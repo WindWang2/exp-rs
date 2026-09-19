@@ -235,10 +235,17 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
   req.source = "module";
   req.exclusive = true;
 
+  // Retry-safe task lambdas (#1050 review round 3): TaskCenter keeps the
+  // executor/cancel hooks after terminal, so a Jobs-panel "Retry" could enter
+  // a lambda whose captured task was already freed when the window closed.
+  const std::weak_ptr<bool> taskToken = mTaskToken;
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
-    [task]( const sicnu::jobs::JobRequest &,
+    [task, taskToken]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
+      if ( taskToken.expired() )
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Georeferencer window closed" );
       ctx.logInfo( "Running SIFT matching" );
       ctx.reportProgress( 0.0, "SIFT" );
       const bool ok = task->run();
@@ -261,7 +268,10 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
       result["inlierRatio"] = task->result().inlierRatio;
       return result;
     },
-    [task]() { task->cancel(); },
+    [task, taskToken]() {
+      if ( taskToken.lock() )
+        task->cancel();
+    },
     /*autoLoad=*/false );
 
   if ( taskId < 0 )
@@ -276,7 +286,7 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
-                   [this, task, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
+                   [this, task, taskId, conn, taskToken]( const sicnu::AlgorithmTaskInfo &info ) {
                      if ( info.taskId != taskId )
                        return;
                      if ( info.status != sicnu::TaskStatus::Completed
@@ -285,6 +295,8 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                        return;
                      disconnect( *conn );
                      delete conn;
+                     if ( taskToken.expired() )
+                       return; // window gone: the captured task may be freed
 
                      const auto r = task->result();
                      task->deleteLater();
@@ -456,12 +468,16 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
   req.source = "module";
   req.exclusive = true;
 
+  const std::weak_ptr<bool> taskToken = mTaskToken;
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
-    [resultHolder, fb, paramsCopy, seedsCopy, srcPath, refPath, destCrs](
+    [resultHolder, fb, paramsCopy, seedsCopy, srcPath, refPath, destCrs, taskToken](
       const sicnu::jobs::JobRequest &,
       sicnu::operators::RSOperatorContext &ctx ) {
       Q_UNUSED( destCrs );
+      if ( taskToken.expired() )
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Georeferencer window closed" );
       ctx.logInfo( "Running geo-initialized template matching (NCC)" );
       ctx.reportProgress( 0.0, "Template match" );
       RsTemplateMatcher matcher( fb );
@@ -482,7 +498,10 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
       result["attempted"] = resultHolder->attempted;
       return result;
     },
-    [fb]() { fb->cancel(); },
+    [fb, taskToken]() {
+      if ( taskToken.lock() )
+        fb->cancel();
+    },
     /*autoLoad=*/false );
 
   if ( taskId < 0 )
@@ -497,7 +516,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
-                   [this, resultHolder, fb, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
+                   [this, resultHolder, fb, taskId, conn, taskToken]( const sicnu::AlgorithmTaskInfo &info ) {
                      if ( info.taskId != taskId )
                        return;
                      if ( info.status != sicnu::TaskStatus::Completed
@@ -506,6 +525,8 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                        return;
                      disconnect( *conn );
                      delete conn;
+                     if ( taskToken.expired() )
+                       return; // window gone: the captured objects may be freed
 
                      const auto r = *resultHolder;
                      delete resultHolder;

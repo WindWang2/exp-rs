@@ -223,6 +223,14 @@ class RsGeoreferencingSession : public QObject
     };
     std::shared_ptr<WarpExecutorState> mWarpExecutorState =
       std::make_shared<WarpExecutorState>();
+    /**
+     * Lifetime token for the submitted warp job (#1050 review round 3).
+     * TaskCenter keeps the executor/cancel lambdas after a task is terminal,
+     * so a later Jobs-panel "Retry" could re-enter a lambda whose captured
+     * task was already freed. The lambdas capture a weak_ptr to this token
+     * and refuse to run once the session is destroyed.
+     */
+    std::shared_ptr<bool> mSessionToken = std::make_shared<bool>( true );
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

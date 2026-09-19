@@ -132,6 +132,46 @@ QgsGeorefShellWindow::~QgsGeorefShellWindow()
   mDataPoints.clear();
   qDeleteAll( mGcpViewPoints );
   mGcpViewPoints.clear();
+
+  // Retire submitted-task lambdas: TaskCenter keeps the executor/cancel hooks,
+  // and a later "Retry" must not re-enter a lambda whose captured objects are
+  // already gone (#1050 review round 3).
+  mTaskToken.reset();
+
+  // #1048: every georef tool is reparented to this shell (setParent(this)),
+  // so ~QObject would destroy them in creation order - AFTER the canvases,
+  // which are older children. The base/pan/zoom destructors then touch a
+  // dangling mCanvas (ungrabGesture) or double-free a rubber band the canvas
+  // scene already reclaimed. Delete the tools here, while both canvases are
+  // still alive.
+  const QList<QgsMapTool *> tools = {
+    mAddPointTool, mAddPointToolDst, mToolMoveSrc, mToolMoveDst,
+    mToolDeleteSrc, mToolDeleteDst, mPanSrc, mPanDst,
+    mZoomInSrc, mZoomOutSrc, mZoomInDst, mZoomOutDst
+  };
+  for ( QgsMapTool *tool : tools )
+  {
+    if ( !tool )
+      continue;
+    if ( QgsMapCanvas *canvas = tool->canvas() )
+    {
+      if ( canvas->mapTool() == tool )
+        canvas->unsetMapTool( tool );
+    }
+    delete tool;
+  }
+  mAddPointTool = nullptr;
+  mAddPointToolDst = nullptr;
+  mToolMoveSrc = nullptr;
+  mToolMoveDst = nullptr;
+  mToolDeleteSrc = nullptr;
+  mToolDeleteDst = nullptr;
+  mPanSrc = nullptr;
+  mPanDst = nullptr;
+  mZoomInSrc = nullptr;
+  mZoomOutSrc = nullptr;
+  mZoomInDst = nullptr;
+  mZoomOutDst = nullptr;
 }
 
 void QgsGeorefShellWindow::setupSessionMaps()
@@ -1797,36 +1837,32 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
   // time so .points saves round-trip it (ADR 0056). The dst coordinate from
   // onDestPointPicked is in the REF raster's layer CRS — transform to the
   // panel's target CRS so label and coordinate are consistent (GEOREF-9).
+  // The seam fails closed (#1005 / F-1030-P1-gcp): an unbuildable required
+  // transform refuses the pair instead of storing the untransformed dst
+  // tagged with the target CRS.
   const QgsCoordinateReferenceSystem destCrs =
     mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
-  QgsPointXY dstForStore = dst;
-  if ( mDstRaster && mDstRaster->crs().isValid() && destCrs.isValid()
-       && mDstRaster->crs() != destCrs )
+  const QgsCoordinateReferenceSystem rasterCrs =
+    mDstRaster ? mDstRaster->crs() : QgsCoordinateReferenceSystem();
+  const std::optional<QgsPointXY> dstForStore = rsGeorefTransformDestinationForStore(
+    rasterCrs, destCrs,
+    QgsProject::instance() ? QgsProject::instance()->transformContext()
+                           : QgsCoordinateTransformContext(),
+    dst );
+  if ( !dstForStore.has_value() )
   {
-    try
-    {
-      const QgsCoordinateTransformContext ctx =
-        QgsProject::instance() ? QgsProject::instance()->transformContext()
-                               : QgsCoordinateTransformContext();
-      QgsCoordinateTransform ct( mDstRaster->crs(), destCrs, ctx );
-      dstForStore = ct.transform( dst );
-    }
-    catch ( const QgsException &e )
-    {
-      // Fail closed (#1005 / F-1030-P1-gcp): storing dst in the raster CRS
-      // while tagging it with the target CRS produced a GCP whose numbers and
-      // CRS disagreed — refuse the pair instead. Mirrors onSourcePointPicked.
-      qWarning().noquote() << "commitGcpPair: CRS transform from"
-                           << mDstRaster->crs().authid() << "to" << destCrs.authid()
-                           << "failed (" << e.what() << "); GCP not added";
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "Cannot transform the target point into the destination CRS — GCP not added" ), 6000 );
-      rearmAddPointTools();
-      return;
-    }
+    // Fail closed: never add a GCP whose numbers and CRS disagree. Mirrors
+    // onSourcePointPicked.
+    qWarning().noquote() << "commitGcpPair: CRS transform from"
+                         << rasterCrs.authid() << "to" << destCrs.authid()
+                         << "failed; GCP not added";
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "Cannot transform the target point into the destination CRS — GCP not added" ), 6000 );
+    rearmAddPointTools();
+    return;
   }
-  mGeorefSession.addGcp( QgsGcpPoint( src, dstForStore, destCrs, true ) );
+  mGeorefSession.addGcp( QgsGcpPoint( src, *dstForStore, destCrs, true ) );
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(

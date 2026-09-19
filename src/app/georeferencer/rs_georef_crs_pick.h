@@ -24,3 +24,13 @@
 std::optional<QgsPointXY> rsGeorefTransformPickBetweenCrs(
   const QgsCoordinateReferenceSystem &canvasCrs, const QgsCoordinateReferenceSystem &layerCrs,
   const QgsCoordinateTransformContext &context, const QgsPointXY &canvasMapPt );
+
+/// Transform a picked destination point from the reference raster CRS into the
+/// panel's target CRS before it is stored on a GCP (#1037 F-1030-P1-gcp).
+/// Fail-closed: a REQUIRED transform that is unbuildable (isValid()==false) or
+/// throws returns std::nullopt — never the untransformed input.
+/// Semantics mirroring the legacy guard: equal CRS, or either CRS invalid,
+/// return destMap unchanged (unreferenced-raster workflow).
+std::optional<QgsPointXY> rsGeorefTransformDestinationForStore(
+  const QgsCoordinateReferenceSystem &rasterCrs, const QgsCoordinateReferenceSystem &targetCrs,
+  const QgsCoordinateTransformContext &context, const QgsPointXY &destMap );

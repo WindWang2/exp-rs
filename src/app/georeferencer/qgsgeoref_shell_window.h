@@ -232,6 +232,16 @@ class QgsGeorefShellWindow : public QMainWindow
 
     QgisInterface *mIface = nullptr;
 
+    /**
+     * Lifetime token for TaskCenter jobs submitted by this window (#1050
+     * review round 3): TaskCenter keeps the executor/cancel lambdas after a
+     * task is terminal, so a user "Retry" from the Jobs panel could re-enter
+     * a lambda whose captured raw task/result/feedback objects were already
+     * freed when the window closed. The lambdas capture a weak_ptr to this
+     * token and refuse to run once the window is gone.
+     */
+    std::shared_ptr<bool> mTaskToken = std::make_shared<bool>( true );
+
     QLabel *mCoordLabel = nullptr;
     QLabel *mCrsLabel = nullptr;
     QLabel *mRmsLabel = nullptr;

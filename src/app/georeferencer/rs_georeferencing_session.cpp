@@ -78,6 +78,10 @@ RsGeoreferencingSession::~RsGeoreferencingSession()
       mPendingWarpTask = nullptr;
     }
   }
+  // Any later TaskCenter "Retry" re-enters the stored executor lambda; the
+  // expired token makes it refuse instead of touching this session's freed
+  // state (#1050 review round 3).
+  mSessionToken.reset();
 }
 
 void RsGeoreferencingSession::setLastPointsPath( const QString &path )
@@ -446,7 +450,8 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   // for a retry in the same session.
   mWarpExecutorState = std::make_shared<WarpExecutorState>();
   const std::shared_ptr<WarpExecutorState> executorState = mWarpExecutorState;
-  auto jobExec = [task, executorState]( const sicnu::jobs::JobRequest &request,
+  const std::weak_ptr<bool> sessionToken = mSessionToken;
+  auto jobExec = [task, executorState, sessionToken]( const sicnu::jobs::JobRequest &request,
                         sicnu::operators::RSOperatorContext &ctx ) {
     struct ActiveGuard
     {
@@ -458,6 +463,9 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
         state->done.release();
       }
     } activeGuard{ executorState };
+    if ( sessionToken.expired() )
+      throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::Cancelled, "Georeferencing session closed" );
     // Drain stale counts so a retry's completion signal cannot be satisfied
     // by a previous run's release.
     while ( executorState->done.tryAcquire() )
@@ -486,7 +494,10 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
     return result;
   };
 
-  auto cancelHook = [task]() { task->cancel(); };
+  auto cancelHook = [task, sessionToken]() {
+    if ( sessionToken.lock() )
+      task->cancel();
+  };
 
   const long taskId = mCustomExecutor.submit
     ? mCustomExecutor.submit( req, jobExec, cancelHook )
