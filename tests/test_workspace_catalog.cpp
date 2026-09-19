@@ -9,6 +9,8 @@
 
 #include <QTemporaryDir>
 
+#include <sqlite3.h>
+
 #include <chrono>
 
 using namespace sicnu::data;
@@ -30,6 +32,23 @@ CatalogAsset makeAsset( int i )
     a.aliases = QStringList{ QStringLiteral( "/vsicurl/http://x/scene_%1.tif" ).arg( i, 6, 10, QLatin1Char( '0' ) ) };
     a.tags = QStringList{ QStringLiteral( "sentinel-2" ) };
     return a;
+}
+
+/// Plants a RAISE(ABORT) guard on the catalog DB (direct DB surgery while the
+/// catalog handle is idle) — the only deterministic way to make a step inside
+/// an open transaction fail.
+void plantTrigger( const QString &dbPath, const QString &sql )
+{
+    sqlite3 *raw = nullptr;
+    REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READWRITE,
+                              nullptr ) == SQLITE_OK );
+    char *err = nullptr;
+    const int rc = sqlite3_exec( raw, sql.toUtf8().constData(), nullptr, nullptr, &err );
+    if ( rc != SQLITE_OK )
+        INFO( QString::fromUtf8( err ).toStdString() );
+    sqlite3_free( err );
+    sqlite3_close( raw );
+    REQUIRE( rc == SQLITE_OK );
 }
 } // namespace
 
@@ -102,6 +121,71 @@ TEST_CASE( "WorkspaceCatalog pages filtered queries", "[workspace_catalog]" )
     CatalogQuery prefix;
     prefix.textPrefix = QStringLiteral( "Scene 24" );
     REQUIRE( catalog.page( prefix, 0, 10 ).total == 11 ); // 24, 240..249
+}
+
+TEST_CASE( "WorkspaceCatalog batch upsert is atomic when a step fails",
+           "[workspace_catalog][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "catalog.sqlite" ) );
+    WorkspaceCatalog catalog;
+    QString err;
+    REQUIRE( catalog.open( dbPath, &err ) );
+    const CatalogAsset first = makeAsset( 0 );
+    REQUIRE( catalog.upsertAsset( first ) );
+
+    // Abort only the SECOND asset's alias insert: the first asset's writes
+    // already went through when the batch fails.
+    plantTrigger( dbPath,
+                  QStringLiteral( "CREATE TRIGGER fail_alias BEFORE INSERT ON aliases"
+                                 " WHEN NEW.path='/data/scene_000001.tif'"
+                                 " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+
+    CatalogAsset mutated = first;
+    mutated.state = QStringLiteral( "Missing" );
+    CatalogAsset second = makeAsset( 1 );
+    const QVector<CatalogAsset> batch{ mutated, second };
+    CHECK_FALSE( catalog.upsertAssets( batch ) );
+
+    // Neither half is durable: the stored asset keeps its old row (no stale
+    // aliases, no half-applied mutation) and the new asset never lands.
+    REQUIRE( catalog.count() == 1 );
+    const auto reloaded = catalog.byId( first.assetId );
+    REQUIRE( reloaded );
+    CHECK( reloaded->state == QStringLiteral( "Ready" ) );
+    CHECK_FALSE( catalog.byPath( second.canonicalSource ).has_value() );
+
+    // No transaction leaked: once the obstacle is gone the batch commits whole.
+    plantTrigger( dbPath, QStringLiteral( "DROP TRIGGER fail_alias" ) );
+    REQUIRE( catalog.upsertAssets( batch ) );
+    REQUIRE( catalog.count() == 2 );
+    CHECK( catalog.byId( first.assetId )->state == QStringLiteral( "Missing" ) );
+}
+
+TEST_CASE( "WorkspaceCatalog removeAsset keeps the asset when a step fails",
+           "[workspace_catalog][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "catalog.sqlite" ) );
+    WorkspaceCatalog catalog;
+    QString err;
+    REQUIRE( catalog.open( dbPath, &err ) );
+    const CatalogAsset asset = makeAsset( 7 );
+    REQUIRE( catalog.upsertAsset( asset ) );
+
+    plantTrigger( dbPath,
+                  QStringLiteral( "CREATE TRIGGER fail_alias_del BEFORE DELETE ON aliases"
+                                 " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( catalog.removeAsset( asset.assetId ) );
+    // The asset row and its aliases survive the aborted delete.
+    REQUIRE( catalog.count() == 1 );
+    REQUIRE( catalog.byId( asset.assetId ) );
+    REQUIRE( catalog.byPath( asset.canonicalSource ) );
+
+    plantTrigger( dbPath, QStringLiteral( "DROP TRIGGER fail_alias_del" ) );
+    REQUIRE( catalog.removeAsset( asset.assetId ) );
+    REQUIRE( catalog.count() == 0 );
+    CHECK_FALSE( catalog.removeAsset( asset.assetId ) );
 }
 
 TEST_CASE( "WorkspaceCatalog stays fast at 100k records", "[workspace_catalog][perf]" )

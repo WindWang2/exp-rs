@@ -101,6 +101,33 @@ TEST_CASE( "deterministic random is platform-stable and seed-derived",
     CHECK( items == copy );
 }
 
+TEST_CASE( "split manifest fingerprint ignores note and leakage summary",
+           "[dataset][split][determinism]" )
+{
+    // Content identity only: the note and the leakage summary are annotation
+    // fields (the fold audit clears exactly these two before recomputing), so
+    // the same content must fingerprint the same way regardless of who stored
+    // it — otherwise an identical-content re-save is refused as a conflict.
+    SplitConfig config;
+    config.method = SplitMethod::Random;
+    config.seed = 20260919;
+    const auto generated =
+        SplitEngine::generate( config, QStringLiteral( "version-1" ), makeInputs( 60 ) );
+    REQUIRE( generated.has_value() );
+
+    SplitManifest annotated = generated.value();
+    annotated.setNote( QStringLiteral( "hand-tuned after review" ) );
+    annotated.setLeakageSummary( QJsonObject{ { QStringLiteral( "finding_count" ), 3 } } );
+    CHECK( splitManifestFingerprint( annotated ) == generated.value().fingerprint() );
+
+    // Annotations survive the round-trip (they are simply not hashed).
+    const auto parsed = SplitManifest::fromJson( annotated.toJson() );
+    REQUIRE( parsed.has_value() );
+    CHECK( parsed.value().note() == annotated.note() );
+    CHECK( parsed.value().leakageSummary() == annotated.leakageSummary() );
+    CHECK( parsed.value().fingerprint() == annotated.fingerprint() );
+}
+
 TEST_CASE( "split replay is byte-identical for identical (config, seed, inputs)",
            "[dataset][split][determinism]" )
 {
@@ -502,6 +529,48 @@ TEST_CASE( "leakage over fully-overlapping far-apart windows reports nothing"
                         []( const LeakageFinding &finding ) {
                             return finding.kind == LeakageKind::OverlappingPatch;
                         } ) );
+}
+
+TEST_CASE( "leakage catches overlapping patches that straddle a cell boundary",
+           "[dataset][leakage]" )
+{
+    // A stride below the window size is exactly the regime the overlap check
+    // exists for (50-75% overlap tiling). With a 256-px window and a 200-px
+    // stride the centers sit two HALF-extents apart, which used to land them
+    // in cells differing by 2 — never compared, so the pair was silently
+    // unreported while the report claimed the check ran clean.
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "overlapping_patch" ) };
+    config.overlapFractionThreshold = 0.0; // any positive overlap counts
+
+    const double window = 256.0;
+    const double stride = 200.0; // < window → consecutive windows overlap
+    QVector<AuditSample> samples;
+    for ( int i = 0; i < 5; ++i )
+    {
+        AuditSample sample = auditFrom( makeInput( QStringLiteral( "grid-%1" ).arg( i ) ),
+                                        i % 2 == 0 ? SplitRole::Train : SplitRole::Test );
+        const double center = i * stride - window; // negative first center
+        sample.input.minX = center - window / 2.0;
+        sample.input.maxX = center + window / 2.0;
+        sample.input.minY = -window / 2.0;
+        sample.input.maxY = window / 2.0;
+        sample.windowWidth = window;
+        sample.windowHeight = window;
+        samples.append( sample );
+    }
+    const auto report = LeakageAuditor::audit(
+        QStringLiteral( "v" ), QStringLiteral( "sp" ), samples, config );
+    REQUIRE( report.has_value() );
+
+    int overlaps = 0;
+    for ( const LeakageFinding &finding : report->findings() )
+    {
+        if ( finding.kind == LeakageKind::OverlappingPatch )
+            ++overlaps;
+    }
+    // 4 consecutive pairs, all cross-split: every one is a finding.
+    CHECK( overlaps == 4 );
 }
 
 TEST_CASE( "k-fold assigns disjoint folds and materialization works",

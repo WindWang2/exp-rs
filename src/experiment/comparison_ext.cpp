@@ -282,8 +282,13 @@ PairedRunSummary pairedRunComparison( const MetricRecord &a, const MetricRecord 
             delta.valueA = classMetricsA.value( name );
             delta.valueB = classMetricsB.value( name );
             delta.delta = delta.valueB - delta.valueA;
-            // "family::code" — support lookup drops the "::metric" suffix.
-            const QString code = name.section( QLatin1String( "::" ), 0, 0 );
+            // "classCode::metric" — support lookup drops the "::metric"
+            // suffix. Class codes may themselves contain "::" (the schema
+            // validator allows any non-empty code), so the split has to
+            // come from the RIGHT: section("::",0,0) would truncate
+            // "agri::crop::iou" to "agri" and silently drop the support
+            // gate (and the metric's insufficientSupport verdict).
+            const QString code = name.section( QLatin1String( "::" ), -2, -2 );
             const qint64 familySupportA = supportA.value( it.key() ).value( code, -1 );
             const qint64 familySupportB = supportB.value( it.key() ).value( code, -1 );
             delta.supportA = familySupportA;

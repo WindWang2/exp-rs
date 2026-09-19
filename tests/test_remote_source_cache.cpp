@@ -15,7 +15,9 @@
 #include <gdal_priv.h>
 
 #include <atomic>
+#include <chrono>
 #include <utility>
+#include <vector>
 #include <cstdlib>
 #include <thread>
 
@@ -120,6 +122,48 @@ TEST_CASE( "RemoteDatasetPool bounds concurrent handles per URL",
     second.join();
     REQUIRE( secondAcquired.load() );
     REQUIRE( pool.openCount() - opensBefore == 1 );
+    pool.clear();
+    qunsetenv( "SICNU_REMOTE_POOL_HANDLES" );
+}
+
+TEST_CASE( "RemoteDatasetPool concurrent first acquire shares one pool state",
+           "[remote_cache][pool]" )
+{
+    // GDAL checkout is what worker threads do: several threads may hit the
+    // pool's first acquire at once. Whichever thread builds the state, all of
+    // them must land in the SAME one — a per-thread Impl would keep its own
+    // handle map and silently overshoot the per-URL bound.
+    qputenv( "SICNU_REMOTE_POOL_HANDLES", "1" );
+    QTemporaryDir dir;
+    const QString tiff = dir.filePath( "cog.tif" );
+    writeTiledTiff( tiff );
+
+    MiniCogServer server( tiff );
+    REQUIRE( server.start() );
+    const QString url = QString( "http://127.0.0.1:%1/cog.tif" ).arg( server.port() );
+
+    auto &pool = RemoteDatasetPool::instance();
+    pool.clear();
+    const qint64 opensBefore = pool.openCount();
+
+    constexpr int kThreads = 4;
+    std::atomic<int> acquired{ 0 };
+    std::vector<std::thread> threads;
+    threads.reserve( kThreads );
+    for ( int i = 0; i < kThreads; ++i )
+    {
+        threads.emplace_back( [ &url, &pool, &acquired ] {
+            const auto lease = pool.acquire( url, GA_ReadOnly );
+            if ( lease )
+                acquired.fetch_add( 1, std::memory_order_relaxed );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 60 ) );
+        } );
+    }
+    for ( std::thread &thread : threads )
+        thread.join();
+
+    CHECK( acquired.load() == kThreads );
+    CHECK( pool.openCount() - opensBefore == 1 ); // bound 1 respected
     pool.clear();
     qunsetenv( "SICNU_REMOTE_POOL_HANDLES" );
 }

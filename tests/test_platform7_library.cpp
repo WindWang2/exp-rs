@@ -23,6 +23,7 @@
 #include "experiment/run_recorder.h"
 
 #include <QFileInfo>
+#include <QHash>
 #include <algorithm>
 #include <cmath>
 #include <QJsonDocument>
@@ -677,6 +678,59 @@ TEST_CASE( "facet distributions are bounded and honest about the tail",
     CHECK( frozen.diagnostics().first().code == QStringLiteral( "dataset.not_draft" ) );
 }
 
+TEST_CASE( "cross-facet cells stay distinct when a value carries the separator",
+           "[facets][cross]" )
+{
+    // Cell keys are joined with U+001F. A facet value that contains U+001F
+    // must not forge another pair's key, or two cells collapse into one and
+    // their counts merge silently.
+    DraftFixture fx( 4 );
+    const QChar separator( 0x001F );
+    // ("a<US>b","c") and ("a","b<US>c") would join to the SAME naive key.
+    const QString trickyA = QStringLiteral( "a" ) + separator + QStringLiteral( "b" );
+    const QString trickyB = QStringLiteral( "b" ) + separator + QStringLiteral( "c" );
+    auto escaped = [ &separator ]( const QString &value ) {
+        QString out;
+        for ( const QChar &ch : value )
+        {
+            if ( ch == separator )
+                out.append( separator );
+            out.append( ch );
+        }
+        return out;
+    };
+    const QStringList facetA{ QStringLiteral( "c" ), trickyA, QStringLiteral( "a" ),
+                              QStringLiteral( "z" ) };
+    const QStringList facetB{ QStringLiteral( "b" ), QStringLiteral( "c" ), trickyB,
+                              QStringLiteral( "y" ) };
+    for ( int i = 0; i < 4; ++i )
+    {
+        QVector<DatasetStore::FacetEntry> entries;
+        entries.append( qMakePair( QStringLiteral( "fa" ), facetA.at( i ) ) );
+        entries.append( qMakePair( QStringLiteral( "fb" ), facetB.at( i ) ) );
+        REQUIRE( fx.store.setSampleFacets(
+                     fx.versionId, SampleId::fromString( fx.samples.at( i ).sampleId() ).value(),
+                     entries )
+                     .has_value() );
+    }
+
+    const auto cross = fx.store.facetCrossCounts( fx.versionId, QStringLiteral( "fa" ),
+                                                 QStringLiteral( "fb" ) );
+    REQUIRE( cross.has_value() );
+    // Four real cells of one sample each — never three merged ones.
+    CHECK( cross.value().size() == 4 );
+    QHash<QString, qint64> byKey;
+    for ( const auto &cell : cross.value() )
+    {
+        CHECK( cell.second == 1 );
+        byKey.insert( cell.first, cell.second );
+    }
+    // Values without the separator keep the documented "valueA\u001FvalueB" key.
+    CHECK( byKey.contains( QStringLiteral( "c" ) + separator + QStringLiteral( "b" ) ) );
+    CHECK( byKey.contains( escaped( trickyA ) + separator + escaped( QStringLiteral( "c" ) ) ) );
+    CHECK( byKey.contains( escaped( QStringLiteral( "a" ) ) + separator + escaped( trickyB ) ) );
+}
+
 TEST_CASE( "duplicate summary counts exact digest buckets", "[facets][duplicates]" )
 {
     // Distribution over content_digest buckets: bucket sizes >1 are
@@ -938,4 +992,38 @@ TEST_CASE( "paired comparison flags insufficient support instead of faking it",
     }
     CHECK( sawWater );
     CHECK( sawRare );
+}
+
+TEST_CASE( "paired comparison keeps class codes that contain ::", "[comparison][paired]" )
+{
+    // LabelSchema::validate allows any non-empty code, so "agri::crop" is a
+    // legal class. The support lookup used to split the metric key from the
+    // LEFT, truncating such a code to "agri": the lookup missed, and the
+    // low-support delta was reported as if it were well supported.
+    MetricRecord a;
+    a.protocol.setDatasetVersionId( QStringLiteral( "v" ) );
+    a.metrics = QJsonObject{
+        { QStringLiteral( "per_class" ),
+          QJsonObject{ { QStringLiteral( "agri::crop" ),
+                         QJsonObject{ { QStringLiteral( "f1" ), 0.5 },
+                                      { QStringLiteral( "support" ), 2 } } } } } };
+    MetricRecord b = a;
+    b.metrics = QJsonObject{
+        { QStringLiteral( "per_class" ),
+          QJsonObject{ { QStringLiteral( "agri::crop" ),
+                         QJsonObject{ { QStringLiteral( "f1" ), 0.6 },
+                                      { QStringLiteral( "support" ), 3 } } } } } };
+
+    const auto summary = pairedRunComparison( a, b, nullptr, 30 );
+    int matched = 0;
+    for ( const PairedMetricDelta &delta : summary.deltas )
+    {
+        if ( !delta.metric.endsWith( QLatin1String( "agri::crop::f1" ) ) )
+            continue;
+        ++matched;
+        CHECK( delta.supportA == 2 );
+        CHECK( delta.supportB == 3 );
+        CHECK( delta.insufficientSupport );
+    }
+    CHECK( matched == 1 );
 }
