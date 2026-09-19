@@ -16,7 +16,14 @@ RsSegmentSelectTool::RsSegmentSelectTool( QgsMapCanvas *canvas )
 
 RsSegmentSelectTool::~RsSegmentSelectTool()
 {
-    delete mRubberBand;
+    // A null canvas means QgsMapCanvas::~QgsMapCanvas already ran: it deletes
+    // every scene item (rubber bands included) before ~QObject destroys its
+    // tool children, so the item is gone and deleting it here would double
+    // free.
+    if ( canvas() )
+    {
+        delete mRubberBand;
+    }
     mRubberBand = nullptr;
 }
 

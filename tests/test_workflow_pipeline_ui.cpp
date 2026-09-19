@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QGraphicsSceneMouseEvent>
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
 #include "app/workflow/pipeline_node_item.h"
@@ -420,6 +421,66 @@ TEST_CASE( "Classification postprocessing visual DAG recipe and operators", "[wo
   auto recodeOp = reg.create( "rs:recode" );
   REQUIRE( recodeOp != nullptr );
   CHECK( recodeOp->name() == "rs:recode" );
+}
+
+TEST_CASE( "PipelineScene cancels the in-flight connection drag when the drag source node is deleted (#1049)", "[workflow][canvas][drag]" )
+{
+  ensureApp();
+
+  PipelineScene scene;
+
+  StepDef s1;
+  s1.id = "n1";
+  s1.artifactOnSuccess = "out";
+  StepDef s2;
+  s2.id = "n2";
+
+  auto *node1 = scene.addNode( s1 );
+  auto *node2 = scene.addNode( s2 );
+  REQUIRE( node1 != nullptr );
+  REQUIRE( node2 != nullptr );
+
+  auto *outPort = node1->outputPorts().front();
+  REQUIRE( outPort );
+
+  // Start a connection drag from the output port: the scene creates a
+  // temporary connection registered on the source port only.
+  emit outPort->connectionDragStarted( outPort, QPointF( 10.0, 10.0 ) );
+  REQUIRE( scene.hasTempConnection() );
+  // 2 nodes + 4 ports + 1 temp wire
+  REQUIRE( scene.items().size() == 7 );
+
+  // Delete the drag source node (Delete key path): the temp wire must be
+  // cancelled, not left pointing at the freed port.
+  REQUIRE( scene.removeNode( QStringLiteral( "n1" ) ) );
+  CHECK_FALSE( scene.hasTempConnection() );
+  CHECK( scene.items().size() == 3 ); // surviving node + its two ports
+
+  // The following mouse move is the reported use-after-free path: with the
+  // temp state cleared it falls through to the base implementation.
+  QGraphicsSceneMouseEvent move( QEvent::GraphicsSceneMouseMove );
+  move.setScenePos( QPointF( 60.0, 60.0 ) );
+  QApplication::sendEvent( &scene, &move );
+
+  // clearWorkflow mid-drag cancels the temp state as well.
+  auto *n2Out = node2->outputPorts().front();
+  REQUIRE( n2Out != nullptr );
+  emit n2Out->connectionDragStarted( n2Out, QPointF( 5.0, 5.0 ) );
+  REQUIRE( scene.hasTempConnection() );
+  scene.clearWorkflow();
+  CHECK_FALSE( scene.hasTempConnection() );
+  REQUIRE( scene.nodes().empty() );
+
+  // loadWorkflowDefinition mid-drag (reload while a wire is being dragged).
+  scene.addNode( s2 );
+  auto *reloaded = scene.findNode( "n2" );
+  REQUIRE( reloaded != nullptr );
+  emit reloaded->outputPorts().front()->connectionDragStarted(
+    reloaded->outputPorts().front(), QPointF( 3.0, 3.0 ) );
+  REQUIRE( scene.hasTempConnection() );
+  scene.loadWorkflowDefinition( WorkflowDefinition{} );
+  CHECK_FALSE( scene.hasTempConnection() );
+  REQUIRE( scene.nodes().empty() );
 }
 
 TEST_CASE( "PipelineScene prevents duplicate edges and self-loops", "[workflow][graph]" )

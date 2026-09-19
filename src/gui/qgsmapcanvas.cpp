@@ -270,15 +270,18 @@ QgsMapCanvas::~QgsMapCanvas()
     mMapTool = nullptr;
   }
 
-  // we also clear the canvas pointer for all child map tools. We're now in a partially destroyed state and it's
-  // no longer safe for map tools to try to cleanup things in the canvas during their destruction (such as removing
-  // associated canvas items)
-  // NOTE -- it may be better to just delete the map tool children here upfront?
-  const QList<QgsMapTool *> tools = findChildren<QgsMapTool *>();
-  for ( QgsMapTool *tool : tools )
-  {
-    tool->mCanvas = nullptr;
-  }
+  // We must unset the active tool and destroy the remaining map tools NOW,
+  // while the canvas is still usable: their destructors delete the canvas
+  // scene items they own (rubber bands, vertex markers) and qDeleteAll below
+  // would otherwise free those items first, leaving the tool with a dangling
+  // pointer and a double free once ~QObject reaches the tool children.
+  // QPointer keeps the snapshot honest in case a tool destructor deletes
+  // another canvas tool.
+  QList<QPointer<QgsMapTool> > tools;
+  for ( QgsMapTool *tool : findChildren<QgsMapTool *>() )
+    tools << tool;
+  for ( const QPointer<QgsMapTool> &tool : tools )
+    delete tool.data();
 
   cancelJobs();
 

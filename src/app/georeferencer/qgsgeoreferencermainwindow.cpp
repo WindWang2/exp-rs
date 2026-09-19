@@ -264,6 +264,15 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
     [task]() { task->cancel(); },
     /*autoLoad=*/false );
 
+  // submitJob fails (shutdown / queue full) without ever running the job or
+  // emitting taskUpdated: the heap task has no other owner and would leak.
+  if ( taskId < 0 )
+  {
+    delete task;
+    statusBar()->showMessage( tr( "SIFT matching could not be scheduled" ), 5000 );
+    return;
+  }
+
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
                    [this, task, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
@@ -474,6 +483,16 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     },
     [fb]() { fb->cancel(); },
     /*autoLoad=*/false );
+
+  // submitJob fails (shutdown / queue full) without ever running the job or
+  // emitting taskUpdated: the heap holder and feedback have no other owner.
+  if ( taskId < 0 )
+  {
+    delete resultHolder;
+    delete fb;
+    statusBar()->showMessage( tr( "Template matching could not be scheduled" ), 5000 );
+    return;
+  }
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,

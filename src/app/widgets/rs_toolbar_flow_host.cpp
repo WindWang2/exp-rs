@@ -49,6 +49,14 @@ void RsToolbarFlowHost::setProductToolbars( const QList<QToolBar *> &bars )
   }
   m_chips.clear();
 
+  // m_chips stores chips by value, so any drag/resize pointer into the old
+  // storage dangles: drop an in-flight interaction instead of dereferencing it
+  // from the (newly allocated) chip list later on.
+  m_dragChip = nullptr;
+  m_resizeChip = nullptr;
+  m_dragging = false;
+  m_resizing = false;
+
   int i = 0;
   for ( QToolBar *tb : bars )
   {

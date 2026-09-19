@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QGraphicsScene>
+#include <QPointer>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -39,6 +40,8 @@ public:
   bool isBulkUpdating() const { return mBulkUpdating; }
   const std::unordered_map<std::string, PipelineNodeItem *> &nodes() const { return mNodes; }
   const std::unordered_set<PipelineConnectionItem *> &connections() const { return mConnections; }
+  /// True while a connection drag is in flight (temp item + source port alive).
+  bool hasTempConnection() const { return mTempConnection != nullptr && !mDragSourcePort.isNull(); }
 
 signals:
   void workflowChanged();
@@ -64,7 +67,7 @@ private:
   std::unordered_set<PipelineConnectionItem *> mConnections;
 
   bool mBulkUpdating = false;
-  PipelinePortItem *mDragSourcePort = nullptr;
+  QPointer<PipelinePortItem> mDragSourcePort;
   PipelineConnectionItem *mTempConnection = nullptr;
 };
 

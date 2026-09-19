@@ -112,6 +112,12 @@ bool PipelineScene::removeNode( const QString &stepId )
   if ( !node )
     return false;
 
+  // An in-flight connection drag owns a temp item that is registered on the
+  // drag source port only. Drop it before touching that port's connection
+  // list, otherwise the temp item outlives its port and the next mouse move
+  // dereferences freed scene geometry.
+  cancelTempConnection();
+
   // Delete only connections incident to this node directly from its ports (O(deg(v)))
   std::vector<PipelineConnectionItem *> toDelete;
   for ( auto *inPort : node->inputPorts() )
@@ -221,6 +227,8 @@ bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
 
 void PipelineScene::clearWorkflow()
 {
+  cancelTempConnection();
+
   for ( auto *conn : mConnections )
   {
     removeItem( conn );

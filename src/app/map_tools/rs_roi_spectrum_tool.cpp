@@ -39,8 +39,34 @@ RsRoiSpectrumTool::RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rast
 
 RsRoiSpectrumTool::~RsRoiSpectrumTool()
 {
-  delete m_rubberBand;
+  // The canvas scene owns every rubber band. QgsMapCanvas::~QgsMapCanvas
+  // qDeleteAll( scene items ) before ~QObject destroys its tool children and
+  // nulls our mCanvas on the way out, so a null canvas pointer means the item
+  // has already been freed — deleting it here would double free.
+  QgsRubberBand *band = m_rubberBand;
+  // Release the state first: a virtual call that arrives after the derived
+  // destructor ran (unsetMapTool from ~QgsMapTool) must not touch it.
   m_rubberBand = nullptr;
+  m_finished = true;
+  if ( mCanvas )
+    delete band;
+}
+
+void RsRoiSpectrumTool::deactivate()
+{
+  // Abandoned polygon: drop the highlight so it is not painted forever, and
+  // release the tool when nobody finishes the polygon on our behalf.
+  if ( m_rubberBand )
+  {
+    m_rubberBand->reset( Qgis::GeometryType::Polygon );
+    m_rubberBand->hide();
+  }
+  if ( !m_finished )
+  {
+    m_polygon.clear();
+    deleteLater();
+  }
+  QgsMapTool::deactivate();
 }
 
 void RsRoiSpectrumTool::canvasPressEvent( QgsMapMouseEvent *e )
@@ -93,24 +119,34 @@ void RsRoiSpectrumTool::finishPolygon()
     return;
   }
 
-  // The ROI kernel expects the polygon in the raster's map CRS; transform the
-  // canvas-drawn polygon when the canvas CRS differs.
   QPolygonF roi = m_polygon;
+  auto onResult = m_onResult;
   const QgsCoordinateReferenceSystem canvasCrs =
     mCanvas ? mCanvas->mapSettings().destinationCrs() : QgsCoordinateReferenceSystem();
   if ( canvasCrs.isValid() && canvasCrs != m_rasterLayer->crs() )
   {
-    const QgsCoordinateTransform transform( canvasCrs, m_rasterLayer->crs(),
-                                            QgsProject::instance()->transformContext() );
-    QPolygonF transformed;
-    for ( const QPointF &p : m_polygon )
-      transformed << transform.transform( QgsPointXY( p.x(), p.y() ) ).toQPointF();
-    roi = transformed;
+    // QgsCoordinateTransform throws QgsCsException out of the event path: a
+    // failed transform must surface as the error callback, never terminate.
+    try
+    {
+      const QgsCoordinateTransform transform( canvasCrs, m_rasterLayer->crs(),
+                                              QgsProject::instance()->transformContext() );
+      QPolygonF transformed;
+      for ( const QPointF &p : m_polygon )
+        transformed << transform.transform( QgsPointXY( p.x(), p.y() ) ).toQPointF();
+      roi = transformed;
+    }
+    catch ( const QgsCsException & )
+    {
+      if ( onResult )
+        onResult( {}, {}, {},
+                  tr( "Cannot reproject the ROI to the raster CRS." ) );
+      return;
+    }
   }
 
   const QString rasterSource = m_rasterLayer->source();
   const QString rasterName = m_rasterLayer->name();
-  auto onResult = m_onResult;
 
   auto *watcher = new QFutureWatcher<SpectrumTaskResult>( this );
   QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, this, [watcher, onResult]() {

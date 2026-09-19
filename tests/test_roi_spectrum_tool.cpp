@@ -167,3 +167,40 @@ TEST_CASE( "GUI/MapTools: RsRoiSpectrumTool lifecycle and canvas destruction", "
     tool.reset();
     canvas.reset();
 }
+
+TEST_CASE( "GUI/MapTools: RsRoiSpectrumTool rubber band survives canvas teardown (#1048)", "[gui][maptool]" )
+{
+    TestAppFixture fixture;
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString rasterPath = tmp.filePath( QStringLiteral( "roi_teardown.tif" ) );
+    REQUIRE( makeRoiRaster( rasterPath ).isEmpty() );
+
+    auto rasterLayer = std::make_unique<QgsRasterLayer>( rasterPath, QStringLiteral( "roi_teardown" ) );
+    REQUIRE( rasterLayer->isValid() );
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    canvas->setDestinationCrs( rasterLayer->crs() );
+    canvas->setExtent( rasterLayer->extent() );
+
+    // The tool is a QObject child of the canvas: destroying the canvas must
+    // free the scene-owned rubber band exactly once. QgsMapCanvas deletes its
+    // scene items (qDeleteAll(mScene->items())) before ~QObject reaches the
+    // tool children, so a tool destructor that deletes the item
+    // unconditionally would double free.
+    auto *tool = new TestableRsRoiSpectrumTool( canvas.get(), rasterLayer.get(),
+        []( const QVector<double> &, const QVector<double> &,
+            const QVector<QString> &, const QString & ) {} );
+
+    // Half-drawn polygon: the rubber band actually owns points.
+    QPoint pt0 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 0.1, -0.1 ) ).toQPointF().toPoint();
+    QgsMapMouseEvent e0( canvas.get(), QEvent::MouseButtonPress, pt0, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasPressEvent( &e0 );
+    QPoint pt1 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 1.9, -1.9 ) ).toQPointF().toPoint();
+    QgsMapMouseEvent e1( canvas.get(), QEvent::MouseButtonPress, pt1, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasPressEvent( &e1 );
+
+    // Canvas dies first: it must take its tools (and their scene items) with it.
+    canvas.reset();
+}

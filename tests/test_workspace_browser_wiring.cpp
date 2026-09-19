@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSortFilterProxyModel>
 #include <QTemporaryDir>
 
 #include <gdal.h>
@@ -133,6 +134,39 @@ TEST_CASE( "WorkspaceBrowserPanel refresh() follows a store reopen", "[ux4][work
     REQUIRE( fx.service.openStore( fx.storePath ) );
     panel.refresh();
     REQUIRE( model->rowCount() >= 1 );
+}
+
+TEST_CASE( "WorkspaceBrowserPanel model reset refills rows inside the reset window (#1056)", "[ux4][workspace][shell]" )
+{
+    Fixture fx;
+    const QString raster = makeRaster( QStringLiteral( "wiring-c.tif" ) );
+    REQUIRE( !registerFile( fx.manager, raster ).assetId.isNull() );
+    REQUIRE( fx.service.mirrorAllAssets() >= 1 );
+
+    sicnu::app::WorkspaceBrowserPanel panel;
+    panel.setWorkspaceService( &fx.service );
+    sicnu::app::WorkspaceGovernanceModel *model =
+        panel.findChild<sicnu::app::WorkspaceGovernanceModel *>();
+    REQUIRE( model != nullptr );
+
+    // A proxy stands in for the attached view: it only learns about row
+    // changes through model signals.
+    QSortFilterProxyModel proxy;
+    proxy.setSourceModel( model );
+    REQUIRE( proxy.rowCount() >= 1 );
+
+    // Reopen an empty store: the reset must clear and leave the model empty.
+    QTemporaryDir freshDir;
+    REQUIRE( fx.service.openStore( QDir( freshDir.path() ).filePath( QStringLiteral( "fresh.db" ) ) ) );
+    panel.refresh();
+    CHECK( proxy.rowCount() == 0 );
+
+    // Reopen the populated store: rows refilled AFTER endResetModel() would
+    // never reach the view, so the proxy must see them again.
+    REQUIRE( fx.service.openStore( fx.storePath ) );
+    panel.refresh();
+    INFO( "rows refilled after endResetModel() are invisible to attached views" );
+    CHECK( proxy.rowCount() >= 1 );
 }
 
 TEST_CASE( "Shell wiring stays in place (source-scan guard)", "[ux4][shell][guardrail]" )

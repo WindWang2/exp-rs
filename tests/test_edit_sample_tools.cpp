@@ -319,3 +319,28 @@ TEST_CASE( "erase stroke touching nothing commits zero removals",
     CHECK( liveCount( &fx.layer ) == 1 );
     CHECK( fx.session.state( fx.layer.id() ).undoDepth == 0 );
 }
+
+TEST_CASE( "brush/erase tools release their canvas rubber band on destruction",
+           "[editing][brush][erase][f11][ownership]" )
+{
+    ensureApp();
+    ToolFixture fx;
+
+    // A QgsRubberBand is a scene item (not a QObject child): it only leaves
+    // the canvas scene when the owning tool deletes it.
+    const int baseItems = fx.canvas.scene()->items().size();
+
+    {
+        RsSampleBrushTool tool( &fx.canvas );
+        tool.setTargetLayer( &fx.layer );
+        CHECK( fx.canvas.scene()->items().size() == baseItems + 1 );
+    }
+    CHECK( fx.canvas.scene()->items().size() == baseItems );
+
+    {
+        RsSampleEraseTool tool( &fx.canvas );
+        tool.setTargetLayer( &fx.layer );
+        CHECK( fx.canvas.scene()->items().size() == baseItems + 1 );
+    }
+    CHECK( fx.canvas.scene()->items().size() == baseItems );
+}

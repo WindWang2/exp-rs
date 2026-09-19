@@ -21,6 +21,16 @@ RsSampleEraseTool::RsSampleEraseTool( QgsMapCanvas *canvas )
     mRubber->hide();
 }
 
+RsSampleEraseTool::~RsSampleEraseTool()
+{
+    // Rubber bands are scene items, not QObject children: they survive QObject
+    // parent cleanup and must be deleted here. A nulled canvas means
+    // QgsMapCanvas is already tearing the scene down, so the item is gone.
+    if ( canvas() )
+        delete mRubber;
+    mRubber = nullptr;
+}
+
 void RsSampleEraseTool::setTargetLayer( QgsVectorLayer *layer )
 {
     mLayer = layer;
