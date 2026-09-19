@@ -170,6 +170,14 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
              " ON experiment_runs(execution_fingerprint)",
              errorOut ) ||
          !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_runs_created"
+             " ON experiment_runs(created_ms, run_id)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_runs_dataset_created"
+             " ON experiment_runs(dataset_version_id, created_ms, run_id)",
+             errorOut ) ||
+         !m_impl->exec(
              "CREATE TABLE IF NOT EXISTS run_metrics("
              "run_id TEXT PRIMARY KEY, dataset_version_id TEXT NOT NULL DEFAULT '',"
              "json TEXT NOT NULL, created_ms INTEGER NOT NULL)",
@@ -673,6 +681,46 @@ sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &r
     return ResultT::success();
 }
 
+namespace
+{
+
+/// Batch sweep of the unified-trace chain (12.0): the single-run upsert
+/// records one event per transition; a batch sweep records one event for
+/// the whole sweep so the trace stays proportional to the number of CALLS,
+/// not to the batch size.
+class BatchTraceEvent
+{
+  public:
+    BatchTraceEvent( int batchSize, QString experimentId )
+        : m_started( std::chrono::steady_clock::now() )
+        , m_batchSize( batchSize )
+        , m_experimentId( std::move( experimentId ) )
+    {
+    }
+
+    void finish( bool ok )
+    {
+        if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+            return;
+        sicnu::runtime::observability::trace::TraceEvent trace;
+        trace.event = "experiment_upsert_batch";
+        trace.phase = "end";
+        trace.run = QString::number( m_batchSize ).toStdString();
+        trace.artifact = m_experimentId.toStdString();
+        trace.durationUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - m_started ).count();
+        trace.status = ok ? "ok" : "error";
+        sicnu::runtime::observability::trace::Trace::publish( trace );
+    }
+
+  private:
+    std::chrono::steady_clock::time_point m_started;
+    int m_batchSize = 0;
+    QString m_experimentId;
+};
+
+} // namespace
+
 sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
     const QVector<ExperimentRun> &runs )
 {
@@ -689,6 +737,7 @@ sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
     if ( !m_impl->begin( nullptr ) )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "cannot begin transaction" ) ) );
+    BatchTraceEvent trace( runs.size(), runs.first().experimentId() );
     for ( const ExperimentRun &run : runs )
     {
         const auto written = writeRunInTxnLocked( m_impl->db, run );
@@ -697,6 +746,7 @@ sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
             // All-or-nothing: the first invalid roll fails the whole batch,
             // so callers can never strand half a sweep of run rows.
             m_impl->rollback();
+            trace.finish( false );
             return written;
         }
     }
@@ -706,15 +756,18 @@ sicnu::data::Result<void> ExperimentStore::upsertRunsBatch(
         // point): take exactly the real commit-failure branch and roll the
         // whole batch back.
         m_impl->rollback();
+        trace.finish( false );
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "commit failed" ) ) );
     }
     if ( !m_impl->commit( nullptr ) )
     {
         m_impl->rollback();
+        trace.finish( false );
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "commit failed" ) ) );
     }
+    trace.finish( true );
     return ResultT::success();
 }
 
@@ -1055,6 +1108,7 @@ QJsonObject ExperimentStore::RunPrunePlan::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "schema_version" ), 1 );
+    json.insert( QStringLiteral( "policy" ), policy.toJson() );
     json.insert( QStringLiteral( "scanned_runs" ), static_cast<double>( scannedRuns ) );
     json.insert( QStringLiteral( "run_ids" ), QJsonArray::fromStringList( runIds ) );
     return json;
@@ -1257,8 +1311,8 @@ sicnu::data::Result<qint64> ExperimentStore::executeRunPrune( const RunPrunePlan
                     .arg( experimentId ) ) );
         }
         QStringList kept = experiment->runIds();
-        const int before = kept.size();
         kept.removeAll( QString() ); // defensive: drop blanks while filtering
+        const int before = kept.size();
         for ( const QString &prunedId : removedIds )
             kept.removeAll( prunedId );
         if ( kept.size() == before )

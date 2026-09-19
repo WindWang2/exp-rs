@@ -26,11 +26,12 @@ struct ReproductionBundleImportOptions
 {
     QString bundleDir;
     /// Experiment the imported run attaches to; must exist in the target
-    /// store (`experiment.not_found` otherwise).
+    /// store (a missing experiment is reported as a failed import with an
+    /// "does not exist" warning).
     QString targetExperimentId;
     /// Keep the ORIGINAL run id. When it already exists in the target store
-    /// the import is idempotent if the recorded execution fingerprint
-    /// matches, and fails `experiment.run_exists` otherwise.
+    /// with a different identity, the import is refused with an
+    /// "already exists with a different identity" warning.
     bool keepOriginalRunId = false;
     /// When the bundle is Portable (carries data/), its payload files are
     /// copied here (created as needed). Empty leaves the files in the bundle
@@ -54,6 +55,8 @@ struct ReproductionBundleImportReport
 class ReproductionBundleImporter
 {
   public:
+    /// @p experimentStore must outlive this importer (a bare pointer is
+    /// held).
     explicit ReproductionBundleImporter( ExperimentStore &experimentStore );
 
     /// Imports one bundle directory. Integrity (checksums) and schema

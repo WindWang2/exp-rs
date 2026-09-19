@@ -99,6 +99,7 @@ class GovernanceStore
         QString entityId;  ///< dataset / result / run / downstream asset id
         QString detail;    ///< role or edge context for humans
     };
+    /// Bounded per relationship family (up to 4 × @p limit rows total).
     QVector<AssetReference> collectAssetReferences( const QString &assetId,
                                                     qint64 limit = 1000 ) const;
     /// Removal policy (12.0): an asset still referenced by a dataset

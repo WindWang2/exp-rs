@@ -148,9 +148,8 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
             continue;
         }
         verdict.matchedRunIds.append( runId );
-        if ( !verdict.environmentDrift.isEmpty() )
-            continue; // evidence against the first matched run only
-        if ( repeatEnvironment )
+        // Drift evidence is computed ONCE, against the first matched run.
+        if ( repeatEnvironment && verdict.environmentDrift.isEmpty() )
             verdict.environmentDrift =
                 environmentDrift( recorded->environment(), *repeatEnvironment );
     }

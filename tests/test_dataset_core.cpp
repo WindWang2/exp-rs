@@ -834,12 +834,15 @@ TEST_CASE( "QA reports persist as append-only audit evidence",
            QStringLiteral( "composition" ) );
     CHECK( history->at( 1 ).report.categories().at( 0 ).verdict == AuditVerdict::Pass );
     const auto latest = store.latestQaReport( versionId );
-    REQUIRE( latest.has_value() );
-    CHECK( latest->id == history->at( 0 ).id );
-    CHECK( latest->report.categories().at( 0 ).verdict == AuditVerdict::Warn );
+    REQUIRE( latest.has_value() );          // store read succeeded
+    REQUIRE( latest->has_value() );          // and the version was audited
+    CHECK( latest.value()->id == history->at( 0 ).id );
+    CHECK( latest.value()->report.categories().at( 0 ).verdict == AuditVerdict::Warn );
 
-    // An unaudited version has no history.
-    CHECK( store.latestQaReport( DatasetVersionId::generate() ) == std::nullopt );
+    // An unaudited version has no history (typed read, inner nullopt).
+    const auto neverAudited = store.latestQaReport( DatasetVersionId::generate() );
+    REQUIRE( neverAudited.has_value() );
+    CHECK( neverAudited->has_value() == false );
 
     // Direct DB surgery: a corrupted evidence row poisons the typed history
     // read (fail-closed) while the row stays on disk for inspection.

@@ -43,6 +43,10 @@ class RepeatExecutionClassifier
         EquivalentRerun,
         /// The executionRef matches recorded run(s) whose identity pins
         /// DIFFER — the same platform execution re-run with changed inputs.
+        /// Precedence: this scan runs only when NO identity twin exists; a
+        /// run that already shares the identity pins is classified by the
+        /// twin rules above, and a matching ref is then just corroborating
+        /// evidence for that run.
         Deviated,
     };
 
@@ -65,6 +69,7 @@ class RepeatExecutionClassifier
         QJsonObject toJson() const;
     };
 
+    /// @p store must outlive this classifier (a bare pointer is held).
     explicit RepeatExecutionClassifier( ExperimentStore &store );
 
     /// Classifies one execution against the store. @p resultFingerprint may

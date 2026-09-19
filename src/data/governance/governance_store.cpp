@@ -263,6 +263,7 @@ struct GovernanceStore::Impl
             "  asset_id TEXT NOT NULL,"
             "  position INTEGER NOT NULL DEFAULT 0,"
             "  PRIMARY KEY(dataset_id, asset_id));"
+            "CREATE INDEX IF NOT EXISTS idx_members_asset ON dataset_members(asset_id);"
             // Results + lifecycle.
             "CREATE TABLE IF NOT EXISTS results("
             "  result_id TEXT PRIMARY KEY,"
@@ -315,6 +316,7 @@ struct GovernanceStore::Impl
             "  run_id TEXT NOT NULL,"
             "  asset_id TEXT NOT NULL,"
             "  PRIMARY KEY(run_id, asset_id));"
+            "CREATE INDEX IF NOT EXISTS idx_run_outputs_asset ON run_outputs(asset_id);"
             // Experiments.
             "CREATE TABLE IF NOT EXISTS experiments("
             "  experiment_id TEXT PRIMARY KEY,"

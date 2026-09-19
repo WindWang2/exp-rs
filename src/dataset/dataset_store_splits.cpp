@@ -341,20 +341,23 @@ sicnu::data::Result<QVector<DatasetStore::QaReportRecord>> DatasetStore::qaRepor
     return Result::success( records );
 }
 
-std::optional<DatasetStore::QaReportRecord> DatasetStore::latestQaReport(
+sicnu::data::Result<std::optional<DatasetStore::QaReportRecord>> DatasetStore::latestQaReport(
     const DatasetVersionId &versionId ) const
 {
+    using Result = sicnu::data::Result<std::optional<QaReportRecord>>;
     if ( !m_impl )
-        return std::nullopt;
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "SELECT id, split_manifest_id, overall, json, created_ms FROM qa_reports"
         " WHERE dataset_version_id=? ORDER BY id DESC LIMIT 1" ) );
     if ( !stmt )
-        return std::nullopt;
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
     stmt.bind( 1, versionId.toString() );
     if ( !stmt.stepRow() )
-        return std::nullopt;
+        return Result::success( std::nullopt ); // genuinely never audited
     QaReportRecord record;
     record.id = stmt.i64( 0 );
     record.splitManifestId = stmt.text( 1 );
@@ -362,9 +365,12 @@ std::optional<DatasetStore::QaReportRecord> DatasetStore::latestQaReport(
     record.createdAtUtc = QDateTime::fromMSecsSinceEpoch( stmt.i64( 4 ) );
     const auto parsed = DatasetQaReport::fromJson( textToJson( stmt.text( 3 ) ) );
     if ( !parsed )
-        return std::nullopt;
+        return Result::failure( storeDiag( QStringLiteral( "dataset.corrupt_qa_report" ),
+                                           QStringLiteral( "newest QA report row %1 does not"
+                                                           " parse" )
+                                               .arg( record.id ) ) );
     record.report = parsed.value();
-    return record;
+    return Result::success( record );
 }
 
 } // namespace sicnu::dataset

@@ -1133,9 +1133,10 @@ sicnu::data::Result<void> DatasetStore::addVersionTag( const DatasetId &datasetI
         insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
         if ( !insert.step() )
         {
-            // Read the error code BEFORE rolling back: a successful rollback
-            // resets the connection's error state.
+            // Read the error code AND message BEFORE rolling back: a
+            // successful rollback resets the connection's error state.
             const int code = sqlite3_errcode( m_impl->db );
+            const QString message = insert.error( m_impl->db );
             m_impl->rollback();
             if ( code == SQLITE_CONSTRAINT )
             {
@@ -1145,8 +1146,8 @@ sicnu::data::Result<void> DatasetStore::addVersionTag( const DatasetId &datasetI
                     QStringLiteral( "tag %1 is already pinned; remove it first to move it" )
                         .arg( tag ) ) );
             }
-            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
-                                               insert.error( m_impl->db ) ) );
+            return Result::failure(
+                storeDiag( QStringLiteral( "dataset.store_write_failed" ), message ) );
         }
     }
     if ( !m_impl->commit( nullptr ) )
@@ -1187,7 +1188,13 @@ sicnu::data::Result<void> DatasetStore::removeVersionTag( const DatasetId &datas
         }
         remove.bind( 1, datasetId.toString() );
         remove.bind( 2, tag );
-        if ( !remove.step() || remove.changes( m_impl->db ) != 1 )
+        if ( !remove.step() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               remove.error( m_impl->db ) ) );
+        }
+        if ( remove.changes( m_impl->db ) != 1 )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
@@ -1236,8 +1243,9 @@ QVector<DatasetStore::VersionTag> DatasetStore::versionTags( const DatasetId &da
                                                              qint64 limit ) const
 {
     QVector<VersionTag> tags;
-    if ( !m_impl || limit <= 0 )
+    if ( !m_impl )
         return tags;
+    limit = qBound<qint64>( qint64( 1 ), limit, qint64( 1000 ) );
     QMutexLocker lock( &m_impl->mutex );
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT tag, version_id, created_ms FROM version_tags"

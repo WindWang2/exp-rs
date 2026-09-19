@@ -292,8 +292,13 @@ class DatasetStore
     /// Newest-first audit history for one version (bounded by @p limit).
     sicnu::data::Result<QVector<QaReportRecord>> qaReportsForVersion(
         const DatasetVersionId &versionId, qint64 limit = 100 ) const;
-    /// The most recent report for one version; nullopt when never audited.
-    std::optional<QaReportRecord> latestQaReport( const DatasetVersionId &versionId ) const;
+    /// The most recent report for one version. The outer Result fails typed
+    /// on store/query problems and on a corrupt newest row (a corrupt
+    /// evidence row must never masquerade as "never audited"); the inner
+    /// optional is nullopt only when the version was genuinely never
+    /// audited.
+    sicnu::data::Result<std::optional<QaReportRecord>> latestQaReport(
+        const DatasetVersionId &versionId ) const;
 
     // --- sample facets & quality cache (goal 7.0 §E) ----------------------------
     /// One facet value of one sample (caller-supplied evidence: "sensor",

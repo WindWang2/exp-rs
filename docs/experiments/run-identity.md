@@ -31,6 +31,8 @@ happen?" at store scale via the indexed `execution_fingerprint` column:
   differing results is drift evidence, not a benign rerun);
 - `deviated` — the platform `executionRef` already recorded runs under
   different pins (the same execution silently re-run with changed inputs).
+  Precedence: the deviation scan runs only when no identity twin exists —
+  twin rules are decided first.
 
 Environment drift between identity twins is REPORTED (`environment_drift`)
 and never downgrades the verdict — environment is not an identity pin

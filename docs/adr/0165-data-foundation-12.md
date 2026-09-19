@@ -82,8 +82,12 @@ by a dataset or run could disappear from under them.
 
 ## Consequences
 
-- Deep pages become O(log n); the 100k-sample / 10k-run scale Oracle
-  (`test_data_foundation_scale`) emits structured JSON perf evidence.
+- Deep pages become O(log n) wherever an index covers the filter + order
+  (samples: `(dataset_version_id, roword)`; runs: `(experiment_id,
+  created_ms)`, the new `(created_ms, run_id)` and
+  `(dataset_version_id, created_ms, run_id)`); the 100k-sample / 10k-run
+  scale Oracle (`test_data_foundation_scale`) emits structured JSON perf
+  evidence.
 - The repeat-execution classifier (`repeat_execution.{h,cpp}`) answers
   same/duplicate/rerun/deviated from the indexed execution fingerprint —
   environment drift is reported as evidence and never changes the verdict

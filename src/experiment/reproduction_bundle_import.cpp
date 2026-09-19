@@ -45,8 +45,16 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
     return document.object();
 }
 
+/// Documents the importer actually parses; every one of them must be
+/// covered by checksums.txt — a manifest that omits the files it wants the
+/// consumer to trust defeats the integrity gate.
+const char *kRequiredBundleMembers[] = {
+    "manifest.json", "run_config.json", "environment.json",
+};
+
 /// Verifies checksums.txt against the bundle contents (the same
-/// "integrity first" rule as validateBundle).
+/// "integrity first" rule as validateBundle) AND that every required member
+/// is listed in it.
 bool verifyChecksums( const QDir &dir, QStringList *reasons )
 {
     QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
@@ -57,6 +65,7 @@ bool verifyChecksums( const QDir &dir, QStringList *reasons )
     }
     const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+    QStringList listed;
     for ( const QString &line : lines )
     {
         const int split = line.indexOf( QStringLiteral( "  " ) );
@@ -64,6 +73,7 @@ bool verifyChecksums( const QDir &dir, QStringList *reasons )
             continue;
         const QString digest = line.left( split );
         const QString name = line.mid( split + 2 );
+        listed.append( name );
         // Path traversal guard: bundle members are relative names inside the
         // directory, never absolute paths or ../ escapes.
         if ( name.startsWith( QLatin1Char( '/' ) ) || name.contains( QLatin1String( ".." ) ) )
@@ -78,6 +88,15 @@ bool verifyChecksums( const QDir &dir, QStringList *reasons )
                      .toHex() ) != digest )
         {
             reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+            return false;
+        }
+    }
+    for ( const char *member : kRequiredBundleMembers )
+    {
+        if ( !listed.contains( QLatin1String( member ) ) )
+        {
+            reasons->append( QStringLiteral( "checksums.txt does not cover %1" )
+                                 .arg( QLatin1String( member ) ) );
             return false;
         }
     }
