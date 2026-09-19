@@ -78,9 +78,36 @@ class HttpRuntimeSession final : public IModelRuntime
       QObject::connect( &timeout, &QTimer::timeout, &loop, &QEventLoop::quit );
       QNetworkReply *reply = manager.post( httpRequest, payload );
       QObject::connect( reply, &QNetworkReply::finished, &loop, &QEventLoop::quit );
+      // Incremental body read (#1056): the max_body_mb guard must bound memory
+      // DURING the transfer, not after `readAll()` has already buffered an
+      // unbounded response. Oversize aborts the transfer immediately.
+      QByteArray body;
+      qint64 receivedBytes = 0;
+      bool bodyTooLarge = false;
+      QObject::connect( reply, &QNetworkReply::readyRead, &loop, [&]() {
+        const QByteArray chunk = reply->readAll();
+        if ( bodyTooLarge || chunk.isEmpty() )
+          return;
+        if ( chunk.size() > m_maxBodyBytes - receivedBytes )
+        {
+          bodyTooLarge = true;
+          reply->abort();
+          loop.quit();
+          return;
+        }
+        receivedBytes += chunk.size();
+        body.append( chunk );
+      } );
       timeout.start( m_timeoutMs );
       loop.exec();
       timeout.stop();
+      if ( bodyTooLarge )
+      {
+        recordFailure( "provider response exceeds the runtime.provider.max_body_mb guard" );
+        reply->deleteLater();
+        throw std::runtime_error( "provider response exceeds the runtime.provider.max_body_mb "
+                                  "guard (output invalid)" );
+      }
       if ( !reply->isFinished() )
       {
         reply->abort();
@@ -88,13 +115,15 @@ class HttpRuntimeSession final : public IModelRuntime
         reply->deleteLater();
         throw std::runtime_error( "no response from provider: request timed out" );
       }
+      // Drain any bytes delivered between the last readyRead and finished, and
+      // re-check: the incremental guard above trusted the chunk sizes.
+      body.append( reply->readAll() );
 
       const QNetworkReply::NetworkError transportError = reply->error();
       const int statusCode =
         reply->attribute( QNetworkRequest::HttpStatusCodeAttribute ).isValid()
           ? reply->attribute( QNetworkRequest::HttpStatusCodeAttribute ).toInt()
           : 0;
-      const QByteArray body = reply->readAll();
       reply->deleteLater();
 
       if ( transportError != QNetworkReply::NoError && statusCode == 0 )

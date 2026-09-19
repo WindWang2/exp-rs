@@ -114,6 +114,16 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
     double stddevMult = getDouble(params, "stddevK", 2.0);
     int filterType = 0;
     int kernelSize = getInt(params, "kernelSize", 3);
+    // #1044: the kernel edge becomes a tile halo (`half = kernelSize / 2`), so
+    // an unbounded value is an unbounded per-tile allocation and an int
+    // overflow hazard. 101 is the repo's documented window ceiling.
+    constexpr int kMaxEnhancementKernel = 101;
+    if (kernelSize < 1 || kernelSize > kMaxEnhancementKernel) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "kernelSize must be in [1, " +
+                                  std::to_string(kMaxEnhancementKernel) + "] (got " +
+                                  std::to_string(kernelSize) + ")");
+    }
     double sigma = getDouble(params, "sigma", 1.0);
     int ratioType = 0;
     int band1 = getInt(params, "band1", 1);

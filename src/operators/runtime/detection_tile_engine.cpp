@@ -235,6 +235,13 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
                                + " samples for a batch of " + std::to_string( B )
                                + " — the export fixes the batch dimension; use batch_size=1" );
 
+    // #1056: the per-sample slice below builds a header onto `output.ptr(bi)`
+    // and passes it to decodeDetections, which addresses the plane as tightly
+    // packed. A non-continuous provider output (strided ROI view) would make
+    // those addresses wrong — clone into a continuous buffer instead.
+    if ( !output.isContinuous() )
+      output = output.clone();
+
     // Per-sample slice: the decode consumes a (1, C, N) tensor per tile.
     for ( int bi = 0; bi < B; ++bi )
     {

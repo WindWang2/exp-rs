@@ -16,6 +16,8 @@
 
 #include "algorithms/terrain_analysis.h"
 
+#include <QFile>
+
 #include <cmath>
 #include <algorithm>
 
@@ -154,6 +156,9 @@ protected:
                 if ( feedback->isCanceled() )
                 {
                     delete outDp;
+                    // The destination was created eagerly by the writer; a
+                    // cancelled run must not leave it behind (#1043).
+                    QFile::remove( dest );
                     return {};
                 }
                 const int bw = std::min( blockSize, nCols - col );
@@ -167,7 +172,12 @@ protected:
                         outBlock.setValue( r, c, static_cast<double>( hsData[static_cast<size_t>( row + r ) * nCols + ( col + c )] ) );
                     }
                 }
-                outDp->writeBlock( &outBlock, 1, col, row );
+                if ( !outDp->writeBlock( &outBlock, 1, col, row ) )
+                {
+                    delete outDp;
+                    QFile::remove( dest );
+                    throw QgsProcessingException( QObject::tr( "Failed to write hillshade block at (%1, %2)" ).arg( col ).arg( row ) );
+                }
             }
             feedback->setProgress( 60 + 40.0 * row / nRows );
         }

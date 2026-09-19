@@ -710,7 +710,12 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
 
 void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload ) const
 {
-  if ( !mDataManager )
+  rollbackVerificationFailure( mDataManager, payload );
+}
+
+void ToolCallDispatcher::rollbackVerificationFailure( sicnu::data::DataManager *manager, Json::Value &payload )
+{
+  if ( !manager )
     return;
   // Only roll back when we actually committed (assetId present) and verification
   // downgraded the payload to error with verified == false.
@@ -727,12 +732,12 @@ void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload ) con
   const sicnu::data::AssetId assetId = *assetIdOpt;
   // Must run on DataManager owning thread; our production callers (ExecutionPlane
   // watch bridge / sync waiter) are on that thread (see tool_call_dispatcher_task_center).
-  if ( QThread::currentThread() != mDataManager->thread() )
+  if ( QThread::currentThread() != manager->thread() )
   {
     // Best-effort: schedule removal; do not block. The insulator guarantee is
     // still met — the asset will be gone before the next event-loop turn.
-    QMetaObject::invokeMethod( mDataManager,
-                              [manager = mDataManager, assetId]() {
+    QMetaObject::invokeMethod( manager,
+                              [manager, assetId]() {
                                 if ( !manager || assetId.isNull() )
                                   return;
                                 if ( manager->asset( assetId ).has_value() )
@@ -762,13 +767,13 @@ void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload ) con
                               Qt::QueuedConnection );
     return;
   }
-  if ( mDataManager->asset( assetId ).has_value() )
+  if ( manager->asset( assetId ).has_value() )
   {
-    const auto result = mDataManager->reap( sicnu::data::ReapRequest{ assetId } );
+    const auto result = manager->reap( sicnu::data::ReapRequest{ assetId } );
     if ( !result.unloaded && !result.diagnostics.isEmpty() )
     {
-      const auto plan = mDataManager->planUnload( assetId ).confirmedCascade();
-      const auto unloadResult = mDataManager->unload( plan );
+      const auto plan = manager->planUnload( assetId ).confirmedCascade();
+      const auto unloadResult = manager->unload( plan );
       // Surface the rollback failures in the returned payload (#703) instead
       // of (void)-discarding them: the caller sees WHY the asset survived.
       Json::Value rollbackErrors( Json::arrayValue );

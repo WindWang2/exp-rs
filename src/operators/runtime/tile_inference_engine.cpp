@@ -3,6 +3,7 @@
 
 #include "operators/runtime/eo_preflight.h"
 #include "operators/framework/artifact_digest.h"
+#include "operators/framework/model_catalog.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
@@ -39,6 +40,18 @@ namespace {
 
 constexpr int kMinTileSize = 16;
 constexpr int kDefaultTileSize = 512;
+
+/// Documented ceiling for one fed inference window side (px): tile_size is
+/// capped at 32768, halo at tile_size/2 and pad at kMaxPreprocessPad by the
+/// manifest contract (#1044). This engine-level guard keeps programmatically
+/// constructed ModelInfo values from overflowing the int arithmetic that sizes
+/// the window allocations.
+constexpr int kMaxInferenceWindowSide = 65536;
+
+/// Documented ceiling for a feed's channel lane (`bands × T`) — 1024 frames ×
+/// 16 bands, far above any real EO model. The scatter/stacked buffers are sized
+/// by this number, so it must never wrap.
+constexpr int kMaxFeedChannels = 16384;
 
 struct CoreTile
 {
@@ -1221,8 +1234,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     stats.inputGrids.push_back( std::move( grid ) );
   }
 
-  // Reusable read buffer: one halo-extended window at a time.
-  const int maxWin = tileSize + 2 * halo;
+  // Reusable read buffer: one halo-extended window at a time. #1044: checked
+  // 64-bit math — a programmatic ModelInfo can bypass the manifest halo bound,
+  // and `tileSize + 2*halo` must never overflow int before it sizes the buffer.
+  const std::int64_t maxWin64 = static_cast<std::int64_t>( tileSize ) + 2LL * halo;
+  if ( maxWin64 <= 0 || maxWin64 > kMaxInferenceWindowSide )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "inference window side " + std::to_string( maxWin64 )
+                             + " px is out of range (tile " + std::to_string( tileSize )
+                             + ", halo " + std::to_string( halo ) + "); the engine bounds the fed "
+                             "window at " + std::to_string( kMaxInferenceWindowSide ) + " px per side" );
+  const int maxWin = static_cast<int>( maxWin64 );
   std::vector<float> windowBuffer( static_cast<std::size_t>( maxWin ) * maxWin * bandCount );
   // Per-band declared NoData sentinels (the BIP read yields raw values; the
   // shared NaN convention is applied here, matching opencv_utils semantics).
@@ -2988,7 +3010,22 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                  + " bands are fed" );
     }
     reader.bands = bandList;
-    reader.channels = static_cast<int>( bandList.size() * declaredFrames );
+    // #1044: `bands × T` must not truncate to a smaller positive int — the
+    // scatter (see the stacked-buffer fill below) writes bandCount floats per
+    // pixel into a `channels`-wide lane, so a wrapped product is a heap OOB.
+    // Checked 64-bit product with a documented channel-lane ceiling.
+    const std::uint64_t feedChannels =
+      static_cast<std::uint64_t>( bandList.size() ) * static_cast<std::uint64_t>( declaredFrames );
+    if ( bandList.empty() || declaredFrames > static_cast<std::size_t>( kMaxModelTemporalFrames )
+         || feedChannels > static_cast<std::uint64_t>( kMaxFeedChannels ) )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "' combines "
+                               + std::to_string( bandList.size() ) + " bands with "
+                               + std::to_string( declaredFrames )
+                               + " temporal frames into an unusable channel lane (temporal bound "
+                               + std::to_string( kMaxModelTemporalFrames ) + " frames, channel "
+                               "bound " + std::to_string( kMaxFeedChannels ) + ")" );
+    reader.channels = static_cast<int>( feedChannels );
 
     // Open all provided frames.
     reader.frames.resize( declaredFrames );
@@ -3119,7 +3156,19 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   if ( options.batchSizeOverride > 0 )
     batchSize = std::min( batchSize, options.batchSizeOverride );
   batchSize = std::max( 1, batchSize );
-  const int maxWin = tileSize + 2 * halo + 2 * pad;
+  // #1044: checked 64-bit window math. A programmatic ModelInfo can bypass the
+  // manifest ceilings (tile_size <= 32768, halo <= tile_size/2, pad <=
+  // kMaxPreprocessPad), so `tileSize + 2*halo + 2*pad` is computed wide and
+  // bounded before it sizes any allocation.
+  const std::int64_t maxWin64 = static_cast<std::int64_t>( tileSize ) + 2LL * halo + 2LL * pad;
+  if ( maxWin64 <= 0 || maxWin64 > kMaxInferenceWindowSide )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "inference window side " + std::to_string( maxWin64 )
+                             + " px is out of range (tile " + std::to_string( tileSize )
+                             + ", halo " + std::to_string( halo ) + ", pad " + std::to_string( pad )
+                             + "); the engine bounds the fed window at "
+                             + std::to_string( kMaxInferenceWindowSide ) + " px per side" );
+  const int maxWin = static_cast<int>( maxWin64 );
 
   std::vector<CoreTile> core;
   for ( int y = 0; y < rasterH; y += tileSize )

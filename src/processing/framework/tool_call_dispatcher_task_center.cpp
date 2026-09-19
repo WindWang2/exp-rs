@@ -28,8 +28,11 @@
 #include "execution_plane.h"
 #include "task_center.h"
 
+#include "data/data_manager.h"
+
 #include <QCoreApplication>
 #include <QObject>
+#include <QPointer>
 
 namespace sicnu::processing {
 
@@ -50,6 +53,10 @@ ToolCallDispatcher::ToolCallDispatcher()
       OutputCommitterHandler committerHandler = mOutputCommitterHandler;
       OutputVerificationHandler verificationHandler = mOutputVerificationHandler;
       std::shared_ptr<QObject> bridge = m_commitBridge;
+      // The insulator rollback (#1042) needs only the DataManager. A QPointer
+      // keeps the capture lifetime-safe when the dispatcher (and with it the
+      // manager, in GUI teardown) is gone before the task reaches terminal.
+      QPointer<sicnu::data::DataManager> managerGuard = mDataManager;
       // deliver runs on the bridge (Data Manager owner) thread whenever
       // needed; buildCommittedResultPayload applies the transactional commit
       // exactly once per task, so a null callback still yields the committed
@@ -58,13 +65,18 @@ ToolCallDispatcher::ToolCallDispatcher()
       ExecutionPlane::instance().watch(
         taskId,
         [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler ),
-         verificationHandler = std::move( verificationHandler )]( const sicnu::AlgorithmTaskInfo &info ) mutable {
+         verificationHandler = std::move( verificationHandler ),
+         managerGuard]( const sicnu::AlgorithmTaskInfo &info ) mutable {
           ExecutionPlane::deliverOnAffinity(
             bridge.get(),
             [info, cb = std::move( cb ), committerHandler = std::move( committerHandler ),
-             verificationHandler = std::move( verificationHandler )]() mutable {
-              const Json::Value payload =
+             verificationHandler = std::move( verificationHandler ), managerGuard]() mutable {
+              Json::Value payload =
                 ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler, verificationHandler );
+              // Verification downgrades a committed payload to error; the
+              // committed asset must not survive that verdict on THIS path
+              // either (the member builder is not the only production caller).
+              ToolCallDispatcher::rollbackVerificationFailure( managerGuard.data(), payload );
               if ( cb )
                 cb( payload );
             } );
@@ -78,9 +90,13 @@ ToolCallDispatcher::ToolCallDispatcher()
     // The handler is read at await time (setDataManager may run after the
     // constructor); the commit then runs on the calling thread — the Data
     // Manager's owning thread for every production caller of the sync path.
-    return ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
-                                                   bridge.get(), /*cancelOnTimeout=*/true,
-                                                   mOutputVerificationHandler );
+    Json::Value payload = ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
+                                                                  bridge.get(), /*cancelOnTimeout=*/true,
+                                                                  mOutputVerificationHandler );
+    // Same insulator as the watcher path (#1042): a verification failure that
+    // downgraded a committed payload must reap the asset here too.
+    rollbackVerificationFailure( payload );
+    return payload;
   };
 }
 

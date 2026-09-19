@@ -350,9 +350,22 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
       Qt::QueuedConnection );
     if ( future.wait_for( std::chrono::milliseconds( 5000 ) ) == std::future_status::ready )
       return future.get();
-    // Affinity thread starved (no pumping): fall through to a raw payload so
-    // the caller still gets a result. No commit runs — safer than a wrong-thread commit.
-    return ToolCallDispatcher::buildTaskResultPayload( info, nullptr );
+    // Affinity thread starved (no pumping): the commit could not run. Never
+    // return the task's raw temp output path as the result — TaskCenter reaps
+    // scratch outputs, so a temp path would dangle and the caller would hold
+    // no committed asset (#1056). Non-completed tasks and tasks without an
+    // output commit nothing anyway, so their standard payload is returned;
+    // a completed run with an output becomes a typed error.
+    if ( info.status != sicnu::TaskStatus::Completed || info.outputLayerPath.isEmpty() )
+      return ToolCallDispatcher::buildTaskResultPayload( info, nullptr );
+    Json::Value errorResult( Json::objectValue );
+    errorResult["status"] = "error";
+    errorResult["taskId"] = static_cast<Json::Int64>( info.taskId );
+    errorResult["algorithmId"] = info.algorithmId.toStdString();
+    errorResult["errorMessage"] =
+      "Output commit did not run: the post-completion handler thread did not respond "
+      "within 5 s; the temporary output was not promoted to a stable asset.";
+    return errorResult;
   }
 
   return buildCommittedResultPayload( info, committerHandler, verificationHandler );

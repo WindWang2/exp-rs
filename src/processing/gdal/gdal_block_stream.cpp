@@ -3,6 +3,19 @@
 #include "gdal_dataset_wrapper.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+
+namespace
+{
+
+/// Structural ceiling for the halo, applied in the constructor as a last-resort
+/// defense: the window side is `tile + 2*halo` and must never overflow int or
+/// size a pathological buffer (#1044). Operator-level validation is expected to
+/// reject absurd halos first (e.g. OpenCvOperatorBase caps the kernel radius).
+constexpr int kMaxBlockStreamHalo = 4096;
+
+} // namespace
 
 GdalBlockStream::GdalBlockStream( const GdalDatasetWrapper &ds, int bandNum,
                                   int tileWidth, int tileHeight, int halo )
@@ -10,7 +23,7 @@ GdalBlockStream::GdalBlockStream( const GdalDatasetWrapper &ds, int bandNum,
   , m_bandNum( bandNum )
   , m_tileWidth( std::max( 1, tileWidth ) )
   , m_tileHeight( std::max( 1, tileHeight ) )
-  , m_halo( std::max( 0, halo ) )
+  , m_halo( std::clamp( halo, 0, kMaxBlockStreamHalo ) )
   , m_rasterWidth( ds.width() )
   , m_rasterHeight( ds.height() )
 {
@@ -23,9 +36,21 @@ void GdalBlockStream::buildTiles()
     if ( m_rasterWidth <= 0 || m_rasterHeight <= 0 )
         return;
 
-    const int cols = ( m_rasterWidth + m_tileWidth - 1 ) / m_tileWidth;
-    const int rows = ( m_rasterHeight + m_tileHeight - 1 ) / m_tileHeight;
-    m_tiles.reserve( static_cast<size_t>( cols ) * rows );
+    // #1044/#1056: 64-bit grid math — `rasterWidth + tileWidth - 1` and
+    // `cols * rows` overflow signed int for GDAL-reported dimensions near
+    // INT_MAX. An impossible grid leaves m_tiles empty (forEach() == false).
+    const std::int64_t cols64 =
+        ( static_cast<std::int64_t>( m_rasterWidth ) + m_tileWidth - 1 ) / m_tileWidth;
+    const std::int64_t rows64 =
+        ( static_cast<std::int64_t>( m_rasterHeight ) + m_tileHeight - 1 ) / m_tileHeight;
+    const std::int64_t total64 = cols64 * rows64;
+    if ( cols64 <= 0 || rows64 <= 0
+         || total64 > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+        return;
+    const int cols = static_cast<int>( cols64 );
+    const int rows = static_cast<int>( rows64 );
+    const int total = static_cast<int>( total64 );
+    m_tiles.reserve( static_cast<std::size_t>( total ) );
 
     int idx = 0;
     for ( int r = 0; r < rows; ++r )
@@ -45,7 +70,7 @@ void GdalBlockStream::buildTiles()
             t.bufferWidth = width + 2 * m_halo;
             t.bufferHeight = height + 2 * m_halo;
             t.index = idx;
-            t.totalTiles = cols * rows;
+            t.totalTiles = total;
             t.rasterWidth = m_rasterWidth;
             t.rasterHeight = m_rasterHeight;
             m_tiles.push_back( t );

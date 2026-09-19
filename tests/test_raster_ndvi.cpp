@@ -14,7 +14,9 @@
 #include <qgsexception.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
+#include <qgsrasterlayer.h>
 
+#include "processing/providers/qgis_algorithms/algorithms/raster/raster_merge_bands.h"
 #include "processing/providers/qgis_algorithms/algorithms/raster/raster_ndvi.h"
 #include "processing/providers/qgis_algorithms/algorithms/remote_sensing/spectral_index_algorithm.h"
 #include "processing/algorithms/spectral_indices.h"
@@ -40,9 +42,9 @@ void ensureQgis()
 
 // Helper: create a small GeoTIFF with known float values
 static QString createTestRaster(const QString &dir, const QString &name,
-                                 int width, int height, const std::vector<float> &data,
-                                 double noDataValue = -9999.0,
-                                 double pixelSize = 1.0)
+                                  int width, int height, const std::vector<float> &data,
+                                  double noDataValue = -9999.0,
+                                  double pixelSize = 1.0)
 {
     QString path = dir + "/" + name;
     GDALAllRegister();
@@ -66,6 +68,35 @@ static QString createTestRaster(const QString &dir, const QString &name,
         (void)GDALRasterIO(band, GF_Write, 0, row, width, 1,
                      const_cast<float*>(data.data() + row * width),
                      width, 1, GDT_Float32, 0, 0);
+    }
+
+    GDALClose(dataset);
+    return path;
+}
+
+// Helper: create a small GeoTIFF of an explicit GDAL type with known values.
+static QString createTypedRaster(const QString &dir, const QString &name,
+                                 int width, int height, GDALDataType type,
+                                 const void *data)
+{
+    QString path = dir + "/" + name;
+    GDALAllRegister();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    if (!driver) return {};
+
+    GDALDatasetH dataset = GDALCreate(driver, path.toUtf8().constData(),
+                                      width, height, 1, type, nullptr);
+    if (!dataset) return {};
+
+    double geoTransform[6] = {500000.0, 1.0, 0.0, 4500000.0, 0.0, -1.0};
+    GDALSetGeoTransform(dataset, geoTransform);
+
+    GDALRasterBandH band = GDALGetRasterBand(dataset, 1);
+    for (int row = 0; row < height; row++) {
+        const char *rowPtr = static_cast<const char *>(data)
+            + static_cast<size_t>(row) * width * GDALGetDataTypeSizeBytes(type);
+        (void)GDALRasterIO(band, GF_Write, 0, row, width, 1,
+                           const_cast<char *>(rowPtr), width, 1, type, 0, 0);
     }
 
     GDALClose(dataset);
@@ -154,6 +185,100 @@ TEST_CASE("RasterNdviAlgorithm refuses mismatched pixel size without warping (#9
                message.contains(QStringLiteral("grid"), Qt::CaseInsensitive)));
     }
     CHECK_FALSE(QFile::exists(outPath));
+}
+
+TEST_CASE("RasterMergeBandsAlgorithm merges mixed-type bands with per-band buffer types (#1035)",
+          "[raster][merge_bands][algorithm][dtype]")
+{
+    ensureQgis();
+    GDALAllRegister();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const std::vector<GByte> byteData = {10, 20, 30, 40};
+    const std::vector<float> floatData = {1.2f, 2.7f, 3.1f, 4.9f};
+    const QString bytePath = createTypedRaster(dir.path(), "byte.tif", 2, 2, GDT_Byte, byteData.data());
+    const QString floatPath = createTypedRaster(dir.path(), "float.tif", 2, 2, GDT_Float32, floatData.data());
+    REQUIRE_FALSE(bytePath.isEmpty());
+    REQUIRE_FALSE(floatPath.isEmpty());
+
+    auto byteLayer = std::make_unique<QgsRasterLayer>(bytePath, "byte", "gdal");
+    auto floatLayer = std::make_unique<QgsRasterLayer>(floatPath, "float", "gdal");
+    REQUIRE(byteLayer->isValid());
+    REQUIRE(floatLayer->isValid());
+
+    QVariantList layersByteFirst = {
+        QVariant::fromValue(static_cast<QgsMapLayer *>(byteLayer.get())),
+        QVariant::fromValue(static_cast<QgsMapLayer *>(floatLayer.get()))
+    };
+    QVariantList layersFloatFirst = {
+        QVariant::fromValue(static_cast<QgsMapLayer *>(floatLayer.get())),
+        QVariant::fromValue(static_cast<QgsMapLayer *>(byteLayer.get()))
+    };
+
+    // Order A: Byte first ⇒ output GDT_Byte. Band 2 (a FLOAT32 block) must be
+    // converted into the byte band (1.2→1, 2.7→3, 3.1→3, 4.9→5). The
+    // historical bug passed blocks[0]'s GDT_Byte as the buffer type for the
+    // float block: GDAL then read one byte per pixel out of a 4-byte-per-pixel
+    // buffer (out-of-bounds read).
+    const QString outA = dir.path() + QStringLiteral("/merged_a.tif");
+    {
+        RasterMergeBandsAlgorithm alg;
+        QgsProcessingContext context;
+        QgsProcessingFeedback feedback;
+        QVariantMap params;
+        params.insert(QStringLiteral("INPUT_LAYERS"), layersByteFirst);
+        params.insert(QStringLiteral("OUTPUT"), outA);
+
+        bool ok = false;
+        const QVariantMap res = alg.run(params, context, &feedback, &ok, QVariantMap(), false);
+        REQUIRE(ok);
+        REQUIRE(res.value(QStringLiteral("OUTPUT")).toString() == outA);
+
+        GDALDatasetH ds = GDALOpen(outA.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        CHECK(GDALGetRasterCount(ds) == 2);
+        CHECK(GDALGetRasterDataType(GDALGetRasterBand(ds, 1)) == GDT_Byte);
+        std::vector<GByte> band1(4), band2(4);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Read, 0, 0, 2, 2, band1.data(), 2, 2, GDT_Byte, 0, 0) == CE_None);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Read, 0, 0, 2, 2, band2.data(), 2, 2, GDT_Byte, 0, 0) == CE_None);
+        GDALClose(ds);
+        CHECK(band1[0] == 10); CHECK(band1[1] == 20); CHECK(band1[2] == 30); CHECK(band1[3] == 40);
+        CHECK(band2[0] == 1); CHECK(band2[1] == 3); CHECK(band2[2] == 3); CHECK(band2[3] == 5);
+    }
+
+    // Order B: Float32 first ⇒ output GDT_Float32. Band 2 (a BYTE block) must
+    // convert exactly (10/20/30/40 as floats). The historical bug declared the
+    // byte buffer as GDT_Float32: GDAL read 4× the bytes out of a 1-byte-per-
+    // pixel heap block (out-of-bounds read).
+    const QString outB = dir.path() + QStringLiteral("/merged_b.tif");
+    {
+        RasterMergeBandsAlgorithm alg;
+        QgsProcessingContext context;
+        QgsProcessingFeedback feedback;
+        QVariantMap params;
+        params.insert(QStringLiteral("INPUT_LAYERS"), layersFloatFirst);
+        params.insert(QStringLiteral("OUTPUT"), outB);
+
+        bool ok = false;
+        const QVariantMap res = alg.run(params, context, &feedback, &ok, QVariantMap(), false);
+        REQUIRE(ok);
+        REQUIRE(res.value(QStringLiteral("OUTPUT")).toString() == outB);
+
+        GDALDatasetH ds = GDALOpen(outB.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        CHECK(GDALGetRasterCount(ds) == 2);
+        CHECK(GDALGetRasterDataType(GDALGetRasterBand(ds, 1)) == GDT_Float32);
+        std::vector<float> band1(4), band2(4);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Read, 0, 0, 2, 2, band1.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Read, 0, 0, 2, 2, band2.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+        for (int i = 0; i < 4; ++i)
+        {
+            CHECK_THAT(band1[i], Catch::Matchers::WithinAbs(floatData[i], 1e-4));
+            CHECK_THAT(band2[i], Catch::Matchers::WithinAbs(static_cast<float>(byteData[i]), 1e-4));
+        }
+    }
 }
 
 TEST_CASE("SpectralIndexAlgorithm refuses mismatched pixel size without warping (#935)",

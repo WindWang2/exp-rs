@@ -76,6 +76,21 @@ bool readDigestSidecar( const std::string &path, std::uint64_t &hash, std::uint6
         return false;
     return true;
 }
+
+/// True when @p component is a plain single path component: non-empty, not a
+/// traversal token, no directory separators, no drive/ADS colon, no embedded
+/// NUL. Defensive only today (no production caller passes foreign strings),
+/// but a path-splice must never be able to escape the scratch root (#1056).
+bool isSafePathComponent( const std::string &component )
+{
+    if ( component.empty() || component == "." || component == ".." )
+        return false;
+    if ( component.find( '\0' ) != std::string::npos )
+        return false;
+    if ( component.find_first_of( "/\\:" ) != std::string::npos )
+        return false;
+    return true;
+}
 } // namespace
 
 // ── ScratchLease::Entry ────────────────────────────────────────────────────
@@ -244,6 +259,10 @@ std::string ScratchRegistry::root() const
 ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::string &stem,
                                        std::uint64_t bytes )
 {
+    if ( !isSafePathComponent( runId ) || !isSafePathComponent( stem ) )
+        throw std::invalid_argument(
+            "scratch acquire: run id / stem must be plain path components "
+            "(no separators, '..', ':' or NUL)" );
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( m_config.budgetBytes != 0
          && saturatingAdd( m_outstandingTotal, bytes ) > m_config.budgetBytes )

@@ -282,7 +282,16 @@ int AlgorithmMetaStore::exportCatalog( const std::string &outDir,
                 *error = "Cannot write " + file.fileName().toStdString();
             return -1;
         }
-        file.write( content.c_str(), static_cast<qint64>( content.size() ) );
+        const qint64 written = file.write( content.c_str(), static_cast<qint64>( content.size() ) );
+        const bool flushed = file.flush();
+        if ( written != static_cast<qint64>( content.size() ) || !flushed )
+        {
+            if ( error )
+                *error = "Short write: " + file.fileName().toStdString();
+            file.close();
+            return -1;
+        }
+        file.close();
     }
     return static_cast<int>( catalog.size() );
 }

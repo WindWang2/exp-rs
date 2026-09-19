@@ -44,8 +44,11 @@ QVariantMap VectorDissolveAlgorithm::processAlgorithm( const QVariantMap &parame
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
-    // Group geometries by field value
-    QMap<QVariant, QgsGeometry> geomMap;
+    // Group geometries by field value. Collect the raw parts per group and
+    // union each group ONCE with GEOS: the historical per-feature combine()
+    // re-copied the accumulated geometry on every iteration (O(n²) copying,
+    // #1056).
+    QMap<QVariant, QVector<QgsGeometry>> geomGroups;
     QgsFeatureIterator it = source->getFeatures();
     QgsFeature feat;
     long long total = source->featureCount();
@@ -62,23 +65,27 @@ QVariantMap VectorDissolveAlgorithm::processAlgorithm( const QVariantMap &parame
 
         if ( feat.hasGeometry() )
         {
-            QVariant fieldValue = feat.attribute( fieldIdx );
-            if ( geomMap.contains( fieldValue ) )
-                geomMap[fieldValue] = geomMap[fieldValue].combine( feat.geometry() );
-            else
-                geomMap[fieldValue] = feat.geometry();
+            geomGroups[feat.attribute( fieldIdx )].append( feat.geometry() );
         }
     }
 
     // Write dissolved features
-    auto it2 = geomMap.constBegin();
-    for ( ; it2 != geomMap.constEnd(); ++it2 )
+    auto it2 = geomGroups.constBegin();
+    for ( ; it2 != geomGroups.constEnd(); ++it2 )
     {
+        QgsGeometry merged = QgsGeometry::unaryUnion( it2.value() );
+        if ( merged.isNull() )
+        {
+            // GEOS refused (invalid input): fall back to a collection so no
+            // group is silently dropped.
+            merged = QgsGeometry::collectGeometry( it2.value() );
+        }
         QgsFeature outputFeat;
         outputFeat.setFields( source->fields() );
         outputFeat.setAttribute( fieldIdx, it2.key() );
-        outputFeat.setGeometry( it2.value() );
-        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+        outputFeat.setGeometry( merged );
+        if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+            throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
     }
 
     return QVariantMap{{OUTPUT, dest}};

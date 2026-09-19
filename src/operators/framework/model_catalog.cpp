@@ -757,6 +757,12 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
        && info.preprocess.normalize != "mean_std" )
     markInvalid( "preprocess.offset only executes with normalize linear or mean_std "
                  "(declared knobs are never silently ignored)" );
+  // #1044: preprocess.pad grows every fed window by 2·pad per side; an absurd
+  // value would make the window (and the arithmetic behind it) unbounded.
+  if ( info.preprocess.pad > kMaxPreprocessPad )
+    markInvalid( "preprocess.pad " + std::to_string( info.preprocess.pad )
+                 + " exceeds the resource bound " + std::to_string( kMaxPreprocessPad )
+                 + " px (the fed window is tile_size + 2*halo + 2*pad per side)" );
   if ( !std::isnan( info.preprocess.clampMin ) && !std::isnan( info.preprocess.clampMax )
        && info.preprocess.clampMin >= info.preprocess.clampMax )
     markInvalid( "preprocess.clamp_min must be < preprocess.clamp_max" );
@@ -1058,6 +1064,10 @@ std::string ModelInputContract::validate() const
   if ( !missingTimestep.empty() && missingTimestep != "refuse" && missingTimestep != "zero" )
     return "missing_timestep '" + missingTimestep
              + "' is unsupported (supported: refuse, zero)";
+  if ( temporalLength > kMaxModelTemporalFrames )
+    return "temporal_length " + std::to_string( temporalLength ) + " exceeds the temporal bound "
+             + std::to_string( kMaxModelTemporalFrames )
+             + " frames (split the series or coarsen it)";
   if ( missingTimestep.empty() || missingTimestep == "refuse" || missingTimestep == "zero" )
   {
     if ( temporalLength <= 0 && !missingTimestep.empty() && !temporalDynamic )

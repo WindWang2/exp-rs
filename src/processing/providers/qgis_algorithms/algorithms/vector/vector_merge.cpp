@@ -104,7 +104,8 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                 if ( outIdx >= 0 )
                     outFeat.setAttribute( outIdx, inAttrs.at( i ) );
             }
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
         }
     }
 

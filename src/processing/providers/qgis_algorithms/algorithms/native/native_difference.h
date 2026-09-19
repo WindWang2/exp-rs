@@ -106,7 +106,8 @@ protected:
                 QgsFeature outputFeat = feat;
                 if ( !overlayCombined.isNull() )
                     outputFeat.setGeometry( feat.geometry().difference( overlayCombined ) );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if (!sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
             }
         }
 

@@ -122,13 +122,18 @@ class PythonWorkerSession final : public IModelRuntime
       // supports (unknown fields keep defaults; lying is the worker's bug).
       // Reset first: a RESTARTED worker must not inherit the dead process's
       // declarations when it declares nothing itself.
-      m_negotiated = QJsonObject();
-      const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
-      if ( !negotiated.isEmpty() )
+      // Guarded by m_stateMutex: capabilities()/health()/providerDetails() read
+      // these without the inference lock (#1056).
       {
-        m_negotiated = negotiated;
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        m_negotiated = QJsonObject();
+        const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
+        if ( !negotiated.isEmpty() )
+        {
+          m_negotiated = negotiated;
+        }
+        m_loaded = true;
       }
-      m_loaded = true;
       return true;
     }
 
@@ -144,8 +149,11 @@ class PythonWorkerSession final : public IModelRuntime
       // protocol is strictly request/response per process — serialize the
       // whole exchange like the ORT provider serializes Run.
       std::lock_guard<std::mutex> lock( m_inferMutex );
-      if ( !m_loaded || !m_process )
-        throw std::runtime_error( "runtime session is not loaded" );
+      {
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        if ( !m_loaded || !m_process )
+          throw std::runtime_error( "runtime session is not loaded" );
+      }
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
         throw std::runtime_error( "inference canceled before the forward pass" );
 
@@ -261,16 +269,23 @@ class PythonWorkerSession final : public IModelRuntime
       caps.outputDtypes = { "float32", "float64", "int32", "int64", "uint8", "int8" };
       // Platform 8.0 WP-F: worker-declared capabilities override the defaults
       // (handshake negotiation; unknown/absent fields keep the defaults).
-      if ( !m_negotiated.isEmpty() )
+      // Snapshot under m_stateMutex: the worker restart path rewrites the
+      // declarations while inference holds only the inference lock (#1056).
+      QJsonObject negotiated;
       {
-        const int maxRank = m_negotiated.value( QStringLiteral( "max_rank" ) ).toInt( caps.maxRank );
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        negotiated = m_negotiated;
+      }
+      if ( !negotiated.isEmpty() )
+      {
+        const int maxRank = negotiated.value( QStringLiteral( "max_rank" ) ).toInt( caps.maxRank );
         if ( maxRank >= 1 && maxRank <= 8 )
           caps.maxRank = maxRank;
         const bool multiInput =
-          m_negotiated.value( QStringLiteral( "multi_input" ) ).toBool( caps.multiInput );
+          negotiated.value( QStringLiteral( "multi_input" ) ).toBool( caps.multiInput );
         caps.multiInput = multiInput;
         const auto dtypeList = [ & ]( const char *key, std::vector<std::string> *out ) {
-          const QJsonArray arr = m_negotiated.value( key ).toArray();
+          const QJsonArray arr = negotiated.value( key ).toArray();
           if ( !arr.isEmpty() )
           {
             out->clear();
@@ -289,8 +304,13 @@ class PythonWorkerSession final : public IModelRuntime
 
     SessionHealth health() const override
     {
+      bool loaded = false;
+      {
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        loaded = m_loaded;
+      }
       SessionHealth health;
-      health.ok = m_loaded && !m_cancelRequested.load( std::memory_order_relaxed );
+      health.ok = loaded && !m_cancelRequested.load( std::memory_order_relaxed );
       health.forwardsCompleted = m_forwards.load( std::memory_order_relaxed );
       health.failures = m_failures.load( std::memory_order_relaxed );
       std::lock_guard<std::mutex> lock( m_healthMutex );
@@ -316,12 +336,17 @@ class PythonWorkerSession final : public IModelRuntime
       // Honesty contract (model_runtime.h): report only what the WORKER
       // declared in its handshake — a resolved CUDA index is a request, not
       // evidence of the EP the worker actually engaged.
+      QJsonObject negotiated;
+      {
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        negotiated = m_negotiated;
+      }
       const QStringList providers =
-        m_negotiated.value( QStringLiteral( "providers" ) ).toVariant().toStringList();
+        negotiated.value( QStringLiteral( "providers" ) ).toVariant().toStringList();
       if ( !providers.isEmpty() )
         details.executionProvider = providers.join( QStringLiteral( "," ) ).toStdString();
       details.runtimeVersion =
-        m_negotiated.value( QStringLiteral( "runtime_version" ) ).toString().toStdString();
+        negotiated.value( QStringLiteral( "runtime_version" ) ).toString().toStdString();
       return details;
     }
 
@@ -409,6 +434,7 @@ class PythonWorkerSession final : public IModelRuntime
         m_process->waitForFinished( 5000 );
       }
       m_process.reset();
+      std::lock_guard<std::mutex> stateLock( m_stateMutex );
       m_loaded = false;
     }
 
@@ -434,6 +460,10 @@ class PythonWorkerSession final : public IModelRuntime
     QByteArray m_stderrTail;
     bool m_stderrTruncated = false;
     bool m_loaded = false;
+    /// Guards m_loaded / m_negotiated against the lock-free readers
+    /// (capabilities/health/providerDetails, #1056). Lock order: after
+    /// m_inferMutex, before m_healthMutex — nothing takes it in reverse.
+    mutable std::mutex m_stateMutex;
     std::mutex m_inferMutex; // one request/response exchange at a time
     std::unique_ptr<QProcess> m_process;
     std::atomic<bool> m_cancelRequested{ false };

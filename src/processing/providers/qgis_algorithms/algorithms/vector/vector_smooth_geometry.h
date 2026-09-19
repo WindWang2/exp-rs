@@ -65,7 +65,8 @@ protected:
                 QgsGeometry smoothed = feat.geometry().smooth(iterations, offset);
                 feat.setGeometry(smoothed);
             }
-            sink->addFeature(feat, QgsFeatureSink::FastInsert);
+            if (!sink->addFeature( feat, QgsFeatureSink::FastInsert ))
+                throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
         }
 
         QVariantMap results;

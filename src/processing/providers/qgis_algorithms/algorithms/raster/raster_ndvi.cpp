@@ -18,6 +18,7 @@
 
 #include <gdal.h>
 #include <cpl_conv.h>
+#include <cpl_vsi.h>
 
 #include <cmath>
 #include <limits>
@@ -143,6 +144,9 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
         if ( GDALRasterIO( band, GF_Write, 0, row, nCols, 1, rowData.data(), nCols, 1, GDT_Float32, 0, 0 ) != CE_None )
         {
             GDALClose( dataset );
+            // Remove the truncated output: a failed run must not leave a
+            // plausible-looking partial raster behind (#1043).
+            VSIUnlink( dest.toUtf8().constData() );
             throw QgsProcessingException( QObject::tr( "Failed to write NDVI output row %1" ).arg( row ) );
         }
     }
