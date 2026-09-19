@@ -9981,6 +9981,7 @@ sicnu_discover_tests(test_mission_e2e_scaffolding)
 # ---------------------------------------------------------------------------
 set(SICNU_MISSION_TASK_SPACE_SOURCES
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
 )
 
 function(sicnu_add_mission_test NAME)
@@ -10003,6 +10004,7 @@ function(sicnu_add_mission_test NAME)
 endfunction()
 
 sicnu_add_mission_test(test_mission_stage)
+sicnu_add_mission_test(test_mission_surface_parity)
 
 
 add_executable(test_agent_workbench_context
