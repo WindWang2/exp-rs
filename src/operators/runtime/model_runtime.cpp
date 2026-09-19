@@ -575,9 +575,14 @@ ErrorCode errorCodeForInferenceFailure( InferenceFailureKind kind )
   return ErrorCode::Unknown;
 }
 
-ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
-                                         const ModelHardwareCapabilities &hw,
-                                         std::string *reason )
+namespace {
+
+/// Single-framework runtime readiness (the historical contract). The public
+/// evaluateRuntimeReadiness wraps this with the provider fallback chain.
+ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
+                                                     const ModelHardwareCapabilities &hw,
+                                                     const std::string &framework,
+                                                     std::string *reason )
 {
   auto fail = [reason]( ModelReadiness state, const std::string &why ) {
     if ( reason )
@@ -585,9 +590,9 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
     return state;
   };
 
-  if ( !ModelRuntimeRegistry::instance().hasProvider( model.framework ) )
+  if ( !ModelRuntimeRegistry::instance().hasProvider( framework ) )
     return fail( ModelReadiness::UnsupportedRuntime,
-                 "no runtime provider available for framework '" + model.framework + "' in this build" );
+                 "no runtime provider available for framework '" + framework + "' in this build" );
 
   // Platform 4.0: an explicit runtime.device token is evaluated through the
   // same deterministic resolution acquire uses, so readiness and execution
@@ -599,7 +604,7 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
   // probe (hw.cudaRuntimeAvailable), not the OpenCV-CUDA backend claim; the
   // same effective view acquire uses. Readiness and execution stay one truth.
   ModelHardwareCapabilities effectiveHw = hw;
-  if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( model.framework );
+  if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( framework );
        traits && traits->maxAddressableCudaIndex > 0 && hw.cudaRuntimeAvailable )
     effectiveHw.cudaAvailable = true;
 
@@ -624,7 +629,7 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
                  "runtime.device '" + model.runtime.device
                    + "' is not parsable (supported: cpu, cuda, cuda:N, auto)" );
   int maxCudaIndex = 0;
-  if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( model.framework ) )
+  if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( framework ) )
     maxCudaIndex = traits->maxAddressableCudaIndex;
   ResolvedDevice resolved;
   std::string why;
@@ -633,6 +638,43 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
     return fail( ModelReadiness::IncompatibleHardware,
                  "device '" + model.runtime.device + "' cannot execute this model: " + why );
   return ModelReadiness::Ready;
+}
+} // namespace
+
+ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
+                                         const ModelHardwareCapabilities &hw,
+                                         std::string *reason )
+{
+  // Provider strategy: a model with a declared fallback chain is
+  // runtime-ready when ANY candidate is (acquire walks the same order and
+  // reports every attempt). Without a chain, the historical single-framework
+  // verdict is verbatim.
+  std::vector<std::string> chain;
+  chain.push_back( model.framework );
+  for ( const std::string &fallback : model.runtime.frameworkFallback )
+    chain.push_back( fallback );
+
+  for ( std::size_t i = 0; i < chain.size(); ++i )
+  {
+    std::string why;
+    const ModelReadiness verdict =
+      evaluateRuntimeReadinessForFramework( model, hw, chain[i], &why );
+    if ( verdict == ModelReadiness::Ready )
+      return ModelReadiness::Ready;
+    if ( reason )
+    {
+      if ( i == 0 )
+        *reason = "framework '" + chain[i] + "': " + why;
+      else
+        *reason += "; fallback '" + chain[i] + "': " + why;
+    }
+  }
+  // Every candidate failed — the historical verdict for this model is the
+  // PRIMARY candidate's state (the chain only widens availability, never the
+  // failure classification). The accumulated reason already carries the full
+  // attempt trail; the re-derivation must not overwrite it with the primary
+  // attempt only.
+  return evaluateRuntimeReadinessForFramework( model, hw, chain.front(), nullptr );
 }
 
 ModelRuntimeRegistry &ModelRuntimeRegistry::instance()
@@ -727,8 +769,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // the path/size/mtime triple — every real provider would fail the load
   // anyway, so no stale-content risk is introduced.
   const std::string digest = contentDigestFor( model );
-  const std::string identityComponent =
-    digest.empty() ? identityFallbackFor( model ) : digest;
+  // Platform 12.0: the ledger holder carries the framework — the provider
+  // fallback chain can legitimately hold the same bytes under two
+  // frameworks, and the ledger must not under-account them as one holder.
+  const std::string identityComponent = ( framework.empty() ? std::string( "-" ) : framework )
+                                          + "|"
+                                          + ( digest.empty() ? identityFallbackFor( model ) : digest );
 
   std::unique_lock<std::mutex> lock( m_mutex );
   // Idle eviction runs once per acquire attempt, BEFORE the cache lookup —
@@ -959,6 +1005,99 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     ++m_evictions;
   }
   return session;
+}
+
+Json::Value ProviderSelectionReport::toJson() const
+{
+  Json::Value out( Json::objectValue );
+  if ( !resolvedFramework.empty() )
+    out["resolved_framework"] = resolvedFramework;
+  Json::Value attemptsJson( Json::arrayValue );
+  for ( const Attempt &attempt : attempts )
+  {
+    Json::Value a( Json::objectValue );
+    a["framework"] = attempt.framework;
+    a["provider_registered"] = attempt.providerRegistered;
+    a["device_resolved"] = attempt.deviceResolved;
+    a["loaded"] = attempt.loaded;
+    if ( !attempt.detail.empty() )
+      a["detail"] = attempt.detail;
+    attemptsJson.append( a );
+  }
+  out["attempts"] = attemptsJson;
+  return out;
+}
+
+ModelRuntimePtr ModelRuntimeRegistry::acquireWithFallback( const ModelInfo &model,
+                                                           const RequestedDevice *explicitDevice,
+                                                           std::string *errorMessage,
+                                                           ProviderSelectionReport *report )
+{
+  ProviderSelectionReport localReport;
+  ProviderSelectionReport &out = report ? *report : localReport;
+
+  // Candidate order: primary first, then the declared fallback chain. The
+  // catalog parse already rejects duplicates and self-references; a
+  // programmatically built ModelInfo gets the same dedup guard here.
+  std::vector<std::string> chain;
+  chain.push_back( model.framework );
+  for ( const std::string &fallback : model.runtime.frameworkFallback )
+  {
+    if ( !fallback.empty() && fallback != model.framework
+         && std::find( chain.begin(), chain.end(), fallback ) == chain.end() )
+      chain.push_back( fallback );
+  }
+
+  std::string allAttempts;
+  for ( const std::string &framework : chain )
+  {
+    ProviderSelectionReport::Attempt attempt;
+    attempt.framework = framework;
+    attempt.providerRegistered = hasProvider( framework );
+
+    if ( !attempt.providerRegistered )
+    {
+      attempt.detail = "no runtime provider available for framework '" + framework + "' in this build";
+    }
+    else
+    {
+      // The attempt reached the registry: device resolution and load run
+      // inside acquire() and every failure lands in detail (per-candidate —
+      // provider traits differ, so the next candidate may still execute).
+      attempt.deviceResolved = true;
+      ModelInfo candidate = model;
+      candidate.framework = framework;
+      std::string attemptError;
+      ModelRuntimePtr session;
+      if ( explicitDevice )
+        session = acquire( candidate, *explicitDevice, &attemptError );
+      else
+        session = acquire( candidate, &attemptError );
+      if ( session )
+      {
+        attempt.loaded = true;
+        out.attempts.push_back( std::move( attempt ) );
+        out.resolvedFramework = framework;
+        if ( errorMessage )
+          errorMessage->clear();
+        return session;
+      }
+      attempt.detail = attemptError.empty() ? "failed to load model session" : attemptError;
+    }
+
+    // Every candidate — won, lost or skipped — lands in the report. Read the
+    // detail BEFORE the move (moved-from strings are unspecified).
+    const std::string attemptDetail = attempt.detail;
+    out.attempts.push_back( std::move( attempt ) );
+    if ( !allAttempts.empty() )
+      allAttempts += "; ";
+    allAttempts += "framework '" + framework + "': " + attemptDetail;
+  }
+
+  if ( errorMessage )
+    *errorMessage = "no provider in the chain could load model '" + model.name
+                      + "' (same artifact, tried in declared order): " + allAttempts;
+  return nullptr;
 }
 
 void ModelRuntimeRegistry::evictExpiredLocked( std::int64_t nowMs )
