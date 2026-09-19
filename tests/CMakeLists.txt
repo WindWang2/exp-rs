@@ -432,6 +432,18 @@ endif()
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
 target_include_directories(test_io_fabric_scale PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — offline mirror maintenance (verify/repair/prune) over plain local
+# fixtures (no network, no Qt).
+sicnu_add_io_test(test_io_mirror_maintenance)
+target_include_directories(test_io_mirror_maintenance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — out-of-core microbench: real loopback HTTP, bytes/requests/peak
+# asserted as correctness gates (latencies reported, never asserted).
+sicnu_add_io_test(test_io_microbench)
+target_sources(test_io_microbench PRIVATE support/http_range_server.cpp)
+target_include_directories(test_io_microbench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_microbench PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
