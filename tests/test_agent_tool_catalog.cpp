@@ -466,6 +466,61 @@ TEST_CASE( "AgentToolCatalog picks up interaction tools registered after first u
   catalog.reset();
 }
 
+TEST_CASE( "InteractionToolProvider keeps explicit overrides across registry merges (#1056)",
+           "[agent][tool_catalog][interaction]" )
+{
+  auto &catalog = AgentToolCatalog::instance();
+  auto &registry = sicnu::agent::InteractionToolRegistry::instance();
+  registry.reset();
+  catalog.reset();
+
+  auto interactionProv = std::dynamic_pointer_cast<InteractionToolProvider>(
+    catalog.provider( "InteractionToolProvider" ) );
+  REQUIRE( interactionProv != nullptr );
+
+  // A registry-owned tool first: the provider merges it into mTools on the
+  // next rebuild and records it as registry-sourced.
+  sicnu::agent::InteractionToolDefinition def;
+  def.name = "canvas:override_probe";
+  def.displayName = "Registry Probe";
+  def.category = "canvas";
+  def.description = "registry-owned description";
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  schema["properties"] = Json::Value( Json::objectValue );
+  def.inputSchema = schema;
+  registry.registerTool( def );
+
+  const auto merged = interactionProv->findTool( "canvas:override_probe" );
+  REQUIRE( merged.has_value() );
+  CHECK( merged->description == def.description );
+
+  // An explicit registration overrides the registry-derived entry...
+  AgentTool custom;
+  custom.name = "canvas:override_probe";
+  custom.displayName = "Explicit Probe";
+  custom.category = ToolCategory::Interaction;
+  custom.group = "canvas";
+  custom.description = "explicitly registered description";
+  interactionProv->registerTool( custom );
+  REQUIRE( interactionProv->findTool( "canvas:override_probe" ).has_value() );
+  CHECK( interactionProv->findTool( "canvas:override_probe" )->description
+         == "explicitly registered description" );
+
+  // ...and the override must survive the NEXT merge triggered by any lookup
+  // or rebuild. The old function-static ownership set erased it here and
+  // silently restored the registry copy.
+  CHECK_FALSE( interactionProv->provideTools().empty() );
+  const auto afterMerge = interactionProv->findTool( "canvas:override_probe" );
+  REQUIRE( afterMerge.has_value() );
+  CHECK( afterMerge->displayName == "Explicit Probe" );
+  CHECK( afterMerge->description == "explicitly registered description" );
+
+  interactionProv->unregisterTool( "canvas:override_probe" );
+  registry.reset();
+  catalog.reset();
+}
+
 TEST_CASE( "AgentTool: Schema Normalization and Fail-Fast Validation", "[agent][tool_catalog][schema]" )
 {
   AgentTool tool;

@@ -493,7 +493,7 @@ TEST_CASE("Dispatch-visible spatial families are listing-visible", "[surface_par
     static const char *kSpatialDispatchFamilies[] = {
         "spatial", "layout", "cartography", "workbench", "symbology", "workflow",
         "workspace", "project", "asset", "collection", "lineage", "result",
-        "harness", "run", "temporal",
+        "harness", "run", "temporal", "io",
     };
     for (const char *family : kSpatialDispatchFamilies) {
         INFO("family: " << family);

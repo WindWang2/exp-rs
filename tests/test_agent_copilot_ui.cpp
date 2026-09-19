@@ -255,6 +255,56 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   loop.exec();
 }
 
+TEST_CASE( "AgentCopilotDockWidget bounds the LLM conversation history", "[agent][ui][history]" )
+{
+  QJsonObject systemMsg;
+  systemMsg[QStringLiteral( "role" )] = QStringLiteral( "system" );
+  systemMsg[QStringLiteral( "content" )] = QStringLiteral( "system prompt" );
+
+  // Runaway tool loop: assistant(tool_calls) + tool + user per round.
+  QJsonArray history;
+  history.append( systemMsg );
+  for ( int i = 0; i < 100; ++i )
+  {
+    QJsonObject assistantMsg;
+    assistantMsg[QStringLiteral( "role" )] = QStringLiteral( "assistant" );
+    history.append( assistantMsg );
+    QJsonObject toolMsg;
+    toolMsg[QStringLiteral( "role" )] = QStringLiteral( "tool" );
+    history.append( toolMsg );
+    QJsonObject userMsg;
+    userMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
+    history.append( userMsg );
+  }
+  REQUIRE( history.size() > AgentCopilotDockWidget::kMaxHistoryMessages );
+
+  const QJsonArray pruned = AgentCopilotDockWidget::pruneHistory( history );
+  CHECK( pruned.size() == 1 + AgentCopilotDockWidget::kMaxHistoryMessages );
+  CHECK( pruned.first().toObject().value( QStringLiteral( "role" ) ).toString()
+         == QStringLiteral( "system" ) );
+  CHECK( pruned.at( 1 ).toObject().value( QStringLiteral( "role" ) ).toString()
+         != QStringLiteral( "tool" ) );
+  CHECK( AgentCopilotDockWidget::pruneHistory( pruned ) == pruned );
+
+  // A tail starting on an orphaned tool reply drops it rather than sending an
+  // invalid tool sequence to the endpoint.
+  QJsonArray orphaned;
+  orphaned.append( systemMsg );
+  QJsonObject orphanTool;
+  orphanTool[QStringLiteral( "role" )] = QStringLiteral( "tool" );
+  orphaned.append( orphanTool );
+  while ( orphaned.size() < AgentCopilotDockWidget::kMaxHistoryMessages + 1 )
+  {
+    QJsonObject userMsg;
+    userMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
+    orphaned.append( userMsg );
+  }
+  const QJsonArray orphanPruned = AgentCopilotDockWidget::pruneHistory( orphaned );
+  CHECK( orphanPruned.size() == AgentCopilotDockWidget::kMaxHistoryMessages );
+  CHECK( orphanPruned.at( 1 ).toObject().value( QStringLiteral( "role" ) ).toString()
+         != QStringLiteral( "tool" ) );
+}
+
 TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[agent][ui][cancel]" )
 {
   ensureQtApp();

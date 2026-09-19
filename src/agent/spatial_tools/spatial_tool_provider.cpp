@@ -36,8 +36,13 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     const bool isHarness = ( spatial->name().rfind( "harness:", 0 ) == 0 );
     // Editing platform 11.0: read-only editing facts join the catalog (F11).
     const bool isEditing = ( spatial->name().rfind( "editing:", 0 ) == 0 );
+    // Foundation 5.0 io: spatial tools (probe/capabilities/product/
+    // product_plan) — registered and MCP-dispatchable, so they must be listed
+    // here too (#1056). io:inspect/io:doctor are RSOperators, not registry
+    // members, and stay on the operator surface.
+    const bool isIo = ( spatial->name().rfind( "io:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
-         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing )
+         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo )
       continue;
 
     AgentTool tool;
@@ -52,7 +57,8 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isGovernance      ? "governance"
                  : isHarness         ? "harness"
                  : isEditing         ? "editing"
-                                      : "spatial";
+                 : isIo              ? "io"
+                                     : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();
     tool.inputSchema = spatial->inputSchema();

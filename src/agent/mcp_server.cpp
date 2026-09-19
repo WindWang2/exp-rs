@@ -129,6 +129,17 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
     return sicnu::agent::tool_catalog::surfaceIdAllowed(id, isCustomTools);
 }
 
+/// io: is a SHARED namespace: io:inspect/io:doctor are RSOperators, while
+/// io:probe/io:capabilities/io:product/io:product_plan are registered spatial
+/// tools (Foundation 5.0). Only the latter route through the spatial handler;
+/// the operator ids keep the algorithm dispatch path (#1056).
+bool isSpatialIoTool(const QString &toolId)
+{
+    auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+    registry.registerBuiltinTools();
+    return registry.find(toolId.toStdString()).has_value();
+}
+
 /// Resolve a path for workspace checks. Relative paths are allowed without check.
 /// Absolute paths must canonicalize under workspace root.
 bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &workspaceRoot, QString *detail)
@@ -717,6 +728,19 @@ void McpServer::handleRequest(const QVariantMap &request)
             QVariantMap resultData;
             if (sicnu::agent::isDataPlatformTool(toolName))
             {
+                // Data-platform tools take caller-controlled dataset_db/
+                // experiment_db/out/bundle paths and open them READWRITE|CREATE
+                // (plus stat() manifest paths in reproducibility:validate), so
+                // they must honour the same SICNU_MCP_WORKSPACE containment as
+                // every other path-consuming branch (#1033).
+                QString denyReason;
+                if (!validateWorkspacePaths(arguments, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
                 resultData = sicnu::agent::handleDataPlatformTool(toolName, arguments);
             }
             else if (toolName == QStringLiteral("list_algorithms"))
@@ -929,6 +953,15 @@ void McpServer::handleRequest(const QVariantMap &request)
                      toolName.startsWith(QStringLiteral("raster:")))
             {
                 resultData = dispatchToolCall(toolName, arguments, false);
+            }
+            else if (toolName.startsWith(QStringLiteral("io:")) && isSpatialIoTool(toolName))
+            {
+                // Registered io: spatial tools (probe/capabilities/product/
+                // product_plan) were cataloged but unreachable — the fallthrough
+                // below resolved them against the algorithm registry and failed
+                // with "Algorithm not found" (#1056). io:inspect/io:doctor are
+                // NOT spatial tools and keep the operator dispatch path.
+                resultData = handleSpatialToolCall(toolName, arguments);
             }
             else if (isToolIdAllowed(toolName))
             {
@@ -2489,6 +2522,17 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
         }
         QVariantMap containmentArgs;
         containmentArgs.insert(QStringLiteral("pipeline"), pipelineValue);
+        // Opt-in recording arguments are opened READWRITE|CREATE by
+        // WorkflowExperimentMonitor::enable() -> ExperimentStore/DatasetStore,
+        // so they are part of the containment contract too — and they must be
+        // validated BEFORE the first enable(), which binds the monitor (#1033).
+        // Validate the exact trimmed string form the recording path uses.
+        for (const QString &key : {QStringLiteral("experiment_db"), QStringLiteral("dataset_db")})
+        {
+            const QString pathText = arguments.value(key).toString().trimmed();
+            if (!pathText.isEmpty())
+                containmentArgs.insert(key, pathText);
+        }
         QString denyReason;
         if (!validateWorkspacePaths(containmentArgs, &denyReason))
         {

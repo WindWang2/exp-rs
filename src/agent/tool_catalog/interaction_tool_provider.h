@@ -4,6 +4,7 @@
 #include "tool_provider.h"
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace sicnu::agent::tool_catalog {
 
@@ -37,6 +38,11 @@ private:
   // InteractionToolRegistry (#701) — every mutation still happens under
   // mMutex.
   mutable std::unordered_map<std::string, AgentTool> mTools;
+  /// Names in mTools that were merged from the InteractionToolRegistry rather
+  /// than explicitly registered. Tracked PER INSTANCE: the old function-static
+  /// set was shared across providers, so an explicit registerTool() override
+  /// was erased (and the registry copy restored) by the next merge (#1056).
+  mutable std::unordered_set<std::string> mRegistrySourcedNames;
 };
 
 } // namespace sicnu::agent::tool_catalog
