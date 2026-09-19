@@ -64,12 +64,16 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
     std::lock_guard<std::mutex> lock( m_impl->mutex );
 
     // 1) Reuse: identity match ⇒ the loaded model is reused as-is.
+    // Honor an explicit device pin: an operator that requested cuda:1 must
+    // not silently receive a warm session on cuda:0 (#1094).
     for ( auto &live : m_impl->sessions )
     {
         if ( live.session->model.modelId != request.model.modelId )
             continue;
         if ( live.session->model.signature != request.model.signature )
             continue; // stale — evictStale handles recycling
+        if ( request.deviceId >= 0 && live.session->deviceId != request.deviceId )
+            continue;
         live.released = false;
         live.session->useCount += 1;
         result.outcome = AcquireOutcome::Acquired;
@@ -215,12 +219,15 @@ void ModelSessionPool::evictStale( const std::string &modelId,
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     for ( auto it = m_impl->sessions.begin(); it != m_impl->sessions.end(); )
     {
-        // Only WARM (released) sessions may be recycled: freeing VRAM under a
-        // session an operator is actively using would pull device memory out
-        // from under a live inference. In-use stale sessions are evicted by
-        // releaseSession on their return (identity check re-run at acquire).
+        // Only WARM (released) sessions with no external shared_ptr holders
+        // may be recycled: freeing VRAM under a session another operator is
+        // still using (released=true after one sharer returned, use_count>1
+        // while another still holds the session) would pull device memory
+        // out from under a live inference (#1094). use_count()==1 means only
+        // the pool's LiveSession copy remains.
         if ( it->session->model.modelId == modelId
-             && it->session->model.signature != currentSignature && it->released )
+             && it->session->model.signature != currentSignature && it->released
+             && it->session.use_count() == 1 )
         {
             m_impl->backend->freeVram( it->session->deviceId, it->vramMb );
             it = m_impl->sessions.erase( it );
