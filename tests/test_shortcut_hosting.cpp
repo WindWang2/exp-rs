@@ -19,7 +19,6 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QFile>
 #include <QKeySequence>
 #include <QMainWindow>
 #include <QMenu>
@@ -39,22 +38,6 @@ QApplication *ensureApp()
   if ( !app && !QCoreApplication::instance() )
     app = new QApplication( fake_argc, fake_argv );
   return app;
-}
-
-QString readSource( const QString &relativePath )
-{
-  const QStringList candidates = {
-    QStringLiteral( "%1/%2" ).arg( QStringLiteral( CMAKE_SOURCE_DIR ), relativePath ),
-    QStringLiteral( "../%1" ).arg( relativePath ),
-    relativePath,
-  };
-  for ( const QString &path : candidates )
-  {
-    QFile f( path );
-    if ( f.open( QIODevice::ReadOnly | QIODevice::Text ) )
-      return QString::fromUtf8( f.readAll() );
-  }
-  return {};
 }
 
 QMenuBar *hiddenMenuBar( QMainWindow &window )
@@ -178,12 +161,10 @@ TEST_CASE( "Shortcuts: forwarding pass re-hosts menubar actions on the window",
   CHECK( hits == 1 );
 }
 
-// The mechanism above is only as good as its call sites — pin the wiring in
-// the real shell so the pass cannot silently disappear again.
-TEST_CASE( "Shortcuts: shell invokes the forwarding pass after menus/plugins",
-           "[shortcuts][wiring][c1]" )
-{
-  const QString cpp = readSource( QStringLiteral( "src/app/main_window.cpp" ) );
-  REQUIRE_FALSE( cpp.isEmpty() );
-  CHECK( cpp.contains( QStringLiteral( "forwardActionShortcutsToWindow()" ) ) );
-}
+// The wiring half of this contract is now proven by a REAL shell
+// construction: the `shell_lifecycle_smoke` CTest target runs the production
+// binary with SICNU_SHELL_SELFTEST=1 and asserts the registry exists before
+// setupMenu projected its actions (issue #1037 F-1031-P0-registry). The
+// former source-text grep (`cpp.contains("forwardActionShortcutsToWindow()")`)
+// was deleted: it stayed green when the function was reduced to an empty
+// identifier-only body.

@@ -112,7 +112,8 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupMapCanvas();
 
     qDebug() << "Setting up menu...";
-    setupMenu(); // builds detached QMenuBar (action host only — not shown)
+    setupMenu(); // builds detached QMenuBar (action host only — not shown);
+                 // demands the CommandRegistry first (issue #1037 F-1031-P0)
     qDebug() << "Setting up toolbars...";
     setupToolbars();
     qDebug() << "Setting up dock widgets...";

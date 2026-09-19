@@ -7978,6 +7978,46 @@ target_compile_definitions(test_shortcut_hosting PRIVATE
 )
 sicnu_discover_tests(test_shortcut_hosting)
 
+# Track 02 (#1037 F-1031-P1-letterkey): window-hosted letter bindings must
+# not steal printable input from a focused editor, while the map/non-editor
+# path keeps the binding. Policy is a standalone Qt-only unit.
+add_executable(test_shell_shortcut_policy
+  test_shell_shortcut_policy.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/shell_shortcut_policy.cpp
+)
+target_link_libraries(test_shell_shortcut_policy PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+)
+target_include_directories(test_shell_shortcut_policy PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_shell_shortcut_policy)
+
+# Track 02 (#1048): canvas-destruction-safe ownership of tool scene items.
+add_executable(test_map_tool_canvas_item
+  test_map_tool_canvas_item.cpp
+)
+target_link_libraries(test_map_tool_canvas_item PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_map_tool_canvas_item PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_map_tool_canvas_item)
+
 # ── Workbench 6.0 Milestone C: bounded UI scan pool (#797) ──────────────────
 add_executable(test_scan_pool
   test_scan_pool.cpp
@@ -11070,3 +11110,22 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
+# Track 02 (#1037 F-1031-P0-registry / F-1031-P1-letterkey, #1048, #1052):
+# real-shell headless lifecycle smoke. Runs the PRODUCTION binary with
+# SICNU_SHELL_SELFTEST=1 — constructs QgisDesktopWindow, proves the command
+# registry existed before setupMenu projected its actions, exercises the
+# focused-editor letter-shortcut policy, switches map tools through the
+# registry, opens/closes a fresh georeferencer window and tears the shell
+# down. Replaces the former source-text grep that stayed green when the
+# wiring was gutted.
+if(TARGET sicnu_geo_rs)
+  add_test(NAME shell_lifecycle_smoke
+           COMMAND $<TARGET_FILE:sicnu_geo_rs>
+           WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+  set_tests_properties(shell_lifecycle_smoke PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;SICNU_SHELL_SELFTEST=1"
+    TIMEOUT 300
+    RUN_SERIAL TRUE)
+  sicnu_set_test_env(shell_lifecycle_smoke)
+endif()

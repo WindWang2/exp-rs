@@ -61,6 +61,7 @@
 // App includes
 #include "app/app_paths.h"
 #include "app/main_window.h"
+#include "app/shell/shell_selftest.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
 #include "agent/cartography/cartography_operators.h"
@@ -388,6 +389,27 @@ int main(int argc, char *argv[])
     qDebug() << "Showing window...";
     window->show();
     qDebug() << "Window shown";
+
+    // Track 02: headless shell lifecycle self-test (ctest shell_lifecycle_smoke).
+    // Runs against the real window, then exits through the normal shutdown
+    // path below — startup → tool switch → georef open/close → teardown.
+    if ( qEnvironmentVariableIsSet( "SICNU_SHELL_SELFTEST" ) )
+    {
+        QPointer<QgisDesktopWindow> safeWindow( window.get() );
+        QTimer::singleShot( 0, [safeWindow, app]() {
+            QString failure;
+            const bool ok = safeWindow
+                            && sicnu::app::runShellSelfTest( safeWindow.data(), &failure );
+            if ( ok )
+                std::cerr << "[shell-selftest] PASS\n";
+            else
+                std::cerr << "[shell-selftest] FAIL: "
+                          << ( failure.isEmpty() ? QStringLiteral( "window gone" ) : failure )
+                               .toStdString()
+                          << "\n";
+            app->exit( ok ? 0 : 1 );
+        } );
+    }
 
     // Diagnostic feedback loop (diagnosing-bugs): geometry dump for under-ribbon
     // toolbars. Run: SICNU_DUMP_CHROME=1 QT_QPA_PLATFORM=offscreen ./build/sicnu_geo_rs

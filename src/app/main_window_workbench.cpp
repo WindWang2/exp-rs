@@ -146,11 +146,31 @@ void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
 
 } // namespace
 
-void QgisDesktopWindow::setupWorkbenchInfrastructure()
+void QgisDesktopWindow::ensureCommandRegistry()
 {
-    m_workbenchHost = new sicnu::app::WorkbenchHost( this );
+    // Issue #1037 F-1031-P0: setupMenu() runs before the workbench wiring in
+    // the constructor and projects registry-backed actions through
+    // CommandRegistry::action() — with the registry created later, the first
+    // addCmd() dereferenced a null pointer and the Project/View menus never
+    // received their registry actions. Make the registry + shell commands
+    // exist on demand so menu projection and workbench wiring can run in any
+    // order; repeated calls are no-ops.
+    if ( m_commandRegistry )
+        return;
+
     m_selectionContext = new sicnu::app::SelectionContext( this );
     m_commandRegistry = new sicnu::app::CommandRegistry( this );
+    m_commandRegistry->setSnapshotProvider( [this] { return m_selectionContext->snapshot(); } );
+    registerShellCommands( m_commandRegistry, this );
+}
+
+void QgisDesktopWindow::setupWorkbenchInfrastructure()
+{
+    // Registry wiring may already have happened in setupMenu(); only the
+    // WorkbenchHost / panel attachments below are specific to this pass.
+    ensureCommandRegistry();
+
+    m_workbenchHost = new sicnu::app::WorkbenchHost( this );
 
     // Workbench 8.0: in-flight fact for ContextFacts / suggestedNextAction.
     // The predicate reads TaskCenter's authoritative task set on the GUI
@@ -352,8 +372,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     }
 
     // ── Command registry ─────────────────────────────────────────────
-    m_commandRegistry->setSnapshotProvider( [this] { return m_selectionContext->snapshot(); } );
-    registerShellCommands( m_commandRegistry, this );
+    // The registry + shell commands were installed by ensureCommandRegistry()
+    // (setupMenu projects them); here only the live refresh wiring remains.
     connect( m_selectionContext, &sicnu::app::SelectionContext::changed, this,
              [this]( const sicnu::app::SelectionContextSnapshot & ) {
                  m_commandRegistry->refreshAll();

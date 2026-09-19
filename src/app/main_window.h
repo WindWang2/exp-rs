@@ -159,6 +159,7 @@ class InspectorHost;
 class CommandRegistry;
 class CommandPalette;
 class WorkbenchStateModel;
+class ShellShortcutPolicy;
 }
 
 class ExprsPluginShellUi;
@@ -422,8 +423,20 @@ private:
     void setupDockWidgets();
     /// Create Data Manager dock after ProjectContext exists (needs DataManager*).
     void setupDataManagerPanel();
+    /**
+     * Idempotent shell-command bootstrap (issue #1037 F-1031-P0): creates the
+     * SelectionContext + CommandRegistry and registers the shell command set
+     * exactly once. setupMenu() projects registry-backed menu entries through
+     * CommandRegistry::action(), so this MUST have run before the first
+     * addCmd(); calling it from both setupMenu() and
+     * setupWorkbenchInfrastructure() makes the ordering independent of the
+     * constructor sequence.
+     */
+    void ensureCommandRegistry();
     /** WorkbenchHost / SelectionContext / CommandRegistry wiring (5.0). */
     void setupWorkbenchInfrastructure();
+    /** Install the focused-editor shortcut policy exactly once (#1037). */
+    void installShortcutPolicy();
     void setupRibbonAndTaskPanel();
     void setupStatusBar();
     void setupConnections();
@@ -577,6 +590,9 @@ private:
     QToolBar *m_digitizeToolBar = nullptr;
     QMenuBar *m_hiddenMenuBar = nullptr;
     QMenu *m_windowMenu = nullptr;
+    /// Issue #1037 F-1031-P1-letterkey: gives focused text editors priority
+    /// over window-hosted unmodified letter shortcuts (e.g. H for map.pan).
+    sicnu::app::ShellShortcutPolicy *m_shortcutPolicy = nullptr;
 
     // Identify results display
     QTextBrowser *m_identifyResults = nullptr;

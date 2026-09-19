@@ -2,6 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 #include "workbench/command_registry.h"
+#include "shell/shell_shortcut_policy.h"
 
 #include "app/help/help_system_controller.h"
 #include "dialogs/dialog_help_catalog.h"
@@ -80,6 +81,11 @@ QMenuBar *QgisDesktopWindow::appMenuBar()
 
 void QgisDesktopWindow::setupMenu()
 {
+    // Issue #1037 F-1031-P0: the registry-backed menu entries below project
+    // through CommandRegistry::action(); the registry and the shell command
+    // set must exist before the first addCmd() — create them on demand.
+    ensureCommandRegistry();
+
     // Brand logo (left corner) — app icon + short product name
     QWidget *brandWidget = new QWidget(this);
     brandWidget->setObjectName("rsMenuBarBrand");
@@ -120,10 +126,19 @@ void QgisDesktopWindow::setupMenu()
     // owner made the registry's canonical-shortcut record a lie and any
     // second installShortcut an ambiguous-shortcut trap).
     auto addCmd = [this]( QMenu *menu, const char *commandId ) -> QAction * {
+        if ( !m_commandRegistry )
+        {
+            // Cannot happen after ensureCommandRegistry(); fail loud, never
+            // crash, if a future reorder bypasses the guard.
+            qCritical() << "setupMenu: command registry missing; cannot project" << commandId;
+            return nullptr;
+        }
         QAction *act = m_commandRegistry->action( QString::fromLatin1( commandId ),
                                                   /*installShortcut=*/true );
         if ( act )
             menu->addAction( act );
+        else
+            qWarning() << "setupMenu: command not registered:" << commandId;
         return act;
     };
 
@@ -665,8 +680,25 @@ void QgisDesktopWindow::setupMenu()
          tr( "About this software." ) );
 }
 
+void QgisDesktopWindow::installShortcutPolicy()
+{
+    if ( m_shortcutPolicy )
+        return;
+    // Application-level filter: ShortcutOverride delivery for real key events
+    // runs through the QWindow before reaching the focused widget, so a filter
+    // installed on the window widget would not see it. Parented to the window,
+    // so window destruction removes it (Qt uninstalls destroyed filters).
+    m_shortcutPolicy = new sicnu::app::ShellShortcutPolicy( this );
+    if ( qApp )
+        qApp->installEventFilter( m_shortcutPolicy );
+}
+
 void QgisDesktopWindow::forwardActionShortcutsToWindow()
 {
+    // Give focused text editors priority over the letter bindings re-hosted
+    // below (issue #1037 F-1031-P1-letterkey) before any action can fire.
+    installShortcutPolicy();
+
     // The detached menubar stays hidden; a QAction shortcut only fires while
     // at least one of its associated widgets is visible — a hidden menubar
     // host makes every menu shortcut dead (verified on Qt 6.8: Shortcut

@@ -119,6 +119,9 @@ add_executable(sicnu_geo_rs
     shell/view_link_controller.cpp
     shell/rs_operator_catalog_panel.cpp
     shell/rs_job_panel.cpp
+    # Track 02: focused-editor shortcut policy + headless shell self-test
+    shell/shell_shortcut_policy.cpp
+    shell/shell_selftest.cpp
 
     # Workbench 5.0 (workspace model, selection context, command surface)
     workbench/workbench_host.cpp
