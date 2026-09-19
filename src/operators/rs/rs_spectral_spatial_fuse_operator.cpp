@@ -38,6 +38,7 @@ Json::Value RsSpectralSpatialFuseOperator::schema() const
     Json::Value radius( Json::objectValue );
     radius["type"] = "integer";
     radius["minimum"] = 0;
+    radius["maximum"] = 128;
     radius["default"] = 1;
     radius["description"] = "Spatial window half-side (window = (2r+1)^2, clamped to the raster).";
     props["radius"] = radius;
@@ -85,12 +86,12 @@ Json::Value RsSpectralSpatialFuseOperator::metadata() const
 Json::Value RsSpectralSpatialFuseOperator::executionEstimate() const
 {
     Json::Value est( Json::objectValue );
-    // FullRaster: the single-band score plane, the fused plane and the validity
-    // mask are resident (input float32 + output float32 + 1 byte/px mask).
-    // Nominal 4096×4096 scene, same convention as rs:morphology.
+    // FullRaster: input plane + fused plane + validity mask + neighbor-count
+    // plane ≈ 4+4+1+4 = 13 bytes/px, rounded up. Nominal 4096×4096 scene,
+    // same convention as rs:morphology.
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = Json::Value::UInt64( 9ULL * 4096ULL * 4096ULL );
+    est["estimatedRamBytes"] = Json::Value::UInt64( 16ULL * 4096ULL * 4096ULL );
     return est;
 }
 
@@ -104,6 +105,13 @@ Json::Value RsSpectralSpatialFuseOperator::run( const Json::Value &params,
 
     const int radius = getInt( params, "radius", 1 );
     const double beta = getDouble( params, "beta", 0.5 );
+    // The kernel is O(pixels * (2r+1)^2) with no interior cancellation point,
+    // so an absurd radius is refused up front instead of hanging (schema
+    // documents the same bound).
+    if ( radius < 0 || radius > 128 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "'radius' must be within [0, 128], got " +
+                                   std::to_string( radius ) );
 
     ensureGdalInit();
 

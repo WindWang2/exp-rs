@@ -112,8 +112,9 @@ surfaces receive append-only edits.
 
 ## Consequences
 
-* algorithm_meta catalog 43 → 45 sidecars (rs:cem_detection,
-  rs:spectral_spatial_fuse); drift pins updated in the same change and the
+* algorithm_meta catalog: drift pin 43 → 55 (rs:cem_detection and
+  rs:spectral_spatial_fuse, plus recovery of master-side drift: six
+  never-exported sidecars and four stale temporal sidecars removed); the
   shipped sidecars regenerated via `export-catalog`.
 * capability catalog/contract/agent JSON rows appended for both operators;
   both declare the `target-detection` task and `hyperspectral` capability

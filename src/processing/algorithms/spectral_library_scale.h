@@ -53,6 +53,9 @@ namespace SpectralLibraryScale
     /// Opaque-ish precomputed index: grid buckets + per-entry norms. Build
     /// once per (library, expected query grid) pair and reuse for any number
     /// of queries; index build is O(N·B) with no resampling.
+    ///
+    /// Lifetime: the index borrows @p library (m_library); the Library must
+    /// outlive every MatchIndex built from it.
     class MatchIndex
     {
     public:

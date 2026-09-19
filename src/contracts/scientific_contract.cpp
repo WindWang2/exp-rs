@@ -391,6 +391,48 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.evidence = "family:spectral; result is an endmember table (no file writes)";
             rows.push_back( c );
         }
+        {
+            // Spectral Intelligence 11.0 family — contract rows were missing
+            // at the adf8f989 baseline (census gate red).
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:local_rx_anomaly";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "probability";
+            c.noDataPolicy = "internal_sentinel";
+            c.evidence = "family:spectral + ADR 0163 (dual-window RX quality planes; "
+                         "unscored pixels stay NaN)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:spectral_similarity";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "probability";
+            c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + ADR 0163 (bounded ProductNormalized hybrid; "
+                         "classic_tan is unbounded by design)";
+            c.note = "classic_tan form is unbounded; the default form is in [0, 1]";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:sparse_unmixing";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "features"; // abundance stacks, continuous
+            c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + ADR 0163 (FISTA, collinear-atom refusal)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:endmember_analysis";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "table";
+            c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + ADR 0163 (derived spectral-table artifact; "
+                         "sensor projection refuses without wavelength metadata)";
+            rows.push_back( c );
+        }
 
         // --- Atmospheric / radiometric ----------------------------------------
         for ( const char *id :
@@ -413,6 +455,28 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.scaleOffset = "product_metadata";
             c.evidence = "family:radiometric + schema read";
             c.note = "output domain follows the declared calibration target";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:brdf_normalization";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "reflectance";
+            c.evidence = "family:radiometric + schema read (BRDF-adjusted reflectance)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:solar_geometry";
+            c.evidence = "family:radiometric + schema read (geometry rasters from "
+                         "product metadata; master drift at adf8f989)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:radiometric_qa";
+            c.evidence = "family:radiometric + schema read (QA planes over declared "
+                         "domains; master drift at adf8f989)";
             rows.push_back( c );
         }
         {
@@ -772,7 +836,9 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         }
 
         // --- Terrain ----------------------------------------------------------------------
-        for ( const char *id : { "rs:terrain_analysis", "rs:terrain_flow" } )
+        for ( const char *id : { "rs:terrain_analysis", "rs:terrain_flow",
+                                 "rs:terrain_landform", "rs:terrain_solar",
+                                 "rs:terrain_viewshed" } )
         {
             ScientificContract c = baseRecord();
             c.operatorId = id;
@@ -1006,6 +1072,33 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                 rows.push_back( c );
             }
             // SAR / InSAR family (Advanced SAR 10.0 package C headers):
+            for ( const char *id : { "rs:sar_coregister_local", "rs:sar_pair_network",
+                                     "rs:sar_network_inversion",
+                                     "rs:sar_remove_topographic_phase" } )
+            {
+                // Advanced InSAR 11.0 (master drift at adf8f989: no rows).
+                ScientificContract c = sarFamily();
+                c.operatorId = id;
+                c.evidence = "family:sar + schema read (InSAR package headers)";
+                rows.push_back( c );
+            }
+            for ( const char *id : { "rs:register_images", "rs:stack_register" } )
+            {
+                // Multimodal registration 11.0 (master drift at adf8f989).
+                ScientificContract c = baseRecord();
+                c.operatorId = id;
+                c.evidence = "family:registration + schema read (F13 registration "
+                             "products; master drift at adf8f989)";
+                rows.push_back( c );
+            }
+            for ( const char *id : { "rs:temporal_seasonal_breaks" } )
+            {
+                ScientificContract c = temporalFamily( "increasing_dates" );
+                c.operatorId = id;
+                c.outputDomain = "features";
+                c.evidence = "family:temporal + schema read (master drift at adf8f989)";
+                rows.push_back( c );
+            }
             {
                 ScientificContract c = sarFamily();
                 c.operatorId = "rs:sar_coregister";
@@ -1085,6 +1178,15 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = id;
             c.evidence = "family:io + schema read (io_operators.h: float resampling "
                          "through GDAL warp kernels)";
+            rows.push_back( c );
+        }
+        for ( const char *id : { "io:metadata_patch", "io:subdatasets",
+                                 "io:verify_dataset" } )
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = id;
+            c.evidence = "family:io + schema read (io metadata/subdataset/verify "
+                         "kernels; master drift at adf8f989)";
             rows.push_back( c );
         }
         {

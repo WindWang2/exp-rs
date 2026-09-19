@@ -449,12 +449,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "io:metadata_patch",
       "prefix" : "io:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -491,12 +491,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "io:subdatasets",
       "prefix" : "io:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -554,12 +554,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "io:verify_dataset",
       "prefix" : "io:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -1005,12 +1005,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:brdf_normalization",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -1446,12 +1446,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:endmember_analysis",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -1930,12 +1930,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:local_rx_anomaly",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2434,12 +2434,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:radiometric_qa",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2497,12 +2497,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:register_images",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2687,12 +2687,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_coregister_local",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2792,12 +2792,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_network_inversion",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2813,12 +2813,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_pair_network",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -2897,12 +2897,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_remove_topographic_phase",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -3193,12 +3193,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:solar_geometry",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -3214,12 +3214,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sparse_unmixing",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -3319,12 +3319,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:spectral_similarity",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -3382,12 +3382,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:stack_register",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
       "source" : 
@@ -3761,12 +3761,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:temporal_seasonal_breaks",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact (CI bands: seeded-deterministic)",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "bit_exact",
       "sidecarStochastic" : "false",
       "source" : 
@@ -3909,12 +3909,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:terrain_landform",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "bit_exact",
       "sidecarStochastic" : "false",
       "source" : 
@@ -3930,12 +3930,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:terrain_solar",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "bit_exact",
       "sidecarStochastic" : "false",
       "source" : 
@@ -3951,12 +3951,12 @@
     },
     {
       "exempted" : false,
-      "hasScientificContract" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:terrain_viewshed",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
-      "seedPolicy" : "",
+      "seedPolicy" : "none",
       "sidecarGrade" : "bit_exact",
       "sidecarStochastic" : "false",
       "source" : 

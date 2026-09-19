@@ -7,8 +7,10 @@
 // matches within the same FP-ulp tolerance the rs:rx_anomaly streaming gate
 // documents (stats rounding is amplified by the matrix inversion).
 //
-// The NoData case also proves QA honesty: declared-NoData pixels never enter
-// the background statistics and score NaN in the output on both paths.
+// The NoData case also proves QA honesty: declared-NoData pixels are excluded
+// from the background statistics identically on both paths. (Their scores
+// stay finite — the kernels NaN only non-finite inputs — but the two paths
+// must agree pixel-for-pixel on the excluded statistics.)
 
 #include "processing/algorithms/spectral_anomaly.h"
 #include "processing/algorithms/spectral_cem.h"

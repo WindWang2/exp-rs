@@ -185,6 +185,9 @@ double conditionProxy( const std::vector<double> &background, int bands )
             norm2 += row * row;
         }
         if ( !std::isfinite( norm2 ) || !( norm2 > 0.0 ) || !std::isfinite( vw ) )
+            // Also covers a PSD matrix whose dominant eigenvector is exactly
+            // orthogonal to the ones start (e.g. [[1,-1],[-1,1]]): a QA
+            // diagnostic returning "unknown" there is acceptable and honest.
             return -1.0;
         lambda = vw;
         const double norm = std::sqrt( norm2 );

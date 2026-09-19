@@ -8,11 +8,18 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 
 namespace SpectralLibraryScale
 {
 namespace
 {
+const std::vector<float> &emptyVector()
+{
+    static const std::vector<float> kEmpty;
+    return kEmpty;
+}
+
 // The brute-force validity predicate of SpectralClassification::spectralAngle:
 // a single sentinel/non-finite value on either side makes the angle undefined.
 bool samUsable( const float *a, const float *b, int bands, float nodata )
@@ -47,15 +54,20 @@ bool MatchIndex::build( const SpectralLibrary::Library &library, MatchIndex *out
     {
         const SpectralLibrary::Entry &entry = library.entries[static_cast<size_t>( i )];
         const int bands = static_cast<int>( entry.spectrum.size() );
+        // Sanitize exactly like membership semantics below: a wavelength/FWHM
+        // grid that is not sized to the spectrum can never host a resample,
+        // so the bucket key treats it as absent.
         const bool hasGrid = entry.wavelengths.size() == entry.spectrum.size();
         const bool hasFwhm = !entry.fwhm.empty() && entry.fwhm.size() == entry.spectrum.size();
+        const std::vector<float> &gridKey = hasGrid ? entry.wavelengths : emptyVector();
+        const std::vector<float> &fwhmKey = hasFwhm ? entry.fwhm : emptyVector();
 
         std::size_t bucketIdx = 0;
         while ( bucketIdx < out->m_buckets.size() )
         {
             const Bucket &existing = out->m_buckets[bucketIdx];
-            if ( existing.bands == bands && existing.wavelengths == entry.wavelengths &&
-                 existing.fwhm == entry.fwhm )
+            if ( existing.bands == bands && existing.hasGrid == hasGrid &&
+                 existing.wavelengths == gridKey && existing.fwhm == fwhmKey )
                 break;
             ++bucketIdx;
         }
@@ -235,18 +247,27 @@ std::vector<SpectralLibrary::MatchScore> MatchIndex::match(
 
     if ( fullScoring )
     {
-        // Ascending SAM angle; undefined (NaN) angles sort last; ties keep
-        // library order (stable_sort) — identical to the brute-force path.
-        std::stable_sort( scores.begin(), scores.end(),
-                          []( const SpectralLibrary::MatchScore &a,
-                              const SpectralLibrary::MatchScore &b ) {
-                              const auto key = []( double v ) {
-                                  return std::isnan( v )
-                                             ? std::numeric_limits<double>::infinity()
-                                             : v;
-                              };
-                              return key( a.angleDegrees ) < key( b.angleDegrees );
-                          } );
+        // Ascending SAM angle; undefined (NaN) angles sort last. Entries
+        // arrive in bucket-first-appearance order, NOT library order, so the
+        // brute-force stable order must be reconstructed explicitly: ties
+        // (equal or NaN angles) break by entryIndex — exactly the order
+        // matchSpectrum's stable_sort produces over library-ordered entries.
+        std::sort( scores.begin(), scores.end(),
+                   []( const SpectralLibrary::MatchScore &a,
+                       const SpectralLibrary::MatchScore &b ) {
+                       const auto key = []( double v ) {
+                           return std::isnan( v )
+                                      ? std::numeric_limits<double>::infinity()
+                                      : v;
+                       };
+                       const double ka = key( a.angleDegrees );
+                       const double kb = key( b.angleDegrees );
+                       if ( ka != kb )
+                           return ka < kb;
+                       return a.entryIndex < b.entryIndex;
+                   } );
+        if ( options.topK > 0 && scores.size() > static_cast<size_t>( options.topK ) )
+            scores.resize( static_cast<size_t>( options.topK ) );
         return scores;
     }
 
@@ -272,6 +293,9 @@ std::vector<SpectralLibrary::MatchScore> MatchIndex::match(
     const int keep = options.topK > 0 ? std::min( options.topK, comparableCount )
                                       : comparableCount;
     scores.reserve( static_cast<size_t>( keep ) );
+    // Bucket resamples cached across the kept prefix: candidates share few
+    // distinct grids, so each bucket's query is resampled at most once here.
+    std::unordered_map<int, std::vector<float>> resampleCache;
     for ( int i = 0; i < keep; ++i )
     {
         const Candidate &candidate =
@@ -279,13 +303,21 @@ std::vector<SpectralLibrary::MatchScore> MatchIndex::match(
         const Bucket &bucket = m_buckets[candidate.bucketIndex];
         std::vector<float> queryEff;
         if ( candidate.rawScored )
+        {
             queryEff = spectrum;
+        }
         else
         {
-            bool ok = false;
-            queryEff = resampleQueryToBucket( spectrum, spectrumWavelengths, bucket, &ok );
-            if ( !ok )
-                continue; // cannot happen: the candidate survived the prescreen
+            auto cached = resampleCache.find( candidate.bucketIndex );
+            if ( cached == resampleCache.end() )
+            {
+                bool ok = false;
+                queryEff = resampleQueryToBucket( spectrum, spectrumWavelengths, bucket, &ok );
+                if ( !ok )
+                    continue; // cannot happen: the candidate survived the prescreen
+                cached = resampleCache.emplace( candidate.bucketIndex, std::move( queryEff ) ).first;
+            }
+            queryEff = cached->second;
         }
         const SpectralLibrary::Entry &entry =
             m_library->entries[static_cast<size_t>( candidate.entryIndex )];

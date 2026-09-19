@@ -127,7 +127,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         if ( cemStats.count == 0 )
             throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
         const int minSamples = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
-        if ( static_cast<int>( cemStats.count ) < minSamples )
+        if ( cemStats.count < static_cast<size_t>( minSamples ) )
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
                 "CEM background is under-sampled: " + std::to_string( cemStats.count ) +

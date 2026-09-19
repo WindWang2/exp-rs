@@ -59,13 +59,11 @@ void expectSameMatches( const std::vector<MatchScore> &brute,
         const bool bruteNaN = std::isnan( brute[i].angleDegrees );
         REQUIRE( std::isnan( scaled[i].angleDegrees ) == bruteNaN );
         if ( !bruteNaN )
-            REQUIRE( scaled[i].angleDegrees ==
-                     Catch::Approx( brute[i].angleDegrees ).margin( 1e-12 ) );
+            REQUIRE( scaled[i].angleDegrees == brute[i].angleDegrees ); // bit-exact
         const bool bruteDivNaN = std::isnan( brute[i].divergence );
         REQUIRE( std::isnan( scaled[i].divergence ) == bruteDivNaN );
         if ( !bruteDivNaN )
-            REQUIRE( scaled[i].divergence ==
-                     Catch::Approx( brute[i].divergence ).margin( 1e-12 ) );
+            REQUIRE( scaled[i].divergence == brute[i].divergence ); // bit-exact
     }
 }
 } // namespace
@@ -135,9 +133,9 @@ TEST_CASE( "MatchIndex matches brute force exactly across grids, sentinels and s
         REQUIRE( scaledTop[static_cast<size_t>( i )].entryIndex ==
                  brute[static_cast<size_t>( i )].entryIndex );
         REQUIRE( scaledTop[static_cast<size_t>( i )].angleDegrees ==
-                 Catch::Approx( brute[static_cast<size_t>( i )].angleDegrees ).margin( 1e-12 ) );
+                 brute[static_cast<size_t>( i )].angleDegrees );
         REQUIRE( scaledTop[static_cast<size_t>( i )].divergence ==
-                 Catch::Approx( brute[static_cast<size_t>( i )].divergence ).margin( 1e-12 ) );
+                 brute[static_cast<size_t>( i )].divergence );
     }
     const Stats topStats = index.lastStats();
     REQUIRE( topStats.resamplesPerformed == 2 );
@@ -238,4 +236,53 @@ TEST_CASE( "MatchIndex build and match guards", "[spectral][library][scale]" )
 
     REQUIRE( index.match( {}, {} ).empty() );
     REQUIRE( index.match( { 0.1f, 0.2f, 0.3f }, {} ).size() == 1 );
+}
+
+TEST_CASE( "MatchIndex cross-bucket undefined-angle tail keeps library order",
+           "[spectral][library][scale]" )
+{
+    // Regression (review P0): the full-scoring path pushes scores in
+    // bucket-first-appearance order, so a plain stable angle sort ordered the
+    // NaN tail by BUCKET order instead of library order when sentinel/zero
+    // entries lived in different grids. Library order here is
+    // [okB, okA, sentinelA, zeroB]; brute force must rank the undefined pair
+    // as sentinelA then zeroB even though the B bucket is discovered first.
+    std::vector<float> gridA{ 400.0f, 500.0f, 600.0f };
+    std::vector<float> gridB{ 450.0f, 550.0f };
+
+    Library library;
+    Lcg lcg;
+    Entry okB = makeEntry( 0, 2, lcg, gridB );
+    library.entries.append( okB );
+    library.entries.append( makeEntry( 1, 3, lcg, gridA ) );
+    Entry sentinelA = makeEntry( 2, 3, lcg, gridA );
+    sentinelA.spectrum[1] = SpectralClassification::kNoDataSentinel;
+    library.entries.append( sentinelA );
+    Entry zeroB = makeEntry( 3, 2, lcg, gridB );
+    zeroB.spectrum.assign( 2, 0.0f );
+    library.entries.append( zeroB );
+
+    Lcg lcgQuery;
+    std::vector<float> query( 3 );
+    for ( auto &v : query )
+        v = lcgQuery.next( 0.1f, 0.8f );
+
+    auto brute = matchSpectrum( query, gridA, library );
+    REQUIRE( brute.size() == 4 );
+    REQUIRE( brute[2].entryIndex == 2 ); // sentinelA (NaN tail, library order)
+    REQUIRE( brute[3].entryIndex == 3 ); // zeroB
+    REQUIRE( std::isnan( brute[2].angleDegrees ) );
+    REQUIRE( std::isnan( brute[3].angleDegrees ) );
+
+    MatchIndex index;
+    REQUIRE( MatchIndex::build( library, &index ) );
+    auto scaled = index.match( query, gridA );
+    expectSameMatches( brute, scaled );
+
+    // The prescreened path must reproduce the same tail order for the kept
+    // prefix.
+    Options topK;
+    topK.topK = 4;
+    auto scaledTop = index.match( query, gridA, topK );
+    expectSameMatches( brute, scaledTop );
 }
