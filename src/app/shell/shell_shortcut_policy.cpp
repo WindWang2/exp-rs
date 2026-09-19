@@ -25,21 +25,43 @@ bool ShellShortcutPolicy::isTextInputWidget( const QWidget *widget )
     // Walk up the focus chain: a combo-box popup hands focus to its internal
     // QAbstractItemView, whose ancestor IS the QComboBox that owns the
     // keyboard search. The same covers spin-box/editor container children.
+    // A read-only editor does not consume printable keys, so it only skips
+    // its own level — a claiming ancestor further up still wins.
     for ( const QWidget *w = widget; w; w = w->parentWidget() )
     {
         if ( const auto *line = qobject_cast<const QLineEdit *>( w ) )
-            return !line->isReadOnly();
+        {
+            if ( !line->isReadOnly() )
+                return true;
+            continue;
+        }
         if ( const auto *text = qobject_cast<const QTextEdit *>( w ) )
-            return !text->isReadOnly();
+        {
+            if ( !text->isReadOnly() )
+                return true;
+            continue;
+        }
         if ( const auto *plain = qobject_cast<const QPlainTextEdit *>( w ) )
-            return !plain->isReadOnly();
+        {
+            if ( !plain->isReadOnly() )
+                return true;
+            continue;
+        }
         if ( const auto *spin = qobject_cast<const QAbstractSpinBox *>( w ) )
-            return !spin->isReadOnly();
+        {
+            if ( !spin->isReadOnly() )
+                return true;
+            continue;
+        }
         // Both editable and non-editable combos consume printable keys: the
         // editable one types into its line edit, the plain one does keyboard
-        // search (Qt::Key_H jumps to the next "H..." item).
+        // search (Qt::Key_H jumps to the next "H..." item). An empty plain
+        // combo consumes nothing and keeps the walk going.
         if ( const auto *combo = qobject_cast<const QComboBox *>( w ) )
-            return combo->isEditable() || combo->count() > 0;
+        {
+            if ( combo->isEditable() || combo->count() > 0 )
+                return true;
+        }
     }
     return false;
 }

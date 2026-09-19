@@ -46,6 +46,15 @@ RsRoiSpectrumTool::~RsRoiSpectrumTool()
   sicnu::app::deleteToolCanvasItem( this, m_rubberBand );
 }
 
+void RsRoiSpectrumTool::activate()
+{
+  // Re-arming the same instance (QgsMapCanvas::setMapTool on an inactive tool)
+  // must allow a fresh polygon: deactivate() marks the tool finished so the
+  // abandoned draw can never fire its callback.
+  m_finished = false;
+  QgsMapTool::activate();
+}
+
 void RsRoiSpectrumTool::deactivate()
 {
   // #1051: abandoning a half-drawn polygon must not leave the partial ring

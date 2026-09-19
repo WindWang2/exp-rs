@@ -42,6 +42,9 @@ class RsRoiSpectrumTool : public QgsMapTool
     /// abandoned draw never leaves a permanent ring on the canvas (#1051).
     void deactivate() override;
 
+    /// Clears the finished flag so a re-armed instance can draw again.
+    void activate() override;
+
     /// Testing seam: the polygon rubber band (null after canvas teardown).
     QgsRubberBand *rubberBandForTest() const { return m_rubberBand; }
 

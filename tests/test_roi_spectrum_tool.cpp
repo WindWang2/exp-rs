@@ -221,3 +221,56 @@ TEST_CASE( "RsRoiSpectrumTool: canvas-first teardown deletes the tool once (#104
 
     CHECK( guard.isNull() );
 }
+
+TEST_CASE( "RsRoiSpectrumTool re-activation allows a fresh polygon after deactivate (#1051)",
+           "[app][map_tools][roi][1051]" )
+{
+    TestAppFixture fixture;
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString rasterPath = tmp.filePath( QStringLiteral( "roi_reactivate.tif" ) );
+    REQUIRE( makeRoiRaster( rasterPath ).isEmpty() );
+
+    auto rasterLayer = std::make_unique<QgsRasterLayer>( rasterPath, QStringLiteral( "roi_reactivate" ) );
+    REQUIRE( rasterLayer->isValid() );
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    canvas->setDestinationCrs( rasterLayer->crs() );
+    canvas->setExtent( rasterLayer->extent() );
+
+    bool callbackFired = false;
+    QEventLoop loop;
+    auto tool = std::make_unique<TestableRsRoiSpectrumTool>(
+        canvas.get(), rasterLayer.get(),
+        [&]( const QVector<double> &, const QVector<double> &,
+             const QVector<QString> &, const QString & ) {
+            callbackFired = true;
+            loop.quit();
+        } );
+
+    // Deactivate marks the instance finished (abandoned draw); re-arming the
+    // SAME instance must clear that state, otherwise the tool is inert.
+    tool->deactivate();
+    tool->activate();
+
+    const QPoint pt0 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 0.1, -0.1 ) ).toQPointF().toPoint();
+    const QPoint pt1 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 1.9, -0.1 ) ).toQPointF().toPoint();
+    const QPoint pt2 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 1.9, -1.9 ) ).toQPointF().toPoint();
+    const QPoint pt3 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 0.1, -1.9 ) ).toQPointF().toPoint();
+    QgsMapMouseEvent e0( canvas.get(), QEvent::MouseButtonPress, pt0, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QgsMapMouseEvent e1( canvas.get(), QEvent::MouseButtonPress, pt1, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QgsMapMouseEvent e2( canvas.get(), QEvent::MouseButtonPress, pt2, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QgsMapMouseEvent e3( canvas.get(), QEvent::MouseButtonPress, pt3, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasPressEvent( &e0 );
+    tool->canvasPressEvent( &e1 );
+    tool->canvasPressEvent( &e2 );
+    tool->canvasPressEvent( &e3 );
+    QgsMapMouseEvent eDbl( canvas.get(), QEvent::MouseButtonDblClick, pt3, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasDoubleClickEvent( &eDbl );
+
+    QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+    loop.exec();
+
+    CHECK( callbackFired );
+}
