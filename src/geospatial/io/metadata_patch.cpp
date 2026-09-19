@@ -7,6 +7,7 @@
 
 #include "geospatial/io/finalize_manifest.h"
 #include "geospatial/io/param_guard.h"
+#include "geospatial/gdal_guard.h"
 #include "geospatial/util/atomic_fs.h"
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/time_normalization.h"
@@ -249,7 +250,7 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
   }
 
   // ---- Phase 2: open for update (capability gate) and apply ---------------
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  QuietCplErrors quietErrors;
   GDALDataset *dataset = GDALDataset::Open( path.c_str(), GDAL_OF_UPDATE | GDAL_OF_RASTER );
   if ( !dataset )
   {
@@ -298,7 +299,7 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     expected.push_back( patch.value );
   GDALClose( dataset );
 
-  CPLErrorStateBackuper verifyBackuper( CPLQuietErrorHandler );
+  QuietCplErrors verifyQuietErrors;
   GDALDataset *verify = GDALDataset::Open( path.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER );
   if ( !verify )
     throw GeoError( ErrorCode::OpenFailed, "patch: verification open failed" );

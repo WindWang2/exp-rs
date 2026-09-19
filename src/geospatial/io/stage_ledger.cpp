@@ -7,6 +7,7 @@
 #include "geospatial/io/stage_ledger.h"
 
 #include "geospatial/io/param_guard.h"
+#include "geospatial/gdal_guard.h"
 #include "geospatial/util/atomic_fs.h"
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/time_normalization.h"
@@ -272,7 +273,10 @@ AttachCheck attachExisting( const std::string &finalPath )
   // The staged dataset must still open, and what opens must be what was
   // declared. A renamed/truncated/spoofed staged file fails here, which is
   // the point: attach is a trust boundary for the resume path.
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  // GDAL >= 3.11 dropped the CPLErrorStateBackuper(handler) overload, and the
+  // default constructor does not restore the error handler, so the stack based
+  // guard (CPLPushErrorHandler/CPLPopErrorHandler) is the portable form.
+  QuietCplErrors quietErrors;
   GDALDataset *dataset =
     GDALDataset::Open( record.stagedPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR );
   if ( !dataset )

@@ -7,6 +7,7 @@
 
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/io/param_guard.h"
+#include "geospatial/gdal_guard.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
@@ -114,7 +115,7 @@ VectorTargetCheck checkVectorWriteTarget( const std::string &driver )
 bool inputOpensAsRaster( const std::string &source )
 {
   ensureGdalRegistered();
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  QuietCplErrors quietErrors;
   GDALDatasetH probe = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !probe )
     return false;

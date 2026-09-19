@@ -7,6 +7,7 @@
 #include "geospatial/io/subdataset_inventory.h"
 
 #include "geospatial/io/param_guard.h"
+#include "geospatial/gdal_guard.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <gdal.h>
@@ -81,7 +82,7 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
     throw GeoError( ErrorCode::InvalidArgument, "subdataset inventory cap outside bounds", details );
   }
 
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  QuietCplErrors quietErrors;
   GDALDatasetH handle = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
   {
