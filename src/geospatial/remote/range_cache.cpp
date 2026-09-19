@@ -497,16 +497,22 @@ class CacheStore
                        const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
                        std::uint64_t expectedGeneration )
     {
+      // Capture generation AND identity under one lock hold. diskBasis()
+      // re-locks via snapshotIdentity — calling it after releasing would
+      // reopen a TOCTOU window where invalidate()+refresh swaps the ETag
+      // and old-content bytes land under a new basis (checksum-valid poison).
+      std::string basis;
       {
-        // A mid-fetch invalidation refreshed both the generation and the
-        // identity: writing these OLD-CONTENT bytes under the NEW identity
-        // basis would poison the disk layer across restarts (checksum-valid,
-        // silently wrong). Refuse stale write-throughs.
         std::lock_guard<std::mutex> lock( mMutex );
         if ( entry->generation != expectedGeneration )
           return;
+        if ( !RangeDiskBlockStore::enabled() )
+          return;
+        const RemoteSourceIdentity &identity = entry->identity;
+        basis = RangeDiskBlockStore::identityBasis(
+          entry->requestUrl, identity.validator.hasStrongEtag(), identity.validator.etag,
+          identity.hasSize, identity.sizeBytes, identity.validator.lastModified );
       }
-      const std::string basis = diskBasis( entry );
       if ( basis.empty() )
         return;
       std::uint64_t offsetInRun = 0;

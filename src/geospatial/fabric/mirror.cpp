@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <ctime>
 #include <fstream>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -573,8 +574,14 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       return;
     atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
                                 [ & ]( const std::string &staged ) {
-      std::ofstream out( staged, std::ios::binary );
-      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+      const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
+      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
+      out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
+      out.flush();
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: write failed for " + staged );
     } );
     invalidateManifestSnapshot( mirrorDirectory );
     pendingManifestWrites = 0;
@@ -787,9 +794,12 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           writer.setGeotransform( { request.minX, gt[1], 0.0, request.maxY, 0.0, gt[5] } );
           writer.writeWindow( 1, { 0, 0, sourceWindow.width, sourceWindow.height }, values.data() );
           writer.finalize();
-          std::ifstream in( stagedPath, std::ios::binary );
-          in.seekg( 0, std::ios::end );
-          written = static_cast<std::uint64_t>( in.tellg() );
+          std::error_code ec;
+          const auto size = std::filesystem::file_size( stagedPath, ec );
+          if ( ec )
+            throw GeoError( ErrorCode::IoError,
+                            "mirror: cannot size staged chunk " + stagedPath + ": " + ec.message() );
+          written = static_cast<std::uint64_t>( size );
         } );
 
         Json::Value entry = manifest[token];
