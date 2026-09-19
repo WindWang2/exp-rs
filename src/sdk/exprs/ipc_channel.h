@@ -116,8 +116,11 @@ public:
     void setCancelSink( std::function<void( long long id )> sink );
 
     // -- state ---------------------------------------------------------------
-    /// Closes the stream and stops the reader. In-flight waiters are failed
-    /// with ChannelClosed. Idempotent.
+    /// Closes the channel and stops the reader, then releases the stream's OS
+    /// resources in a defined order: mark closed -> join the reader -> let
+    /// the stream close its handles/fds (single owner, #1036). In-flight
+    /// waiters are failed with ChannelClosed. Idempotent and safe to call
+    /// from any thread (including the reader thread itself).
     void close();
     bool isOpen() const;
     /// Last protocol-level failure description ("" when none).
@@ -163,11 +166,17 @@ private:
     void handleFrame( const std::string &payload );
     void failAllPending( Outcome::Status status, const std::string &code, const std::string &message );
     void closeLocked();
+    /// Releases the stream's OS resources under mWriteMutex (in-flight writes
+    /// finish first). Called only by close(), after the reader is gone.
+    void releaseStream();
 
     std::unique_ptr<IIpcStream> mStream;
     const Options mOptions;
 
     std::mutex mWriteMutex;             ///< serializes frame writes
+    /// Serializes the close sequence (mark -> join reader -> release stream)
+    /// so two concurrent closers can never join the same std::thread twice.
+    std::mutex mCloseMutex;
     mutable std::mutex mMutex;          ///< state below (minus atomics)
     std::condition_variable mResponseCv;
     std::condition_variable mRequestCv;

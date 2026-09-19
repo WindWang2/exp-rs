@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstring>
 #include <poll.h>
+#include <signal.h>
 #include <unistd.h>
 #endif
 
@@ -191,11 +192,24 @@ public:
 
     void close() override
     {
-        // Break the pipe from the write side so a blocked peer read fails;
-        // handles themselves are owned by the session (not closed here).
-        mClosed = true;
+        // Idempotent, single-winner release of BOTH owned handles (#1036):
+        // the exchange elects exactly one closer, so a session/kill-ladder
+        // race can never double-close (or leak) a pipe end.
+        if ( mClosed.exchange( true ) )
+            return;
+        // Break a blocked local read/peer write first, then release.
         if ( mWrite != INVALID_HANDLE_VALUE )
             CancelIoEx( mWrite, nullptr );
+        if ( mRead != INVALID_HANDLE_VALUE )
+        {
+            ::CloseHandle( mRead );
+            mRead = INVALID_HANDLE_VALUE;
+        }
+        if ( mWrite != INVALID_HANDLE_VALUE )
+        {
+            ::CloseHandle( mWrite );
+            mWrite = INVALID_HANDLE_VALUE;
+        }
     }
 
     std::string lastError() const override { return mError; }
@@ -257,6 +271,17 @@ public:
             error = "handle stream closed";
             return false;
         }
+        // A write racing the peer's death raises SIGPIPE, whose default
+        // disposition terminates the HOST — exactly what the isolation layer
+        // exists to prevent. Block it for the duration of this write (no
+        // process-wide SIG_IGN side effect) and consume a raised instance
+        // before restoring the mask, so write() reports EPIPE instead.
+        sigset_t pipeSet;
+        sigset_t previousSet;
+        sigemptyset( &pipeSet );
+        sigaddset( &pipeSet, SIGPIPE );
+        const bool maskChanged = ::pthread_sigmask( SIG_BLOCK, &pipeSet, &previousSet ) == 0;
+        bool pipeBroken = false;
         size_t written = 0;
         while ( written < len )
         {
@@ -274,14 +299,51 @@ public:
                 ::poll( &pfd, 1, 100 );
                 continue;
             }
+            pipeBroken = n < 0 && errno == EPIPE;
             error = n == 0 ? "write wrote 0 bytes"
                            : std::string( "write failed: " ) + std::strerror( errno );
-            return false;
+            break;
         }
-        return true;
+        if ( maskChanged )
+        {
+            if ( pipeBroken )
+            {
+                // Drain the SIGPIPE the kernel queued for this thread: it is
+                // still blocked, so unblocking it without consuming would
+                // deliver it immediately and kill the process.
+                sigset_t pendingSet;
+                sigemptyset( &pendingSet );
+                if ( ::sigpending( &pendingSet ) == 0 && sigismember( &pendingSet, SIGPIPE ) )
+                {
+                    struct timespec zeroTimeout
+                    {
+                    };
+                    ::sigtimedwait( &pipeSet, nullptr, &zeroTimeout );
+                }
+            }
+            ::pthread_sigmask( SIG_SETMASK, &previousSet, nullptr );
+        }
+        return !pipeBroken && written == len;
     }
 
-    void close() override { mClosed = true; }
+    void close() override
+    {
+        // Idempotent, single-winner release of BOTH owned fds (#1036): the
+        // exchange elects exactly one closer, so session/kill-ladder races
+        // can neither leak nor double-close a (possibly recycled) fd.
+        if ( mClosed.exchange( true ) )
+            return;
+        if ( mRead >= 0 )
+        {
+            ::close( mRead );
+            mRead = -1;
+        }
+        if ( mWrite >= 0 )
+        {
+            ::close( mWrite );
+            mWrite = -1;
+        }
+    }
     std::string lastError() const override { return mError; }
 
 private:

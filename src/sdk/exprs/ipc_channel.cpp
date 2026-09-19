@@ -65,15 +65,48 @@ std::string IpcChannel::Outcome::statusCode() const
 
 void IpcChannel::close()
 {
+    // Reader-thread self-close (e.g. the owning object is released from an
+    // event sink): the reader cannot join itself. Mark + release directly;
+    // the other closer (if any) is blocked on mCloseMutex and will observe
+    // the already-finished reader once this call returns.
+    if ( mReader.joinable() && mReader.get_id() == std::this_thread::get_id() )
+    {
+        {
+            std::lock_guard<std::mutex> lock( mMutex );
+            closeLocked();
+        }
+        releaseStream();
+        return;
+    }
+
+    std::lock_guard<std::mutex> closeLock( mCloseMutex );
     {
         std::lock_guard<std::mutex> lock( mMutex );
         closeLocked();
     }
-    // Reap the reader outside the state lock: it may be waiting for mMutex
-    // on its way out, and joining under the lock would deadlock. The reader
-    // never calls close() itself, so this cannot self-join.
-    if ( mReader.joinable() && mReader.get_id() != std::this_thread::get_id() )
+    // Reap the reader OUTSIDE the state lock: it may be waiting for mMutex
+    // on its way out, and joining under the lock would deadlock. Once the
+    // reader is gone no thread touches the read handle again, so it is safe
+    // for the stream (its single owner) to release both pipe ends (#1036).
+    if ( mReader.joinable() )
         mReader.join();
+    releaseStream();
+}
+
+void IpcChannel::releaseStream()
+{
+    // Serialize the release against in-flight WRITES: a request thread that
+    // passed the mClosed check before close() marked the channel may still be
+    // inside writeAll(). Closing the fd/handle under that write is undefined
+    // (EPIPE/recycled descriptor on POSIX, UB on Windows) and the writer's
+    // mutex is the only synchronization on that path. Lock order: mCloseMutex
+    // -> mMutex (released) -> mWriteMutex, never nested, so no inversion with
+    // sendEnvelope (mWriteMutex -> mMutex). The reader never takes
+    // mWriteMutex, so joining it first cannot deadlock here.
+    if ( !mStream )
+        return;
+    std::lock_guard<std::mutex> writeLock( mWriteMutex );
+    mStream->close();
 }
 
 void IpcChannel::closeLocked()
@@ -81,8 +114,11 @@ void IpcChannel::closeLocked()
     if ( mClosed )
         return;
     mClosed = true;
-    if ( mStream )
-        mStream->close();
+    // NOTE: the stream's OS resources are NOT released here. closeLocked()
+    // runs on the reader thread (EOF/protocol failure), on writer threads
+    // (send failure) and under mMutex; closing a handle while the reader is
+    // still inside readSome would race a recycled descriptor. IpcChannel::
+    // close() owns the release, after the reader has been joined.
     mResponseCv.notify_all();
     mRequestCv.notify_all();
 }

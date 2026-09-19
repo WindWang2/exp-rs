@@ -16,6 +16,21 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+#include <filesystem>
+#include <system_error>
+
 using namespace exprs;
 
 namespace {
@@ -25,6 +40,31 @@ Json::Value objectWith( std::string key, std::string value )
     Json::Value json( Json::objectValue );
     json[key] = value;
     return json;
+}
+
+/// OS-descriptor accounting for the #1036 lifetime suite. -1 = unavailable.
+long long openDescriptorCount()
+{
+#ifdef _WIN32
+    DWORD count = 0;
+    return ::GetProcessHandleCount( ::GetCurrentProcess(), &count )
+               ? static_cast<long long>( count )
+               : -1;
+#elif defined( __linux__ )
+    std::error_code error;
+    std::filesystem::directory_iterator iterator( "/proc/self/fd", error );
+    if ( error )
+        return -1;
+    long long count = 0;
+    for ( const std::filesystem::directory_entry &entry : iterator )
+    {
+        (void)entry;
+        ++count;
+    }
+    return count;
+#else
+    return -1;
+#endif
 }
 
 } // namespace
@@ -649,5 +689,72 @@ TEST_CASE( "protocol compatibility matrix (1.2)", "[ipc][envelope][p12]" )
     REQUIRE( reason.find( "major" ) != std::string::npos );
     REQUIRE( hostProtocolVersionMajor() == 1 );
     REQUIRE( hostProtocolVersionMinor() >= 2 );
+}
+
+// -- #1036: handle/fd ownership and release ----------------------------------
+
+TEST_CASE( "handle streams own and release their descriptors exactly once (#1036)",
+           "[ipc][stream][lifetime]" )
+{
+    if ( openDescriptorCount() < 0 )
+    {
+        WARN( "descriptor accounting unavailable on this platform; skipped" );
+        return;
+    }
+
+    // One open/exchange/close cycle; returns the descriptor delta. Each
+    // stream takes ownership of BOTH handles it is given and close() is the
+    // idempotent single-winner release (single-owner contract, #1036).
+    const auto cycle = []() -> long long {
+        const long long start = openDescriptorCount();
+#ifdef _WIN32
+        SECURITY_ATTRIBUTES inherit;
+        inherit.nLength = sizeof( inherit );
+        inherit.bInheritHandle = TRUE;
+        inherit.lpSecurityDescriptor = nullptr;
+        HANDLE aToB[ 2 ] = { nullptr, nullptr };
+        HANDLE bToA[ 2 ] = { nullptr, nullptr };
+        REQUIRE( ::CreatePipe( &aToB[ 0 ], &aToB[ 1 ], &inherit, 0 ) );
+        REQUIRE( ::CreatePipe( &bToA[ 0 ], &bToA[ 1 ], &inherit, 0 ) );
+        const auto asVoid = []( HANDLE handle ) { return static_cast<void *>( handle ); };
+#else
+        int aToB[ 2 ] = { -1, -1 };
+        int bToA[ 2 ] = { -1, -1 };
+        REQUIRE( ::pipe( aToB ) == 0 );
+        REQUIRE( ::pipe( bToA ) == 0 );
+        const auto asVoid = []( int fd ) {
+            return reinterpret_cast<void *>( static_cast<intptr_t>( fd ) );
+        };
+#endif
+        {
+            std::unique_ptr<IIpcStream> endpointA = makeIpcHandleStream(
+                asVoid( aToB[ 0 ] ), asVoid( bToA[ 1 ] ) );
+            std::unique_ptr<IIpcStream> endpointB = makeIpcHandleStream(
+                asVoid( bToA[ 0 ] ), asVoid( aToB[ 1 ] ) );
+
+            IpcFrameLimits limits;
+            std::string error;
+            REQUIRE( IpcFrame::writeJson( *endpointA, objectWith( "ping", "pong" ), limits, error ) );
+            std::string payload;
+            REQUIRE( IpcFrame::read( *endpointB, payload, limits, 1000, error )
+                     == IpcFrame::ReadStatus::Ok );
+
+            // close() is idempotent under the single-winner exchange; a second
+            // close (and the destructor's close) must be harmless no-ops.
+            endpointA->close();
+            endpointA->close();
+            endpointB->close();
+            endpointB->close();
+        }
+        return openDescriptorCount() - start;
+    };
+
+    // Warm-up cycle: absorbs one-time runtime/CRT descriptor state, then the
+    // steady state must be exactly flat. A leak of even one descriptor per
+    // cycle (the pre-fix behavior leaked TWO) fails here.
+    (void)cycle();
+    const long long steadyDelta = cycle();
+    INFO( "steady-state descriptor delta=" << steadyDelta );
+    REQUIRE( steadyDelta == 0 );
 }
 
