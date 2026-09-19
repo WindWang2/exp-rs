@@ -1,6 +1,7 @@
 // main_window_menus.cpp — Menu bar, toolbars, and status bar setup
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
+#include "workbench/command_defs.h"
 #include "workbench/command_registry.h"
 
 #include "app/help/help_system_controller.h"
@@ -677,7 +678,8 @@ void QgisDesktopWindow::forwardActionShortcutsToWindow()
     const QList<QAction *> acts = findChildren<QAction *>();
     for ( QAction *action : acts )
     {
-        if ( !action || action->shortcuts().isEmpty() )
+        // Typing keys stay off the window host (#1031 F-1031-P1-letterkey).
+        if ( !sicnu::app::actionShortcutIsWindowSafe( action ) )
             continue;
         if ( action->shortcutContext() == Qt::WidgetShortcut ||
              action->shortcutContext() == Qt::WidgetWithChildrenShortcut )

@@ -131,6 +131,10 @@ void GeorefDualWindow::loadSourceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mSourceCanvas) {
+        // Settle rendering before the displayed layer is swapped out: the
+        // parallel job snapshots the layer list by raw pointer and its worker
+        // threads keep reading it after a non-blocking stop (#1050).
+        mSourceCanvas->stopRenderingAndSettle();
         mSourceCanvas->setLayers({layer});
         mSourceCanvas->zoomToFullExtent();
     }
@@ -150,6 +154,9 @@ void GeorefDualWindow::loadReferenceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mReferenceCanvas) {
+        // #1050: same blocking settle as the source canvas — deleteLater on a
+        // layer a render worker still reads is a use-after-free.
+        mReferenceCanvas->stopRenderingAndSettle();
         mReferenceCanvas->setLayers({layer});
         mReferenceCanvas->zoomToFullExtent();
     }

@@ -145,10 +145,17 @@ qint64 peakRssBytes()
     if ( ::GetProcessMemoryInfo( ::GetCurrentProcess(), &counters, sizeof( counters ) ) )
         return qint64( counters.PeakWorkingSetSize );
     return 0;
-#else
+#elif defined( Q_OS_MACOS )
+    rusage usage;
+    ::getrusage( RUSAGE_SELF, &usage );
+    return qint64( usage.ru_maxrss ); // macOS reports BYTES
+#elif defined( Q_OS_LINUX )
     rusage usage;
     ::getrusage( RUSAGE_SELF, &usage );
     return qint64( usage.ru_maxrss ) * 1024; // Linux reports KiB
+#else
+    // Unknown platform: report no evidence rather than a wrong unit.
+    return 0;
 #endif
 }
 

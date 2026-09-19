@@ -12,14 +12,15 @@
 //   1. menubar-only hosting on a hidden bar does NOT fire (the bug);
 //   2. the same action additionally hosted on the window DOES fire (fix);
 //   3. a CommandRegistry action hosted on the window runs its handler;
-//   4. the forwarding pass itself re-hosts menubar actions correctly.
+//   4. the hosting rule (sicnu::app::actionShortcutIsWindowSafe, #1031) decides
+//      what the real forwarding pass may host, and bare typing keys lose.
 #include <catch2/catch_test_macros.hpp>
 
+#include "app/workbench/command_defs.h"
 #include "app/workbench/command_registry.h"
 
 #include <QAction>
 #include <QApplication>
-#include <QFile>
 #include <QKeySequence>
 #include <QMainWindow>
 #include <QMenu>
@@ -39,22 +40,6 @@ QApplication *ensureApp()
   if ( !app && !QCoreApplication::instance() )
     app = new QApplication( fake_argc, fake_argv );
   return app;
-}
-
-QString readSource( const QString &relativePath )
-{
-  const QStringList candidates = {
-    QStringLiteral( "%1/%2" ).arg( QStringLiteral( CMAKE_SOURCE_DIR ), relativePath ),
-    QStringLiteral( "../%1" ).arg( relativePath ),
-    relativePath,
-  };
-  for ( const QString &path : candidates )
-  {
-    QFile f( path );
-    if ( f.open( QIODevice::ReadOnly | QIODevice::Text ) )
-      return QString::fromUtf8( f.readAll() );
-  }
-  return {};
 }
 
 QMenuBar *hiddenMenuBar( QMainWindow &window )
@@ -145,24 +130,83 @@ TEST_CASE( "Shortcuts: registry action hosted on the window runs its handler",
   CHECK( runs == 1 );
 }
 
-TEST_CASE( "Shortcuts: forwarding pass re-hosts menubar actions on the window",
-           "[shortcuts][behavior][c1]" )
+// The mechanism above is only as good as the rule that decides what may be
+// window-hosted. QgisDesktopWindow::forwardActionShortcutsToWindow() filters
+// through sicnu::app::actionShortcutIsWindowSafe(): a bare unmodified letter
+// key must stay off the window, otherwise typing in the Copilot / palette /
+// any text field activates a map command (#1031 F-1031-P1-letterkey, map.pan
+// was "H"). The rule is an inline helper, so it runs here directly -- no shell
+// construction and no source-text grep.
+TEST_CASE( "Shortcuts: window-hosting rule rejects bare typing keys",
+           "[shortcuts][behavior][letterkey][1031]" )
+{
+  ensureApp();
+  QObject owner; // keeps the probe actions owned
+
+  QAction modified( &owner );
+  modified.setShortcut( QKeySequence( QStringLiteral( "Ctrl+N" ) ) );
+  CHECK( sicnu::app::actionShortcutIsWindowSafe( &modified ) );
+
+  QAction shiftLetter( &owner );
+  shiftLetter.setShortcut( QKeySequence( QStringLiteral( "Shift+H" ) ) );
+  CHECK( sicnu::app::actionShortcutIsWindowSafe( &shiftLetter ) );
+
+  QAction functionKey( &owner );
+  functionKey.setShortcut( QKeySequence( QStringLiteral( "F5" ) ) );
+  CHECK( sicnu::app::actionShortcutIsWindowSafe( &functionKey ) );
+
+  // The reported theft: map.pan was bound to a bare "H".
+  QAction bareLetter( &owner );
+  bareLetter.setShortcut( QKeySequence( QStringLiteral( "H" ) ) );
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( &bareLetter ) );
+
+  QAction bareDigit( &owner );
+  bareDigit.setShortcut( QKeySequence( QStringLiteral( "5" ) ) );
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( &bareDigit ) );
+
+  QAction barePunctuation( &owner );
+  barePunctuation.setShortcut( QKeySequence( QStringLiteral( "Space" ) ) );
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( &barePunctuation ) );
+
+  // The rule answers "may this be hosted on the window?" for every action.
+  QAction widgetScoped( &owner );
+  widgetScoped.setShortcut( QKeySequence( QStringLiteral( "Ctrl+N" ) ) );
+  widgetScoped.setShortcutContext( Qt::WidgetShortcut );
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( &widgetScoped ) );
+
+  QAction noShortcut( &owner );
+  noShortcut.setText( QStringLiteral( "no binding" ) );
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( &noShortcut ) );
+
+  CHECK_FALSE( sicnu::app::actionShortcutIsWindowSafe( nullptr ) );
+}
+
+// The forwarding pass itself, decided by the real rule (the shell method
+// cannot be constructed in a shell-free test, but its decision is):
+// modified keys reach the window host and fire, typing keys do not.
+TEST_CASE( "Shortcuts: forwarding hosts Ctrl+Z but never a bare letter key",
+           "[shortcuts][behavior][letterkey][1031]" )
 {
   ensureApp();
   QMainWindow window;
   QMenuBar *bar = hiddenMenuBar( window );
 
-  int hits = 0;
-  QAction *act = bar->addMenu( QStringLiteral( "&Edit" ) )
-                     ->addAction( QStringLiteral( "Undo" ), &window,
-                                  [&hits] { ++hits; } );
-  act->setShortcut( QKeySequence::Undo );
+  int undoHits = 0;
+  QAction *undoAction = bar->addMenu( QStringLiteral( "&Edit" ) )
+                            ->addAction( QStringLiteral( "Undo" ), &window,
+                                         [&undoHits] { ++undoHits; } );
+  undoAction->setShortcut( QKeySequence::Undo );
 
-  // Mirror of QgisDesktopWindow::forwardActionShortcutsToWindow().
+  int panHits = 0;
+  QAction *panAction = bar->addMenu( QStringLiteral( "&View" ) )
+                           ->addAction( QStringLiteral( "Pan" ), &window,
+                                        [&panHits] { ++panHits; } );
+  panAction->setShortcut( QKeySequence( QStringLiteral( "H" ) ) );
+
   const QList<QAction *> acts = window.findChildren<QAction *>();
   for ( QAction *a : acts )
   {
-    if ( !a || a->shortcuts().isEmpty() )
+    if ( !sicnu::app::actionShortcutIsWindowSafe( a ) )
       continue;
     if ( a->shortcutContext() == Qt::WidgetShortcut ||
          a->shortcutContext() == Qt::WidgetWithChildrenShortcut )
@@ -170,20 +214,19 @@ TEST_CASE( "Shortcuts: forwarding pass re-hosts menubar actions on the window",
     window.addAction( a );
   }
 
+  REQUIRE( sicnu::app::actionShortcutIsWindowSafe( undoAction ) );
+  REQUIRE_FALSE( sicnu::app::actionShortcutIsWindowSafe( panAction ) );
+  CHECK( window.actions().contains( undoAction ) );
+  CHECK_FALSE( window.actions().contains( panAction ) );
+
   window.show();
   QTest::qWaitForWindowExposed( &window );
   QTest::keyClick( &window, Qt::Key_Z, Qt::ControlModifier );
   QTest::qWait( 1 );
+  CHECK( undoHits == 1 );
 
-  CHECK( hits == 1 );
-}
-
-// The mechanism above is only as good as its call sites — pin the wiring in
-// the real shell so the pass cannot silently disappear again.
-TEST_CASE( "Shortcuts: shell invokes the forwarding pass after menus/plugins",
-           "[shortcuts][wiring][c1]" )
-{
-  const QString cpp = readSource( QStringLiteral( "src/app/main_window.cpp" ) );
-  REQUIRE_FALSE( cpp.isEmpty() );
-  CHECK( cpp.contains( QStringLiteral( "forwardActionShortcutsToWindow()" ) ) );
+  // Typing "H" must not trigger pan from the window host.
+  QTest::keyClick( &window, Qt::Key_H );
+  QTest::qWait( 1 );
+  CHECK( panHits == 0 );
 }

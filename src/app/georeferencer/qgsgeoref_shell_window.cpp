@@ -1329,10 +1329,14 @@ void QgsGeorefShellWindow::refreshFit()
 
   // Push panel config into the session, then refit — the session is the only
   // place a fit is computed (ADR 0020 S2). fitChanged drives the UI update.
+  // #1052: projecting panel state is not an unsaved edit, so the push runs
+  // inside a configuration-sync scope (no spurious born-dirty window).
+  mGeorefSession.beginConfigurationSync();
   mGeorefSession.setSourceRasterPath( mSourceRasterPath );
   mGeorefSession.setTransformMethod( mParamsPanel->transformMethod() );
   mGeorefSession.setDemPath( mParamsPanel->demPath() );
   mGeorefSession.setDemZOffset( mParamsPanel->demZOffset() );
+  mGeorefSession.endConfigurationSync();
   mGeorefSession.refit();
 }
 
@@ -1717,12 +1721,16 @@ void QgsGeorefShellWindow::applyWorkflowSnapshot( const RsGeoreferencingSession:
     }
     mParamsPanel->setDemZOffset( s.demZOffset );
   }
+  // #1052: restoring a saved snapshot is a configuration projection, not an
+  // unsaved edit — it must not leave the window born dirty.
+  mGeorefSession.beginConfigurationSync();
   if ( !s.lastSourcePath.isEmpty() )
     setSourceRasterPath( s.lastSourcePath );
   applyShellSpecific( s );
   updateSourceLayerCaption();
   updateGcpTableRasterPaths();
   refreshFit();
+  mGeorefSession.endConfigurationSync();
 }
 
 void QgsGeorefShellWindow::clearPendingGcpPick()
@@ -1793,25 +1801,25 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
   // panel's target CRS so label and coordinate are consistent (GEOREF-9).
   const QgsCoordinateReferenceSystem destCrs =
     mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
-  QgsPointXY dstForStore = dst;
-  if ( mDstRaster && mDstRaster->crs().isValid() && destCrs.isValid()
-       && mDstRaster->crs() != destCrs )
+  // #1030 F-1030-P1-gcp: fail closed. The old empty catch kept the pick in the
+  // raster layer CRS and stored it under the panel CRS label, then reported
+  // "Added GCP #...".
+  const RsGeorefGcpDestination normalized =
+    rsGeorefNormalizeGcpDestination(
+      dst,
+      mDstRaster ? mDstRaster->crs() : QgsCoordinateReferenceSystem(),
+      destCrs,
+      QgsProject::instance() ? QgsProject::instance()->transformContext()
+                             : QgsCoordinateTransformContext() );
+  if ( normalized.refuse )
   {
-    try
-    {
-      const QgsCoordinateTransformContext ctx =
-        QgsProject::instance() ? QgsProject::instance()->transformContext()
-                               : QgsCoordinateTransformContext();
-      QgsCoordinateTransform ct( mDstRaster->crs(), destCrs, ctx );
-      dstForStore = ct.transform( dst );
-    }
-    catch ( ... )
-    {
-      // Keep original dst — fit path will report via collectOk; do not silently
-      // store a mismatched CRS label.
-    }
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "Cannot transform the target point into the destination CRS — GCP not added" ), 6000 );
+    rearmAddPointTools();
+    return;
   }
-  mGeorefSession.addGcp( QgsGcpPoint( src, dstForStore, destCrs, true ) );
+  mGeorefSession.addGcp( QgsGcpPoint( src, normalized.point, destCrs, true ) );
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(
@@ -1976,7 +1984,11 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
     return false;
   }
 
+  // #1052: choosing an image is a configuration change, not an unsaved GCP
+  // edit — keep the "unsaved control points" prompt honest.
+  mGeorefSession.beginConfigurationSync();
   setSourceRasterPath( path );
+  mGeorefSession.endConfigurationSync();
   if ( mSrcSession )
   {
     if ( mSrcRaster )

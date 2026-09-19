@@ -18,6 +18,8 @@
 #include <qgscoordinatetransformcontext.h>
 #include <qgspointxy.h>
 
+#include <cmath>
+
 using Catch::Approx;
 
 namespace {
@@ -59,7 +61,7 @@ TEST_CASE("georef pick: same CRS is the exact identity, not a failure", "[f13][i
     REQUIRE(out->y() == Approx(48.2082).margin(1e-12));
 }
 
-TEST_CASE("georef pick: CRS validity semantics — unreferenced layer passes through, "
+TEST_CASE("georef pick: CRS validity semantics -- unreferenced layer passes through, "
           "invalid canvas refuses",
           "[f13][issue1005][negative]")
 {
@@ -70,7 +72,7 @@ TEST_CASE("georef pick: CRS validity semantics — unreferenced layer passes thr
 
     const QgsPointXY raw(16.3738, 48.2082);
     // An invalid LAYER CRS means "this raster has no CRS": canvas picks are
-    // raw image coordinates — the georeferencing workflow itself. This
+    // raw image coordinates -- the georeferencing workflow itself. This
     // pass-through is preserved semantics, not the #1005 failure.
     const auto out =
         rsGeorefTransformPickBetweenCrs(valid, invalid, QgsCoordinateTransformContext(), raw);
@@ -103,4 +105,55 @@ TEST_CASE("georef pick: WGS84 -> UTM33N transforms to documented meter coordinat
     REQUIRE(out->x() < 700000.0);
     REQUIRE(out->y() > 5000000.0);
     REQUIRE(out->y() < 5600000.0);
+}
+
+// #1030 F-1030-P1-gcp: the destination transform before a GCP is stored used
+// to be an empty catch that kept the raster-CRS point and reported success.
+// The decision now lives in the pure seam rsGeorefNormalizeGcpDestination.
+TEST_CASE("georef GCP destination: normalization semantics before a GCP is stored",
+          "[f13][issue1030][gcp]")
+{
+    qgisEnv();
+    const auto wgs84 = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326"));
+    const auto utm33 = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:32633"));
+    const QgsCoordinateTransformContext ctx;
+    const QgsPointXY pick(16.3738, 48.2082);
+
+    // Unreferenced raster / no destination CRS chosen yet: the pick is stored
+    // as-is. That is not a transform failure (pre-existing workflow).
+    const auto passthrough = rsGeorefNormalizeGcpDestination(
+        pick, QgsCoordinateReferenceSystem(), QgsCoordinateReferenceSystem(), ctx);
+    REQUIRE_FALSE(passthrough.refuse);
+    REQUIRE(passthrough.point.x() == Approx(pick.x()).margin(1e-12));
+
+    // Same CRS: exact identity, not a failure.
+    const auto same = rsGeorefNormalizeGcpDestination(pick, wgs84, wgs84, ctx);
+    REQUIRE_FALSE(same.refuse);
+    REQUIRE(same.point.x() == Approx(pick.x()).margin(1e-12));
+    REQUIRE(same.point.y() == Approx(pick.y()).margin(1e-12));
+
+    // Valid differing pair is transformed (same seam as mapPickToLayerCrs).
+    const auto utm = rsGeorefNormalizeGcpDestination(pick, wgs84, utm33, ctx);
+    REQUIRE_FALSE(utm.refuse);
+    REQUIRE(utm.point.x() > 500000.0);
+    REQUIRE(utm.point.x() < 700000.0);
+    REQUIRE(utm.point.y() > 5000000.0);
+}
+
+TEST_CASE("georef GCP destination: an unplaceable pick is refused, never stored",
+          "[f13][issue1030][gcp][negative]")
+{
+    qgisEnv();
+    const auto wgs84 = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326"));
+    const auto utm33 = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:32633"));
+    const QgsCoordinateTransformContext ctx;
+
+    // Latitude 95 is outside the UTM domain. PROJ either errors (refuse) or
+    // yields a non-finite coordinate (also refused) -- what must never happen
+    // is a silently plausible finite pair stored as a GCP.
+    const auto outOfDomain =
+        rsGeorefNormalizeGcpDestination(QgsPointXY(16.0, 95.0), wgs84, utm33, ctx);
+    const bool usableAsIs = !outOfDomain.refuse
+        && std::isfinite(outOfDomain.point.x()) && std::isfinite(outOfDomain.point.y());
+    REQUIRE_FALSE(usableAsIs);
 }

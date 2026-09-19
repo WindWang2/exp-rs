@@ -91,8 +91,19 @@ class RsGeoreferencingSession : public QObject
     };
 
     bool isDirty() const { return mDirty; }
-    void markDirty() { mDirty = true; }
+    void markDirty() { if ( !mConfigurationSync ) mDirty = true; }
     void clearDirty() { mDirty = false; }
+
+    /// Configuration sync scope (#1052): the shell projects params-panel state
+    /// into the session on every refreshFit()/destCrsChanged(). That is a UI
+    /// projection, not an unsaved edit, so it must not leave a fresh window
+    /// born dirty (which triggered a spurious "unsaved control points" prompt).
+    void beginConfigurationSync() { ++mConfigurationSync; }
+    void endConfigurationSync()
+    {
+      if ( mConfigurationSync > 0 )
+        --mConfigurationSync;
+    }
 
     QString lastPointsPath() const { return mLastPointsPath; }
     void setLastPointsPath( const QString &path );
@@ -187,7 +198,18 @@ class RsGeoreferencingSession : public QObject
   private:
     void syncWorkflowGcps();
 
+    /// Warp executor liveness state (#1050). Lives behind a shared_ptr because
+    /// the JobEngine worker can still be inside the job after the session is
+    /// destroyed (bounded-wait timeout leaks the task on purpose): the guard
+    /// must then write shared state, never freed session members.
+    struct WarpExecutorState
+    {
+      std::atomic<bool> active{ false };
+      QSemaphore done{ 0 };
+    };
+
     bool mDirty = false;
+    int mConfigurationSync = 0;
     QString mLastPointsPath;
     QString mSourcePath;
     QgsGcpTransformerInterface::TransformMethod mMethod =
@@ -202,12 +224,13 @@ class RsGeoreferencingSession : public QObject
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
-    /// True while the JobEngine worker is inside mPendingWarpTask->run();
-    /// the destructor bounded-waits on it instead of hard-deleting (#626).
-    std::atomic<bool> mWarpExecutorActive{ false };
-    /// Released when the executor leaves the warp job (#650): the destructor
-    /// blocks on this instead of a 500x10 ms GUI-thread spin.
-    QSemaphore mWarpExecutorDone{ 0 };
+    /// Shared liveness state for the in-flight warp job (#1050): true while
+    /// the JobEngine worker is inside mPendingWarpTask->run(); the destructor
+    /// bounded-waits on it instead of hard-deleting (#626). Released when the
+    /// executor leaves the job (#650): the destructor blocks on this instead
+    /// of a 500x10 ms GUI-thread spin.
+    std::shared_ptr<WarpExecutorState> mWarpExecutorState =
+      std::make_shared<WarpExecutorState>();
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

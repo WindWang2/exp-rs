@@ -486,7 +486,6 @@ void QgisDesktopWindow::zoomToLayer()
         QgsMapLayer *target = selected.first();
         QgsRectangle extent = target->extent();
         const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
-        bool transformFailed = false;
         if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
         {
             try
@@ -494,22 +493,22 @@ void QgisDesktopWindow::zoomToLayer()
                 const QgsCoordinateTransform ct( target->crs(), canvasCrs, QgsProject::instance() );
                 extent = ct.transformBoundingBox( extent );
             }
-            catch ( ... )
+            catch ( const QgsCsException & )
             {
-                // #1005: surface the degraded zoom instead of silently
-                // applying the extent in the wrong CRS.
-                transformFailed = true;
+                // #1030: fail closed (#1005 sibling). Zooming to a layer extent
+                // that is still in the layer CRS jumps the canvas to a
+                // meaningless rectangle; refuse instead.
                 qWarning().noquote() << "zoomToLayer: CRS transform from"
                                      << target->crs().authid() << "to" << canvasCrs.authid()
-                                     << "failed; zooming to the untransformed layer extent";
+                                     << "failed; zoom refused";
+                statusBar()->showMessage(
+                    tr( "Cannot reproject the layer extent — Zoom to Layer skipped" ), 4000 );
+                return;
             }
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage( transformFailed
-                                      ? tr( "Zoom to Layer (CRS transform failed — extent in layer CRS)" )
-                                      : tr( "Zoom to Layer" ),
-                                  2000 );
+        statusBar()->showMessage( tr( "Zoom to Layer" ), 2000 );
     }
 }
 

@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <cpl_string.h>
@@ -1349,7 +1350,18 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   if ( writeProb )
   {
     QFile::remove( config.probabilityOutput );
-    QFile::rename( tempProbPath, config.probabilityOutput );
+    // #1052: mirror the uncertainty branch — a rename that cannot complete
+    // (cross-device, locked or occupied target) must not be reported as
+    // success while leaving a stale raster from a previous run in place.
+    if ( !QFile::rename( tempProbPath, config.probabilityOutput ) )
+    {
+      QFile::remove( tempProbPath );
+      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+      result.errorMessage =
+        QStringLiteral( "Failed to finalize probability raster: %1" )
+          .arg( config.probabilityOutput );
+      return result;
+    }
   }
   if ( writeUnc )
   {
@@ -1365,7 +1377,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     }
   }
 
-  result.totalPixels = outW * outH;
+  // #1056: outW * outH overflows a signed int past ~2^31 pixels (~46k x 46k);
+  // saturate instead of reporting a garbage (possibly negative) count.
+  const qint64 pixelCount = static_cast<qint64>( outW ) * static_cast<qint64>( outH );
+  result.totalPixels = pixelCount > std::numeric_limits<int>::max()
+                         ? std::numeric_limits<int>::max()
+                         : static_cast<int>( pixelCount );
   result.durationMs = static_cast<int>( timer.elapsed() );
   result.ok = true;
   result.meanConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0.0;

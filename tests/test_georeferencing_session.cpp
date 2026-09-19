@@ -834,3 +834,49 @@ TEST_CASE( "Georeferencer/Session: Destructor cancels running warp and cleans up
 }
 
 #include "test_georeferencing_session.moc"
+
+TEST_CASE( "GeoreferencingSession: configuration sync never dirties a fresh session",
+           "[georef][session][dirty][1052]" )
+{
+  ensureApp();
+  RsGeoreferencingSession session;
+  REQUIRE_FALSE( session.isDirty() );
+
+  // refreshFit() pushes params-panel state on every call (constructor,
+  // destCrsChanged, demZOffsetChanged, snapshot restore). None of that is an
+  // unsaved edit - a window born dirty triggered a spurious "unsaved control
+  // points" prompt and a dirty workbench bench.
+  for ( int i = 0; i < 3; ++i )
+  {
+    session.beginConfigurationSync();
+    session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
+    session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::PolynomialOrder2 );
+    session.setDemPath( QStringLiteral( "/tmp/dem.tif" ) );
+    session.setDemZOffset( 3.0 );
+    session.endConfigurationSync();
+    session.refit();
+    CHECK_FALSE( session.isDirty() );
+  }
+
+  // Real GCP edits still mark dirty.
+  session.addGcp( mkGcp( QgsPointXY( 0, 0 ), QgsPointXY( 1, 1 ) ) );
+  REQUIRE( session.isDirty() );
+}
+
+TEST_CASE( "GeoreferencingSession: config setters only dirty on an actual change",
+           "[georef][session][dirty][1052]" )
+{
+  ensureApp();
+  RsGeoreferencingSession session;
+  session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::PolynomialOrder2 );
+  session.clearDirty();
+  REQUIRE_FALSE( session.isDirty() );
+
+  session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::PolynomialOrder2 );
+  CHECK_FALSE( session.isDirty() );
+
+  session.setSourceRasterPath( QStringLiteral( "/tmp/other.tif" ) );
+  CHECK( session.isDirty() );
+}
