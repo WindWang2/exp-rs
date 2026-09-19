@@ -22,7 +22,9 @@ Surfaces: `commands`, `menuItems`, `settingsPages`, `dockPanels`,
 `checkbox`, `combo`, `slider`, `button`, `group` (nested, depth ≤ 4).
 
 Caps (see `exprs::PluginUiSchemaLimits`): ≤ 32 entries, ≤ 64 controls per
-page, ≤ 32 combo options, ≤ 256-char strings. Unknown control TYPES fail
+page, ≤ 512 controls TOTAL across all surfaces (per-group caps compound
+multiplicatively otherwise), ≤ 32 combo options, ≤ 256-char strings,
+group recursion depth ≤ 4. Unknown control TYPES fail
 validation (the host cannot render what it does not know); unknown FIELDS
 are ignored (additive evolution). `menuItems` and `contextActions` must
 reference declared `commands`.

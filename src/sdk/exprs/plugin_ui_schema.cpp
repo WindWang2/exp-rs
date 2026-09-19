@@ -48,14 +48,24 @@ bool boundedString( const Json::Value &value, size_t maxLength )
 }
 
 /// Validates one control (recursively for groups). Returns false when the
-/// control is structurally invalid (fatal). @p ids accumulates sibling ids.
+/// control is structurally invalid (fatal). @p ids accumulates sibling ids;
+/// @p totalControls is the schema-wide rendered-control budget (per-group
+/// caps alone compound multiplicatively).
 bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &limits,
                       size_t depth, std::set<std::string> &ids,
-                      std::vector<std::string> &errors, const std::string &path )
+                      std::vector<std::string> &errors, const std::string &path,
+                      size_t &totalControls )
 {
     if ( !control.isObject() )
     {
         fail( errors, path, "control must be an object" );
+        return false;
+    }
+    ++totalControls;
+    if ( totalControls > limits.maxTotalControls )
+    {
+        fail( errors, path, "total control count exceeds the schema cap ("
+                                + std::to_string( limits.maxTotalControls ) + ")" );
         return false;
     }
     const Json::Value id = control.get( "id", Json::Value() );
@@ -127,7 +137,7 @@ bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &li
         bool ok = true;
         for ( const Json::Value &child : children )
             ok = validateControl( child, limits, depth + 1, childIds, errors,
-                                  path + "/" + id.asString() )
+                                  path + "/" + id.asString(), totalControls )
                  && ok;
         return ok;
     }
@@ -277,8 +287,14 @@ bool validateEntries( const Json::Value &entries, const PluginUiSchemaLimits &li
             if ( !boundedString( commandId, limits.maxStringLength )
                  || !referencedCommands.count( commandId.asString() ) )
             {
-                fail( errors, path, "commandId '" + commandId.asString()
-                                        + "' does not reference a declared command" );
+                // Type-guarded rendering of the offending value: a hostile
+                // non-string commandId must not throw Json::LogicError out of
+                // the validator (the error message is the one place that
+                // still cast the raw value).
+                const std::string shown =
+                    commandId.isString() ? commandId.asString() : std::string( "<non-string>" );
+                fail( errors, path,
+                      "commandId '" + shown + "' does not reference a declared command" );
                 ok = false;
             }
         }
@@ -359,7 +375,10 @@ PluginUiSchemaParseResult validatePluginUiSchema( const Json::Value &schema,
         return result;
     }
 
-    // Controls-bearing surfaces.
+    // Controls-bearing surfaces. totalControls is ONE budget across every
+    // surface: per-array caps alone let a 4-deep group tree fan out to
+    // millions of widgets.
+    size_t totalControls = 0;
     for ( const char *surface : { "settingsPages", "dockPanels" } )
     {
         const Json::Value &pages = schema[ surface ];
@@ -416,7 +435,7 @@ PluginUiSchemaParseResult validatePluginUiSchema( const Json::Value &schema,
             std::set<std::string> ids;
             for ( const Json::Value &control : controls )
                 validateControl( control, limits, 1, ids, errors,
-                                 std::string( surface ) + "/" + id.asString() );
+                                 std::string( surface ) + "/" + id.asString(), totalControls );
         }
     }
 
@@ -501,6 +520,22 @@ PluginUiEventParseResult validateUiEvent( const Json::Value &event,
         }
     }
     return result;
+}
+
+Json::Value uiStateFromInvokeResponse( const Json::Value &invokeResult )
+{
+    if ( !invokeResult.isObject() )
+        return Json::Value( Json::nullValue );
+    const Json::Value &ok = invokeResult.get( "ok", Json::Value( false ) );
+    if ( !ok.isBool() || !ok.asBool() )
+        return Json::Value( Json::nullValue );
+    const Json::Value &response = invokeResult.get( "response", Json::Value() );
+    if ( !response.isObject() )
+        return Json::Value( Json::nullValue );
+    const Json::Value &state = response.get( "state", Json::Value() );
+    if ( !state.isObject() )
+        return Json::Value( Json::nullValue );
+    return state;
 }
 
 } // namespace exprs

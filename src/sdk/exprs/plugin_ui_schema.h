@@ -49,6 +49,10 @@ struct PluginUiSchemaLimits
 {
     size_t maxContributions = 32;     ///< total entries across all arrays
     size_t maxControlsPerPage = 64;   ///< controls per settings page / dock / group tree
+    /// Hard cap on the TOTAL rendered controls across every surface of one
+    /// schema. Without it the per-group cap compounds: 4 levels x 64
+    /// children is ~16M widgets and an OOM before any interaction.
+    size_t maxTotalControls = 512;
     size_t maxComboOptions = 32;
     size_t maxStringLength = 256;     ///< labels, titles, ids, option strings
     size_t maxGroupDepth = 4;
@@ -88,6 +92,23 @@ PluginUiEventParseResult validateUiEvent( const Json::Value &event,
 /// result whose normalized value is only meaningful when ok().
 PluginUiSchemaParseResult validatePluginUiSchema(
     const Json::Value &schema, const PluginUiSchemaLimits &limits = PluginUiSchemaLimits() );
+
+/// Extracts the state patch from a ui.invoke HOST RESULT.
+///
+/// Canonical wire shape (what PluginHostProcessRuntime::invokeUi returns and
+/// what the production delegate therefore hands the renderer):
+///
+///     { "ok": true, "response": { "state": { "<controlId>": <value>, ... } } }
+///
+/// The plugin's handleUiEvent() return object lives under "response" (the
+/// worker wraps it as result["response"]); the state patch therefore lives at
+/// result["response"]["state"], NOT result["state"]. Reading the wrong level
+/// silently discarded every plugin state update (#1040).
+///
+/// Returns an object-valued state patch, or a null value when the result is
+/// not a successful invoke outcome, carries no response object, or carries a
+/// non-object state. Never throws on hostile input.
+Json::Value uiStateFromInvokeResponse( const Json::Value &invokeResult );
 
 /// The interface an out-of-process plugin may export through the optional
 /// entry point EXPRS_createUiSchemaProviderV1 (declared Qt-free; the

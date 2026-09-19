@@ -48,10 +48,18 @@ namespace sicnu::plugins {
 
 /// Delivers one rendered event to the owning plugin and returns its bounded
 /// response. The production delegate wraps
-/// PluginHostProcessRuntime::invokeUi and is created by the SHELL when it
-/// attaches a schema (shell integration is the workbench track's seam);
-/// tests fake it. Implementations must be thread-safe (called from the
-/// renderer's delivery thread).
+/// PluginRuntimeHost::invokePluginUi and is created by the SHELL when it
+/// attaches a schema; tests fake it.
+///
+/// RESPONSE CONTRACT: the returned value is the HOST INVOKE RESULT —
+/// `{ "ok": bool, "response": { "state": { <controlId>: <value> } } }` — the
+/// same shape PluginHostProcessRuntime::invokeUi produces, NOT a bare state
+/// patch. The renderer extracts the patch with
+/// exprs::uiStateFromInvokeResponse (#1040); a delegate returning a different
+/// shape simply has no state applied.
+///
+/// Implementations must be thread-safe (called from the renderer's delivery
+/// thread).
 class UiInvokeDelegate
 {
 public:
@@ -129,8 +137,13 @@ private:
     void enqueueEvent( const QString &pluginId, const Json::Value &event );
     void deliveryLoop();
     void applyState( RenderedRecord &record, const Json::Value &state );
+    /// @p depth / @p budget are the renderer's own defense-in-depth caps
+    /// (the schema contract caps are validated host-side before rendering,
+    /// but a renderer must never trust that: depth-bounded recursion, a
+    /// schema-wide control budget, and type-guarded field reads).
     void buildControls( QWidget *parent, const Json::Value &controls, const QString &contributionId,
-                        const QString &pluginId, RenderedRecord &record );
+                        const QString &pluginId, RenderedRecord &record, size_t depth,
+                        size_t &budget );
 
     UiShellSink *mShellSink = nullptr;
     std::vector<std::shared_ptr<RenderedRecord>> mRecords;

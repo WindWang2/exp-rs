@@ -65,7 +65,13 @@ constexpr int kExitLoadFailed = 3;
 ///    normal "no UI" answer, not a failure.)
 /// ui.invoke params: { "event": { "contributionId", "controlId",
 ///                                "eventType", "value" } }
-///   result: the provider's bounded response ({ "state": {...} } optional).
+///   result: { "response": <provider return> } where the provider return is
+///   typically { "state": { <controlId>: <value> } }. The HOST-level invoke
+///   result (PluginHostProcessRuntime::invokeUi) wraps this one level:
+///   { "ok": true, "response": { "state": ... } }. Consumers must read the
+///   state patch at result["response"]["state"] (see
+///   exprs::uiStateFromInvokeResponse) — reading result["state"] silently
+///   discards every plugin update (#1040).
 /// plugin.shutdown params: {} — the worker runs PluginV1::shutdown and
 /// exits with kExitOk after replying.
 

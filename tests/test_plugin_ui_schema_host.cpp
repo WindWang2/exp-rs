@@ -46,7 +46,10 @@ Json::Value event( const char *contributionId, const char *controlId, const char
     return event;
 }
 
-/// Fake plugin: records delivered events, answers clicks with a state patch.
+/// Fake plugin: records delivered events and answers clicks with the REAL
+/// production envelope shape (PluginHostProcessRuntime::invokeUi returns
+/// { ok, response: { state } }) — a bare {state} would hide the #1040 level
+/// confusion this suite must keep fixed.
 class FakeDelegate : public UiInvokeDelegate
 {
 public:
@@ -58,11 +61,12 @@ public:
         lastEvent = event;
         delivered.fetch_add( 1 );
         Json::Value response( Json::objectValue );
+        response["ok"] = true;
         if ( event.get( "eventType", "" ).asString() == "clicked" )
         {
             Json::Value state( Json::objectValue );
             state["name"] = "clicked-response";
-            response["state"] = state;
+            response["response"]["state"] = state;
         }
         return response;
     }
@@ -223,5 +227,231 @@ TEST_CASE( "renderer refuses a schema with no attachable surface", "[uischemahos
     QString error;
     REQUIRE_FALSE( renderer.attachPluginSchema( "org.test.empty", schema,
                                                 std::make_unique<FakeDelegate>(), error ) );
+    renderer.setShellSink( nullptr );
+}
+
+TEST_CASE( "renderer refuses hostile schemas typed, never crashes the GUI thread",
+           "[uischemahost][hostile]" )
+{
+    AppFixture fixture;
+    auto &renderer = *PluginUiSchemaRenderer::instance();
+    TestShellSink sink;
+    renderer.setShellSink( &sink );
+
+    SECTION( "deep group nesting must not recurse without bound" )
+    {
+        // 256 levels: 64x the schema-contract depth cap (4) and 32x the
+        // renderer's own cap (8). The test tree itself is destroyed by
+        // jsoncpp's recursive destructor, so the fixture stays well inside
+        // the default thread stack while still proving bounded recursion.
+        Json::Value control( Json::objectValue );
+        control["id"] = "leaf";
+        control["type"] = "text";
+        control["label"] = "Leaf";
+        for ( int level = 1; level < 256; ++level )
+        {
+            Json::Value group( Json::objectValue );
+            group["id"] = "group" + std::to_string( level );
+            group["type"] = "group";
+            group["label"] = "Group";
+            Json::Value children( Json::arrayValue );
+            children.append( control );
+            group["controls"] = children;
+            control = group;
+        }
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+        Json::Value controls( Json::arrayValue );
+        controls.append( control );
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.deep";
+        page["title"] = "Deep";
+        page["controls"] = controls;
+        Json::Value pages( Json::arrayValue );
+        pages.append( page );
+        schema["settingsPages"] = pages;
+
+        QString error;
+        REQUIRE_FALSE( renderer.attachPluginSchema(
+            "org.test.hostile.deep", schema, std::make_unique<FakeDelegate>(), error ) );
+        REQUIRE_FALSE( error.isEmpty() );
+        REQUIRE_FALSE( renderer.hasPluginUi( "org.test.hostile.deep" ) );
+    }
+
+    SECTION( "wrong-typed control fields are refused before widget build" )
+    {
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.types";
+        page["title"] = "Types";
+        Json::Value controls( Json::arrayValue );
+        Json::Value text( Json::objectValue );
+        text["id"] = "text";
+        text["type"] = "text";
+        text["label"] = "Text";
+        text["multiline"] = Json::Value( Json::objectValue ); // must be bool
+        controls.append( text );
+        Json::Value number( Json::objectValue );
+        number["id"] = "number";
+        number["type"] = "number";
+        number["label"] = "Number";
+        number["minimum"] = Json::Value( Json::arrayValue ); // must be number
+        controls.append( number );
+        Json::Value combo( Json::objectValue );
+        combo["id"] = "combo";
+        combo["type"] = "combo";
+        combo["label"] = "Combo";
+        Json::Value options( Json::arrayValue );
+        Json::Value option( Json::objectValue );
+        option["value"] = Json::Value( Json::objectValue ); // must be string
+        option["label"] = Json::Value( Json::arrayValue );
+        options.append( option );
+        combo["options"] = options;
+        controls.append( combo );
+        page["controls"] = controls;
+        Json::Value pages( Json::arrayValue );
+        pages.append( page );
+        schema["settingsPages"] = pages;
+
+        QString error;
+        REQUIRE_FALSE( renderer.attachPluginSchema(
+            "org.test.hostile.types", schema, std::make_unique<FakeDelegate>(), error ) );
+        REQUIRE_FALSE( error.isEmpty() );
+        REQUIRE_FALSE( renderer.hasPluginUi( "org.test.hostile.types" ) );
+    }
+
+    SECTION( "control flood is refused instead of exhausting widget memory" )
+    {
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.flood";
+        page["title"] = "Flood";
+        Json::Value controls( Json::arrayValue );
+        for ( int index = 0; index < 4096; ++index )
+        {
+            Json::Value control( Json::objectValue );
+            control["id"] = "flood" + std::to_string( index );
+            control["type"] = "text";
+            control["label"] = "Text";
+            control["defaultValue"] = "x";
+            controls.append( control );
+        }
+        page["controls"] = controls;
+        Json::Value pages( Json::arrayValue );
+        pages.append( page );
+        schema["settingsPages"] = pages;
+
+        QString error;
+        REQUIRE_FALSE( renderer.attachPluginSchema(
+            "org.test.hostile.flood", schema, std::make_unique<FakeDelegate>(), error ) );
+        REQUIRE_FALSE( error.isEmpty() );
+        REQUIRE_FALSE( renderer.hasPluginUi( "org.test.hostile.flood" ) );
+    }
+
+    renderer.setShellSink( nullptr );
+}
+
+/// Delegate answering with a HOSTILE state patch: wrong-typed values for
+/// every control kind (the shape a compromised worker can return even with a
+/// valid schema). The renderer must ignore them, never throw on the GUI
+/// thread, and still emit eventApplied.
+class HostileStateDelegate : public UiInvokeDelegate
+{
+public:
+    Json::Value invoke( const Json::Value & ) override
+    {
+        Json::Value response( Json::objectValue );
+        response["ok"] = true;
+        Json::Value state( Json::objectValue );
+        state["name"] = 42;                                    // text: not a string
+        state["enabled"] = "yes";                              // checkbox: not bool
+        state["profile"] = Json::Value( Json::arrayValue );    // combo: not a string
+        state["bogus"] = Json::Value( Json::objectValue );     // unknown id
+        response["response"]["state"] = state;
+        return response;
+    }
+};
+
+TEST_CASE( "hostile state patches are ignored without breaking the GUI thread",
+           "[uischemahost][hostile]" )
+{
+    AppFixture fixture;
+    auto &renderer = *PluginUiSchemaRenderer::instance();
+    TestShellSink sink;
+    renderer.setShellSink( &sink );
+
+    Json::Value schema( Json::objectValue );
+    schema["version"] = 1;
+    Json::Value page( Json::objectValue );
+    page["id"] = "page.state";
+    page["title"] = "State";
+    Json::Value controls( Json::arrayValue );
+    Json::Value text( Json::objectValue );
+    text["id"] = "name";
+    text["type"] = "text";
+    text["label"] = "Name";
+    text["defaultValue"] = "initial";
+    controls.append( text );
+    Json::Value check( Json::objectValue );
+    check["id"] = "enabled";
+    check["type"] = "checkbox";
+    check["label"] = "Enabled";
+    check["defaultValue"] = false;
+    controls.append( check );
+    Json::Value combo( Json::objectValue );
+    combo["id"] = "profile";
+    combo["type"] = "combo";
+    combo["label"] = "Profile";
+    Json::Value options( Json::arrayValue );
+    for ( const char *value : { "fast", "safe" } )
+    {
+        Json::Value option( Json::objectValue );
+        option["value"] = value;
+        option["label"] = value;
+        options.append( option );
+    }
+    combo["options"] = options;
+    combo["defaultValue"] = "safe";
+    controls.append( combo );
+    page["controls"] = controls;
+    Json::Value pages( Json::arrayValue );
+    pages.append( page );
+    schema["settingsPages"] = pages;
+
+    QString attachError;
+    REQUIRE( renderer.attachPluginSchema( "org.test.hostile.state", schema,
+                                          std::make_unique<HostileStateDelegate>(),
+                                          attachError ) );
+    QWidget *rendered = sink.settingsPage;
+    REQUIRE( rendered != nullptr );
+
+    int applied = 0;
+    QObject::connect( &renderer, &PluginUiSchemaRenderer::eventApplied,
+                      [&applied]( const QString &, const QString & ) { ++applied; } );
+
+    // Force one delivery round-trip with the hostile response shape.
+    auto *comboWidget = rendered->findChild<QComboBox *>();
+    REQUIRE( comboWidget != nullptr );
+    comboWidget->setCurrentIndex( 0 );
+
+    for ( int index = 0; index < 200 && applied == 0; ++index )
+    {
+        QApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    REQUIRE( applied > 0 );
+
+    // Every hostile value was ignored: widgets keep their prior values.
+    auto *lineEdit = rendered->findChild<QLineEdit *>();
+    REQUIRE( lineEdit != nullptr );
+    REQUIRE( lineEdit->text() == "initial" );
+    auto *checkbox = rendered->findChild<QCheckBox *>();
+    REQUIRE( checkbox != nullptr );
+    REQUIRE_FALSE( checkbox->isChecked() );
+    REQUIRE( comboWidget->currentData().toString() == "fast" ); // the user-driven value
+
+    renderer.releasePluginUi( "org.test.hostile.state" );
     renderer.setShellSink( nullptr );
 }
