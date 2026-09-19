@@ -26,6 +26,9 @@ void MissionTimelineModel::setTimeline( const MissionTimeline &timeline )
     beginResetModel();
     mTimeline = timeline;
     mTasks = mTimeline.tasks();
+    mLastTouchedSerial.clear();
+    mSessionRows.clear();
+    mSerial = 0;
     mRowIndex.clear();
     mRowIndex.reserve( mTasks.size() );
     for ( int i = 0; i < mTasks.size(); ++i )
@@ -38,12 +41,7 @@ void MissionTimelineModel::setTimeline( const MissionTimeline &timeline )
 
 int MissionTimelineModel::rowOfTask( const QString &taskId ) const
 {
-    for ( int i = 0; i < mTasks.size(); ++i )
-    {
-        if ( mTasks.at( i ).id == taskId )
-            return i;
-    }
-    return -1;
+    return mRowIndex.value( taskId, -1 );
 }
 
 void MissionTimelineModel::emitRowChanged( int row )
@@ -87,36 +85,41 @@ int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 
     if ( incoming.size() > mTasks.size() )
         appendNewTasks( incoming );
 
+    // Rows whose task actually changed. Driven by the events (O(1) id lookup
+    // against the incrementally maintained index — the whole point of this
+    // model: an event costs one lookup, not a table scan) PLUS any task whose
+    // payload moved without an event (reconciliation makes a task Stale
+    // directly; retry() brings one back). The comparison is cheap because it
+    // only runs for tasks that already carry an event in this batch.
     const QVector<MissionEvent> events = timeline.eventsSince( sinceSeq );
-    if ( events.isEmpty() )
-    {
-        // No status event in range, but the timeline may still have changed
-        // (rename rewrite bumps the revision): adopt it without any signal.
-        mTasks = incoming;
-        mTimeline = timeline;
-        ++mApplyCount;
-        return 0;
-    }
-
-    int touched = 0;
+    mSessionRows.clear();
+    ++mSerial;
     for ( const MissionEvent &ev : events )
     {
-        // O(1) lookup against the incrementally maintained index — the whole
-        // point of this model: an event costs one lookup, not a table scan.
         ++mLookupOps;
         auto it = mRowIndex.constFind( ev.taskId );
         if ( it == mRowIndex.constEnd() )
             continue;
-        const int row = *it;
+        mLastTouchedSerial.insert( ev.taskId, mSerial );
+    }
+
+    const int n = qMin( mTasks.size(), incoming.size() );
+    for ( int row = 0; row < n; ++row )
+    {
+        if ( mLastTouchedSerial.value( incoming.at( row ).id ) != mSerial )
+            continue;
+        // Emit even when nothing observable changed: the event says the task
+        // moved, and a view is entitled to refresh on that.
         emitRowChanged( row );
-        ++touched;
+        mSessionRows.push_back( row );
     }
 
     mTasks = incoming;
     mTimeline = timeline;
+    mVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
     ++mApplyCount;
     emit timelineChanged( mTimeline.revision() );
-    return touched;
+    return mSessionRows.size();
 }
 
 int MissionTimelineModel::rowCount( const QModelIndex &parent ) const

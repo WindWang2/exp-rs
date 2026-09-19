@@ -63,8 +63,12 @@ public:
     /// Returns the number of rows touched.
     int applyEvents( const MissionTimeline &timeline, quint64 sinceSeq );
 
-    /// Row index of a task id, or -1 when unknown / not yet paged in.
+    /// Row index of a task id, or -1 when unknown.
     int rowOfTask( const QString &taskId ) const;
+
+    /// Rows reported as changed by the previous applyEvents() call, ascending.
+    /// The benchmark uses size() as the per-call work bound.
+    const QVector<int> &lastTouchedRows() const { return mSessionRows; }
 
     /// Projection of a single row — the exact bytes the MCP `mission:timeline`
     /// tool returns for the same task (surface parity by construction).
@@ -99,6 +103,19 @@ signals:
 private:
     void emitRowChanged( int row );
     void appendNewTasks( const QVector<MissionTask> &tasks );
+
+    /// Task -> the applyEvents() serial in which it was last reported. An
+    /// event may repeat a row (two transitions in one batch); those are still
+    /// two rows worth of work, so the model reports both.
+    QHash<QString, int> mLastTouchedSerial;
+    /// Rows touched by the current applyEvents() call. Reconciliation can drop
+    /// a reference from a task WITHOUT any event and `retry()` can bring a
+    /// stale task back, so the model cannot assume "changed tasks have events":
+    /// it reports the rows whose task actually changed, which is the honest
+    /// bound. Rows are never removed (positions are stable and the history is
+    /// provenance), so no index has to move.
+    QVector<int> mSessionRows;
+    int mSerial = 0;
 
     MissionTimeline mTimeline;
     QVector<MissionTask> mTasks;   ///< in insertion order; index == row

@@ -75,8 +75,13 @@ RunResult runEvents( const MissionTimeline &base, int taskCount, int eventCount,
         // Same-status replay: legal, audit-only, and the realistic shape of a
         // progress stream.
         (void) timeline.transition( id, task->status, QStringLiteral( "2026-09-20T00:00:00Z" ) );
-        model.applyEvents( timeline, cursor );
+        const int perCall = model.applyEvents( timeline, cursor );
         cursor = timeline.lastEventSeq();
+
+        // The per-call bound is the thing a user feels. One event must touch
+        // at most one row, however large the mission is.
+        REQUIRE( perCall <= 1 );
+        REQUIRE( model.lastTouchedRows().size() <= 1 );
     }
 
     RunResult result;

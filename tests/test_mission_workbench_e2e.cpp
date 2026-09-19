@@ -133,9 +133,13 @@ TEST_CASE( "a mission runs from import to publish and survives a project reopen"
 
     // --- 2. execute through the run authority, observe incrementally -----
     quint64 cursor = timeline.lastEventSeq();
+    int observedRows = 0;
     const auto observe = [&]() {
-        model.applyEvents( timeline, cursor );
+        const int touched = model.applyEvents( timeline, cursor );
         cursor = timeline.lastEventSeq();
+        // One observation must not repaint more rows than it observed.
+        REQUIRE( model.lastTouchedRows().size() == touched );
+        observedRows += touched;
     };
 
     REQUIRE( runner.submit( QStringLiteral( "task-0" ), QStringLiteral( "t0" ) ).applied );
@@ -153,6 +157,7 @@ TEST_CASE( "a mission runs from import to publish and survives a project reopen"
     REQUIRE( model.fullRangeDataChangedCount() == 0 );
     REQUIRE( model.incrementalApplyCount() == 4 );
     REQUIRE( model.touchedRows() == 4 );
+    REQUIRE( observedRows == 4 );
 
     // GUI and agent agree after the failures as well.
     const QJsonObject afterFailure = missionTimelineProjectionJson( timeline, 32, 0 );
@@ -196,6 +201,11 @@ TEST_CASE( "a mission runs from import to publish and survives a project reopen"
 
     reopenedModel.applyEvents( reopened, 0 );
     REQUIRE( reopenedModel.resetCount() == 1 );
+    // Replaying the whole log touches the five original rows (task-0 and
+    // task-1 ran) and does NOT invent a sixth row for the resumed run. The
+    // stale/settled rows keep their identity across the reopen.
+    REQUIRE( reopenedModel.lastTouchedRows() == QVector<int>{ 0, 1, 2, 3, 4 } );
+    REQUIRE( reopenedModel.rowCount() == 5 );
 
     // --- 5. deleting a layer after reopen marks work stale, on all surfaces
     MissionRefResolver resolver = []( const QString &id ) {
