@@ -10,10 +10,12 @@
 #include "processing/algorithms/spectral_unmixing.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "rs_spectral_reference_input.h"
+#include "rs_partial_output_guard.h"
 
 #include <gdal.h>
 
 #include <QString>
+#include <QStringList>
 
 #include <cmath>
 #include <numeric>
@@ -139,10 +141,15 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output abundance dataset: " + outputPath);
 
+    QStringList guardedPaths{ QString::fromStdString(outputPath) };
+    const std::string errorPath = getString(params, "errorOut", "");
+    if (!errorPath.empty())
+        guardedPaths.append(QString::fromStdString(errorPath));
+    PartialOutputGuard partialGuard(guardedPaths);
+
     for (int e = 0; e < nEndmembers; ++e)
         outDataset.setBandNoDataValue(e + 1, std::numeric_limits<float>::quiet_NaN());
 
-    const std::string errorPath = getString(params, "errorOut", "");
     GdalDatasetWrapper errorDataset;
     if (!errorPath.empty())
     {
@@ -267,6 +274,7 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                       ? "Failed to finalize reconstruction-error raster"
                                       : errorCloseError.toStdString());
     }
+    partialGuard.disarm();
 
     context.reportProgress(1.0, "Spectral unmixing complete");
 

@@ -129,7 +129,7 @@ echo == generating sample data (deterministic, offline) ==
 mkdir "%BUNDLE%\data\samples"
 if not "%SKIP_SAMPLES%"=="1" (
   pushd "%BUNDLE%"
-  "%GEN_BIN%" "%BUNDLE%\data\samples" || ( popd & exit /b 1 )
+  "%GEN_BIN%" "--out=%BUNDLE%\data\samples" || ( popd & exit /b 1 )
   popd
 )
 

@@ -280,8 +280,25 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         report.warnings.append( QStringLiteral( "cannot write checksums.txt" ) );
         return report;
     }
-    checksumFile.write( checksums.join( QLatin1Char( '\n' ) ).toUtf8() );
-    checksumFile.write( "\n" );
+    {
+        const QByteArray checksumBytes =
+            checksums.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+        if ( checksumFile.write( checksumBytes ) != checksumBytes.size() )
+        {
+            report.warnings.append( QStringLiteral( "short write checksums.txt" ) );
+            checksumFile.close();
+            report.ok = false;
+            return report;
+        }
+    }
+    if ( !checksumFile.flush() )
+    {
+        report.warnings.append( QStringLiteral( "flush failed checksums.txt" ) );
+        checksumFile.close();
+        report.ok = false;
+        return report;
+    }
+    checksumFile.close();
     ++report.fileCount;
 
     report.ok = report.warnings.isEmpty();

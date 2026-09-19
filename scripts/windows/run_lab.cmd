@@ -20,7 +20,7 @@ if exist "data\samples\landsat_sample.tif" (
   echo     data\samples present - skipping.
 ) else (
   if not exist "%GEN%" ( echo ERROR: %GEN% missing - run setup.cmd first & exit /b 1 )
-  "%GEN%" data\samples || exit /b 1
+  "%GEN%" --out=data\samples || exit /b 1
 )
 
 echo === [2/3] lab 1 pipeline (NDVI, offline) ===

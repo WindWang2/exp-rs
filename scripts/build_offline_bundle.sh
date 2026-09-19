@@ -84,7 +84,7 @@ cp "$gen_bin" "$bundle/bin/"
 echo "== generating sample data (deterministic, offline) =="
 mkdir -p "$bundle/data/samples"
 if [ "$skip_samples" -eq 0 ]; then
-  "$gen_bin" "$bundle/data/samples"
+  "$gen_bin" --out="$bundle/data/samples"
 fi
 
 echo "== copying data tree =="

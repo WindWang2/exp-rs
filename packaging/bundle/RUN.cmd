@@ -28,7 +28,7 @@ if exist "data\samples\landsat_sample.tif" (
     pause
     exit /b 1
   )
-  bin\sicnu_generate_samples.exe data\samples
+  bin\sicnu_generate_samples.exe --out=data\samples
   if errorlevel 1 (
     echo ERROR: sample generation failed.
     pause

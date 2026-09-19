@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -137,6 +138,10 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                                   " bands, got " + std::to_string(bandCount));
 
     const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (pixelCount > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "raster too large for endmember extraction "
+                              "(pixel indices would exceed 2^31-1)");
     if (static_cast<size_t>(nEndmembers) > pixelCount)
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "nEndmembers exceeds the pixel count");

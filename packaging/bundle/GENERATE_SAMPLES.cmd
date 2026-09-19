@@ -15,7 +15,7 @@ if not exist "bin\sicnu_generate_samples.exe" (
   exit /b 1
 )
 echo Generating deterministic sample rasters into data\samples ...
-bin\sicnu_generate_samples.exe data\samples
+bin\sicnu_generate_samples.exe --out=data\samples
 set "RC=%errorlevel%"
 if "%RC%"=="0" (
   echo Done. Files: data\samples\landsat_sample.tif, change_before.tif, change_after.tif, dem_sample.tif

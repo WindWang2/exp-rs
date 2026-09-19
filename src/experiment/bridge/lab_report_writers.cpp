@@ -558,8 +558,34 @@ Result<QStringList> writeLabReportFiles( const QJsonObject &document, const QStr
                     .arg( targets.at( i ), file.errorString() ),
                 sicnu::dataset::DiagnosticSeverity::Error } );
         }
-        file.write( payloads.at( i ).toUtf8() );
+        const QByteArray bytes = payloads.at( i ).toUtf8();
+        if ( file.write( bytes ) != bytes.size() )
+        {
+            const QString err = file.errorString();
+            file.close();
+            return Result<QStringList>::failure( Diagnostic{
+                QStringLiteral( "lab.report_write_failed" ),
+                QStringLiteral( "short write %1: %2" ).arg( targets.at( i ), err ),
+                sicnu::dataset::DiagnosticSeverity::Error } );
+        }
+        if ( !file.flush() )
+        {
+            const QString err = file.errorString();
+            file.close();
+            return Result<QStringList>::failure( Diagnostic{
+                QStringLiteral( "lab.report_write_failed" ),
+                QStringLiteral( "flush failed %1: %2" ).arg( targets.at( i ), err ),
+                sicnu::dataset::DiagnosticSeverity::Error } );
+        }
         file.close();
+        if ( file.error() != QFile::NoError )
+        {
+            return Result<QStringList>::failure( Diagnostic{
+                QStringLiteral( "lab.report_write_failed" ),
+                QStringLiteral( "close failed %1: %2" )
+                    .arg( targets.at( i ), file.errorString() ),
+                sicnu::dataset::DiagnosticSeverity::Error } );
+        }
         written << targets.at( i );
     }
     return Result<QStringList>::success( written );
