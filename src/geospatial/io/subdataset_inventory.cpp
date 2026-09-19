@@ -81,7 +81,8 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
     throw GeoError( ErrorCode::InvalidArgument, "subdataset inventory cap outside bounds", details );
   }
 
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  CPLErrorStateBackuper errorState;
+  CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
   GDALDatasetH handle = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !handle )
   {
