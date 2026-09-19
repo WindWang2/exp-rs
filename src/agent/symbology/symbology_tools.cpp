@@ -1,4 +1,5 @@
 // src/agent/symbology/symbology_tools.cpp
+#include <memory>
 #include "symbology_tools.h"
 
 #include "../commands/workspace_commands.h"
@@ -285,23 +286,26 @@ class ApplyCategoricalTool final : public SpatialTool
       delete ramp;
       auto *renderer = new QgsCategorizedSymbolRenderer( field, categories );
 
-      // Previous renderer snapshot for undo.
-      QgsFeatureRenderer *previous = vector->renderer() ? vector->renderer()->clone() : nullptr;
+      // Templates for undo/redo. setRenderer() takes ownership and deletes the
+      // outgoing renderer, so each replay must install a fresh clone (#1075).
+      std::shared_ptr<QgsFeatureRenderer> after( renderer );
+      std::shared_ptr<QgsFeatureRenderer> previous(
+        vector->renderer() ? vector->renderer()->clone() : nullptr );
       const QString label =
         QStringLiteral( "Apply categorical symbology on %1" ).arg( vector->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
       QgsVectorLayer *vectorLayer = vector;
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set categorized renderer" ),
-                               [ vectorLayer, renderer ] {
-                                 vectorLayer->setRenderer( renderer );
+                               [ vectorLayer, after ] {
+                                 vectorLayer->setRenderer( after->clone() );
                                  vectorLayer->triggerRepaint();
                                  return true;
                                },
                                [ vectorLayer, previous ] {
                                  if ( previous )
                                  {
-                                   vectorLayer->setRenderer( previous );
+                                   vectorLayer->setRenderer( previous->clone() );
                                    vectorLayer->triggerRepaint();
                                    return true;
                                  }
@@ -434,21 +438,23 @@ class ApplyGraduatedTool final : public SpatialTool
       delete ramp;
       auto *renderer = new QgsGraduatedSymbolRenderer( field, ranges );
 
-      QgsFeatureRenderer *previous = vector->renderer() ? vector->renderer()->clone() : nullptr;
+      std::shared_ptr<QgsFeatureRenderer> after( renderer );
+      std::shared_ptr<QgsFeatureRenderer> previous(
+        vector->renderer() ? vector->renderer()->clone() : nullptr );
       const QString label = QStringLiteral( "Apply graduated symbology on %1" ).arg( vector->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
       QgsVectorLayer *vectorLayer = vector;
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set graduated renderer" ),
-                               [ vectorLayer, renderer ] {
-                                 vectorLayer->setRenderer( renderer );
+                               [ vectorLayer, after ] {
+                                 vectorLayer->setRenderer( after->clone() );
                                  vectorLayer->triggerRepaint();
                                  return true;
                                },
                                [ vectorLayer, previous ] {
                                  if ( previous )
                                  {
-                                   vectorLayer->setRenderer( previous );
+                                   vectorLayer->setRenderer( previous->clone() );
                                    vectorLayer->triggerRepaint();
                                    return true;
                                  }
@@ -569,21 +575,23 @@ class ApplyRasterRampTool final : public SpatialTool
       shader->setRasterShaderFunction( new QgsColorRampShader( minValue, maxValue, ramp ) );
       auto *renderer = new QgsSingleBandPseudoColorRenderer( raster->dataProvider(), band, shader );
 
-      QgsRasterRenderer *previous = raster->renderer() ? raster->renderer()->clone() : nullptr;
+      std::shared_ptr<QgsRasterRenderer> after( renderer );
+      std::shared_ptr<QgsRasterRenderer> previous(
+        raster->renderer() ? raster->renderer()->clone() : nullptr );
       const QString label = QStringLiteral( "Apply raster ramp on %1" ).arg( raster->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
       QgsRasterLayer *rasterLayer = raster;
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set pseudo-color renderer" ),
-                               [ rasterLayer, renderer ] {
-                                 rasterLayer->setRenderer( renderer );
+                               [ rasterLayer, after ] {
+                                 rasterLayer->setRenderer( after->clone() );
                                  rasterLayer->triggerRepaint();
                                  return true;
                                },
                                [ rasterLayer, previous ] {
                                  if ( previous )
                                  {
-                                   rasterLayer->setRenderer( previous );
+                                   rasterLayer->setRenderer( previous->clone() );
                                    rasterLayer->triggerRepaint();
                                    return true;
                                  }
