@@ -23,6 +23,7 @@
 
 #include "dataset_ids.h"
 #include "dataset_manifest.h"
+#include "dataset_qa_report.h"
 #include "dataset_types.h"
 #include "dataset_version.h"
 
@@ -130,6 +131,37 @@ class DatasetStore
     sicnu::data::Result<DatasetVersionRecord> createDerivedVersion(
         const DatasetVersionId &parentId, const QString &note = QString() );
 
+    // --- version tags (12.0) --------------------------------------------------
+    /// A stable name pinned to one COMMITTED (or deprecated) version of
+    /// @p datasetId — the human-stable handle ("baseline", "release-2")
+    /// that survives later version churn. Tags live in the store, NOT in the
+    /// manifest: tagging changes no content, so version fingerprints are
+    /// untouched by definition.
+    struct VersionTag
+    {
+        QString tag;
+        DatasetVersionId versionId;
+        QDateTime createdAtUtc;
+    };
+
+    /// Pins @p tag to @p versionId. The version must be committed (draft
+    /// content is still moving) and belong to @p datasetId. A tag is
+    /// immutable once written: re-adding an existing tag — to any version —
+    /// fails with `dataset.tag_conflict`; moving one is an explicit
+    /// removeVersionTag + addVersionTag.
+    sicnu::data::Result<void> addVersionTag( const DatasetId &datasetId, const QString &tag,
+                                             const DatasetVersionId &versionId );
+    /// Unpins a tag. Removing a tag that does not exist fails with
+    /// `dataset.not_found` (tags are audit-relevant handles, not idempotent
+    /// cache entries).
+    sicnu::data::Result<void> removeVersionTag( const DatasetId &datasetId, const QString &tag );
+    /// Resolves a tag to its pinned version; nullopt when unset (or when the
+    /// pinned version row no longer exists — tags never fabricate targets).
+    std::optional<DatasetVersionId> versionByTag( const DatasetId &datasetId,
+                                                  const QString &tag ) const;
+    /// All tags of one dataset, tag-ascending (bounded by @p limit).
+    QVector<VersionTag> versionTags( const DatasetId &datasetId, qint64 limit = 1000 ) const;
+
     // --- lineage edges (dataset-side; goal §28) ------------------------------
     /// Adds a directed edge `from → to`. Both endpoints are (kind, id) pairs
     /// with kind one of: asset, dataset, dataset_version, sample, annotation,
@@ -180,6 +212,21 @@ class DatasetStore
     sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> samplesPage(
         const DatasetVersionId &versionId, qint64 offset = 0,
         qint64 limit = kMaxPageSize ) const;
+    /// Keyset-paged samples (12.0): deep pages cost O(log n) instead of
+    /// O(offset), so a 100k-row version pages with the same latency at the
+    /// end as at the beginning. @p cursor is the opaque `nextCursor` of the
+    /// previous page (empty = first page); it embeds the version id, so
+    /// replaying a cursor against another version fails
+    /// `dataset.cursor_mismatch` instead of silently resuming elsewhere.
+    struct SampleCursorPage
+    {
+        QVector<SampleRecord> samples;
+        QString nextCursor; ///< empty after the last page
+        qint64 total = 0;   ///< full row count, independent of the cursor
+    };
+    sicnu::data::Result<SampleCursorPage> samplesPageCursor(
+        const DatasetVersionId &versionId, const QString &cursor = QString(),
+        qint64 limit = kMaxPageSize ) const;
     qint64 sampleCount( const DatasetVersionId &versionId ) const;
     /// Distinct group ids of one version (bounded by @p limit; ordered).
     QVector<QString> sampleGroupIds( const DatasetVersionId &versionId,
@@ -225,6 +272,28 @@ class DatasetStore
     /// All reports for one manifest, oldest first (bounded).
     QVector<LeakageReport> leakageReportsForSplit( const QString &splitManifestId,
                                                    qint64 limit = 100 ) const;
+
+    // --- dataset QA reports (12.0; append-only audit evidence) ------------------
+    /// One persisted QA report about a dataset VERSION.
+    struct QaReportRecord
+    {
+        qint64 id = 0;               ///< store-assigned, append order
+        QString splitManifestId;     ///< empty = version-scoped QA only
+        QString overallVerdict;      ///< "pass"|"warn"|"fail"|"unknown"
+        DatasetQaReport report;      ///< the parsed document
+        QDateTime createdAtUtc;
+    };
+
+    /// Appends a QA report as audit evidence. Append-only BY CONTRACT: rows
+    /// are never updated or deleted (draft-only dataset deletion cascades
+    /// them with the version). The report's datasetVersionId must match the
+    /// @p versionId being audited and the version must exist.
+    sicnu::data::Result<void> saveQaReport( const DatasetQaReport &report );
+    /// Newest-first audit history for one version (bounded by @p limit).
+    sicnu::data::Result<QVector<QaReportRecord>> qaReportsForVersion(
+        const DatasetVersionId &versionId, qint64 limit = 100 ) const;
+    /// The most recent report for one version; nullopt when never audited.
+    std::optional<QaReportRecord> latestQaReport( const DatasetVersionId &versionId ) const;
 
     // --- sample facets & quality cache (goal 7.0 §E) ----------------------------
     /// One facet value of one sample (caller-supplied evidence: "sensor",
