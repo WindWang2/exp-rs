@@ -6,12 +6,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/workspace_catalog.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <QTemporaryDir>
 
 #include <chrono>
 
 using namespace sicnu::data;
+using sicnu::runtime::observability::fault::ArmedFault;
+using sicnu::runtime::observability::fault::Mode;
 
 namespace
 {
@@ -102,6 +105,73 @@ TEST_CASE( "WorkspaceCatalog pages filtered queries", "[workspace_catalog]" )
     CatalogQuery prefix;
     prefix.textPrefix = QStringLiteral( "Scene 24" );
     REQUIRE( catalog.page( prefix, 0, 10 ).total == 11 ); // 24, 240..249
+}
+
+TEST_CASE( "WorkspaceCatalog batch upsert is atomic when a mid-batch step fails",
+           "[workspace_catalog][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    WorkspaceCatalog catalog;
+    QString err;
+    REQUIRE( catalog.open( dir.filePath( "catalog.sqlite" ), &err ) );
+
+    // Pre-existing state that must survive the failed batch untouched.
+    CatalogAsset keeper = makeAsset( 1 );
+    REQUIRE( catalog.upsertAsset( keeper ) );
+
+    // EveryNth(2): the probe fires on the SECOND checked write — the first
+    // asset's alias cleanup — after its asset row was fully inserted inside
+    // the open transaction, which is exactly the partial-commit window issue
+    // #1045 describes.
+    QVector<CatalogAsset> batch{ makeAsset( 2 ), makeAsset( 3 ) };
+    {
+        ArmedFault fault( { "workspace_catalog.step", Mode::EveryNth, 2, {} } );
+        REQUIRE_FALSE( catalog.upsertAssets( batch ).operator bool() );
+    }
+
+    // Nothing from the batch survived — not even the asset whose own row
+    // write succeeded before the failure.
+    REQUIRE( catalog.count() == 1 );
+    REQUIRE_FALSE( catalog.byId( QStringLiteral( "asset-000002" ) ).has_value() );
+    REQUIRE_FALSE( catalog.byId( QStringLiteral( "asset-000003" ) ).has_value() );
+    REQUIRE_FALSE( catalog.byPath( QStringLiteral( "/data/scene_000002.tif" ) ).has_value() );
+    REQUIRE_FALSE( catalog.byPath( QStringLiteral( "/data/scene_000003.tif" ) ).has_value() );
+    const auto kept = catalog.byId( keeper.assetId );
+    REQUIRE( kept );
+    REQUIRE( kept->aliases.size() == 2 );
+
+    // No transaction leaked: ordinary writes still work on the same handle.
+    REQUIRE( catalog.upsertAsset( makeAsset( 4 ) ) );
+    REQUIRE( catalog.count() == 2 );
+}
+
+TEST_CASE( "WorkspaceCatalog reports commit failure without persisting or leaking",
+           "[workspace_catalog][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    WorkspaceCatalog catalog;
+    QString err;
+    REQUIRE( catalog.open( dir.filePath( "catalog.sqlite" ), &err ) );
+
+    CatalogAsset keeper = makeAsset( 1 );
+    REQUIRE( catalog.upsertAsset( keeper ) );
+
+    {
+        ArmedFault fault( { "workspace_catalog.commit", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( catalog.upsertAsset( makeAsset( 2 ) ).operator bool() );
+    }
+    {
+        ArmedFault fault( { "workspace_catalog.commit", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( catalog.removeAsset( keeper.assetId ).operator bool() );
+    }
+    // Both failed operations are fully absent from the store.
+    REQUIRE( catalog.count() == 1 );
+    REQUIRE( catalog.byId( keeper.assetId ).has_value() );
+    REQUIRE_FALSE( catalog.byId( QStringLiteral( "asset-000002" ) ).has_value() );
+
+    // The connection is usable again — no dangling transaction.
+    REQUIRE( catalog.upsertAsset( makeAsset( 3 ) ) );
+    REQUIRE( catalog.count() == 2 );
 }
 
 TEST_CASE( "WorkspaceCatalog stays fast at 100k records", "[workspace_catalog][perf]" )

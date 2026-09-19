@@ -6,6 +6,8 @@
 
 #include <sqlite3.h>
 
+#include "runtime/observability/fault_point.h"
+
 #include <algorithm>
 #include <mutex>
 
@@ -63,16 +65,47 @@ struct WorkspaceCatalog::Impl
 
     mutable std::mutex mutex;
     QString schemaVersion;
+    // Text of the last failing sqlite call (empty when nothing failed); lets
+    // writers build actionable diagnostics instead of opaque failures.
+    mutable QString lastError;
 
     bool exec( const char *sql ) const
     {
         char *err = nullptr;
         if ( sqlite3_exec( db, sql, nullptr, nullptr, &err ) != SQLITE_OK )
         {
+            lastError = err ? QString::fromUtf8( err ) : QStringLiteral( "unknown sqlite error" );
             sqlite3_free( err );
             return false;
         }
+        lastError.clear();
         return true;
+    }
+
+    // Checked COMMIT (issue #1045): a discarded commit result used to report
+    // success for a non-durable batch and leak the open transaction into the
+    // next call, whose ROLLBACK then silently undid this call's "successful"
+    // writes. A failed commit now rolls back and reports failure.
+    bool commit() const
+    {
+        if ( exec( "COMMIT" ) )
+            return true;
+        exec( "ROLLBACK" );
+        return false;
+    }
+
+    // sqlite3_errmsg is connection-scoped and stays current after a failed
+    // step(), unlike lastError which only exec() refreshes.
+    QString stepError() const { return QString::fromUtf8( sqlite3_errmsg( db ) ); }
+
+    // Roll back the failed transaction and return the failing statement's
+    // error text, captured BEFORE the rollback replaces the connection's
+    // error state.
+    QString rollbackMsg() const
+    {
+        const QString msg = stepError();
+        exec( "ROLLBACK" );
+        return msg;
     }
 
     bool createSchema()
@@ -208,7 +241,12 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    // Checked BEGIN (issue #1045): on SQLITE_BUSY the whole batch used to run
+    // in autocommit — a mid-batch step failure then no-op'd the ROLLBACK while
+    // earlier assets were already durable.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.begin" ),
+                                                   QStringLiteral( "cannot begin transaction: %1" ).arg( m_impl->lastError ) ) );
     {
         Stmt up( m_impl->db,
             "INSERT INTO assets(asset_id, source_key, canonical_source, kind, state,"
@@ -247,41 +285,86 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
             up.bind( 10, static_cast<qint64>( asset.revision ) );
             up.bind( 11, asset.metadataJson );
             up.bind( 12, now );
-            if ( !up.step() )
+            if ( SICNU_FAULT_POINT( "workspace_catalog.step" ) || !up.step() )
             {
-                m_impl->exec( "ROLLBACK" );
+                // Roll back on the FIRST failure — the batch is atomic, so no
+                // asset row may survive a later asset's failed write.
+                const QString stepErr = m_impl->rollbackMsg();
                 return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
-                                                           QStringLiteral( "asset %1 failed" ).arg( asset.assetId ) ) );
+                                                           QStringLiteral( "asset %1 failed: %2" )
+                                                               .arg( asset.assetId, stepErr ) ) );
             }
             delAlias.reset();
             delAlias.bind( 1, asset.assetId );
-            delAlias.step();
-            insAlias.reset();
-            insAlias.bind( 1, asset.canonicalSource );
-            insAlias.bind( 2, asset.assetId );
-            insAlias.step();
+            if ( SICNU_FAULT_POINT( "workspace_catalog.step" ) || !delAlias.step() )
+            {
+                const QString stepErr = m_impl->rollbackMsg();
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.alias_write" ),
+                                                           QStringLiteral( "asset %1 alias cleanup failed: %2" )
+                                                               .arg( asset.assetId, stepErr ) ) );
+            }
+            const auto writeAlias = [ & ]( const QString &path ) -> bool {
+                insAlias.reset();
+                insAlias.bind( 1, path );
+                insAlias.bind( 2, asset.assetId );
+                return insAlias.step();
+            };
+            if ( !writeAlias( asset.canonicalSource ) )
+            {
+                const QString stepErr = m_impl->rollbackMsg();
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.alias_write" ),
+                                                           QStringLiteral( "asset %1 alias write failed: %2" )
+                                                               .arg( asset.assetId, stepErr ) ) );
+            }
             for ( const QString &alias : asset.aliases )
             {
                 if ( alias == asset.canonicalSource )
                     continue;
-                insAlias.reset();
-                insAlias.bind( 1, alias );
-                insAlias.bind( 2, asset.assetId );
-                insAlias.step();
+                if ( !writeAlias( alias ) )
+                {
+                    const QString stepErr = m_impl->rollbackMsg();
+                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.alias_write" ),
+                                                               QStringLiteral( "asset %1 alias write failed: %2" )
+                                                                   .arg( asset.assetId, stepErr ) ) );
+                }
             }
             delTag.reset();
             delTag.bind( 1, asset.assetId );
-            delTag.step();
+            if ( !delTag.step() )
+            {
+                const QString stepErr = m_impl->rollbackMsg();
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.tag_write" ),
+                                                           QStringLiteral( "asset %1 tag cleanup failed: %2" )
+                                                               .arg( asset.assetId, stepErr ) ) );
+            }
             for ( const QString &tag : asset.tags )
             {
                 insTag.reset();
                 insTag.bind( 1, asset.assetId );
                 insTag.bind( 2, tag );
-                insTag.step();
+                if ( !insTag.step() )
+                {
+                    const QString stepErr = m_impl->rollbackMsg();
+                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.tag_write" ),
+                                                               QStringLiteral( "asset %1 tag write failed: %2" )
+                                                                   .arg( asset.assetId, stepErr ) ) );
+                }
             }
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( SICNU_FAULT_POINT( "workspace_catalog.commit" ) )
+    {
+        // Injected commit failure (fault matrix, test-only arming): take
+        // exactly the real commit-failure branch so the batch rolls back
+        // instead of reporting success for a non-durable write.
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                   QStringLiteral( "transaction commit failed" ) ) );
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
     return Result<void>::success();
 }
 
@@ -291,23 +374,58 @@ Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.begin" ),
+                                                   QStringLiteral( "cannot begin transaction: %1" ).arg( m_impl->lastError ) ) );
     {
         Stmt a( m_impl->db, "DELETE FROM assets WHERE asset_id=?" );
         Stmt al( m_impl->db, "DELETE FROM aliases WHERE asset_id=?" );
         Stmt t( m_impl->db, "DELETE FROM tags WHERE asset_id=?" );
         if ( !a || !al || !t )
+        {
+            m_impl->exec( "ROLLBACK" );
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.prepare" ),
                                                        QStringLiteral( "prepare failed" ) ) );
-        m_impl->exec( "BEGIN IMMEDIATE" );
-        a.bind( 1, assetId ); a.step();
+        }
+        a.bind( 1, assetId );
+        if ( SICNU_FAULT_POINT( "workspace_catalog.step" ) || !a.step() )
+        {
+            const QString stepErr = m_impl->rollbackMsg();
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.remove" ),
+                                                       QStringLiteral( "asset %1 delete failed: %2" )
+                                                           .arg( assetId, stepErr ) ) );
+        }
+        // The not-found verdict is reached INSIDE the transaction so a miss
+        // rolls back instead of committing a partial cleanup (issue #1045).
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
-        al.bind( 1, assetId ); al.step();
-        t.bind( 1, assetId ); t.step();
-        m_impl->exec( "COMMIT" );
+        al.bind( 1, assetId );
+        t.bind( 1, assetId );
+        if ( !al.step() || !t.step() )
+        {
+            const QString stepErr = m_impl->rollbackMsg();
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.remove" ),
+                                                       QStringLiteral( "asset %1 cleanup failed: %2" )
+                                                           .arg( assetId, stepErr ) ) );
+        }
         if ( !removed )
+        {
+            m_impl->exec( "ROLLBACK" );
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.unknown" ),
                                                        QStringLiteral( "no asset %1" ).arg( assetId ) ) );
+        }
     }
+    if ( SICNU_FAULT_POINT( "workspace_catalog.commit" ) )
+    {
+        // Injected commit failure (fault matrix, test-only arming): same
+        // branch as a real commit error — roll back, report failure.
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                   QStringLiteral( "transaction commit failed" ) ) );
+    }
+    if ( !m_impl->commit() )
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                   m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
+                                                                               : m_impl->lastError ) );
     return Result<void>::success();
 }
 

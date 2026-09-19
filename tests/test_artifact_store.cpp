@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/artifact_store.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -18,6 +19,8 @@
 #include <cstring>
 
 using namespace sicnu::data;
+using sicnu::runtime::observability::fault::ArmedFault;
+using sicnu::runtime::observability::fault::Mode;
 
 namespace
 {
@@ -271,4 +274,79 @@ TEST_CASE( "ArtifactStore survives concurrent store handles (WAL)", "[artifact_s
     const auto seen = reader.artifactById( rec.value().artifactId );
     REQUIRE( seen );
     REQUIRE( seen->logicalKey == QStringLiteral( "x" ) );
+}
+
+TEST_CASE( "ArtifactStore registrations roll back cleanly under injected failures",
+           "[artifact_store][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    const QString payloadA = dir.filePath( "a.tif" );
+    const QString payloadB = dir.filePath( "b.tif" );
+    writePayload( payloadA, "keeper-bytes" );
+    writePayload( payloadB, "doomed-bytes" );
+
+    ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "artifacts.sqlite" ), &err ) );
+
+    const auto keeper = store.registerArtifact( makeRegistration( QStringLiteral( "keep" ), payloadA ) );
+    REQUIRE( keeper );
+
+    // Mid-transaction step failure: the insert must leave no trace.
+    {
+        ArmedFault fault( { "artifact_store.step", Mode::NextN, 1, {} } );
+        const auto stepFault = store.registerArtifact( makeRegistration( QStringLiteral( "doomed" ), payloadB ) );
+        REQUIRE_FALSE( stepFault );
+    }
+    REQUIRE( store.count() == 1 );
+    REQUIRE_FALSE( store.latestByLogicalKey( QStringLiteral( "doomed" ) ).has_value() );
+
+    // Commit failure: reported as failure, nothing durable, transaction freed.
+    {
+        ArmedFault fault( { "artifact_store.commit", Mode::NextN, 1, {} } );
+        const auto commitFault = store.registerArtifact( makeRegistration( QStringLiteral( "doomed" ), payloadB ) );
+        REQUIRE_FALSE( commitFault );
+    }
+    REQUIRE( store.count() == 1 );
+
+    // The same handle still works — no leaked transaction.
+    const auto retry = store.registerArtifact( makeRegistration( QStringLiteral( "doomed" ), payloadB ) );
+    REQUIRE( retry );
+    REQUIRE( store.count() == 2 );
+    REQUIRE( retry.value().artifactId != keeper.value().artifactId );
+}
+
+TEST_CASE( "forget keeps the row resolvable when the transaction fails",
+           "[artifact_store][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    const QString payload = dir.filePath( "a.tif" );
+    writePayload( payload, "payload" );
+
+    ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "artifacts.sqlite" ), &err ) );
+    const auto rec = store.registerArtifact( makeRegistration( QStringLiteral( "x" ), payload ) );
+    REQUIRE( rec );
+    const QString id = rec.value().artifactId;
+    REQUIRE( store.attachRef( id, QStringLiteral( "run" ), QStringLiteral( "run-1" ) ) );
+
+    // A failed forget (commit seam) must NOT drop the metadata while the
+    // payload bookkeeping is half-removed — the row and its refs survive.
+    {
+        ArmedFault fault( { "artifact_store.commit", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( store.forget( id ).operator bool() );
+    }
+    REQUIRE( store.count() == 1 );
+    REQUIRE( store.artifactById( id ).has_value() );
+    REQUIRE( store.refCount( id ) == 1 );
+
+    // Unknown ids still fail (pre-existing contract), leaving no state change.
+    REQUIRE_FALSE( store.forget( QStringLiteral( "missing" ) ) );
+    REQUIRE( store.count() == 1 );
+
+    // The retry removes row + refs atomically.
+    REQUIRE( store.forget( id ) );
+    REQUIRE( store.count() == 0 );
+    REQUIRE( store.refsOf( id ).isEmpty() );
 }

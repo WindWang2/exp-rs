@@ -11,6 +11,8 @@
 
 #include <sqlite3.h>
 
+#include "runtime/observability/fault_point.h"
+
 #include <mutex>
 
 namespace sicnu::data
@@ -152,6 +154,25 @@ struct ArtifactStore::Impl
             return false;
         }
         return true;
+    }
+
+    // Checked COMMIT (issue #1045): a discarded commit result used to report
+    // success for a non-durable registration/deletion and leak the open
+    // transaction into the next call, whose ROLLBACK then silently undid this
+    // call's "successful" writes. A failed commit rolls back and reports.
+    bool commit() const
+    {
+        return exec( "COMMIT", nullptr );
+    }
+
+    // Roll back the failed transaction and return the failing statement's
+    // error text, captured BEFORE the rollback replaces the connection's
+    // error state.
+    QString rollbackMsg() const
+    {
+        const QString msg = lastError( db );
+        exec( "ROLLBACK", nullptr );
+        return msg;
     }
 
     bool createSchema( QString *errorOut ) const
@@ -326,7 +347,13 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
     if ( artifactId.isEmpty() )
         artifactId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    // Checked BEGIN (issue #1045): a failed BEGIN used to leave the INSERT
+    // inside a caller's outer transaction (the recursive mutex explicitly
+    // permits nesting), where this call's unchecked COMMIT prematurely
+    // committed it. A failed BEGIN now aborts before any statement runs.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ),
+                                                      QStringLiteral( "cannot begin transaction: %1" ).arg( lastError( m_impl->db ) ) ) );
     {
         Stmt s( m_impl->db,
                 "INSERT INTO artifacts(artifact_id, logical_key, version, producer_fingerprint,"
@@ -336,8 +363,8 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
                 errorOut );
         if ( !s )
         {
-            m_impl->exec( "ROLLBACK", nullptr );
-            return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
+            const QString stepErr = m_impl->rollbackMsg();
+            return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), stepErr ) );
         }
         const qint64 ts = nowMs();
         s.bind( 1, artifactId );
@@ -354,14 +381,30 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
         s.bind( 12, QStringLiteral( "live" ) );
         s.bind( 13, ts );
         s.bind( 14, ts );
-        if ( !s.step() )
+        if ( SICNU_FAULT_POINT( "artifact_store.step" ) || !s.step() )
         {
             const QString err = lastError( m_impl->db );
             m_impl->exec( "ROLLBACK", nullptr );
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), err ) );
         }
     }
-    m_impl->exec( "COMMIT", nullptr );
+    if ( SICNU_FAULT_POINT( "artifact_store.commit" ) )
+    {
+        // Injected commit failure (fault matrix, test-only arming): take
+        // exactly the real commit-failure branch so the registration rolls
+        // back instead of reporting success for a non-durable write.
+        m_impl->exec( "ROLLBACK", nullptr );
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                                      QStringLiteral( "transaction commit failed" ) ) );
+    }
+    if ( !m_impl->commit() )
+    {
+        // Capture the commit error before the rollback replaces errmsg.
+        const QString err = lastError( m_impl->db );
+        m_impl->exec( "ROLLBACK", nullptr );
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                                      QStringLiteral( "transaction commit failed: %1" ).arg( err ) ) );
+    }
 
     // Fetch exactly the version just inserted — artifact_id is shared across
     // versions, so an id-only lookup may return an older row.
@@ -650,25 +693,54 @@ Result<void> ArtifactStore::forget( const QString &artifactId )
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    // Checked BEGIN (issue #1045): the delete pair must never land in a
+    // caller's outer transaction, and the whole removal must be atomic.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+        return Result<void>::failure( diag( QStringLiteral( "artifact.db" ),
+                                            QStringLiteral( "cannot begin transaction: %1" ).arg( lastError( m_impl->db ) ) ) );
     {
         Stmt d( m_impl->db, "DELETE FROM artifact_refs WHERE artifact_id=?", nullptr );
         Stmt a( m_impl->db, "DELETE FROM artifacts WHERE artifact_id=?", nullptr );
-        if ( d && a )
+        if ( !d || !a )
         {
-            d.bind( 1, artifactId );
-            a.bind( 1, artifactId );
-            const bool ok = d.step() && a.step() && sqlite3_changes( m_impl->db ) > 0;
-            if ( ok )
-            {
-                m_impl->exec( "COMMIT", nullptr );
-                return Result<void>::success();
-            }
+            m_impl->exec( "ROLLBACK", nullptr );
+            return Result<void>::failure( diag( QStringLiteral( "artifact.prepare" ),
+                                                QStringLiteral( "forget prepare failed" ) ) );
+        }
+        d.bind( 1, artifactId );
+        a.bind( 1, artifactId );
+        if ( SICNU_FAULT_POINT( "artifact_store.step" ) || !d.step() || !a.step() )
+        {
+            const QString stepErr = m_impl->rollbackMsg();
+            return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
+                                                QStringLiteral( "artifact %1 removal failed: %2" )
+                                                    .arg( artifactId, stepErr ) ) );
+        }
+        if ( sqlite3_changes( m_impl->db ) == 0 )
+        {
+            m_impl->exec( "ROLLBACK", nullptr );
+            return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
+                                                QStringLiteral( "artifact %1 not removed" ).arg( artifactId ) ) );
         }
     }
-    m_impl->exec( "ROLLBACK", nullptr );
-    return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
-                                        QStringLiteral( "artifact %1 not removed" ).arg( artifactId ) ) );
+    if ( SICNU_FAULT_POINT( "artifact_store.commit" ) )
+    {
+        // Injected commit failure (fault matrix, test-only arming): same
+        // branch as a real commit error — roll back, report failure, so the
+        // row and its refs stay resolvable.
+        m_impl->exec( "ROLLBACK", nullptr );
+        return Result<void>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                            QStringLiteral( "transaction commit failed" ) ) );
+    }
+    if ( !m_impl->commit() )
+    {
+        // Capture the commit error before the rollback replaces errmsg.
+        const QString err = lastError( m_impl->db );
+        m_impl->exec( "ROLLBACK", nullptr );
+        return Result<void>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                            QStringLiteral( "transaction commit failed: %1" ).arg( err ) ) );
+    }
+    return Result<void>::success();
 }
 
 qint64 ArtifactStore::count() const
