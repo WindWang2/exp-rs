@@ -71,6 +71,43 @@ TEST_CASE( "structural problems are diagnosed", "[workflow][schema]" )
     }
 }
 
+TEST_CASE( "wrong-typed step fields fail typed, never throw (#1038)", "[workflow][schema][hardening]" )
+{
+    SECTION( "step id is an object" )
+    {
+        const auto document =
+            parse( R"({"schema_version":1,"id":"x","steps":[{"id":{}}]})" );
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
+        REQUIRE( log.hasErrors() );
+    }
+    SECTION( "step id is an array" )
+    {
+        const auto document =
+            parse( R"({"schema_version":1,"id":"x","steps":[{"id":[1,2],"operator":"rs:ndvi"}]})" );
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
+        REQUIRE( log.hasErrors() );
+    }
+    SECTION( "step id is null still reports the missing field" )
+    {
+        const auto document =
+            parse( R"({"schema_version":1,"id":"x","steps":[{"id":null,"operator":"rs:ndvi"}]})" );
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
+        REQUIRE( log.hasErrors() );
+    }
+    SECTION( "hostile nested values in unrelated fields stay typed" )
+    {
+        const auto document = parse(
+            R"({"schema_version":1,"id":"x","steps":[{"id":"s","kind":"operator",
+                 "operator":{"nested":true},"params":{"a":{"b":[1,2]}}}]})" );
+        PluginDiagnosticLog log;
+        REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
+        REQUIRE( log.hasErrors() );
+    }
+}
+
 TEST_CASE( "builder produces valid public documents", "[workflow][builder]" )
 {
     WorkflowBuilder builder( "lab.demo", "Demo workflow" );

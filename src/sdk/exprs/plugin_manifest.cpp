@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "exprs/plugin_manifest.h"
 
+#include "exprs/json_reader.h"
+
 #include <fstream>
 #include <sstream>
 
@@ -11,6 +13,12 @@ namespace exprs {
 namespace {
 std::string requireString( const Json::Value &object, const char *key, std::string &error )
 {
+    if ( !object.isObject() )
+    {
+        if ( error.empty() )
+            error = std::string( "field '" ) + key + "' read from a non-object value";
+        return {};
+    }
     const Json::Value &value = object[key];
     if ( !value.isString() || value.asString().empty() )
     {
@@ -19,6 +27,28 @@ std::string requireString( const Json::Value &object, const char *key, std::stri
         return {};
     }
     return value.asString();
+}
+
+/// Refuses a present-but-wrong-typed optional section (access/quotas/...).
+/// JSON null stays legal (absent section); anything that is neither null nor
+/// an object is a typed manifest failure, never a silently dropped subtree
+/// that later deserializes into an abort.
+bool objectSection( const Json::Value &json, const char *key, Json::Value &out,
+                    std::string &error )
+{
+    if ( !json.isMember( key ) )
+        return true;
+    const Json::Value &value = json[key];
+    if ( value.isNull() )
+        return true;
+    if ( !value.isObject() )
+    {
+        if ( error.empty() )
+            error = std::string( "field '" ) + key + "' must be an object";
+        return false;
+    }
+    out = value;
+    return true;
 }
 } // namespace
 
@@ -57,27 +87,30 @@ bool ManifestPort::fromJson( const Json::Value &json, ManifestPort &out, std::st
     out.name = requireString( json, "name", error );
     if ( out.name.empty() )
         return false;
-    if ( json.isMember( "type" ) && json["type"].isString() )
-        out.type = json["type"].asString();
-    out.required = json.get( "required", false ).asBool();
-    if ( json.isMember( "description" ) && json["description"].isString() )
-        out.description = json["description"].asString();
+    if ( !jsonread::readString( json, "type", out.type, error ) )
+        return false;
+    if ( !jsonread::readBool( json, "required", out.required, error ) )
+        return false;
+    if ( !jsonread::readString( json, "description", out.description, error ) )
+        return false;
     if ( json.isMember( "default" ) )
         out.defaultValue = json["default"];
     if ( json.isMember( "enum" ) && json["enum"].isArray() )
         out.enumOptions = json["enum"];
-    if ( json.isMember( "min" ) && json["min"].isNumeric() )
+    if ( !jsonread::member( json, "min" ).isNull() )
     {
+        if ( !jsonread::readDouble( json, "min", out.minValue, error ) )
+            return false;
         out.hasMin = true;
-        out.minValue = json["min"].asDouble();
     }
-    if ( json.isMember( "max" ) && json["max"].isNumeric() )
+    if ( !jsonread::member( json, "max" ).isNull() )
     {
+        if ( !jsonread::readDouble( json, "max", out.maxValue, error ) )
+            return false;
         out.hasMax = true;
-        out.maxValue = json["max"].asDouble();
     }
-    if ( json.isMember( "file_format" ) && json["file_format"].isString() )
-        out.fileFormat = json["file_format"].asString();
+    if ( !jsonread::readString( json, "file_format", out.fileFormat, error ) )
+        return false;
     return true;
 }
 
@@ -128,15 +161,16 @@ bool ManifestExternalTool::fromJson( const Json::Value &json, ManifestExternalTo
     }
     if ( json.isMember( "environment" ) && json["environment"].isObject() )
         out.environment = json["environment"];
-    out.inheritEnvironment = json.get( "inherit_environment", false ).asBool();
-    if ( json.isMember( "working_directory" ) && json["working_directory"].isString() )
-        out.workingDirectoryParam = json["working_directory"].asString();
-    if ( json.isMember( "timeout_seconds" ) && json["timeout_seconds"].isNumeric() )
-        out.timeoutSeconds = json["timeout_seconds"].asInt();
-    if ( json.isMember( "stdout_limit_bytes" ) && json["stdout_limit_bytes"].isNumeric() )
-        out.stdoutLimitBytes = json["stdout_limit_bytes"].asInt();
-    if ( json.isMember( "stderr_limit_bytes" ) && json["stderr_limit_bytes"].isNumeric() )
-        out.stderrLimitBytes = json["stderr_limit_bytes"].asInt();
+    if ( !jsonread::readBool( json, "inherit_environment", out.inheritEnvironment, error ) )
+        return false;
+    if ( !jsonread::readString( json, "working_directory", out.workingDirectoryParam, error ) )
+        return false;
+    if ( !jsonread::readInt( json, "timeout_seconds", out.timeoutSeconds, error ) )
+        return false;
+    if ( !jsonread::readInt( json, "stdout_limit_bytes", out.stdoutLimitBytes, error ) )
+        return false;
+    if ( !jsonread::readInt( json, "stderr_limit_bytes", out.stderrLimitBytes, error ) )
+        return false;
     if ( out.timeoutSeconds <= 0 )
         out.timeoutSeconds = 3600;
     return true;
@@ -188,15 +222,16 @@ bool ManifestOperator::fromJson( const Json::Value &json, ManifestOperator &out,
     out.displayName = requireString( json, "display_name", error );
     if ( out.displayName.empty() )
         return false;
-    if ( json.isMember( "group" ) && json["group"].isString() )
-        out.group = json["group"].asString();
-    if ( json.isMember( "description" ) && json["description"].isString() )
-        out.description = json["description"].asString();
-    if ( json.isMember( "memory_policy" ) && json["memory_policy"].isString() )
-        out.memoryPolicy = json["memory_policy"].asString();
-    if ( json.isMember( "determinism_grade" ) && json["determinism_grade"].isString() )
-        out.determinismGrade = json["determinism_grade"].asString();
-    out.supportsCancel = json.get( "supports_cancel", true ).asBool();
+    if ( !jsonread::readString( json, "group", out.group, error ) )
+        return false;
+    if ( !jsonread::readString( json, "description", out.description, error ) )
+        return false;
+    if ( !jsonread::readString( json, "memory_policy", out.memoryPolicy, error ) )
+        return false;
+    if ( !jsonread::readString( json, "determinism_grade", out.determinismGrade, error ) )
+        return false;
+    if ( !jsonread::readBool( json, "supports_cancel", out.supportsCancel, error ) )
+        return false;
     if ( json.isMember( "schema" ) )
         out.schema = json["schema"];
     if ( json.isMember( "metadata" ) )
@@ -258,8 +293,8 @@ bool ManifestDataProvider::fromJson( const Json::Value &json, ManifestDataProvid
     out.displayName = requireString( json, "display_name", error );
     if ( out.displayName.empty() )
         return false;
-    if ( json.isMember( "description" ) && json["description"].isString() )
-        out.description = json["description"].asString();
+    if ( !jsonread::readString( json, "description", out.description, error ) )
+        return false;
     for ( const Json::Value &scheme : json["schemes"] )
     {
         if ( scheme.isString() )
@@ -296,9 +331,10 @@ bool ManifestModelRuntime::fromJson( const Json::Value &json, ManifestModelRunti
     out.displayName = requireString( json, "display_name", error );
     if ( out.displayName.empty() )
         return false;
-    if ( json.isMember( "description" ) && json["description"].isString() )
-        out.description = json["description"].asString();
-    out.gpu = json.get( "gpu", false ).asBool();
+    if ( !jsonread::readString( json, "description", out.description, error ) )
+        return false;
+    if ( !jsonread::readBool( json, "gpu", out.gpu, error ) )
+        return false;
     return true;
 }
 
@@ -332,10 +368,10 @@ bool ManifestAgentTool::fromJson( const Json::Value &json, ManifestAgentTool &ou
     out.displayName = requireString( json, "display_name", error );
     if ( out.displayName.empty() )
         return false;
-    if ( json.isMember( "category" ) && json["category"].isString() )
-        out.category = json["category"].asString();
-    if ( json.isMember( "description" ) && json["description"].isString() )
-        out.description = json["description"].asString();
+    if ( !jsonread::readString( json, "category", out.category, error ) )
+        return false;
+    if ( !jsonread::readString( json, "description", out.description, error ) )
+        return false;
     if ( json.isMember( "input_schema" ) && json["input_schema"].isObject() )
         out.inputSchema = json["input_schema"];
     if ( json.isMember( "output_schema" ) && json["output_schema"].isObject() )
@@ -369,13 +405,16 @@ bool ManifestUi::fromJson( const Json::Value &json, ManifestUi &out, std::string
         return false;
     }
     out = ManifestUi();
-    out.dock = json.get( "dock", false ).asBool();
-    out.menuActions = json.get( "menu_actions", false ).asBool();
-    out.settingsPage = json.get( "settings_page", false ).asBool();
-    if ( json.isMember( "dock_title" ) && json["dock_title"].isString() )
-        out.dockTitle = json["dock_title"].asString();
-    if ( json.isMember( "settings_page_title" ) && json["settings_page_title"].isString() )
-        out.settingsPageTitle = json["settings_page_title"].asString();
+    if ( !jsonread::readBool( json, "dock", out.dock, error ) )
+        return false;
+    if ( !jsonread::readBool( json, "menu_actions", out.menuActions, error ) )
+        return false;
+    if ( !jsonread::readBool( json, "settings_page", out.settingsPage, error ) )
+        return false;
+    if ( !jsonread::readString( json, "dock_title", out.dockTitle, error ) )
+        return false;
+    if ( !jsonread::readString( json, "settings_page_title", out.settingsPageTitle, error ) )
+        return false;
     return true;
 }
 
@@ -396,7 +435,8 @@ bool ManifestCartography::fromJson( const Json::Value &json, ManifestCartography
         return false;
     }
     out = ManifestCartography();
-    out.layoutItems = json.get( "layout_items", false ).asBool();
+    if ( !jsonread::readBool( json, "layout_items", out.layoutItems, error ) )
+        return false;
     if ( json.isMember( "layout_item_ids" ) )
         out.layoutItemIds = json["layout_item_ids"];
     return true;
@@ -423,8 +463,8 @@ bool ManifestPythonSection::fromJson( const Json::Value &json, ManifestPythonSec
     out.module = requireString( json, "module", error );
     if ( out.module.empty() )
         return false;
-    if ( json.isMember( "package" ) && json["package"].isString() )
-        out.package = json["package"].asString();
+    if ( !jsonread::readString( json, "package", out.package, error ) )
+        return false;
     return true;
 }
 
@@ -581,8 +621,8 @@ Json::Value PluginManifest::toJson() const
     if ( !modelRuntimes.empty() )
     {
         Json::Value runtimes( Json::arrayValue );
-        for ( const ManifestModelRuntime &runtime : modelRuntimes )
-            runtimes.append( runtime.toJson() );
+        for ( const ManifestModelRuntime &modelRuntime : modelRuntimes )
+            runtimes.append( modelRuntime.toJson() );
         json["model_runtimes"] = runtimes;
     }
     if ( !agentTools.empty() )
@@ -609,23 +649,47 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         return false;
     }
     out = PluginManifest();
-    out.manifestVersion = json.get( "manifest_version", 0 ).asInt();
-    out.id = json.get( "id", "" ).asString();
-    out.name = json.get( "name", "" ).asString();
-    out.version = json.get( "version", "" ).asString();
-    out.apiVersion = json.get( "api_version", "" ).asString();
-    out.abiVersion = json.get( "abi_version", 0 ).asInt();
-    out.description = json.get( "description", "" ).asString();
-    out.vendor = json.get( "vendor", "" ).asString();
-    out.license = json.get( "license", "" ).asString();
+    std::string fieldError;
+    const auto failField = [&]( const char *field ) {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = field;
+        error.message = fieldError;
+        return false;
+    };
+    if ( !jsonread::readInt( json, "manifest_version", out.manifestVersion, fieldError ) )
+        return failField( "manifest_version" );
+    if ( !jsonread::readString( json, "id", out.id, fieldError ) )
+        return failField( "id" );
+    if ( !jsonread::readString( json, "name", out.name, fieldError ) )
+        return failField( "name" );
+    if ( !jsonread::readString( json, "version", out.version, fieldError ) )
+        return failField( "version" );
+    if ( !jsonread::readString( json, "api_version", out.apiVersion, fieldError ) )
+        return failField( "api_version" );
+    if ( !jsonread::readInt( json, "abi_version", out.abiVersion, fieldError ) )
+        return failField( "abi_version" );
+    if ( !jsonread::readString( json, "description", out.description, fieldError ) )
+        return failField( "description" );
+    if ( !jsonread::readString( json, "vendor", out.vendor, fieldError ) )
+        return failField( "vendor" );
+    if ( !jsonread::readString( json, "license", out.license, fieldError ) )
+        return failField( "license" );
     for ( const Json::Value &platform : json["platforms"] )
     {
         if ( platform.isString() )
             out.platforms.push_back( platform.asString() );
     }
-    out.entrypoint = json.get( "entrypoint", "" ).asString();
+    if ( !jsonread::readString( json, "entrypoint", out.entrypoint, fieldError ) )
+        return failField( "entrypoint" );
     std::string kindError;
-    const std::string kindName = json.get( "entrypoint_kind", "native" ).asString();
+    std::string kindName = "native";
+    if ( !jsonread::readString( json, "entrypoint_kind", kindName, kindError ) )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = "entrypoint_kind";
+        error.message = kindError;
+        return false;
+    }
     if ( !entrypointKindFromName( kindName, out.entrypointKind ) )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidField;
@@ -649,7 +713,15 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         if ( capability.isString() )
             out.capabilities.push_back( capability.asString() );
     }
-    const std::string runtimeName = json.get( "runtime", "in-process" ).asString();
+    std::string runtimeNameError;
+    std::string runtimeName = "in-process";
+    if ( !jsonread::readString( json, "runtime", runtimeName, runtimeNameError ) )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = "runtime";
+        error.message = runtimeNameError;
+        return false;
+    }
     if ( !pluginRuntimeKindFromName( runtimeName, out.runtime ) )
     {
         // Lenient here (forward compatibility); the validator refuses unknown
@@ -658,14 +730,14 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         out.runtimeUnknown = true;
         out.warnings.push_back( "unknown runtime '" + runtimeName + "'; loaded in-process" );
     }
-    if ( json.isMember( "access" ) )
-        out.access = json["access"];
-    if ( json.isMember( "quotas" ) )
-        out.quotas = json["quotas"];
-    if ( json.isMember( "conformance" ) && json["conformance"].isObject() )
-        out.conformance = json["conformance"];
-    if ( json.isMember( "package" ) && json["package"].isObject() )
-        out.package = json["package"];
+    if ( !objectSection( json, "access", out.access, fieldError ) )
+        return failField( "access" );
+    if ( !objectSection( json, "quotas", out.quotas, fieldError ) )
+        return failField( "quotas" );
+    if ( !objectSection( json, "conformance", out.conformance, fieldError ) )
+        return failField( "conformance" );
+    if ( !objectSection( json, "package", out.package, fieldError ) )
+        return failField( "package" );
     out.permissions = parsePermissions( json["permissions"], out.warnings );
     for ( const Json::Value &dependency : json["dependencies"] )
     {
@@ -774,14 +846,24 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
         error.message = "invalid JSON: " + reader.getFormattedErrorMessages();
         return false;
     }
-    if ( root.isMember( "manifest_version" ) && root["manifest_version"].asInt() != 1 )
+    if ( root.isMember( "manifest_version" ) )
     {
-        error.code = PluginDiagnosticCode::ManifestUnknownVersion;
-        error.field = "manifest_version";
-        error.message = "unsupported manifest_version "
-                        + std::to_string( root["manifest_version"].asInt() )
-                        + " (this host understands 1)";
-        return false;
+        const Json::Value &version = root["manifest_version"];
+        if ( !version.isInt() )
+        {
+            error.code = PluginDiagnosticCode::ManifestInvalidJson;
+            error.field = "manifest_version";
+            error.message = "manifest_version must be an integer";
+            return false;
+        }
+        if ( version.asInt() != 1 )
+        {
+            error.code = PluginDiagnosticCode::ManifestUnknownVersion;
+            error.field = "manifest_version";
+            error.message = "unsupported manifest_version " + std::to_string( version.asInt() )
+                            + " (this host understands 1)";
+            return false;
+        }
     }
     if ( !PluginManifest::fromJson( root, out, error ) )
         return false;

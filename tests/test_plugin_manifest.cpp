@@ -514,3 +514,78 @@ TEST_CASE( "entrypoint containment (issue #756)", "[plugin][validator][containme
     }
     fs::remove_all( root );
 }
+
+TEST_CASE( "wrong-typed manifest fields fail typed, never throw (#1038)",
+           "[plugin][manifest][hardening]" )
+{
+    // Every case is externally-authored JSON: before the typed reader this
+    // pattern escaped loadManifestFromFile/PluginDiscovery::scan as
+    // Json::LogicError and crashed the host at startup. Each case now fails
+    // with a structured PluginDiagnostic.
+    struct Case
+    {
+        const char *name;
+        const char *json;
+    };
+    const Case cases[] = {
+        { "manifest_version string", R"({"manifest_version":"1"})" },
+        { "id array", R"({"manifest_version":1,"id":[]})" },
+        { "name object", R"({"manifest_version":1,"id":"a.b","name":{}})" },
+        { "abi_version string", R"({"manifest_version":1,"abi_version":"1"})" },
+        { "entrypoint_kind array",
+          R"({"manifest_version":1,"entrypoint_kind":[]})" },
+        { "runtime object", R"({"manifest_version":1,"runtime":{}})" },
+        { "access array", R"({"manifest_version":1,"access":[]})" },
+        { "quotas string", R"({"manifest_version":1,"quotas":"none"})" },
+        { "package array", R"({"manifest_version":1,"package":[]})" },
+        { "python module number", R"({"manifest_version":1,"python":{"module":7}})" },
+        { "operator supports_cancel object",
+          R"({"manifest_version":1,"operators":[{"id":"a:b","display_name":"A",
+              "supports_cancel":{}}]})" },
+        { "operator input required object",
+          R"({"manifest_version":1,"operators":[{"id":"a:b","display_name":"A",
+              "inputs":[{"name":"x","required":{}}]}]})" },
+        { "operator input min array",
+          R"({"manifest_version":1,"operators":[{"id":"a:b","display_name":"A",
+              "inputs":[{"name":"x","min":[]}]}]})" },
+        { "model runtime gpu object",
+          R"({"manifest_version":1,"model_runtimes":[{"framework":"f",
+              "display_name":"F","gpu":{}}]})" },
+        { "agent tool input_schema array",
+          R"({"manifest_version":1,"agent_tools":[{"id":"t","display_name":"T",
+              "input_schema":[]}]})" },
+        { "ui dock array",
+          R"({"manifest_version":1,"ui":{"dock":[]}})" },
+        { "cartography layout_items string",
+          R"({"manifest_version":1,"cartography":{"layout_items":"yes"}})" },
+        { "external inherit_environment object",
+          R"({"manifest_version":1,"operators":[{"id":"a:b","display_name":"A",
+              "external":{"argv":["/bin/echo"],"inherit_environment":{}}}]})" },
+    };
+    for ( const Case &testCase : cases )
+    {
+        Json::Value root;
+        Json::Reader reader;
+        REQUIRE( reader.parse( testCase.json, root, false ) );
+        PluginManifest manifest;
+        PluginDiagnostic error;
+        const bool parsed = PluginManifest::fromJson( root, manifest, error );
+        INFO( "case: " << testCase.name << " diagnostic: " << error.message );
+        REQUIRE_FALSE( parsed );
+        REQUIRE_FALSE( error.message.empty() );
+    }
+}
+
+TEST_CASE( "loadManifestFromFile reports a wrong-typed manifest_version typed (#1038)",
+           "[plugin][manifest][hardening]" )
+{
+    const std::string path =
+        writeTemp( "bad_version.json", R"({"manifest_version":{"v":1},"id":"a.b"})" );
+    PluginManifest manifest;
+    PluginDiagnostic error;
+    REQUIRE_FALSE( loadManifestFromFile( path, manifest, error ) );
+    REQUIRE( error.field == "manifest_version" );
+    REQUIRE_FALSE( error.message.empty() );
+    std::error_code ignored;
+    std::filesystem::remove( path, ignored );
+}

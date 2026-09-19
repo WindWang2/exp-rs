@@ -86,7 +86,18 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             ok = false;
             continue;
         }
-        const std::string stepId = step.get( "id", "" ).asString();
+        // Type-guard before asString(): {"steps":[{"id":{}}]} must be a typed
+        // validation failure, not a Json::LogicError escaping the validator.
+        const Json::Value &idValue = step["id"];
+        if ( !idValue.isNull() && !idValue.isString() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                      "step at index " + std::to_string( index ) + " 'id' must be a string",
+                      "steps[].id" );
+            ok = false;
+            continue;
+        }
+        const std::string stepId = idValue.isString() ? idValue.asString() : std::string();
         if ( stepId.empty() )
         {
             addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,

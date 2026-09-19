@@ -115,7 +115,11 @@ bool tryCachedManifest( const Json::Value &index, const std::string &dir,
     const Json::Value &entry = index[dir];
     if ( !entry.isObject() || !entry.isMember( "mtime" ) || !entry.isMember( "manifest" ) )
         return false;
-    if ( modificationTicks( manifestPath ) != entry["mtime"].asInt64() )
+    // The index cache is external JSON too (hand-editable, crash-truncated):
+    // a wrong-typed mtime is a cache MISS, never a Json::LogicError out of
+    // discovery.
+    const Json::Value &mtime = entry["mtime"];
+    if ( !mtime.isInt64() || modificationTicks( manifestPath ) != mtime.asInt64() )
         return false;
     PluginDiagnostic ignored;
     return manifestFromIndexValue( entry["manifest"], out, ignored );

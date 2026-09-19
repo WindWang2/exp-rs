@@ -20,6 +20,7 @@
 
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_validator.h"
+#include "exprs/json_reader.h"
 
 namespace exprs {
 
@@ -458,14 +459,34 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
     if ( packageJson.isObject() && packageJson.isMember( "sbom" ) )
     {
+        // sbom is metadata of arbitrary shape (a string format tag, or an
+        // object with format/path). Read it through guarded accessors: a
+        // non-object sbom must never reach Json::Value::get (JSON_ASSERT in
+        // debug builds, undefined behavior in release).
+        std::string sbomFormat;
+        std::string sbomPath;
+        std::string sbomFieldError;
+        const Json::Value &sbom = packageJson[ "sbom" ];
+        if ( sbom.isObject() )
+        {
+            (void)jsonread::readString( sbom, "format", sbomFormat, sbomFieldError );
+            (void)jsonread::readString( sbom, "path", sbomPath, sbomFieldError );
+        }
+        else if ( sbom.isString() )
+        {
+            sbomFormat = sbom.asString();
+        }
+        std::string detail = "package carries SBOM metadata";
+        if ( !sbomFormat.empty() )
+            detail += " (format " + sbomFormat + ")";
+        if ( !sbomPath.empty() )
+            detail += " (path " + sbomPath + ")";
+        detail += "; carried as metadata, integrity-only contract";
         PluginDiagnostic note;
         note.code = PluginDiagnosticCode::None;
         note.severity = PluginDiagnosticSeverity::Info;
         note.pluginId = manifest.id;
-        note.message = "package carries SBOM metadata (format "
-                           + packageJson[ "sbom" ].get( "format", "" ).asString() + ", path "
-                           + packageJson[ "sbom" ].get( "path", "" ).asString()
-                           + "); carried as metadata, integrity-only contract";
+        note.message = detail;
         log.add( note );
     }
 

@@ -73,6 +73,7 @@ add_library( ExpRS::SDK ALIAS exprs_sdk )
 
 set( EXPRS_SDK_INCLUDE_HEADERS
   exprs/version.h
+  exprs/json_reader.h
   exprs/path_policy.h
   exprs/plugin_diagnostics.h
   exprs/plugin_manifest.h

@@ -219,6 +219,59 @@ TEST_CASE( "plugin packages install and uninstall with traversal protection", "[
     ::system( "rm -rf /tmp/exprs_test_pkg_src" );
 }
 
+TEST_CASE( "non-object package sbom metadata installs without crashing (#1038)",
+           "[plugin][package][hardening]" )
+{
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_sbom";
+    const std::string source = pkgRoot + "/org.test.sbom";
+    ::system( "rm -rf /tmp/exprs_test_pkg_sbom" );
+    ::mkdir( pkgRoot.c_str(), 0755 );
+    ::mkdir( source.c_str(), 0755 );
+    {
+        std::ofstream payload( source + "/payload.txt", std::ios::trunc );
+        payload << "payload\n";
+    }
+
+    const auto writeManifest = [&source]( const char *version, const char *sbom ) {
+        std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.sbom",
+            "name": "SBOM",
+            "version": ")" << version << R"(",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "package": { "sbom": )" << sbom << R"( }
+        })";
+    };
+
+    PluginDiagnosticLog log;
+    std::string installed;
+
+    // The original crash shape: sbom is a plain string, not an object. The
+    // install must complete with an informational note (before the fix this
+    // hit Json::Value::get on a non-object: JSON_ASSERT abort in debug).
+    writeManifest( "1.0.0", "\"cyclonedx\"" );
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+    REQUIRE_FALSE( installed.empty() );
+
+    // Well-formed object sbom still reports format/path.
+    writeManifest( "2.0.0", R"({"format":"spdx","path":"sbom.spdx"})" );
+    log = PluginDiagnosticLog();
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+
+    // Wrong-typed fields inside the sbom object are metadata-only: carried,
+    // never fatal, never a crash.
+    writeManifest( "3.0.0", R"({"format":[],"path":{}})" );
+    log = PluginDiagnosticLog();
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+
+    REQUIRE( PluginPackage::uninstall( "org.test.sbom", log ) );
+    ::system( "rm -rf /tmp/exprs_test_pkg_sbom" );
+}
+
 TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin][package]" )
 {
     const std::string pkgRoot = "/tmp/exprs_test_pkg_ck";
