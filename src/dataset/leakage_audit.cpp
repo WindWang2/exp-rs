@@ -30,10 +30,8 @@ bool checkEnabled( const LeakageAuditConfig &config, const QString &name,
     return audited.contains( name );
 }
 
-/// x/y-grid bucketing for spatial pair checks: cell size >= the per-axis
-/// reach of the enabled checks (configured radius, or the full window
-/// extent for patch overlap) so any pair worth reporting is at most one
-/// cell away on each axis.
+/// Grid bucketing for spatial pair checks: bucket index along one axis for
+/// the caller-chosen reach-consistent cell size.
 qint64 bucketOf( double x, double cell )
 {
     return qint64( std::floor( x / cell ) );
@@ -485,22 +483,34 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         enabled( QStringLiteral( "buffer_overlap" ) );
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
-        // Per-axis 2-D grid with a 3x3 neighborhood. For distance/buffer the
-        // cell must cover the configured radius. For patch overlap the cell
-        // must cover the FULL window extent: two windows overlap only when
-        // their centers are closer than one window extent, so a cell sized
-        // to the half extent left centers two cells apart (#1046) — never
-        // compared, and every overlapping pair silently unreported.
-        double maxWindowWidth = 1.0;
-        double maxWindowHeight = 1.0;
+        // 2-D grid with a 3x3 neighborhood whose reach is consistent with
+        // the widest check (#1046). Two windows overlap on an axis only when
+        // |cA − cB| < hA + hB (sum of half-extents), so the cell must span
+        // the full largest extent per axis — half of it lets neighboring
+        // centers land 2 buckets apart and the ±1 neighborhood never
+        // compares them. The half-extents are taken from the SAME ground
+        // bounds the overlap predicate intersects (windowWidth/windowHeight
+        // are pixel counts — sizing ground-unit cells from them silently
+        // misses again whenever GSD ≠ 1). With cell ≥ the reach of its
+        // checks, any pair that could overlap (distance/buffer/patch) lands
+        // in cells whose indices differ by at most 1 per axis and the
+        // half-space 3×3 scan compares every candidate pair. Per-axis cells
+        // keep elongated footprints from over-inflating the opposite axis.
+        double maxHalfWidth = 0.0;
+        double maxHalfHeight = 0.0;
         for ( const AuditSample &sample : samples )
         {
-            maxWindowWidth = qMax( maxWindowWidth, sample.windowWidth );
-            maxWindowHeight = qMax( maxWindowHeight, sample.windowHeight );
+            if ( !sample.input.validBounds )
+                continue;
+            maxHalfWidth =
+                qMax( maxHalfWidth, ( sample.input.maxX - sample.input.minX ) / 2.0 );
+            maxHalfHeight =
+                qMax( maxHalfHeight, ( sample.input.maxY - sample.input.minY ) / 2.0 );
         }
-        const double reach = qMax( config.distanceThreshold, config.bufferDistance );
-        const double cellX = qMax( qMax( 1.0, reach ), overlapCheck ? maxWindowWidth : 1.0 );
-        const double cellY = qMax( qMax( 1.0, reach ), overlapCheck ? maxWindowHeight : 1.0 );
+        const double radiusCell =
+            qMax( 1.0, qMax( config.distanceThreshold, config.bufferDistance ) );
+        const double cellX = qMax( radiusCell, overlapCheck ? 2.0 * maxHalfWidth : 1.0 );
+        const double cellY = qMax( radiusCell, overlapCheck ? 2.0 * maxHalfHeight : 1.0 );
         // Injective (cellX, cellY) keys (#787): the previous combined key
         // `cy * xSpan + cx` collided for negative cells (e.g. xSpan=10:
         // (9,-1) ≡ (-1,0)), merging unrelated cells — duplicated pair
@@ -513,8 +523,10 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const AuditSample &sample = samples.at( i );
             if ( sample.input.validBounds )
             {
-                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cellX );
-                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cellY );
+                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0,
+                                            cellX );
+                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0,
+                                            cellY );
                 buckets[qMakePair( cx, cy )].append( i );
             }
         }

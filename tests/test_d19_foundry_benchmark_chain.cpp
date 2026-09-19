@@ -71,6 +71,10 @@ struct ChainFixture
         manifest.entries().append( entry );
         manifest.labelSchema().schemaId = QStringLiteral( "lc" );
         manifest.labelSchema().version = 1;
+        // The fixture declares a schema CRS while its point samples carry no
+        // per-sample CRS: the dataset:qa façade must then report the crs
+        // category as unknown (#1037 F-1030-P2-crs-pass), never pass.
+        manifest.schema().crs = QStringLiteral( "EPSG:32650" );
 
         REQUIRE( datasetStore.createDraftVersion( manifest ).has_value() );
 
@@ -331,6 +335,7 @@ TEST_CASE( "D19 hermetic foundry→benchmark→experiment chain",
     CHECK( qaTool.value( QStringLiteral( "sample_count" ) ).toLongLong() >= 1 );
     // Labels must not claim Pass when the agent façade did not run label QA.
     bool sawLabelsUnknown = false;
+    bool sawCrsUnknown = false;
     const QVariantList cats = qaTool.value( QStringLiteral( "categories" ) ).toList();
     for ( const QVariant &c : cats )
     {
@@ -340,8 +345,17 @@ TEST_CASE( "D19 hermetic foundry→benchmark→experiment chain",
             sawLabelsUnknown =
                 cat.value( QStringLiteral( "verdict" ) ).toString() == QLatin1String( "unknown" );
         }
+        // Façade-level CRS honesty (#1037 F-1030-P2-crs-pass): the fixture
+        // declares EPSG:32650 but no scanned sample carries a CRS — the crs
+        // category must say unknown, never pass.
+        if ( cat.value( QStringLiteral( "name" ) ).toString() == QLatin1String( "crs" ) )
+        {
+            sawCrsUnknown =
+                cat.value( QStringLiteral( "verdict" ) ).toString() == QLatin1String( "unknown" );
+        }
     }
     CHECK( sawLabelsUnknown );
+    CHECK( sawCrsUnknown );
 
     QVariantMap sampleArgs = qaArgs;
     sampleArgs.insert( QStringLiteral( "limit" ), 10 );

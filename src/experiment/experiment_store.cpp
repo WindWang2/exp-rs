@@ -421,24 +421,49 @@ namespace
 {
 
 /// Loads the stored run JSON (status included) while the caller holds the
-/// mutex. @p present distinguishes "no such row" from "row exists but does
-/// not parse": a corrupt row must never be mistaken for an absent one, or an
-/// upsert silently overwrites it and skips the transition/identity checks.
-std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId,
-                                            bool *present = nullptr )
+/// mutex; nullopt when absent or corrupt.
+std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId )
 {
-    if ( present )
-        *present = false;
     Stmt stmt( db, QStringLiteral( "SELECT json FROM experiment_runs WHERE run_id=?" ) );
     if ( !stmt )
         return std::nullopt;
     stmt.bind( 1, runId );
     if ( !stmt.stepRow() )
         return std::nullopt;
-    if ( present )
-        *present = true;
     const auto parsed = ExperimentRun::fromJson( textToJson( stmt.text( 0 ) ) );
     return parsed ? std::optional<ExperimentRun>( parsed.value() ) : std::nullopt;
+}
+
+/// Tri-state view of the stored run row for the write path (#1056): absent
+/// vs parsed vs corrupt. A parse failure must be observable by the writer —
+/// an unparseable row is evidence to preserve, not a gap to overwrite.
+struct ExistingRun
+{
+    std::optional<ExperimentRun> run;
+    bool corrupt = false;
+    bool queryFailed = false;
+};
+
+ExistingRun loadExistingRunLocked( sqlite3 *db, const QString &runId )
+{
+    ExistingRun out;
+    Stmt stmt( db, QStringLiteral( "SELECT json FROM experiment_runs WHERE run_id=?" ) );
+    if ( !stmt )
+    {
+        out.queryFailed = true;
+        return out;
+    }
+    stmt.bind( 1, runId );
+    if ( !stmt.stepRow() )
+        return out; // absent
+    const auto parsed = ExperimentRun::fromJson( textToJson( stmt.text( 0 ) ) );
+    if ( !parsed )
+    {
+        out.corrupt = true;
+        return out;
+    }
+    out.run = parsed.value();
+    return out;
 }
 
 } // namespace
@@ -489,32 +514,41 @@ sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &r
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "cannot begin transaction" ) ) );
 
-    bool runPresent = false;
-    const auto existing = loadRunLocked( m_impl->db, run.runId(), &runPresent );
-    if ( !existing && runPresent )
+    const auto existing = loadExistingRunLocked( m_impl->db, run.runId() );
+    if ( existing.corrupt )
     {
-        // The row exists but no longer parses: overwriting it would drop the
-        // recorded history without any transition/identity check, so refuse
-        // and let the operator repair the store.
+        // #1056: a row that exists but cannot be parsed is corrupt evidence,
+        // not an absent run — the transition/identity checks cannot run on
+        // it, and silently upserting over it would destroy the evidence.
+        // Fail closed and leave the row untouched for inspection.
         m_impl->rollback();
         return ResultT::failure( storeDiag(
-            QStringLiteral( "experiment.run_corrupt" ),
-            QStringLiteral( "stored run %1 is corrupt; refusing to overwrite it" )
+            QStringLiteral( "experiment.corrupt_record" ),
+            QStringLiteral( "run %1 exists but its stored record cannot be parsed;"
+                            " refusing to overwrite corrupt evidence" )
                 .arg( run.runId() ) ) );
     }
-    if ( existing && !isValidRunTransition( existing->status(), run.status() ) )
+    if ( existing.queryFailed )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            QStringLiteral( "cannot read existing run %1" )
+                                                .arg( run.runId() ) ) );
+    }
+    const std::optional<ExperimentRun> &parsed = existing.run;
+    if ( parsed && !isValidRunTransition( parsed->status(), run.status() ) )
     {
         m_impl->rollback();
         return ResultT::failure( storeDiag(
             QStringLiteral( "experiment.bad_transition" ),
             QStringLiteral( "illegal status transition %1 → %2" )
-                .arg( dataset::runStatusToString( existing->status() ),
+                .arg( dataset::runStatusToString( parsed->status() ),
                       dataset::runStatusToString( run.status() ) ) ) );
     }
     // Identity pins are immutable once the run started.
-    if ( existing && existing->status() != RunStatus::Created )
+    if ( parsed && parsed->status() != RunStatus::Created )
     {
-        if ( existing->executionIdentity() != run.executionIdentity() )
+        if ( parsed->executionIdentity() != run.executionIdentity() )
         {
             m_impl->rollback();
             return ResultT::failure( storeDiag(
@@ -713,13 +747,12 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
         while ( stmt.stepRow() )
         {
             pageEmpty = false;
-            const QString json = stmt.text( 1 );
-            // Match the parsed member, never a raw needle built from the
-            // caller's ref: the serializer escapes `"`, `\` and control
-            // characters, so a needle containing any of them would never
-            // match and one execution would resolve to a second run.
-            if ( textToJson( json ).value( QStringLiteral( "execution_ref" ) ).toString()
-                 == executionRef )
+            // Structured member read (#1056): a raw substring needle never
+            // matches refs whose characters JSON escaping rewrites (quotes,
+            // backslashes, control chars), so one execution could silently
+            // record duplicate runs. Parse each row and compare the member.
+            const QJsonObject row = textToJson( stmt.text( 1 ) );
+            if ( row.value( QStringLiteral( "execution_ref" ) ).toString() == executionRef )
                 ids.append( stmt.text( 0 ) );
         }
         if ( pageEmpty )

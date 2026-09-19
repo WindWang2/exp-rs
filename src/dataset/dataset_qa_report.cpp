@@ -173,21 +173,58 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
                 category.evidence.insert( QStringLiteral( "conflicting_sample_crs" ),
                                           QJsonArray::fromStringList( conflicts ) );
             }
-            else if ( inputs.distinctSampleCrs.isEmpty() )
-            {
-                // #1030: a declared schema CRS with no sample-CRS evidence is
-                // not a Pass. Identity learned the same lesson for a capped
-                // scan window (#1004); CRS must not claim agreement that was
-                // never observed.
-                category.verdict = AuditVerdict::Unknown;
-                category.summary =
-                    QStringLiteral( "schema CRS declared; no sample CRS evidence" );
-            }
             else
             {
-                category.verdict = AuditVerdict::Pass;
-                category.summary =
-                    QStringLiteral( "schema CRS declared; scanned sample CRS agrees" );
+                // #1037 F-1030-P2-crs-pass: Pass needs sample CRS evidence —
+                // at least one observed sample CRS — over a COMPLETE scan
+                // window. An empty observation set (no samples scanned, or
+                // every scanned sample carries no CRS) and a capped/partial
+                // scan are both "cannot verify agreement", not "verified".
+                // Callers that never report scan counts cannot reach Pass:
+                // totalSamples == 0 keeps the verdict Unknown.
+                const bool completeScan =
+                    !inputs.scanCapped && inputs.totalSamples > 0 &&
+                    inputs.scannedSamples >= inputs.totalSamples;
+                if ( inputs.distinctSampleCrs.isEmpty() )
+                {
+                    category.verdict = AuditVerdict::Unknown;
+                    category.summary = QStringLiteral(
+                        "no sample CRS observed in the scan window; agreement with"
+                        " the declared schema CRS is unverified" );
+                    category.evidence.insert( QStringLiteral( "scanned" ),
+                                              inputs.scannedSamples );
+                    category.evidence.insert( QStringLiteral( "sample_count" ),
+                                              inputs.totalSamples );
+                    category.evidence.insert( QStringLiteral( "scan_capped" ),
+                                              inputs.scanCapped );
+                }
+                else if ( !completeScan )
+                {
+                    category.verdict = AuditVerdict::Unknown;
+                    category.summary =
+                        QStringLiteral( "sample CRS evidence incomplete: scanned %1 of %2 sample(s)" )
+                            .arg( inputs.scannedSamples )
+                            .arg( inputs.totalSamples );
+                    category.evidence.insert( QStringLiteral( "observed_sample_crs" ),
+                                              QJsonArray::fromStringList(
+                                                  inputs.distinctSampleCrs ) );
+                    category.evidence.insert( QStringLiteral( "scanned" ),
+                                              inputs.scannedSamples );
+                    category.evidence.insert( QStringLiteral( "sample_count" ),
+                                              inputs.totalSamples );
+                    category.evidence.insert( QStringLiteral( "scan_capped" ),
+                                              inputs.scanCapped );
+                }
+                else
+                {
+                    category.verdict = AuditVerdict::Pass;
+                    category.summary =
+                        QStringLiteral( "schema CRS declared; observed sample CRS agrees"
+                                        " over the complete scan window" );
+                    category.evidence.insert( QStringLiteral( "observed_sample_crs" ),
+                                              QJsonArray::fromStringList(
+                                                  inputs.distinctSampleCrs ) );
+                }
             }
         }
         report.categories().append( category );

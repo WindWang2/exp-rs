@@ -30,23 +30,6 @@ Diagnostic notDraft( const QString &versionId )
                           .arg( versionId ) );
 }
 
-/// U+001F is the cell-key separator; a facet value carrying it is doubled so
-/// the joined key stays injective (otherwise "a<US>b" × "c" and "a" × "<US>b" × "c"
-/// collapse into one key and two cells merge).
-QString escapeCellValue( const QString &value )
-{
-    const QChar separator( 0x001F );
-    QString escaped;
-    escaped.reserve( value.size() );
-    for ( const QChar &ch : value )
-    {
-        if ( ch == separator )
-            escaped.append( separator );
-        escaped.append( ch );
-    }
-    return escaped;
-}
-
 } // namespace
 
 sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId &versionId,
@@ -210,11 +193,11 @@ sicnu::data::Result<DatasetStore::FacetDistribution> DatasetStore::facetDistribu
     return Result::success( distribution );
 }
 
-sicnu::data::Result<QVector<QPair<QString, qint64>>> DatasetStore::facetCrossCounts(
+sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>> DatasetStore::facetCrossCounts(
     const DatasetVersionId &versionId, const QString &facetA, const QString &facetB,
     int maxCells ) const
 {
-    using Result = sicnu::data::Result<QVector<QPair<QString, qint64>>>;
+    using Result = sicnu::data::Result<QVector<QPair<QPair<QString, QString>, qint64>>>;
     if ( !m_impl )
         return Result::failure( facetDiag( QStringLiteral( "dataset.store_closed" ),
                                            QStringLiteral( "store is not open" ) ) );
@@ -234,10 +217,9 @@ sicnu::data::Result<QVector<QPair<QString, qint64>>> DatasetStore::facetCrossCou
     cells.bind( 2, facetA );
     cells.bind( 3, facetB );
     cells.bind( 4, qMax( 1, maxCells ) );
-    QVector<QPair<QString, qint64>> out;
+    QVector<QPair<QPair<QString, QString>, qint64>> out;
     while ( cells.stepRow() )
-        out.append( qMakePair( escapeCellValue( cells.text( 0 ) ) + QChar( 0x001F ) +
-                                   escapeCellValue( cells.text( 1 ) ),
+        out.append( qMakePair( qMakePair( cells.text( 0 ), cells.text( 1 ) ),
                                cells.i64( 2 ) ) );
     return Result::success( out );
 }

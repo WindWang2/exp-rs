@@ -138,20 +138,18 @@ TEST_CASE( "split manifest persistence is immutable and idempotent", "[dataset][
     // Idempotent re-save of identical content.
     REQUIRE( seeded.store.saveSplitManifest( manifest.value() ).has_value() );
 
-    // Annotations are NOT content: re-saving the same split with a different
-    // note / leakage summary is the same content (a fold audit recomputes the
-    // fingerprint over the manifest with exactly those cleared), so it must
-    // stay idempotent instead of being refused as a conflict.
+    // A different note is NOT different content (#1056): the content
+    // fingerprint excludes presentation fields, so re-saving an annotated
+    // copy is the same idempotent no-op, not a conflict.
     auto annotated = manifest.value();
-    annotated.setNote( QStringLiteral( "annotated later" ) );
-    annotated.setLeakageSummary( QJsonObject{ { QStringLiteral( "finding_count" ), 0 } } );
+    annotated.setNote( QStringLiteral( "annotated" ) );
+    CHECK( splitManifestFingerprint( annotated ) ==
+           splitManifestFingerprint( manifest.value() ) );
     REQUIRE( seeded.store.saveSplitManifest( annotated ).has_value() );
 
-    // Re-saving the same id with different CONTENT is a conflict.
+    // Re-saving the same id with different content is a conflict.
     auto mutated = manifest.value();
-    SplitConfig mutatedConfig = mutated.config();
-    mutatedConfig.seed = mutatedConfig.seed + 1;
-    mutated.setConfig( mutatedConfig );
+    mutated.assignments()[0].sampleId = QStringLiteral( "re-pointed" );
     const auto conflict = seeded.store.saveSplitManifest( mutated );
     REQUIRE( !conflict.has_value() );
     REQUIRE( conflict.diagnostics().first().code == QStringLiteral( "dataset.conflict" ) );
