@@ -14,6 +14,7 @@
 #include <functional>
 #include <vector>
 
+#include "rs_pixel_rasterizer.h"
 #include "rs_training_data_extraction.h"
 
 namespace
@@ -449,4 +450,48 @@ TEST_CASE(
   REQUIRE( static_cast<int>( res.X.at<float>( 0, 0 ) ) == 3 );
   REQUIRE( res.y.at<int>( 4, 0 ) == 2 );
   REQUIRE( static_cast<int>( res.X.at<float>( 4, 0 ) ) == 5 );
+}
+
+TEST_CASE(
+  "Training extraction: forced rasterization failure fails closed",
+  "[classification][training-data][fail-closed]" )
+{
+  // #1056 — a rasterize API failure used to be indistinguishable from empty
+  // coverage, silently dropping the geometry from the training set. It must
+  // now surface as a typed RasterizeFailed error instead of a false success.
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  const QString raster = tmp.path() + "/src.tif";
+  createRaster( raster, 16, 16, 1,
+                []( int, int r, int c ) { return static_cast<float>( r * 16 + c ); } );
+
+  // Geometry without a cached pixel-index set → goes through the rasterizer.
+  const QVector<RsTrainingGeometry> geoms = {
+    roi( 1, squareGeom( 0, 16, 8, 8 ) ),
+  };
+
+  struct HookGuard
+  {
+    ~HookGuard() { RsPixelRasterizer::sForceRasterizeGeometriesFailure = nullptr; }
+  } guard;
+  RsPixelRasterizer::sForceRasterizeGeometriesFailure = []() { return true; };
+
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
+    raster, { 1 }, geoms );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsTrainingDataResult::Error::RasterizeFailed );
+  REQUIRE( res.X.empty() );
+  REQUIRE( res.y.empty() );
+
+  // Failure must propagate from the vector path too.
+  const QString vectorPath = tmp.path() + "/training.gpkg";
+  createVector( vectorPath, QStringLiteral( "class_id" ), 1, 0.0, 16.0, 8.0, 8.0 );
+
+  RsPixelRasterizer::sForceRasterizeGeometriesFailure = []() { return true; };
+  const RsTrainingDataResult resVec = RsTrainingDataExtraction::extractFromVector(
+    raster, { 1 }, vectorPath, QStringLiteral( "class_id" ) );
+  REQUIRE( !resVec.ok );
+  REQUIRE( resVec.error == RsTrainingDataResult::Error::RasterizeFailed );
 }

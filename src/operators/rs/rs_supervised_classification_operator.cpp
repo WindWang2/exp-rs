@@ -94,6 +94,9 @@ const std::vector<std::string> s_uncertaintyMeasures = {"entropy", "margin", "co
                                     + "; check CRS overlap and classField)");
         case E::InsufficientSamples:
             throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
+        case E::RasterTooLarge:
+            // Input-validation, not a computation failure (#1056).
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
         case E::ModelOpenFailed:
         case E::ModelSidecarMissing:
             throw RSOperatorError(ErrorCode::FileNotReadable, msg);

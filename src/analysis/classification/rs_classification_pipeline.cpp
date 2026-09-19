@@ -455,6 +455,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         case RsTrainingDataResult::Error::Cancelled:
           result.error = RsClassificationPipelineResult::Error::Cancelled;
           break;
+        case RsTrainingDataResult::Error::RasterizeFailed:
+          // GDAL-level failure while rasterizing a training geometry —
+          // surfaces as a raster read failure, not the vector fallback.
+          result.error = RsClassificationPipelineResult::Error::RasterReadFailed;
+          break;
         default:
           result.error = RsClassificationPipelineResult::Error::VectorOpenFailed;
           break;
@@ -737,6 +742,24 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   const int outW = x1 - x0;
   const int outH = y1 - y0;
 
+  // Pixel-count arithmetic is 64-bit everywhere (#1056): the int product
+  // wraps past ~46k×46k and a wrapped count would be published as a
+  // successful garbage totalPixels. Windows beyond the int-representable
+  // range are rejected up front, before any output is created.
+  const qint64 totalPixelCount = static_cast<qint64>( outW ) * static_cast<qint64>( outH );
+  if ( totalPixelCount > std::numeric_limits<int>::max() )
+  {
+    GDALClose( srcDs );
+    result.error = RsClassificationPipelineResult::Error::RasterTooLarge;
+    result.errorMessage = QStringLiteral(
+      "Classification output raster %1x%2 (%3 pixels) exceeds the maximum supported size (%4 pixels)" )
+      .arg( outW )
+      .arg( outH )
+      .arg( totalPixelCount )
+      .arg( static_cast<qint64>( std::numeric_limits<int>::max() ) );
+    return result;
+  }
+
   // Destination geotransform: shift origin to window top-left pixel.
   double outGt[6] = { gt[0], gt[1], gt[2], gt[3], gt[4], gt[5] };
   if ( crop )
@@ -804,6 +827,9 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     CSLDestroy( papsz );
     GDALClose( srcDs );
+    // A failed Create can still leave a partial file on disk (mirror of the
+    // failWithPartialOutput cleanup that guards every later stage).
+    QFile::remove( tempOutputPath );
     result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
     result.errorMessage = QStringLiteral( "Cannot create output: %1" )
                             .arg( config.outputRaster );
@@ -883,6 +909,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         GDALClose( srcDs );
         GDALClose( dstDs );
         QFile::remove( tempOutputPath );
+        QFile::remove( tempProbPath );
         result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
         result.errorMessage = QStringLiteral( "Cannot create probability output: %1" )
                                 .arg( config.probabilityOutput );
@@ -917,6 +944,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         QFile::remove( tempOutputPath );
         if ( !tempProbPath.isEmpty() )
           QFile::remove( tempProbPath );
+        QFile::remove( tempUncPath );
         result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
         result.errorMessage = QStringLiteral( "Cannot create uncertainty output: %1" )
                                 .arg( config.uncertaintyOutput );
@@ -984,10 +1012,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // 4. Tile-streamed predict over [x0,x1)×[y0,y1) in source pixel space;
   // write relative to the destination origin (0,0).
   constexpr int kTileSize = 256;
-  const int totalTiles = std::max( 1,
-    ( ( outW + kTileSize - 1 ) / kTileSize )
-    * ( ( outH + kTileSize - 1 ) / kTileSize ) );
-  int doneTiles = 0;
+  // 64-bit tile bookkeeping (#1056): int would overflow long before the
+  // per-tile loop above it, corrupting the progress fraction.
+  const qint64 totalTiles = std::max<qint64>( 1,
+    ( ( static_cast<qint64>( outW ) + kTileSize - 1 ) / kTileSize )
+    * ( ( static_cast<qint64>( outH ) + kTileSize - 1 ) / kTileSize ) );
+  qint64 doneTiles = 0;
 
   std::vector<float> tileBuf( static_cast<size_t>( kTileSize ) * kTileSize );
   // Int32 write buffer; GDAL converts to the band datatype on RasterIO.
@@ -1350,12 +1380,17 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   if ( writeProb )
   {
     QFile::remove( config.probabilityOutput );
-    // #1052: mirror the uncertainty branch — a rename that cannot complete
-    // (cross-device, locked or occupied target) must not be reported as
-    // success while leaving a stale raster from a previous run in place.
+    // Fail closed, mirroring the label and uncertainty branches (#1052):
+    // an unchecked rename reported success while the probability output was
+    // missing or a stale raster from a previous run. On failure the label
+    // raster (already renamed above) and every temp still on disk are
+    // removed — a failed run publishes nothing (#1052 review P2-1).
     if ( !QFile::rename( tempProbPath, config.probabilityOutput ) )
     {
       QFile::remove( tempProbPath );
+      if ( !tempUncPath.isEmpty() )
+        QFile::remove( tempUncPath );
+      QFile::remove( config.outputRaster );
       result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
       result.errorMessage =
         QStringLiteral( "Failed to finalize probability raster: %1" )
@@ -1369,6 +1404,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     if ( !QFile::rename( tempUncPath, config.uncertaintyOutput ) )
     {
       QFile::remove( tempUncPath );
+      // Label and probability rasters were already published above; remove
+      // them too so the failed run leaves no outputs behind.
+      QFile::remove( config.outputRaster );
+      QFile::remove( config.probabilityOutput );
       result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
       result.errorMessage =
         QStringLiteral( "Failed to finalize uncertainty raster: %1" )
@@ -1377,12 +1416,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     }
   }
 
-  // #1056: outW * outH overflows a signed int past ~2^31 pixels (~46k x 46k);
-  // saturate instead of reporting a garbage (possibly negative) count.
-  const qint64 pixelCount = static_cast<qint64>( outW ) * static_cast<qint64>( outH );
-  result.totalPixels = pixelCount > std::numeric_limits<int>::max()
-                         ? std::numeric_limits<int>::max()
-                         : static_cast<int>( pixelCount );
+  result.totalPixels = totalPixelCount;
   result.durationMs = static_cast<int>( timer.elapsed() );
   result.ok = true;
   result.meanConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0.0;

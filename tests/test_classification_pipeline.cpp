@@ -14,6 +14,7 @@
 #include <gdal_priv.h>
 
 #include <functional>
+#include <type_traits>
 #include <vector>
 
 #include "rs_classification_pipeline.h"
@@ -864,10 +865,141 @@ TEST_CASE(
   CHECK( resKm.meanAccuracy > 0.8 );
 }
 
+// ---------------------------------------------------------------------------
+// Publication integrity (#1052 / #1056): fail-closed finalize + overflow-safe
+// pixel accounting.
+// ---------------------------------------------------------------------------
+
 TEST_CASE(
-  "Classification pipeline: probability finalize failure is never reported as success",
-  "[classify][pipeline][probability][1052]" )
+  "Classification pipeline: probability raster finalize failure fails the run",
+  "[classify][pipeline][fail-closed]" )
 {
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  // The probability output path is a DIRECTORY: the temp GTiff next to it
+  // creates fine, but the final rename onto the directory can never
+  // succeed — exactly the false-success window #1052 reported.
+  const QString probTarget = tmp.path() + "/prob";
+  REQUIRE( QDir( tmp.path() ).mkpath( QStringLiteral( "prob" ) ) );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.probabilityOutput = probTarget;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::OutputCreateFailed );
+  REQUIRE( res.errorMessage.contains( QStringLiteral( "probability" ) ) );
+
+  // The label raster was renamed before the probability failure — the run
+  // must not leave it published either (a failed run publishes nothing).
+  REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
+  // No temp probability artifact is left behind.
+  const QStringList leftovers = QDir( tmp.path() )
+                                  .entryList( QStringList{ QStringLiteral( "prob.tmp~*" ) },
+                                              QDir::Files );
+  REQUIRE( leftovers.isEmpty() );
+}
+
+TEST_CASE(
+  "Classification pipeline: uncertainty raster finalize failure fails the run",
+  "[classify][pipeline][fail-closed]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const QString uncTarget = tmp.path() + "/unc";
+  REQUIRE( QDir( tmp.path() ).mkpath( QStringLiteral( "unc" ) ) );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.uncertaintyOutput = uncTarget;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::OutputCreateFailed );
+  REQUIRE( res.errorMessage.contains( QStringLiteral( "uncertainty" ) ) );
+
+  // Label (and probability, when requested) outputs published before the
+  // uncertainty failure are removed: a failed run publishes nothing.
+  REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
+  const QStringList leftovers = QDir( tmp.path() )
+                                  .entryList( QStringList{ QStringLiteral( "unc.tmp~*" ) },
+                                              QDir::Files );
+  REQUIRE( leftovers.isEmpty() );
+}
+
+TEST_CASE(
+  "Classification pipeline: windows beyond the int pixel range are rejected up front",
+  "[classify][pipeline][overflow]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  // 46341 × 46341 > INT_MAX pixels (~2.15e9) — the smallest square that
+  // overflows 32-bit pixel counts (#1056). The GeoTIFF is sparse: nothing
+  // below the header is ever materialized, so the test stays fast and small.
+  GDALAllRegister();
+  GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+  REQUIRE( drv != nullptr );
+  const int kBig = 46341;
+  const QString srcPath = tmp.path() + "/huge.tif";
+  {
+    GDALDataset *ds = drv->Create( srcPath.toUtf8().constData(), kBig, kBig, 3, GDT_Byte, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 0, 1, 0, static_cast<double>( kBig ), 0, -1 };
+    ds->SetGeoTransform( gt );
+    GDALClose( ds );
+  }
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.probabilityOutput = tmp.path() + "/prob.tif";
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::RasterTooLarge );
+  // Rejected before any output stage: neither the label nor the probability
+  // output (or their temps) exists.
+  REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
+  REQUIRE( !QFile::exists( tmp.path() + "/prob.tif" ) );
+  REQUIRE( QDir( tmp.path() ).entryList( QStringList{ QStringLiteral( "*.tmp~*" ) }, QDir::Files ).isEmpty() );
+}
+
+TEST_CASE(
+  "Classification pipeline: totalPixels is 64-bit and exact",
+  "[classify][pipeline][overflow]" )
+{
+  // Contract lock for #1056: the published count must be a 64-bit field so
+  // no future refactor silently reintroduces the int product.
+  static_assert( std::is_same<decltype( RsClassificationPipelineResult().totalPixels ), qint64>::value,
+                 "RsClassificationPipelineResult::totalPixels must stay 64-bit" );
+
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
 
@@ -882,19 +1014,7 @@ TEST_CASE(
   cfg.trainX = X;
   cfg.trainY = y;
 
-  // Occupy the probability output path with a directory: the final rename
-  // cannot succeed, which used to be swallowed and reported as success.
-  const QString probPath = tmp.path() + "/prob.tif";
-  REQUIRE( QDir().mkpath( probPath ) );
-  cfg.probabilityOutput = probPath;
-
   const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
-  INFO( res.errorMessage.toStdString() );
-  REQUIRE_FALSE( res.ok );
-  REQUIRE( res.error == RsClassificationPipelineResult::Error::OutputCreateFailed );
-  REQUIRE_FALSE( res.errorMessage.isEmpty() );
-  // No stale temp raster is left behind as if it were the product.
-  const QStringList leftovers =
-    QDir( tmp.path() ).entryList( QStringList() << QStringLiteral( "prob.tif.tmp*" ), QDir::Files );
-  CHECK( leftovers.isEmpty() );
+  REQUIRE( res.ok );
+  REQUIRE( res.totalPixels == 32 * 32 );
 }

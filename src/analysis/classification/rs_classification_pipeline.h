@@ -74,12 +74,17 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       InsufficientSamples,
       ModelOpenFailed,
       ModelSidecarMissing,
+      RasterTooLarge,
     };
 
     bool ok = false;
     Error error = Error::None;
     QString errorMessage;      ///< Human-readable detail, set when !ok.
-    int totalPixels = 0;
+    /// Pixel count of the published raster (outW × outH). 64-bit so the
+    /// reported count cannot wrap on huge windows (#1056); runs whose output
+    /// exceeds the int-representable range are rejected up front with
+    /// Error::RasterTooLarge instead of publishing an overflowed count.
+    qint64 totalPixels = 0;
     int durationMs = 0;
     int trainSamples = 0;
     int classCount = 0;

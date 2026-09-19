@@ -61,6 +61,7 @@ struct QGIS_ANALYSIS_EXPORT RsTrainingDataResult
       NoValidPixels,
       InsufficientSamples,
       Cancelled,
+      RasterizeFailed,
     };
 
     bool ok = false;
