@@ -3,6 +3,7 @@
 #include "active_view_host.h"
 #include "project_context.h"
 #include "shell/view_link_controller.h"
+#include "shell/canvas_extent_crs.h"
 #include "visualanalytics/va_layer_link_controller.h"
 #include "shell/rs_session_map_workspace.h"
 #include "shell/secondary_map_view_widget.h"
@@ -17,7 +18,6 @@
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgscoordinatetransform.h>
-#include <qgsexception.h>
 #include <georeferencer/qgsgeoreferencermainwindow.h>
 #include <georeferencer/qgsgeoref_image_to_map_window.h>
 #include <georeferencer/qgsgeoref_shell_window.h>
@@ -485,29 +485,26 @@ void QgisDesktopWindow::zoomToLayer()
     QList<QgsMapLayer*> selected = selectedLayers();
     if (!selected.isEmpty()) {
         QgsMapLayer *target = selected.first();
-        QgsRectangle extent = target->extent();
+        const QgsRectangle extent = target->extent();
         const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
-        if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
+        const QgsCoordinateTransformContext context =
+            QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                   : QgsCoordinateTransformContext();
+        const std::optional<QgsRectangle> transformed =
+            sicnu::app::rsTransformExtentForCanvas( extent, target->crs(), canvasCrs, context );
+        if ( !transformed.has_value() )
         {
-            try
-            {
-                const QgsCoordinateTransform ct( target->crs(), canvasCrs, QgsProject::instance() );
-                extent = ct.transformBoundingBox( extent );
-            }
-            catch ( const QgsException &e )
-            {
-                // Fail-closed (#1005): the numbers are in the layer CRS; a
-                // failed transform must not move the canvas to a wrong place.
-                qWarning().noquote() << "zoomToLayer: CRS transform from"
-                                     << target->crs().authid() << "to" << canvasCrs.authid()
-                                     << "failed (" << e.what() << "); view unchanged";
-                statusBar()->showMessage(
-                    tr( "Zoom to Layer failed: cannot transform the layer extent to the map CRS" ),
-                    4000 );
-                return;
-            }
+            // Fail-closed (#1005): the numbers are in the layer CRS; a
+            // failed transform must not move the canvas to a wrong place.
+            qWarning().noquote() << "zoomToLayer: CRS transform from"
+                                 << target->crs().authid() << "to" << canvasCrs.authid()
+                                 << "failed; view unchanged";
+            statusBar()->showMessage(
+                tr( "Zoom to Layer failed: cannot transform the layer extent to the map CRS" ),
+                4000 );
+            return;
         }
-        m_mapCanvas->setExtent(extent);
+        m_mapCanvas->setExtent(*transformed);
         m_mapCanvas->refresh();
         statusBar()->showMessage( tr( "Zoom to Layer" ), 2000 );
     }

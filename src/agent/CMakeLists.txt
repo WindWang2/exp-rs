@@ -25,6 +25,8 @@ add_library(sicnu_agent SHARED
   interaction_tool_registry.h
   agent_copilot_dock_widget.cpp
   agent_copilot_dock_widget.h
+  copilot_history_retention.cpp
+  copilot_history_retention.h
   llm_config_manager.cpp
   llm_config_manager.h
   llm_settings_dialog.cpp

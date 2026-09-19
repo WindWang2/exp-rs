@@ -7998,6 +7998,39 @@ target_include_directories(test_shell_shortcut_policy PRIVATE
 )
 sicnu_discover_tests(test_shell_shortcut_policy)
 
+# Track 02 (#1005/#1037): fail-closed canvas extent reprojection seam shared
+# by the zoom-to-layer / zoom-to-native / open-asset extent paths.
+add_executable(test_canvas_extent_crs
+  test_canvas_extent_crs.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/canvas_extent_crs.cpp
+)
+target_link_libraries(test_canvas_extent_crs PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+)
+target_include_directories(test_canvas_extent_crs PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_canvas_extent_crs)
+
+# Track 02 (#1056): copilot conversation-retention cap keeps the request
+# history bounded without orphaning assistant tool_calls from tool results.
+add_executable(test_copilot_history_retention
+  test_copilot_history_retention.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/copilot_history_retention.cpp
+)
+target_link_libraries(test_copilot_history_retention PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_copilot_history_retention PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_copilot_history_retention)
+
 # Track 02 (#1048): canvas-destruction-safe ownership of tool scene items.
 add_executable(test_map_tool_canvas_item
   test_map_tool_canvas_item.cpp

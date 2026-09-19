@@ -13,7 +13,6 @@
 #include <qgsmapoverviewcanvas.h>
 #include <qgsproject.h>
 #include <qgscoordinatetransform.h>
-#include <qgsexception.h>
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
@@ -29,6 +28,7 @@
 
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
+#include "shell/canvas_extent_crs.h"
 
 namespace {
 /// Transform @p extent from @p layerCrs into @p canvas's destination CRS and
@@ -41,23 +41,18 @@ bool applyCanvasExtentInLayerCrs( QgsMapCanvas *canvas, const QgsRectangle &exte
     if ( !canvas )
         return false;
     const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
-    QgsRectangle target = extent;
-    if ( layerCrs.isValid() && canvasCrs.isValid() && layerCrs != canvasCrs )
+    const QgsCoordinateTransformContext context =
+        QgsProject::instance() ? QgsProject::instance()->transformContext()
+                               : QgsCoordinateTransformContext();
+    const std::optional<QgsRectangle> target =
+        sicnu::app::rsTransformExtentForCanvas( extent, layerCrs, canvasCrs, context );
+    if ( !target.has_value() )
     {
-        try
-        {
-            const QgsCoordinateTransform ct( layerCrs, canvasCrs, QgsProject::instance() );
-            target = ct.transformBoundingBox( target );
-        }
-        catch ( const QgsException &e )
-        {
-            qWarning().noquote() << "canvas extent: CRS transform from" << layerCrs.authid()
-                                 << "to" << canvasCrs.authid()
-                                 << "failed (" << e.what() << "); extent left unchanged";
-            return false;
-        }
+        qWarning().noquote() << "canvas extent: CRS transform from" << layerCrs.authid()
+                             << "to" << canvasCrs.authid() << "failed; extent left unchanged";
+        return false;
     }
-    canvas->setExtent( target );
+    canvas->setExtent( *target );
     return true;
 }
 

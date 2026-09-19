@@ -1,5 +1,6 @@
 // src/agent/agent_copilot_dock_widget.cpp
 #include "agent_copilot_dock_widget.h"
+#include "copilot_history_retention.h"
 #include "interaction_tool_registry.h"
 #include "llm_settings_dialog.h"
 #include "output_verifier.h"
@@ -25,46 +26,6 @@
 
 namespace sicnu::agent
 {
-
-namespace
-{
-/// Bounded conversation retention (#1056): the copilot appends 2-3 entries per
-/// tool round and kept every one for the lifetime of the dock. The cap trims
-/// complete turns only: index 0 (the system prompt) always stays, and the
-/// array may only restart at a role=="user" entry, so an assistant
-/// tool_calls entry is never orphaned from its tool result (which would make
-/// every subsequent request invalid).
-constexpr int kMaxHistoryMessages = 80;
-
-void trimMessageHistory( QJsonArray &history )
-{
-  if ( history.size() <= kMaxHistoryMessages )
-    return;
-  // Cut at the FIRST role=="user" boundary at or after the cap: the retained
-  // suffix always starts at a user turn, so no assistant tool_calls entry is
-  // orphaned from its tool result, and the cap is hard (unlike the previous
-  // "last boundary before the cap" scan, which could leave the array over the
-  // limit when a turn outran the cap).
-  const int keepFrom = history.size() - kMaxHistoryMessages;
-  int cut = -1;
-  for ( int i = 1; i < history.size(); ++i )
-  {
-    if ( i < keepFrom )
-      continue;
-    if ( history.at( i ).toObject().value( QStringLiteral( "role" ) ).toString()
-         == QLatin1String( "user" ) )
-    {
-      cut = i;
-      break;
-    }
-  }
-  if ( cut < 1 )
-    return; // no safe boundary: keeping the array valid wins over the cap
-  // QJsonArray has no range remove(): drop the head one entry at a time.
-  for ( int i = 1; i < cut; ++i )
-    history.removeAt( 1 );
-}
-} // namespace
 
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   : QDockWidget( tr( "AI Copilot 智能助手" ), parent )

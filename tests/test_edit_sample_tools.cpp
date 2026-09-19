@@ -319,3 +319,27 @@ TEST_CASE( "erase stroke touching nothing commits zero removals",
     CHECK( liveCount( &fx.layer ) == 1 );
     CHECK( fx.session.state( fx.layer.id() ).undoDepth == 0 );
 }
+
+TEST_CASE( "brush/erase tools free their scene-owned rubber band on destruction (#1051)",
+           "[editing][sample][1051]" )
+{
+    ensureApp();
+    ToolFixture fx;
+
+    const int baseline = fx.canvas.scene() ? fx.canvas.scene()->items().size() : -1;
+    REQUIRE( baseline >= 0 );
+
+    {
+        RsSampleBrushTool brush( &fx.canvas );
+        CHECK( fx.canvas.scene()->items().size() == baseline + 1 );
+    }
+    // Without the destructor the tool leaked one QgsRubberBand per instance
+    // (the band is a scene item, not a QObject child).
+    CHECK( fx.canvas.scene()->items().size() == baseline );
+
+    {
+        RsSampleEraseTool erase( &fx.canvas );
+        CHECK( fx.canvas.scene()->items().size() == baseline + 1 );
+    }
+    CHECK( fx.canvas.scene()->items().size() == baseline );
+}

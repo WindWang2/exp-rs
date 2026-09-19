@@ -122,6 +122,9 @@ add_executable(sicnu_geo_rs
     # Track 02: focused-editor shortcut policy + headless shell self-test
     shell/shell_shortcut_policy.cpp
     shell/shell_selftest.cpp
+    # Track 02: fail-closed canvas extent reprojection seam
+    shell/canvas_extent_crs.cpp
+    shell/canvas_extent_crs.h
 
     # Workbench 5.0 (workspace model, selection context, command surface)
     workbench/workbench_host.cpp
