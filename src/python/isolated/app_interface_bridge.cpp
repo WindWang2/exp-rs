@@ -44,7 +44,8 @@ constexpr int kSegmentHeightCap = 1024;
 /// is left untouched so the plugin falls back to GDAL).
 ///
 /// Rasters not taller than kSegmentHeightCap migrate as ONE segment, delivered
-/// as `__shm_array__` (key + width/height/bands/dtype in \a params). Taller
+/// as `__shm_array__` (key + __shm_width__/__shm_height__/__shm_bands__/__shm_dtype__
+/// in \a params). Taller
 /// rasters split into ceil(height / kSegmentHeightCap) row-chunk tiles, each a
 /// segment of its own; \a params then carries a `__shm_tiles__` array (one
 /// entry per tile: key + tile width/height/bands/dtype + the tile's first row
@@ -189,10 +190,12 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
   else
   {
     params.insert( QStringLiteral( "__shm_key__" ), segments.front()->nativeKey() );
-    params.insert( QStringLiteral( "width" ), width );
-    params.insert( QStringLiteral( "height" ), height );
-    params.insert( QStringLiteral( "bands" ), bands );
-    params.insert( QStringLiteral( "dtype" ), static_cast<int>( segDtype ) );
+    // Namespaced delivery keys — do not clobber plugin algorithm params
+    // that legitimately use width/height/bands/dtype (#1095b).
+    params.insert( QStringLiteral( "__shm_width__" ), width );
+    params.insert( QStringLiteral( "__shm_height__" ), height );
+    params.insert( QStringLiteral( "__shm_bands__" ), bands );
+    params.insert( QStringLiteral( "__shm_dtype__" ), static_cast<int>( segDtype ) );
   }
   return segments;
 }

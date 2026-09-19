@@ -460,22 +460,24 @@ def main():
                                 exec_params = params.get("params", {})
                                 # ADR 0064 zero-copy delivery: when the C++ side
                                 # has migrated a raster input into a shared-memory
-                                # segment, it sends __shm_key__ (+ width/height/
-                                # bands/dtype) instead of the file path. Mount the
-                                # payload as a numpy array (no copy) and expose it
-                                # to the plugin as params["__shm_array__"]. Plugins
-                                # that don't read __shm_array__ are unaffected.
-                                # Lifetime: close+best-effort unlink before reply,
-                                # consistent with the shm.read sync contract.
+                                # segment, it sends __shm_key__ (+ namespaced
+                                # __shm_width__/__shm_height__/__shm_bands__/
+                                # __shm_dtype__) instead of the file path. Mount
+                                # the payload as a numpy array (no copy) and
+                                # expose it to the plugin as params["__shm_array__"].
+                                # Plugins that don't read __shm_array__ are
+                                # unaffected. Lifetime: close+best-effort unlink
+                                # before reply, consistent with the shm.read
+                                # sync contract.
                                 shm_handles = []
                                 if isinstance(exec_params, dict) and exec_params.get("__shm_key__"):
                                     try:
                                         shm_handle, arr = _mount_shm_array(
                                             exec_params["__shm_key__"],
-                                            exec_params.get("width"),
-                                            exec_params.get("height"),
-                                            exec_params.get("bands"),
-                                            exec_params.get("dtype"),
+                                            exec_params.get("__shm_width__", exec_params.get("width")),
+                                            exec_params.get("__shm_height__", exec_params.get("height")),
+                                            exec_params.get("__shm_bands__", exec_params.get("bands")),
+                                            exec_params.get("__shm_dtype__", exec_params.get("dtype")),
                                         )
                                         shm_handles.append(shm_handle)
                                         exec_params = dict(exec_params)
