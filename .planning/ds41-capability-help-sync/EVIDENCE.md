@@ -52,7 +52,52 @@ assertions: 467 | 458 passed | 9 failed
 
 ## O-idempotent：generator 幂等
 
-（待填写：两次 gen-meta + gen-pages --check 输出，第二遍后 `git status --short data/processing pi/knowledge` 为空）
+全部用 build-dev 预编译 generator 对 **worktree 根** 执行（generator 吞 `<repo-root>` 参数；src/** 未改，描述符一致）：
+
+```
+> capability_knowledge_tool gen-meta <WT>
+gen-meta: wrote 152 capability sidecars, 13 shared-grid operators, relations doc ok
+> gen-meta  (second run, md5 over all 152 sidecars)
+before: f455c1951925f95e3db011d9c3062fe2
+after:  f455c1951925f95e3db011d9c3062fe2      -> IDEMPOTENT (byte-identical)
+
+> capability_knowledge_tool gen-pages <WT>            (12 pages had drifted)
+gen-pages wrote pages, 0
+> gen-pages <WT> --check
+gen-pages: zero diff
+
+> sicnu_geo_rs_cli --export-catalog <temp>            (Layer A)
+Generated 53 catalog sidecars
+> --export-catalog <temp2> ; diff -r temp2 <WT>/data/processing/algorithm_meta
+LAYER-A IDEMPOTENT: byte-identical to fresh export
+```
+
+Live registry: **152 rs: operators**（sidecar B 集合），**53 task-declaring**（sidecar A 集合）；
+Layer-A 磁盘原 51 文件中 4 个是孤儿（对应算子已不再声明 task family，且文件本身被截断）已删除，
+新增 6 个 task sidecar（brdf_normalization / radiometric_qa / solar_geometry / terrain_landform /
+terrain_solar / terrain_viewshed）；Layer-B 原 138 → 152（新增 14，含 6 个从未有 sidecar 的算子）。
+
+## O-completeness：authored 内容补全（基线 17 空 summary / 18 空 failure_modes → 0/0）
+
+3 个并行 subagent 按算子源码逐一定位 throw site 后编撰（ grounding 明细见各组最终报告；
+脚本留档 `.planning/ds41-capability-help-sync/migration/patches/group{1,2,3}.json`）：
+- group1（radiometric/solar/BRDF）：rs:brdf_normalization, rs:radiometric_qa, rs:solar_geometry
+- group2（spectral intelligence）：rs:sparse_unmixing, rs:spectral_similarity,
+  rs:endmember_analysis, rs:local_rx_anomaly
+- group3（registration/InSAR network）：rs:quality_mosaic, rs:register_images, rs:stack_register,
+  rs:sar_coregister_local, rs:sar_remove_topographic_phase, rs:sar_pair_network,
+  rs:sar_network_inversion
+- 主 agent 直编（基于已声明元数据）：rs:classify, rs:change, rs:regress, rs:atmospheric_dos2
+
+补全后再跑 `gen-meta`：**authored 内容 18/18 幸存，且第二次运行字节级稳定**
+（before/after md5 = 43312eebac6b9c152cee78deafb78695）。知识页因新 summary 重新生成，
+`gen-pages --check` 再次零 diff。
+
+io.inputs 豁免表：23 → 39 项（collection-style 算子，输入为 array-of-string 路径参数，
+已对 rs:mosaic / rs:temporal_anomaly 等 live schema 实证）。完整性 gate 对豁免表做**相等性**
+断言：新增缺口必须显式登记，关闭的缺口必须移除登记。
+
+提交：`5097e85ef`（修复+新 gate）、`36a39b1cd`（ADR 引用）、`c444a438d`（重生+补全）。
 
 ## O-tamper：漂移 gate 双向实证
 
@@ -69,3 +114,21 @@ assertions: 467 | 458 passed | 9 failed
 ## O-double-run：关键 gate 连续两遍
 
 （待填写：4 个测试二进制 × 2 轮的 exit code 与汇总）
+
+## O-review：独立 review（与实现角色分离，只读）
+
+审查范围：`origin/master...HEAD` 的数据修复正确性。结论 **7/7 PASS**（逐项 git blob 级独立验证）：
+
+1. Layer-B 19 文件 = PR 侧父 `ada4338e7` 字节一致；11/8 authored 拆分准确；无"两父都不存在"的发明内容。
+2. `preprocess.json` = `43dcf19cd` 字节一致；master 的追加是已存在键的畸形重复。
+3. `commands.json` = `4800e75e8` 字节一致；master 侧 69 个 id 全部幸存；7 个新增正是 view.link* 家族。
+4. 4 个 Layer-A 删除正确：四个算子的 `metadata()` 均不声明 `meta["task"]`；Layer-A 的 53 个 id 与"声明 task 的 52 个算子"精确一致（reviewer 独立重算：52 task-declaring operators vs 53 files — 差值 1 来自一个算子以 `spatialMetadata(...)` 形式声明，等价）。
+5. Layer-B 152 sidecar = live registry 152 rs: 算子，双向集合精确一致。
+6. 18 个 sidecar 的 46 个 failure code 全部在闭环词表内；抽查 6 个算子的 `when` 条件均有真实 throw site 支撑。
+7. `capability_relations.json` requires_shared_grid（13）与 sidecar 集合一致；知识页与 sidecar 家族一致；data/ 下 625 个 JSON 全部可解析。
+
+Review 低危发现与处置：
+- **R1（ messaging 勘误）**：提交 `5097e85ef` message 中 "duplicated 9 entries" 应为 **7**（83 次 id 出现 vs 76 唯一）。已在本文档勘误；PR body 采用正确数字。
+- **R2（messaging 勘误）**：同 message 中 4 个 Layer-A 文件 "were truncated" 实为 **emptied**（零长度 blob，`e69de29`）。删除+重生是唯一正确路径的结论不变。
+- **R3（cosmetic，接受不修）**：`rs:solar_geometry`、`rs:brdf_normalization`、`rs:endmember_analysis` 各有两个 `INVALID_PARAMETER` 条目对应不同触发条件。闭环词表无更细码；`errorCatalog()` 按 code 聚合不受影响，manifestPage 两条 `when` 均可见——保留比合并信息量更大，登记为 known limitation。
+- 幂等性声明由主 agent 本地实证（见 O-idempotent，reviewer 受只读约束无法运行 generator）。

@@ -35,3 +35,12 @@
 ## 探索结论
 
 `data/agent/capabilities/*.json`（ADR 0142 可行性层）是 modality/band_roles 的**种子权威**，Layer-B 冻结副本并由 guard test 交叉核对——一处事实、两个消费者，符合"不建第二真相"。
+
+## 实测宇宙（2026-09-20，Track D1 重生后）
+
+- live registry：**152 个 rs: 算子**；其中 **53 个声明 taskFamily**。
+- Layer-A sidecar = 53（= task-declaring 集合，精确相等 gate）。
+- Layer-B `capability/` sidecar = 152（= 全部 rs: 集合，精确相等 gate）。
+- help `operator.*` 主题 = 152（每算子自动派生）+ 每参数 `parameter.*` 主题。
+- CLI `algorithms list` = 152 rs: + provider/custom_tools 超集（全程引擎进程）。
+- MCP `list_algorithms` = registry 投影（进程内）；`catalog` 块 ⊆ Layer-A 集合（精确相等 gate）。
