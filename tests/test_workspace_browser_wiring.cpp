@@ -155,3 +155,33 @@ TEST_CASE( "Shell wiring stays in place (source-scan guard)", "[ux4][shell][guar
     REQUIRE( projectSource.contains( QStringLiteral( "refreshWorkspaceBrowser()" ) ) );
     REQUIRE( projectSource.contains( QStringLiteral( "updateWindowTitle()" ) ) );
 }
+
+TEST_CASE( "WorkspaceGovernanceModel populates inside the reset window (#1056)",
+           "[ux4][workspace][model][1056]" )
+{
+    Fixture fx;
+    const QString raster = makeRaster( QStringLiteral( "reset-window.tif" ) );
+    REQUIRE( !registerFile( fx.manager, raster ).assetId.isNull() );
+    REQUIRE( fx.service.mirrorAllAssets() >= 1 );
+
+    sicnu::app::WorkspaceBrowserPanel panel;
+    panel.setWorkspaceService( &fx.service );
+    sicnu::app::WorkspaceGovernanceModel *model =
+        panel.findChild<sicnu::app::WorkspaceGovernanceModel *>();
+    REQUIRE( model != nullptr );
+    REQUIRE( model->rowCount() >= 1 );
+
+    // A view reads the model when modelReset fires. Assigning m_rows AFTER
+    // endResetModel() left every attached view with the pre-reset row count
+    // until an unrelated reset — the bug this pins.
+    int rowsAtReset = -1;
+    QObject::connect( model, &QAbstractItemModel::modelReset, model, [&]() {
+        rowsAtReset = model->rowCount();
+    } );
+
+    model->applyFilters( QString(), QStringLiteral( "assets" ), QString(), QString(), QString() );
+
+    REQUIRE( model->rowCount() >= 1 );
+    INFO( "rows visible to views during modelReset: " << rowsAtReset );
+    CHECK( rowsAtReset == model->rowCount() );
+}

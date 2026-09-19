@@ -25,6 +25,17 @@ RsToolbarFlowHost::RsToolbarFlowHost( QWidget *parent )
 
 void RsToolbarFlowHost::setProductToolbars( const QList<QToolBar *> &bars )
 {
+  // #1056: m_dragChip / m_resizeChip point INTO m_chips. Rebuilding the list
+  // without dropping the interaction state leaves dangling pointers that the
+  // next mouse move dereferences (currently setup-only, latent by accident).
+  m_dragging = false;
+  m_dragChip = nullptr;
+  m_dragOffset = QPoint();
+  m_resizing = false;
+  m_resizeChip = nullptr;
+  m_resizeStartW = 0;
+  m_resizeStartX = 0;
+
   // Keep existing width/order when possible.
   QHash<QString, Chip> prev;
   for ( const Chip &c : m_chips )

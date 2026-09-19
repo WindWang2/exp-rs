@@ -26,6 +26,37 @@
 namespace sicnu::agent
 {
 
+namespace
+{
+/// Bounded conversation retention (#1056): the copilot appends 2-3 entries per
+/// tool round and kept every one for the lifetime of the dock. The cap trims
+/// complete turns only: index 0 (the system prompt) always stays, and the
+/// array may only restart at a role=="user" entry, so an assistant
+/// tool_calls entry is never orphaned from its tool result (which would make
+/// every subsequent request invalid).
+constexpr int kMaxHistoryMessages = 80;
+
+void trimMessageHistory( QJsonArray &history )
+{
+  if ( history.size() <= kMaxHistoryMessages )
+    return;
+  int cut = 1; // keep history[0] (system)
+  const int keepFrom = history.size() - kMaxHistoryMessages;
+  for ( int i = 1; i < history.size() && i <= keepFrom; ++i )
+  {
+    if ( history.at( i ).toObject().value( QStringLiteral( "role" ) ).toString()
+         == QLatin1String( "user" ) )
+      cut = i;
+  }
+  if ( cut > 1 )
+  {
+    // QJsonArray has no range remove(): drop the head one entry at a time.
+    for ( int i = 1; i < cut; ++i )
+      history.removeAt( 1 );
+  }
+}
+} // namespace
+
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   : QDockWidget( tr( "AI Copilot 智能助手" ), parent )
   , m_completionGuard( std::make_shared<std::atomic<bool>>( true ) )
@@ -804,6 +835,8 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
     "请根据上述工具执行结果生成最终回答。如果执行失败或验证未通过，必须明确说明失败原因，"
     "不得报喜。" );
   m_messageHistory.append( finalUserMsg );
+
+  trimMessageHistory( m_messageHistory );
 
   const QJsonArray followUpMessages = m_messageHistory;
 
