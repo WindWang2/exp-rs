@@ -150,7 +150,8 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
     if (!errorOut.empty())
         guardedPaths.append(QString::fromStdString(errorOut));
     PartialOutputGuard partialGuard(guardedPaths);
-    outDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
+    for (int b = 0; b < model.bandCount; ++b)
+        outDataset.setBandNoDataValue(b + 1, std::numeric_limits<float>::quiet_NaN());
     GDALDatasetH outHandle = static_cast<GDALDatasetH>( outDataset.dataset() );
     for (int b = 0; b < model.bandCount; ++b)
     {

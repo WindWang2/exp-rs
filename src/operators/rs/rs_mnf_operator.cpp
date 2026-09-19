@@ -286,7 +286,8 @@ Json::Value RsMnfOperator::run(const Json::Value& params, RSOperatorContext& con
     if (!transformOut.empty())
         guardedPaths.append(QString::fromStdString(transformOut));
     PartialOutputGuard partialGuard(guardedPaths);
-    outDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
+    for (int c = 0; c < numComponents; ++c)
+        outDataset.setBandNoDataValue(c + 1, std::numeric_limits<float>::quiet_NaN());
 
     std::vector<double> yBuffer(static_cast<size_t>(bandCount), 0.0);
     std::vector<std::vector<float>> componentRows(
