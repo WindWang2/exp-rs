@@ -13,6 +13,7 @@
 #include <qgsmapoverviewcanvas.h>
 #include <qgsproject.h>
 #include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
@@ -30,29 +31,41 @@
 #include "data/source_descriptor.h"
 
 namespace {
-void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
+/// Transform @p extent from @p layerCrs into @p canvas's destination CRS and
+/// apply it. Returns false — and changes NOTHING on the canvas — when a
+/// required transform fails (#1005 fail-closed): source-CRS numbers must
+/// never be presented as a target-CRS extent.
+bool applyCanvasExtentInLayerCrs( QgsMapCanvas *canvas, const QgsRectangle &extent,
+                                  const QgsCoordinateReferenceSystem &layerCrs )
 {
-    if ( !canvas || !layer )
-        return;
-    QgsRectangle extent = layer->extent();
+    if ( !canvas )
+        return false;
     const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
-    if ( layer->crs().isValid() && canvasCrs.isValid() && layer->crs() != canvasCrs )
+    QgsRectangle target = extent;
+    if ( layerCrs.isValid() && canvasCrs.isValid() && layerCrs != canvasCrs )
     {
         try
         {
-            const QgsCoordinateTransform ct( layer->crs(), canvasCrs, QgsProject::instance() );
-            extent = ct.transformBoundingBox( extent );
+            const QgsCoordinateTransform ct( layerCrs, canvasCrs, QgsProject::instance() );
+            target = ct.transformBoundingBox( target );
         }
-        catch ( ... )
+        catch ( const QgsException &e )
         {
-            // #1005: extent stays in the layer CRS — say so instead of
-            // silently setting a wrong-canvas extent.
-            qWarning().noquote() << "canvas extent: CRS transform from"
-                                 << layer->crs().authid() << "to" << canvasCrs.authid()
-                                 << "failed; using the untransformed layer extent";
+            qWarning().noquote() << "canvas extent: CRS transform from" << layerCrs.authid()
+                                 << "to" << canvasCrs.authid()
+                                 << "failed (" << e.what() << "); extent left unchanged";
+            return false;
         }
     }
-    canvas->setExtent( extent );
+    canvas->setExtent( target );
+    return true;
+}
+
+bool setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
+{
+    if ( !canvas || !layer )
+        return false;
+    return applyCanvasExtentInLayerCrs( canvas, layer->extent(), layer->crs() );
 }
 } // namespace
 
@@ -299,7 +312,15 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId, bool zoomToLayer )
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( zoomToLayer || !hadVisibleLayers )
-        setCanvasExtentReprojected( targetCanvas, layer );
+    {
+        // Fail-closed (#1005): a failed transform leaves the viewport as-is
+        // and says so; it never presents source-CRS numbers on this canvas.
+        if ( !setCanvasExtentReprojected( targetCanvas, layer ) )
+            pushMessageBarAlert( QObject::tr( "Zoom to Layer" ),
+                                 QObject::tr( "The layer extent could not be transformed to the "
+                                              "map CRS; the view was left unchanged." ),
+                                 Qgis::MessageLevel::Warning );
+    }
 
     return Result<DisplayLayerId>::success( displayed.value() );
 }
@@ -361,7 +382,15 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source, const QString 
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
-        setCanvasExtentReprojected( targetCanvas, layer );
+    {
+        // Fail-closed (#1005): see openAsset — a failed transform leaves the
+        // viewport unchanged and is reported, never applied untransformed.
+        if ( !setCanvasExtentReprojected( targetCanvas, layer ) )
+            pushMessageBarAlert( QObject::tr( "Zoom to Layer" ),
+                                 QObject::tr( "The layer extent could not be transformed to the "
+                                              "map CRS; the view was left unchanged." ),
+                                 Qgis::MessageLevel::Warning );
+    }
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
     {
@@ -533,7 +562,15 @@ void ActiveViewHost::zoomToLayer( QgsMapLayer *layer )
     if ( !target )
         return;
 
-    setCanvasExtentReprojected( m_mapCanvas, target );
+    // Fail-closed (#1005): don't zoom to numbers that are in the wrong CRS.
+    if ( !setCanvasExtentReprojected( m_mapCanvas, target ) )
+    {
+        pushMessageBarAlert( QObject::tr( "Zoom to Layer" ),
+                             QObject::tr( "The layer extent could not be transformed to the "
+                                          "map CRS; the view was left unchanged." ),
+                             Qgis::MessageLevel::Warning );
+        return;
+    }
     m_mapCanvas->refresh();
 }
 
@@ -560,7 +597,18 @@ void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
     double cy = ( ext.yMinimum() + ext.yMaximum() ) / 2.0;
     double w = m_mapCanvas->width() * xRes;
     double h = m_mapCanvas->height() * yRes;
-    m_mapCanvas->setExtent( QgsRectangle( cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0 ) );
+    // Fail-closed (#1005): the rectangle is in the raster CRS; refuse rather
+    // than present it on a canvas with a different CRS when the transform fails.
+    if ( !applyCanvasExtentInLayerCrs( m_mapCanvas,
+                                       QgsRectangle( cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0 ),
+                                       rl->crs() ) )
+    {
+        pushMessageBarAlert( QObject::tr( "Zoom to Native Resolution" ),
+                             QObject::tr( "The raster extent could not be transformed to the "
+                                          "map CRS; the view was left unchanged." ),
+                             Qgis::MessageLevel::Warning );
+        return;
+    }
     m_mapCanvas->refresh();
 }
 

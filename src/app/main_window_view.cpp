@@ -17,6 +17,7 @@
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <georeferencer/qgsgeoreferencermainwindow.h>
 #include <georeferencer/qgsgeoref_image_to_map_window.h>
 #include <georeferencer/qgsgeoref_shell_window.h>
@@ -486,7 +487,6 @@ void QgisDesktopWindow::zoomToLayer()
         QgsMapLayer *target = selected.first();
         QgsRectangle extent = target->extent();
         const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
-        bool transformFailed = false;
         if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
         {
             try
@@ -494,22 +494,22 @@ void QgisDesktopWindow::zoomToLayer()
                 const QgsCoordinateTransform ct( target->crs(), canvasCrs, QgsProject::instance() );
                 extent = ct.transformBoundingBox( extent );
             }
-            catch ( ... )
+            catch ( const QgsException &e )
             {
-                // #1005: surface the degraded zoom instead of silently
-                // applying the extent in the wrong CRS.
-                transformFailed = true;
+                // Fail-closed (#1005): the numbers are in the layer CRS; a
+                // failed transform must not move the canvas to a wrong place.
                 qWarning().noquote() << "zoomToLayer: CRS transform from"
                                      << target->crs().authid() << "to" << canvasCrs.authid()
-                                     << "failed; zooming to the untransformed layer extent";
+                                     << "failed (" << e.what() << "); view unchanged";
+                statusBar()->showMessage(
+                    tr( "Zoom to Layer failed: cannot transform the layer extent to the map CRS" ),
+                    4000 );
+                return;
             }
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage( transformFailed
-                                      ? tr( "Zoom to Layer (CRS transform failed — extent in layer CRS)" )
-                                      : tr( "Zoom to Layer" ),
-                                  2000 );
+        statusBar()->showMessage( tr( "Zoom to Layer" ), 2000 );
     }
 }
 

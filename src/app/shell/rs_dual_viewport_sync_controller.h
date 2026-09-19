@@ -42,6 +42,8 @@ class RsDualViewportSyncController : public QObject
         quint64 extentChangedEvents = 0;
         quint64 appliedSyncCount = 0;
         quint64 canvasRefreshRequests = 0;
+        /// #1005 fail-closed: passes aborted because a CRS transform threw.
+        quint64 failedTransforms = 0;
     };
 
     RsDualViewportSyncController( QgsMapCanvas *primary, QgsMapCanvas *secondary,

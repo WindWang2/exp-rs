@@ -8,6 +8,7 @@
 #include "qgsmaptoolzoom.h"
 #include "qgsmapcanvas.h"
 #include "qgsrectangle.h"
+#include "qgsexception.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -312,6 +313,11 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
     mParamsPanel->setRpcMode( false );
   onTransformMethodChanged();
   updateToolAvailability();
+
+  // #1052: the constructor's config sync (refreshFit + workflow restore) is
+  // not a user edit. A fresh window with zero GCPs must close without the
+  // "unsaved control points" prompt; the first real mutation dirties it again.
+  mGeorefSession.clearDirty();
 
   addViewMenu();
 
@@ -1805,10 +1811,19 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
       QgsCoordinateTransform ct( mDstRaster->crs(), destCrs, ctx );
       dstForStore = ct.transform( dst );
     }
-    catch ( ... )
+    catch ( const QgsException &e )
     {
-      // Keep original dst — fit path will report via collectOk; do not silently
-      // store a mismatched CRS label.
+      // Fail closed (#1005 / F-1030-P1-gcp): storing dst in the raster CRS
+      // while tagging it with the target CRS produced a GCP whose numbers and
+      // CRS disagreed — refuse the pair instead. Mirrors onSourcePointPicked.
+      qWarning().noquote() << "commitGcpPair: CRS transform from"
+                           << mDstRaster->crs().authid() << "to" << destCrs.authid()
+                           << "failed (" << e.what() << "); GCP not added";
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "Cannot transform the target point into the destination CRS — GCP not added" ), 6000 );
+      rearmAddPointTools();
+      return;
     }
   }
   mGeorefSession.addGcp( QgsGcpPoint( src, dstForStore, destCrs, true ) );

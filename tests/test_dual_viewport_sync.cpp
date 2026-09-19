@@ -8,6 +8,9 @@
 
 #include "qgsmapcanvas.h"
 #include "qgsrectangle.h"
+#include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransform.h"
+#include "qgsproject.h"
 
 #include "shell/rs_dual_viewport_sync_controller.h"
 
@@ -268,4 +271,51 @@ TEST_CASE( "Dual viewport: 9. snapSecondaryToPrimary applies immediately", "[app
 
   REQUIRE( secondary.extent().xMinimum() == Approx( primary.extent().xMinimum() ).margin( 1e-3 ) );
   REQUIRE( secondary.extent().xMaximum() == Approx( primary.extent().xMaximum() ).margin( 1e-3 ) );
+}
+
+TEST_CASE( "Dual viewport: 10. failed CRS transform leaves the target viewport untouched (#1005 fail-closed)", "[app][dual_viewport][crs]" )
+{
+  ensureApp();
+  QgsMapCanvas primary;
+  QgsMapCanvas secondary;
+  primary.resize( 300, 300 );
+  secondary.resize( 300, 300 );
+
+  // EPSG:4978 (geocentric) is a GUARANTEED throw for transformBoundingBox —
+  // QgsCoordinateTransform::transformBoundingBox refuses 2D bboxes that
+  // involve a geocentric CRS. Lock that precondition so a PROJ/QGIS change
+  // cannot silently turn this regression test into a no-op.
+  const QgsCoordinateReferenceSystem wgs84( QStringLiteral( "EPSG:4326" ) );
+  const QgsCoordinateReferenceSystem geocentric( QStringLiteral( "EPSG:4978" ) );
+  REQUIRE( wgs84.isValid() );
+  REQUIRE( geocentric.isValid() );
+  {
+    const QgsCoordinateTransform probe( wgs84, geocentric, QgsProject::instance() );
+    REQUIRE_THROWS( probe.transformBoundingBox( QgsRectangle( 0, 0, 1, 1 ) ) );
+  }
+
+  RsDualViewportSyncController ctl( &primary, &secondary );
+
+  primary.setDestinationCrs( wgs84 );
+  secondary.setDestinationCrs( geocentric );
+  ctl.resetStats();
+  primary.setExtent( QgsRectangle( 10, 10, 20, 20 ) );
+  QTest::qWait( 80 );
+
+  // Fail-closed: the untransformed source extent must NOT be applied to the
+  // destination canvas, and the target is not refreshed for a non-sync.
+  CHECK( ctl.stats().failedTransforms == 1 );
+  CHECK( ctl.stats().canvasRefreshRequests == 0 );
+  CHECK_FALSE( secondary.extent().xMinimum() == Approx( 10.0 ).margin( 1e-6 ) );
+  CHECK_FALSE( secondary.extent().xMaximum() == Approx( 20.0 ).margin( 1e-6 ) );
+
+  // Same-CRS sync still works after the failure (the controller stays usable).
+  // Assert the controller's contract (target follows source) rather than a
+  // literal rectangle: setExtent/zoomScale normalise for the canvas aspect.
+  secondary.setDestinationCrs( wgs84 );
+  primary.setExtent( QgsRectangle( 30, 30, 40, 40 ) );
+  QTest::qWait( 80 );
+  CHECK( secondary.extent().center().x() == Approx( primary.extent().center().x() ).margin( 1e-3 ) );
+  CHECK( secondary.extent().center().y() == Approx( primary.extent().center().y() ).margin( 1e-3 ) );
+  CHECK( secondary.scale() == Approx( primary.scale() ).epsilon( 1e-4 ) );
 }
