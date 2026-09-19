@@ -133,7 +133,7 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
     int availableIdle = 0;
     for ( const WorkerNode *node : m_nodes )
     {
-      if ( node && !node->isBusy )
+      if ( node && !node->isBusy && !node->isRestarting )
         availableIdle++;
     }
     if ( availableIdle < excessNodes )
@@ -143,7 +143,9 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
     for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
     {
       WorkerNode *node = m_nodes[i];
-      if ( node && !node->isBusy )
+      // Skip busy and mid-restart nodes — a pending restart timer still
+      // holds the id; removing the node makes the timer bail (#1095a).
+      if ( node && !node->isBusy && !node->isRestarting )
       {
         if ( node->worker )
         {
@@ -277,7 +279,24 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
   // to 10 s per crash. The whole restart body runs inside the timer so the
   // crash handler returns immediately.
   const int backoffMs = std::min( 500 * ( 1 << std::min( node->restartCount, 5 ) ), 10000 );
-  QTimer::singleShot( backoffMs, this, [this, node, wasBusy, id, pending = std::move( pending )]() mutable {
+  // Capture id only — setPoolSize may delete the WorkerNode during backoff
+  // (#1095a). Re-resolve from m_nodes before touching any fields.
+  QTimer::singleShot( backoffMs, this, [this, wasBusy, id, pending = std::move( pending )]() mutable {
+  WorkerNode *node = nullptr;
+  for ( WorkerNode *candidate : m_nodes )
+  {
+    if ( candidate && candidate->id == id )
+    {
+      node = candidate;
+      break;
+    }
+  }
+  if ( !node )
+  {
+    // Node removed by pool shrink while the restart was pending.
+    failPendingRequests( pending );
+    return;
+  }
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
@@ -288,8 +307,18 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
 
   if ( node->server->listen( socketName ) )
   {
-    connect( node->worker, &PythonWorkerProcess::workerCrashed, this, [this, node]() {
-      handleWorkerCrash( node );
+    connect( node->worker, &PythonWorkerProcess::workerCrashed, this, [this, id]() {
+      WorkerNode *live = nullptr;
+      for ( WorkerNode *candidate : m_nodes )
+      {
+        if ( candidate && candidate->id == id )
+        {
+          live = candidate;
+          break;
+        }
+      }
+      if ( live )
+        handleWorkerCrash( live );
     } );
     const bool started = node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
     node->isRestarting = false;
@@ -312,12 +341,27 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
       // State recovery: replay lost requests once the fresh worker connects.
       // Each replay consumes one retry; a request whose budget is exhausted is
       // answered with an error so the caller never hangs on a dead worker.
-      const auto replay = [this, node, sharedPending]() {
+      const auto replay = [this, id, sharedPending]() {
+        WorkerNode *live = nullptr;
+        for ( WorkerNode *candidate : m_nodes )
+        {
+          if ( candidate && candidate->id == id )
+          {
+            live = candidate;
+            break;
+          }
+        }
+        if ( !live || !live->server )
+        {
+          failPendingRequests( *sharedPending );
+          sharedPending->clear();
+          return;
+        }
         for ( const PythonIpcServer::PendingRequest &req : *sharedPending )
         {
           if ( req.retriesLeft > 0 )
           {
-            node->server->sendRequest( req.method, req.params, req.callback, req.retriesLeft - 1 );
+            live->server->sendRequest( req.method, req.params, req.callback, req.retriesLeft - 1 );
           }
           else
           {

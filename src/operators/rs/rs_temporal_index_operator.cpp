@@ -280,9 +280,14 @@ Json::Value RsTemporalIndexSeriesOperator::run( const Json::Value &params, RSOpe
       {
         for ( int b = 0; b < indexBandCount; ++b )
         {
+          int px = 0, py = 0, pw = 0, ph = 0;
+          reader.tileRect( probePositions[p], &px, &py, &pw, &ph );
+          const size_t probePixels = static_cast<size_t>( pw ) * static_cast<size_t>( ph );
+          // Clear only the bytes this read will fill so a failed/partial
+          // probe cannot leave a previous scene's tail in the scan window.
+          std::fill_n( probeTile.data(), probePixels, std::numeric_limits<float>::quiet_NaN() );
           if ( !reader.readSceneBandTile( s, indexBands[b], probePositions[p], probeTile.data() ) )
             continue;
-          const size_t probePixels = tilePixels;
           for ( size_t i = 0; i < probePixels; ++i )
           {
             if ( std::isfinite( probeTile[i] ) )

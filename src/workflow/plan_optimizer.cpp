@@ -42,20 +42,38 @@ QVector<QString> childrenOf( const WorkflowDocument &def, const QString &nodeId 
 } // namespace
 
 QString WorkflowPlanOptimizer::computeNodeSignature( const NodeFact &node,
-                                                     const QMap<QString, QString> &parentSignatures )
+                                                     const QMap<QString, QString> &parentSignatures,
+                                                     const QVector<QPair<QString, QString>> &incomingPorts )
 {
-    // Parents concatenated in sorted node-id order — the ⊕^Sorted clause.
-    QStringList parentIds;
-    for ( auto it = parentSignatures.cbegin(); it != parentSignatures.cend(); ++it )
-        parentIds << it.key();
-
     QString lineage = node.operatorId;
     lineage += QLatin1Char( '\x1f' );
     lineage += canonicalJson( node.parameters );
-    for ( const QString &parentId : parentIds )
+    if ( !incomingPorts.isEmpty() )
     {
-        lineage += QLatin1Char( '\x1f' );
-        lineage += parentSignatures.value( parentId );
+        // Port-sensitive lineage (#1077): each incoming edge contributes
+        // (targetPortName, sourceNodeId, parentSignature). Caller sorts.
+        for ( const auto &port : incomingPorts )
+        {
+            lineage += QLatin1Char( '\x1f' );
+            lineage += port.first;   // targetPortName
+            lineage += QLatin1Char( '\x1f' );
+            lineage += port.second;  // sourceNodeId
+            lineage += QLatin1Char( '\x1f' );
+            lineage += parentSignatures.value( port.second );
+        }
+    }
+    else
+    {
+        // Legacy / parentless path: parents concatenated in sorted node-id
+        // order — keeps pinned digests for root nodes and unit tests.
+        QStringList parentIds;
+        for ( auto it = parentSignatures.cbegin(); it != parentSignatures.cend(); ++it )
+            parentIds << it.key();
+        for ( const QString &parentId : parentIds )
+        {
+            lineage += QLatin1Char( '\x1f' );
+            lineage += parentSignatures.value( parentId );
+        }
     }
 
     const QByteArray digest = QCryptographicHash::hash( lineage.toUtf8(), QCryptographicHash::Sha256 );
@@ -88,7 +106,16 @@ QMap<QString, QString> WorkflowPlanOptimizer::computeLineageSignatures( const Wo
             }
             if ( !parentsReady )
                 continue;
-            signatures.insert( node.nodeId, computeNodeSignature( node, parentSigs ) );
+            // Fold every incoming edge's (targetPort, sourceNodeId) so a
+            // swapped-port rewire cannot share a cache/CSE signature (#1077).
+            QVector<QPair<QString, QString>> incomingPorts;
+            for ( const EdgeFact &edge : def.edges )
+            {
+                if ( edge.targetNodeId == node.nodeId )
+                    incomingPorts.append( qMakePair( edge.targetPortName, edge.sourceNodeId ) );
+            }
+            std::sort( incomingPorts.begin(), incomingPorts.end() );
+            signatures.insert( node.nodeId, computeNodeSignature( node, parentSigs, incomingPorts ) );
             progressed = true;
         }
         if ( !progressed )

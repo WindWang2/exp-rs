@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QSet>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -641,8 +642,23 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     if ( !parsed.isSuccess() )
         return fail( QStringLiteral( "checkpoint workflow does not parse: %1" ).arg( parsed.error() ) );
 
+    // Validate node set + count BEFORE mutating m_state so a corrupt
+    // checkpoint cannot wedge the coordinator as "already active" (#1078c).
+    const WorkflowDocument resumedDef = parsed.value();
+    const QJsonArray nodes = document.value( QLatin1String( "nodes" ) ).toArray();
+    QSet<QString> seenNodeIds;
+    for ( const QJsonValue &value : nodes )
+    {
+        const QString nodeId = value.toObject().value( QLatin1String( "nodeId" ) ).toString();
+        if ( !resumedDef.findNode( nodeId ) )
+            return fail( QStringLiteral( "checkpoint references unknown node '%1'" ).arg( nodeId ) );
+        seenNodeIds.insert( nodeId );
+    }
+    if ( seenNodeIds.size() != resumedDef.nodes.size() )
+        return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
+
     // Fresh scheduling state over the resumed document.
-    m_state->def = parsed.value();
+    m_state->def = resumedDef;
     m_state->runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
     m_state->runId = document.value( QLatin1String( "runId" ) ).toString();
     m_state->checkpointPath = checkpointFilePath;
@@ -655,7 +671,6 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // Replay statuses; CacheHit requires BOTH a matching recomputed lineage
     // signature and a still-existing artifact.
     const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( m_state->def );
-    const QJsonArray nodes = document.value( QLatin1String( "nodes" ) ).toArray();
     for ( const QJsonValue &value : nodes )
     {
         const QJsonObject entry = value.toObject();

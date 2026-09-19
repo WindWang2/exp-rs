@@ -6,9 +6,10 @@
 // to the requested sinks:
 //
 //   - computeNodeSignature: H(v) = SHA-256( opId ‖ canonical(params) ‖
-//     ⊕ H(parents) with parents sorted by node id ). Deterministic and
-//     order-insensitive to parent enumeration; parameter-sensitive;
-//     operator-sensitive. Signatures drive CSE and cache-hit reuse.
+//     ⊕ (targetPort ‖ sourceNodeId ‖ H(parent)) with incoming edges sorted
+//     by (targetPort, sourceNodeId) ). Deterministic and order-insensitive
+//     to edge enumeration; parameter-, operator-, and port-sensitive.
+//     Signatures drive CSE and cache-hit reuse.
 //   - optimizePlan: Dead Node Elimination keeps only the ancestors of the
 //     requested sinks; Common Subexpression Elimination merges nodes with
 //     equal signatures (first occurrence in document order wins) and
@@ -20,6 +21,7 @@
 
 #include <QJsonObject>
 #include <QMap>
+#include <QPair>
 #include <QSet>
 #include <QString>
 
@@ -49,10 +51,14 @@ class WorkflowPlanOptimizer
   public:
     WorkflowPlanOptimizer() = delete;
 
-    /// Content signature of one node given its parents' signatures.
-    /// 64 lowercase hex characters (SHA-256).
+    /// Content signature of one node given its parents' signatures and the
+    /// incoming port wiring. @p incomingPorts is a sorted list of
+    /// (targetPortName, sourceNodeId) pairs — port names are hashed so
+    /// swapped-edge rewires cannot collide (#1077). 64 lowercase hex
+    /// characters (SHA-256).
     static QString computeNodeSignature( const NodeFact &node,
-                                         const QMap<QString, QString> &parentSignatures );
+                                         const QMap<QString, QString> &parentSignatures,
+                                         const QVector<QPair<QString, QString>> &incomingPorts = {} );
 
     /// Full lineage signatures for the whole graph: parents-first (the map
     /// value is the node's signature; input is the accumulated map).

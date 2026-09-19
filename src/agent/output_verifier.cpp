@@ -771,6 +771,8 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
     }
     else if ( a.kind == QLatin1String( "histogram_shape" ) )
     {
+      if ( !p.has( params, "band" ) )
+        p.fail( "band is required" );
       const int bins = p.integer( params, "bins" );
       if ( bins < 2 || bins > 4096 )
         p.fail( "bins must lie in [2,4096]" );
@@ -1334,6 +1336,10 @@ void ContentWalk::feedTile( const sicnu::geo::TileSlice &slice, const std::vecto
             }
             else
             {
+                // Guard empty readBands/positions — a histogram_shape without
+                // band used to pass validation and OOB here (#1079).
+                if ( positions.empty() || need.readBands.empty() )
+                    continue;
                 const std::size_t pos = positions[0];
                 const BandInfo &band = mMeta->bands.at( static_cast<std::size_t>( need.readBands[0] - 1 ) );
                 const int bins = params.isMember( "bins" ) ? params["bins"].asInt() : 0;
