@@ -768,6 +768,10 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
     // The run is terminal: whoever acquires the run lock next may resume or
     // reconcile it. (Erasing the shared_ptr releases the flock.)
     m_locksByRunId.erase( run.runId() );
+    // #1097: drop the reverse map so a Failed/Canceled run can be resumed in
+    // the same long-lived process (resume refuses "already tracked" otherwise).
+    // m_runsByPipeline retains history for runs()/explainRun.
+    m_pipelineByRunId.erase( run.runId() );
     (void)pipelineId;
 }
 
@@ -1338,6 +1342,7 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
                     run->forceSetState( target );
                 queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() );
                 m_locksByRunId.erase( run->runId() );
+                m_pipelineByRunId.erase( run->runId() ); // #1097: mirror finalizeRunLocked
                 finalizePersist = capturePersistLocked(
                     run, run->state() == WorkflowRunState::Completed );
                 didFinalize = true;

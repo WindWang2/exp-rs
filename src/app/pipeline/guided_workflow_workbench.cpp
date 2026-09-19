@@ -143,6 +143,11 @@ void GuidedWorkflowWidget::syncParameterToTopology( const QString &nodeId, const
 
 void GuidedWorkflowWidget::setViewMode( ViewMode mode )
 {
+    // #1097: leaving TopologyCanvas must export canvas edits back into
+    // m_workflow before any subsequent loadWorkflow would discard them.
+    if ( m_uiBuilt && m_viewMode == ViewMode::TopologyCanvas
+         && mode != ViewMode::TopologyCanvas && m_canvas )
+        m_workflow = m_canvas->exportWorkflow();
     m_viewMode = mode;
     if ( !m_uiBuilt )
         return; // headless use: state flip only, widgets built lazily

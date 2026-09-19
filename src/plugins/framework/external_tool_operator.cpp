@@ -73,10 +73,9 @@ bool substitute( std::string text, const Json::Value &params,
 
 void ensureParentDirectory( const std::string &path )
 {
-    const size_t slash = path.rfind( '/' );
-    if ( slash == std::string::npos )
-        return;
-    const std::string parent = path.substr( 0, slash );
+    // #1097: filesystem::path handles Windows backslashes; rfind('/') alone
+    // left parents uncreated for Windows output paths and publish always failed.
+    const std::filesystem::path parent = std::filesystem::u8path( path ).parent_path();
     if ( parent.empty() )
         return;
     std::error_code error;
@@ -116,9 +115,13 @@ bool ExternalToolOperator::buildArgv( const Json::Value &params,
             return false;
         }
         std::string suffix;
-        const size_t dot = finalPath.rfind( '.' );
-        if ( dot != std::string::npos && finalPath.find( '/', dot ) == std::string::npos )
-            suffix = finalPath.substr( dot );
+        {
+            // #1097: path::extension so Windows backslash paths still get a
+            // suffix; rfind('.') + find('/') mis-detects e.g. C:\a.b\out.
+            const auto ext = std::filesystem::u8path( finalPath ).extension().u8string();
+            if ( !ext.empty() )
+                suffix.assign( ext.begin(), ext.end() );
+        }
         const std::string tempPath = context.tempPath( suffix );
         overrides[port.name] = tempPath;
         outputMoves[port.name] = { tempPath, finalPath };

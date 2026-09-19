@@ -166,13 +166,25 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
                 // be allowed to leak the reservation.
                 lock.lock();
                 pool.opening[url] -= 1;
+                if ( pool.opening[url] == 0 )
+                    pool.opening.erase( url );
+                if ( pool.handles[url].empty() )
+                    pool.handles.erase( url );
                 throw;
             }
             m_openCount.fetch_add( 1, std::memory_order_relaxed );
             lock.lock();
             pool.opening[url] -= 1;
             if ( !dataset )
+            {
+                // #1097: operator[] left empty map nodes for every failed URL;
+                // drop idle buckets so STAC churn cannot grow unbounded.
+                if ( pool.opening[url] == 0 )
+                    pool.opening.erase( url );
+                if ( pool.handles[url].empty() )
+                    pool.handles.erase( url );
                 return RemoteDatasetLease{};
+            }
             handle->dataset = dataset;
             try
             {
@@ -184,6 +196,54 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
                 // goes out of scope here, so close it before rethrowing.
                 GDALClose( dataset );
                 throw;
+            }
+            // #1097: bound distinct URL keys; evict idle (no in-flight, all
+            // handles unlocked) entries when the map grows too large.
+            constexpr size_t kMaxUrlEntries = 512;
+            while ( pool.handles.size() > kMaxUrlEntries )
+            {
+                bool evicted = false;
+                for ( auto it = pool.handles.begin(); it != pool.handles.end(); )
+                {
+                    if ( it->first == url )
+                    {
+                        ++it;
+                        continue;
+                    }
+                    const auto openIt = pool.opening.find( it->first );
+                    const size_t inflight = openIt == pool.opening.end() ? 0 : openIt->second;
+                    if ( inflight != 0 )
+                    {
+                        ++it;
+                        continue;
+                    }
+                    bool busy = false;
+                    for ( auto &h : it->second )
+                    {
+                        std::unique_lock<std::mutex> hl( h->mutex, std::try_to_lock );
+                        if ( !hl.owns_lock() )
+                        {
+                            busy = true;
+                            break;
+                        }
+                        if ( h->dataset )
+                        {
+                            GDALClose( h->dataset );
+                            h->dataset = nullptr;
+                        }
+                    }
+                    if ( busy )
+                    {
+                        ++it;
+                        continue;
+                    }
+                    pool.opening.erase( it->first );
+                    it = pool.handles.erase( it );
+                    evicted = true;
+                    break;
+                }
+                if ( !evicted )
+                    break;
             }
             std::unique_lock<std::mutex> handleLock( handle->mutex );
             return RemoteDatasetLease( handle, std::move( handleLock ) );

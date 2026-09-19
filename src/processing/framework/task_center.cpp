@@ -690,33 +690,10 @@ TaskCenter::AdmissionDims TaskCenter::admissionDimsLocked( const AlgorithmTaskIn
 {
     if ( m_admissionDimsCache.contains( task.taskId ) )
         return m_admissionDimsCache[ task.taskId ];
-    AdmissionDims dims;
-    try
-    {
-        auto adapter =
-            processing::AtomicAlgorithmRegistry::instance().findAdapter( task.algorithmId.toStdString() );
-        if ( adapter )
-        {
-            const auto desc = adapter->descriptor();
-            dims.ioHeavy = desc.agentMetadata.ioHeavy;
-            const Json::Value &execution = desc.agentMetadata.execution;
-            if ( execution.isObject() )
-            {
-                const Json::Value &tempDisk = execution["temporaryDiskBytes"];
-                if ( tempDisk.isNumeric() )
-                    dims.tempDiskMb = static_cast<unsigned int>(
-                        tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
-                const Json::Value &vram = execution["estimatedVramBytes"];
-                if ( vram.isNumeric() )
-                    dims.vramMb = static_cast<unsigned int>(
-                        vram.asUInt64() / ( 1024ull * 1024ull ) );
-            }
-        }
-    }
-    catch ( ... )
-    {
-        dims = AdmissionDims{}; // a descriptor failure never gates
-    }
+    // #1097 / #930: never lazy-construct QGIS adapters under m_mutex. Unwarmed
+    // tasks get conservative zero dims; enqueueTask / submitPipeline seed the
+    // cache outside the lock.
+    AdmissionDims dims{};
     m_admissionDimsCache[ task.taskId ] = dims;
     return dims;
 }
@@ -1290,6 +1267,39 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         catalogForWarm = m_catalog;
     }
     sicnu::temporal::warmExecutionIdentityCache( catalogForWarm, params );
+    // #1097 / #930: QGIS registry lazy-construction (and descriptor JSON) must
+    // not run under m_mutex — first touch of an unknown provider id builds
+    // QgsProcessingAlgorithm adapters and would stall every terminal /
+    // progress / cancel. Resolve the adapter + admission dims HERE, lock-free.
+    QString warmedAlgorithmName = algorithmId;
+    AdmissionDims warmedDims;
+    try
+    {
+        auto adapter =
+            processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
+        if ( adapter )
+        {
+            const auto desc = adapter->descriptor();
+            warmedAlgorithmName = QString::fromStdString( desc.displayName );
+            warmedDims.ioHeavy = desc.agentMetadata.ioHeavy;
+            const Json::Value &execution = desc.agentMetadata.execution;
+            if ( execution.isObject() )
+            {
+                const Json::Value &tempDisk = execution["temporaryDiskBytes"];
+                if ( tempDisk.isNumeric() )
+                    warmedDims.tempDiskMb = static_cast<unsigned int>(
+                        tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
+                const Json::Value &vram = execution["estimatedVramBytes"];
+                if ( vram.isNumeric() )
+                    warmedDims.vramMb = static_cast<unsigned int>(
+                        vram.asUInt64() / ( 1024ull * 1024ull ) );
+            }
+        }
+    }
+    catch ( ... )
+    {
+        warmedDims = AdmissionDims{};
+    }
     long id = -1;
     std::optional<PendingSubmissionFingerprint> pendingFingerprint;
     {
@@ -1328,11 +1338,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
             }
         }
 
-        auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
-        if ( adapter )
-            info.algorithmName = QString::fromStdString( adapter->descriptor().displayName );
-        else
-            info.algorithmName = algorithmId;
+        info.algorithmName = warmedAlgorithmName;
 
         info.status = TaskStatus::Queued;
         info.progressPercentage = 0.0;
@@ -1347,6 +1353,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                                  .arg( static_cast<int>( priority ) ) );
 
         m_tasks[id] = info;
+        // Seed so admissionDimsLocked never re-enters the QGIS registry under
+        // m_mutex for this task (#1097).
+        m_admissionDimsCache[id] = warmedDims;
         if ( m_tasks[id].ownerTaskId > 0 )
             m_ownedChildren.insert( m_tasks[id].ownerTaskId, id );
         // 8.0 WP-A: derived admission state for the new task (children index,
@@ -1526,7 +1535,11 @@ void TaskCenter::onJobRecord( const sicnu::jobs::JobRecord &record )
                 tag = tag.substr( 5 );
             bool ok = false;
             long parsedId = QString::fromStdString( tag ).toLong( &ok );
-            if ( ok && m_tasks.contains( parsedId ) && !isTerminalStatus( m_tasks[parsedId].status ) )
+            // #1097: refuse clientTag recovery when the task already tracks a
+            // different (retry) jobId — a late terminal record for the dead job
+            // must not overwrite the retry or re-deliver the old failure.
+            if ( ok && m_tasks.contains( parsedId ) && !isTerminalStatus( m_tasks[parsedId].status )
+                 && ( m_tasks[parsedId].jobId.empty() || m_tasks[parsedId].jobId == record.id ) )
             {
                 taskId = parsedId;
                 m_taskByJobId[record.id] = taskId;
@@ -3273,6 +3286,47 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 catalogForWarm, sicnu::processing::jsonParamsToVariantMap( step.params ) );
     }
 
+    // #1097 / #930: warm admission dims outside m_mutex (per unique operator id).
+    QMap<QString, AdmissionDims> warmedDimsByAlgo;
+    auto warmDimsFor = [&warmedDimsByAlgo]( const QString &algoId ) -> AdmissionDims {
+        if ( warmedDimsByAlgo.contains( algoId ) )
+            return warmedDimsByAlgo.value( algoId );
+        AdmissionDims dims;
+        try
+        {
+            auto adapter =
+                processing::AtomicAlgorithmRegistry::instance().findAdapter( algoId.toStdString() );
+            if ( adapter )
+            {
+                const auto desc = adapter->descriptor();
+                dims.ioHeavy = desc.agentMetadata.ioHeavy;
+                const Json::Value &execution = desc.agentMetadata.execution;
+                if ( execution.isObject() )
+                {
+                    const Json::Value &tempDisk = execution["temporaryDiskBytes"];
+                    if ( tempDisk.isNumeric() )
+                        dims.tempDiskMb = static_cast<unsigned int>(
+                            tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
+                    const Json::Value &vram = execution["estimatedVramBytes"];
+                    if ( vram.isNumeric() )
+                        dims.vramMb = static_cast<unsigned int>(
+                            vram.asUInt64() / ( 1024ull * 1024ull ) );
+                }
+            }
+        }
+        catch ( ... )
+        {
+            dims = AdmissionDims{};
+        }
+        warmedDimsByAlgo.insert( algoId, dims );
+        return dims;
+    };
+    for ( const auto &step : def.steps )
+    {
+        if ( step.kind == sicnu::workflow::StepKind::Operator && !step.operatorId.empty() )
+            (void) warmDimsFor( QString::fromStdString( step.operatorId ) );
+    }
+
     long pipelineId = -1;
     // Submission fingerprints prepared under the lock below; their
     // input-identity resolution (potentially a blocking network probe) is
@@ -3368,6 +3422,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                                            QString::fromStdString( stepId ) ) );
 
             m_tasks[taskId] = info;
+            m_admissionDimsCache[taskId] = warmDimsFor( info.algorithmId );
             // 8.0 WP-A: derived admission state for the pipeline step
             // (children index + ready-heap / manual-queue registration; fused
             // members are autoDispatch=false and land on the manual list,

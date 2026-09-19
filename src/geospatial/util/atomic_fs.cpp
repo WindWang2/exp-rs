@@ -13,10 +13,12 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <random>
 
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -98,15 +100,42 @@ std::string stagedPathFor( const std::string &targetPath )
   const std::size_t dot = filename.rfind( '.' );
   const std::string stem = dot == std::string::npos ? filename : filename.substr( 0, dot );
   const std::string extension = dot == std::string::npos ? "" : filename.substr( dot );
+  // #1097: pid + counter alone still collide across forks that share a
+  // counter reset, and a check-then-use TOCTOU lets two publishers share one
+  // temp. Claim the name with O_EXCL / CREATE_NEW; random_device supplies
+  // entropy that ::rand() (never seeded in src/) cannot.
+  static thread_local std::mt19937_64 rng{ [] {
+    std::random_device rd;
+    return std::mt19937_64{ rd() ^ ( stagingProcessId() << 1 ) };
+  }() };
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
     const std::string staged = u8( directory ) + "/" + stem + "." +
                                  std::to_string( stagingProcessId() ) + "." +
                                  std::to_string( stagingCounter()++ ) + "." +
-                                 std::to_string( ::rand() ) + ".tmp" + extension;
-    if ( !fileExists( staged ) )
+                                 std::to_string( rng() ) + ".tmp" + extension;
+#ifdef _WIN32
+    const HANDLE handle = CreateFileW( wideFromUtf8( staged ).c_str(), GENERIC_WRITE,
+                                       FILE_SHARE_READ, nullptr, CREATE_NEW,
+                                       FILE_ATTRIBUTE_NORMAL, nullptr );
+    if ( handle != INVALID_HANDLE_VALUE )
+    {
+      CloseHandle( handle );
       return staged;
+    }
+    if ( GetLastError() != ERROR_FILE_EXISTS )
+      throwLastWindowsError( "Cannot allocate a staging path", staged );
+#else
+    const int fd = ::open( staged.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600 );
+    if ( fd >= 0 )
+    {
+      ::close( fd );
+      return staged;
+    }
+    if ( errno != EEXIST )
+      throw GeoError( ErrorCode::IoError, "Cannot allocate a staging path next to " + targetPath );
+#endif
   }
   throw GeoError( ErrorCode::IoError, "Cannot allocate a staging path next to " + targetPath );
 }
