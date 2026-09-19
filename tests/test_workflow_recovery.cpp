@@ -246,6 +246,51 @@ TEST_CASE( "saveCheckpoint refuses unsafe run ids", "[workflow][v2][checkpoint]"
   REQUIRE( written.front() == QStringLiteral( "checkpoint_run-ok.json" ) );
 }
 
+TEST_CASE( "loadCheckpoint refuses an oversized checkpoint file", "[workflow][v2][checkpoint]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  WorkflowCheckpointManager manager;
+
+  WorkflowDefinition def;
+  def.id = "wf_oversize";
+  def.title = "Oversize Test";
+  StepDef step;
+  step.id = "s1";
+  step.operatorId = "rs:test";
+  def.steps.push_back( step );
+
+  auto run = WorkflowRun::createFromDefinition( def, "run-oversize-1" );
+  const QString saved = manager.saveCheckpoint( *run, tmpDir.path() );
+  REQUIRE( !saved.isEmpty() );
+
+  // A checkpoint is a small JSON sidecar: pad it far past the size cap. Such a
+  // file is planted or corrupt and must be refused, not buffered unbounded
+  // (readAll without a cap, #1056).
+  {
+    QFile oversized( saved );
+    REQUIRE( oversized.open( QIODevice::Append ) );
+    const QByteArray padding( 1 << 20, ' ' ); // 1 MiB chunks
+    for ( int i = 0; i < 20; ++i )            // 20 MiB > the 16 MiB cap
+      REQUIRE( oversized.write( padding ) == padding.size() );
+    oversized.close();
+  }
+
+  QString err;
+  auto loaded = manager.loadCheckpoint( saved, &err );
+  REQUIRE( loaded == nullptr );
+  REQUIRE( err.contains( QStringLiteral( "size cap" ) ) );
+
+  // An untouched checkpoint still loads normally.
+  const QString intact = manager.saveCheckpoint( *run, tmpDir.path() );
+  REQUIRE( intact == saved );
+  QString ok_err;
+  auto reloaded = manager.loadCheckpoint( intact, &ok_err );
+  REQUIRE( reloaded != nullptr );
+  REQUIRE( reloaded->runId() == "run-oversize-1" );
+}
+
 namespace {
 
 std::unique_ptr<WorkflowRun> makeRunningRun( const WorkflowDefinition &def, const std::string &runId )

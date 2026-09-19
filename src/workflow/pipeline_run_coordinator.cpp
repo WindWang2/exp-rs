@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QThread>
 
 #ifdef Q_OS_WIN
 #include <fcntl.h>
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 
 #include <fcntl.h>
 #ifdef Q_OS_WIN
@@ -91,6 +93,21 @@ void fsyncDirectory( const QString &path )
         ::close( fd );
     }
 #endif
+}
+
+/// Runs @p body on the coordinator's affinity thread when the caller lives on
+/// another one. onNodeFinished (and therefore every run-state mutation it
+/// performs) is delivered to that thread, so a public accessor reading the
+/// same fields from a worker/UI thread would race (#1056). Returns true when
+/// the body was executed on the caller's behalf; false when the caller is
+/// already on the affinity thread and must run the read inline.
+bool runOnCoordinatorThread( PipelineRunCoordinator *self, const std::function<void()> &body )
+{
+    Q_ASSERT( self );
+    if ( QThread::currentThread() == self->thread() )
+        return false;
+    QMetaObject::invokeMethod( self, body, Qt::BlockingQueuedConnection );
+    return true;
 }
 
 /// Two-phase atomic write (DECISIONS D7): tmp -> flush -> fsync -> rename ->
@@ -239,19 +256,37 @@ QString PipelineRunCoordinator::checkpointPath() const
 
 bool PipelineRunCoordinator::isRunning() const
 {
+    // Marshal the read onto the affinity thread: onNodeFinished flips
+    // m_state->finished there and an unsynchronised cross-thread read races.
+    bool value = false;
+    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
+                                 [this, &value] {
+                                     value = !m_state->finished && !m_state->def.nodes.isEmpty();
+                                 } ) )
+        return value;
     return !m_state->finished && !m_state->def.nodes.isEmpty();
 }
 
 bool PipelineRunCoordinator::hasCompleted() const
 {
+    bool value = false;
+    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
+                                 [this, &value] { value = m_state->finished; } ) )
+        return value;
     return m_state->finished;
 }
 
 QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
 {
     QMap<QString, NodeStatusSnapshot> map;
-    for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
-        map.insert( it.key(), it.value() );
+    const auto fill = [this]( QMap<QString, NodeStatusSnapshot> &out ) {
+        for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
+            out.insert( it.key(), it.value() );
+    };
+    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
+                                 [&fill, &map] { fill( map ); } ) )
+        return map;
+    fill( map );
     return map;
 }
 
@@ -307,6 +342,12 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
 
 void PipelineRunCoordinator::requestCancel()
 {
+    // Cancel mutates the run state (statuses, bookkeeping) that onNodeFinished
+    // also touches on the affinity thread: marshal the request there so the
+    // two can never interleave (#1056). Callers already on the affinity thread
+    // run inline, which keeps the synchronous pipelineCompleted behaviour.
+    if ( runOnCoordinatorThread( this, [this] { requestCancel(); } ) )
+        return;
     m_state->cancelRequested = true;
     markRemaining( ExecutionState::Cancelled );
     dispatchReadyNodes(); // nothing will be dispatched; drive finalization

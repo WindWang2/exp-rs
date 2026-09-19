@@ -35,14 +35,22 @@ if [ -z "$bin" ]; then
 fi
 
 # Verify the directory that was actually written: the user's --out when given,
-# otherwise the default data/samples.
+# otherwise the default data/samples. The forced verify pass is skipped when
+# the caller already passed --verify or asked for --help/-h (exit 0, no data),
+# so the wrapper can never fail a successful no-op invocation.
 out_dir="$repo_root/data/samples"
+run_verify=yes
 for arg in "$@"; do
   case "$arg" in
     --out=*) out_dir=${arg#--out=} ;;
+    --verify|--help|-h) run_verify=no ;;
   esac
 done
 
 cd "$repo_root"
 "$bin" "$@"
+# set -e propagates a non-zero generate exit with the CLI's own status code.
+if [ "$run_verify" = no ]; then
+  exit 0
+fi
 "$bin" --verify "--out=$out_dir"

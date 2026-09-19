@@ -615,6 +615,132 @@ TEST_CASE( "generate(lab) landsat truth carries class-name metadata", "[foundry]
     GDALClose( truth );
 }
 
+TEST_CASE( "generate twice into the same directory replaces the shapefile",
+           "[foundry][e2e][overwrite]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    options.seed = 42;
+
+    GenerateResult first;
+    REQUIRE( generate( options, &first ).ok );
+    std::map<std::string, std::string> first_bytes;
+    for ( const EmittedFile &file : first.files )
+        first_bytes[file.name] = readBinary( dir.path / file.name );
+
+    // The second generate into the SAME non-empty directory must replace the
+    // shapefile (the driver refuses to create over an existing dataset) instead
+    // of failing after the rasters were already rewritten (F-1032-P1-shp).
+    GenerateResult second;
+    REQUIRE( generate( options, &second ).ok );
+    CHECK( second.files.size() == first.files.size() );
+    for ( const EmittedFile &file : second.files )
+        CHECK( first_bytes[file.name] == readBinary( dir.path / file.name ) );
+
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+
+    GDALDataset *roi_ds = static_cast<GDALDataset *>(
+        GDALOpenEx( ( dir.path / "training_samples.shp" ).string().c_str(),
+                    GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr ) );
+    REQUIRE( roi_ds != nullptr );
+    OGRLayer *layer = roi_ds->GetLayer( 0 );
+    REQUIRE( layer != nullptr );
+    CHECK( layer->GetFeatureCount() == 6 );
+    GDALClose( roi_ds );
+}
+
+TEST_CASE( "subset generate prunes leftover catalog files so verify still passes",
+           "[foundry][e2e][stale]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options full;
+    full.out_dir = dir.str();
+    full.seed = 42;
+    GenerateResult first;
+    REQUIRE( generate( full, &first ).ok );
+
+    // A file that is not a known catalog basename must never be touched.
+    {
+        std::ofstream out( dir.path / "keepme.txt" );
+        out << "operator notes";
+        REQUIRE( out );
+    }
+
+    Options subset;
+    subset.out_dir = dir.str();
+    subset.products = { Product::DemSample };
+    GenerateResult second;
+    REQUIRE( generate( subset, &second ).ok );
+    REQUIRE( second.files.size() == 1 );
+
+    // Catalog basenames outside this selection are pruned (they would fail
+    // --verify as unlisted data files); the selection survives; anything else
+    // is left exactly as it was (F-1032-P1-stale).
+    CHECK( fs::exists( dir.path / "dem_sample.tif" ) );
+    CHECK_FALSE( fs::exists( dir.path / "landsat_sample.tif" ) );
+    CHECK_FALSE( fs::exists( dir.path / "change_before.tif" ) );
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.shp" ) );
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.dbf" ) );
+    CHECK( fs::exists( dir.path / "keepme.txt" ) );
+
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+    CHECK( report.files_checked == 1 );
+}
+
+TEST_CASE( "generate is byte-identical under a hostile GDAL environment",
+           "[foundry][cli][determinism]" )
+{
+    GDALAllRegister();
+
+    // Hostile ambient environment: a multi-threaded DEFLATE pool and an
+    // encoding that used to make the shapefile driver emit training_samples.cpg
+    // (ADR 0164: emit bytes must not depend on the host environment).
+    CPLSetConfigOption( "GDAL_NUM_THREADS", "8" );
+    CPLSetConfigOption( "SHAPE_ENCODING", "UTF-8" );
+    struct RestoreGdalEnv
+    {
+        ~RestoreGdalEnv()
+        {
+            CPLSetConfigOption( "GDAL_NUM_THREADS", nullptr );
+            CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
+        }
+    } restore;
+
+    TempDir hostile;
+    Options options;
+    options.out_dir = hostile.str();
+    options.seed = 42;
+    GenerateResult first;
+    REQUIRE( generate( options, &first ).ok );
+    CHECK_FALSE( fs::exists( hostile.path / "training_samples.cpg" ) );
+
+    // Drop the hostile options: the reference run sees a clean environment.
+    CPLSetConfigOption( "GDAL_NUM_THREADS", nullptr );
+    CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
+
+    TempDir clean;
+    Options reference;
+    reference.out_dir = clean.str();
+    reference.seed = 42;
+    GenerateResult second;
+    REQUIRE( generate( reference, &second ).ok );
+
+    CHECK( first.manifest_bytes == second.manifest_bytes );
+    for ( const EmittedFile &file : second.files )
+        CHECK( readBinary( hostile.path / file.name ) == readBinary( clean.path / file.name ) );
+
+    VerifyReport report;
+    REQUIRE( verifyDirectory( hostile.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+}
+
 // ---------------------------------------------------------------------------
 // 4. CLI subprocess: determinism, seeds, typed exits, spec intake
 // ---------------------------------------------------------------------------

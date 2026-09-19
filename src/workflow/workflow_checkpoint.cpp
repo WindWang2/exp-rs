@@ -24,6 +24,11 @@ namespace sicnu::workflow {
 
 namespace {
 
+/// A checkpoint is a small JSON sidecar; a larger file is planted or corrupt
+/// and is refused instead of buffered unbounded (mirrors kMaxLedgerBytes /
+/// kMaxManifestBytes in the geospatial leaf layer).
+constexpr qint64 kMaxCheckpointBytes = 16 * 1024 * 1024;
+
 void fsyncDirectory( const QString &dirPath )
 {
 #if defined( Q_OS_UNIX )
@@ -129,6 +134,15 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
   {
     if ( error )
       *error = QStringLiteral( "Failed to open checkpoint file: %1" ).arg( filePath );
+    return nullptr;
+  }
+  if ( file.size() > kMaxCheckpointBytes )
+  {
+    file.close();
+    if ( error )
+      *error = QStringLiteral( "checkpoint file exceeds the %1 byte size cap: %2" )
+                   .arg( kMaxCheckpointBytes )
+                   .arg( filePath );
     return nullptr;
   }
 
