@@ -13,37 +13,10 @@
 #include <qgsrasterprojector.h>
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgsgdalutils.h>
+#include <qgsogrutils.h>
 #include <gdal.h>
-#include <cpl_vsi.h>
-
-namespace
-{
-
-/// Maps a block's QGIS data type to the GDAL buffer type GDALRasterIO must be
-/// told. Passing the BLOCK's own type (instead of the output band's type) is
-/// what makes mixed Byte/Float32 inputs correct: GDAL then converts
-/// buffer→band instead of trusting a mismatched element size (#1035).
-GDALDataType gdalBufferType( Qgis::DataType dt )
-{
-    switch ( dt )
-    {
-        case Qgis::DataType::Byte: return GDT_Byte;
-        case Qgis::DataType::Int8: return GDT_Int8;
-        case Qgis::DataType::UInt16: return GDT_UInt16;
-        case Qgis::DataType::Int16: return GDT_Int16;
-        case Qgis::DataType::UInt32: return GDT_UInt32;
-        case Qgis::DataType::Int32: return GDT_Int32;
-        case Qgis::DataType::Float32: return GDT_Float32;
-        case Qgis::DataType::Float64: return GDT_Float64;
-        case Qgis::DataType::CInt16: return GDT_CInt16;
-        case Qgis::DataType::CInt32: return GDT_CInt32;
-        case Qgis::DataType::CFloat32: return GDT_CFloat32;
-        case Qgis::DataType::CFloat64: return GDT_CFloat64;
-        default: return GDT_Float32;
-    }
-}
-
-} // namespace
+#include <QScopeGuard>
 
 void RasterMergeBandsAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -132,60 +105,70 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
     if ( !hDriver )
         throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
 
-    GDALDataType gdalType = GDT_Float32;
-    if ( !blocks.empty() )
+    // Output type contract: the output band type is the GDALDataTypeUnion of all
+    // input band types — the narrowest GDAL type that preserves every input band.
+    // Same-type inputs therefore keep their type; mixed inputs promote to the
+    // wider type (e.g. Byte+Float32 -> Float32) instead of silently truncating
+    // wider bands to the first band's type.
+    GDALDataType gdalType = GDT_Unknown;
+    for ( const std::unique_ptr<QgsRasterBlock> &block : blocks )
     {
-        const Qgis::DataType dt = blocks[0]->dataType();
-        if ( dt == Qgis::DataType::Byte || dt == Qgis::DataType::UInt16 || dt == Qgis::DataType::Int16 || dt == Qgis::DataType::UInt32 || dt == Qgis::DataType::Int32 || dt == Qgis::DataType::Float32 || dt == Qgis::DataType::Float64 )
-        {
-            gdalType = ( dt == Qgis::DataType::Byte ) ? GDT_Byte :
-                       ( dt == Qgis::DataType::UInt16 ) ? GDT_UInt16 :
-                       ( dt == Qgis::DataType::Int16 ) ? GDT_Int16 :
-                       ( dt == Qgis::DataType::UInt32 ) ? GDT_UInt32 :
-                       ( dt == Qgis::DataType::Int32 ) ? GDT_Int32 :
-                       ( dt == Qgis::DataType::Float64 ) ? GDT_Float64 : GDT_Float32;
-        }
+        const GDALDataType blockType = QgsGdalUtils::gdalDataTypeFromQgisDataType( block->dataType() );
+        if ( blockType == GDT_Unknown )
+            throw QgsProcessingException( QObject::tr( "Unsupported band data type %1" ).arg( qgsEnumValueToKey( block->dataType() ) ) );
+        gdalType = ( gdalType == GDT_Unknown ) ? blockType : GDALDataTypeUnion( gdalType, blockType );
     }
 
-    GDALDatasetH hOutDs = GDALCreate( hDriver, dest.toUtf8().constData(), nCols, nRows, totalBands, gdalType, nullptr );
+    const QByteArray destUtf8 = dest.toUtf8();
+    // dataset_unique_ptr closes the dataset on every exit path (including
+    // non-QgsProcessingException).
+    gdal::dataset_unique_ptr hOutDs( GDALCreate( hDriver, destUtf8.constData(), nCols, nRows, totalBands, gdalType, nullptr ) );
     if ( !hOutDs )
         throw QgsProcessingException( QObject::tr( "Could not create output file %1" ).arg( dest ) );
 
+    // Deletes the (possibly partial) output file on every early exit —
+    // cancellation returns and any exception alike — so failures are not
+    // mistaken for results. Dismissed once the dataset is fully written.
+    auto deleteOutputOnFailure = qScopeGuard( [&hOutDs, &hDriver, &dest]()
+    {
+        gdal::fast_delete_and_close( hOutDs, hDriver, dest );
+    } );
+
     double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
                                extent.yMaximum(), 0, -extent.height() / nRows };
-    GDALSetGeoTransform( hOutDs, geoTransform );
+    if ( GDALSetGeoTransform( hOutDs.get(), geoTransform ) != CE_None )
+        throw QgsProcessingException( QObject::tr( "Could not set geotransform on %1" ).arg( dest ) );
     if ( crs.isValid() )
     {
         QByteArray wkt = crs.toWkt( Qgis::CrsWktVariant::Wkt1Gdal ).toUtf8();
-        GDALSetProjection( hOutDs, wkt.constData() );
+        if ( GDALSetProjection( hOutDs.get(), wkt.constData() ) != CE_None )
+            throw QgsProcessingException( QObject::tr( "Could not set projection on %1" ).arg( dest ) );
     }
 
     for ( int b = 0; b < totalBands; ++b )
     {
         if ( feedback->isCanceled() )
-        {
-            GDALClose( hOutDs );
-            VSIUnlink( dest.toUtf8().constData() );
             return QVariantMap();
-        }
-        GDALRasterBandH hBand = GDALGetRasterBand( hOutDs, b + 1 );
+        GDALRasterBandH hBand = GDALGetRasterBand( hOutDs.get(), b + 1 );
+        if ( !hBand )
+            throw QgsProcessingException( QObject::tr( "Could not open output band %1" ).arg( b + 1 ) );
         if ( blocks[b]->hasNoDataValue() )
         {
             GDALSetRasterNoDataValue( hBand, blocks[b]->noDataValue() );
         }
         const void *data = blocks[b]->bits();
+        // eBufType declares the type of the user buffer — each block's own type,
+        // not the output type. GDAL converts buffer -> output band type itself.
+        const GDALDataType bufType = QgsGdalUtils::gdalDataTypeFromQgisDataType( blocks[b]->dataType() );
         CPLErr cplErr = GDALRasterIO( hBand, GF_Write, 0, 0, nCols, nRows,
                                      const_cast<void *>( data ), nCols, nRows,
-                                     gdalBufferType( blocks[b]->dataType() ), 0, 0 );
+                                     bufType, 0, 0 );
         if ( cplErr != CE_None )
-        {
-            GDALClose( hOutDs );
-            VSIUnlink( dest.toUtf8().constData() );
             throw QgsProcessingException( QObject::tr( "Error writing band %1" ).arg( b + 1 ) );
-        }
         feedback->setProgress( 50.0 + 50.0 * ( b + 1 ) / totalBands );
     }
-    GDALClose( hOutDs );
+    hOutDs.reset();
+    deleteOutputOnFailure.dismiss();
 
     feedback->setProgress( 100 );
 
