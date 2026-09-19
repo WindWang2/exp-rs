@@ -64,7 +64,9 @@ void writeLedger( const StageRecord &record )
 }
 
 /// The staged-name shape produced by atomic_fs::stagedPathFor():
-/// "<stem>.<digits>.<digits>.tmp<extension>".
+/// "<stem>.<digits>.<digits>[.<digits>[.<digits>]].tmp<extension>" — the
+/// 10.0 writer emitted two numeric segments; the pid-mixed writer emits
+/// three. Both shapes (and anything in between) are ours.
 bool isStagedShapedName( const std::string &name )
 {
   const std::size_t tmp = name.find( ".tmp" );
@@ -73,21 +75,29 @@ bool isStagedShapedName( const std::string &name )
   const std::string remainder = name.substr( tmp + 4 );
   if ( !remainder.empty() && remainder.front() != '.' )
     return false; // ".temporary" style names are not ours
-  // Walk back over two dot-separated all-digit segments.
+  // Walk back over dot-separated all-digit segments (2..4).
   std::size_t end = tmp;
-  for ( int segment = 0; segment < 2; ++segment )
+  int segments = 0;
+  while ( segments < 4 && end > 0 )
   {
     const std::size_t start = name.rfind( '.', end - 1 );
     if ( start == std::string::npos || start + 1 >= end )
-      return false;
+      break;
+    bool allDigits = true;
     for ( std::size_t i = start + 1; i < end; ++i )
     {
       if ( name[i] < '0' || name[i] > '9' )
-        return false;
+      {
+        allDigits = false;
+        break;
+      }
     }
+    if ( !allDigits )
+      break;
+    ++segments;
     end = start;
   }
-  return true;
+  return segments >= 2;
 }
 
 bool endsWith( const std::string &text, const char *suffix )
@@ -141,15 +151,20 @@ StageRecord stageRecordFromJson( const Json::Value &json )
     details["expected_version"] = kLedgerSchemaVersion;
     throw GeoError( ErrorCode::InvalidMetadata, "stage ledger schema version mismatch", details );
   }
+  const Json::Value &shape = json["declared_shape"];
+  if ( !json["producer"].isString() || !json["driver"].isString() || !json["state"].isString() ||
+       !json["updated_utc"].isString() || !shape.isObject() || !shape["width"].isInt() ||
+       !shape["height"].isInt() || !shape["band_count"].isInt() )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger fields have foreign types" );
   StageRecord record;
   record.runId = json["run_id"].asString();
   record.producer = json["producer"].asString();
   record.finalPath = json["final_path"].asString();
   record.stagedPath = json["staged_path"].asString();
   record.driver = json["driver"].asString();
-  record.width = json["declared_shape"]["width"].asInt();
-  record.height = json["declared_shape"]["height"].asInt();
-  record.bandCount = json["declared_shape"]["band_count"].asInt();
+  record.width = shape["width"].asInt();
+  record.height = shape["height"].asInt();
+  record.bandCount = shape["band_count"].asInt();
   record.state = json["state"].asString();
   record.updatedAtUtc = json["updated_utc"].asString();
   static const char *kKnownStates[] = { "staged", "finalized", "discarded" };

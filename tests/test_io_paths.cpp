@@ -220,4 +220,8 @@ TEST_CASE( "atomic staging never escapes the target directory", "[io][paths][sec
   // The staged path lives beside the target (same volume → atomic rename).
   CHECK( staged.rfind( dir, 0 ) == 0 );
   CHECK( staged.find( ".tmp" ) != std::string::npos );
+  // The name mixes the process id: repeated allocations in one process (and
+  // across processes) can never share a staged name.
+  const std::string second = sicnu::geo::atomic_fs::stagedPathFor( target );
+  CHECK( staged != second );
 }

@@ -333,6 +333,53 @@ TEST_CASE( "mirror corruption degrades by skipping entries, never by failing rea
   offline::setEnabled( false );
 }
 
+TEST_CASE( "one unreadable asset yields recorded chunk failures, never an aborted mirror pass",
+           "[io][fabric][scale][mirror][isolation]" )
+{
+  const std::string dir = scratchDir( "isolation" );
+  const std::string scene = writeConstantScene( dir + "/scene.tif", 32, 5.0 );
+  // A file with a PROVABLE identity (its bytes hash) that is not a raster:
+  // the per-chunk open must fail as a RECORDED outcome, not a thrown pass.
+  const std::string poison = dir + "/poison.tif";
+  {
+    std::ofstream out( poison, std::ios::binary );
+    out << "this is definitely not a raster";
+  }
+
+  const AssetRecord good = recordWithBbox( "good", scene, "2024-01-01T00:00:00Z", 0.0 );
+  const AssetRecord bad = recordWithBbox( "bad", poison, "2024-01-02T00:00:00Z", 0.0 );
+  const VirtualCube cube =
+    VirtualCube::build( { good, bad }, fixedGrid( 32.0 ), OverlapPolicy::FirstWins, {} );
+
+  CubeChunkShape shape;
+  shape.time = 1;
+  shape.y = 16;
+  shape.x = 16;
+  shape.band = 1;
+  const CubeChunkPlan plan = CubeChunkPlan::forVirtualCube( cube, shape );
+  REQUIRE( plan.chunkCountTotal() == 8 );   // 4 chunks × 2 time steps
+
+  MirrorOptions options;
+  options.mirrorDirectory = dir + "/mirror";
+  const MirrorReport report = mirrorChunks( cube, plan, options );
+  // The pass completes: the good asset's 4 chunks mirror, the poison
+  // asset's 4 surface as failed outcomes with their error text.
+  CHECK( report.mirrored == 4 );
+  CHECK( report.failed == 4 );
+  CHECK( report.chunks.size() == 8 );
+  bool sawFailure = false;
+  for ( const MirrorChunkOutcome &outcome : report.chunks )
+    sawFailure |= outcome.status == "failed" && !outcome.errorText.empty();
+  CHECK( sawFailure );
+
+  // The manifest still resolves the healthy asset (published before/despite
+  // the failures) — the report was preserved AND the mirror is usable.
+  MirrorIndexAssetFacts facts;
+  CHECK( lookupMirrorAsset( dir + "/mirror", scene, facts ) );
+  CHECK( facts.found );
+  CHECK( !facts.token.empty() );
+}
+
 TEST_CASE( "prefetch without the range cache and offline refusals stay typed",
            "[io][fabric][scale][typed]" )
 {

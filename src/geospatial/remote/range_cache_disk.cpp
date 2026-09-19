@@ -54,6 +54,18 @@ DiskState &disk()
   return state;
 }
 
+/// The current process id, portable across the Windows/POSIX branches
+/// (temp-name uniqueness is cross-process — a per-process counter alone is
+/// not).
+std::uint64_t processId()
+{
+#ifdef _WIN32
+  return static_cast<std::uint64_t>( GetCurrentProcessId() );
+#else
+  return static_cast<std::uint64_t>( ::getpid() );
+#endif
+}
+
 /// Block file name: content-keyed, fixed layout
 /// "<basis-hash>.<blockIndex>.blk".
 std::string blockFileName( const std::string &basisHash, std::uint64_t blockIndex )
@@ -367,7 +379,7 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
     const std::string basisHash = sha256Hex( basis );
     const std::string finalName = blockFileName( basisHash, blockIndex );
     const fs::path directory = fs::u8path( state.directory );
-    const std::string unique = std::to_string( ::getpid() ) + "." +
+    const std::string unique = std::to_string( processId() ) + "." +
                                std::to_string( state.tempCounter.fetch_add( 1 ) );
     tempPath = ( directory / ( finalName + "." + unique + ".tmp" ) ).string();
     finalPath = ( directory / finalName ).string();

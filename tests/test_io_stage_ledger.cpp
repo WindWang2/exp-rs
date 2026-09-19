@@ -255,6 +255,8 @@ TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers",
   {
     const std::string dir = scratch( "sweep-dry" );
     const std::string staged = makeStagedRaster( dir, "out.11.22.tmp.tif" );
+    // The pid-mixed staging shape (three numeric segments) must be swept too.
+    const std::string pidStaged = makeStagedRaster( dir, "out.1234.11.22.tmp.tif" );
     const StageRecord record = journal( dir, "out.tif", staged );
     recordStaged( record );
     // A stale ledger: journal whose staged file is gone.
@@ -263,20 +265,24 @@ TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers",
 
     const std::vector<StrayStaging> strays = sweepOrphans( dir, /*remove=*/false );
     INFO( "count=" << strays.size() );
-    // staged main + LIVE ledger (staged file alive) + stale ledger.
-    CHECK( strays.size() == 3 );
+    // staged main + pid-mixed staged main + LIVE ledger (staged file alive)
+    // + stale ledger.
+    CHECK( strays.size() == 4 );
     bool sawStagedFile = false;
+    bool sawPidStaged = false;
     bool sawLive = false;
     bool sawStaleLedger = false;
     for ( const StrayStaging &stray : strays )
     {
       sawStagedFile |= stray.kind == "staged_file";
+      sawPidStaged |= stray.path == pidStaged;
       sawLive |= stray.kind == "live_staged";
       sawStaleLedger |= stray.kind == "stale_ledger";
       CHECK( !stray.removed );
       CHECK( stray.display.find( dir ) != std::string::npos ); // local paths display as themselves
     }
     CHECK( sawStagedFile );
+    CHECK( sawPidStaged );
     CHECK( sawLive );
     CHECK( sawStaleLedger );
     // Nothing deleted.
@@ -352,6 +358,23 @@ TEST_CASE( "recordStaged refuses a staged path outside the target directory", "[
   record.stagedPath = dir + "/out.1.2.tmp.tif";
   recordStaged( record );
   CHECK( atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
+}
+
+TEST_CASE( "stage ledger foreign JSON types fail typed, never as Json::LogicError",
+           "[io][ledger][negative][hostile]" )
+{
+  const std::string dir = scratch( "foreign-types" );
+  const std::string finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  // producer is an object and declared_shape is an array: both used to
+  // throw Json::LogicError straight through the sweep/discard catch arms.
+  {
+    std::ofstream out( stageLedgerPath( finalPath ) );
+    out << R"({"schema_version":1,"run_id":"r","final_path":"f","staged_path":"s",)"
+           R"("producer":{},"driver":"GTiff","declared_shape":[],"state":"staged","updated_utc":"now"})";
+  }
+  REQUIRE_THROWS_AS( readStageLedger( finalPath ), GeoError );
+  // A whole sweep over the same directory must survive the bad ledger.
+  CHECK_NOTHROW( sweepOrphans( dir, /*remove=*/true ) );
 }
 
 TEST_CASE( "staging ledger tolerates Unicode target names", "[io][ledger][unicode]" )

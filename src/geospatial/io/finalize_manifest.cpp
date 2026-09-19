@@ -217,7 +217,12 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
     addIssue( "manifest_invalid", "finalize manifest is malformed (foreign JSON types)" );
   }
 
-  const std::string declaredDigest = manifest["dataset_sha256"].asString();
+  // Foreign-typed fields are a malformed manifest: every read below is
+  // type-guarded, so a hostile document can never throw outside this
+  // function's catch coverage.
+  const std::string declaredDigest = manifest["dataset_sha256"].isString()
+                                       ? manifest["dataset_sha256"].asString()
+                                       : std::string();
   if ( report.manifestPresent && declaredDigest.empty() )
     addIssue( "manifest_invalid", "manifest carries no dataset_sha256; integrity is unverifiable" );
   if ( !declaredDigest.empty() )
@@ -237,9 +242,14 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
 
   // Shape re-check: only when the manifest declares a raster shape AND the
   // file still inspects as a raster. Vector/other kinds skip (declared 0s).
-  const int declaredWidth = manifest["shape"]["width"].asInt();
-  const int declaredHeight = manifest["shape"]["height"].asInt();
-  const int declaredBands = manifest["shape"]["band_count"].asInt();
+  const Json::Value &declaredShape = manifest["shape"];
+  const int declaredWidth =
+    declaredShape.isObject() && declaredShape["width"].isInt() ? declaredShape["width"].asInt() : 0;
+  const int declaredHeight =
+    declaredShape.isObject() && declaredShape["height"].isInt() ? declaredShape["height"].asInt() : 0;
+  const int declaredBands = declaredShape.isObject() && declaredShape["band_count"].isInt()
+                              ? declaredShape["band_count"].asInt()
+                              : 0;
   if ( declaredWidth > 0 && declaredHeight > 0 )
   {
     try

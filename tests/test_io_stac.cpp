@@ -87,6 +87,51 @@ TEST_CASE( "canonical → STAC requires the fields STAC mandates", "[io][stac][g
   CHECK( item["assets"]["data"]["roles"][0].asString() == "data" );
 }
 
+TEST_CASE( "foreign-typed STAC documents fail typed, never as Json::LogicError", "[io][stac][negative]" )
+{
+  const auto makeItem = [] {
+    Json::Value item;
+    item["type"] = "Feature";
+    item["id"] = "hostile";
+    item["properties"]["datetime"] = "2026-01-01T00:00:00Z";
+    item["assets"]["data"]["href"] = "a.tif";
+    return item;
+  };
+
+  // A remote item whose "type" is an object: item parsing must throw GeoError.
+  {
+    Json::Value item = makeItem();
+    item["type"] = Json::Value( Json::objectValue );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
+  // Object elements inside declared arrays (polarizations / instruments /
+  // bbox / roles) are typed refusals too.
+  {
+    Json::Value item = makeItem();
+    item["properties"]["sar:polarizations"] = Json::Value( Json::arrayValue );
+    item["properties"]["sar:polarizations"].append( Json::Value( Json::objectValue ) );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
+  {
+    Json::Value item = makeItem();
+    item["bbox"] = Json::Value( Json::arrayValue );
+    item["bbox"].append( Json::Value( Json::objectValue ) );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
+  {
+    Json::Value item = makeItem();
+    item["assets"]["data"]["roles"] = Json::Value( Json::arrayValue );
+    item["assets"]["data"]["roles"].append( Json::Value( Json::objectValue ) );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
+  {
+    Json::Value item = makeItem();
+    item["properties"]["instruments"] = Json::Value( Json::arrayValue );
+    item["properties"]["instruments"].append( Json::Value( Json::objectValue ) );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
+}
+
 TEST_CASE( "start/end datetime range satisfies the STAC time contract", "[io][stac][time]" )
 {
   const sicnu::geo::StacItem item = sicnu::geo::StacItem::parseText( R"({

@@ -73,10 +73,10 @@ StacItem StacItem::parse( const Json::Value &item )
 {
   if ( !item.isObject() )
     throw GeoError( ErrorCode::InvalidArgument, "STAC item must be a JSON object" );
-  if ( item.get( "type", "" ).asString() != "Feature" )
+  if ( !item["type"].isString() || item["type"].asString() != "Feature" )
   {
     Json::Value details;
-    details["type"] = item.get( "type", "" ).asString();
+    details["type"] = item.isMember( "type" ) ? item["type"] : Json::Value();
     throw GeoError( ErrorCode::InvalidArgument, "STAC item requires type=Feature", details );
   }
 
@@ -140,7 +140,12 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "sar:polarizations" ) && properties["sar:polarizations"].isArray() )
   {
     for ( const Json::Value &pol : properties["sar:polarizations"] )
+    {
+      if ( !pol.isString() )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "STAC item sar:polarizations entries must be strings" );
       parsed.polarizations.push_back( pol.asString() );
+    }
   }
   if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isIntegral() )
     parsed.epsg = "EPSG:" + std::to_string( properties["proj:epsg"].asInt() );
@@ -149,13 +154,21 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "instruments" ) && properties["instruments"].isArray() )
   {
     for ( const Json::Value &instrument : properties["instruments"] )
+    {
+      if ( !instrument.isString() )
+        throw GeoError( ErrorCode::InvalidArgument, "STAC item instruments entries must be strings" );
       parsed.instruments.push_back( instrument.asString() );
+    }
   }
 
   if ( item.isMember( "bbox" ) && item["bbox"].isArray() )
   {
     for ( const Json::Value &value : item["bbox"] )
+    {
+      if ( !value.isNumeric() )
+        throw GeoError( ErrorCode::InvalidArgument, "STAC item bbox entries must be numbers" );
       parsed.bbox.push_back( value.asDouble() );
+    }
   }
   parsed.geometry = item.get( "geometry", Json::Value() );
 
@@ -173,7 +186,11 @@ StacItem StacItem::parse( const Json::Value &item )
       if ( assetJson.isMember( "roles" ) && assetJson["roles"].isArray() )
       {
         for ( const Json::Value &role : assetJson["roles"] )
+        {
+          if ( !role.isString() )
+            throw GeoError( ErrorCode::InvalidArgument, "STAC asset roles entries must be strings" );
           asset.roles.push_back( role.asString() );
+        }
       }
       parsed.assets[key] = asset;
     }

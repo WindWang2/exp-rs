@@ -127,6 +127,16 @@ int resolveBandIndex( const RasterMetadata &metadata, const VirtualCubeReadOptio
   return 0;
 }
 
+/// Band metadata resolved by the recorded GDAL index — never by vector
+/// position (a degraded dataset may carry padded/partial band records).
+const BandInfo *bandInfoByIndex( const RasterMetadata &metadata, int band )
+{
+  for ( const BandInfo &info : metadata.bands )
+    if ( info.index == band )
+      return &info;
+  return nullptr;
+}
+
 } // namespace
 
 // --- grid ------------------------------------------------------------------
@@ -636,7 +646,10 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
             const std::vector<double> chunkValues =
               mirrored.readWindow( { 1 }, { 0, 0, chunkWidth, chunkHeight },
                                    options.maxWindowBytes );
-            const BandInfo &bandInfo = mirroredMeta.bands[0];
+            if ( mirroredMeta.bands.empty() )
+              throw GeoError( ErrorCode::InvalidMetadata,
+                              "mirrored chunk carries no band metadata" );
+            const BandInfo &bandInfo = mirroredMeta.bands.front();
             provenance.mirrorHit = hit.file;
             provenance.sourceWindow = mapped.window;
             provenance.contributed = scatterInto(
@@ -778,10 +791,13 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       if ( mirrorHitPath.empty() )
       {
         values = reader.readWindow( { band }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = metadata.bands[static_cast<std::size_t>( band - 1 )];
-        sourceHasNoData = bandInfo.hasNoData;
-        sourceNoDataIsNaN = bandInfo.noDataIsNaN;
-        sourceNoDataValue = bandInfo.noDataValue;
+        const BandInfo *bandInfo = bandInfoByIndex( metadata, band );
+        if ( !bandInfo )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "band " + std::to_string( band ) + " carries no band metadata" );
+        sourceHasNoData = bandInfo->hasNoData;
+        sourceNoDataIsNaN = bandInfo->noDataIsNaN;
+        sourceNoDataValue = bandInfo->noDataValue;
       }
       else
       {
@@ -789,7 +805,10 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         readWindow = RasterWindow { 0, 0, std::min( sourceWindow.width, mirroredReader.metadata().width ),
                                     std::min( sourceWindow.height, mirroredReader.metadata().height ) };
         values = mirroredReader.readWindow( { 1 }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = mirroredReader.metadata().bands[0];
+        if ( mirroredReader.metadata().bands.empty() )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "mirrored chunk carries no band metadata" );
+        const BandInfo &bandInfo = mirroredReader.metadata().bands.front();
         sourceHasNoData = bandInfo.hasNoData;
         sourceNoDataIsNaN = bandInfo.noDataIsNaN;
         sourceNoDataValue = bandInfo.noDataValue;

@@ -793,7 +793,15 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
   {
     GDALRasterBandH band = GDALGetRasterBand( handle, index );
     if ( !band )
+    {
+      // Positional alignment is a contract: bands[i] is ALWAYS GDAL band
+      // i+1. Skipping a null handle would shift every later band and make
+      // consumers that index by band number read out of bounds.
+      BandInfo placeholder;
+      placeholder.index = index;
+      meta.bands.push_back( std::move( placeholder ) );
       continue;
+    }
     BandInfo info;
     info.index = index;
     info.dtype = gdalDataTypeName( GDALGetRasterDataType( band ) );

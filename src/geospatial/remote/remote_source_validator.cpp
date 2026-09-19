@@ -286,6 +286,14 @@ RemoteSourceIdentity RemoteSourceIdentity::fromJson( const Json::Value &json )
   identity.validator = RemoteValidatorSet::fromJson( json["validator"] );
   if ( json.isMember( "size_bytes" ) )
   {
+    if ( !json["size_bytes"].isUInt64() )
+    {
+      Json::Value details;
+      details["field"] = "size_bytes";
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "RemoteSourceIdentity::fromJson: size_bytes must be an unsigned integer",
+                      details );
+    }
     identity.hasSize = true;
     identity.sizeBytes = json["size_bytes"].asUInt64();
   }

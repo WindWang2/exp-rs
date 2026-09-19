@@ -334,6 +334,11 @@ void HttpRangeServer::handleConnection( SocketHandle client )
     respond( client, 500, "Internal Server Error", {}, nullptr, 0, false, true );
     return;
   }
+  if ( mBehavior == ServerBehavior::Gone )
+  {
+    respond( client, 410, "Gone", {}, nullptr, 0, false, true );
+    return;
+  }
   if ( mBehavior == ServerBehavior::Slow )
   {
     std::this_thread::sleep_for( std::chrono::milliseconds( 3000 ) );
