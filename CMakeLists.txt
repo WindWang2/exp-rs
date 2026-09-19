@@ -9,6 +9,11 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(CheckFunctionExists)
 include(CreateQgsVersion)
 include(GenerateExportHeader)
+# Configure-time dependency doctor: actionable find_package failures plus the
+# end-of-configure dependency summary (cmake/SicnuDepDoctor.cmake). Diagnosis
+# only — it never changes what is searched or found. Complements the runtime
+# env-doctor from Deployment 11.0 (src/geospatial/doctor/env_doctor.*).
+include(SicnuDepDoctor)
 
 # Global cross-platform definitions
 if(WIN32)
@@ -87,6 +92,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg
                                        MultimediaWidgets Qml QuickWidgets SvgWidgets UiTools
                                        Core5Compat Test)
 qt_standard_project_setup(REQUIRES 6.8)
+sicnu_dep_note(Qt6 FOUND_VERSION "${Qt6_VERSION}" MODE config PATH "${Qt6_DIR}")
 
 # When vendoring, directly include the config files to bypass Find module cache.
 # On a fresh configure vendor_prefix is empty (ExternalProject builds at build time),
@@ -106,25 +112,25 @@ if(SICNU_VENDOR_GDAL)
         message(STATUS "Found vendored GEOS")
     else()
         message(WARNING "SICNU_VENDOR_GDAL=ON but vendor_prefix not yet built (${SICNU_VENDOR_PREFIX} missing) — using system GDAL/PROJ/GEOS for this configure; run `cmake --build . --target vendor_gdal` then re-configure")
-        find_package(GDAL REQUIRED)
-        find_package(PROJ REQUIRED)
-        find_package(GEOS REQUIRED)
+        sicnu_require_dependency(GDAL)
+        sicnu_require_dependency(PROJ)
+        sicnu_require_dependency(GEOS)
     endif()
 else()
-    find_package(GDAL REQUIRED)
-    find_package(PROJ REQUIRED)
-    find_package(GEOS REQUIRED)
+    sicnu_require_dependency(GDAL)
+    sicnu_require_dependency(PROJ)
+    sicnu_require_dependency(GEOS)
 endif()
-find_package(BISON REQUIRED)
-find_package(FLEX REQUIRED)
-find_package(EXPAT REQUIRED)
-find_package(SQLite3 REQUIRED)
-find_package(ZLIB REQUIRED)
-find_package(LibZip REQUIRED)
+sicnu_require_dependency(BISON)
+sicnu_require_dependency(FLEX)
+sicnu_require_dependency(EXPAT)
+sicnu_require_dependency(SQLite3)
+sicnu_require_dependency(ZLIB)
+sicnu_require_dependency(LibZip)
 option(WITH_EPT "" ON)
 # ZSTD is only required for point cloud support (WITH_EPT)
 if(WITH_EPT)
-    find_package(ZSTD REQUIRED)
+    sicnu_require_dependency(ZSTD)
 endif()
 # Protobuf — prefer the upstream CMake package (vcpkg / Homebrew ship
 # protobuf-config.cmake with correct imported targets), but fall back to
@@ -134,27 +140,32 @@ endif()
 # vector-tile proto, so load the module afterwards. FindProtobuf guards its
 # imported targets with `if(NOT TARGET ...)`, so mixing modes is safe.
 find_package(Protobuf QUIET CONFIG)
+set(SICNU_PROTOBUF_MODE "module")
 if(NOT Protobuf_FOUND)
     find_package(Protobuf MODULE REQUIRED)
 elseif(NOT COMMAND protobuf_generate_cpp)
     find_package(Protobuf MODULE REQUIRED)
+else()
+    set(SICNU_PROTOBUF_MODE "config")
 endif()
+sicnu_dep_note(Protobuf FOUND_VERSION "${Protobuf_VERSION}" MODE "${SICNU_PROTOBUF_MODE}" PATH "${Protobuf_DIR}")
 find_package(Qt6Keychain QUIET)
+sicnu_dep_note(Qt6Keychain FOUND_VERSION "" MODE "config" PATH "${Qt6Keychain_DIR}")
 # PCRE2 and CURL are transitive dependencies (glib, Qt6, GDAL)
 find_library(PCRE2_16 pcre2-16 REQUIRED)
 find_library(PCRE2_8 pcre2-8 REQUIRED)
-find_package(CURL REQUIRED)
+sicnu_require_dependency(CURL)
 # macOS only: libtasn1 for the DER-encoded PKI ASN.1 workarounds in
 # qgsauthcertutils (src/core links ${LIBTASN1_LIBRARY} under APPLE). Without
 # the find_package the variables stay empty: compilation succeeds through
 # the brew include path, then the link fails on every asn1_* symbol.
 if(APPLE)
-    find_package(Libtasn1 REQUIRED)
+    sicnu_require_dependency(Libtasn1)
 endif()
 # Python: always required for build-time scripts; Development only when embedding
-find_package(Python REQUIRED COMPONENTS Interpreter)
+sicnu_require_dependency(Python COMPONENTS Interpreter)
 if(SICNU_EMBED_PYTHON)
-    find_package(Python REQUIRED COMPONENTS Interpreter Development)
+    sicnu_require_dependency(Python COMPONENTS Interpreter Development)
     message(STATUS "SICNU_EMBED_PYTHON=ON — linking embedded Python console")
 else()
     message(STATUS "SICNU_EMBED_PYTHON=OFF — Python console disabled")
@@ -179,9 +190,11 @@ endif()
 if(OpenCV_FOUND)
     message(STATUS "OpenCV ${OpenCV_VERSION} found — SIFT enabled")
     set(SICNU_HAS_OPENCV TRUE)
+    sicnu_dep_note(OpenCV FOUND_VERSION "${OpenCV_VERSION}" MODE "config" PATH "${OpenCV_DIR}")
 else()
     message(STATUS "OpenCV not found — SIFT will be disabled (set OpenCV_DIR to enable)")
     set(SICNU_HAS_OPENCV FALSE)
+    sicnu_dep_note(OpenCV MODE "absent" PATH "")
 endif()
 
 # Include FetchContent for dependency management (e.g. Catch2)
@@ -626,7 +639,7 @@ endif()
 # Mirrors upstream QGIS: WITH_GSL gates the HAVE_GSL config macro.
 set(WITH_GSL TRUE CACHE BOOL "Determines whether GSL library should be used")
 if(WITH_GSL)
-  find_package(GSL REQUIRED)
+  sicnu_require_dependency(GSL)
   set(HAVE_GSL TRUE)
 endif()
 
@@ -674,6 +687,46 @@ if(JSONCPP_INCLUDE_DIRS)
   # jsoncpp themselves (e.g. sicnu_python_isolated).
   include_directories(SYSTEM ${JSONCPP_INCLUDE_DIRS})
 endif()
+sicnu_dep_note(jsoncpp MODE "config" PATH "${JSONCPP_INCLUDE_DIRS}")
+
+# ─── Portable feature probes: COMPILE CHECKS, never version guesses ─────────
+# #1108's lesson: version-range ifdefs guessed the GDAL 3.8.4 API wrong (the
+# single-argument CPLErrorStateBackuper constructor is 3.9+). Each probe
+# compiles against the headers actually found and records the result; the
+# generated ${CMAKE_BINARY_DIR}/sicnu_feature_probes.h defines every macro to
+# 0 or 1 so consumers can #if without #ifdef dances. tests/test_feature_probes
+# pins the contract (and fails to compile without the header).
+include(SicnuFeatureProbes)
+sicnu_feature_probe(SICNU_HAVE_GDAL_QUIET_ERROR_CTOR
+  "GDAL single-argument CPLErrorStateBackuper(handler) constructor (GDAL 3.9+)"
+  INCLUDES "#include <gdal.h>"
+  CODE "CPLErrorStateBackuper state(CPLQuietErrorHandler)"
+  REQUIRED_INCLUDES "${GDAL_INCLUDE_DIRS}"
+  REQUIRED_LIBRARIES "GDAL::GDAL"
+  DEPENDS GDAL::GDAL)
+sicnu_feature_probe(SICNU_HAVE_GDAL_ERROR_HANDLER_PUSHER
+  "GDAL CPLerrorHandlerPusher RAII — portable error quieting (works on GDAL 3.8+)"
+  INCLUDES "#include <gdal.h>"
+  CODE "CPLErrorHandlerPusher push(CPLQuietErrorHandler)"
+  REQUIRED_INCLUDES "${GDAL_INCLUDE_DIRS}"
+  REQUIRED_LIBRARIES "GDAL::GDAL"
+  DEPENDS GDAL::GDAL)
+sicnu_feature_probe(SICNU_HAVE_STD_FORMAT
+  "C++20 std::format (GCC 13+, MSVC 19.29+, libc++ 15+)"
+  INCLUDES "#include <format>"
+  CODE "return static_cast<int>(std::format(\"{}\", 42).size()) == 2 ? 0 : 1")
+sicnu_feature_probe(SICNU_HAVE_STD_STACKTRACE
+  "C++23 <stacktrace> current() (GCC 12+, MSVC 19.30+)"
+  INCLUDES "#include <stacktrace>"
+  CODE "std::stacktrace st = std::stacktrace::current()")
+sicnu_feature_probe(SICNU_HAVE_QT6_QTYPES
+  "Qt6 QtTypes header (Qt 6.5+, project minimum 6.8)"
+  INCLUDES "#include <QtTypes>"
+  CODE "return QT_VERSION_MAJOR >= 6 ? 0 : 1"
+  REQUIRED_INCLUDES "${Qt6Core_INCLUDE_DIRS}"
+  DEPENDS Qt6::Core)
+sicnu_feature_probes_report()
+sicnu_write_feature_probes_header("${CMAKE_BINARY_DIR}/sicnu_feature_probes.h")
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
@@ -802,3 +855,11 @@ add_custom_target(sicnu_i18n_update
 if(TARGET sicnu_geo_rs)
   add_dependencies(sicnu_geo_rs sicnu_i18n)
 endif()
+
+# =============================================================================
+# End-of-configure dependency report (dependency doctor, ds41-build-portability):
+# one paste-able block with every recorded library's version, discovery mode
+# and resolved path. The clean-tree smoke gate (scripts/build.sh smoke) asserts
+# this block exists; bug reports should include it verbatim.
+# =============================================================================
+sicnu_dependency_summary()
