@@ -1069,3 +1069,71 @@ TEST_CASE( "duplicate explicit ids are rejected like duplicate names", "[models]
   }
   CHECK( reportedIssue );
 }
+
+TEST_CASE( "extreme integer knobs are typed-rejected at the catalog boundary (#1044)",
+           "[models][catalog][bounds]" )
+{
+  QTemporaryDir dir;
+  // #1044: every manifest integer that feeds an allocation or index math has
+  // a documented ceiling. temporal_length materializes its declared axis
+  // (6 bands × 715827883 frames truncated to int = the OOB-heap-write
+  // repro); pad grows every tile window on all four sides; a fixed input
+  // extent sizes the to_input resize target.
+  writeManifest( dir, QStringLiteral( "bad-temporal" ), R"({
+      "name": "bad-temporal",
+      "input": { "band_roles": ["Red", "Green", "Blue", "NIR", "SWIR1", "SWIR2"],
+                 "temporal_collapse": "channels", "temporal_length": 715827883 },
+      "preprocess": { "nodata_policy": "zero" }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-temporal-just-over" ), R"({
+      "name": "bad-temporal-just-over",
+      "input": { "temporal_collapse": "sequence", "layout": "NCTHW",
+                 "temporal_length": 1025 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-pad" ), R"({
+      "name": "bad-pad",
+      "preprocess": { "pad": 1073741824 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-pad-moderate" ), R"({
+      "name": "bad-pad-moderate",
+      "preprocess": { "pad": 1025 }
+  })", QByteArray( "w" ) );
+  writeManifest( dir, QStringLiteral( "bad-input-extent" ), R"({
+      "name": "bad-input-extent",
+      "input": { "width": 40000, "height": 224, "preprocess": { "resize": "to_input" } }
+  })", QByteArray( "w" ) );
+  // Boundary values stay loadable: the ceilings must not over-reject.
+  writeManifest( dir, QStringLiteral( "good-bounds" ), R"({
+      "name": "good-bounds",
+      "input": { "temporal_collapse": "sequence", "layout": "NCTHW",
+                 "temporal_length": 1024, "width": 32768, "height": 32768 },
+      "preprocess": { "pad": 1024 }
+  })", QByteArray( "w" ) );
+
+  auto &catalog = ModelCatalog::instance();
+  catalog.setDirectory( dir.path().toStdString() );
+
+  struct Expectation
+  {
+    const char *name;
+    const char *reasonFragment;
+  };
+  for ( const auto &e : {
+           Expectation{ "bad-temporal", "temporal_length" },
+           Expectation{ "bad-temporal-just-over", "temporal lane bound" },
+           Expectation{ "bad-pad", "preprocess.pad" },
+           Expectation{ "bad-pad-moderate", "preprocess.pad" },
+           Expectation{ "bad-input-extent", "absurdly large" },
+       } )
+  {
+    const auto model = catalog.find( e.name );
+    INFO( "manifest: " << e.name );
+    REQUIRE( model.has_value() );
+    CHECK( model->readiness == ModelReadiness::InvalidManifest );
+    CHECK( model->readinessReason.find( e.reasonFragment ) != std::string::npos );
+  }
+
+  const auto good = catalog.find( "good-bounds" );
+  REQUIRE( good.has_value() );
+  CHECK( good->readiness != ModelReadiness::InvalidManifest );
+}

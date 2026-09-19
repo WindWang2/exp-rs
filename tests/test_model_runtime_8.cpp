@@ -1110,3 +1110,93 @@ TEST_CASE( "rs:infer expands a local STAC collection with nested items into orde
   CHECK( payload["inputs"][0]["crs_verified"].asBool() == true );
   CHECK( payload["inputs"][0]["crs"].asString().find( "4326" ) != std::string::npos );
 }
+
+// ---------------------------------------------------------------------------
+// #1044: allocation-math bounds at the engine boundary (hand-built ModelInfo
+// bypasses the catalog ceilings — the engines are the last line of defense).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "runMultiInput typed-refuses an oversized declared temporal axis before any "
+           "allocation (#1044)",
+           "[models][multimodal][bounds]" )
+{
+  QTemporaryDir dir;
+  auto primary = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                   .withCrs( QStringLiteral( "EPSG:4326" ) )
+                   .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                   .withConstantValue( 1, 1.0f )
+                   .writeToDisk( dir.filePath( QStringLiteral( "primary.tif" ) ) );
+  auto other = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                 .withCrs( QStringLiteral( "EPSG:4326" ) )
+                 .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                 .withConstantValue( 1, 2.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "other.tif" ) ) );
+  REQUIRE_FALSE( primary.isEmpty() );
+  REQUIRE_FALSE( other.isEmpty() );
+
+  ModelInfo model = twoInputModel();
+  // The #1044 repro shape: bands × temporal_length truncated to int by the
+  // old static_cast (6 × 715827883 → 2) turned the scatter loop into an
+  // OOB heap write. A hand-built contract must hit the same ceiling the
+  // catalog enforces — before reader.frames.resize.
+  model.inputs[0].temporalCollapse = "channels";
+  model.inputs[0].temporalLength = 715827883;
+
+  auto runtime = std::make_shared<RecordingMultiRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+  const QString out = dir.filePath( QStringLiteral( "out.tif" ) );
+  REQUIRE_THROWS_WITH( engine.runMultiInput(
+                         { NamedRasterFeed{ "before", { primary.toStdString() }, {} },
+                           NamedRasterFeed{ "after", { other.toStdString() }, {} } },
+                         out.toStdString(), context, {} ),
+                       Catch::Matchers::ContainsSubstring( "temporal lane is bounded" ) );
+  CHECK_FALSE( QFile::exists( out ) );
+}
+
+TEST_CASE( "tile engines typed-refuse a memory-unbounded tile+halo+pad window (#1044)",
+           "[models][multimodal][bounds]" )
+{
+  QTemporaryDir dir;
+  auto primary = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                   .withCrs( QStringLiteral( "EPSG:4326" ) )
+                   .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                   .withConstantValue( 1, 1.0f )
+                   .writeToDisk( dir.filePath( QStringLiteral( "primary.tif" ) ) );
+  auto other = sicnu::testing::RsSyntheticRasterBuilder( 32, 32, 1, GDT_Float32 )
+                 .withCrs( QStringLiteral( "EPSG:4326" ) )
+                 .withGeoTransform( 10.0, 1.0, 50.0, -1.0 )
+                 .withConstantValue( 1, 2.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "other.tif" ) ) );
+  REQUIRE_FALSE( primary.isEmpty() );
+  REQUIRE_FALSE( other.isEmpty() );
+
+  auto runtime = std::make_shared<RecordingMultiRuntime>();
+  RSOperatorContext context;
+  const QString out = dir.filePath( QStringLiteral( "out.tif" ) );
+  const std::vector<NamedRasterFeed> feeds = {
+    NamedRasterFeed{ "before", { primary.toStdString() }, {} },
+    NamedRasterFeed{ "after", { other.toStdString() }, {} } };
+
+  // Unbounded halo: the old `tileSize + 2 * halo` int math overflows near
+  // INT_MAX and the window buffer scales with its square.
+  {
+    ModelInfo model = twoInputModel();
+    model.tiling.tileSize = 16;
+    model.tiling.halo = 100000;
+    TileInferenceEngine engine( model, runtime );
+    REQUIRE_THROWS_WITH( engine.runMultiInput( feeds, out.toStdString(), context, {} ),
+                         Catch::Matchers::ContainsSubstring( "window" ) );
+  }
+  // Unbounded pad: `2 * pad` signed overflow (UB) in the old maxWin math;
+  // runMultiInput executes pad, so it must refuse it in int64 first.
+  {
+    ModelInfo model = twoInputModel();
+    model.tiling.tileSize = 16;
+    model.preprocess.pad = 2000000000;
+    TileInferenceEngine engine( model, runtime );
+    REQUIRE_THROWS_WITH( engine.runMultiInput( feeds, out.toStdString(), context, {} ),
+                         Catch::Matchers::ContainsSubstring( "window" ) );
+    CHECK_FALSE( QFile::exists( out ) );
+  }
+}

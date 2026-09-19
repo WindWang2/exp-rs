@@ -76,21 +76,6 @@ bool readDigestSidecar( const std::string &path, std::uint64_t &hash, std::uint6
         return false;
     return true;
 }
-
-/// True when @p component is a plain single path component: non-empty, not a
-/// traversal token, no directory separators, no drive/ADS colon, no embedded
-/// NUL. Defensive only today (no production caller passes foreign strings),
-/// but a path-splice must never be able to escape the scratch root (#1056).
-bool isSafePathComponent( const std::string &component )
-{
-    if ( component.empty() || component == "." || component == ".." )
-        return false;
-    if ( component.find( '\0' ) != std::string::npos )
-        return false;
-    if ( component.find_first_of( "/\\:" ) != std::string::npos )
-        return false;
-    return true;
-}
 } // namespace
 
 // ── ScratchLease::Entry ────────────────────────────────────────────────────
@@ -220,6 +205,68 @@ void ScratchLease::Deleter::operator()( Entry *entry ) const
 
 // ── ScratchRegistry ────────────────────────────────────────────────────────
 
+/// #1056 (latent): runId/stem are spliced into filesystem paths at this API
+/// boundary — a component containing separators or a ".." element escapes
+/// the per-run directory (`<root>/../../elsewhere`). The registry is the
+/// last line of defense, so it validates REGARDLESS of how trusted the
+/// current production callers are: a strict allowlist keeps every legal run
+/// identifier in and every traversal/injection out (Windows-reserved device
+/// names and trailing dots included — they resolve to devices or get
+/// silently truncated on Windows hosts).
+void validatePathComponent( const std::string &value, const char *what )
+{
+    static constexpr std::size_t kMaxComponentBytes = 200;
+    /// Message echoes are sanitized: a rejected value may contain control
+    /// characters that would corrupt logs.
+    const auto safeEcho = []( const std::string &raw ) {
+        std::string out;
+        out.reserve( raw.size() );
+        for ( const char c : raw )
+            out += ( c >= 0x20 && c < 0x7f ) ? c : '?';
+        return out;
+    };
+
+    if ( value.empty() )
+        throw std::invalid_argument( std::string( "scratch acquire: " ) + what +
+                                     " must not be empty" );
+    if ( value.size() > kMaxComponentBytes )
+        throw std::invalid_argument( std::string( "scratch acquire: " ) + what + " is " +
+                                     std::to_string( value.size() ) +
+                                     " bytes; the path-component bound is " +
+                                     std::to_string( kMaxComponentBytes ) );
+    if ( value == "." || value == ".." )
+        throw std::invalid_argument( std::string( "scratch acquire: " ) + what +
+                                     " must not be a path dot element" );
+    if ( value.back() == '.' )
+        throw std::invalid_argument( std::string( "scratch acquire: " ) + what +
+                                     " must not end with a dot (silent truncation on "
+                                     "Windows hosts): '" +
+                                     safeEcho( value ) + "'" );
+    for ( const char c : value )
+    {
+        const bool safe = ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) ||
+                          ( c >= '0' && c <= '9' ) || c == '-' || c == '_' || c == '.';
+        if ( !safe )
+            throw std::invalid_argument(
+                std::string( "scratch acquire: " ) + what +
+                " must match [A-Za-z0-9._-] to stay inside the run directory (got '" +
+                safeEcho( value ) + "')" );
+    }
+    // Windows reserves device names in every directory (case-insensitive).
+    std::string upper;
+    upper.reserve( value.size() );
+    for ( const char c : value )
+        upper += static_cast<char>( std::toupper( static_cast<unsigned char>( c ) ) );
+    static const char *kReserved[] = { "CON",  "PRN",  "AUX",   "NUL",
+                                       "COM1", "COM2", "COM3",  "COM4", "COM5", "COM6",
+                                       "COM7", "COM8", "COM9",  "LPT1", "LPT2", "LPT3",
+                                       "LPT4", "LPT5", "LPT6",  "LPT7", "LPT8", "LPT9" };
+    for ( const char *reserved : kReserved )
+        if ( upper == reserved )
+            throw std::invalid_argument( std::string( "scratch acquire: " ) + what +
+                                         " uses a reserved device name: '" + value + "'" );
+}
+
 ScratchRegistry::ScratchRegistry( Config config ) : m_config( std::move( config ) )
 {
     if ( m_config.root.empty() )
@@ -259,10 +306,9 @@ std::string ScratchRegistry::root() const
 ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::string &stem,
                                        std::uint64_t bytes )
 {
-    if ( !isSafePathComponent( runId ) || !isSafePathComponent( stem ) )
-        throw std::invalid_argument(
-            "scratch acquire: run id / stem must be plain path components "
-            "(no separators, '..', ':' or NUL)" );
+    validatePathComponent( runId, "runId" );
+    validatePathComponent( stem, "stem" );
+
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( m_config.budgetBytes != 0
          && saturatingAdd( m_outstandingTotal, bytes ) > m_config.budgetBytes )

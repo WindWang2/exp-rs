@@ -12,6 +12,8 @@
 #include "operators/runtime/provider_wire.h"
 
 #include <QCoreApplication>
+#include <QDeadlineTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -21,6 +23,9 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
+
+#include <atomic>
 
 #include <cmath>
 #include <memory>
@@ -112,6 +117,36 @@ class LoopbackInferServer
               responseBody = QJsonDocument( response ).toJson( QJsonDocument::Compact );
             }
 
+            if ( m_floodBytes > 0 )
+            {
+              // #1056 flood mode: advertise an enormous body, then stream it
+              // chunk by chunk FROM THE EVENT LOOP so the client's cap guard
+              // can abort mid-transfer. The socket records how much actually
+              // reached the wire before the disconnect.
+              QByteArray floodHead;
+              floodHead += "HTTP/1.1 200 FLOOD\r\n";
+              floodHead += "Content-Type: application/json\r\n";
+              floodHead += "Content-Length: " + QByteArray::number( m_floodBytes ) + "\r\n";
+              floodHead += "Connection: close\r\n\r\n";
+              socket->write( floodHead );
+              const QByteArray chunk( 256 * 1024, 'x' );
+              auto *pump = new QTimer( socket );
+              QObject::connect( pump, &QTimer::timeout, socket, [ socket, chunk, pump, this ] {
+                if ( socket->state() != QAbstractSocket::ConnectedState )
+                {
+                  pump->stop();
+                  return;
+                }
+                socket->write( chunk );
+                m_floodQueued += chunk.size();
+                if ( m_floodQueued >= m_floodBytes )
+                  pump->stop();
+              } );
+              pump->start( 0 );
+              m_buffer.remove( socket );
+              return;
+            }
+
             QByteArray http;
             http += "HTTP/1.1 " + QByteArray::number( m_httpStatus ) + " FAKE\r\n";
             http += "Content-Type: application/json\r\n";
@@ -121,7 +156,15 @@ class LoopbackInferServer
             socket->write( http );
             socket->disconnectFromHost();
           } );
-          QObject::connect( socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater );
+          // bytesWritten is a SIGNAL (bytes actually flushed to the OS
+          // socket) — accumulate it to see how much of the flood reached
+          // the wire before the client hung up.
+          QObject::connect( socket, &QTcpSocket::bytesWritten, socket,
+                            [ this ]( qint64 n ) { m_floodFlushed += n; } );
+          QObject::connect( socket, &QTcpSocket::disconnected, socket, [ this, socket ] {
+            m_floodDone = true;
+            socket->deleteLater();
+          } );
         } );
     }
 
@@ -130,6 +173,12 @@ class LoopbackInferServer
     quint16 port() const { return m_port; }
     int requestsServed = 0;
     bool m_protocolMismatch = false;
+    /// #1056: when > 0, every response is a flood of this advertised size.
+    qint64 m_floodBytes = 0;
+    /// Bytes that reached the OS socket layer before the client hung up.
+    qint64 floodFlushed() const { return m_floodFlushed.load(); }
+    /// True once the client-induced disconnect was observed server-side.
+    bool floodCompleted() const { return m_floodDone.load(); }
 
   private:
     static QString encodeFloat( float value )
@@ -153,6 +202,9 @@ class LoopbackInferServer
     quint16 m_port = 0;
     int m_httpStatus = 200;
     QMap<QTcpSocket *, QByteArray> m_buffer;
+    std::atomic<qint64> m_floodQueued{ 0 };
+    std::atomic<qint64> m_floodFlushed{ 0 };
+    std::atomic<bool> m_floodDone{ false };
 };
 
 /// Builds a ready http model bound to @p endpoint with a local artifact.
@@ -301,4 +353,53 @@ TEST_CASE( "http provider refuses foreign wire protocols", "[models][http]" )
   {
     CHECK( classifyInferenceError( e.what() ) == InferenceFailureKind::IncompatibleSchema );
   }
+}
+
+TEST_CASE( "http provider stops receiving at max_body_mb instead of buffering the flood (#1056)",
+           "[models][http]" )
+{
+  ( void )ensureApp();
+  // A hostile provider advertises (and streams) far more than the guard
+  // allows. The provider must type-refuse at the threshold and abort the
+  // transfer MID-STREAM: the old post-hoc readAll() check buffered the whole
+  // body first, so the server always saw its full flood reach the wire.
+  constexpr qint64 kFloodBytes = 64 * 1024 * 1024;
+  LoopbackInferServer server;
+  server.m_floodBytes = kFloodBytes;
+  QTemporaryDir dir;
+  ModelInfo model =
+    makeHttpModel( dir, "http://127.0.0.1:" + std::to_string( server.port() ) + "/infer",
+                   std::to_string( server.port() ) );
+  model.runtime.provider.maxBodyMb = 1; // 1 MiB guard against a 64 MiB flood
+  const auto session = acquireModel( model );
+
+  std::vector<float> a = { 1.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  bool typedGuard = false;
+  try
+  {
+    session->inferNamed( inputs, {} );
+    FAIL( "expected the max_body_mb guard to refuse the flood" );
+  }
+  catch ( const std::exception &e )
+  {
+    typedGuard = classifyInferenceError( e.what() ) == InferenceFailureKind::OutputInvalid
+                   || std::string( e.what() ).find( "max_body_mb" ) != std::string::npos;
+    CHECK( classifyInferenceError( e.what() ) == InferenceFailureKind::OutputInvalid );
+    CHECK_THAT( e.what(), Catch::Matchers::ContainsSubstring( "max_body_mb" ) );
+  }
+  CHECK( typedGuard );
+
+  // The provider must have hung up mid-transfer. Give the shared event loop
+  // a moment to deliver the server-side disconnect, then require that far
+  // less than the advertised body was flushed (a full 64 MiB flush is
+  // exactly the buffering behavior this guard forbids).
+  const QDeadlineTimer deadline( 5000 );
+  while ( !server.floodCompleted() && !deadline.hasExpired() )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+  CHECK( server.floodCompleted() );
+  CHECK( server.floodFlushed() < kFloodBytes );
+  CHECK( session->health().failures >= 1 );
 }

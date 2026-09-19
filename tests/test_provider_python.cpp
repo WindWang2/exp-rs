@@ -17,7 +17,9 @@
 #include <QTemporaryDir>
 
 #include <cmath>
+#include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -212,4 +214,86 @@ TEST_CASE( "worker handshake capabilities override the provider defaults",
   const auto outputs = session->inferNamed( inputs, {} );
   REQUIRE( outputs.size() == 1 );
   CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 7.0f ) );
+}
+
+TEST_CASE( "shared python worker session survives concurrent probes of its negotiation state "
+           "(#1056)",
+           "[models][python][concurrency]" )
+{
+  ( void )ensureApp();
+  // The registry hands ONE session to multiple TaskCenter threads. While the
+  // main thread runs forwards — including the bounded-restart path that
+  // REWRITES the negotiated handshake block — a foreign thread hammers
+  // capabilities()/health()/providerDetails(). The crash worker declares a
+  // NON-EMPTY capabilities block, so the restart genuinely rewrites a
+  // populated JSON object mid-read (the pre-#1056 code raced that write
+  // unsynchronized; now every read is a snapshot under m_stateMutex or an
+  // atomic load).
+  QTemporaryDir dir;
+  const std::string script =
+    ( QFileInfo( __FILE__ ).absolutePath() + QStringLiteral( "/data/py_worker_crash.py" ) )
+      .toStdString();
+  const ModelInfo model = makeWorkerModel( dir, script, "probe-hammer-weights.bin" );
+  std::string error;
+  const auto session =
+    ModelRuntimeRegistry::instance().acquire( model, RequestedDevice::cpu(), &error );
+  REQUIRE( session );
+
+  std::vector<float> a = { 2.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  std::atomic<unsigned> probes{ 0 };
+  std::atomic<bool> stop{ false };
+  std::thread prober( [ & ] {
+    while ( !stop.load( std::memory_order_relaxed ) )
+    {
+      // No Catch2 assertions off the main thread: the assertion here is the
+      // sanitizer's (and the absence of a torn-read crash).
+      const auto caps = session->capabilities();
+      const auto details = session->providerDetails();
+      const auto health = session->health();
+      ( void )caps;
+      ( void )details;
+      ( void )health;
+      probes.fetch_add( 1, std::memory_order_relaxed );
+    }
+  } );
+
+  // Forward #1 succeeds. Forward #2 crashes the worker mid-session and takes
+  // the bounded-restart path (stop → fresh handshake → negotiated rewrite)
+  // while the prober is mid-read. Forward #3 exhausts the restart budget and
+  // must surface the typed ProviderCrash diagnostic.
+  const auto first = session->inferNamed( inputs, {} );
+  REQUIRE( first.size() == 1 );
+  CHECK( first[0].second.dataFloat32()[0] == Catch::Approx( 42.0f ) );
+
+  const auto replayed = session->inferNamed( inputs, {} );
+  REQUIRE( replayed.size() == 1 );
+  CHECK( replayed[0].second.dataFloat32()[0] == Catch::Approx( 42.0f ) );
+
+  bool typedCrash = false;
+  try
+  {
+    session->inferNamed( inputs, {} );
+  }
+  catch ( const std::exception &e )
+  {
+    typedCrash =
+      classifyInferenceError( e.what() ) == InferenceFailureKind::ProviderCrash;
+  }
+  CHECK( typedCrash );
+
+  stop.store( true, std::memory_order_relaxed );
+  prober.join();
+  CHECK( probes.load( std::memory_order_relaxed ) > 0 );
+  CHECK( session->health().forwardsCompleted == 2 );
+
+  // The crash worker DECLARES a non-empty capabilities block, so the
+  // restart above genuinely rewrote a populated m_negotiated while the
+  // prober was reading it. After the dust settles the republished block
+  // must be the one the (re)handshake delivered — a torn or half-reset
+  // negotiation state cannot produce this.
+  CHECK( session->capabilities().maxRank == 5 );
+  CHECK( session->providerDetails().executionProvider == "crashfake-ep" );
 }

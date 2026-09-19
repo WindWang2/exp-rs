@@ -875,3 +875,62 @@ TEST_CASE("OpenCV windowed filters declare Streaming; Canny stays FullRaster (#6
     // Canny normalizes with the global band min/max -> genuinely full-frame.
     CHECK(OpenCvCannyOperator().memoryPolicy() == RSOperatorMemoryPolicy::FullRaster);
 }
+
+TEST_CASE("OpenCv filter operators type-reject absurd kernels before any allocation (#1044)",
+          "[opencv][bounds]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    QString input = createTestRaster(tempDir.path(), "in.tif", 8, 8);
+    QString output = tempDir.path() + QDir::separator() + "out.tif";
+
+    // Streaming kernels (Sobel/Laplacian): the radius becomes the tile halo
+    // and sizes the halo buffer BEFORE applyFilter runs — the rejection must
+    // happen at the neighborhoodRadius seam, not after a multi-GB alloc.
+    {
+        auto op = std::make_unique<OpenCvSobelOperator>();
+        RSOperatorContext ctx;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 2147483647; // near INT_MAX: 2*halo would overflow int
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+        }
+    }
+    {
+        auto op = std::make_unique<OpenCvLaplacianOperator>();
+        RSOperatorContext ctx;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 100001; // ≥ 40 GB halo request at the old code
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+        }
+    }
+    // Full-frame kernels get the same documented ceiling in applyFilter.
+    {
+        auto op = std::make_unique<OpenCvGaussianBlurOperator>();
+        RSOperatorContext ctx;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 103; // odd, but above the 101 px ceiling
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+        }
+    }
+    // The largest legal kernel still runs.
+    {
+        auto op = std::make_unique<OpenCvGaussianBlurOperator>();
+        RSOperatorContext ctx;
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 101;
+        const Json::Value result = op->run(params, ctx);
+        REQUIRE(result.isMember("output"));
+    }
+}

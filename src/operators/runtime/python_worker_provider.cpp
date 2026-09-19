@@ -27,6 +27,14 @@ namespace {
 
 /// One worker process per session. Weights stay wherever the worker keeps
 /// them; the local artifact (digest anchor) is announced to the worker.
+///
+/// Sharing contract (#1056): the registry hands ONE shared session to any
+/// number of TaskCenter threads. inferNamed serializes the whole
+/// request/response exchange on m_inferMutex (the worker protocol is
+/// strictly request/response per process); capabilities/health/
+/// providerDetails are concurrent snapshots — m_negotiated under
+/// m_stateMutex, m_loaded/m_cancelRequested/m_forwards/m_failures atomic.
+/// Lock order is m_inferMutex → m_stateMutex, never the reverse.
 class PythonWorkerSession final : public IModelRuntime
 {
   public:
@@ -122,18 +130,20 @@ class PythonWorkerSession final : public IModelRuntime
       // supports (unknown fields keep defaults; lying is the worker's bug).
       // Reset first: a RESTARTED worker must not inherit the dead process's
       // declarations when it declares nothing itself.
-      // Guarded by m_stateMutex: capabilities()/health()/providerDetails() read
-      // these without the inference lock (#1056).
+      // #1056: capabilities()/providerDetails() snapshot m_negotiated from
+      // other threads — publish/reset it under m_stateMutex so a concurrent
+      // restart inside inferNamed cannot tear the JSON object.
       {
         std::lock_guard<std::mutex> stateLock( m_stateMutex );
         m_negotiated = QJsonObject();
-        const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
-        if ( !negotiated.isEmpty() )
-        {
-          m_negotiated = negotiated;
-        }
-        m_loaded = true;
       }
+      const QJsonObject negotiated = ready.value( QStringLiteral( "capabilities" ) ).toObject();
+      if ( !negotiated.isEmpty() )
+      {
+        std::lock_guard<std::mutex> stateLock( m_stateMutex );
+        m_negotiated = negotiated;
+      }
+      m_loaded.store( true, std::memory_order_release );
       return true;
     }
 
@@ -149,11 +159,8 @@ class PythonWorkerSession final : public IModelRuntime
       // protocol is strictly request/response per process — serialize the
       // whole exchange like the ORT provider serializes Run.
       std::lock_guard<std::mutex> lock( m_inferMutex );
-      {
-        std::lock_guard<std::mutex> stateLock( m_stateMutex );
-        if ( !m_loaded || !m_process )
-          throw std::runtime_error( "runtime session is not loaded" );
-      }
+      if ( !m_loaded.load( std::memory_order_acquire ) || !m_process )
+        throw std::runtime_error( "runtime session is not loaded" );
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
         throw std::runtime_error( "inference canceled before the forward pass" );
 
@@ -269,8 +276,9 @@ class PythonWorkerSession final : public IModelRuntime
       caps.outputDtypes = { "float32", "float64", "int32", "int64", "uint8", "int8" };
       // Platform 8.0 WP-F: worker-declared capabilities override the defaults
       // (handshake negotiation; unknown/absent fields keep the defaults).
-      // Snapshot under m_stateMutex: the worker restart path rewrites the
-      // declarations while inference holds only the inference lock (#1056).
+      // #1056: work on a COPY taken under m_stateMutex — this method runs on
+      // foreign threads concurrently with a restart that rewrites the
+      // negotiated block.
       QJsonObject negotiated;
       {
         std::lock_guard<std::mutex> stateLock( m_stateMutex );
@@ -304,13 +312,9 @@ class PythonWorkerSession final : public IModelRuntime
 
     SessionHealth health() const override
     {
-      bool loaded = false;
-      {
-        std::lock_guard<std::mutex> stateLock( m_stateMutex );
-        loaded = m_loaded;
-      }
       SessionHealth health;
-      health.ok = loaded && !m_cancelRequested.load( std::memory_order_relaxed );
+      health.ok = m_loaded.load( std::memory_order_acquire )
+                    && !m_cancelRequested.load( std::memory_order_relaxed );
       health.forwardsCompleted = m_forwards.load( std::memory_order_relaxed );
       health.failures = m_failures.load( std::memory_order_relaxed );
       std::lock_guard<std::mutex> lock( m_healthMutex );
@@ -336,6 +340,7 @@ class PythonWorkerSession final : public IModelRuntime
       // Honesty contract (model_runtime.h): report only what the WORKER
       // declared in its handshake — a resolved CUDA index is a request, not
       // evidence of the EP the worker actually engaged.
+      // #1056: negotiated snapshot under m_stateMutex (see capabilities()).
       QJsonObject negotiated;
       {
         std::lock_guard<std::mutex> stateLock( m_stateMutex );
@@ -434,8 +439,7 @@ class PythonWorkerSession final : public IModelRuntime
         m_process->waitForFinished( 5000 );
       }
       m_process.reset();
-      std::lock_guard<std::mutex> stateLock( m_stateMutex );
-      m_loaded = false;
+      m_loaded.store( false, std::memory_order_release );
     }
 
     void recordFailure( const std::string &what )
@@ -459,12 +463,11 @@ class PythonWorkerSession final : public IModelRuntime
     qint64 m_maxStderrBytes = 64 * 1024;
     QByteArray m_stderrTail;
     bool m_stderrTruncated = false;
-    bool m_loaded = false;
-    /// Guards m_loaded / m_negotiated against the lock-free readers
-    /// (capabilities/health/providerDetails, #1056). Lock order: after
-    /// m_inferMutex, before m_healthMutex — nothing takes it in reverse.
-    mutable std::mutex m_stateMutex;
-    std::mutex m_inferMutex; // one request/response exchange at a time
+    // #1056: read by health() on foreign threads while a restart inside
+    // inferNamed flips it — atomic, acquire/release against the handshake.
+    std::atomic<bool> m_loaded{ false };
+    std::mutex m_inferMutex;   // one request/response exchange at a time
+    mutable std::mutex m_stateMutex; // guards m_negotiated (snapshot reads)
     std::unique_ptr<QProcess> m_process;
     std::atomic<bool> m_cancelRequested{ false };
     std::atomic<std::uint64_t> m_forwards{ 0 };
@@ -472,6 +475,7 @@ class PythonWorkerSession final : public IModelRuntime
     mutable std::mutex m_healthMutex;
     std::string m_lastError;
     QJsonObject m_negotiated; // WP-F: capabilities declared in the ready handshake
+                              // (guarded by m_stateMutex)
     int m_restartsLeft = 1;   // WP-F: ONE bounded restart for the session lifetime
 };
 

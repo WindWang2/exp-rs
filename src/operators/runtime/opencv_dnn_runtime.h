@@ -86,7 +86,12 @@ class OpenCvDnnRuntime final : public IModelRuntime
     cv::dnn::Net m_net;
     std::string m_deviceName = "cpu";
     std::mutex m_inferMutex;
-    bool m_loaded = false;
+    // #1056: health()/infer()/outputTensorNames() read the loaded flag on
+    // foreign threads while load() writes it once — atomic so the shared
+    // session's health probe has no data race with the load. The flag is
+    // publish-only: false → true exactly once (a failed load destroys the
+    // session, it is never retried concurrently).
+    std::atomic<bool> m_loaded{ false };
 
     // Platform 4.0 health/cancel state (atomics: health() never takes the
     // inference lock, so a stuck forward cannot block the probe).

@@ -45,6 +45,10 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
              + std::to_string( output.dims );
   if ( output.type() != CV_32F )
     return "detection head output must be float32";
+  // #1056: the flat read below indexes with continuous (C, N) strides. A
+  // strided tensor (an ROI view, or a provider that returns plane strides)
+  // would silently decode wrong values — normalize with one clone.
+  const cv::Mat continuous = output.isContinuous() ? output : output.clone();
 
   int C = output.size[1];
   int N = output.size[2];
@@ -71,7 +75,7 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
              + std::to_string( expectedChannels ) + " (layout '" + contract.layout + "' with "
              + std::to_string( classCount ) + " classes)";
 
-  const float *data = output.ptr<float>( 0 );
+  const float *data = continuous.ptr<float>( 0 );
   auto at = [&]( int channel, int candidate ) {
     return channelsFirst ? data[static_cast<std::size_t>( channel ) * N + candidate]
                          : data[static_cast<std::size_t>( candidate ) * C + channel];

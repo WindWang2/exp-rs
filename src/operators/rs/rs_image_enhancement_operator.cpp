@@ -114,15 +114,15 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
     double stddevMult = getDouble(params, "stddevK", 2.0);
     int filterType = 0;
     int kernelSize = getInt(params, "kernelSize", 3);
-    // #1044: the kernel edge becomes a tile halo (`half = kernelSize / 2`), so
-    // an unbounded value is an unbounded per-tile allocation and an int
-    // overflow hazard. 101 is the repo's documented window ceiling.
-    constexpr int kMaxEnhancementKernel = 101;
-    if (kernelSize < 1 || kernelSize > kMaxEnhancementKernel) {
+    // #1044: the kernel radius becomes the streamed tile halo, so enforce
+    // the schema's own declared range here — before the halo buffer and the
+    // tile+2*halo window arithmetic in the streaming backend. The schema
+    // range (3..15, setRange below the schema builder) is the operator's
+    // documented contract, tighter than the repository-wide 101 px ceiling.
+    if (kernelSize < 3 || kernelSize > 15 || kernelSize % 2 == 0) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "kernelSize must be in [1, " +
-                                  std::to_string(kMaxEnhancementKernel) + "] (got " +
-                                  std::to_string(kernelSize) + ")");
+                              "kernelSize must be an odd integer in [3, 15] (the schema's "
+                              "declared filter/speckle window range)");
     }
     double sigma = getDouble(params, "sigma", 1.0);
     int ratioType = 0;
