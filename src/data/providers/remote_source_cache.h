@@ -71,12 +71,17 @@ class RemoteDatasetLease
     std::optional<std::unique_lock<std::mutex>> m_lock;
 };
 
-/// Bounded per-URL GDAL dataset pool. Thread-safe.
+/// Bounded per-URL GDAL dataset pool. Thread-safe: first use constructs the
+/// single process-wide Impl exactly once (C++11 function-local static
+/// guarantee), so concurrent first acquire/clear calls share one mutex domain,
+/// one handle map and one handlesPerUrl policy (issue #1047).
 class RemoteDatasetPool
 {
   public:
-    /// Singleton used by the data layer. handlesPerUrl defaults to 2
-    /// (env SICNU_REMOTE_POOL_HANDLES, clamped to [1, 8]).
+    /// Singleton used by the data layer. handlesPerUrl is read from
+    /// SICNU_REMOTE_POOL_HANDLES exactly once, when the process-wide state is
+    /// first constructed (by the first acquire or clear), and is latched
+    /// afterwards: it defaults to 2 and is clamped to [1, 8].
     static RemoteDatasetPool &instance();
 
     /// Checks out a handle for @p url (open with @p oflag, e.g. GA_READONLY),
@@ -84,22 +89,21 @@ class RemoteDatasetPool
     /// and the per-URL bound is not reached; otherwise blocks.
     RemoteDatasetLease acquire( const QString &url, unsigned int oflag );
 
-    /// Drops every cached handle (process teardown / tests). Blocks until all
-    /// leases are returned.
+    /// Drops every cached handle (process teardown / tests). Blocks until no
+    /// handle cached at entry survives: outstanding leases must be returned
+    /// and opens already in flight are awaited. Handles opened by acquires
+    /// that start after the sweep are not affected (callers coordinate).
     void clear();
 
     /// Diagnostics (tests): number of GDALOpen calls actually performed.
     qint64 openCount() const { return m_openCount.load(); }
 
   private:
-    RemoteDatasetPool();
+    RemoteDatasetPool() = default;
     struct Impl;
-    Impl *m_impl = nullptr;
-    /// Allocated exactly once, in the constructor: the class is reachable
-    /// only through instance() (a magic static), so acquisition is fully
-    /// constructed before any thread can obtain it — no unsynchronized
-    /// lazy-init read of m_impl anywhere.
-    void allocateImpl();
+    /// The one process-wide pool state, created on first use. Never returns
+    /// null and never allocates twice, whatever the calling thread.
+    static Impl &impl();
     std::atomic<qint64> m_openCount{ 0 };
 };
 
