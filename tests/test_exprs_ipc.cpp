@@ -16,6 +16,20 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 using namespace exprs;
 
 namespace {
@@ -632,6 +646,57 @@ TEST_CASE( "seeded fuzz: random raw frames never crash the frame reader",
         const IpcFrame::ReadStatus status = IpcFrame::read( *b, payload, limits, 20, error );
         (void)status;
     }
+}
+
+// -- issue #1036: descriptor ownership of the platform stream -----------------
+
+TEST_CASE( "handle streams own and release their OS descriptors (issue #1036)",
+           "[ipc][stream][resource]" )
+{
+    // Regression: the launcher-side pipe ends handed to makeIpcHandleStream
+    // were never closed on ANY session lifecycle, leaking 2 descriptors per
+    // worker spawn/shutdown/respawn. The stream now owns them; close() must
+    // release both exactly once, and destruction must not double-close.
+#ifdef _WIN32
+    HANDLE hostToWorkerRead = nullptr;
+    HANDLE hostToWorkerWrite = nullptr;
+    HANDLE workerToHostRead = nullptr;
+    HANDLE workerToHostWrite = nullptr;
+    REQUIRE( ::CreatePipe( &hostToWorkerRead, &hostToWorkerWrite, nullptr, 0 ) );
+    REQUIRE( ::CreatePipe( &workerToHostRead, &workerToHostWrite, nullptr, 0 ) );
+    // Mirror the session: only the launcher-side ends reach the stream.
+    ::CloseHandle( hostToWorkerRead );
+    ::CloseHandle( workerToHostWrite );
+
+    auto stream = makeIpcHandleStream( workerToHostRead, hostToWorkerWrite );
+    stream->close();
+    stream->close(); // idempotent: exactly one closer per handle
+    DWORD flags = 0;
+    REQUIRE_FALSE( ::GetHandleInformation( workerToHostRead, &flags ) );
+    REQUIRE_FALSE( ::GetHandleInformation( hostToWorkerWrite, &flags ) );
+    stream.reset(); // destructor must not double-close
+#else
+    int hostToWorker[ 2 ] = { -1, -1 };
+    int workerToHost[ 2 ] = { -1, -1 };
+    REQUIRE( ::pipe( hostToWorker ) == 0 );
+    REQUIRE( ::pipe( workerToHost ) == 0 );
+    // Mirror the session: only the launcher-side ends reach the stream.
+    ::close( hostToWorker[ 0 ] );
+    ::close( workerToHost[ 1 ] );
+
+    auto stream = makeIpcHandleStream(
+        reinterpret_cast<void *>( static_cast<intptr_t>( workerToHost[ 0 ] ) ),
+        reinterpret_cast<void *>( static_cast<intptr_t>( hostToWorker[ 1 ] ) ) );
+    stream->close();
+    stream->close(); // idempotent: exactly one closer per descriptor
+    errno = 0;
+    REQUIRE( ::fcntl( workerToHost[ 0 ], F_GETFD ) == -1 );
+    REQUIRE( errno == EBADF );
+    errno = 0;
+    REQUIRE( ::fcntl( hostToWorker[ 1 ], F_GETFD ) == -1 );
+    REQUIRE( errno == EBADF );
+    stream.reset(); // destructor must not double-close
+#endif
 }
 
 // -- protocol 1.2: version matrix --------------------------------------------

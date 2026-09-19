@@ -86,6 +86,17 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             ok = false;
             continue;
         }
+        // Type-checked before the cast (issue #1038): `{"steps":[{"id":{}}]}`
+        // used to throw out of validateWorkflowDocument instead of returning
+        // false with a typed diagnostic.
+        if ( step.isMember( "id" ) && !step["id"].isString() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                      "step at index " + std::to_string( index ) + " 'id' must be a string",
+                      "steps[].id" );
+            ok = false;
+            continue;
+        }
         const std::string stepId = step.get( "id", "" ).asString();
         if ( stepId.empty() )
         {

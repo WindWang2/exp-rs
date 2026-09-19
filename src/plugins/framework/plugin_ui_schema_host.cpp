@@ -41,6 +41,14 @@ QString jsonString( const Json::Value &value, const char *key )
 /// application through the renderer itself.
 constexpr int kDeliveryPollMs = 50;
 
+/// Defense-in-depth render bounds (issue #1039): the schema is validated
+/// before it reaches the renderer, but a caller that bypasses validation
+/// must still not exhaust the GUI thread (stack via group recursion, or
+/// memory via unbounded widget construction). Mirrors
+/// exprs::PluginUiSchemaLimits::maxGroupDepth.
+constexpr int kMaxRenderedGroupDepth = 4;
+constexpr size_t kMaxRenderedControls = 4096;
+
 } // namespace
 
 PluginUiSchemaRenderer *PluginUiSchemaRenderer::instance()
@@ -85,18 +93,27 @@ void PluginUiSchemaRenderer::deliveryLoop()
         Json::Value response;
         if ( delegate )
             response = delegate->invoke( pending.event );
+        // The production delegate returns the runtime's result envelope
+        // ({ok, response:{state?...}}); the state lives one level down
+        // (issue #1040 — reading result["state"] silently dropped every
+        // production state update). A payload-shaped answer from a simple
+        // delegate is still honored.
+        Json::Value payload = response;
+        if ( response.isObject() && response.isMember( "response" )
+             && response["response"].isObject() )
+            payload = response["response"];
         // Hop back to the GUI thread for widget mutation. Re-copy the
         // delegate: non-null means the record is still attached.
         QMetaObject::invokeMethod(
             this,
-            [this, record = pending.record, response]() {
+            [this, record = pending.record, payload]() {
                 std::shared_ptr<UiInvokeDelegate> delegate;
                 {
                     std::lock_guard<std::mutex> lock( mEventMutex );
                     delegate = record->delegate;
                 }
                 if ( delegate )
-                    applyState( *record, response.get( "state", Json::Value() ) );
+                    applyState( *record, payload.get( "state", Json::Value() ) );
             },
             Qt::QueuedConnection );
     }
@@ -124,13 +141,21 @@ void PluginUiSchemaRenderer::enqueueEvent( const QString &pluginId, const Json::
 
 void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &controls,
                                             const QString &contributionId, const QString &pluginId,
-                                            RenderedRecord &record )
+                                            RenderedRecord &record, int depth,
+                                            size_t &renderedControls )
 {
     QFormLayout *layout = new QFormLayout( parent );
     parent->setLayout( layout );
 
+    // Unvalidated input must not recurse without bound (issue #1039).
+    if ( !controls.isArray() || depth > kMaxRenderedGroupDepth )
+        return;
+
     for ( const Json::Value &control : controls )
     {
+        if ( renderedControls >= kMaxRenderedControls )
+            return; // widget-flood bound
+        ++renderedControls;
         const QString id = jsonString( control, "id" );
         const QString type = jsonString( control, "type" );
         const QString label = jsonString( control, "label" );
@@ -149,7 +174,8 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
         if ( type == "group" )
         {
             auto *box = new QGroupBox( label, parent );
-            buildControls( box, control[ "controls" ], contributionId, pluginId, record );
+            buildControls( box, control.get( "controls", Json::Value() ), contributionId, pluginId,
+                           record, depth + 1, renderedControls );
             layout->addRow( box );
             continue;
         }
@@ -157,7 +183,12 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
         QWidget *field = nullptr;
         if ( type == "text" )
         {
-            const bool multiline = control.get( "multiline", false ).asBool();
+            // Type-guarded reads: an unvalidated hostile schema must fail
+            // closed, never throw Json::LogicError through the GUI thread
+            // (issue #1039).
+            const bool multiline = control.isMember( "multiline" )
+                                   && control[ "multiline" ].isBool()
+                                   && control[ "multiline" ].asBool();
             if ( multiline )
             {
                 auto *edit = new QPlainTextEdit( parent );
@@ -195,9 +226,15 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
         }
         else if ( type == "number" || type == "slider" )
         {
-            const double minimum = control.get( "minimum", 0.0 ).asDouble();
-            const double maximum = control.get( "maximum", 100.0 ).asDouble();
-            const double step = control.get( "step", 1.0 ).asDouble();
+            // Type-guarded reads (issue #1039): wrong-typed range fields fall
+            // back to the documented defaults instead of throwing.
+            const auto numberField = [&control]( const char *key, double fallback ) {
+                const Json::Value &value = control.get( key, Json::Value() );
+                return value.isNumeric() ? value.asDouble() : fallback;
+            };
+            const double minimum = numberField( "minimum", 0.0 );
+            const double maximum = numberField( "maximum", 100.0 );
+            const double step = numberField( "step", 1.0 );
             if ( type == "number" )
             {
                 auto *spin = new QDoubleSpinBox( parent );
@@ -264,16 +301,20 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
         else if ( type == "combo" )
         {
             auto *combo = new QComboBox( parent );
-            const Json::Value &options = control[ "options" ];
+            const Json::Value &options = control.get( "options", Json::Value() );
             int defaultIndex = 0;
-            for ( int index = 0; index < static_cast<int>( options.size() ); ++index )
+            if ( options.isArray() )
             {
-                const Json::Value &option = options[ index ];
-                combo->addItem( QString::fromStdString( option.get( "label", "" ).asString() ),
-                                QString::fromStdString( option.get( "value", "" ).asString() ) );
-                if ( defaultValue.isString()
-                     && defaultValue.asString() == option.get( "value", "" ).asString() )
-                    defaultIndex = index;
+                for ( int index = 0; index < static_cast<int>( options.size() ); ++index )
+                {
+                    // jsonString() is type-guarded (issue #1039): a non-string
+                    // option label/value used to throw through the GUI thread.
+                    const Json::Value &option = options[ index ];
+                    combo->addItem( jsonString( option, "label" ), jsonString( option, "value" ) );
+                    if ( defaultValue.isString()
+                         && defaultValue.asString() == jsonString( option, "value" ).toStdString() )
+                        defaultIndex = index;
+                }
             }
             combo->setCurrentIndex( defaultIndex );
             field = combo;
@@ -281,6 +322,10 @@ void PluginUiSchemaRenderer::buildControls( QWidget *parent, const Json::Value &
                 return Json::Value( combo->currentData().toString().toStdString() );
             };
             binding.applyValue = [combo]( const Json::Value &value ) {
+                // A state value of the wrong type must be ignored, never
+                // throw asString() from the queued GUI lambda (issue #1039).
+                if ( !value.isString() )
+                    return;
                 const int index = combo->findData( QString::fromStdString( value.asString() ) );
                 if ( index >= 0 )
                 {
@@ -402,17 +447,36 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
         error = "attachPluginSchema must be called on the renderer's thread";
         return false;
     }
-    if ( !schema.isObject() )
+    // Host-side re-validation (issue #1039): the schema arrives from the
+    // untrusted worker, so the host does not trust the worker's own
+    // validation. A hostile or buggy schema must fail typed HERE, never
+    // throw or flood the GUI thread inside buildControls.
+    exprs::PluginUiSchemaParseResult validated;
+    try
     {
-        error = "schema is not an object";
+        validated = exprs::validatePluginUiSchema( schema );
+    }
+    catch ( const std::exception &exception )
+    {
+        error = QStringLiteral( "schema validation threw: %1" )
+                    .arg( QString::fromUtf8( exception.what() ) );
         return false;
     }
+    if ( !validated.ok() )
+    {
+        error = QStringLiteral( "schema failed host-side validation: %1" )
+                    .arg( QString::fromStdString( validated.errors.front() ) );
+        return false;
+    }
+    // Build from the NORMALIZED copy so no unvalidated subtree reaches the
+    // renderer even if validation were ever loosened.
+    const Json::Value &normalized = validated.normalized;
     // Re-attachment replaces (reload path): release first.
     releasePluginUi( pluginId );
 
     auto record = std::make_shared<RenderedRecord>();
     record->pluginId = pluginId;
-    record->schema = schema;
+    record->schema = normalized;
     record->delegate = std::move( delegate );
 
     // Commands become host-owned actions; menuItems attach them.
@@ -422,7 +486,7 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
         QAction *action = nullptr;
     };
     std::vector<CommandAction> commandActions;
-    const Json::Value &commands = schema.get( "commands", Json::Value( Json::nullValue ) );
+    const Json::Value &commands = normalized.get( "commands", Json::Value( Json::nullValue ) );
     if ( commands.isArray() )
     {
         for ( const Json::Value &command : commands )
@@ -442,16 +506,17 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
     }
 
     // Settings pages and dock panels are host-owned widgets.
+    size_t renderedControls = 0; // shared render bound across every surface
     for ( const char *surface : { "settingsPages", "dockPanels" } )
     {
-        const Json::Value &pages = schema.get( surface, Json::Value( Json::nullValue ) );
+        const Json::Value &pages = normalized.get( surface, Json::Value( Json::nullValue ) );
         if ( !pages.isArray() )
             continue;
         for ( const Json::Value &page : pages )
         {
             auto *widget = new QWidget();
-            buildControls( widget, page[ "controls" ], jsonString( page, "id" ), pluginId,
-                           *record );
+            buildControls( widget, page.get( "controls", Json::Value() ), jsonString( page, "id" ),
+                           pluginId, *record, 1, renderedControls );
             record->surfaces.append( { jsonString( page, "id" ), widget,
                                        jsonString( page, "title" ) } );
         }
@@ -465,7 +530,7 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
 
     // Attach through the reverse-ownership shell sink; surface kinds come
     // from the schema (settings vs dock), not from widget guesses.
-    const Json::Value &settingsPages = schema.get( "settingsPages", Json::Value( Json::nullValue ) );
+    const Json::Value &settingsPages = normalized.get( "settingsPages", Json::Value( Json::nullValue ) );
     if ( settingsPages.isArray() )
     {
         for ( const Json::Value &page : settingsPages )
@@ -479,7 +544,7 @@ bool PluginUiSchemaRenderer::attachPluginSchema( const QString &pluginId, const 
                 }
         }
     }
-    const Json::Value &dockPanels = schema.get( "dockPanels", Json::Value( Json::nullValue ) );
+    const Json::Value &dockPanels = normalized.get( "dockPanels", Json::Value( Json::nullValue ) );
     if ( dockPanels.isArray() )
     {
         for ( const Json::Value &panel : dockPanels )

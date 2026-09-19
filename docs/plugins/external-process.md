@@ -15,6 +15,7 @@ generic manifest operators and the plugin host.
 | Credential leakage via env | child inherits only `PATH HOME TMPDIR LANG`; full inheritance is opt-in (`inherit_environment`) plus explicit `environment` entries |
 | Partial outputs on failure | declared outputs are redirected to temp paths and published (rename) only after a clean exit; failed runs leave nothing behind |
 | Cancellation | cooperative cancel poll during execution; cancel = SIGTERM ladder on the group |
+| Descendant holding inherited pipes | child liveness is polled (`waitpid(WNOHANG)` on POSIX, `WaitForSingleObject` on Windows); after the child exits the drain is bounded by a 2 s grace, so a daemonizing descendant can never turn a clean exit into a spurious timeout (issue #1041; tail output beyond the grace is lost) |
 
 ## Manifest shape
 
