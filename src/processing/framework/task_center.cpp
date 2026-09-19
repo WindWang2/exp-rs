@@ -367,6 +367,11 @@ void TaskCenter::shutdownForTests()
         m_taskFingerprints.clear();
         m_taskFingerprintParams.clear();
         m_taskChainedEdges.clear();
+        m_taskRegisteredInputStats.clear();
+        // 9.0 M1 ownership index: task ids restart at 1 — stale owner→child
+        // edges must not leak across tests (#1089).
+        m_ownedChildren.clear();
+        m_pendingOwnedCancels.clear();
         // 8.0 WP-A: reset the incremental admission state (task ids restart
         // at 1 — stale heap/serial/counter entries must not leak across tests).
         m_active = ActiveCounters{};
@@ -2607,7 +2612,10 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
 {
     for ( long targetId : targets )
     {
-        auto &info = m_tasks[targetId];
+        const auto targetIt = m_tasks.find( targetId );
+        if ( targetIt == m_tasks.end() )
+            continue; // never insert a ghost task via operator[] (#1089)
+        auto &info = targetIt.value();
         if ( isTerminalStatus( info.status ) )
             continue;
 
@@ -2790,9 +2798,13 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
                 m_taskByJobId.remove( deadJobId );
             // The retried run records fresh identity: drop the failed
             // attempt's fingerprint bookkeeping (the legacy removals below
-            // do not run on this early-return path).
+            // do not run on this early-return path). Also drop chained-edge /
+            // input-stat maps — fingerprints are prepared only at submit, so
+            // keeping them would leak forever in long-lived hosts (#1089).
             m_taskFingerprints.remove( taskId );
             m_taskFingerprintParams.remove( taskId );
+            m_taskChainedEdges.remove( taskId );
+            m_taskRegisteredInputStats.remove( taskId );
             // 8.0 WP-A: resurrect onto the ready heap — its heap entries were
             // dropped when the task was staged/dispatched, so a fresh serial
             // is required or the retry would strand.
@@ -3821,6 +3833,8 @@ void TaskCenter::verifyDispatchFingerprintLocked( long taskId )
     if ( fpIt == m_taskFingerprints.constEnd() )
     {
         m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         return;
     }
     const auto snapIt = m_taskFingerprintParams.constFind( taskId );
@@ -4127,6 +4141,8 @@ TaskCenter::takeExecutionStoreRequestLocked( long taskId )
     if ( fpIt == m_taskFingerprints.constEnd() || !fpIt->isValid() )
     {
         m_taskFingerprintParams.remove( taskId );
+        m_taskChainedEdges.remove( taskId );
+        m_taskRegisteredInputStats.remove( taskId );
         return std::nullopt;
     }
     ExecutionStoreRequest request;

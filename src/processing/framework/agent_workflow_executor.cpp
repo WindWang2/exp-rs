@@ -175,7 +175,15 @@ void stampPlanResultProvenance( data::DataManager *dataManager, long pipelineId,
         lineage.collectionId,
         lineage.collectionRevision );
     derivation.executionFingerprint = executionFingerprint;
-    dataManager->attachDerivationRecord( registered.assetId, derivation );
+    const auto attached =
+      dataManager->attachDerivationRecord( registered.assetId, derivation );
+    if ( !attached )
+    {
+      // Mirror OutputCommitter: registration succeeded but lineage must not
+      // vanish silently (#1089).
+      (*stepRes)["provenanceWarning"] =
+        "output was registered but its Derivation Record could not be attached";
+    }
 
     (*stepRes)["assetId"] = registered.assetId.toString().toStdString();
     ++registeredCount;
