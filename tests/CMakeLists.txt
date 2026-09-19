@@ -3052,6 +3052,25 @@ target_include_directories(test_remote_source_cache PRIVATE ${CMAKE_CURRENT_SOUR
 target_include_directories(test_execution_benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
+# RemoteDatasetPool first-use initialization concurrency (issue #1047) —
+# driven through a local GeoTIFF, so unlike test_remote_source_cache it needs
+# no POSIX sockets and runs on every platform. Lean link set on purpose: the
+# pool is a Qt Core + GDAL data-layer primitive; pulling the GUI stack in
+# would only slow the targeted lane. Discovered under Catch2 case names (no
+# TEST_PREFIX), so select with `ctest -R "RemoteDatasetPool"`.
+qt_add_executable(test_remote_pool_init test_remote_pool_init.cpp)
+target_link_libraries(test_remote_pool_init PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_remote_pool_init PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_remote_pool_init TIMEOUT 180)
+
 # Phase G scheduler contracts (header-only budget2 + tests).
 sicnu_add_test(test_scheduler3 TIMEOUT 120)
 

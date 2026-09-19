@@ -53,13 +53,24 @@ void configureRemoteCachingDefaults()
 
 struct RemoteDatasetPool::Impl
 {
+    /// Reads the per-URL bound once, before the Impl is published to any
+    /// other thread, so no reader can observe a half-configured pool.
+    static size_t configuredHandlesPerUrl()
+    {
+        const char *env = std::getenv( "SICNU_REMOTE_POOL_HANDLES" );
+        if ( !env )
+            return 2;
+        const long parsed = std::strtol( env, nullptr, 10 );
+        return static_cast<size_t>( std::clamp<long>( parsed, 1, 8 ) );
+    }
+
+    const size_t handlesPerUrl = configuredHandlesPerUrl();
     std::mutex mutex;
     std::condition_variable cv;
     std::map<QString, std::vector<std::shared_ptr<PooledRemoteHandle>>> handles;
     /// Per-URL GDALOpen calls in flight (reserved before releasing the pool
     /// mutex for network I/O, so the per-URL bound can never be overshot).
     std::map<QString, size_t> opening;
-    size_t handlesPerUrl = 2;
 };
 
 RemoteDatasetPool &RemoteDatasetPool::instance()
@@ -68,20 +79,14 @@ RemoteDatasetPool &RemoteDatasetPool::instance()
     return pool;
 }
 
-RemoteDatasetPool::RemoteDatasetPool()
+RemoteDatasetPool::Impl &RemoteDatasetPool::impl()
 {
-    allocateImpl();
-}
-
-void RemoteDatasetPool::allocateImpl()
-{
-    m_impl = new Impl;
-    if ( const char *env = std::getenv( "SICNU_REMOTE_POOL_HANDLES" ) )
-    {
-        const long parsed = std::strtol( env, nullptr, 10 );
-        m_impl->handlesPerUrl =
-            static_cast<size_t>( std::clamp<long>( parsed, 1, 8 ) );
-    }
+    // Function-local static: initialized exactly once, thread-safely; every
+    // later call synchronizes-with the completed construction. This replaces
+    // the racy `if ( !m_impl ) m_impl = new Impl;` pattern (#1047): no double
+    // allocation, no leak, no divergent mutex domains.
+    static Impl pool;
+    return pool;
 }
 
 RemoteDatasetLease::RemoteDatasetLease( std::shared_ptr<PooledRemoteHandle> handle,
@@ -121,70 +126,110 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
 
     configureRemoteCachingDefaults();
 
-    std::unique_lock<std::mutex> lock( m_impl->mutex );
+    Impl &pool = impl();
+    std::unique_lock<std::mutex> lock( pool.mutex );
     while ( true )
     {
-        std::vector<std::shared_ptr<PooledRemoteHandle>> &bucket = m_impl->handles[url];
+        std::vector<std::shared_ptr<PooledRemoteHandle>> &bucket = pool.handles[url];
         for ( auto &handle : bucket )
         {
             std::unique_lock<std::mutex> handleLock( handle->mutex, std::try_to_lock );
             if ( handleLock.owns_lock() )
                 return RemoteDatasetLease( handle, std::move( handleLock ) );
         }
-        const size_t inFlight = m_impl->opening[url];
-        if ( bucket.size() + inFlight < m_impl->handlesPerUrl )
+        const size_t inFlight = pool.opening[url];
+        if ( bucket.size() + inFlight < pool.handlesPerUrl )
         {
             // Reserve a slot, then open OUTSIDE the pool mutex: GDALOpen on
             // /vsicurl/ does network I/O (bounded by the configured connect/
             // transfer timeouts), so never hold the global lock across it.
-            m_impl->opening[url] = inFlight + 1;
+            pool.opening[url] = inFlight + 1;
+            // Everything that can allocate (the handle and the URL's UTF-8
+            // form) runs while the pool mutex is still held: a throwing
+            // allocation must never escape with the reservation dangling,
+            // because a stuck reservation silently lowers the per-URL bound
+            // and wedges clear()'s in-flight drain.
+            auto handle = std::make_shared<PooledRemoteHandle>();
+            handle->url = url;
+            const QByteArray utf8 = url.toUtf8();
             lock.unlock();
-            GDALDatasetH dataset = GDALOpenEx( url.toUtf8().constData(), oflag,
-                                               nullptr, nullptr, nullptr );
+            GDALDatasetH dataset = nullptr;
+            try
+            {
+                dataset = GDALOpenEx( utf8.constData(), oflag, nullptr,
+                                      nullptr, nullptr );
+            }
+            catch ( ... )
+            {
+                // Restore the pool state before propagating: GDAL normally
+                // reports failures as a null handle, but an exception cannot
+                // be allowed to leak the reservation.
+                lock.lock();
+                pool.opening[url] -= 1;
+                throw;
+            }
             m_openCount.fetch_add( 1, std::memory_order_relaxed );
             lock.lock();
-            m_impl->opening[url] -= 1;
+            pool.opening[url] -= 1;
             if ( !dataset )
                 return RemoteDatasetLease{};
-            auto handle = std::make_shared<PooledRemoteHandle>();
             handle->dataset = dataset;
-            handle->url = url;
-            m_impl->handles[url].push_back( handle );
+            try
+            {
+                pool.handles[url].push_back( handle );
+            }
+            catch ( ... )
+            {
+                // Nothing references the open dataset once the shared_ptr
+                // goes out of scope here, so close it before rethrowing.
+                GDALClose( dataset );
+                throw;
+            }
             std::unique_lock<std::mutex> handleLock( handle->mutex );
             return RemoteDatasetLease( handle, std::move( handleLock ) );
         }
         // All handles busy and the bound reached: wait for a return. Leases
         // do not know the pool, so wake on a short poll — checkout cost is
         // dominated by remote I/O anyway.
-        m_impl->cv.wait_for( lock, std::chrono::milliseconds( 20 ) );
+        pool.cv.wait_for( lock, std::chrono::milliseconds( 20 ) );
     }
 }
 
 void RemoteDatasetPool::clear()
 {
-    if ( !m_impl )
-        return;
-    std::unique_lock<std::mutex> lock( m_impl->mutex );
-    // Wait for all leases to return (every handle must be lockable), then
-    // close. Retry loop keeps it simple and bounded by lease lifetimes.
+    Impl &pool = impl();
+    std::unique_lock<std::mutex> lock( pool.mutex );
+    // Wait until no open is in flight and all leases have returned (every
+    // handle must be lockable), then close. Retry loop keeps it simple and
+    // bounded by lease lifetimes / the configured GDAL timeouts.
+    auto noOpenInFlight = []( const std::map<QString, size_t> &opening ) {
+        // Entries can stay in the map with a zero count (acquire reserves via
+        // operator[]), so emptiness is not a valid in-flight predicate.
+        return std::all_of( opening.begin(), opening.end(),
+                            []( const auto &slot ) { return slot.second == 0; } );
+    };
     bool allFree = false;
     while ( !allFree )
     {
-        allFree = true;
-        for ( auto &[url, bucket] : m_impl->handles )
+        allFree = noOpenInFlight( pool.opening );
+        if ( allFree )
         {
-            Q_UNUSED( url );
-            for ( auto &handle : bucket )
+            for ( const auto &[url, bucket] : pool.handles )
             {
-                std::unique_lock<std::mutex> handleLock( handle->mutex, std::try_to_lock );
-                if ( !handleLock.owns_lock() )
+                Q_UNUSED( url );
+                for ( const auto &handle : bucket )
                 {
-                    allFree = false;
-                    break;
+                    std::unique_lock<std::mutex> handleLock( handle->mutex,
+                                                             std::try_to_lock );
+                    if ( !handleLock.owns_lock() )
+                    {
+                        allFree = false;
+                        break;
+                    }
                 }
+                if ( !allFree )
+                    break;
             }
-            if ( !allFree )
-                break;
         }
         if ( !allFree )
         {
@@ -193,15 +238,17 @@ void RemoteDatasetPool::clear()
             lock.lock();
         }
     }
-    for ( auto &[url, bucket] : m_impl->handles )
+    // Mutex held: acquire cannot hand out or add handles while we close, so
+    // no handle cached at entry survives this sweep.
+    for ( const auto &[url, bucket] : pool.handles )
     {
         Q_UNUSED( url );
-        for ( auto &handle : bucket )
+        for ( const auto &handle : bucket )
             if ( handle->dataset )
                 GDALClose( handle->dataset );
     }
-    m_impl->handles.clear();
-    m_impl->cv.notify_all();
+    pool.handles.clear();
+    pool.cv.notify_all();
 }
 
 // ---------------------------------------------------------------------------
