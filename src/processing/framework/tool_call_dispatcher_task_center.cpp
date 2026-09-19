@@ -25,10 +25,9 @@
 //     thread in every production caller — so a sync wait can never wedge a
 //     queued delivery, and the commit happens exactly once.
 #include "tool_call_dispatcher.h"
+#include "data/data_manager.h"
 #include "execution_plane.h"
 #include "task_center.h"
-
-#include "data/data_manager.h"
 
 #include <QCoreApplication>
 #include <QObject>
@@ -50,13 +49,16 @@ ToolCallDispatcher::ToolCallDispatcher()
       return ExecutionPlane::instance().submit( request ).taskId();
     } )
   , mWatcher( [this]( long taskId, CompletionCallback onComplete ) {
+      // Handlers (and the rollback manager) are snapshotted as plain values so
+      // the queued delivery survives the dispatcher being destroyed mid-flight;
+      // the plane builder applies the verification rollback (#1042) inside its
+      // publication gate, before the payload is cached or handed to the callback.
+      // The manager rides a QPointer: like the committer handler below, the
+      // rollback must never touch a DataManager that died after the commit.
       OutputCommitterHandler committerHandler = mOutputCommitterHandler;
       OutputVerificationHandler verificationHandler = mOutputVerificationHandler;
+      QPointer<sicnu::data::DataManager> rollbackManager = mDataManager;
       std::shared_ptr<QObject> bridge = m_commitBridge;
-      // The insulator rollback (#1042) needs only the DataManager. A QPointer
-      // keeps the capture lifetime-safe when the dispatcher (and with it the
-      // manager, in GUI teardown) is gone before the task reaches terminal.
-      QPointer<sicnu::data::DataManager> managerGuard = mDataManager;
       // deliver runs on the bridge (Data Manager owner) thread whenever
       // needed; buildCommittedResultPayload applies the transactional commit
       // exactly once per task, so a null callback still yields the committed
@@ -66,17 +68,17 @@ ToolCallDispatcher::ToolCallDispatcher()
         taskId,
         [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler ),
          verificationHandler = std::move( verificationHandler ),
-         managerGuard]( const sicnu::AlgorithmTaskInfo &info ) mutable {
+         rollbackManager]( const sicnu::AlgorithmTaskInfo &info ) mutable {
           ExecutionPlane::deliverOnAffinity(
             bridge.get(),
             [info, cb = std::move( cb ), committerHandler = std::move( committerHandler ),
-             verificationHandler = std::move( verificationHandler ), managerGuard]() mutable {
-              Json::Value payload =
-                ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler, verificationHandler );
-              // Verification downgrades a committed payload to error; the
-              // committed asset must not survive that verdict on THIS path
-              // either (the member builder is not the only production caller).
-              ToolCallDispatcher::rollbackVerificationFailure( managerGuard.data(), payload );
+             verificationHandler = std::move( verificationHandler ),
+             rollbackManager]() mutable {
+              const Json::Value payload = ExecutionPlane::instance().buildCommittedResultPayload(
+                info, committerHandler, verificationHandler,
+                [rollbackManager]( Json::Value &p ) {
+                  ToolCallDispatcher::rollbackVerificationFailure( p, rollbackManager );
+                } );
               if ( cb )
                 cb( payload );
             } );
@@ -90,22 +92,24 @@ ToolCallDispatcher::ToolCallDispatcher()
     // The handler is read at await time (setDataManager may run after the
     // constructor); the commit then runs on the calling thread — the Data
     // Manager's owning thread for every production caller of the sync path.
-    Json::Value payload = ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
-                                                                  bridge.get(), /*cancelOnTimeout=*/true,
-                                                                  mOutputVerificationHandler );
-    // Same insulator as the watcher path (#1042): a verification failure that
-    // downgraded a committed payload must reap the asset here too.
-    rollbackVerificationFailure( payload );
-    return payload;
+    // The plane's awaitResult applies the verification rollback (#1042) on
+    // both commit exits; the affinity-starvation exit returns a structured
+    // commit_delivery_timeout error instead of the raw temp output (#1056).
+    return ExecutionPlane::instance().awaitResult(
+      taskId, timeout, mOutputCommitterHandler, bridge.get(), /*cancelOnTimeout=*/true,
+      mOutputVerificationHandler, [this]( Json::Value &payload ) { rollbackVerificationFailure( payload ); } );
   };
 }
 
 Json::Value ToolCallDispatcher::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const
 {
-  Json::Value payload =
-    ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler, mOutputVerificationHandler );
-  rollbackVerificationFailure( payload );
-  return payload;
+  // The plane builder is the single publication gate: commit exactly once,
+  // then verification rollback before the payload is cached or returned
+  // (#1042). No second rollback here — repeated reaps are idempotent, but the
+  // responsibility lives in exactly one layer.
+  return ExecutionPlane::instance().buildCommittedResultPayload(
+    info, mOutputCommitterHandler, mOutputVerificationHandler,
+    [this]( Json::Value &payload ) { rollbackVerificationFailure( payload ); } );
 }
 
 } // namespace sicnu::processing

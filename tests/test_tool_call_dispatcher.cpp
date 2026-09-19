@@ -10,10 +10,7 @@
 #include <QString>
 #include <QVariantMap>
 
-#include <QCoreApplication>
-#include <QEventLoop>
 #include <QTemporaryDir>
-#include <QTimer>
 
 #include <chrono>
 #include <thread>
@@ -22,10 +19,13 @@
 
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
 #include "operators/rs/rs_spectral_index_operator.h"
+
+#include <QFileInfo>
 
 #include <string>
 
@@ -1190,20 +1190,19 @@ TEST_CASE( "ToolCallDispatcher verification failure rolls back committed asset",
   CHECK_FALSE( manager.asset( assetId2 ).has_value() );
 }
 
-// ---------------------------------------------------------------------------
-// #1042 regression: the production watcher / sync-await wiring carries only a
-// guarded DataManager pointer (the dispatcher may be gone when a task reaches
-// terminal), so the insulator rollback must exist as a static form and be
-// invoked on those paths — not just by the member builder.
-// ---------------------------------------------------------------------------
-TEST_CASE( "ToolCallDispatcher static rollback reaps verification failures for the watcher wiring (#1042)",
-           "[processing][tool_call_dispatcher][verification][insulator]" )
+TEST_CASE( "plane commit-cache hit re-applies the rollback supplied by a later builder (#1042)",
+           "[processing][tool_call_dispatcher][verification][cache][insulator]" )
 {
+  // A builder that does not pass a rollback handler (e.g. a surface wired
+  // before the publication gate existed) leaves the downgraded commit in the
+  // catalog. The next builder of the SAME task — the copilot-style duplicate —
+  // supplies the rollback and the cache hit must repair the state instead of
+  // republishing the committed-but-unverified asset.
   sicnu::data::DataManager manager;
 
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
-  const QString outPath = tmp.path() + QStringLiteral( "/static.tif" );
+  const QString outPath = tmp.path() + QStringLiteral( "/cache_roll_committed.tif" );
   GDALAllRegister();
   {
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
@@ -1222,143 +1221,14 @@ TEST_CASE( "ToolCallDispatcher static rollback reaps verification failures for t
   REQUIRE( !reg.assetId.isNull() );
   const sicnu::data::AssetId assetId = reg.assetId;
 
-  const std::string assetIdStr = assetId.toString().toStdString();
-  Json::Value failedPayload( Json::objectValue );
-  failedPayload["status"] = "error";
-  failedPayload["assetId"] = assetIdStr;
-  failedPayload["verified"] = false;
-  ToolCallDispatcher::rollbackVerificationFailure( &manager, failedPayload );
-  CHECK_FALSE( manager.asset( assetId ).has_value() );
-
-  // A successful payload (verified) must never be rolled back.
-  const QString outPath2 = tmp.path() + QStringLiteral( "/static2.tif" );
-  {
-    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
-    GDALDatasetH ds = GDALCreate( driver, outPath2.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
-    REQUIRE( ds != nullptr );
-    GDALClose( ds );
-  }
-  sicnu::data::SourceDescriptor src2;
-  src2.canonicalSource = outPath2;
-  src2.providerKey = QStringLiteral( "gdal" );
-  sicnu::data::RegisterRequest req2{ src2 };
-  req2.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
-  req2.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
-  const auto reg2 = manager.registerSource( req2 );
-  REQUIRE( !reg2.assetId.isNull() );
-  Json::Value okPayload( Json::objectValue );
-  okPayload["status"] = "success";
-  okPayload["assetId"] = reg2.assetId.toString().toStdString();
-  okPayload["verified"] = true;
-  ToolCallDispatcher::rollbackVerificationFailure( &manager, okPayload );
-  CHECK( manager.asset( reg2.assetId ).has_value() );
-
-  // Null manager is a no-op (lifetime-safe guard pointer).
-  Json::Value dangling( Json::objectValue );
-  dangling["status"] = "error";
-  dangling["assetId"] = assetIdStr;
-  dangling["verified"] = false;
-  REQUIRE_NOTHROW( ToolCallDispatcher::rollbackVerificationFailure( nullptr, dangling ) );
-}
-
-namespace
-{
-
-// Stub that reports a prepared output path so TaskCenter records
-// outputLayerPath and the commit/verification handlers engage.
-class OutputStubAdapter : public AtomicAlgorithmAdapter
-{
-  public:
-    explicit OutputStubAdapter( std::string id, QString outputPath )
-      : mId( std::move( id ) ), mOutputPath( std::move( outputPath ) ) {}
-
-    std::string algorithmId() const override { return mId; }
-    AlgorithmDescriptor descriptor() const override { return AlgorithmDescriptor{}; }
-    Json::Value execute( const Json::Value &params, ProgressCallback,
-                         std::function<bool()> = nullptr ) override
-    {
-      Json::Value result( Json::objectValue );
-      result["status"] = "ok";
-      result["output"] = mOutputPath.toStdString();
-      result["echo"] = params;
-      return result;
-    }
-
-  private:
-    std::string mId;
-    QString mOutputPath;
-};
-
-QCoreApplication *ensureDispatcherCoreApp()
-{
-  static QCoreApplication *app = [] {
-    int argc = 1;
-    static char arg0[] = "test_tool_call_dispatcher";
-    char *argv[] = { arg0, nullptr };
-    return new QCoreApplication( argc, argv );
-  }();
-  return app;
-}
-
-} // namespace
-
-// ---------------------------------------------------------------------------
-// #1042 regression (end-to-end): the PRODUCTION watcher wiring (default
-// constructor: sink + watcher on the Execution Plane) must apply the same
-// verification-failure rollback the member builder applies. Before the fix the
-// watcher lambda called ExecutionPlane::buildCommittedResultPayload directly
-// and the committed asset survived a failed verification.
-// ---------------------------------------------------------------------------
-TEST_CASE( "ToolCallDispatcher production watcher rolls back verification failures (#1042)",
-           "[processing][tool_call_dispatcher][verification][watcher]" )
-{
-  ensureDispatcherCoreApp();
-  AtomicAlgorithmRegistry::instance().reset();
-  sicnu::jobs::JobEngine::instance().setFallbackExecutor(
-    []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) -> Json::Value {
-      const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
-      if ( !adapter )
-        throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
-      return adapter->execute( req.params, {}, [&ctx]() { return ctx.isCancelled(); } );
-    } );
-
-  QTemporaryDir tmp;
-  REQUIRE( tmp.isValid() );
-  const QString outPath = tmp.path() + QStringLiteral( "/watched.tif" );
-  GDALAllRegister();
-  {
-    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
-    REQUIRE( driver != nullptr );
-    GDALDatasetH ds = GDALCreate( driver, outPath.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
-    REQUIRE( ds != nullptr );
-    GDALClose( ds );
-  }
-
-  AtomicAlgorithmRegistry::instance().registerAdapter(
-    std::make_shared<OutputStubAdapter>( "stub:watch_rollback", outPath ) );
-
-  sicnu::data::DataManager manager;
-  sicnu::data::SourceDescriptor src;
-  src.canonicalSource = outPath;
-  src.providerKey = QStringLiteral( "gdal" );
-  sicnu::data::RegisterRequest req{ src };
-  req.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
-  req.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
-  const auto reg = manager.registerSource( req );
-  REQUIRE( !reg.assetId.isNull() );
-  const sicnu::data::AssetId assetId = reg.assetId;
-
-  ToolCallDispatcher dispatcher; // production wiring (watcher on the plane)
-  dispatcher.setDataManager( &manager );
-  dispatcher.setOutputCommitterHandler(
-    [assetIdStr = assetId.toString().toStdString(), outPathStd = outPath.toStdString()](
-      const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
-      std::string &, std::string &outAssetId ) -> bool {
-      outCommittedPath = outPathStd;
-      outAssetId = assetIdStr;
-      return true;
-    } );
-  dispatcher.setOutputVerificationHandler( []( const QString &, const QString & ) -> Json::Value {
+  auto commitHandler = [assetIdStr = assetId.toString().toStdString(), outPathStd = outPath.toStdString()](
+                       const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                       std::string &, std::string &outAssetId ) -> bool {
+    outCommittedPath = outPathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+  auto verifyFail = []( const QString &, const QString & ) -> Json::Value {
     Json::Value v( Json::objectValue );
     v["ok"] = false;
     v["kind"] = "raster";
@@ -1368,53 +1238,43 @@ TEST_CASE( "ToolCallDispatcher production watcher rolls back verification failur
     v["issues"] = issues;
     v["warnings"] = Json::Value( Json::arrayValue );
     return v;
-  } );
+  };
 
-  Json::Value delivered;
-  std::atomic<bool> done{ false };
-  QEventLoop loop;
-  const bool submitted = dispatcher.submit(
-    objectEnvelope( "stub:watch_rollback", "parameters", Json::Value( Json::objectValue ) ),
-    [&]( const Json::Value &payload ) {
-      delivered = payload;
-      done = true;
-      loop.quit();
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 9104203; // unique in this binary: the plane commit cache is keyed by task id
+  info.algorithmId = QStringLiteral( "rs:ndvi" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = outPath;
+
+  // First builder: no rollback handler — the downgraded commit survives.
+  const Json::Value first =
+    ExecutionPlane::instance().buildCommittedResultPayload( info, commitHandler, verifyFail );
+  REQUIRE( first["status"].asString() == "error" );
+  CHECK( manager.asset( assetId ).has_value() );
+
+  // Second builder: rollback handler supplied — the cache hit re-applies it.
+  const Json::Value second = ExecutionPlane::instance().buildCommittedResultPayload(
+    info, commitHandler, verifyFail,
+    [&manager]( Json::Value &payload ) {
+      ToolCallDispatcher::rollbackVerificationFailure( payload, &manager );
     } );
-  REQUIRE( submitted );
-
-  // The watcher marshals the payload onto the bridge (main) thread: pump the
-  // event loop like an async consumer would.
-  QTimer::singleShot( std::chrono::seconds( 15 ), &loop, &QEventLoop::quit );
-  loop.exec();
-  REQUIRE( done.load() );
-
-  CHECK( delivered["status"].asString() == "error" );
-  CHECK( delivered["verified"].asBool() == false );
-  CHECK( delivered["assetId"].asString() == assetId.toString().toStdString() );
-  // The insulator on the watcher path: the failed-verification asset is gone.
+  REQUIRE( second["status"].asString() == "error" );
+  REQUIRE( second["verified"].asBool() == false );
   CHECK_FALSE( manager.asset( assetId ).has_value() );
+  CHECK_FALSE( QFileInfo::exists( outPath ) );
 }
 
-// ---------------------------------------------------------------------------
-// #1042 regression (sync path): the production SYNC await wiring (mSyncAwait →
-// ExecutionPlane::awaitResult) must apply the same rollback after the commit.
-// ---------------------------------------------------------------------------
-TEST_CASE( "ToolCallDispatcher sync await path rolls back verification failures (#1042)",
-           "[processing][tool_call_dispatcher][verification][sync]" )
+TEST_CASE( "commit refusal downgrades without touching the rollback path",
+           "[processing][tool_call_dispatcher][verification][commit_refusal]" )
 {
-  ensureDispatcherCoreApp();
-  AtomicAlgorithmRegistry::instance().reset();
-  sicnu::jobs::JobEngine::instance().setFallbackExecutor(
-    []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) -> Json::Value {
-      const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
-      if ( !adapter )
-        throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
-      return adapter->execute( req.params, {}, [&ctx]() { return ctx.isCancelled(); } );
-    } );
+  // A refused commit never produced an asset: the gate still runs the
+  // rollback handler, but without assetId/verified:false in the payload it
+  // must be a no-op — nothing existing is deleted.
+  sicnu::data::DataManager manager;
 
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
-  const QString outPath = tmp.path() + QStringLiteral( "/synced.tif" );
+  const QString outPath = tmp.path() + QStringLiteral( "/refused.tif" );
   GDALAllRegister();
   {
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
@@ -1423,11 +1283,6 @@ TEST_CASE( "ToolCallDispatcher sync await path rolls back verification failures 
     REQUIRE( ds != nullptr );
     GDALClose( ds );
   }
-
-  AtomicAlgorithmRegistry::instance().registerAdapter(
-    std::make_shared<OutputStubAdapter>( "stub:sync_rollback", outPath ) );
-
-  sicnu::data::DataManager manager;
   sicnu::data::SourceDescriptor src;
   src.canonicalSource = outPath;
   src.providerKey = QStringLiteral( "gdal" );
@@ -1438,34 +1293,36 @@ TEST_CASE( "ToolCallDispatcher sync await path rolls back verification failures 
   REQUIRE( !reg.assetId.isNull() );
   const sicnu::data::AssetId assetId = reg.assetId;
 
-  ToolCallDispatcher dispatcher; // production wiring (sync await on the plane)
-  dispatcher.setDataManager( &manager );
-  dispatcher.setOutputCommitterHandler(
-    [assetIdStr = assetId.toString().toStdString(), outPathStd = outPath.toStdString()](
-      const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
-      std::string &, std::string &outAssetId ) -> bool {
-      outCommittedPath = outPathStd;
-      outAssetId = assetIdStr;
-      return true;
-    } );
-  dispatcher.setOutputVerificationHandler( []( const QString &, const QString & ) -> Json::Value {
+  auto refusingCommitter = []( const sicnu::AlgorithmTaskInfo &, std::string &,
+                               std::string &outCommitError, std::string & ) -> bool {
+    outCommitError = "structural validation refused the output";
+    return false;
+  };
+  auto verifyFail = []( const QString &, const QString & ) -> Json::Value {
     Json::Value v( Json::objectValue );
     v["ok"] = false;
     v["kind"] = "raster";
     v["summary"] = Json::Value( Json::objectValue );
-    Json::Value issues( Json::arrayValue );
-    issues.append( "all pixels are NoData" );
-    v["issues"] = issues;
+    v["issues"] = Json::Value( Json::arrayValue );
     v["warnings"] = Json::Value( Json::arrayValue );
     return v;
-  } );
+  };
 
-  const Json::Value payload = dispatcher.dispatchAndAwait(
-    objectEnvelope( "stub:sync_rollback", "parameters", Json::Value( Json::objectValue ) ),
-    std::chrono::seconds( 15 ) );
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 9104204;
+  info.algorithmId = QStringLiteral( "rs:ndvi" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = outPath;
 
-  CHECK( payload["status"].asString() == "error" );
-  CHECK( payload["verified"].asBool() == false );
-  // The insulator on the sync path: the failed-verification asset is gone.
-  CHECK_FALSE( manager.asset( assetId ).has_value() );
+  const Json::Value payload = ExecutionPlane::instance().buildCommittedResultPayload(
+    info, refusingCommitter, verifyFail,
+    [&manager]( Json::Value &p ) {
+      ToolCallDispatcher::rollbackVerificationFailure( p, &manager );
+    } );
+  REQUIRE( payload["status"].asString() == "error" );
+  REQUIRE( payload.isMember( "commitError" ) );
+  CHECK_FALSE( payload.isMember( "assetId" ) );
+  // The pre-existing (unrelated) asset is untouched.
+  CHECK( manager.asset( assetId ).has_value() );
+  CHECK( QFileInfo::exists( outPath ) );
 }

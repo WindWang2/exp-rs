@@ -199,10 +199,19 @@ void ExecutionPlane::deliverOnAffinity( QObject *affinityContext, std::function<
 
 Json::Value ExecutionPlane::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info,
                                                          const OutputCommitterHandler &committerHandler,
-                                                         const OutputVerificationHandler &verificationHandler )
+                                                         const OutputVerificationHandler &verificationHandler,
+                                                         const VerificationRollbackHandler &rollbackHandler )
 {
   if ( info.taskId <= 0 )
-    return ToolCallDispatcher::buildTaskResultPayload( info, committerHandler, verificationHandler );
+  {
+    // No commit-once bookkeeping for a taskless payload, but the publication
+    // gate still applies: a synthetic/terminal-info payload that verification
+    // downgraded gets the same rollback (#1042).
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, committerHandler, verificationHandler );
+    if ( rollbackHandler )
+      rollbackHandler( payload );
+    return payload;
+  }
 
   // One builder at a time globally: commits are rare (terminal only) and this
   // closes the commit race (watcher vs signal-handler vs sync waiter) without
@@ -211,9 +220,25 @@ Json::Value ExecutionPlane::buildCommittedResultPayload( const sicnu::AlgorithmT
   std::lock_guard<std::mutex> buildLock( m_commitMutex );
   auto it = m_commitCache.find( info.taskId );
   if ( it != m_commitCache.end() )
-    return it->second.payload;
+  {
+    // Publication gate, cache-hit side (#1042): a payload built by an earlier
+    // builder without a rollback handler must still be rolled back before it
+    // reaches a caller that supplies one. Idempotent — keyed off the payload's
+    // assetId, so re-running on an already-reaped asset is a no-op.
+    Json::Value cached = it->second.payload;
+    if ( rollbackHandler )
+      rollbackHandler( cached );
+    return cached;
+  }
 
   Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, committerHandler, verificationHandler );
+
+  // Publication gate, fresh-build side (#1042): a commit that verification
+  // downgraded to "error" is rolled back BEFORE the payload is cached or
+  // returned, so no builder — watcher, sync awaiter, signal handler — can
+  // publish a committed-but-unverified asset.
+  if ( rollbackHandler )
+    rollbackHandler( payload );
 
   CommitOutcome outcome;
   outcome.payload = payload;
@@ -236,7 +261,8 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
                                          const OutputCommitterHandler &committerHandler,
                                          QObject *affinityContext,
                                          bool cancelOnTimeout,
-                                         const OutputVerificationHandler &verificationHandler )
+                                         const OutputVerificationHandler &verificationHandler,
+                                         const VerificationRollbackHandler &rollbackHandler )
 {
   auto &center = sicnu::TaskCenter::instance();
 
@@ -344,31 +370,35 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
     auto future = promise->get_future();
     QMetaObject::invokeMethod(
       affinityContext,
-      [this, info, committerHandler, verificationHandler, promise]() {
-        promise->set_value( buildCommittedResultPayload( info, committerHandler, verificationHandler ) );
+      [this, info, committerHandler, verificationHandler, rollbackHandler, promise]() {
+        promise->set_value( buildCommittedResultPayload( info, committerHandler, verificationHandler,
+                                                         rollbackHandler ) );
       },
       Qt::QueuedConnection );
     if ( future.wait_for( std::chrono::milliseconds( 5000 ) ) == std::future_status::ready )
       return future.get();
-    // Affinity thread starved (no pumping): the commit could not run. Never
-    // return the task's raw temp output path as the result — TaskCenter reaps
-    // scratch outputs, so a temp path would dangle and the caller would hold
-    // no committed asset (#1056). Non-completed tasks and tasks without an
-    // output commit nothing anyway, so their standard payload is returned;
-    // a completed run with an output becomes a typed error.
-    if ( info.status != sicnu::TaskStatus::Completed || info.outputLayerPath.isEmpty() )
-      return ToolCallDispatcher::buildTaskResultPayload( info, nullptr );
-    Json::Value errorResult( Json::objectValue );
-    errorResult["status"] = "error";
-    errorResult["taskId"] = static_cast<Json::Int64>( info.taskId );
-    errorResult["algorithmId"] = info.algorithmId.toStdString();
-    errorResult["errorMessage"] =
-      "Output commit did not run: the post-completion handler thread did not respond "
-      "within 5 s; the temporary output was not promoted to a stable asset.";
-    return errorResult;
+    // Affinity thread starved (no pumping): no commit ran, so there is no
+    // stable asset to publish. Falling through to the task's raw payload
+    // would publish its temporary output path — which TaskCenter may reap —
+    // as the stable result (#1056). Return a structured error instead; the
+    // exactly-once commit stays available for a later builder (the watcher),
+    // which will then also run the verification rollback through the normal
+    // publication gate. A late delivery that does arrive after this timeout
+    // simply commits into the cache; this caller already received the honest
+    // error below.
+    Json::Value unavailable( Json::objectValue );
+    unavailable["status"] = "error";
+    unavailable["taskId"] = static_cast<Json::Int64>( taskId );
+    unavailable["algorithmId"] = info.algorithmId.toStdString();
+    unavailable["errorKind"] = "commit_delivery_timeout";
+    unavailable["errorMessage"] =
+      "Task completed, but its output commit was not delivered to the "
+      "result-owner thread in time; the uncommitted temporary output was "
+      "not published.";
+    return unavailable;
   }
 
-  return buildCommittedResultPayload( info, committerHandler, verificationHandler );
+  return buildCommittedResultPayload( info, committerHandler, verificationHandler, rollbackHandler );
 }
 
 unsigned int ExecutionPlane::estimateFromPreflight( const std::string &algorithmId, const Json::Value &params )

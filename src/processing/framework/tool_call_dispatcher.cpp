@@ -710,10 +710,10 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
 
 void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload ) const
 {
-  rollbackVerificationFailure( mDataManager, payload );
+  rollbackVerificationFailure( payload, mDataManager );
 }
 
-void ToolCallDispatcher::rollbackVerificationFailure( sicnu::data::DataManager *manager, Json::Value &payload )
+void ToolCallDispatcher::rollbackVerificationFailure( Json::Value &payload, sicnu::data::DataManager *manager )
 {
   if ( !manager )
     return;

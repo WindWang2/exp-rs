@@ -225,6 +225,19 @@ class ExecutionPlane
     using OutputVerificationHandler = std::function<Json::Value( const QString &committedPath,
                                                                  const QString &kindHint )>;
 
+    /// Undo hook for a commit that verification downgraded (status "error",
+    /// "verified": false): reap the committed asset so no unverified payload
+    /// survives as a stable catalog entry / file (#1042). Must be IDEMPOTENT
+    /// (keyed off the payload's "assetId"; re-running on an already-reaped
+    /// asset is a no-op), MUST NOT THROW (a throw inside the commit critical
+    /// section discards the built payload, so a retry would re-commit), and
+    /// must NOT call back into buildCommittedResultPayload/awaitResult (it
+    /// runs under the commit mutex). Production wiring: ToolCallDispatcher
+    /// supplies rollbackVerificationFailure here for every completion path,
+    /// which makes the plane's builder the single non-bypassable publication
+    /// gate.
+    using VerificationRollbackHandler = std::function<void( Json::Value &payload )>;
+
     /// Build the standardized result payload for a terminal task, applying
     /// the committer handler EXACTLY ONCE per task id (first builder wins;
     /// later builders reuse the cached outcome). This is what allows several
@@ -233,22 +246,35 @@ class ExecutionPlane
     /// commit or double-registering assets. Thread/affinity note: the actual
     /// commit runs on the CALLING thread — callers on the DataManager's
     /// owning thread (the normal case: bridge thread, sync waiter) are safe.
+    ///
+    /// Publication gate (#1042): @a rollbackHandler runs INSIDE the commit
+    /// critical section, before the payload is cached or returned — and is
+    /// re-applied to cached payloads on later builds — so no caller of this
+    /// builder can obtain a committed-but-unverified asset (a verification
+    /// downgrade is always paired with the rollback before publication).
     Json::Value buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info,
                                              const OutputCommitterHandler &committerHandler,
-                                             const OutputVerificationHandler &verificationHandler = {} );
+                                             const OutputVerificationHandler &verificationHandler = {},
+                                             const VerificationRollbackHandler &rollbackHandler = {} );
 
     /// Sync completion: wait (event-loop-free) for @a taskId, enforce the
     /// timeout (cancel on expiry when the request allows), then build the
     /// committed payload on the CALLING thread (affinity-correct for the
     /// standard case where the caller owns the DataManager). @a affinityContext
     /// is only used to marshal the payload build when the caller is NOT the
-    /// affinity thread and an event loop exists there.
+    /// affinity thread and an event loop exists there. When that marshaled
+    /// build is not delivered within the affinity window, a structured
+    /// "commit_delivery_timeout" error is returned — never the task's raw
+    /// payload, whose output path is an uncommitted temporary that TaskCenter
+    /// may reap (#1056). @a rollbackHandler is applied to the committed
+    /// payload exactly like buildCommittedResultPayload.
     Json::Value awaitResult( long taskId,
                              std::chrono::milliseconds timeout,
                              const OutputCommitterHandler &committerHandler,
                              QObject *affinityContext = nullptr,
                              bool cancelOnTimeout = true,
-                             const OutputVerificationHandler &verificationHandler = {} );
+                             const OutputVerificationHandler &verificationHandler = {},
+                             const VerificationRollbackHandler &rollbackHandler = {} );
 
     /// Preflight → Admission bridge: run AlgorithmPreflight for @a
     /// algorithmId/@a params and extract its resource estimate (MiB, 0 when
