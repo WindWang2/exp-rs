@@ -136,6 +136,12 @@ struct Bootstrap
 
         adapters::OperatorHelpSource helpSource;
         const auto report = help::composeHelpSystem( help::globalHelpRegistry(), nullptr, &helpSource );
+        // Composition must be clean: corrupt curated knowledge (the shipped
+        // data/help/commands.json was unparsable on master) would silently
+        // drop help topics instead of failing.
+        CHECK( report.ok() );
+        INFO( "help composition errors: " << report.errors.join( QStringLiteral( " | " ) ).toStdString() );
+        INFO( "help composition dangling: " << report.dangling.join( QStringLiteral( " | " ) ).toStdString() );
         REQUIRE( report.ok() );
     }
 };
