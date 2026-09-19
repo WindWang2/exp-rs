@@ -2983,6 +2983,27 @@ sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
 target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 
+# 12.0 data-foundation scale Oracle (O1): 100k-sample catalog + 10k-run
+# experiment store — batch ingest, keyset-cursor paging, indexed identity
+# lookup, with a structured JSON perf report emitted to
+# SICNU_PERF_EVIDENCE_DIR. RUN_SERIAL: the benchmark should not compete for
+# memory.
+sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE
+  ENVIRONMENT "SICNU_PERF_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/test-artifacts")
+target_link_libraries(test_data_foundation_scale PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+set_property(TARGET test_data_foundation_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation fault Oracle (O3): deterministic mid-transaction
+# failures, corrupt rows and batch-commit faults leave no partial rows or
+# phantom references.
+sicnu_add_test(test_store_fault_injection TIMEOUT 300)
+target_link_libraries(test_store_fault_injection PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3 sicnu_runtime)
+
+# 12.0 GC/retention Oracle (O4): governance graph fixture proves dry-run ==
+# execution and reachability; experiment run prune plan/execute equivalence.
+sicnu_add_test(test_gc_retention_plan TIMEOUT 300)
+target_link_libraries(test_gc_retention_plan PRIVATE Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+
 # Foundation 5.0 end-to-end examples (goal §54): optical classification,
 # SAR pair, multimodal temporal, segmentation — small data, whole chain.
 sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
