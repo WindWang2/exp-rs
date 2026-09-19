@@ -99,6 +99,10 @@ bool LocalWorkerPool::start( const LocalWorkerPoolConfig &config, QString *error
         if ( !worker )
             break;
         std::lock_guard<std::mutex> lock( m_mutex );
+        // Pre-warmed workers occupy a live slot the same way run()'s
+        // reservation path does — otherwise maxWorkers is under-counted and
+        // retirements of uncounted victims steal from live workers (#1090).
+        ++m_alive;
         m_idle.push_back( std::move( worker ) );
         m_idleChanged.notify_all();
     }
