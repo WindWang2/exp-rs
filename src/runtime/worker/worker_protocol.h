@@ -162,6 +162,13 @@ inline std::string makeErrorFrame( const std::string &jobId, const std::string &
 inline bool parseFrame( const std::string &line, Json::Value &frame )
 {
     Json::CharReaderBuilder builder;
+    // The line is peer-controlled input: jsoncpp's default builder does not
+    // bound its own recursion usefully, and a small-but-deeply-nested frame
+    // overflows the reader thread's stack (SIGSEGV) instead of being refused.
+    // The documented protocol is shallow (frames carry a bounded payload
+    // object), so the limit is set explicitly as the same hardening the reader
+    // library provides for this class of input.
+    builder[ "stackLimit" ] = 64;
     std::string errors;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     if ( !reader->parse( line.data(), line.data() + line.size(), &frame, &errors ) )

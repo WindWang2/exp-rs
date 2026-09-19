@@ -843,10 +843,28 @@ void PluginRegistry::loadUserIndex()
         return;
     std::stringstream buffer;
     buffer << input.rdbuf();
+    const std::string document = buffer.str();
     Json::Value root;
-    Json::Reader reader;
-    if ( !reader.parse( buffer.str(), root, false ) || !root.isObject() )
+    // Bounded reader: the user index is a plain file on disk (anything can
+    // rewrite it), and an unbounded parse of a deeply nested document
+    // stack-overflows the caller instead of being ignored.
+    Json::CharReaderBuilder builder;
+    builder[ "stackLimit" ] = 64;
+    std::string parseError;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    // Guarded: the reader THROWS when the depth bound is exceeded — a rewritten
+    // index file must be ignored, not crash the caller.
+    try
+    {
+        if ( !reader->parse( document.data(), document.data() + document.size(), &root,
+                             &parseError )
+             || !root.isObject() )
+            return;
+    }
+    catch ( const Json::Exception & )
+    {
         return;
+    }
     for ( const Json::Value &id : root["disabled"] )
     {
         if ( id.isString() )

@@ -59,6 +59,31 @@ struct TempRoot
     }
 };
 
+/// Test-side platform path from UTF-8 text (the same idiom the production
+/// policy uses after the D5 fix): the ANSI code-page constructor THROWS for
+/// UTF-8 text with no ANSI mapping on a zh-CN host, which would be a harness
+/// defect rather than a finding.
+fs::path pathFromText( const std::string &text )
+{
+    return fs::path( std::u8string( reinterpret_cast<const char8_t *>( text.data() ),
+                                    text.size() ) );
+}
+
+/// pathFromText that reports the un-representable case instead of throwing.
+fs::path pathOrEmpty( const std::string &text, bool &representable )
+{
+    try
+    {
+        representable = true;
+        return pathFromText( text );
+    }
+    catch ( const std::exception & )
+    {
+        representable = false;
+        return {};
+    }
+}
+
 /// Independent containment oracle: resolves @p candidate under @p root with
 /// the test's own weakly_canonical walk and reports whether the result is a
 /// regular file at/under the canonical root. Deliberately does NOT call the
@@ -115,7 +140,7 @@ TEST_CASE( "path policy fuzz: lexical check is total and correctly classified",
         PathPolicyRejection rejection = PathPolicyRejection::OutsideRoot;
         REQUIRE_NOTHROW( rejection = PathPolicy::checkRelativeLexically( candidate ) );
         const bool empty = candidate.empty();
-        const fs::path parsed( candidate );
+        const fs::path parsed = pathFromText( candidate );
         const bool absolute = parsed.is_absolute();
         bool dotdot = false;
         for ( const fs::path &component : parsed )
@@ -143,7 +168,15 @@ TEST_CASE( "path policy fuzz: lexical check is total and correctly classified",
             REQUIRE_NOTHROW( rejection = PathPolicy::checkRelativeLexically( candidate ) );
 
             const bool empty = candidate.empty();
-            const fs::path parsed( candidate );
+            bool representable = false;
+            const fs::path parsed = pathOrEmpty( candidate, representable );
+            if ( !representable )
+            {
+                // Text the platform cannot express: the policy must answer
+                // with a typed rejection, whichever one it names.
+                CHECK( rejection != PathPolicyRejection::Accepted );
+                continue;
+            }
             const bool absolute = parsed.is_absolute();
             if ( empty )
                 CHECK( rejection == PathPolicyRejection::Empty );
@@ -172,7 +205,7 @@ TEST_CASE( "path policy fuzz: payload containment cage holds for every corpus na
             "trailing.dot.",
         };
         for ( const std::string &relative : contained )
-            writeFile( root.path / fs::path( relative ) );
+            writeFile( root.path / pathFromText( relative ) );
 
         for ( const std::string &relative : contained )
         {
@@ -185,7 +218,28 @@ TEST_CASE( "path policy fuzz: payload containment cage holds for every corpus na
             CHECK( !resolved.empty() );
             // Independent oracle agrees on the containment verdict.
             CHECK( independentlyContained( root.path, relative ) );
-            CHECK( fs::exists( fs::path( resolved ) ) );
+            // The policy returns the resolved path in the platform's own
+            // narrow encoding (its callers feed it straight back into
+            // std::filesystem), so existence is checked through the native
+            // conversion and skipped for names the code page cannot express.
+            // NOTE: the existence check is evaluated OUTSIDE the Catch2
+            // assertion — Catch2 turns a throwing assertion expression into a
+            // reported failure instead of letting the exception propagate, so
+            // the code-page surprise has to be handled in plain code first.
+            bool exists = false;
+            bool representable = true;
+            try
+            {
+                exists = fs::exists( pathFromText( resolved ) );
+            }
+            catch ( const std::exception & )
+            {
+                representable = false;
+            }
+            if ( representable )
+                CHECK( exists );
+            else
+                CHECK_FALSE( resolved.empty() );
         }
 
         // Escapes and non-payload shapes are refused with a stated reason.
@@ -251,10 +305,23 @@ TEST_CASE( "path policy fuzz: resolvesInsideRoot agrees with the independent cag
            "[contract8][fuzz][paths]" )
 {
     const TempRoot root( "resolve" );
-    writeFile( root.path / "inside.txt" );
+    writeFile( root.path / pathFromText( "inside.txt" ) );
+    const std::string insideAbsolute = ( root.path / "inside.txt" ).generic_string();
 
-    CHECK( PathPolicy::resolvesInsideRoot( root.path.string(), "inside.txt" ) );
-    CHECK( independentlyContained( root.path, "inside.txt" ) );
+    // Positive: an ABSOLUTE path inside the root is contained (the shape the
+    // production callers use — output paths that already exist).
+    CHECK( PathPolicy::resolvesInsideRoot( root.path.string(), insideAbsolute ) );
+    CHECK( independentlyContained( root.path, insideAbsolute ) );
+
+    // Documented semantics, pinned: a RELATIVE candidate resolves against the
+    // PROCESS CWD (not against the root), so "inside.txt" is contained only
+    // when the cwd itself is the root. Callers pass absolute paths; the
+    // relative behaviour is recorded here so it cannot change by accident.
+    const bool cwdContained =
+        PathPolicy::resolvesInsideRoot( root.path.string(), "inside.txt" );
+    CHECK( cwdContained
+           == independentlyContained( root.path, fs::current_path().generic_string()
+                                                 + "/inside.txt" ) );
 
     for ( const std::string &escape : { "", "..", "../outside.txt", "../../outside.txt",
                                         "/etc/passwd", "C:\\Windows\\system32",
@@ -314,7 +381,7 @@ TEST_CASE( "path policy fuzz: canonical/isAbsolute are total and sane",
         REQUIRE_NOTHROW( canonical = PathPolicy::canonical( candidate ) );
         bool absolute = false;
         REQUIRE_NOTHROW( absolute = PathPolicy::isAbsolute( candidate ) );
-        CHECK( absolute == fs::path( candidate ).is_absolute() );
+        CHECK( absolute == pathFromText( candidate ).is_absolute() );
         CHECK( canonical.empty() == candidate.empty() );
     }
     // Empty is canonicalized to empty (no crash, no "." surprise).

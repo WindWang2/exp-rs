@@ -269,11 +269,33 @@ bool decodeEnvelopePayload( const std::string &payload, Envelope &envelope, std:
 {
     Json::Value json;
     Json::CharReaderBuilder builder;
+    // A frame payload is UNTRUSTED peer input, and jsoncpp's default builder
+    // does not bound its own recursion usefully: a ~1.7 KB payload nested
+    // 866 levels deep overflows the reader thread's stack (SIGSEGV, not a
+    // typed reject) even though every documented cap was respected. The bound
+    // is therefore set explicitly — jsoncpp's stackLimit setting exists for
+    // exactly this hardening. Envelope messages are shallow by design (large
+    // artifacts travel as workspace-contained file references, never as raw
+    // JSON), so 64 levels is orders of magnitude above the real contract.
+    builder[ "stackLimit" ] = 64;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     std::string parseError;
-    if ( !reader->parse( payload.data(), payload.data() + payload.size(), &json, &parseError ) )
+    // The reader THROWS (not returns false) when the depth bound is exceeded,
+    // so the parse is guarded: a hostile frame must produce a typed E6002
+    // refusal on the reader thread, never an escaping exception.
+    try
     {
-        error = "frame payload is not valid JSON: " + parseError + " (E6002)";
+        if ( !reader->parse( payload.data(), payload.data() + payload.size(), &json,
+                             &parseError ) )
+        {
+            error = "frame payload is not valid JSON: " + parseError + " (E6002)";
+            return false;
+        }
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error = std::string( "frame payload is not valid JSON: " ) + exception.what()
+                + " (E6002)";
         return false;
     }
     return decodeEnvelope( json, envelope, error );

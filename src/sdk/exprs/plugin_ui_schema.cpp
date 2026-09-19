@@ -274,11 +274,23 @@ bool validateEntries( const Json::Value &entries, const PluginUiSchemaLimits &li
         if ( commandsReferenced )
         {
             const Json::Value commandId = entry.get( "commandId", Json::Value() );
-            if ( !boundedString( commandId, limits.maxStringLength )
-                 || !referencedCommands.count( commandId.asString() ) )
+            // Type-checked BEFORE any use: a worker-declared menu item whose
+            // "commandId" is a number/object/array must fail VALIDATION with a
+            // typed diagnostic. Building the message from commandId.asString()
+            // unconditionally threw Json::LogicError out of the validator
+            // instead (#1038-class: untrusted JSON leaving the typed-error
+            // boundary), so the string conversion only happens on the branch
+            // that already proved the value is a string.
+            if ( !boundedString( commandId, limits.maxStringLength ) )
             {
-                fail( errors, path, "commandId '" + commandId.asString()
-                                        + "' does not reference a declared command" );
+                fail( errors, path, "commandId must be a bounded string" );
+                ok = false;
+            }
+            else if ( !referencedCommands.count( commandId.asString() ) )
+            {
+                fail( errors, path,
+                      "commandId '" + commandId.asString()
+                          + "' does not reference a declared command" );
                 ok = false;
             }
         }

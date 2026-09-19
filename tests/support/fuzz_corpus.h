@@ -100,38 +100,44 @@ std::vector<std::string> streamMutations( const std::string &seed, size_t maxPre
 // ---------------------------------------------------------------------------
 
 /// Reduces @p input to a 1-minimal subsequence that still satisfies
-/// @p reproduces(input) == true (Zeller & Hildebrandt ddmin, byte granularity).
-/// @p maxRounds bounds the work so a runaway predicate cannot stall a run.
+/// @p reproduces(input) == true.
+///
+/// Byte-granularity delta debugging: sweeping removals of 1, 2 and 4 bytes and
+/// repeating the whole sweep until nothing can be removed any more. The outer
+/// loop matters — removing two bytes can succeed where removing either one
+/// alone fails (e.g. a `,"` pair), so a single pass is not a fixed point.
+/// Every successful removal strictly shrinks the input, so the loop always
+/// terminates; @p maxRounds bounds a pathological predicate.
 template <typename Predicate>
-std::string ddmin( std::string input, Predicate reproduces, size_t maxRounds = 64 )
+std::string ddmin( std::string input, Predicate reproduces, size_t maxRounds = 256 )
 {
     if ( !reproduces( input ) )
         return {}; // caller error: the input did not reproduce to begin with
 
-    size_t granularity = 2;
+    const size_t granularities[] = { 1, 2, 4 };
+    bool reduced = true;
     size_t rounds = 0;
-    while ( granularity <= input.size() && rounds++ < maxRounds )
+    while ( reduced && rounds++ < maxRounds )
     {
-        bool reduced = false;
-        for ( size_t start = 0; start + granularity <= input.size() && !reduced; )
+        reduced = false;
+        for ( const size_t granularity : granularities )
         {
-            std::string candidate = input;
-            candidate.erase( static_cast<std::string::difference_type>( start ),
-                             granularity );
-            if ( reproduces( candidate ) )
+            size_t start = 0;
+            while ( granularity <= input.size() )
             {
-                input = std::move( candidate );
-                reduced = true;
-                // Same granularity retries at the same offset first.
-                continue;
+                if ( start + granularity > input.size() )
+                    break;
+                std::string candidate = input;
+                candidate.erase( static_cast<std::string::difference_type>( start ),
+                                 granularity );
+                if ( reproduces( candidate ) )
+                {
+                    input = std::move( candidate );
+                    reduced = true;
+                    continue; // retry the same offset before advancing
+                }
+                start += granularity;
             }
-            start += std::max<size_t>( 1, granularity );
-        }
-        if ( !reduced )
-        {
-            if ( granularity >= input.size() )
-                break;
-            granularity = std::min( input.size(), granularity * 2 );
         }
     }
     return input;

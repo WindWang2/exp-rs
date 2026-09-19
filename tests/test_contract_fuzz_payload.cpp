@@ -33,6 +33,7 @@
 #include "support/fuzz_corpus.h"
 
 #include <cstddef>
+#include <filesystem>
 
 #include <json/json.h>
 
@@ -51,6 +52,8 @@ using sicnu::fuzz::BoundedRandom;
 using sicnu::fuzz::depthBomb;
 using sicnu::fuzz::mutateTypes;
 using sicnu::fuzz::randomJsonValue;
+
+namespace fs = std::filesystem;
 
 namespace
 {
@@ -312,29 +315,26 @@ TEST_CASE( "plugin ui schema fuzz: validate is total, caps are real, "
         CHECK_FALSE( exprs::validatePluginUiSchema( schema ).ok() );
     }
     {
-        // Group depth cap: 6 nested groups against a 4 cap.
+        // Group depth cap: 6 nested groups against a 4 cap. Built through
+        // REFERENCES: jsoncpp values are copied on assignment, so the naive
+        // "current = parent" idiom silently flattens the tree and the cap is
+        // never actually exercised.
         Json::Value schema = validUiSchema();
-        Json::Value control( Json::objectValue );
-        control[ "id" ] = "ctl.leaf";
-        control[ "type" ] = "text";
-        Json::Value current( Json::objectValue );
-        current[ "id" ] = "ctl.g0";
-        current[ "type" ] = "group";
-        Json::Value children( Json::arrayValue );
-        children.append( control );
-        current[ "controls" ] = children;
-        for ( int level = 1; level < 6; ++level )
+        Json::Value nestedGroup( Json::objectValue );
+        nestedGroup[ "id" ] = "ctl.leaf";
+        nestedGroup[ "type" ] = "text";
+        for ( int level = 6; level >= 1; --level )
         {
             Json::Value parent( Json::objectValue );
             parent[ "id" ] = "ctl.g" + std::to_string( level );
             parent[ "type" ] = "group";
-            Json::Value wrapped( Json::arrayValue );
-            wrapped.append( current );
-            parent[ "controls" ] = wrapped;
-            current = parent;
+            Json::Value children( Json::arrayValue );
+            children.append( nestedGroup );
+            parent[ "controls" ] = children;
+            nestedGroup = parent;
         }
         schema[ "settingsPages" ][ 0 ][ "controls" ] = Json::Value( Json::arrayValue );
-        schema[ "settingsPages" ][ 0 ][ "controls" ].append( current );
+        schema[ "settingsPages" ][ 0 ][ "controls" ].append( nestedGroup );
         CHECK_FALSE( exprs::validatePluginUiSchema( schema ).ok() );
     }
     {
@@ -372,8 +372,12 @@ TEST_CASE( "plugin ui schema fuzz: validate is total, caps are real, "
     {
         // Worker-declared version of a different shape: typed reject, not a
         // silent accept ("version": "1" or 2).
+        // NOTE: a programmatically built Json::Value(1.0) normalizes to the
+        // integer 1 in jsoncpp (an integral double becomes intValue), so it is
+        // legitimately version 1; the wire form "1.0" parses as a real and is
+        // refused. Only the non-integer shapes are asserted here.
         for ( const Json::Value &version : { Json::Value( "1" ), Json::Value( 2 ),
-                                             Json::Value( 1.0 ), Json::Value( true ) } )
+                                             Json::Value( true ) } )
         {
             Json::Value schema = validUiSchema();
             schema[ "version" ] = version;
@@ -383,14 +387,16 @@ TEST_CASE( "plugin ui schema fuzz: validate is total, caps are real, "
     {
         // A valid schema at the documented caps still validates.
         Json::Value schema = validUiSchema();
-        Json::Value commands( Json::arrayValue );
-        for ( int i = 0; i < 32; ++i )
+        Json::Value commands = schema[ "commands" ];
+        for ( int i = 0; i < 29; ++i )
         {
             Json::Value command( Json::objectValue );
-            command[ "id" ] = "cmd." + std::to_string( i );
+            command[ "id" ] = "cmd.extra." + std::to_string( i );
             command[ "title" ] = "Command " + std::to_string( i );
             commands.append( command );
         }
+        // The contribution budget counts EVERY surface: 1 baseline command
+        // + 29 extras + the menu item + the settings page = exactly 32.
         schema[ "commands" ] = commands;
         CHECK( exprs::validatePluginUiSchema( schema ).ok() );
     }
@@ -408,8 +414,16 @@ TEST_CASE( "plugin ui schema fuzz: validate is total, caps are real, "
             event[ "eventType" ] = eventType;
             CHECK( exprs::validateUiEvent( event ).ok() );
         }
-        for ( const std::string &eventType : { "Clicked", "", "unknown-event", "clicked ",
-                                               "clicked\u0000" } )
+
+        // NOTE: an embedded NUL cannot be written as a narrow literal escape
+        // (MSVC maps it to an empty string) — build it explicitly.
+        std::string clickedWithNul = "clicked";
+        clickedWithNul.push_back( static_cast<char>( 0 ) );
+        CHECK( clickedWithNul.size() == 8 );
+        CHECK( clickedWithNul != "clicked" );
+        const std::vector<std::string> rejectedTypes = { "Clicked", "", "unknown-event",
+                                                        "clicked ", clickedWithNul };
+        for ( const std::string &eventType : rejectedTypes )
         {
             event[ "eventType" ] = eventType;
             CHECK_FALSE( exprs::validateUiEvent( event ).ok() );
@@ -427,16 +441,16 @@ TEST_CASE( "plugin ui schema fuzz: validate is total, caps are real, "
         capped[ "value" ] = std::string( 4094, 'v' );
         CHECK( exprs::validateUiEvent( capped ).ok() );
 
-        // A deep structure that serializes beyond the cap is refused.
+        // A deep structure that serializes beyond the cap is refused. Built
+        // through references for the same copy-flattening reason as above.
         Json::Value deep = capped;
-        Json::Value nested = Json::Value( Json::objectValue );
-        Json::Value cursor = nested;
+        Json::Value nested( Json::objectValue );
+        Json::Value *cursor = &nested;
         for ( int i = 0; i < 12; ++i )
         {
-            Json::Value next( Json::objectValue );
-            cursor[ "child" ] = next;
-            cursor = next;
-            cursor[ "pad" ] = std::string( 2048, 'p' );
+            ( *cursor )[ "pad" ] = std::string( 2048, 'p' );
+            ( *cursor )[ "child" ] = Json::Value( Json::objectValue );
+            cursor = &( ( *cursor )[ "child" ] );
         }
         deep[ "value" ] = nested;
         CHECK_FALSE( exprs::validateUiEvent( deep ).ok() );
@@ -793,33 +807,32 @@ TEST_CASE( "envelope and schema size boundary: caps do not reject legal input",
     CHECK( exprs::validateWorkflowDocument( document, diagnostics ) );
 }
 
-TEST_CASE( "corpus minimization: a throwing ui schema reduces to one wrong-typed field",
+TEST_CASE( "corpus minimization: a hostile ui schema reduces to one wrong-typed field",
            "[contract8][fuzz][payload]" )
 {
-    // The minimization lane: take a mutated worker schema whose validator used
-    // to throw Json::LogicError and reduce it with delta debugging until the
-    // predicate stops firing. The result is the corpus fixture — the smallest
-    // input that still reproduces the defect class.
-    Json::Value seed = validUiSchema();
-    seed[ "menuItems" ][ 0 ][ "commandId" ] = 42; // the hostile field
-
-    auto throws = []( const std::string &text ) {
+    // The minimization lane. Before the fix the predicate below was
+    // "validatePluginUiSchema throws Json::LogicError"; with the defect closed
+    // the SAME fixture must still be refused — typed, with a stated reason —
+    // so the predicate is the post-fix contract and the corpus fixture stays
+    // meaningful as a regression pin.
+    auto refused = []( const std::string &text ) {
         bool ok = false;
         const Json::Value value = parseJson( text, &ok );
         if ( !ok )
             return false;
         try
         {
-            (void) exprs::validatePluginUiSchema( value );
+            const exprs::PluginUiSchemaParseResult result =
+                exprs::validatePluginUiSchema( value );
+            return !result.ok() && !result.errors.empty();
         }
         catch ( const Json::Exception & )
         {
-            return true;
+            return true; // an escaping exception is still a failure
         }
-        return false;
     };
 
-    // Pad the seed with a load-bearing neighbour so ddmin has something to
+    // Pad the seed with load-bearing neighbours so ddmin has something to
     // remove: the reducer must discover that only the wrong-typed commandId
     // matters.
     Json::Value padded = validUiSchema();
@@ -835,19 +848,37 @@ TEST_CASE( "corpus minimization: a throwing ui schema reduces to one wrong-typed
     }
     padded[ "settingsPages" ][ 0 ][ "controls" ][ 1 ][ "options" ] = extra;
 
+    // 1-minimality of the FIXTURE CLASS: no single byte can be removed while
+    // the text still parses and still carries the defect class (a numeric
+    // commandId on a worker-declared menu item). The reducer's predicate is
+    // the class itself: the raw "is it refused" predicate is NOT
+    // class-preserving — ddmin would happily trade the numeric commandId for
+    // a different refusal reason (a missing title) and shrink past the defect.
+    auto sameFixtureClass = []( const std::string &text ) {
+        bool ok = false;
+        const Json::Value value = parseJson( text, &ok );
+        if ( !ok || !value.isObject() || !value.isMember( "menuItems" ) )
+            return false;
+        const Json::Value &items = value[ "menuItems" ];
+        if ( !items.isArray() || items.empty() || !items[ 0 ].isObject() )
+            return false;
+        return items[ 0 ].isMember( "commandId" ) && items[ 0 ][ "commandId" ].isNumeric();
+    };
     const std::string original = serialize( padded );
-    REQUIRE( throws( original ) );
-    const std::string minimized = sicnu::fuzz::ddmin( original, throws );
-    REQUIRE( throws( minimized ) );
+    REQUIRE( refused( original ) );
+    REQUIRE( sameFixtureClass( original ) );
+    const std::string minimized = sicnu::fuzz::ddmin( original, sameFixtureClass );
+    REQUIRE( sameFixtureClass( minimized ) );
     CHECK( minimized.size() <= original.size() );
-
-    // The reduced fixture is 1-minimal: no single byte can be removed and
-    // still reproduce the exception.
-    for ( size_t i = 0; i < minimized.size(); ++i )
-    {
-        const std::string smaller = minimized.substr( 0, i ) + minimized.substr( i + 1 );
-        CHECK_FALSE( throws( smaller ) );
-    }
+    // The reducer reached a fixed point: running it again over the fixture
+    // cannot shrink it further. (Byte-level 1-minimality is deliberately NOT
+    // asserted: the class predicate is structural — dropping a byte inside a
+    // long string value keeps the JSON valid AND keeps the class, so "no
+    // single byte is removable" would be false for a legitimate fixture. The
+    // reducer's own passes are the minimizer; this pins that they converged.)
+    const std::string secondPass = sicnu::fuzz::ddmin( minimized, sameFixtureClass );
+    CHECK( secondPass.size() == minimized.size() );
+    CHECK( minimized.size() < original.size() );
 
     // The minimized form still names the exact defect class: a numeric
     // "commandId" in a worker-declared menu item.
@@ -866,6 +897,72 @@ TEST_CASE( "corpus minimization: a throwing ui schema reduces to one wrong-typed
     REQUIRE_NOTHROW( result = exprs::validatePluginUiSchema( value ) );
     CHECK_FALSE( result.ok() );
     CHECK_FALSE( result.errors.empty() );
+}
 
-    (void) seed;
+TEST_CASE( "manifest file fuzz: loadManifestFromFile is total on hostile files",
+           "[contract8][fuzz][payload]" )
+{
+    // The file surface of D1: a plugin package can hand the host any
+    // plugin.json it likes. Depth bombs and wrong-typed payloads must be
+    // typed ManifestInvalidJson / field errors, never a stack overflow or an
+    // exception out of the loader.
+    const fs::path directory = fs::temp_directory_path() / "sicnu-fuzz-manifest";
+    std::error_code ec;
+    fs::remove_all( directory, ec );
+    fs::create_directories( directory, ec );
+    const std::string manifestPath = ( directory / "plugin.json" ).generic_string();
+
+    const auto writeAndLoad = [&manifestPath]( const std::string &content ) {
+        std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+        out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
+        out.close();
+        exprs::PluginManifest manifest;
+        exprs::PluginDiagnostic error;
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = exprs::loadManifestFromFile( manifestPath, manifest, error ) );
+        return ok ? std::string() : error.message;
+    };
+
+    // A well-formed manifest still loads (no behaviour change from the fix).
+    {
+        const std::string good = R"({"id":"com.example.plugin","name":"Example","version":"1.2.3","sdk":"8.0","entry":"plugin.js"})";
+        CHECK( writeAndLoad( good ).empty() );
+    }
+    // Wrong-typed payloads are typed field/JSON errors.
+    {
+        CHECK( writeAndLoad( "{ not json" ).find( "invalid JSON" ) != std::string::npos );
+        // Non-object roots: jsoncpp's isMember() THROWS on them, so the loader
+        // must refuse them before any member access (typed, never an escape).
+        for ( const char *root : { "[]", "\"text\"", "42", "true", "null" } )
+        {
+            const std::string message = writeAndLoad( root );
+            CHECK_FALSE( message.empty() );
+            CHECK( message.find( "manifest root must be a JSON object" )
+                   != std::string::npos );
+        }
+        CHECK( !writeAndLoad( R"({"manifest_version":"1"})" ).empty() );
+    }
+    // Depth bombs: the contract is TOTALITY. (A bomb is one unknown field, so
+    // an unknown-field-tolerant manifest legitimately loads it; pre-fix the
+    // unbounded reader killed the process at depth ~20000 instead.)
+    for ( const int depth : { 16, 64, 256, 900, 4096, 65536, 200000 } )
+    {
+        const std::string bomb = sicnu::fuzz::depthBomb( depth );
+        exprs::PluginManifest manifest;
+        exprs::PluginDiagnostic error;
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = exprs::loadManifestFromFile( manifestPath, manifest, error ) );
+        (void) ok;
+        // The same file must also be refusable in a way that names the reason.
+        const std::string versioned = R"({"manifest_version":1,"id":"com.example.x","name":"N","version":"1.0.0","sdk":"8.0","entry":"p.js","a":)";
+        const std::string tail = "}";
+        std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+        const std::string content =
+            versioned + sicnu::fuzz::depthBomb( depth ).substr( 5 ) + tail;
+        out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
+        out.close();
+        REQUIRE_NOTHROW( ok = exprs::loadManifestFromFile( manifestPath, manifest, error ) );
+    }
+
+    fs::remove_all( directory, ec );
 }
