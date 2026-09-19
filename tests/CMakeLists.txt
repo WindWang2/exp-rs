@@ -8015,6 +8015,24 @@ target_include_directories(test_canvas_extent_crs PRIVATE
 )
 sicnu_discover_tests(test_canvas_extent_crs)
 
+# Track 02 (#1056): toolbar chip rebuild must drop in-flight drag/resize state.
+add_executable(test_toolbar_flow_host
+  test_toolbar_flow_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
+)
+target_link_libraries(test_toolbar_flow_host PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_toolbar_flow_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_toolbar_flow_host)
+
 # Track 02 (#1056): copilot conversation-retention cap keeps the request
 # history bounded without orphaning assistant tool_calls from tool results.
 add_executable(test_copilot_history_retention

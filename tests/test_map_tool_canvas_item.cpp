@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QGraphicsScene>
 #include <QPointer>
 
 #include "app/map_tools/map_tool_canvas_item.h"
@@ -88,6 +89,35 @@ class GuardedTool : public QgsMapTool
     QgsRubberBand *mBand = nullptr;
 };
 
+/// Proves the destruction ORDER without relying on heap-UB: the tool records
+/// how many scene items still existed when its destructor ran. The canvas
+/// must delete tools BEFORE qDeleteAll(mScene->items()), so the band is still
+/// there at that point (1 item); the old order showed 0.
+class OrderProbeTool : public QgsMapTool
+{
+  public:
+    OrderProbeTool( QgsMapCanvas *canvas, QGraphicsScene *scene, int *itemsAtDtor )
+      : QgsMapTool( canvas )
+      , mScene( scene )
+      , mItemsAtDtor( itemsAtDtor )
+      , mBand( new QgsRubberBand( canvas, Qgis::GeometryType::Polygon ) )
+    {
+    }
+
+    ~OrderProbeTool() override
+    {
+      if ( mItemsAtDtor )
+        *mItemsAtDtor = mScene ? mScene->items().size() : -1;
+      delete mBand;
+      mBand = nullptr;
+    }
+
+  private:
+    QGraphicsScene *mScene = nullptr;
+    int *mItemsAtDtor = nullptr;
+    QgsRubberBand *mBand = nullptr;
+};
+
 } // namespace
 
 TEST_CASE( "deleteToolCanvasItem: live canvas deletes the item and nulls the pointer", "[maptool][lifetime][1048]" )
@@ -139,4 +169,29 @@ TEST_CASE( "QgsMapCanvas destruction deletes child tools before scene items (#10
   delete canvas; // must destroy the tool while the scene is intact
 
   CHECK( tool.isNull() ); // tool died with its canvas, exactly once
+}
+
+TEST_CASE( "QgsMapCanvas destroys child tools while their scene items still exist (#1048, order oracle)",
+           "[maptool][lifetime][1048]" )
+{
+  ensureApp();
+  // Deterministic order proof (no heap-UB dependency): the probe records the
+  // scene item count at destructor time. Tools deleted BEFORE the scene
+  // teardown still see their rubber band (>= 1 item); the pre-fix order
+  // showed 0 because the scene items were already reclaimed.
+  auto *canvas = new QgsMapCanvas();
+  canvas->resize( 200, 200 );
+  QGraphicsScene *scene = canvas->scene();
+  REQUIRE( scene != nullptr );
+  const int baselineItems = scene->items().size();
+
+  int itemsAtToolDestruction = -1;
+  new OrderProbeTool( canvas, scene, &itemsAtToolDestruction );
+  REQUIRE( scene->items().size() == baselineItems + 1 ); // just the band
+
+  delete canvas;
+
+  // The tool must die while its band is still in the scene; the old order
+  // deleted the scene items first (count would be baselineItems).
+  CHECK( itemsAtToolDestruction == baselineItems + 1 );
 }

@@ -35,6 +35,10 @@ class RsToolbarFlowHost : public QWidget
 
     bool hasProductToolbars() const { return !m_chips.isEmpty(); }
 
+    /// Testing seam (#1056): true while a drag/resize gesture is in flight.
+    /// Rebuilding the chips must clear it (the chip pointers are invalidated).
+    bool isInteractionActiveForTest() const { return m_dragging || m_resizing; }
+
     /**
      * Apply visibility map (true = show). Reparents toolbars into chips and reflows.
      * Does not touch QAction toggles — caller blocks those.
