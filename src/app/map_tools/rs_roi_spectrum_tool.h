@@ -22,7 +22,8 @@ class QgsRasterLayer;
  * (values, wavelengths, labels, layerName) on success, or with empty values
  * and the error message in @p layerName on failure. The caller is the sole
  * owner: it must restore the previous map tool and delete the tool via
- * release()->deleteLater() inside the callback.
+ * release()->deleteLater() inside the callback. A polygon that is abandoned
+ * (tool deactivated before it is finished) releases itself.
  */
 class RsRoiSpectrumTool : public QgsMapTool
 {
@@ -39,6 +40,7 @@ class RsRoiSpectrumTool : public QgsMapTool
     ~RsRoiSpectrumTool() override;
 
   protected:
+    void deactivate() override;
     void canvasPressEvent( QgsMapMouseEvent *e ) override;
     void canvasMoveEvent( QgsMapMouseEvent *e ) override;
     void canvasReleaseEvent( QgsMapMouseEvent *e ) override;

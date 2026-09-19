@@ -281,7 +281,11 @@ void RsObiaMainWindow::setupDocks()
         auto *idItem = new QTableWidgetItem( QString::number( mClassDefs[i].id ) );
         idItem->setFlags( idItem->flags() & ~Qt::ItemIsEditable ); // ID maps to pixel value; keep read-only
         mClassTable->setItem( i, 0, idItem );
-        mClassTable->setItem( i, 1, new QTableWidgetItem( mClassDefs[i].name ) );
+        // Name/color write back through the context menu (edit name -> mClassDefs);
+        // inline editing here would silently drop the edit.
+        auto *nameItem = new QTableWidgetItem( mClassDefs[i].name );
+        nameItem->setFlags( nameItem->flags() & ~Qt::ItemIsEditable );
+        mClassTable->setItem( i, 1, nameItem );
         auto *colorItem = new QTableWidgetItem;
         colorItem->setFlags( colorItem->flags() & ~Qt::ItemIsEditable ); // edited via context menu color picker
         colorItem->setBackground( mClassDefs[i].color );
@@ -1631,7 +1635,9 @@ void RsObiaMainWindow::rebuildClassTable()
         auto *idItem = new QTableWidgetItem( QString::number( mClassDefs[i].id ) );
         idItem->setFlags( idItem->flags() & ~Qt::ItemIsEditable );
         mClassTable->setItem( i, 0, idItem );
-        mClassTable->setItem( i, 1, new QTableWidgetItem( mClassDefs[i].name ) );
+        auto *nameItem = new QTableWidgetItem( mClassDefs[i].name );
+        nameItem->setFlags( nameItem->flags() & ~Qt::ItemIsEditable );
+        mClassTable->setItem( i, 1, nameItem );
         auto *colorItem = new QTableWidgetItem;
         colorItem->setFlags( colorItem->flags() & ~Qt::ItemIsEditable );
         colorItem->setBackground( mClassDefs[i].color );

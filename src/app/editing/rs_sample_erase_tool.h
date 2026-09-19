@@ -31,6 +31,7 @@ class RsSampleEraseTool : public QgsMapTool
     static constexpr int kMaxStampsPerStroke = 2048;
 
     explicit RsSampleEraseTool( QgsMapCanvas *canvas );
+    ~RsSampleEraseTool() override;
 
     void setTargetLayer( QgsVectorLayer *layer );
     QgsVectorLayer *targetLayer() const { return mLayer.data(); }

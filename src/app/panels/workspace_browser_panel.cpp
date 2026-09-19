@@ -62,16 +62,19 @@ void WorkspaceGovernanceModel::applyFilters( const QString &text, const QString 
 
 void WorkspaceGovernanceModel::resetQuery()
 {
+    // Rows must be replaced inside the reset window: filling them after
+    // endResetModel() leaves attached views with a stale row count that no
+    // signal ever corrected.
     beginResetModel();
     m_rows.clear();
     m_total = 0;
-    endResetModel();
     if ( m_service && m_service->isStoreOpen() )
     {
         const WorkspacePage page = m_service->query( m_query );
         m_total = page.total;
         m_rows = page.items;
     }
+    endResetModel();
 }
 
 int WorkspaceGovernanceModel::rowCount( const QModelIndex &parent ) const

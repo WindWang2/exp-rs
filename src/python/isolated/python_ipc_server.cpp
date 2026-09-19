@@ -17,6 +17,15 @@
 namespace sicnu::python::isolated
 {
 
+namespace
+{
+  /// Hardening bounds for the trusted local worker channel: the protocol is
+  /// newline-framed JSON, so a peer that never terminates a line (or streams
+  /// unbounded messages) must not be able to grow the buffer without limit.
+  constexpr int kMaxBufferBytes = 4 * 1024 * 1024;
+  constexpr int kMaxLineBytes = 1 * 1024 * 1024;
+} // namespace
+
 PythonIpcServer::PythonIpcServer( QObject *parent )
   : QObject( parent )
 {
@@ -115,11 +124,31 @@ void PythonIpcServer::onReadyRead()
 
   m_buffer.append( m_socket->readAll() );
 
+  if ( m_buffer.size() > kMaxBufferBytes )
+  {
+    m_buffer.clear();
+    // Our own slots are detached first so the close() below cannot re-enter
+    // this handler through onSocketDisconnected.
+    m_socket->disconnect();
+    m_socket->close();
+    m_socket->deleteLater();
+    m_socket = nullptr;
+    emit clientDisconnected();
+    return;
+  }
+
   while ( true )
   {
     int newlineIdx = m_buffer.indexOf( '\n' );
     if ( newlineIdx == -1 )
       break;
+
+    if ( newlineIdx > kMaxLineBytes )
+    {
+      // Oversized message: discard it and keep parsing the following lines.
+      m_buffer.remove( 0, newlineIdx + 1 );
+      continue;
+    }
 
     QByteArray line = m_buffer.left( newlineIdx ).trimmed();
     m_buffer.remove( 0, newlineIdx + 1 );

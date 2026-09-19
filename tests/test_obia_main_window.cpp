@@ -369,6 +369,7 @@ TEST_CASE( "ObiaAdapter: params builders carry the operator contract", "[obia][a
 #include "app/obia/rs_segment_select_tool.h"
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
+#include <QMouseEvent>
 
 TEST_CASE( "OBIA/MapTools: RsSegmentSelectTool rubber band canvas destruction safety", "[obia][maptool]" )
 {
@@ -385,6 +386,42 @@ TEST_CASE( "OBIA/MapTools: RsSegmentSelectTool rubber band canvas destruction sa
 
     // Clean teardown: destroy tool before canvas
     tool.reset();
+    canvas.reset();
+}
+
+namespace
+{
+
+class TestableRsSegmentSelectTool : public RsSegmentSelectTool
+{
+    public:
+        using RsSegmentSelectTool::RsSegmentSelectTool;
+        using RsSegmentSelectTool::canvasReleaseEvent;
+};
+
+} // namespace
+
+TEST_CASE( "OBIA/MapTools: RsSegmentSelectTool highlight survives canvas teardown (#1048)", "[obia][maptool]" )
+{
+    ensureApp();
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    // The tool is owned by the canvas (QgsMapTool parents itself to the
+    // canvas), so the canvas teardown must delete the highlight rubber band
+    // exactly once — the OBIA window never deletes mSelectTool itself.
+    auto *tool = new TestableRsSegmentSelectTool( canvas.get() );
+
+    QVector<quint32> labels = { 1, 1, 1, 1 };
+    RsSegmentMap segMap( labels, 2, 2 );
+    tool->setSegmentMap( segMap );
+
+    QMouseEvent me( QEvent::MouseButtonRelease, QPointF( 1.0, 1.0 ),
+                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+    QgsMapMouseEvent mme( canvas.get(), &me );
+    tool->canvasReleaseEvent( &mme );
+    REQUIRE( tool->selectedSegmentId() != 0 );
+
+    // Canvas dies first with a live highlight: no double free of the band.
     canvas.reset();
 }
 

@@ -329,11 +329,24 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
     if (!m_mapCanvas || !m_identifyTool)
         return;
 
+    // Re-invocation replaces the previous tool: an abandoned polygon would
+    // otherwise keep a canvas-child tool (and its rubber band) alive behind
+    // the new reference. Unset it from the canvas first so ~QgsMapTool does
+    // not deactivate a half-destroyed object.
+    if ( m_roiSpectrumTool )
+    {
+        RsRoiSpectrumTool *abandoned = m_roiSpectrumTool;
+        m_roiSpectrumTool = nullptr;
+        if ( m_mapCanvas && m_mapCanvas->mapTool() == abandoned )
+            m_mapCanvas->unsetMapTool( abandoned );
+        delete abandoned;
+    }
+
     // The tool computes the ROI mean spectrum and reports it into the Spectral
     // Profile dock; afterwards the canvas returns to the identify tool. The
     // callback is the tool's sole owner — it always restores the tool and
     // releases (empty values carry an error message in layerName).
-    m_roiSpectrumTool = new RsRoiSpectrumTool(
+    auto *roiTool = new RsRoiSpectrumTool(
       m_mapCanvas, rasterLayer,
       [this](const QVector<double> &values, const QVector<double> &wavelengths,
              const QVector<QString> &labels, const QString &layerName)
@@ -348,10 +361,12 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         }
         if (m_mapCanvas && m_identifyTool)
           m_mapCanvas->setMapTool(m_identifyTool);
-        // Safe asynchronous deletion: we are inside the tool's own callback.
+        // Safe asynchronous deletion: we are inside the tool's own callback,
+        // releasing exactly this tool (re-invocation replaced it earlier).
         if (m_roiSpectrumTool)
           m_roiSpectrumTool->deleteLater();
       });
+    m_roiSpectrumTool = roiTool;
 
     m_mapCanvas->setMapTool(m_roiSpectrumTool.data());
 }
