@@ -244,11 +244,14 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
   // CPL's MAX_FILE_SIZE enforcement is not reliable for every answer shape
   // in this build (plain 200 answers can slip through) — the budget is also
   // enforced here, at the layer that promises it.
+  // Truncation must be decided from the PRE-resize size: clamping first
+  // made `body.size() > budget` always false and left `truncated` dead.
+  // Exactly-budget bodies are treated as truncated (header contract —
+  // conservative, truthful); a guard abort always means a cut answer.
+  const bool bodyWasOverBudget = fetch.body.size() >= budget;
   if ( fetch.body.size() > budget )
     fetch.body.resize( static_cast<std::size_t>( budget ) );
-  // Exactly-budget bodies are complete (MAX_FILE_SIZE aborts strictly
-  // beyond the budget); a guard abort always means a cut answer.
-  fetch.truncated = fetch.sizeGuardHit || fetch.body.size() > budget;
+  fetch.truncated = fetch.sizeGuardHit || bodyWasOverBudget;
 
   // This build's CPLHTTPFetch can answer a failed transport with a NON-null
   // result carrying a curl code (< 100) in nStatus, no body and no headers.
