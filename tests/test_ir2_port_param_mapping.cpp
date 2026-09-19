@@ -211,6 +211,23 @@ class WritingOperator : public sicnu::operators::RSOperator
     }
 };
 
+// Declares a PRE-EXISTING file outside the run directory via the outputPath
+// key: existence somewhere else is not authorship (F-1032-P1-artifact).
+class OutsideArtifactOperator : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "test:ir2_outside_artifact"; }
+    std::string group() const override { return "test"; }
+    std::string description() const override { return "declares an artifact outside the run directory"; }
+    Json::Value schema() const override { return Json::Value( Json::objectValue ); }
+    Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext & ) override
+    {
+        Json::Value result( Json::objectValue );
+        result["outputPath"] = params.get( "external_file", "" ).asString();
+        return result;
+    }
+};
+
 QApplication *ensureApp()
 {
     static QApplication *app = nullptr;
@@ -308,7 +325,7 @@ TEST_CASE( "Coordinator without a bound executor fails nodes instead of synthesi
 }
 
 TEST_CASE( "Registry executor end-to-end: unbound node fails the run",
-           "[d18][ir2][executor][1006]" )
+            "[d18][ir2][executor][1006]" )
 {
     ensureApp();
     PipelineRunCoordinator coordinator;
@@ -326,4 +343,104 @@ TEST_CASE( "Registry executor end-to-end: unbound node fails the run",
     REQUIRE( snapshot.state == ExecutionState::Failed );
     REQUIRE( snapshot.errorMessage.startsWith( QLatin1String( kIr2OperatorUnboundPrefix ) ) );
     REQUIRE( snapshot.outputArtifactPath.isEmpty() );
+}
+
+TEST_CASE( "Registry executor confines every artifact to the run directory",
+           "[d18][ir2][executor][1032]" )
+{
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_ghost_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_ghost_artifact", [] { return std::make_unique<GhostArtifactOperator>(); } );
+    if ( !registry.hasOperator( "test:ir2_writes_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_writes_artifact", [] { return std::make_unique<WritingOperator>(); } );
+    if ( !registry.hasOperator( "test:ir2_outside_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_outside_artifact", [] { return std::make_unique<OutsideArtifactOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+
+    // 1. A nodeId with a separator or traversal component never reaches the
+    //    default-artifact path.
+    {
+        NodeFact node = makeNode( QStringLiteral( "../escape" ), {} );
+        node.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
+        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        REQUIRE_FALSE( result.success );
+        REQUIRE( result.artifactPath.isEmpty() );
+        REQUIRE( result.errorMessage.contains( QStringLiteral( "unsafe nodeId" ) ) );
+    }
+
+    // 2. An operator pointing at an existing file OUTSIDE the run directory is
+    //    refused: existence is not authorship.
+    const QString outsidePath = QDir( QFileInfo( runDir.path() ).absolutePath() )
+        .filePath( QStringLiteral( "sicnu-ir2-outside-artifact.bin" ) );
+    {
+        QFile outside( outsidePath );
+        REQUIRE( outside.open( QIODevice::WriteOnly ) );
+        outside.write( QByteArrayLiteral( "outside" ) );
+        outside.close();
+    }
+    {
+        NodeFact node = makeNode( QStringLiteral( "outside" ), {} );
+        node.operatorId = QStringLiteral( "test:ir2_outside_artifact" );
+        node.parameters = QJsonObject{ { QStringLiteral( "external_file" ), outsidePath } };
+        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        REQUIRE_FALSE( result.success );
+        REQUIRE( result.artifactPath.isEmpty() );
+        REQUIRE( result.errorMessage.contains( QStringLiteral( "escapes the run directory" ) ) );
+        // The run-external file was neither consumed nor rewritten.
+        REQUIRE( QFile::exists( outsidePath ) );
+    }
+
+    // 3. A leftover artifact from an earlier run is not authorship either: the
+    //    expected output is cleared before the operator runs.
+    {
+        NodeFact ghost = makeNode( QStringLiteral( "stale" ), {} );
+        ghost.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
+        const QString stale = QDir( runDir.path() ).filePath( "stale.out.tif" );
+        {
+            QFile staleFile( stale );
+            REQUIRE( staleFile.open( QIODevice::WriteOnly ) );
+            staleFile.write( QByteArrayLiteral( "leftover" ) );
+            staleFile.close();
+        }
+        const NodeExecutionResult result = executor( ghost, {}, runDir.path() );
+        REQUIRE_FALSE( result.success );
+        REQUIRE( result.errorMessage.startsWith(
+            QLatin1String( "ir2.operator_failed: missing artifact" ) ) );
+        CHECK_FALSE( QFile::exists( stale ) );
+    }
+
+    // 4. A directory where a file is expected is not an artifact.
+    {
+        REQUIRE( QDir( runDir.path() ).mkdir( QStringLiteral( "dirnode.out.tif" ) ) );
+        NodeFact node = makeNode( QStringLiteral( "dirnode" ), {} );
+        node.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
+        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        REQUIRE_FALSE( result.success );
+        REQUIRE( result.errorMessage.contains( QStringLiteral( "missing artifact" ) ) );
+    }
+
+    // 5. A RELATIVE declared output resolves inside the run directory.
+    {
+        NodeFact node = makeNode( QStringLiteral( "relative" ), {} );
+        node.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+        node.parameters = QJsonObject{ { QStringLiteral( "output" ),
+                                        QStringLiteral( "relative.out.tif" ) } };
+        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        REQUIRE( result.success );
+        const QString runRoot = QFileInfo( runDir.path() ).canonicalFilePath();
+        const QString expected = QDir( runRoot ).filePath( "relative.out.tif" );
+        CHECK( result.artifactPath == expected );
+        CHECK( QFile::exists( expected ) );
+    }
+
+    QFile::remove( outsidePath );
+    registry.unregisterOperator( "test:ir2_ghost_artifact" );
+    registry.unregisterOperator( "test:ir2_writes_artifact" );
+    registry.unregisterOperator( "test:ir2_outside_artifact" );
 }

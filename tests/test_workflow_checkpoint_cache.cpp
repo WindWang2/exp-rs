@@ -393,7 +393,6 @@ TEST_CASE( "startRun rejects cyclic documents and rejects double starts", "[d17]
     ensureApp();
     PipelineRunCoordinator coordinator;
     const QString dir = scratchDir( QStringLiteral( "cyclic" ) );
-
     WorkflowDocument def;
     auto node = []( const QString &id ) {
         NodeFact n;
@@ -414,4 +413,72 @@ TEST_CASE( "startRun rejects cyclic documents and rejects double starts", "[d17]
     QString error;
     REQUIRE_FALSE( coordinator.startRun( def, dir, &error ) );
     REQUIRE( error.contains( QStringLiteral( "cycle" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    PipelineRunCoordinator coordinator;
+    coordinator.setMaxParallelism( 2 );
+    // Slow executor: keeps the run in flight long enough for a foreign thread
+    // to read the state onNodeFinished is mutating on the affinity thread
+    // (#1056: unprotected cross-thread reads of the same fields).
+    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+        QThread::msleep( 10 );
+        NodeExecutionResult result;
+        const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        QFile f( artifact );
+        if ( !f.open( QIODevice::WriteOnly ) )
+        {
+            result.errorMessage = QStringLiteral( "artifact open failed for %1" ).arg( node.nodeId );
+            return result;
+        }
+        f.write( QByteArrayLiteral( "ok" ) );
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    } );
+    const QString dir = scratchDir( QStringLiteral( "cross-thread" ) );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> reads{ 0 };
+    std::atomic<bool> inconsistent{ false };
+    QThread reader;
+    QObject::connect( &reader, &QThread::started, [&]() {
+        while ( !stop.load() )
+        {
+            const auto statuses = coordinator.getAllStatuses();
+            const bool running = coordinator.isRunning();
+            const bool completed = coordinator.hasCompleted();
+            // A snapshotted status map must always cover the whole document.
+            if ( statuses.size() != 12 || ( running && completed ) )
+                inconsistent = true;
+            for ( const NodeStatusSnapshot &snapshot : statuses )
+                if ( executionStateString( snapshot.state ).isEmpty() )
+                    inconsistent = true;
+            reads.fetch_add( 1 );
+            if ( completed )
+                break;
+        }
+    } );
+    REQUIRE( coordinator.startRun( chain( 12 ), dir ) );
+    reader.start();
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    // The reader blocks inside marshalled accessor calls until the
+    // coordinator's thread services them: keep pumping events until it
+    // observed the terminal state.
+    while ( !reader.isFinished() )
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    REQUIRE( reader.wait( 30000 ) );
+
+    CHECK_FALSE( inconsistent.load() );
+    CHECK( reads.load() > 0 );
+
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 12 );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+    CHECK( coordinator.hasCompleted() );
+    CHECK_FALSE( coordinator.isRunning() );
 }

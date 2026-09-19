@@ -298,9 +298,13 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
   options = CSLSetNameValue( options, "TILED", "YES" );
   options = CSLSetNameValue( options, "BLOCKXSIZE", "256" );
   options = CSLSetNameValue( options, "BLOCKYSIZE", "256" );
+  // ADR 0164 determinism: single-threaded DEFLATE keeps the emitted bytes
+  // independent of the host (NUM_THREADS is also pinned in generate() so a
+  // stray GDAL_NUM_THREADS cannot change them). GDAL_PAM_ENABLED=NO keeps
+  // .aux.xml sidecars away.
+  options = CSLSetNameValue( options, "NUM_THREADS", "1" );
   // COG-friendly layout (epic default #3); PREDICTOR 2 for Byte, 3 for
-  // Float32. NUM_THREADS stays unset: single-threaded DEFLATE keeps bytes
-  // stable, and GDAL_PAM_ENABLED=NO (set in generate) keeps .aux.xml away.
+  // Float32.
   options = CSLSetNameValue( options, "PREDICTOR", spec.byte_type ? "2" : "3" );
 
   const std::string path = ( fs::path( out_dir ) / product ).string() + ".tif";
@@ -479,10 +483,13 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
   }
 
   const std::string shp_path = ( fs::path( out_dir ) / "training_samples.shp" ).string();
-  // A stale .cpg from a prior run (created when SHAPE_ENCODING is set in the
-  // environment) must not survive into this run's directory listing.
+  // A second generate into a non-empty out_dir must REPLACE the shapefile:
+  // the driver refuses to create over an existing dataset, so every
+  // foundry-owned sidecar (including a stale .cpg, which SHAPE_ENCODING could
+  // otherwise have produced) is removed first. Nothing else is touched.
   std::error_code rm_ec;
-  fs::remove( fs::path( out_dir ) / "training_samples.cpg", rm_ec );
+  for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj", ".cpg" } )
+    fs::remove( fs::path( out_dir ) / ( "training_samples" + std::string( ext ) ), rm_ec );
   GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "ESRI Shapefile" );
   if ( !driver )
     return fail( "gdal", "ESRI Shapefile driver unavailable" );
@@ -580,11 +587,8 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
       return fail( "io", "shapefile sidecar missing after write: " + name );
     emitted->push_back( name );
   }
-  // The driver writes .cpg only when an encoding is in effect (host-dependent,
-  // e.g. SHAPE_ENCODING); record it when present so --verify never sees an
-  // unlisted data file.
-  if ( fs::exists( fs::path( out_dir ) / "training_samples.cpg" ) )
-    emitted->push_back( "training_samples.cpg" );
+  // No .cpg: SHAPE_ENCODING is cleared in generate(), so the driver can never
+  // emit an encoding file whose presence would vary with the host environment.
   return okOut();
 }
 
@@ -1179,10 +1183,64 @@ Outcome generate( const Options &options, GenerateResult *result )
   fs::create_directories( options.out_dir, ec );
   if ( !fs::is_directory( options.out_dir ) )
     return fail( "io", "cannot create output directory " + options.out_dir +
-                             ( ec ? ( ": " + ec.message() ) : std::string() ) );
+                              ( ec ? ( ": " + ec.message() ) : std::string() ) );
 
-  // No .aux.xml sidecars: PAM would break byte-determinism (D-012).
+  // generate() writes only the current selection; a leftover catalog file from
+  // a wider earlier selection would make --verify fail with "unlisted data
+  // file". Known catalog basenames NOT in this selection are pruned here.
+  // Nothing outside those names — user data, manifest.json included — is ever
+  // touched.
+  {
+    std::vector<std::string> known;
+    for ( Product p : productCatalog() )
+      known.push_back( std::string( productName( p ) ) + ".tif" );
+    for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj", ".cpg" } )
+      known.push_back( "training_samples" + std::string( ext ) );
+
+    std::vector<std::string> expected;
+    for ( Product p : selection )
+      expected.push_back( std::string( productName( p ) ) + ".tif" );
+    if ( contains( selection, Product::TrainingSamples ) )
+      for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj", ".cpg" } )
+        expected.push_back( "training_samples" + std::string( ext ) );
+
+    auto selected = [&expected]( const std::string &name ) {
+      return std::find( expected.begin(), expected.end(), name ) != expected.end();
+    };
+
+    std::vector<std::string> stale;
+    std::error_code iter_ec;
+    fs::directory_iterator it( options.out_dir, iter_ec );
+    if ( iter_ec )
+        return fail( "io", "cannot list output directory " + options.out_dir +
+                              ": " + iter_ec.message() );
+    for ( fs::directory_iterator end; it != end; it.increment( iter_ec ) )
+    {
+      if ( iter_ec )
+        return fail( "io", "cannot list output directory " + options.out_dir +
+                              ": " + iter_ec.message() );
+      std::error_code regular_ec;
+      if ( !it->is_regular_file( regular_ec ) )
+        continue;
+      const std::string name = it->path().filename().string();
+      if ( !contains( known, name ) || selected( name ) )
+        continue;
+      stale.push_back( it->path().string() );
+    }
+    for ( const std::string &path : stale )
+    {
+      std::error_code remove_ec;
+      fs::remove( path, remove_ec );
+    }
+  }
+
+  // ADR 0164: the emit path must not depend on the ambient GDAL environment.
+  // No .aux.xml sidecars (PAM would break byte-determinism, D-012), DEFLATE is
+  // forced single-threaded, and SHAPE_ENCODING is cleared so the shapefile
+  // driver can never emit a host-dependent training_samples.cpg.
   CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  CPLSetConfigOption( "GDAL_NUM_THREADS", "1" );
+  CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
   GDALAllRegister();
 
   const GridSpec grid = gridForProfile( options.profile );
