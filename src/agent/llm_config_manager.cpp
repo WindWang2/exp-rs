@@ -61,6 +61,15 @@ QList<LlmProviderProfile> LlmConfigManager::getPresetProfiles() const
   openai.stream = true;
   presets.append( openai );
 
+  LlmProviderProfile stepfun;
+  stepfun.id = QStringLiteral( "stepfun" );
+  stepfun.name = QStringLiteral( "StepFun" );
+  stepfun.baseUrl = QStringLiteral( "https://api.stepfun.com/step_plan/v1" );
+  stepfun.modelName = QStringLiteral( "step-5-preview" );
+  stepfun.temperature = 0.2;
+  stepfun.stream = true;
+  presets.append( stepfun );
+
   return presets;
 }
 
