@@ -151,8 +151,11 @@ public:
         // 1.1 concurrency is real — the session is refcounted, so a respawn
         // can never invalidate the shared_ptr we are using (its channel
         // simply fails typed when the old worker dies).
+        // Mid-run crash consumes one iteration for the failed request and
+        // one for respawn; a third iteration re-executes on the fresh worker
+        // (#1080). Dead-on-entry still recovers within the same budget.
         bool recovered = false;
-        for ( int attempt = 0; attempt < 2; ++attempt )
+        for ( int attempt = 0; attempt < 3; ++attempt )
         {
             std::shared_ptr<PluginHostProcessSession> session;
             {
