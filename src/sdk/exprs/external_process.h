@@ -41,6 +41,13 @@ struct ExternalProcessRequest
     Json::Value environment;               ///< object: extra env vars (name -> string)
     bool inheritEnvironment = false;       ///< full env inheritance (opt-in)
     int timeoutSeconds = 3600;             ///< wall-clock budget (<=0 = 3600)
+    /// Bounded post-exit drain window. After the direct child exits, output
+    /// is drained until pipe EOF — but a descendant that inherited the write
+    /// ends must not hold run() open: once this grace elapses the remaining
+    /// pipes are abandoned (tail output lost) and, on POSIX, the process
+    /// group is reaped exactly as the Windows job-object close reaps it.
+    /// <=0 selects the built-in default (2000 ms).
+    int postExitDrainGraceMs = 0;
     long stdoutLimitBytes = 8 * 1024 * 1024;
     long stderrLimitBytes = 1 * 1024 * 1024;
     /// Polled during execution; returning true cancels (SIGTERM ladder).

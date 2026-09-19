@@ -516,6 +516,8 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 
     const int timeoutSeconds = request.timeoutSeconds > 0 ? request.timeoutSeconds : 3600;
     const auto deadline = startTime + std::chrono::seconds( timeoutSeconds );
+    const int drainGraceMs = request.postExitDrainGraceMs > 0 ? request.postExitDrainGraceMs
+                                                             : kPostExitDrainGraceMs;
 
     bool cancelled = false;
     bool timedOut = false;
@@ -558,7 +560,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             {
                 exited = true;
                 postExitDrainDeadline = std::chrono::steady_clock::now()
-                                        + std::chrono::milliseconds( kPostExitDrainGraceMs );
+                                        + std::chrono::milliseconds( drainGraceMs );
             }
             else if ( ( cancelled || timedOut ) && !killed )
             {
@@ -876,6 +878,14 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         // Child: own session/process group so the parent can kill the whole
         // tree on timeout/cancel.
         ::setsid();
+        // Reset the terminal/kill signals to their defaults BEFORE exec: a
+        // cancel/timeout delivered in the fork window would otherwise run the
+        // PARENT's handlers in the child (arbitrary parent code in a process
+        // about to be killed), and an inherited SIG_IGN would survive exec
+        // entirely. signal() is async-signal-safe.
+        ::signal( SIGTERM, SIG_DFL );
+        ::signal( SIGINT, SIG_DFL );
+        ::signal( SIGPIPE, SIG_DFL );
         ::dup2( stdoutPipe[1], STDOUT_FILENO );
         ::dup2( stderrPipe[1], STDERR_FILENO );
         for ( int fd : { stdoutPipe[0], stdoutPipe[1], stderrPipe[0], stderrPipe[1],
@@ -916,8 +926,18 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     bool cancelled = false;
     bool timedOut = false;
     bool reaped = false;
+    // Child-exit liveness (#1041): the drain loop must NOT depend on pipe EOF
+    // alone. A descendant that inherited stdout/stderr keeps the write ends
+    // open after the direct child exited; without a waitpid(WNOHANG) probe
+    // the loop spins to the full timeout and falsely reports timedOut.
+    // Mirrors the Windows WaitForSingleObject + kPostExitDrainGraceMs model.
+    bool exited = false;
+    bool drainAbandoned = false;
+    std::chrono::steady_clock::time_point postExitDrainDeadline{};
     const int timeoutSeconds = request.timeoutSeconds > 0 ? request.timeoutSeconds : 3600;
     const auto deadline = startTime + std::chrono::seconds( timeoutSeconds );
+    const int drainGraceMs = request.postExitDrainGraceMs > 0 ? request.postExitDrainGraceMs
+                                                             : kPostExitDrainGraceMs;
 
     auto reapStatus = [&]( int status ) {
         result.exitCode = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
@@ -986,10 +1006,50 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( readFds[0] < 0 && readFds[1] < 0 && readFds[2] < 0 )
             break;
 
-        if ( !cancelled && request.isCancelled && request.isCancelled() )
-            cancelled = true;
-        if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
-            timedOut = true;
+        // Liveness probe (NOT pipe-EOF dependent): each iteration asks
+        // waitpid(WNOHANG) whether the direct child is gone. On exit a
+        // bounded post-exit drain window is armed so buffered tail output is
+        // still collected while a pipe-holding descendant cannot stall the
+        // call or convert a normal exit into a spurious timeout (#1041).
+        if ( !exited )
+        {
+            int status = 0;
+            const pid_t done = ::waitpid( pid, &status, WNOHANG );
+            if ( done == pid )
+            {
+                reapStatus( status );
+                exited = true;
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( drainGraceMs );
+            }
+            else if ( done < 0 && errno == ECHILD )
+            {
+                // SIGCHLD ignored / auto-reaped elsewhere: the child is gone
+                // even though no status is available. Never block on it.
+                exited = true;
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( drainGraceMs );
+            }
+        }
+        if ( exited && std::chrono::steady_clock::now() >= postExitDrainDeadline )
+        {
+            // Descendant still holds the pipes after the grace: stop
+            // draining and reap the surviving group below (Windows parity:
+            // closing the job object kills survivors at the same point).
+            drainAbandoned = true;
+            break;
+        }
+
+        // Windows parity: once the direct child exited, neither the deadline
+        // nor the cancel callback can retroactively convert a completed run
+        // into a timeout/cancellation; only the bounded drain remains.
+        if ( !exited )
+        {
+            if ( !cancelled && request.isCancelled && request.isCancelled() )
+                cancelled = true;
+            if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
+                timedOut = true;
+        }
 
         if ( cancelled || timedOut )
         {
@@ -1055,6 +1115,13 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( fd >= 0 )
             ::close( fd );
     }
+
+    // Post-exit drain abandoned with survivors holding the pipes: reap the
+    // surviving PROCESS GROUP only. The direct child was already reaped by
+    // the liveness probe; signalling its (reaped) pid again is undefined and
+    // could hit a recycled pid, so kill(-pid) is the whole operation.
+    if ( drainAbandoned && !timedOut && !cancelled )
+        ::kill( static_cast<pid_t>( -static_cast<long long>( pid ) ), SIGKILL );
 
     if ( !result.timedOut && !result.cancelled )
     {

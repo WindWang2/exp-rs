@@ -3,6 +3,7 @@
 
 #include "exprs/external_process.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #ifdef _WIN32
@@ -104,6 +105,52 @@ TEST_CASE( "external process reports exec failures", "[sdk][external]" )
     const auto result = ExternalProcess::run( request );
     REQUIRE_FALSE( result.exitedCleanly() );
     REQUIRE_FALSE( result.error.empty() );
+}
+
+TEST_CASE( "descendant-held pipes never stall run() or fake a timeout (#1041)",
+           "[sdk][external][liveness]" )
+{
+    // The direct child forks a descendant that keeps the inherited stdout
+    // write end open for 30 s and exits immediately. Pipe EOF therefore
+    // never arrives; only the waitpid(WNOHANG) liveness probe can observe
+    // the completed child. Before the fix the drain loop spun to the 60 s
+    // deadline and reported timedOut=true for a process that succeeded.
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", "sleep 30 & echo started; exit 0" };
+    request.timeoutSeconds = 60;
+    request.postExitDrainGraceMs = 500;
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = ExternalProcess::run( request );
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - start )
+                             .count();
+    REQUIRE( result.started );
+    REQUIRE_FALSE( result.timedOut );
+    REQUIRE_FALSE( result.cancelled );
+    REQUIRE( result.exitCode == 0 );
+    REQUIRE( result.exitSignal == 0 );
+    REQUIRE( result.stdOut.find( "started" ) != std::string::npos );
+    // Bounded by the grace (500 ms) plus scheduling, never the 60 s timeout.
+    REQUIRE( elapsed < 10000 );
+}
+
+TEST_CASE( "a genuinely hung child still hits the timeout ladder (#1041 regression guard)",
+           "[sdk][external][liveness]" )
+{
+    // The liveness probe must not weaken the timeout path: a child that
+    // stays alive is still killed and reported timedOut.
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", "sleep 30" };
+    request.timeoutSeconds = 1;
+    request.postExitDrainGraceMs = 500;
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = ExternalProcess::run( request );
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - start )
+                             .count();
+    REQUIRE( result.timedOut );
+    REQUIRE_FALSE( result.exitedCleanly() );
+    REQUIRE( elapsed < 20000 );
 }
 
 TEST_CASE( "workspace effect policy contains resolved execution effects (issue #757)",
