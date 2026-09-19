@@ -142,7 +142,8 @@ protected:
             if ( total > 0 && feedback ) feedback->setProgress( 100.0 * current / total );
 
             if ( matches( feat.attribute( fieldIdx ) ) )
-                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+                if (!sink->addFeature( feat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
         }
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};

@@ -23,6 +23,12 @@ namespace {
 /// Streaming tile dimension for the filter path (GdalBlockStream default).
 constexpr int kStreamTileDim = 256;
 
+/// Documented ceiling for a streaming filter's halo (kernel radius). Kernels
+/// are capped at 101 (#1044), so a radius of 128 is already above every legal
+/// filter; the guard keeps a programmatic/foreign caller from sizing a
+/// multi-GB per-tile buffer or overflowing `tile + 2*halo` (#1044).
+constexpr int kMaxStreamHalo = 128;
+
 /**
  * Converts a raw tile buffer to the operator's NaN convention, mirroring
  * readRasterBandsToMats: with a declared finite NoData, sentinel and
@@ -114,6 +120,12 @@ Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
     if (width <= 0 || height <= 0 || bandCount <= 0) {
         throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Failed to read raster bands from: " + inputPath);
+    }
+    if (halo > kMaxStreamHalo) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "filter radius " + std::to_string(halo) +
+                                  " exceeds the streaming bound " +
+                                  std::to_string(kMaxStreamHalo));
     }
 
     context.logInfo("Streaming raster tiles: " + inputPath);

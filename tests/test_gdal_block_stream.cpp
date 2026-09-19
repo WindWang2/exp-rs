@@ -11,6 +11,7 @@ using Catch::Approx;
 #include <gdal.h>
 
 #include <array>
+#include <limits>
 #include <vector>
 
 namespace
@@ -215,4 +216,38 @@ TEST_CASE( "GdalBlockStream: halo buffering and border replication", "[block_str
 
     REQUIRE( ok );
     REQUIRE( visited == 4 );
+}
+
+TEST_CASE( "GdalBlockStream: absurd halo is clamped instead of overflowing the buffer math (#1044)",
+           "[block_stream][halo][bounds]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( QStringLiteral( "r.tif" ) );
+    buildIndexRaster( path, 6, 6 );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( path ) );
+
+    // A halo near INT_MAX makes `width + 2*halo` overflow int and would size a
+    // pathological per-tile buffer; the structural ceiling keeps the tile math
+    // finite (metadata-only check: running forEach at the ceiling would
+    // deliberately allocate the capped buffer).
+    const int absurdHalo = std::numeric_limits<int>::max() / 2 + 1;
+    GdalBlockStream stream( ds, 1, 3, 3, absurdHalo );
+    const int halo = stream.halo();
+    REQUIRE( halo >= 0 );
+    REQUIRE( halo < absurdHalo );
+
+    REQUIRE( stream.tileCount() == 4 );
+    for ( int i = 0; i < stream.tileCount(); ++i )
+    {
+        const auto &t = stream.tile( i );
+        REQUIRE( t.bufferWidth == t.width + 2 * halo );
+        REQUIRE( t.bufferHeight == t.height + 2 * halo );
+    }
+
+    // A negative halo clamps to 0 (the historical max(0, halo) contract).
+    GdalBlockStream negativeHalo( ds, 1, 3, 3, -5 );
+    REQUIRE( negativeHalo.halo() == 0 );
 }

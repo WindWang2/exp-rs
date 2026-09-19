@@ -382,9 +382,23 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
 
     // Watchdog (#618): an external tool that hangs must not block its worker
     // thread forever. Default 30 minutes; tools may declare timeout_seconds.
+    // 64-bit math (#1043): the historical `toInt() * 1000` wrapped negative
+    // past ~24.8 days and turned a long timeout into an instant bogus kill.
+    // Clamp to a documented ceiling (7 days) so a typo cannot become UB.
+    constexpr qint64 kMaxTimeoutSeconds = 7 * 24 * 60 * 60;
     qint64 timeoutMs = 30 * 60 * 1000;
     if (m_config.contains(QStringLiteral("timeout_seconds")))
-        timeoutMs = m_config.value(QStringLiteral("timeout_seconds")).toInt() * 1000;
+    {
+        bool timeoutOk = false;
+        const qint64 timeoutSeconds =
+            m_config.value(QStringLiteral("timeout_seconds")).toVariant().toLongLong(&timeoutOk);
+        if (timeoutOk && timeoutSeconds > 0)
+            timeoutMs = qMin(timeoutSeconds, kMaxTimeoutSeconds) * 1000;
+        else if (!timeoutOk)
+            QgsMessageLog::logMessage(
+                QObject::tr("Invalid timeout_seconds value; using the default 30-minute watchdog."),
+                "generic_cli", Qgis::MessageLevel::Warning);
+    }
     QElapsedTimer watchdog;
     watchdog.start();
 

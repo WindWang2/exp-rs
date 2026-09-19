@@ -8,6 +8,8 @@
 // through observable throws, not implementation details.
 #include <catch2/catch_test_macros.hpp>
 
+#include <QTemporaryDir>
+
 #include "operators/framework/chunk_error_bridge.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -16,9 +18,11 @@
 #include "runtime/chunk/disk_tile_store.h"
 #include "runtime/chunk/scratch_registry.h"
 #include "runtime/chunk/tile_run_contract.h"
+#include "runtime/chunk/tile_spec.h"
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -315,4 +319,50 @@ TEST_CASE( "TileRunCancelSource honors flag-then-predicate precedence", "[chunk]
     TileRunCancelSource onlyPredicate;
     onlyPredicate.predicate = [] { return true; };
     REQUIRE( onlyPredicate.cancelled() );
+}
+
+TEST_CASE( "buildTileGrid refuses overflow-sized grids instead of wrapping (#1056)",
+           "[chunk][contract][tile_grid]" )
+{
+    using sicnu::runtime::chunk::buildTileGrid;
+
+    // Sanity: a normal grid is unchanged.
+    const auto grid = buildTileGrid( 1024, 768, 64, 64, 1, 4 );
+    REQUIRE( grid.size() == 16 * 12 );
+    REQUIRE( grid.front().totalTiles == 16 * 12 );
+    REQUIRE( grid.back().xOffset == 15 * 64 );
+
+    // GDAL-reported dimensions near INT_MAX: `rasterWidth + tileWidth - 1`
+    // and `cols * rows` overflow signed int — the grid must refuse loudly
+    // rather than wrap into UB or an absurd reserve.
+    REQUIRE_THROWS_AS( buildTileGrid( std::numeric_limits<int>::max(),
+                                      std::numeric_limits<int>::max(), 64, 64, 0, 1 ),
+                       std::length_error );
+    REQUIRE_THROWS_AS( buildTileGrid( 1 << 20, 1 << 20, 1, 1, 0, 1 ), std::length_error );
+    // `tile + 2*halo` must never overflow the buffer side either.
+    REQUIRE_THROWS_AS( buildTileGrid( 8, 8, 4, 4, std::numeric_limits<int>::max(), 1 ),
+                       std::length_error );
+    REQUIRE_THROWS_AS( buildTileGrid( 8, 8, 4, 4, -1, 1 ), std::invalid_argument );
+}
+
+TEST_CASE( "ScratchRegistry::acquire refuses path-injection components (#1056)",
+           "[chunk][contract][scratch]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    ScratchRegistry::Config config;
+    config.root = dir.path().toStdString();
+    ScratchRegistry registry( config );
+
+    const auto lease = registry.acquire( "run-1", "tile", 1024 );
+    REQUIRE( lease.path().find( "run-1" ) != std::string::npos );
+
+    // runId / stem are spliced into paths: separators, traversal tokens and
+    // colons must never be able to escape the scratch root.
+    REQUIRE_THROWS_AS( registry.acquire( "../escape", "tile", 1024 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run", "..", 1024 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run", "a/b", 1024 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run", "C:tile", 1024 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "", "tile", 1024 ), std::invalid_argument );
 }

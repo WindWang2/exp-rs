@@ -688,6 +688,79 @@ TEST_CASE( "watch token can be removed before the terminal transition (#702)",
 }
 
 // ---------------------------------------------------------------------------
+// #1056 regression: when the affinity thread is starved and the commit cannot
+// run, awaitResult must NOT return the task's raw temporary output path
+// (TaskCenter reaps scratch outputs — the caller would hold a dangling path
+// and no committed asset). A completed run with an output becomes a typed
+// error; output-less / non-completed tasks keep their standard payload.
+// ---------------------------------------------------------------------------
+TEST_CASE( "awaitResult never returns the raw temp output path when the commit cannot run (#1056)",
+           "[processing][execution_plane][commit][starved]" )
+{
+  ensureCoreApp();
+
+  // A completed task that reports an output.
+  registerStub( "stub:await_output", BehavioralStubAdapter::Mode::WriteOutput, /*sleepMs=*/50,
+                QStringLiteral( "/tmp/stub-await-output.tif" ) );
+  ExecutionRequest request;
+  request.algorithmId = QStringLiteral( "stub:await_output" );
+  const ExecutionHandle handle = ExecutionPlane::instance().submit( request );
+  REQUIRE( handle.taskId() > 0 );
+  REQUIRE( eventually( [&] {
+    return TaskCenter::instance().getTaskInfo( handle.taskId() ).status == TaskStatus::Completed;
+  } ) );
+
+  std::atomic<int> commits{ 0 };
+  auto countingCommitter = []( std::atomic<int> *counter ) {
+    return [counter]( const sicnu::AlgorithmTaskInfo &, std::string &path, std::string &,
+                      std::string & ) {
+      ++( *counter );
+      path = "/tmp/committed-from-starved.tif";
+      return true;
+    };
+  }( &commits );
+
+  // The affinity context lives on the main thread while awaitResult runs on a
+  // worker thread; the main thread never pumps its event loop (blocked in
+  // join), so the queued commit cannot be delivered — the starved branch.
+  QObject affinity;
+  Json::Value payload;
+  auto awaiter = std::thread( [&] {
+    payload = ExecutionPlane::instance().awaitResult(
+      handle.taskId(), std::chrono::seconds( 10 ), countingCommitter, &affinity,
+      /*cancelOnTimeout=*/false );
+  } );
+  awaiter.join();
+
+  REQUIRE( payload.isObject() );
+  CHECK( payload["status"].asString() == "error" );
+  const std::string message = payload["errorMessage"].asString();
+  CHECK( message.find( "commit" ) != std::string::npos );
+  CHECK( !payload.isMember( "output" ) );
+  CHECK( commits.load() == 0 );
+
+  // A task WITHOUT an output keeps its standard payload (nothing to commit).
+  registerStub( "stub:await_noout", BehavioralStubAdapter::Mode::Immediate );
+  ExecutionRequest request2;
+  request2.algorithmId = QStringLiteral( "stub:await_noout" );
+  const ExecutionHandle handle2 = ExecutionPlane::instance().submit( request2 );
+  REQUIRE( handle2.taskId() > 0 );
+  REQUIRE( eventually( [&] {
+    return TaskCenter::instance().getTaskInfo( handle2.taskId() ).status == TaskStatus::Completed;
+  } ) );
+
+  Json::Value payload2;
+  auto awaiter2 = std::thread( [&] {
+    payload2 = ExecutionPlane::instance().awaitResult(
+      handle2.taskId(), std::chrono::seconds( 10 ), countingCommitter, &affinity,
+      /*cancelOnTimeout=*/false );
+  } );
+  awaiter2.join();
+  REQUIRE( payload2.isObject() );
+  CHECK( payload2["status"].asString() == "success" );
+}
+
+// ---------------------------------------------------------------------------
 // 9. Shutdown with a running task: sync awaiters wake promptly. MUST BE LAST:
 //    TaskCenter::shutdown latches for the lifetime of the process.
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@
 #include <processing/qgsprocessingparameters.h>
 #include <qgsrasterlayer.h>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -134,11 +135,27 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
     proc.write(stdinLine.toUtf8());
     proc.closeWriteChannel();
 
+    // Watchdog (#1056): the sibling CLI implementations bound a hung tool at
+    // 30 minutes; this poll loop lacked it and could block its worker forever.
+    QElapsedTimer watchdog;
+    watchdog.start();
+    constexpr qint64 kWatchdogMs = 30 * 60 * 1000;
+
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
             proc.kill();
             feedback->reportError(QObject::tr("Tool execution canceled by user."));
             return {};
+        }
+        if (watchdog.elapsed() > kWatchdogMs) {
+            proc.kill();
+            proc.waitForFinished(5000);
+            const QString err = QObject::tr("Tool timed out after 30 minutes and was terminated.");
+            if (feedback) {
+                feedback->reportError(err);
+            }
+            SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
+            throw QgsProcessingException(err);
         }
         proc.waitForReadyRead(100);
         const QByteArray output = proc.readAllStandardOutput();

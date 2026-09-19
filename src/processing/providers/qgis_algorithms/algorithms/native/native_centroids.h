@@ -68,7 +68,8 @@ protected:
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( feat.geometry().centroid() );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if (!sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
             }
         }
 

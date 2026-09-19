@@ -457,10 +457,27 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     throw std::runtime_error( e.what().toStdString() );
   }
-
-  checkCancelled();
-  if ( feedback.isCanceled() )
+  catch ( const std::exception &e )
   {
+    // Any non-QgsProcessingException failure must still give the algorithm a
+    // chance to clean up partial work — swallowing it here would leak it
+    // (#1043).
+    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    throw std::runtime_error( e.what() );
+  }
+  catch ( ... )
+  {
+    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    throw;
+  }
+
+  // External cancel OR feedback-cancel must run postProcess(false) BEFORE the
+  // typed error leaves this function: the historical checkCancelled() threw
+  // first, so postProcess(false) never executed on the external-cancel path
+  // (#1043).
+  if ( ( isCancelledFn && isCancelledFn() ) || feedback.isCanceled() )
+  {
+    feedback.cancel();
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
                                              "Processing algorithm cancelled during run: " + mDesc.id );

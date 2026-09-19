@@ -56,7 +56,8 @@ protected:
             if (total > 0) feedback->setProgress(100.0 * current / total);
 
             if (!feat.hasGeometry()) {
-                sink->addFeature(feat, QgsFeatureSink::FastInsert);
+                if (!sink->addFeature( feat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
                 outputCount++;
                 continue;
             }
@@ -68,11 +69,13 @@ protected:
                 for (const QgsGeometry &part : parts) {
                     QgsFeature outputFeat = feat;
                     outputFeat.setGeometry(part);
-                    sink->addFeature(outputFeat, QgsFeatureSink::FastInsert);
+                    if (!sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ))
+                        throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
                     outputCount++;
                 }
             } else {
-                sink->addFeature(feat, QgsFeatureSink::FastInsert);
+                if (!sink->addFeature( feat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
                 outputCount++;
             }
         }

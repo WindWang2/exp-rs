@@ -213,7 +213,10 @@ bool streamBandWindowed( const GdalDatasetWrapper &src, int bandNum,
                          GdalStreamingOutput &dst, int tileDim, int halo,
                          const WindowedTileFn &fn )
 {
-    if ( tileDim < 1 || halo < 0 )
+    // #1044: the halo is a kernel radius — bound it so a foreign caller cannot
+    // size the tile buffer unboundedly (`tile + 2*halo`).
+    constexpr int kMaxWindowHalo = 128;
+    if ( tileDim < 1 || halo < 0 || halo > kMaxWindowHalo )
         return false;
     GdalBlockStream stream( src, bandNum, tileDim, tileDim, halo );
     std::vector<float> core( static_cast<size_t>( tileDim ) * tileDim );

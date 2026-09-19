@@ -131,7 +131,8 @@ protected:
                         outputFeat.setAttribute( i, feat.attribute( i ) );
                     for ( int i = 0; i < overlayFields.count(); ++i )
                         outputFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-                    sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                    if (!sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ))
+                        throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
                 }
             }
         }

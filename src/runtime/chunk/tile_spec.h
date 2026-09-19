@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace sicnu::runtime::chunk
@@ -62,11 +65,28 @@ inline std::vector<TileSpec> buildTileGrid( int rasterWidth, int rasterHeight,
     assert( tileWidth > 0 && tileHeight > 0 );
     assert( halo >= 0 );
     assert( bands > 0 );
+    // Release-build guards: GDAL-reported dimensions near INT_MAX make the
+    // historical `rasterWidth + tileWidth - 1` / `cols * rows` int arithmetic
+    // overflow (#1056). A negative or absurd grid is refused loudly instead of
+    // becoming UB or an OOB reserve.
+    if ( rasterWidth <= 0 || rasterHeight <= 0 || tileWidth <= 0 || tileHeight <= 0
+         || halo < 0 || bands <= 0 )
+        throw std::invalid_argument( "buildTileGrid: width/height/tile/halo/bands must be positive" );
+    const std::int64_t cols64 =
+        ( static_cast<std::int64_t>( rasterWidth ) + tileWidth - 1 ) / tileWidth;
+    const std::int64_t rows64 =
+        ( static_cast<std::int64_t>( rasterHeight ) + tileHeight - 1 ) / tileHeight;
+    const std::int64_t total64 = cols64 * rows64;
+    const std::int64_t maxBufferSide =
+        static_cast<std::int64_t>( std::max( tileWidth, tileHeight ) ) + 2LL * halo;
+    if ( total64 > std::numeric_limits<int>::max()
+         || maxBufferSide > std::numeric_limits<int>::max() )
+        throw std::length_error( "buildTileGrid: tile grid exceeds the supported integer range" );
     std::vector<TileSpec> tiles;
-    const int cols = ( rasterWidth + tileWidth - 1 ) / tileWidth;
-    const int rows = ( rasterHeight + tileHeight - 1 ) / tileHeight;
-    tiles.reserve( static_cast<size_t>( cols ) * rows );
-    const int total = cols * rows;
+    tiles.reserve( static_cast<std::size_t>( total64 ) );
+    const int cols = static_cast<int>( cols64 );
+    const int rows = static_cast<int>( rows64 );
+    const int total = static_cast<int>( total64 );
     int index = 0;
     for ( int row = 0; row < rows; ++row )
     {

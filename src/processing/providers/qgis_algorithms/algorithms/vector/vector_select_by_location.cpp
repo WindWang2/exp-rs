@@ -148,7 +148,8 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
         }
 
         if ( match )
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
     }
 
     return QVariantMap{{OUTPUT, dest}};

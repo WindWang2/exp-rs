@@ -176,7 +176,8 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
                 outputFeat.setAttribute( QStringLiteral( "TargetID" ), nearest.attribute( targetFieldName ).toString() );
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), dist );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
             }
         }
         else if ( outputType == 1 )
@@ -196,7 +197,8 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 double dist = std::sqrt( dx * dx + dy * dy );
                 outputFeat.setAttribute( colName, dist );
             }
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
         }
         else
         {
@@ -231,7 +233,8 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), de.distance );
                 if ( outputType == 0 )
                     outputFeat.setAttribute( QStringLiteral( "Rank" ), rank );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
                 rank++;
             }
         }

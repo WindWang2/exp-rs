@@ -1,9 +1,11 @@
 // tests/test_vector_overlay_crs_transform.cpp
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <qgsapplication.h>
 #include <qgsvectorlayer.h>
 #include <qgsfeature.h>
+#include <qgsfeatureiterator.h>
 #include <qgsgeometry.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsprocessingcontext.h>
@@ -14,6 +16,7 @@
 #include "processing/providers/qgis_algorithms/algorithms/native/native_intersection.h"
 #include "processing/providers/qgis_algorithms/algorithms/native/native_union.h"
 #include "processing/providers/qgis_algorithms/algorithms/vector/vector_difference.h"
+#include "processing/providers/qgis_algorithms/algorithms/vector/vector_dissolve.h"
 #include "processing/providers/qgis_algorithms/algorithms/vector/vector_symmetrical_difference.h"
 #include "processing/providers/qgis_algorithms/algorithms/vector/vector_spatial_query.h"
 #include "processing/providers/qgis_algorithms/algorithms/vector/vector_select_by_location.h"
@@ -217,4 +220,135 @@ TEST_CASE("Vector overlay algorithms transform geometries across different CRSs 
         CHECK(f1.geometry().boundingBox().xMaximum() <= 1.01);
         CHECK(f2.geometry().boundingBox().xMaximum() <= 1.01);
     }
+}
+
+TEST_CASE("VectorMergeAlgorithm refuses unwritable features instead of dropping them (#1043)",
+          "[processing][vector][merge]") {
+    // The sink is typed from the FIRST layer's wkbType while INPUT_LAYERS
+    // accepts VectorAnyGeometry: merging a Point layer with a Polygon layer
+    // used to silently drop every non-converting feature while the task
+    // reported success. The addFeature() check (#1043) turns that into a
+    // loud QgsProcessingException.
+    std::unique_ptr<QgsVectorLayer> pointLayer(new QgsVectorLayer(
+        "Point?crs=EPSG:4326&field=name:string", "merge_pt", "memory"));
+    REQUIRE(pointLayer->isValid());
+    QgsFeature pt(pointLayer->fields());
+    pt.setAttribute("name", "pt");
+    pt.setGeometry(QgsGeometry::fromWkt("POINT(0 0)"));
+    QgsFeatureList ptList = {pt};
+    REQUIRE(pointLayer->dataProvider()->addFeatures(ptList));
+
+    std::unique_ptr<QgsVectorLayer> polyLayer(new QgsVectorLayer(
+        "Polygon?crs=EPSG:4326&field=name:string", "merge_poly", "memory"));
+    REQUIRE(polyLayer->isValid());
+    QgsFeature pg(polyLayer->fields());
+    pg.setAttribute("name", "pg");
+    pg.setGeometry(QgsGeometry::fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"));
+    QgsFeatureList pgList = {pg};
+    REQUIRE(polyLayer->dataProvider()->addFeatures(pgList));
+
+    VectorMergeAlgorithm proto;
+    std::unique_ptr<QgsProcessingAlgorithm> alg(proto.create());
+
+    QgsProcessingContext context;
+    QgsProcessingFeedback feedback;
+    QVariantMap params;
+    QVariantList mapLayers = {
+        QVariant::fromValue(static_cast<QgsMapLayer *>(pointLayer.get())),
+        QVariant::fromValue(static_cast<QgsMapLayer *>(polyLayer.get()))
+    };
+    params[QStringLiteral("INPUT_LAYERS")] = mapLayers;
+    params[QStringLiteral("OUTPUT")] = QStringLiteral("memory:");
+
+    bool ok = true;
+    try {
+        (void)alg->run(params, context, &feedback, &ok);
+        FAIL("expected QgsProcessingException for features the sink cannot store");
+    } catch (const QgsProcessingException &e) {
+        const QString message = e.what();
+        CHECK(message.contains(QStringLiteral("Could not write feature"), Qt::CaseInsensitive));
+        CHECK(message.contains(QStringLiteral("geometry type"), Qt::CaseInsensitive));
+    }
+    CHECK_FALSE(ok);
+
+    // Same-type merges still succeed (the guard must not reject valid work).
+    std::unique_ptr<QgsVectorLayer> pointLayer2(new QgsVectorLayer(
+        "Point?crs=EPSG:4326&field=name:string", "merge_pt2", "memory"));
+    REQUIRE(pointLayer2->isValid());
+    QgsFeature pt2(pointLayer2->fields());
+    pt2.setAttribute("name", "pt2");
+    pt2.setGeometry(QgsGeometry::fromWkt("POINT(2 2)"));
+    QgsFeatureList pt2List = {pt2};
+    REQUIRE(pointLayer2->dataProvider()->addFeatures(pt2List));
+
+    QVariantMap params2;
+    QVariantList mapLayers2 = {
+        QVariant::fromValue(static_cast<QgsMapLayer *>(pointLayer.get())),
+        QVariant::fromValue(static_cast<QgsMapLayer *>(pointLayer2.get()))
+    };
+    params2[QStringLiteral("INPUT_LAYERS")] = mapLayers2;
+    params2[QStringLiteral("OUTPUT")] = QStringLiteral("memory:");
+    bool ok2 = false;
+    QVariantMap res2 = alg->run(params2, context, &feedback, &ok2);
+    REQUIRE(ok2);
+    auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res2[QStringLiteral("OUTPUT")].toString()));
+    REQUIRE(outLayer != nullptr);
+    CHECK(outLayer->featureCount() == 2);
+}
+
+TEST_CASE("VectorDissolveAlgorithm unions groups once and keeps every group (#1056)",
+          "[processing][vector][dissolve]") {
+    // Two adjacent squares share the edge x=1; dissolving by the group field
+    // must yield ONE feature per group with the correct union geometry. The
+    // historical implementation re-copied the accumulated geometry on every
+    // feature (O(group²)); the refactor collects parts and unions once.
+    std::unique_ptr<QgsVectorLayer> layer(new QgsVectorLayer(
+        "Polygon?crs=EPSG:4326&field=grp:string", "dissolve_in", "memory"));
+    REQUIRE(layer->isValid());
+    QgsFeatureList feats;
+    const char *groups[3] = {"a", "a", "b"};
+    const char *wkts[3] = {
+        "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+        "POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))",
+        "POLYGON((5 5, 6 5, 6 6, 5 6, 5 5))"
+    };
+    for (int i = 0; i < 3; ++i) {
+        QgsFeature f(layer->fields());
+        f.setAttribute("grp", QString::fromUtf8(groups[i]));
+        f.setGeometry(QgsGeometry::fromWkt(wkts[i]));
+        feats.append(f);
+    }
+    REQUIRE(layer->dataProvider()->addFeatures(feats));
+
+    VectorDissolveAlgorithm proto;
+    std::unique_ptr<QgsProcessingAlgorithm> alg(proto.create());
+
+    QgsProcessingContext context;
+    QgsProcessingFeedback feedback;
+    QVariantMap params;
+    params[QStringLiteral("INPUT")] = QVariant::fromValue(static_cast<QgsMapLayer *>(layer.get()));
+    params[QStringLiteral("FIELD")] = QStringLiteral("grp");
+    params[QStringLiteral("OUTPUT")] = QStringLiteral("memory:");
+
+    bool ok = false;
+    QVariantMap res = alg->run(params, context, &feedback, &ok);
+    REQUIRE(ok);
+    auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
+    REQUIRE(outLayer != nullptr);
+    // Group "a" (two adjacent squares) and group "b" (one square).
+    REQUIRE(outLayer->featureCount() == 2);
+
+    double areaA = -1.0;
+    double areaB = -1.0;
+    QgsFeatureIterator it = outLayer->getFeatures();
+    QgsFeature of;
+    while (it.nextFeature(of)) {
+        const double area = of.geometry().area();
+        if (of.attribute("grp").toString() == QStringLiteral("a"))
+            areaA = area;
+        else
+            areaB = area;
+    }
+    CHECK_THAT(areaA, Catch::Matchers::WithinAbs(2.0, 1e-6));
+    CHECK_THAT(areaB, Catch::Matchers::WithinAbs(1.0, 1e-6));
 }

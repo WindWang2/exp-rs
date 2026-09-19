@@ -14,6 +14,36 @@
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
 #include <gdal.h>
+#include <cpl_vsi.h>
+
+namespace
+{
+
+/// Maps a block's QGIS data type to the GDAL buffer type GDALRasterIO must be
+/// told. Passing the BLOCK's own type (instead of the output band's type) is
+/// what makes mixed Byte/Float32 inputs correct: GDAL then converts
+/// buffer→band instead of trusting a mismatched element size (#1035).
+GDALDataType gdalBufferType( Qgis::DataType dt )
+{
+    switch ( dt )
+    {
+        case Qgis::DataType::Byte: return GDT_Byte;
+        case Qgis::DataType::Int8: return GDT_Int8;
+        case Qgis::DataType::UInt16: return GDT_UInt16;
+        case Qgis::DataType::Int16: return GDT_Int16;
+        case Qgis::DataType::UInt32: return GDT_UInt32;
+        case Qgis::DataType::Int32: return GDT_Int32;
+        case Qgis::DataType::Float32: return GDT_Float32;
+        case Qgis::DataType::Float64: return GDT_Float64;
+        case Qgis::DataType::CInt16: return GDT_CInt16;
+        case Qgis::DataType::CInt32: return GDT_CInt32;
+        case Qgis::DataType::CFloat32: return GDT_CFloat32;
+        case Qgis::DataType::CFloat64: return GDT_CFloat64;
+        default: return GDT_Float32;
+    }
+}
+
+} // namespace
 
 void RasterMergeBandsAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -135,6 +165,7 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
         if ( feedback->isCanceled() )
         {
             GDALClose( hOutDs );
+            VSIUnlink( dest.toUtf8().constData() );
             return QVariantMap();
         }
         GDALRasterBandH hBand = GDALGetRasterBand( hOutDs, b + 1 );
@@ -145,10 +176,11 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
         const void *data = blocks[b]->bits();
         CPLErr cplErr = GDALRasterIO( hBand, GF_Write, 0, 0, nCols, nRows,
                                      const_cast<void *>( data ), nCols, nRows,
-                                     gdalType, 0, 0 );
+                                     gdalBufferType( blocks[b]->dataType() ), 0, 0 );
         if ( cplErr != CE_None )
         {
             GDALClose( hOutDs );
+            VSIUnlink( dest.toUtf8().constData() );
             throw QgsProcessingException( QObject::tr( "Error writing band %1" ).arg( b + 1 ) );
         }
         feedback->setProgress( 50.0 + 50.0 * ( b + 1 ) / totalBands );

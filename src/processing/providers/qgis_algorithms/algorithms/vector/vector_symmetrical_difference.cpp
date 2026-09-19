@@ -130,7 +130,8 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
             outFeat.setGeometry( geomA );
             for ( int i = 0; i < source->fields().count(); ++i )
                 outFeat.setAttribute( i, inFeat.attribute( i ) );
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
         }
     }
 
@@ -152,7 +153,8 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
             outFeat.setGeometry( geomB );
             for ( int i = 0; i < overlayFields.count(); ++i )
                 outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
         }
     }
 

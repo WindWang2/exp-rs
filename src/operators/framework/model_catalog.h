@@ -13,6 +13,19 @@
 
 namespace sicnu::operators {
 
+// --- Resource ceilings for manifest-controlled integers (#1044) --------------
+
+/// Frames per inference a feed may declare (manifest `temporal_length`) or
+/// provide. The engine materializes `bands × T` channels per tile, so an
+/// unbounded time axis is an unbounded allocation AND an int-overflow hazard;
+/// the engine enforces the same bound on the provided-frame count.
+inline constexpr int kMaxModelTemporalFrames = 1024;
+
+/// Symmetric tile-padding ceiling in px (manifest `preprocess.pad`). The fed
+/// window side is `tile_size + 2·halo + 2·pad`; this bound keeps the window and
+/// the int arithmetic sizing it finite.
+inline constexpr int kMaxPreprocessPad = 4096;
+
 // --- Platform 10.0: EO task vocabulary ---------------------------------------
 
 /// Canonical EO task vocabulary (Platform 10.0). The manifest `task` string

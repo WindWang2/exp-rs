@@ -72,7 +72,8 @@ protected:
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( feat.geometry().simplify( tolerance ) );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if (!sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ))
+                    throw QgsProcessingException(writeFeatureError(sink.get(), parameters, QString()));
             }
         }
 

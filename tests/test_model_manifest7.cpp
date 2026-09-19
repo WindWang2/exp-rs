@@ -382,3 +382,30 @@ TEST_CASE( "validateManifestJson reports 7.0 refusals without registering", "[mo
   CHECK( found );
   CHECK( !catalog.find( "m7-val" ).has_value() );
 }
+
+TEST_CASE( "manifest-controlled integers carry resource bounds (#1044)", "[models][manifest7][bounds]" )
+{
+  // An unbounded time axis is an unbounded allocation (and an int-overflow
+  // hazard in `bands × T`): the catalog must refuse a temporal_length beyond
+  // the documented frame ceiling.
+  expectRefusal( R"({
+      "name": "m7-badtemporal", "task": "t", "framework": "onnx",
+      "inputs": [ { "name": "x", "temporal_length": 715827883, "missing_timestep": "zero" } ] })",
+                 "temporal_length 715827883 exceeds the temporal bound" );
+  // preprocess.pad grows every fed window by 2*pad per side: it needs its own
+  // ceiling, consistent with tile_size/halo.
+  expectRefusal( R"({
+      "name": "m7-badpad", "task": "t", "framework": "onnx",
+      "inputs": [ { "name": "x", "band_roles": ["R","G","B"] } ],
+      "preprocess": { "pad": 1000000 } })",
+                 "preprocess.pad 1000000 exceeds the resource bound" );
+
+  // Exactly at the documented ceilings the manifest still parses and loads.
+  const auto okModel = parseOk( R"({
+      "name": "m7-maxbounds", "task": "t", "framework": "onnx",
+      "inputs": [ { "name": "x", "temporal_length": 1024, "missing_timestep": "zero" } ],
+      "preprocess": { "pad": 4096 } })" );
+  CHECK( okModel.inputs[0].temporalLength == 1024 );
+  CHECK( okModel.preprocess.pad == 4096 );
+  CHECK( okModel.readiness != ModelReadiness::InvalidManifest );
+}

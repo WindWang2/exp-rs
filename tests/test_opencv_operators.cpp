@@ -114,6 +114,62 @@ TEST_CASE("OpenCvGaussianBlurOperator rejects even kernel size", "[opencv]") {
     }
 }
 
+TEST_CASE("OpenCv filters refuse kernel sizes beyond the documented ceiling (#1044)", "[opencv]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    QString input = createTestRaster(tempDir.path(), "in.tif", 8, 8);
+    QString output = tempDir.path() + QDir::separator() + "out.tif";
+    RSOperatorContext ctx;
+
+    // A kernel edge beyond the streaming ceiling (101) would size a multi-GB
+    // halo buffer and push tile + 2*halo toward int overflow.
+    const int absurdKernel = 1000001; // odd
+    {
+        auto op = std::make_unique<OpenCvGaussianBlurOperator>();
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = absurdKernel;
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError for oversized gaussian kernel");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+            CHECK(std::string(e.what()).find("101") != std::string::npos);
+        }
+    }
+    {
+        auto op = std::make_unique<OpenCvMeanBlurOperator>();
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = absurdKernel;
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError for oversized mean-blur kernel");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+        }
+    }
+    {
+        auto op = std::make_unique<OpenCvMedianBlurOperator>();
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = absurdKernel;
+        try {
+            op->run(params, ctx);
+            FAIL("Expected RSOperatorError for oversized median kernel");
+        } catch (const RSOperatorError& e) {
+            REQUIRE(e.code() == ErrorCode::InvalidParameter);
+        }
+    }
+    // A legal kernel at the ceiling still runs (the guard must not reject
+    // valid work).
+    {
+        auto op = std::make_unique<OpenCvMeanBlurOperator>();
+        Json::Value params = makeParams(input, output);
+        params["kernelSize"] = 101;
+        const Json::Value result = op->run(params, ctx);
+        REQUIRE(result["output"].asString() == output.toStdString());
+    }
+}
+
 TEST_CASE("OpenCvGaussianBlurOperator produces output", "[opencv]") {
     QTemporaryDir tempDir;
     REQUIRE(tempDir.isValid());

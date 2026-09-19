@@ -99,7 +99,8 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( clipped );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
             }
         }
     }
