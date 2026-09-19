@@ -3,6 +3,7 @@
 
 #include "data/governance/governance_store.h"
 #include "data/governance/governance_types.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <QDateTime>
 #include <QFile>
@@ -10,6 +11,8 @@
 #include <QVariantMap>
 
 using namespace sicnu::workspace;
+using sicnu::runtime::observability::fault::ArmedFault;
+using sicnu::runtime::observability::fault::Mode;
 
 namespace
 {
@@ -396,4 +399,207 @@ TEST_CASE( "GovernanceStore smart collections, exports, mappings, audit, integri
     REQUIRE( store.clearAll().operator bool() );
     REQUIRE( store.assetCount() == 0 );
     REQUIRE( store.exports().isEmpty() );
+}
+
+// Issue #1056: removeAsset used to leave the asset referenced by
+// dataset_members / result_inputs / run_outputs — readers handed out ids no
+// lookup could resolve. The removal now clears those relationship rows inside
+// the same transaction.
+TEST_CASE( "GovernanceStore removeAsset leaves no phantom references in datasets, results or runs",
+           "[governance][store][issue1056]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    REQUIRE( store.upsertAsset( makeAsset( "gone", "gone" ) ).operator bool() );
+    REQUIRE( store.upsertAsset( makeAsset( "stays", "stays" ) ).operator bool() );
+
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.header.name = QStringLiteral( "mixed" );
+    ds.memberAssetIds = QStringList{ QStringLiteral( "gone" ), QStringLiteral( "stays" ) };
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+
+    ResultRecord r;
+    r.id = ResultId::generate();
+    r.semanticType = ResultSemanticType::Classification;
+    ResultInput in;
+    in.assetId = QStringLiteral( "gone" );
+    ResultInput keep;
+    keep.assetId = QStringLiteral( "stays" );
+    r.inputs.append( in );
+    r.inputs.append( keep );
+    REQUIRE( store.upsertResult( r ).operator bool() );
+
+    RunRecord run;
+    run.id = QStringLiteral( "run-phantom" );
+    run.state = QStringLiteral( "Completed" );
+    REQUIRE( store.upsertRun( run ).operator bool() );
+    REQUIRE( store.linkRunOutput( QStringLiteral( "run-phantom" ), QStringLiteral( "gone" ) ).operator bool() );
+    REQUIRE( store.linkRunOutput( QStringLiteral( "run-phantom" ), QStringLiteral( "stays" ) ).operator bool() );
+
+    REQUIRE( store.removeAsset( QStringLiteral( "gone" ) ).operator bool() );
+
+    // No reader returns the removed id anymore.
+    const auto loadedDataset = store.datasetById( ds.id.toString() );
+    REQUIRE( loadedDataset.has_value() );
+    REQUIRE( loadedDataset->memberAssetIds == QStringList{ QStringLiteral( "stays" ) } );
+
+    const auto loadedResult = store.resultById( r.id.toString() );
+    REQUIRE( loadedResult.has_value() );
+    for ( const ResultInput &remaining : loadedResult->inputs )
+        REQUIRE( remaining.assetId != QLatin1String( "gone" ) );
+    REQUIRE( loadedResult->inputs.size() == 1 );
+    REQUIRE( store.resultsDependingOnAsset( QStringLiteral( "gone" ) ).isEmpty() );
+
+    const auto loadedRun = store.runById( QStringLiteral( "run-phantom" ) );
+    REQUIRE( loadedRun.has_value() );
+    REQUIRE( loadedRun->outputAssetIds == QStringList{ QStringLiteral( "stays" ) } );
+
+    // The dataset-scoped query surface cannot resurrect the id either.
+    WorkspaceQuery q;
+    q.set = EntitySet::Assets;
+    q.datasetId = ds.id.toString();
+    REQUIRE( store.query( q ).total == 1 );
+}
+
+TEST_CASE( "GovernanceStore removeAsset is atomic under injected failures",
+           "[governance][store][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    REQUIRE( store.upsertAsset( makeAsset( "a", "a" ) ).operator bool() );
+
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.memberAssetIds = QStringList{ QStringLiteral( "a" ) };
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+
+    auto verifyIntact = [ & ]() {
+        REQUIRE( store.assetById( QStringLiteral( "a" ) ).has_value() );
+        REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds.size() == 1 );
+        REQUIRE( store.tagsOf( QStringLiteral( "asset" ), QStringLiteral( "a" ) ).size() == 1 );
+        REQUIRE( store.directEdges( QStringLiteral( "a" ), true ).size() == 1 );
+    };
+
+    GovernanceStore::LineageEdge edge;
+    edge.outputAssetId = QStringLiteral( "a" );
+    edge.inputAssetId = QStringLiteral( "upstream" );
+    edge.operatorId = QStringLiteral( "rs:test" );
+    REQUIRE( store.addLineageEdges( { edge } ).operator bool() );
+    REQUIRE( store.addTag( QStringLiteral( "asset" ), QStringLiteral( "a" ), QStringLiteral( "qa" ) ).operator bool() );
+
+    // Step-seam failure: the removal is refused wholesale.
+    {
+        ArmedFault fault( { "governance_store.step", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( store.removeAsset( QStringLiteral( "a" ) ).operator bool() );
+    }
+    verifyIntact();
+
+    // Commit-seam failure: same verdict, nothing half-removed.
+    {
+        ArmedFault fault( { "governance_store.commit", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( store.removeAsset( QStringLiteral( "a" ) ).operator bool() );
+    }
+    verifyIntact();
+
+    // Removing an unknown id fails without disturbing the graph (the
+    // not-found verdict no longer commits after partial cleanup).
+    REQUIRE_FALSE( store.removeAsset( QStringLiteral( "nope" ) ).operator bool() );
+    verifyIntact();
+
+    // The handle is still usable and the real removal clears relationships.
+    REQUIRE( store.removeAsset( QStringLiteral( "a" ) ).operator bool() );
+    REQUIRE_FALSE( store.assetById( QStringLiteral( "a" ) ).has_value() );
+    REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds.isEmpty() );
+}
+
+TEST_CASE( "GovernanceStore multi-statement writers roll back to the prior state on failure",
+           "[governance][store][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    // Dataset membership rewrite: a commit failure keeps the OLD members.
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.memberAssetIds = QStringList{ QStringLiteral( "m1" ), QStringLiteral( "m2" ) };
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+    {
+        ArmedFault fault( { "governance_store.commit", Mode::NextN, 1, {} } );
+        DatasetRecord changed = ds;
+        changed.memberAssetIds = QStringList{ QStringLiteral( "m3" ) };
+        REQUIRE_FALSE( store.upsertDataset( changed ).operator bool() );
+    }
+    REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds
+             == QStringList{ QStringLiteral( "m1" ), QStringLiteral( "m2" ) } );
+
+    // Lineage reconciliation with replaceOutgoing: a commit failure must NOT
+    // lose the superseded edges it was about to replace.
+    auto edge = [ & ]( const QString &out, const QString &in ) {
+        GovernanceStore::LineageEdge e;
+        e.outputAssetId = out;
+        e.inputAssetId = in;
+        e.operatorId = QStringLiteral( "rs:test" );
+        return e;
+    };
+    REQUIRE( store.addLineageEdges( { edge( "out", "in1" ) } ).operator bool() );
+    {
+        ArmedFault fault( { "governance_store.commit", Mode::NextN, 1, {} } );
+        REQUIRE_FALSE( store.addLineageEdges( { edge( "out", "in2" ) }, true ).operator bool() );
+    }
+    const QVector<GovernanceStore::LineageEdge> edges = store.directEdges( QStringLiteral( "out" ), true );
+    REQUIRE( edges.size() == 1 );
+    REQUIRE( edges.first().inputAssetId == QLatin1String( "in1" ) );
+
+    // All writers still succeed on the same handle — no leaked transaction.
+    DatasetRecord ok = ds;
+    ok.memberAssetIds = QStringList{ QStringLiteral( "m3" ) };
+    REQUIRE( store.upsertDataset( ok ).operator bool() );
+    REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds == QStringList{ QStringLiteral( "m3" ) } );
+    REQUIRE( store.addLineageEdges( { edge( "out", "in2" ) }, true ).operator bool() );
+    REQUIRE( store.directEdges( QStringLiteral( "out" ), true ).size() == 1 );
+}
+
+// A removal that reports success MUST be committed: a leaked transaction
+// breaks every later write on the handle (BEGIN fails) and an uncommitted
+// removal vanishes on reopen even though the caller saw success.
+TEST_CASE( "GovernanceStore removals commit durably and never leak the transaction",
+           "[governance][store][fault][issue1045]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "gov.db" ) );
+    GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.memberAssetIds = QStringList{ QStringLiteral( "m1" ) };
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+    ResultRecord r;
+    r.id = ResultId::generate();
+    REQUIRE( store.upsertResult( r ).operator bool() );
+    ExperimentRecord exp;
+    exp.id = ExperimentId::generate();
+    REQUIRE( store.upsertExperiment( exp ).operator bool() );
+
+    REQUIRE( store.removeDataset( ds.id.toString() ).operator bool() );
+    REQUIRE( store.removeResult( r.id.toString() ).operator bool() );
+    REQUIRE( store.removeExperiment( exp.id.toString() ).operator bool() );
+
+    // A leaked transaction would fail this BEGIN on the same handle.
+    REQUIRE( store.upsertAsset( makeAsset( "after", "after" ) ).operator bool() );
+
+    // A fresh handle reads COMMITTED state: all three removals are durable
+    // and the follow-up write survived too.
+    GovernanceStore fresh;
+    REQUIRE( fresh.open( dbPath ) );
+    REQUIRE_FALSE( fresh.datasetById( ds.id.toString() ).has_value() );
+    REQUIRE_FALSE( fresh.resultById( r.id.toString() ).has_value() );
+    REQUIRE_FALSE( fresh.experimentById( exp.id.toString() ).has_value() );
+    REQUIRE( fresh.assetById( QStringLiteral( "after" ) ).has_value() );
 }
