@@ -44,6 +44,7 @@ enum class ServerBehavior
   Normal,        ///< Range honored, full answers
   NoRange,       ///< Range header ignored (always 200 + whole file)
   ServerError,   ///< every request answers 500
+  Gone,          ///< every request answers 410 (the strict-fetch NotFound arm)
   Truncated,     ///< body cut short (connection reset mid-payload)
   Slow,          ///< answers after a delay (timeout probing)
   ResetRanged,   ///< 8.0: the FIRST ranged GET beyond the identity head

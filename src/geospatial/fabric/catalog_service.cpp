@@ -383,12 +383,21 @@ Json::Value CatalogPage::statsJson() const
 namespace
 {
 
+/// A catalog item/link document is a small JSON sidecar; anything bigger is
+/// not a catalog document (memory-DoS guard for the read path).
+constexpr std::uintmax_t kMaxCatalogJsonBytes = 16ull * 1024ull * 1024ull;
+
 /// Bounded generic JSON file reader (shape sniffing for local candidates).
 /// Throws GeoError(OpenFailed/InvalidMetadata).
 Json::Value readJsonFile( const std::string &path )
 {
   if ( path.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readJsonFile: empty path" );
+  VSIStatBufL statBuffer;
+  if ( VSIStatL( path.c_str(), &statBuffer ) == 0 &&
+       static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxCatalogJsonBytes )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "readJsonFile: file exceeds the size cap; refusing to read: " + path );
   std::ifstream in( path, std::ios::binary );
   if ( !in )
     throw GeoError( ErrorCode::OpenFailed, "readJsonFile: cannot open " + path );
@@ -404,7 +413,8 @@ Json::Value readJsonFile( const std::string &path )
 
 bool isItemShape( const Json::Value &json )
 {
-  return json["type"].asString() == "Feature" && json["assets"].isObject();
+  return json.isObject() && json["type"].isString() && json["type"].asString() == "Feature" &&
+         json["assets"].isObject();
 }
 
 // --- VSI path helpers (portable; std::filesystem is off the table here —
@@ -589,8 +599,10 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
             continue;
           for ( const Json::Value &link : links )
           {
-            const std::string rel = link["rel"].asString();
-            const std::string href = link["href"].asString();
+            if ( !link.isObject() )
+              continue;   // foreign-typed element: not a link document
+            const std::string rel = link["rel"].isString() ? link["rel"].asString() : std::string();
+            const std::string href = link["href"].isString() ? link["href"].asString() : std::string();
             if ( href.empty() )
               continue;
             if ( rel == "child" || rel == "item" )

@@ -19,6 +19,7 @@
 #include "geospatial/fabric/virtual_cube.h"
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/raster/raster_writer.h"
+#include "geospatial/util/sha256.h"
 #include "support/http_s3_server.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -345,6 +346,120 @@ TEST_CASE( "offline misses are honest, corrupted chunks are misses, expiry is co
     !window.provenance.front().mirrorHit.empty();
   CHECK( ( honestlyFailed || servedFromMirror ) );
   CHECK( server.requestCount() == requestsBefore );   // still zero dispatch
+}
+
+TEST_CASE( "manifest-named chunk files cannot escape the mirror and must prove themselves",
+           "[io][fabric][replay][security]" )
+{
+  SECTION( "parent-directory traversal is a corrupt entry" )
+  {
+    const std::string dir = scratchDir( "traversal" );
+    const std::string mirrorDir = dir + "/mirror";
+    std::filesystem::create_directories( mirrorDir + "/chunks" );
+    Json::Value manifest( Json::objectValue );
+    manifest["index"] = Json::Value( Json::objectValue );
+    manifest["token-a"]["key-a"]["file"] = "../../escaped.tif";
+    manifest["token-a"]["key-a"]["bytes"] = 1;
+    {
+      std::ofstream out( mirrorDir + "/manifest.json", std::ios::binary );
+      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+    }
+    std::string skipped;
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-a", &skipped ).empty() );
+    CHECK( skipped.find( "unsafe" ) != std::string::npos );
+  }
+
+  SECTION( "absolute and drive-qualified names are corrupt entries" )
+  {
+    const std::string dir = scratchDir( "absolute" );
+    const std::string mirrorDir = dir + "/mirror";
+    std::filesystem::create_directories( mirrorDir + "/chunks" );
+    Json::Value manifest( Json::objectValue );
+    manifest["index"] = Json::Value( Json::objectValue );
+    manifest["token-a"]["key-a"]["file"] = "C:\\outside.tif";
+    manifest["token-a"]["key-b"]["file"] = "/etc/passwd";
+    {
+      std::ofstream out( mirrorDir + "/manifest.json", std::ios::binary );
+      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+    }
+    std::string skipped;
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-a", &skipped ).empty() );
+    CHECK( skipped.find( "unsafe" ) != std::string::npos );
+    skipped.clear();
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-b", &skipped ).empty() );
+    CHECK( skipped.find( "unsafe" ) != std::string::npos );
+  }
+
+  SECTION( "an 11.0 entry without sha256 fails closed; a proven entry resolves" )
+  {
+    const std::string dir = scratchDir( "integrity" );
+    const std::string mirrorDir = dir + "/mirror";
+    std::filesystem::create_directories( mirrorDir + "/chunks" );
+    const std::string chunk = mirrorDir + "/chunks/ok.tif";
+    const std::string chunkBytes = "chunk-payload";
+    {
+      std::ofstream out( chunk, std::ios::binary );
+      out << chunkBytes;
+    }
+    auto writeManifest = [ & ]( const Json::Value &manifest ) {
+      const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
+      std::ofstream out( mirrorDir + "/manifest.json", std::ios::binary );
+      out << text;
+    };
+    Json::Value unproven( Json::objectValue );
+    unproven["index"] = Json::Value( Json::objectValue );
+    unproven["token-a"]["key-a"]["file"] = "ok.tif";
+    unproven["token-a"]["key-a"]["bytes"] = static_cast<Json::UInt64>( chunkBytes.size() );
+    writeManifest( unproven );
+    std::string skipped;
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-a", &skipped ).empty() );
+    CHECK( skipped.find( "sha256" ) != std::string::npos );
+
+    Json::Value proven( Json::objectValue );
+    proven["index"] = Json::Value( Json::objectValue );
+    proven["token-a"]["key-a"]["file"] = "ok.tif";
+    proven["token-a"]["key-a"]["bytes"] = static_cast<Json::UInt64>( chunkBytes.size() );
+    proven["token-a"]["key-a"]["sha256"] = sha256Hex( chunkBytes );
+    proven["token-a"]["key-r"]["file"] = "ok.tif";
+    proven["token-a"]["key-r"]["bytes"] = 1;   // lies about the size
+    proven["token-a"]["key-r"]["sha256"] = sha256Hex( chunkBytes );
+    writeManifest( proven );
+    skipped.clear();
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-a", &skipped ) == chunk );
+    skipped.clear();
+    CHECK( resolveMirrorHit( mirrorDir, "token-a", "key-r", &skipped ).empty() );
+    CHECK( skipped.find( "size" ) != std::string::npos );
+  }
+
+  SECTION( "a foreign-typed offline index is skipped, never a throw" )
+  {
+    const std::string dir = scratchDir( "hostile-index" );
+    const std::string mirrorDir = dir + "/mirror";
+    std::filesystem::create_directories( mirrorDir + "/chunks" );
+    const std::string assetPath = "/hostile/asset.tif";
+    const std::string indexKey = fabricMirrorIndexKey( assetPath );
+    Json::Value manifest( Json::objectValue );
+    manifest["index"][indexKey]["token"] = "t";
+    manifest["index"][indexKey]["grid"]["width"] = 1;
+    manifest["index"][indexKey]["grid"]["height"] = 1;
+    Json::Value gt( Json::arrayValue );
+    gt.append( Json::Value( Json::objectValue ) );   // hostile element
+    gt.append( 1.0 );
+    gt.append( 0.0 );
+    gt.append( Json::Value( Json::objectValue ) );   // hostile element
+    gt.append( 0.0 );
+    gt.append( -1.0 );
+    manifest["index"][indexKey]["grid"]["geotransform"] = gt;
+    {
+      std::ofstream out( mirrorDir + "/manifest.json", std::ios::binary );
+      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+    }
+    MirrorIndexAssetFacts facts;
+    CHECK( lookupMirrorAsset( mirrorDir, assetPath, facts ) );
+    CHECK( facts.found );
+    CHECK( !facts.hasGrid );   // corrupt facts are refused, not coerced
+    CHECK( facts.token == "t" );
+  }
 }
 
 namespace

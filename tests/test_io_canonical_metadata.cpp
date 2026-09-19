@@ -124,6 +124,12 @@ TEST_CASE( "inspectRaster reads full canonical structure without scanning pixels
   CHECK( meta.compression == "LZW" );
   REQUIRE( meta.bands.size() == 3 );
 
+  // Positional contract: bands[i] is ALWAYS GDAL band i+1 — a degraded
+  // band handle must not shift later bands (consumers index by band number).
+  REQUIRE( meta.bands.size() == static_cast<std::size_t>( meta.bandCount ) );
+  for ( int i = 0; i < meta.bandCount; ++i )
+    CHECK( meta.bands[static_cast<std::size_t>( i )].index == i + 1 );
+
   CHECK( meta.crs.valid );
   CHECK( meta.crs.authid == "EPSG:4326" );
   CHECK( meta.crs.isGeographic );

@@ -126,7 +126,19 @@ option(WITH_EPT "" ON)
 if(WITH_EPT)
     find_package(ZSTD REQUIRED)
 endif()
-find_package(Protobuf CONFIG REQUIRED)
+# Protobuf — prefer the upstream CMake package (vcpkg / Homebrew ship
+# protobuf-config.cmake with correct imported targets), but fall back to
+# CMake's FindProtobuf module where no config exists: Ubuntu's libprotobuf-dev
+# ships none, so CONFIG-only failed every Ubuntu CI configure. CONFIG mode
+# does not define protobuf_generate_cpp, which src/core needs for the
+# vector-tile proto, so load the module afterwards. FindProtobuf guards its
+# imported targets with `if(NOT TARGET ...)`, so mixing modes is safe.
+find_package(Protobuf QUIET CONFIG)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf MODULE REQUIRED)
+elseif(NOT COMMAND protobuf_generate_cpp)
+    find_package(Protobuf MODULE REQUIRED)
+endif()
 find_package(Qt6Keychain QUIET)
 # PCRE2 and CURL are transitive dependencies (glib, Qt6, GDAL)
 find_library(PCRE2_16 pcre2-16 REQUIRED)

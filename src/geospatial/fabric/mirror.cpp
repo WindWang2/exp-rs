@@ -44,9 +44,37 @@ constexpr const char *kMirrorManifest = "manifest.json";
 constexpr const char *kMirrorChunkDir = "chunks";
 constexpr const char *kMirrorLockFile = "writer.lock";
 
+/// A manifest is a bounded inventory (hundreds of bytes per chunk entry);
+/// a planted oversized file must never be slurped into memory.
+constexpr std::uintmax_t kMaxMirrorManifestBytes = 64ull * 1024ull * 1024ull;
+
+/// A manifest-controlled chunk file name is a PLAIN BASENAME inside the
+/// mirror's chunk directory: separators, "..", drive letters and control
+/// characters would let a crafted manifest escape the mirror root.
+bool isSafeMirrorChunkFileName( const std::string &file )
+{
+  if ( file.empty() || file == "." || file == ".." )
+    return false;
+  if ( file.find( '/' ) != std::string::npos || file.find( '\\' ) != std::string::npos )
+    return false;
+  if ( file.find( ':' ) != std::string::npos )
+    return false;
+  for ( const char c : file )
+  {
+    if ( static_cast<unsigned char>( c ) < 0x20 )
+      return false;
+  }
+  return true;
+}
+
 Json::Value readManifest( const std::string &mirrorDirectory )
 {
   const std::string path = mirrorDirectory + "/" + kMirrorManifest;
+  VSIStatBufL statBuffer;
+  if ( VSIStatL( path.c_str(), &statBuffer ) != 0 )
+    return Json::Value( Json::objectValue );
+  if ( static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxMirrorManifestBytes )
+    return Json::Value();   // corrupt-by-contract (oversized) — caller counts the skip
   std::ifstream in( path, std::ios::binary );
   if ( !in )
     return Json::Value( Json::objectValue );
@@ -262,10 +290,10 @@ std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::str
     return {};
   }
   const std::string file = chunk["file"].asString();
-  if ( file.empty() )
+  if ( !isSafeMirrorChunkFileName( file ) )
   {
     if ( skippedCorrupt )
-      *skippedCorrupt = "entry without file: token " + token.substr( 0, 8 );
+      *skippedCorrupt = "unsafe chunk file name: " + file.substr( 0, 64 );
     return {};
   }
   const std::string fullPath = mirrorDirectory + "/" + kMirrorChunkDir + "/" + file;
@@ -274,6 +302,34 @@ std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::str
   {
     if ( skippedCorrupt )
       *skippedCorrupt = "chunk file missing: " + file;
+    return {};
+  }
+  // Integrity is enforced HERE so every replay path (virtual_cube included)
+  // receives a verified file, never a manifest-named path: the declared size
+  // must match, and an 11.0 manifest (it carries the offline index) must
+  // prove the payload with sha256 — absence is corrupt there. v1 manifests
+  // predate the checksum and stay size-checked only.
+  if ( chunk["bytes"].isUInt64() &&
+       chunk["bytes"].asUInt64() != static_cast<Json::UInt64>( statBuffer.st_size ) )
+  {
+    if ( skippedCorrupt )
+      *skippedCorrupt = "chunk size mismatch: " + file;
+    return {};
+  }
+  if ( chunk["sha256"].isString() )
+  {
+    const std::string digest = fileSha256Hex( fullPath );
+    if ( digest.empty() || digest != chunk["sha256"].asString() )
+    {
+      if ( skippedCorrupt )
+        *skippedCorrupt = "chunk sha256 mismatch: " + file;
+      return {};
+    }
+  }
+  else if ( manifest.isMember( "index" ) )
+  {
+    if ( skippedCorrupt )
+      *skippedCorrupt = "chunk entry without sha256: " + file;
     return {};
   }
   return fullPath;
@@ -302,7 +358,10 @@ bool lookupMirrorAsset( const std::string &mirrorDirectory, const std::string &a
       *skippedCorrupt = "manifest unreadable";
     return false;
   }
-  const Json::Value &entry = manifest["index"][fabricMirrorIndexKey( assetPath )];
+  const Json::Value &index = manifest["index"];
+  if ( !index.isObject() )
+    return false;
+  const Json::Value &entry = index[fabricMirrorIndexKey( assetPath )];
   if ( !entry.isObject() )
     return false;
   if ( !entry["token"].isString() )
@@ -319,13 +378,16 @@ bool lookupMirrorAsset( const std::string &mirrorDirectory, const std::string &a
   if ( grid.isObject() && grid["width"].isInt() && grid["height"].isInt() &&
        grid["geotransform"].isArray() && grid["geotransform"].size() == 6 )
   {
+    const Json::Value &gt = grid["geotransform"];
+    if ( !gt[0].isNumeric() || !gt[1].isNumeric() || !gt[3].isNumeric() || !gt[5].isNumeric() )
+      return true;   // token found; the grid facts are corrupt — never coerced
     facts.hasGrid = true;
     facts.rasterWidth = grid["width"].asInt();
     facts.rasterHeight = grid["height"].asInt();
-    facts.resX = grid["geotransform"][1].asDouble();
-    facts.resY = grid["geotransform"][5].asDouble();
-    facts.assetMinX = grid["geotransform"][0].asDouble();
-    facts.assetMaxY = grid["geotransform"][3].asDouble();
+    facts.resX = gt[1].asDouble();
+    facts.resY = gt[5].asDouble();
+    facts.assetMinX = gt[0].asDouble();
+    facts.assetMaxY = gt[3].asDouble();
     facts.assetMaxX = facts.assetMinX + facts.resX * facts.rasterWidth;
     facts.assetMinY = facts.assetMaxY + facts.resY * facts.rasterHeight;
     facts.epsgAuthid = grid["epsg"].isString() ? grid["epsg"].asString() : std::string();
@@ -391,32 +453,12 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
     return result;
   }
 
-  // Integrity: the file must carry the manifest's declared size (a
-  // truncated/tampered chunk is a miss — the caller falls back to the
-  // origin path and the corruption stays visible in skippedCorrupt). When
-  // the manifest records a sha256 (11.0 writes), the payload must PROVE
-  // itself — chunks are bounded (chunk plan windows), so the full hash per
-  // hit is the honest cost of offline replay.
+  // resolveMirrorHit already enforced the integrity contract (declared
+  // size + sha256 proof on 11.0 manifests) before returning the path; only
+  // the byte count is needed here.
   VSIStatBufL statBuffer;
   if ( VSIStatL( file.c_str(), &statBuffer ) != 0 )
     return result;
-  const Json::Value manifest = manifestSnapshot( mirrorDirectory );
-  const Json::Value &chunk = manifest[facts.token][key];
-  if ( chunk.isObject() && chunk["bytes"].isUInt64() &&
-       chunk["bytes"].asUInt64() != static_cast<Json::UInt64>( statBuffer.st_size ) )
-  {
-    result.skippedCorrupt = "chunk size mismatch: " + file;
-    return result;
-  }
-  if ( chunk.isObject() && chunk["sha256"].isString() )
-  {
-    const std::string digest = fileSha256Hex( file );
-    if ( digest.empty() || digest != chunk["sha256"].asString() )
-    {
-      result.skippedCorrupt = "chunk sha256 mismatch: " + file;
-      return result;
-    }
-  }
 
   result.hit = true;
   result.chunkKey = key;
@@ -446,7 +488,11 @@ Json::Value mirrorStatsJson( const std::string &mirrorDirectory )
         continue;
       entries += chunks.size();
       for ( const auto &key : chunks.getMemberNames() )
-        bytes += chunks[key]["bytes"].asUInt64();
+      {
+        const Json::Value &chunk = chunks[key];
+        if ( chunk.isObject() && chunk["bytes"].isUInt64() )
+          bytes += chunk["bytes"].asUInt64();
+      }
     }
   }
   stats["indexedAssets"] = static_cast<Json::UInt64>( indexedAssets );
@@ -483,6 +529,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
   Json::Value manifest = readManifest( mirrorDirectory );
   if ( !manifest.isObject() )
     manifest = Json::Value( Json::objectValue );
+  // A foreign-typed "index" member would make every later manifest[token]
+  // write land on a non-object (jsoncpp's operator[] on an array is UB):
+  // repair it to the empty object it must be.
+  if ( !manifest["index"].isObject() )
+    manifest["index"] = Json::Value( Json::objectValue );
 
   const std::uint64_t total = plan.chunkCountTotal();
   // maxBytes==0 means the DECLARED default bound: the chunk plan's own byte
@@ -612,149 +663,174 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         pushOutcome( std::move( outcome ) );
         continue;
       }
-      RasterReader reader = RasterReader::open( fabricCachedPath( asset->record.path ) );
-      const RasterMetadata &metadata = reader.metadata();
-      // THE shared mapping rule (sign-safe, clamped) — no inline re-derivation.
-      const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
-        metadata, request.minX, request.minY, request.maxX, request.maxY );
-      if ( !mapped.ok )
+      // Per-chunk isolation (review R13 class): one unreadable asset or
+      // write failure is a RECORDED chunk outcome, never an aborted pass —
+      // the report and every remaining chunk survive (prefetch's pattern).
+      try
+      {
+        RasterReader reader = RasterReader::open( fabricCachedPath( asset->record.path ) );
+        const RasterMetadata &metadata = reader.metadata();
+        if ( metadata.bands.empty() )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "mirrored asset declares no readable band metadata" );
+        // THE shared mapping rule (sign-safe, clamped) — no inline re-derivation.
+        const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
+          metadata, request.minX, request.minY, request.maxX, request.maxY );
+        if ( !mapped.ok )
+        {
+          outcome.status = "failed";
+          outcome.errorText = "chunk extent misses the asset's raster";
+          ++report.failed;
+          pushOutcome( std::move( outcome ) );
+          continue;
+        }
+        const RasterWindow sourceWindow = mapped.window;
+        // 11.0 (D-1103): the chunk key's path component is the CREDENTIAL-
+        // FREE index key (spelling-stable; a re-signed href of the same
+        // object maps to the same chunk key). The offline index entry is
+        // written/refreshed for every resolved asset so a later process can
+        // replay without any network probe.
+        const std::string indexKey = fabricMirrorIndexKey( asset->record.path );
+        const std::string key =
+          fabricChunkMirrorKey( token, indexKey, sourceWindow, "band1" );
+        outcome.chunkKey = key;
+        {
+          Json::Value &assetIndex = manifest["index"][indexKey];
+          if ( !assetIndex.isObject() )
+            assetIndex = Json::Value( Json::objectValue );
+          if ( !assetIndex["token"].isString() || assetIndex["token"].asString() != token )
+          {
+            assetIndex["token"] = token;
+            assetIndex["assetId"] = asset->record.id;
+            const std::array<double, 6> &gt = metadata.geotransform;
+            assetIndex["grid"]["width"] = metadata.width;
+            assetIndex["grid"]["height"] = metadata.height;
+            Json::Value gtJson( Json::arrayValue );
+            for ( int i = 0; i < 6; ++i )
+              gtJson.append( gt[i] );
+            assetIndex["grid"]["geotransform"] = gtJson;
+            assetIndex["grid"]["epsg"] = metadata.crs.authid;
+            assetIndex["writtenUtc"] = nowIso8601Utc();
+            pendingManifestWrites++;
+          }
+        }
+
+        // Already mirrored? A token-keyed hit is the proof — skip the fetch.
+        // The in-memory manifest answers (the walk re-reads nothing; quadratic
+        // manifest I/O would sink 10k-chunk passes).
+        std::string existing;
+        {
+          Json::Value &tokenEntry = manifest[token];
+          if ( !tokenEntry.isObject() )
+            tokenEntry = Json::Value( Json::objectValue );
+          if ( tokenEntry[key].isObject() && tokenEntry[key]["file"].isString() )
+          {
+            const std::string candidateName = tokenEntry[key]["file"].asString();
+            if ( !isSafeMirrorChunkFileName( candidateName ) )
+              tokenEntry.removeMember( key );   // hostile join: force a rewrite
+            else
+            {
+              const std::string candidate =
+                mirrorDirectory + "/" + kMirrorChunkDir + "/" + candidateName;
+              VSIStatBufL existingStat;
+              if ( VSIStatL( candidate.c_str(), &existingStat ) == 0 )
+                existing = candidate;
+            }
+          }
+        }
+        if ( !existing.empty() )
+        {
+          outcome.status = "already-present";
+          outcome.file = existing;
+          ++report.alreadyPresent;
+          pushOutcome( std::move( outcome ) );
+          continue;
+        }
+
+        // The budget counts DECLARED chunk estimates (logical bytes); the
+        // report's bytesWritten stays the real file size (GeoTIFF containers
+        // are larger than their payload — comparing file bytes to a logical
+        // estimate would skip most of the pass).
+        if ( logicalWritten >= budget && budget > 0 )
+        {
+          outcome.status = "skipped-budget";
+          ++report.skippedBudget;
+          pushOutcome( std::move( outcome ) );
+          report.budgetStopped = true;
+          continue;
+        }
+
+        // Read the source window through the normal path (range cache intact)
+        // and publish it as a plain GTiff chunk.
+        const std::vector<double> values =
+          reader.readWindow( { 1 }, sourceWindow, options.maxChunkReadBytes );
+        const std::string target = mirrorDirectory + "/" + kMirrorChunkDir + "/" + key + ".tif";
+        std::uint64_t written = 0;
+        atomic_fs::writeFileAtomic( target, [ & ]( const std::string &stagedPath ) {
+          // The chunk carries the SOURCE band's NoData declaration (review
+          // R13): offline replay's NoData semantics then match the online
+          // read exactly — declared-NoData source pixels lose FirstWins the
+          // same way they do online.
+          RasterBandSpec chunkBand;
+          chunkBand.dtype = metadata.bands[0].dtype;
+          chunkBand.description = metadata.bands[0].description;
+          chunkBand.hasNoData = metadata.bands[0].hasNoData;
+          chunkBand.noDataValue = metadata.bands[0].noDataValue;
+          chunkBand.noDataIsNaN = metadata.bands[0].noDataIsNaN;
+          RasterWriter writer = RasterWriter::create(
+            stagedPath, sourceWindow.width, sourceWindow.height, { chunkBand },
+            { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
+          // Real georeferencing: the chunk sits at its source extent in the
+          // asset's own grid (a plain pixel grid would make mirrored chunks
+          // un-geolocatable to direct consumers).
+          const std::array<double, 6> &gt = metadata.geotransform;
+          writer.setGeotransform( { request.minX, gt[1], 0.0, request.maxY, 0.0, gt[5] } );
+          writer.writeWindow( 1, { 0, 0, sourceWindow.width, sourceWindow.height }, values.data() );
+          writer.finalize();
+          std::ifstream in( stagedPath, std::ios::binary );
+          in.seekg( 0, std::ios::end );
+          written = static_cast<std::uint64_t>( in.tellg() );
+        } );
+
+        Json::Value entry = manifest[token];
+        entry[key]["file"] = key + ".tif";
+        entry[key]["bytes"] = static_cast<Json::UInt64>( written );
+        entry[key]["assetId"] = asset->record.id;
+        entry[key]["window"] = [ & ] {
+          Json::Value w( Json::arrayValue );
+          w.append( sourceWindow.xOff );
+          w.append( sourceWindow.yOff );
+          w.append( sourceWindow.width );
+          w.append( sourceWindow.height );
+          return w;
+        }();
+        entry[key]["timeUtc"] = request.timeUtc;
+        // 11.0 integrity checksum: replay can demand a payload proof before
+        // serving (size checks are cheap; this is the strong form).
+        entry[key]["sha256"] = fileSha256Hex( target );
+        manifest[token] = entry;
+
+        // Throttled flush (11.0): the manifest publishes after every 32nd
+        // mirrored chunk and unconditionally at the end of the walk.
+        pendingManifestWrites++;
+        flushManifest( manifest, /*force=*/false );
+
+        outcome.status = "mirrored";
+        outcome.file = target;
+        outcome.bytes = written;
+        bytesWritten += written;
+        logicalWritten += request.estimatedBytes;
+        ++report.mirrored;
+        report.bytesWritten += written;
+        pushOutcome( std::move( outcome ) );
+      }
+      catch ( const GeoError &error )
       {
         outcome.status = "failed";
-        outcome.errorText = "chunk extent misses the asset's raster";
+        outcome.errorText = std::string( error.what() ).substr( 0, 512 );
         ++report.failed;
         pushOutcome( std::move( outcome ) );
-        continue;
       }
-      const RasterWindow sourceWindow = mapped.window;
-      // 11.0 (D-1103): the chunk key's path component is the CREDENTIAL-
-      // FREE index key (spelling-stable; a re-signed href of the same
-      // object maps to the same chunk key). The offline index entry is
-      // written/refreshed for every resolved asset so a later process can
-      // replay without any network probe.
-      const std::string indexKey = fabricMirrorIndexKey( asset->record.path );
-      const std::string key =
-        fabricChunkMirrorKey( token, indexKey, sourceWindow, "band1" );
-      outcome.chunkKey = key;
-      {
-        Json::Value &assetIndex = manifest["index"][indexKey];
-        if ( !assetIndex["token"].isString() || assetIndex["token"].asString() != token )
-        {
-          assetIndex["token"] = token;
-          assetIndex["assetId"] = asset->record.id;
-          const std::array<double, 6> &gt = metadata.geotransform;
-          assetIndex["grid"]["width"] = metadata.width;
-          assetIndex["grid"]["height"] = metadata.height;
-          Json::Value gtJson( Json::arrayValue );
-          for ( int i = 0; i < 6; ++i )
-            gtJson.append( gt[i] );
-          assetIndex["grid"]["geotransform"] = gtJson;
-          assetIndex["grid"]["epsg"] = metadata.crs.authid;
-          assetIndex["writtenUtc"] = nowIso8601Utc();
-          pendingManifestWrites++;
-        }
-      }
-
-      // Already mirrored? A token-keyed hit is the proof — skip the fetch.
-      // The in-memory manifest answers (the walk re-reads nothing; quadratic
-      // manifest I/O would sink 10k-chunk passes).
-      std::string existing;
-      {
-        const Json::Value &tokenEntry = manifest[token];
-        if ( tokenEntry.isObject() && tokenEntry[key].isObject() &&
-             tokenEntry[key]["file"].isString() )
-        {
-          const std::string candidate =
-            mirrorDirectory + "/" + kMirrorChunkDir + "/" + tokenEntry[key]["file"].asString();
-          VSIStatBufL existingStat;
-          if ( VSIStatL( candidate.c_str(), &existingStat ) == 0 )
-            existing = candidate;
-        }
-      }
-      if ( !existing.empty() )
-      {
-        outcome.status = "already-present";
-        outcome.file = existing;
-        ++report.alreadyPresent;
-        pushOutcome( std::move( outcome ) );
-        continue;
-      }
-
-      // The budget counts DECLARED chunk estimates (logical bytes); the
-      // report's bytesWritten stays the real file size (GeoTIFF containers
-      // are larger than their payload — comparing file bytes to a logical
-      // estimate would skip most of the pass).
-      if ( logicalWritten >= budget && budget > 0 )
-      {
-        outcome.status = "skipped-budget";
-        ++report.skippedBudget;
-        pushOutcome( std::move( outcome ) );
-        report.budgetStopped = true;
-        continue;
-      }
-
-      // Read the source window through the normal path (range cache intact)
-      // and publish it as a plain GTiff chunk.
-      const std::vector<double> values =
-        reader.readWindow( { 1 }, sourceWindow, options.maxChunkReadBytes );
-      const std::string target = mirrorDirectory + "/" + kMirrorChunkDir + "/" + key + ".tif";
-      std::uint64_t written = 0;
-      atomic_fs::writeFileAtomic( target, [ & ]( const std::string &stagedPath ) {
-        // The chunk carries the SOURCE band's NoData declaration (review
-        // R13): offline replay's NoData semantics then match the online
-        // read exactly — declared-NoData source pixels lose FirstWins the
-        // same way they do online.
-        RasterBandSpec chunkBand;
-        chunkBand.dtype = metadata.bands[0].dtype;
-        chunkBand.description = metadata.bands[0].description;
-        chunkBand.hasNoData = metadata.bands[0].hasNoData;
-        chunkBand.noDataValue = metadata.bands[0].noDataValue;
-        chunkBand.noDataIsNaN = metadata.bands[0].noDataIsNaN;
-        RasterWriter writer = RasterWriter::create(
-          stagedPath, sourceWindow.width, sourceWindow.height, { chunkBand },
-          { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
-        // Real georeferencing: the chunk sits at its source extent in the
-        // asset's own grid (a plain pixel grid would make mirrored chunks
-        // un-geolocatable to direct consumers).
-        const std::array<double, 6> &gt = metadata.geotransform;
-        writer.setGeotransform( { request.minX, gt[1], 0.0, request.maxY, 0.0, gt[5] } );
-        writer.writeWindow( 1, { 0, 0, sourceWindow.width, sourceWindow.height }, values.data() );
-        writer.finalize();
-        std::ifstream in( stagedPath, std::ios::binary );
-        in.seekg( 0, std::ios::end );
-        written = static_cast<std::uint64_t>( in.tellg() );
-      } );
-
-      Json::Value entry = manifest[token];
-      entry[key]["file"] = key + ".tif";
-      entry[key]["bytes"] = static_cast<Json::UInt64>( written );
-      entry[key]["assetId"] = asset->record.id;
-      entry[key]["window"] = [ & ] {
-        Json::Value w( Json::arrayValue );
-        w.append( sourceWindow.xOff );
-        w.append( sourceWindow.yOff );
-        w.append( sourceWindow.width );
-        w.append( sourceWindow.height );
-        return w;
-      }();
-      entry[key]["timeUtc"] = request.timeUtc;
-      // 11.0 integrity checksum: replay can demand a payload proof before
-      // serving (size checks are cheap; this is the strong form).
-      entry[key]["sha256"] = fileSha256Hex( target );
-      manifest[token] = entry;
-
-      // Throttled flush (11.0): the manifest publishes after every 32nd
-      // mirrored chunk and unconditionally at the end of the walk.
-      pendingManifestWrites++;
-      flushManifest( manifest, /*force=*/false );
-
-      outcome.status = "mirrored";
-      outcome.file = target;
-      outcome.bytes = written;
-      bytesWritten += written;
-      logicalWritten += request.estimatedBytes;
-      ++report.mirrored;
-      report.bytesWritten += written;
-      pushOutcome( std::move( outcome ) );
     }
   }
   report.cancelled = cancel.cancelled();

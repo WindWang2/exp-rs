@@ -297,6 +297,51 @@ TEST_CASE( "httpFetch honors ranges, byte budgets and typed truncation",
   CHECK_THROWS_AS( httpFetch( "C:/local/file.tif" ), GeoError );
 }
 
+TEST_CASE( "strict httpFetch types every >=400 origin error, never a silent success",
+           "[io][remote][http_fetch][errors]" )
+{
+  SECTION( "500 is a NetworkError; the raw status variant still answers" )
+  {
+    HttpRangeServer server( payloadOfSize( 256 ), testsupport::ServerBehavior::ServerError );
+    try
+    {
+      httpFetch( server.url() );
+      FAIL( "httpFetch must throw for a 500 answer" );
+    }
+    catch ( const GeoError &error )
+    {
+      CHECK( error.code() == ErrorCode::NetworkError );
+    }
+    // httpFetchJson must fail typed too — an error body is never a document.
+    CHECK_THROWS_AS( httpFetchJson( server.url() ), GeoError );
+    const HttpFetchResult raw = httpFetchStatus( server.url() );
+    CHECK( raw.httpStatus == 500 );
+  }
+
+  SECTION( "410 is a NotFound, not only 404" )
+  {
+    HttpRangeServer server( payloadOfSize( 256 ), testsupport::ServerBehavior::Gone );
+    try
+    {
+      httpFetch( server.url() );
+      FAIL( "httpFetch must throw for a 410 answer" );
+    }
+    catch ( const GeoError &error )
+    {
+      CHECK( error.code() == ErrorCode::NotFound );
+    }
+  }
+}
+
+TEST_CASE( "hostile identity JSON fails typed, never as Json::LogicError",
+           "[io][remote][validator][negative]" )
+{
+  Json::Value hostile;
+  hostile["url"] = "https://example.invalid/x.tif";
+  hostile["size_bytes"] = "not-a-number";
+  CHECK_THROWS_AS( RemoteSourceIdentity::fromJson( hostile ), GeoError );
+}
+
 
 
 TEST_CASE( "etag weak comparison follows RFC 7232 §2.3",

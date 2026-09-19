@@ -367,6 +367,32 @@ TEST_CASE( "the remote backend reuses the STAC client and refuses offline by typ
   offline::setEnabled( false );
 }
 
+TEST_CASE( "foreign-typed catalog JSON is skipped, never an untyped crash",
+           "[io][fabric][catalog][negative]" )
+{
+  const std::string root = scratchDir( "hostile" );
+  // The root catalog's links carry foreign-typed elements: an object rel
+  // and an href that is not a string, plus a bare string (not a link).
+  writeFile( root + "/catalog.json", R"({
+    "type": "Catalog", "stac_version": "1.0.0", "id": "root",
+    "links": [
+      "not-an-object",
+      {"rel": {}, "href": 42},
+      {"rel": "item", "href": "bad-item.json"},
+      {"rel": "item", "href": "good-item.json"}
+    ]})" );
+  // An item-shaped file whose "type" is an object — shape sniffing must
+  // refuse it without a Json::LogicError escaping the walk.
+  writeFile( root + "/bad-item.json", R"({"type": {}, "assets": []})" );
+  writeFile( root + "/good-item.json",
+             itemJson( "good", "2024-05-01T10:00:00Z", 3.0, "S2A", "pixels/p1.tif" ) );
+
+  const CatalogService service = openCatalogService( root );
+  const CatalogService::SearchAllResult result = service.searchAll( {} );
+  REQUIRE( result.records.size() == 1 );
+  CHECK( result.records[0].id == "good" );
+}
+
 TEST_CASE( "invalid roots and unparsable filters are typed, never guessed",
            "[io][fabric][catalog]" )
 {

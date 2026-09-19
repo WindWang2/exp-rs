@@ -200,6 +200,21 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
       invalidIssue |= issue.code == "manifest_invalid";
     CHECK( invalidIssue );
   }
+  SECTION( "foreign-typed manifest fields are reported, never thrown" )
+  {
+    {
+      std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary );
+      out << R"({"schema_version": 1, "dataset_sha256": [], "shape": {"width": "w", "height": {}}})";
+    }
+    const ManifestVerifyReport report = verifyDataset( tif );
+    INFO( report.toJson().toStyledString() );
+    CHECK( !report.verified );
+    CHECK( !report.digestMatched );
+    bool invalidIssue = false;
+    for ( const ManifestIssue &issue : report.issues )
+      invalidIssue |= issue.code == "manifest_invalid";
+    CHECK( invalidIssue );
+  }
 }
 
 TEST_CASE( "manifests survive Unicode directory names", "[io][manifest][unicode]" )

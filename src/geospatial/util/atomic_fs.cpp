@@ -34,6 +34,18 @@ std::atomic<unsigned> &stagingCounter()
   return counter;
 }
 
+/// The current process id, portable across the Windows/POSIX branches: the
+/// staging counter is per-process, so cross-process uniqueness needs the pid
+/// (two processes otherwise generate identical staged names).
+std::uint64_t stagingProcessId()
+{
+#ifdef _WIN32
+  return static_cast<std::uint64_t>( GetCurrentProcessId() );
+#else
+  return static_cast<std::uint64_t>( ::getpid() );
+#endif
+}
+
 #ifdef _WIN32
 std::wstring wideFromUtf8( const std::string &text )
 {
@@ -89,8 +101,10 @@ std::string stagedPathFor( const std::string &targetPath )
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
-    const std::string staged = u8( directory ) + "/" + stem + "." + std::to_string( stagingCounter()++ )
-                                 + "." + std::to_string( ::rand() ) + ".tmp" + extension;
+    const std::string staged = u8( directory ) + "/" + stem + "." +
+                                 std::to_string( stagingProcessId() ) + "." +
+                                 std::to_string( stagingCounter()++ ) + "." +
+                                 std::to_string( ::rand() ) + ".tmp" + extension;
     if ( !fileExists( staged ) )
       return staged;
   }
