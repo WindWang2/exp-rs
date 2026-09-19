@@ -735,6 +735,12 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
                                         []( const StepPlan &p ) { return p.status == "Failed"; } );
     const bool anyCanceled = std::any_of( plans.begin(), plans.end(),
                                           []( const StepPlan &p ) { return p.status == "Canceled"; } );
+    auto goTerminal = [&]( WorkflowRunState target ) {
+        // Cancelling/Interrupted cannot reach Completed via transitionTo;
+        // force so finalize never leaves a non-terminal wedge (#1078).
+        if ( !run.transitionTo( target ) )
+            run.forceSetState( target );
+    };
     if ( anyFailed )
     {
         for ( const auto &p : plans )
@@ -745,15 +751,15 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
                 break;
             }
         }
-        run.transitionTo( WorkflowRunState::Failed );
+        goTerminal( WorkflowRunState::Failed );
     }
     else if ( anyCanceled )
     {
-        run.transitionTo( WorkflowRunState::Canceled );
+        goTerminal( WorkflowRunState::Canceled );
     }
     else
     {
-        run.transitionTo( WorkflowRunState::Completed );
+        goTerminal( WorkflowRunState::Completed );
     }
     queueRunStateNotificationLocked( run, 0, QDateTime::currentMSecsSinceEpoch() );
     // Checkpoint IO, ArtifactGC and archive run AFTER m_mutex drops via
@@ -1095,12 +1101,31 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     }
     if ( remaining.steps.empty() )
     {
-        if ( error )
-            *error = QStringLiteral( "Run %1 has nothing left to resume" )
-                       .arg( QString::fromStdString( runId ) );
-        std::lock_guard<std::mutex> lock( m_mutex );
-        m_locksByRunId.erase( runId ); // releases the run lock
-        return -1;
+        // All steps already completed (Interrupted crash after last fold,
+        // or Cancelling stranded with every step terminal). Finalize to the
+        // derived terminal state instead of refusing forever (#1078a).
+        PersistRequest donePersist;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            const auto plans = run->stepPlans();
+            const bool anyFailed = std::any_of( plans.begin(), plans.end(),
+                                                []( const StepPlan &p ) { return p.status == "Failed"; } );
+            const bool anyCanceled = std::any_of( plans.begin(), plans.end(),
+                                                  []( const StepPlan &p ) { return p.status == "Canceled"; } );
+            const WorkflowRunState target = anyFailed ? WorkflowRunState::Failed
+                : anyCanceled ? WorkflowRunState::Canceled
+                              : WorkflowRunState::Completed;
+            // Interrupted/Cancelling cannot transitionTo(Completed); force.
+            if ( !run->transitionTo( target ) )
+                run->forceSetState( target );
+            m_locksByRunId.erase( runId ); // releases the run lock
+            queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() );
+            donePersist = capturePersistLocked(
+                run, run->state() == WorkflowRunState::Completed );
+        }
+        persistRun( std::move( donePersist ) );
+        drainRunNotifications();
+        return 0; // success: nothing to execute; run is terminal
     }
 
     if ( !run->transitionTo( WorkflowRunState::Running ) )
@@ -1279,7 +1304,52 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
         cancelPersist = capturePersistLocked( run );
     }
     persistRun( std::move( cancelPersist ) );
-    return TaskCenter::instance().cancelPipeline( pipelineId );
+    const bool canceledAny = TaskCenter::instance().cancelPipeline( pipelineId );
+    if ( !canceledAny )
+    {
+        // cancelPipeline returns false when every task is already terminal —
+        // no further taskUpdated arrives, so finalize here or the run stays
+        // Cancelling forever and feeds wedge (a) on next resume (#1078b).
+        PersistRequest finalizePersist;
+        bool didFinalize = false;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            const auto plans = run->stepPlans();
+            const bool allTerminal = !plans.empty() && std::all_of(
+                plans.begin(), plans.end(),
+                []( const StepPlan &p2 ) {
+                    return p2.status == "Completed"
+                           || p2.status == "Failed"
+                           || p2.status == "Canceled"
+                           || p2.status == "Skipped";
+                } );
+            if ( allTerminal && !isTerminalRunState( run->state() ) )
+            {
+                // Cancelling→Completed is illegal via transitionTo; force the
+                // derived terminal (mirror finalizeRunLocked outcomes).
+                const bool anyFailed = std::any_of( plans.begin(), plans.end(),
+                                                    []( const StepPlan &p ) { return p.status == "Failed"; } );
+                const bool anyCanceled = std::any_of( plans.begin(), plans.end(),
+                                                      []( const StepPlan &p ) { return p.status == "Canceled"; } );
+                const WorkflowRunState target = anyFailed ? WorkflowRunState::Failed
+                    : anyCanceled ? WorkflowRunState::Canceled
+                                  : WorkflowRunState::Completed;
+                if ( !run->transitionTo( target ) )
+                    run->forceSetState( target );
+                queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() );
+                m_locksByRunId.erase( run->runId() );
+                finalizePersist = capturePersistLocked(
+                    run, run->state() == WorkflowRunState::Completed );
+                didFinalize = true;
+            }
+        }
+        if ( didFinalize )
+        {
+            persistRun( std::move( finalizePersist ) );
+            drainRunNotifications();
+        }
+    }
+    return canceledAny;
 }
 
 std::shared_ptr<WorkflowRun> WorkflowRunCoordinator::runForPipeline( long pipelineId ) const

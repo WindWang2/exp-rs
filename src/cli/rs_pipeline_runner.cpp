@@ -1025,6 +1025,16 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
     flushRecording( 0 );
     return result;
   }
+  if ( pipelineId == 0 )
+  {
+    // All steps already complete — resume finalized the Interrupted run
+    // without starting a new pipeline (#1078a).
+    reportLog( "info", "Run " + runId + " had nothing left to resume; "
+                       "checkpoint finalized to its terminal state" );
+    result.success = true;
+    flushRecording( 0 );
+    return result;
+  }
 
   reportLog( "info", "Resuming tracked run " + runId + " (pipeline "
                      + std::to_string( pipelineId ) + "): completed steps with "
