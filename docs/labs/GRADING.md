@@ -88,6 +88,7 @@ rules file — the same policy as the classification truth walk.
 | `series_separation` | **zones**:{path}, **x**:[≥2 axis values], bounds?/separations?:[{zone, below_zone, min_delta}] | per-zone least-squares slope over the declared axis outside bounds, or slope separation below the floor |
 | `spectral_signature` | **bands**, **references**:[{name?, spectrum}], zones?:{path}, zone_reference?, sam_max_mean_degrees?/sam_max_degrees? | mean/max SAM spectral angle of pixel spectra vs the declared reference exceeds the bound |
 | `file_check` (artifact `kind: "file"`) | exists? \| min_bytes?/max_bytes? \| png:{page_width_mm, page_height_mm, dpi, size_tolerance} \| mapspec:{max_problems} \| preflight:{max_problems, forbidden_codes?}; path? (sibling file) | the submitted FILE is absent, mis-sized, the PNG page geometry (parsed from IHDR vs the declared dpi) does not match, or the MapSpec fails the platform's validateMapSpec / preflight catalog |
+| `provenance` (12.0) | at least ONE of generator?, seed? (uint32), product?, profile?, version? | the artifact's dataset metadata (`SICNU_GENERATOR/_SEED/_PRODUCT/_PROFILE/_VERSION`, written by `sicnu_generate_samples`) is missing or differs from the declared value — a submission computed from a different or tampered sample fails even when the statistics look right |
 
 ## Report and determinism
 
@@ -139,6 +140,21 @@ the largest artifact, CSV flushed per row). Since 11.0 it also accepts:
   (`sicnu.lab.batch-summary/1`; rows sorted by student_id; NO wall-clock
   values, so identical submissions regrade to byte-identical summaries).
   Both are written atomically (tmp + rename).
+
+## Process-isolated classroom batch (12.0, `scripts/run_classroom_batch.py`)
+
+`lab --batch` isolates *rows* inside one process. The Python driver
+`scripts/run_classroom_batch.py` isolates *processes*: one
+`lab --grade` subprocess per submission with a per-submission wall-clock
+timeout (`--timeout`, whole process group killed on expiry), bounded
+concurrency (`--jobs`, default min(4, cpus)) and crash containment (a signal
+in the grader becomes one `crash` row, never an aborted class). Reports:
+Excel-friendly CSV (BOM + CRLF) plus a deterministic `sicnu.classroom.batch/1`
+JSON summary — byte-identical across two runs on identical inputs and flags.
+Exit codes: 0 all graded; 1 any timeout/error/crash row or cap hit; 2 usage.
+POSIX classrooms can also use the bundle's `GRADE_ALL.sh` (the twin of
+`GRADE_ALL.cmd`); the conformance fixtures live in
+`tests/fixtures/classroom_batch/` and `tests/fixtures/launcher_parity/`.
 
 ## Headless reproducibility report (`--report`)
 
