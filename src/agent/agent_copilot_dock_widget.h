@@ -58,6 +58,13 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// Exposed for tests; returns an empty string when no run has started.
     QString runInspectorSummary() const;
 
+    /// Retention bound for the LLM conversation history (LCY-5). Pure and
+    /// static so the bound is unit-testable without a live LLM: keeps the
+    /// leading system prompt plus the most recent kMaxHistoryMessages entries,
+    /// never starting the retained tail on an orphaned role:"tool" reply.
+    static QJsonArray pruneHistory( const QJsonArray &history );
+    static constexpr int kMaxHistoryMessages = 60;
+
     ViewControlService *viewControlService() { return &m_viewControlService; }
     const ViewControlService *viewControlService() const { return &m_viewControlService; }
     RasterDisplayService *rasterDisplayService() { return &m_rasterDisplayService; }

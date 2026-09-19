@@ -92,6 +92,37 @@ TEST_CASE( "Sessions round-trip through save/load with typed failures", "[contex
   CHECK( store.saveSession( evil, error ).isEmpty() );
   CHECK( error.code == "INVALID_PARAMETER" );
 
+  // The same filename-safety contract applies to the read/delete/resume
+  // paths — a pre-arranged escaped file must not be loadable or deletable
+  // through a hostile id (#1056).
+  REQUIRE( QDir( kStoreDir ).mkpath( QStringLiteral( "harness_session_../" ) ) );
+  {
+    QFile escaped( QDir( kStoreDir ).filePath( QStringLiteral( "harness_session_../escape.json" ) ) );
+    REQUIRE( escaped.open( QIODevice::WriteOnly ) );
+    escaped.write( "{\"kind\":\"harness_session\",\"schema_version\":\"1.0\",\"session_id\":\"escape\"}" );
+    escaped.close();
+  }
+  error = HarnessError{};
+  CHECK( !store.loadSession( "../escape", error ).has_value() );
+  CHECK( error.code == "INVALID_PARAMETER" );
+  CHECK_FALSE( store.deleteSession( "../escape" ) );
+  CHECK( QFile::exists( QDir( kStoreDir ).filePath( QStringLiteral( "harness_session_../escape.json" ) ) ) );
+  error = HarnessError{};
+  CHECK( !store.resumeSession( "../escape", error ).has_value() );
+  CHECK( error.code == "INVALID_PARAMETER" );
+  for ( const char *hostile : { "/etc/passwd", "..\\escape", "sess\x01ctl" } )
+  {
+    error = HarnessError{};
+    CHECK( !store.loadSession( hostile, error ).has_value() );
+    CHECK( error.code == "INVALID_PARAMETER" );
+    CHECK_FALSE( store.deleteSession( hostile ) );
+  }
+  // A valid-but-unknown id keeps the not-found contract.
+  error = HarnessError{};
+  CHECK( !store.loadSession( "sess-none", error ).has_value() );
+  CHECK( error.code == "WORKFLOW_NOT_FOUND" );
+  CHECK_FALSE( store.deleteSession( "sess-none" ) );
+
   // Corrupt documents are rejected fail-closed.
   QFile corrupt( QDir( kStoreDir ).filePath( "harness_session_broken.json" ) );
   REQUIRE( corrupt.open( QIODevice::WriteOnly ) );

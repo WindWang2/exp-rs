@@ -1274,6 +1274,81 @@ TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every executio
                          .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
         }
     }
+
+    SECTION( "data-platform tools reject an out-of-workspace database path (#1033)" )
+    {
+        const QString rogueDb = outside.filePath( QStringLiteral( "rogue_dataset.db" ) );
+        QVariantMap arguments;
+        arguments[QStringLiteral( "dataset_db" )] = rogueDb;
+        QVariantMap callReq;
+        callReq[QStringLiteral( "id" )] = 900;
+        callReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+        QVariantMap callParams;
+        callParams[QStringLiteral( "name" )] = QStringLiteral( "dataset:list" );
+        callParams[QStringLiteral( "arguments" )] = arguments;
+        callReq[QStringLiteral( "params" )] = callParams;
+
+        server.testHandleRequest( callReq );
+        CHECK( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString()
+               == QStringLiteral( "PATH_OUTSIDE_WORKSPACE" ) );
+        // Containment runs BEFORE the store opens: no SQLite file appeared.
+        CHECK_FALSE( QFile::exists( rogueDb ) );
+    }
+
+    SECTION( "data-platform tools still accept an in-workspace database path (#1033)" )
+    {
+        QVariantMap arguments;
+        arguments[QStringLiteral( "dataset_db" )] = workspace.filePath( QStringLiteral( "ok_dataset.db" ) );
+        QVariantMap callReq;
+        callReq[QStringLiteral( "id" )] = 901;
+        callReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+        QVariantMap callParams;
+        callParams[QStringLiteral( "name" )] = QStringLiteral( "dataset:list" );
+        callParams[QStringLiteral( "arguments" )] = arguments;
+        callReq[QStringLiteral( "params" )] = callParams;
+
+        server.testHandleRequest( callReq );
+        CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( QFile::exists( workspace.filePath( QStringLiteral( "ok_dataset.db" ) ) ) );
+    }
+
+    SECTION( "run_workflow rejects an out-of-workspace recording database (#1033)" )
+    {
+        const QString validPipeline =
+            QStringLiteral( R"({"id":"p1","steps":[{"id":"s1","operator":"rs:mcp_noop","params":{}}]})" );
+        for ( const QString &key : { QStringLiteral( "experiment_db" ), QStringLiteral( "dataset_db" ) } )
+        {
+            const QString rogueDb = outside.filePath( key + QStringLiteral( ".db" ) );
+            QVariantMap args;
+            args[QStringLiteral( "pipeline" )] = validPipeline;
+            args[key] = rogueDb;
+            try
+            {
+                server.testRunWorkflow( args );
+                FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+            }
+            catch ( const std::runtime_error &e )
+            {
+                REQUIRE( QString::fromStdString( e.what() )
+                             .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+            }
+            // The containment gate runs BEFORE enable(): no store was opened.
+            CHECK_FALSE( QFile::exists( rogueDb ) );
+        }
+    }
+
+    SECTION( "run_workflow still accepts an in-workspace recording database (#1033)" )
+    {
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral(
+            R"({"id":"p1","steps":[{"id":"s1","operator":"rs:mcp_noop","params":{}}]})" );
+        args[QStringLiteral( "experiment_db" )] = workspace.filePath( QStringLiteral( "ok_exp.db" ) );
+        args[QStringLiteral( "experiment_id" )] =
+            QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1033" );
+        const QVariantMap submitted = server.testRunWorkflow( args );
+        CHECK( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+    }
 }
 
 TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][spatial]" )
@@ -1336,6 +1411,57 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     CHECK( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "INVALID_PARAMETER" ) );
     CHECK( server.lastResponseResult.value( QStringLiteral( "errorCategory" ) ).toString() == QStringLiteral( "validation" ) );
 
+    // Registered io: spatial tools (Foundation 5.0) share the io: namespace
+    // with the io:inspect/io:doctor RSOperators; the probe tool must be
+    // dispatchable, not an "Algorithm not found" fallthrough (#1056).
+    const QString rasterPath = dir.filePath( QStringLiteral( "io_probe.tif" ) );
+    {
+        std::vector<std::vector<float>> bands( 1, std::vector<float>( 4, 1.0f ) );
+        std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+        QString err;
+        REQUIRE( writeGdalOutput( rasterPath, 2, 2, bands, gt, QString(), &err ) );
+    }
+    QVariantMap ioCallReq;
+    ioCallReq[QStringLiteral( "id" )] = 45;
+    ioCallReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap ioParams;
+    ioParams[QStringLiteral( "name" )] = QStringLiteral( "io:probe" );
+    QVariantMap ioArgs;
+    ioArgs[QStringLiteral( "path" )] = rasterPath;
+    ioParams[QStringLiteral( "arguments" )] = ioArgs;
+    ioCallReq[QStringLiteral( "params" )] = ioParams;
+    server.lastErrorId = QVariant();
+    server.lastResponseId = QVariant();
+    server.testHandleRequest( ioCallReq );
+    CHECK( server.lastResponseId.toInt() == 45 );
+    CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    const QString ioPayload = server.lastResponseResult.value( QStringLiteral( "content" ) )
+                                  .toList()
+                                  .first()
+                                  .toMap()
+                                  .value( QStringLiteral( "text" ) )
+                                  .toString();
+    CHECK( ioPayload.contains( QStringLiteral( "GTiff" ) ) );
+
+    // The shared namespace split must not hijack the io:inspect operator.
+    QVariantMap inspectReq = ioCallReq;
+    inspectReq[QStringLiteral( "id" )] = 46;
+    QVariantMap inspectParams;
+    inspectParams[QStringLiteral( "name" )] = QStringLiteral( "io:inspect" );
+    inspectParams[QStringLiteral( "arguments" )] = ioArgs;
+    inspectReq[QStringLiteral( "params" )] = inspectParams;
+    server.lastErrorId = QVariant();
+    server.lastResponseId = QVariant();
+    server.testHandleRequest( inspectReq );
+    CHECK( server.lastResponseId.toInt() == 46 );
+    CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString()
+                 == QStringLiteral( "UNKNOWN_TOOL" ) );
+    for ( const QVariant &contentVar : server.lastResponseResult.value( QStringLiteral( "content" ) ).toList() )
+    {
+        CHECK_FALSE( contentVar.toMap().value( QStringLiteral( "text" ) ).toString()
+                     .contains( QStringLiteral( "Unknown spatial tool" ) ) );
+    }
+
     // tools/list includes the spatial catalog tools alongside meta tools.
     QVariantMap listReq;
     listReq[QStringLiteral( "id" )] = 44;
@@ -1343,7 +1469,7 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     server.testHandleRequest( listReq );
     CHECK( server.lastResponseId.toInt() == 44 );
     const QVariantList tools = server.lastResponseResult.value( QStringLiteral( "tools" ) ).toList();
-    bool hasRunWorkflow = false, hasRasterInspect = false;
+    bool hasRunWorkflow = false, hasRasterInspect = false, hasIoProbe = false;
     for ( const QVariant &toolVar : tools )
     {
         const QString name = toolVar.toMap().value( QStringLiteral( "name" ) ).toString();
@@ -1351,9 +1477,12 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
             hasRunWorkflow = true;
         if ( name == QStringLiteral( "spatial:raster_inspect" ) )
             hasRasterInspect = true;
+        if ( name == QStringLiteral( "io:probe" ) )
+            hasIoProbe = true;
     }
     CHECK( hasRunWorkflow );
     CHECK( hasRasterInspect );
+    CHECK( hasIoProbe );
 }
 
 TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputType and outputType matching", "[agent][mcp]" )

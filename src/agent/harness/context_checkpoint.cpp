@@ -42,6 +42,24 @@ Json::Value parseText( const std::string &text, bool *ok )
   return out;
 }
 
+/// Filename-safety contract for session ids: they are interpolated into the
+/// checkpoint file name, so save/load/delete/resume must all apply the same
+/// check — validating only on save let a hostile id walk out of the session
+/// directory on the read/delete paths (#1056). Returns an empty string when
+/// the id is acceptable.
+std::string sessionIdRejection( const std::string &sessionId )
+{
+  if ( sessionId.empty() || sessionId.size() > 128 )
+    return "session_id must be 1..128 characters";
+  for ( char c : sessionId )
+  {
+    if ( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) ||
+            c == '_' || c == '-' || c == '.' ) )
+      return "session_id must stay filename-safe";
+  }
+  return {};
+}
+
 /// File identity for staleness checks: (size, mtime). Revision rides along
 /// when the grounding recorded a governed asset.
 Json::Value identityForFile( const QString &path, long long revision )
@@ -213,21 +231,11 @@ QString HarnessSessionStore::sessionPathLocked( const std::string &sessionId ) c
 QString HarnessSessionStore::saveSession( const HarnessSessionState &state, HarnessError &error )
 {
   QMutexLocker locker( &gStoreMutex );
-  if ( state.sessionId.empty() || state.sessionId.size() > 128 )
+  const std::string idRejection = sessionIdRejection( state.sessionId );
+  if ( !idRejection.empty() )
   {
-    error = HarnessError::make( error_codes::kInvalidParameter,
-                                "session_id must be 1..128 characters" );
+    error = HarnessError::make( error_codes::kInvalidParameter, idRejection );
     return {};
-  }
-  for ( char c : state.sessionId )
-  {
-    if ( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) ||
-            c == '_' || c == '-' || c == '.' ) )
-    {
-      error = HarnessError::make( error_codes::kInvalidParameter,
-                                  "session_id must stay filename-safe" );
-      return {};
-    }
   }
 
   HarnessSessionState toWrite = state;
@@ -297,6 +305,12 @@ std::optional<HarnessSessionState> HarnessSessionStore::loadSession( const std::
                                                                      HarnessError &error ) const
 {
   QMutexLocker locker( &gStoreMutex );
+  const std::string idRejection = sessionIdRejection( sessionId );
+  if ( !idRejection.empty() )
+  {
+    error = HarnessError::make( error_codes::kInvalidParameter, idRejection );
+    return std::nullopt;
+  }
   const QString path = sessionPathLocked( sessionId );
   QFile file( path );
   if ( !file.open( QIODevice::ReadOnly ) )
@@ -368,6 +382,8 @@ Json::Value HarnessSessionStore::listSessions() const
 bool HarnessSessionStore::deleteSession( const std::string &sessionId )
 {
   QMutexLocker locker( &gStoreMutex );
+  if ( !sessionIdRejection( sessionId ).empty() )
+    return false;
   return QFile::exists( sessionPathLocked( sessionId ) ) &&
          QFile::remove( sessionPathLocked( sessionId ) );
 }

@@ -805,6 +805,11 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
     "不得报喜。" );
   m_messageHistory.append( finalUserMsg );
 
+  // Retention bound (LCY-5): a tool-calling model can loop indefinitely, and
+  // every round appends assistant+tool+user. Keep the system prompt plus the
+  // most recent rounds so a runaway loop cannot grow the request unbounded.
+  m_messageHistory = pruneHistory( m_messageHistory );
+
   const QJsonArray followUpMessages = m_messageHistory;
 
   m_isStreaming = true;
@@ -1028,6 +1033,31 @@ QString AgentCopilotDockWidget::runInspectorSummary() const
   if ( !m_lastError.isEmpty() )
     parts.append( QStringLiteral( "error=%1" ).arg( m_lastError ) );
   return parts.join( QStringLiteral( " | " ) );
+}
+
+QJsonArray AgentCopilotDockWidget::pruneHistory( const QJsonArray &history )
+{
+  if ( history.size() <= kMaxHistoryMessages )
+    return history;
+
+  // Keep the leading system message plus the newest tail. Never retain a tail
+  // that begins with a role:"tool" message: OpenAI-compatible endpoints reject
+  // an orphaned tool reply whose assistant tool_calls message was dropped.
+  int start = history.size() - kMaxHistoryMessages;
+  while ( start < history.size()
+          && history.at( start ).toObject().value( QStringLiteral( "role" ) ).toString()
+               == QStringLiteral( "tool" ) )
+  {
+    ++start;
+  }
+
+  QJsonArray pruned;
+  for ( int i = 0; i < history.size(); ++i )
+  {
+    if ( i == 0 || i >= start )
+      pruned.append( history.at( i ) );
+  }
+  return pruned;
 }
 
 void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )

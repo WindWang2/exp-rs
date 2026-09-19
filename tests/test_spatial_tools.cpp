@@ -432,6 +432,17 @@ TEST_CASE( "SpatialToolProvider feeds the unified AgentToolCatalog", "[agent][sp
     CHECK( tool->inputSchema["required"][0].asString() == "path" );
 
     CHECK( AgentToolCatalog::instance().findTool( "spatial:list_models" ).has_value() );
+
+    // Foundation 5.0 io: spatial tools are registered and MCP-dispatchable, so
+    // they must be cataloged under their own group instead of being filtered
+    // out while still reachable (#1056).
+    const auto ioProbe = AgentToolCatalog::instance().findTool( "io:probe" );
+    REQUIRE( ioProbe.has_value() );
+    CHECK( ioProbe->category == ToolCategory::Data );
+    CHECK( ioProbe->group == "io" );
+    CHECK( AgentToolCatalog::instance().findTool( "io:capabilities" ).has_value() );
+    CHECK( AgentToolCatalog::instance().findTool( "io:product" ).has_value() );
+    CHECK( AgentToolCatalog::instance().findTool( "io:product_plan" ).has_value() );
 }
 
 // ——— Unified resolver regression tests (GH #560) ————————————————
