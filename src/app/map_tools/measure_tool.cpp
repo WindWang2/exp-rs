@@ -1,5 +1,6 @@
 #include "measure_tool.h"
 #include "core/sicnu_logging.h"
+#include "map_tools/map_tool_canvas_item.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
@@ -66,9 +67,10 @@ void MeasureTool::updateDistanceArea()
 
 MeasureTool::~MeasureTool()
 {
-    reset();
-    delete mRubberBand;
-    mRubberBand = nullptr;
+    // #1048: the band is a scene item; never touch scene memory the canvas
+    // destructor already reclaimed (the manager deletes this tool early in
+    // production, but the guard keeps direct/test ownership safe too).
+    sicnu::app::deleteToolCanvasItem( this, mRubberBand );
 }
 
 void MeasureTool::canvasPressEvent( QgsMapMouseEvent *e )

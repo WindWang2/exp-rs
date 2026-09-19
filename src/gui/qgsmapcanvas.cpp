@@ -270,17 +270,24 @@ QgsMapCanvas::~QgsMapCanvas()
     mMapTool = nullptr;
   }
 
-  // we also clear the canvas pointer for all child map tools. We're now in a partially destroyed state and it's
-  // no longer safe for map tools to try to cleanup things in the canvas during their destruction (such as removing
-  // associated canvas items)
-  // NOTE -- it may be better to just delete the map tool children here upfront?
+  // Cancel any in-flight rendering before touching tools/items.
+  cancelJobs();
+
+  // We also clear the canvas pointer for all child map tools and delete them
+  // NOW, while the scene (and every canvas item) still exists. A canvas item
+  // is a scene-owned QGraphicsItem: if we deleted the scene items first, any
+  // tool destructor that frees its own rubber band / marker (QgsMapToolCapture,
+  // RsRoiSpectrumTool, RsSegmentSelectTool, MeasureTool, ...) would hold a
+  // dangling pointer and double-free it (issue #1048). Deleting the tools
+  // upfront gives each destructor the same partially-destroyed world the
+  // original null-out announced (canvas pointer cleared; items still alive),
+  // and the scene teardown below then deletes only items with no live owner.
   const QList<QgsMapTool *> tools = findChildren<QgsMapTool *>();
   for ( QgsMapTool *tool : tools )
   {
     tool->mCanvas = nullptr;
+    delete tool;
   }
-
-  cancelJobs();
 
   // delete canvas items prior to deleting the canvas
   // because they might try to update canvas when it's

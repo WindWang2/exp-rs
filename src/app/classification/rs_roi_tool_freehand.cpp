@@ -1,5 +1,6 @@
 // rs_roi_tool_freehand.cpp — see header for design notes.
 #include "rs_roi_tool_freehand.h"
+#include "map_tools/map_tool_canvas_item.h"
 
 #include "qgsmapcanvas.h"
 #include "qgsmapmouseevent.h"
@@ -20,8 +21,9 @@ RsRoiToolFreehand::RsRoiToolFreehand( QgsMapCanvas *canvas )
 
 RsRoiToolFreehand::~RsRoiToolFreehand()
 {
-  delete mRubber;
-  mRubber = nullptr;
+  // #1048: the band is a scene item; skip the delete when the canvas is
+  // already tearing its scene down.
+  sicnu::app::deleteToolCanvasItem( this, mRubber );
 }
 
 void RsRoiToolFreehand::clearRubber()

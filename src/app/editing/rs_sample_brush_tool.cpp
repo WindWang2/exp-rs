@@ -1,6 +1,7 @@
 // rs_sample_brush_tool.cpp — see rs_sample_brush_tool.h.
 #include "rs_sample_brush_tool.h"
 
+#include "map_tools/map_tool_canvas_item.h"
 #include "rs_edit_command_guard.h"
 #include "rs_edit_session.h"
 
@@ -41,6 +42,13 @@ RsSampleBrushTool::RsSampleBrushTool( QgsMapCanvas *canvas )
     mRubber->setFillColor( QColor( 60, 180, 255, 70 ) );
     mRubber->setWidth( 1 );
     mRubber->hide();
+}
+
+RsSampleBrushTool::~RsSampleBrushTool()
+{
+    // #1051: mRubber is a scene item, not a QObject child — free it here.
+    // #1048: skip when the canvas already reclaimed its scene items.
+    sicnu::app::deleteToolCanvasItem( this, mRubber );
 }
 
 void RsSampleBrushTool::setTargetLayer( QgsVectorLayer *layer )

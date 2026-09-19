@@ -132,6 +132,17 @@ RsObiaMainWindow::~RsObiaMainWindow()
   // task silently ran to completion. cancelActiveTask() cancels the task and
   // restores the cursor before member teardown destroys the progress dialog.
   cancelActiveTask();
+
+  // #1048: the selection tool is a canvas child whose destructor frees a
+  // scene-owned rubber band. Delete it explicitly while the canvas is still
+  // alive (deactivate first so no tool event can land mid-teardown).
+  if ( mSelectTool )
+  {
+    if ( mCanvas && mCanvas->mapTool() == mSelectTool )
+      mCanvas->unsetMapTool( mSelectTool );
+    delete mSelectTool;
+    mSelectTool = nullptr;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +292,12 @@ void RsObiaMainWindow::setupDocks()
         auto *idItem = new QTableWidgetItem( QString::number( mClassDefs[i].id ) );
         idItem->setFlags( idItem->flags() & ~Qt::ItemIsEditable ); // ID maps to pixel value; keep read-only
         mClassTable->setItem( i, 0, idItem );
-        mClassTable->setItem( i, 1, new QTableWidgetItem( mClassDefs[i].name ) );
+        // #1056: the Name column must not look editable — inline edits were
+        // silently discarded. Renaming happens through the context menu's
+        // "Edit Name..." (write-back to mClassDefs).
+        auto *nameItem = new QTableWidgetItem( mClassDefs[i].name );
+        nameItem->setFlags( nameItem->flags() & ~Qt::ItemIsEditable );
+        mClassTable->setItem( i, 1, nameItem );
         auto *colorItem = new QTableWidgetItem;
         colorItem->setFlags( colorItem->flags() & ~Qt::ItemIsEditable ); // edited via context menu color picker
         colorItem->setBackground( mClassDefs[i].color );
@@ -1631,7 +1647,9 @@ void RsObiaMainWindow::rebuildClassTable()
         auto *idItem = new QTableWidgetItem( QString::number( mClassDefs[i].id ) );
         idItem->setFlags( idItem->flags() & ~Qt::ItemIsEditable );
         mClassTable->setItem( i, 0, idItem );
-        mClassTable->setItem( i, 1, new QTableWidgetItem( mClassDefs[i].name ) );
+        auto *nameItem = new QTableWidgetItem( mClassDefs[i].name );
+        nameItem->setFlags( nameItem->flags() & ~Qt::ItemIsEditable ); // #1056: no silent inline edits
+        mClassTable->setItem( i, 1, nameItem );
         auto *colorItem = new QTableWidgetItem;
         colorItem->setFlags( colorItem->flags() & ~Qt::ItemIsEditable );
         colorItem->setBackground( mClassDefs[i].color );

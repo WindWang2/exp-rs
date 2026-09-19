@@ -342,6 +342,25 @@ QgsClassificationMainWindow::~QgsClassificationMainWindow()
     m_canvas->setLayers( QList<QgsMapLayer *>() );
     m_canvas->setCurrentLayer( nullptr );
   }
+
+  // #1048: the four interaction tools are canvas children whose destructors
+  // free scene-owned rubber bands. Delete them explicitly here, while the
+  // canvas and its scene are still alive — deterministic ownership instead of
+  // relying on the canvas destructor order.
+  const QList<QgsMapTool *> childTools = { m_toolMagicWand, m_toolAddPolygon,
+                                           m_toolSelect, m_toolPan };
+  for ( QgsMapTool *tool : childTools )
+  {
+    if ( !tool )
+      continue;
+    if ( m_canvas && m_canvas->mapTool() == tool )
+      m_canvas->unsetMapTool( tool );
+    delete tool;
+  }
+  m_toolMagicWand = nullptr;
+  m_toolAddPolygon = nullptr;
+  m_toolSelect = nullptr;
+  m_toolPan = nullptr;
 }
 
 RsClassifySessionState::WorkflowSnapshot

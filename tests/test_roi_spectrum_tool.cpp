@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QEventLoop>
+#include <QPointer>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -166,4 +167,57 @@ TEST_CASE( "GUI/MapTools: RsRoiSpectrumTool lifecycle and canvas destruction", "
     // Cleanly destroy tool and canvas without SIGSEGV or double free
     tool.reset();
     canvas.reset();
+}
+
+TEST_CASE( "RsRoiSpectrumTool deactivate cancels an abandoned polygon (#1051)",
+           "[app][map_tools][roi][1051]" )
+{
+    TestAppFixture fixture;
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    canvas->resize( 200, 200 );
+
+    bool fired = false;
+    auto tool = std::make_unique<TestableRsRoiSpectrumTool>(
+        canvas.get(), nullptr,
+        [&fired]( const QVector<double> &, const QVector<double> &,
+                  const QVector<QString> &, const QString & ) { fired = true; } );
+
+    REQUIRE( tool->rubberBandForTest() != nullptr );
+
+    // Two clicks start (not finish) a polygon.
+    const QPoint pt0 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 5, 5 ) ).toQPointF().toPoint();
+    QgsMapMouseEvent e0( canvas.get(), QEvent::MouseButtonPress, pt0, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasPressEvent( &e0 );
+
+    // Switching tools / closing the window deactivates the tool: the partial
+    // ring must be cleared, the band hidden, and no callback may fire.
+    tool->deactivate();
+
+    CHECK_FALSE( fired );
+    REQUIRE( tool->rubberBandForTest() != nullptr );
+    CHECK( tool->rubberBandForTest()->numberOfVertices() == 0 );
+    CHECK_FALSE( tool->rubberBandForTest()->isVisible() );
+}
+
+TEST_CASE( "RsRoiSpectrumTool: canvas-first teardown deletes the tool once (#1048)",
+           "[app][map_tools][roi][1048]" )
+{
+    TestAppFixture fixture;
+
+    // The tool is a canvas child whose destructor frees a scene item. The
+    // canvas must destroy it while the scene is intact; a double free here
+    // is the regression.
+    auto *canvas = new QgsMapCanvas();
+    canvas->resize( 200, 200 );
+    auto *tool = new TestableRsRoiSpectrumTool(
+        canvas, nullptr,
+        []( const QVector<double> &, const QVector<double> &,
+            const QVector<QString> &, const QString & ) {} );
+    QPointer<TestableRsRoiSpectrumTool> guard( tool );
+    REQUIRE( guard->rubberBandForTest() != nullptr );
+
+    delete canvas;
+
+    CHECK( guard.isNull() );
 }

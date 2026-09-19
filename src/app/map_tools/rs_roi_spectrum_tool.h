@@ -38,6 +38,13 @@ class RsRoiSpectrumTool : public QgsMapTool
                        ResultCallback onResult );
     ~RsRoiSpectrumTool() override;
 
+    /// Cancels any in-progress polygon (hides/resets the rubber band) so an
+    /// abandoned draw never leaves a permanent ring on the canvas (#1051).
+    void deactivate() override;
+
+    /// Testing seam: the polygon rubber band (null after canvas teardown).
+    QgsRubberBand *rubberBandForTest() const { return m_rubberBand; }
+
   protected:
     void canvasPressEvent( QgsMapMouseEvent *e ) override;
     void canvasMoveEvent( QgsMapMouseEvent *e ) override;

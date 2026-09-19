@@ -329,15 +329,32 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
     if (!m_mapCanvas || !m_identifyTool)
         return;
 
+    // #1051: re-invocation while a previous ROI tool is armed (half-drawn
+    // polygon, or a compute whose callback has not fired) must retire the old
+    // instance — otherwise it stays a canvas child with a painted rubber band
+    // that no cleanup path can reach. deactivate() resets the partial ring.
+    if (m_roiSpectrumTool)
+    {
+        m_mapCanvas->unsetMapTool(m_roiSpectrumTool.data());
+        m_roiSpectrumTool->deleteLater();
+    }
+
     // The tool computes the ROI mean spectrum and reports it into the Spectral
     // Profile dock; afterwards the canvas returns to the identify tool. The
     // callback is the tool's sole owner — it always restores the tool and
     // releases (empty values carry an error message in layerName).
+    // #1051: the callback must act on the instance that FIRED it, never on
+    // whatever m_roiSpectrumTool points at by then — a future finishing after
+    // a re-invocation used to delete the just-armed replacement.
+    auto toolSlot = std::make_shared<QPointer<RsRoiSpectrumTool>>();
     m_roiSpectrumTool = new RsRoiSpectrumTool(
       m_mapCanvas, rasterLayer,
-      [this](const QVector<double> &values, const QVector<double> &wavelengths,
+      [this, toolSlot](const QVector<double> &values, const QVector<double> &wavelengths,
              const QVector<QString> &labels, const QString &layerName)
       {
+        RsRoiSpectrumTool *fired = toolSlot->data();
+        if (!fired || m_roiSpectrumTool != fired)
+          return; // retired instance: stale result, never touch the new tool
         if (!values.isEmpty() && m_spectralProfile)
         {
           m_spectralProfile->setSpectrum(values, wavelengths, labels, layerName);
@@ -349,9 +366,10 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         if (m_mapCanvas && m_identifyTool)
           m_mapCanvas->setMapTool(m_identifyTool);
         // Safe asynchronous deletion: we are inside the tool's own callback.
-        if (m_roiSpectrumTool)
-          m_roiSpectrumTool->deleteLater();
+        m_roiSpectrumTool->deleteLater();
+        m_roiSpectrumTool = nullptr;
       });
+    *toolSlot = m_roiSpectrumTool;
 
     m_mapCanvas->setMapTool(m_roiSpectrumTool.data());
 }

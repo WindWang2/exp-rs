@@ -1,6 +1,8 @@
 // rs_segment_select_tool.cpp — Phase 10B Task 10B.5
 #include "rs_segment_select_tool.h"
 
+#include "map_tools/map_tool_canvas_item.h"
+
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgspointxy.h>
@@ -16,8 +18,8 @@ RsSegmentSelectTool::RsSegmentSelectTool( QgsMapCanvas *canvas )
 
 RsSegmentSelectTool::~RsSegmentSelectTool()
 {
-    delete mRubberBand;
-    mRubberBand = nullptr;
+    // #1048: never touch scene memory the canvas destructor already reclaimed.
+    sicnu::app::deleteToolCanvasItem( this, mRubberBand );
 }
 
 void RsSegmentSelectTool::setSegmentMap( const RsSegmentMap &segMap )
@@ -34,12 +36,9 @@ void RsSegmentSelectTool::setGeoTransform( const double gt[6] )
 void RsSegmentSelectTool::clearSelection()
 {
     mSelectedSegId = 0;
-    if ( mRubberBand )
-    {
-        mRubberBand->reset( Qgis::GeometryType::Polygon );
-        delete mRubberBand;
-        mRubberBand = nullptr;
-    }
+    // The band is a scene item; the guard keeps this safe even if the canvas
+    // is already gone (deferred callbacks / teardown).
+    sicnu::app::deleteToolCanvasItem( this, mRubberBand );
     emit selectionCleared();
 }
 

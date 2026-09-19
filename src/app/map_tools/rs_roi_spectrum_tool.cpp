@@ -1,10 +1,12 @@
 // src/app/map_tools/rs_roi_spectrum_tool.cpp — polygon ROI mean-spectrum tool
 #include "rs_roi_spectrum_tool.h"
+#include "map_tools/map_tool_canvas_item.h"
 
 #include "processing/algorithms/spectral_roi.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptopixel.h>
@@ -39,8 +41,21 @@ RsRoiSpectrumTool::RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rast
 
 RsRoiSpectrumTool::~RsRoiSpectrumTool()
 {
-  delete m_rubberBand;
-  m_rubberBand = nullptr;
+  // #1048: the band is a scene item; skip the delete when the canvas is
+  // already tearing its scene down.
+  sicnu::app::deleteToolCanvasItem( this, m_rubberBand );
+}
+
+void RsRoiSpectrumTool::deactivate()
+{
+  // #1051: abandoning a half-drawn polygon must not leave the partial ring
+  // painted on the canvas; the tool may be deactivated by switching tools,
+  // closing the window, or re-invoking the action.
+  if ( m_rubberBand )
+    m_rubberBand->reset( Qgis::GeometryType::Polygon );
+  m_polygon.clear();
+  m_finished = true;
+  QgsMapTool::deactivate();
 }
 
 void RsRoiSpectrumTool::canvasPressEvent( QgsMapMouseEvent *e )
@@ -100,12 +115,30 @@ void RsRoiSpectrumTool::finishPolygon()
     mCanvas ? mCanvas->mapSettings().destinationCrs() : QgsCoordinateReferenceSystem();
   if ( canvasCrs.isValid() && canvasCrs != m_rasterLayer->crs() )
   {
-    const QgsCoordinateTransform transform( canvasCrs, m_rasterLayer->crs(),
-                                            QgsProject::instance()->transformContext() );
-    QPolygonF transformed;
-    for ( const QPointF &p : m_polygon )
-      transformed << transform.transform( QgsPointXY( p.x(), p.y() ) ).toQPointF();
-    roi = transformed;
+    try
+    {
+      const QgsCoordinateTransform transform( canvasCrs, m_rasterLayer->crs(),
+                                              QgsProject::instance()->transformContext() );
+      QPolygonF transformed;
+      transformed.reserve( m_polygon.size() );
+      for ( const QPointF &p : m_polygon )
+        transformed << transform.transform( QgsPointXY( p.x(), p.y() ) ).toQPointF();
+      roi = transformed;
+    }
+    catch ( const QgsException &e )
+    {
+      // #1056: this runs on the mouse-event path — a throwing transform used
+      // to escape into the event loop and terminate. Report instead, exactly
+      // like the sibling CrsException sites.
+      qWarning().noquote() << "RsRoiSpectrumTool: CRS transform from"
+                           << canvasCrs.authid() << "to" << m_rasterLayer->crs().authid()
+                           << "failed (" << e.what() << "); ROI not computed";
+      if ( m_onResult )
+        m_onResult( {}, {}, {},
+                    tr( "Cannot transform the ROI into the raster CRS — select a raster "
+                        "in the map CRS or reproject it first." ) );
+      return;
+    }
   }
 
   const QString rasterSource = m_rasterLayer->source();
