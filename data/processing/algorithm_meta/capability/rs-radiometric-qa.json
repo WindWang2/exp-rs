@@ -1,0 +1,142 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u8865\u9f50 input/output\uff1bqa_radsat_band \u7528 0\uff08\u5173\u95ed\uff09\u6216 1..\u6ce2\u6bb5\u6570\uff1bqa_radsat_bits \u6309\u8f93\u5165\u6ce2\u6bb5\u6570\u7ed9\u51fa\u9017\u53f7\u5206\u9694\u7684 [0, 65535] \u63a9\u7801",
+        "when" : "\u7f3a\u5c11\u5fc5\u9700\u53c2\u6570 input/output\uff0c\u6216 qa_radsat_band \u4e3a\u8d1f\u3001\u8d85\u8fc7\u8f93\u5165\u6ce2\u6bb5\u6570\uff0c\u6216 qa_radsat_bits \u6761\u76ee\u6570\u4e0e\u8f93\u5165\u6ce2\u6bb5\u6570\u4e0d\u7b26\u3001\u53d6\u503c\u8d85\u51fa [0, 65535]"
+      },
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u63d0\u4f9b\u4e0e\u8f93\u5165\u540c\u7f51\u683c\u7684\u63a9\u819c\uff0c\u6216\u5148\u7528 rs:resample \u5bf9\u9f50\u5230\u540c\u4e00\u7f51\u683c",
+        "when" : "cloud_mask \u4e0e\u8f93\u5165\u6805\u683c\u7684 CRS\u3001\u5730\u7406\u53d8\u6362\u6216\u5c3a\u5bf8\u4e0d\u4e00\u81f4\uff08\u4e0d\u505a\u91cd\u91c7\u6837\uff09"
+      },
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5\u8f93\u5165\u4e0e\u63a9\u819c\u8def\u5f84\u3001\u9a71\u52a8\u53ca\u6587\u4ef6\u6743\u9650\uff0c\u786e\u8ba4\u8f93\u5165\u4e3a\u542b\u81f3\u5c11\u4e00\u4e2a\u6ce2\u6bb5\u7684\u53cd\u5c04\u7387\u6805\u683c",
+        "when" : "\u8f93\u5165\u53cd\u5c04\u7387\u6805\u683c\u6216 cloud_mask \u65e0\u6cd5\u6253\u5f00\uff08\u8def\u5f84\u65e0\u6548/\u683c\u5f0f\u4e0d\u652f\u6301\uff09\uff0c\u6216\u8f93\u5165\u4e3a\u7a7a\uff08\u5bbd\u9ad8\u6216\u6ce2\u6bb5\u6570\u4e3a 0\uff09"
+      },
+      {
+        "code" : "OUTPUT_INVALID",
+        "remedy" : "\u66f4\u6362\u53ef\u5199\u8f93\u51fa\u8def\u5f84\u5e76\u786e\u8ba4\u78c1\u76d8\u7a7a\u95f4\u540e\u91cd\u8dd1",
+        "when" : "\u8f93\u51fa\u6807\u5fd7\u6805\u683c\u65e0\u6cd5\u521b\u5efa\u3001\u5206\u5757\u5199\u5165\u5931\u8d25\u6216\u6536\u5c3e\u5931\u8d25\uff08\u76ee\u6807\u8def\u5f84\u4e0d\u53ef\u5199\u3001\u78c1\u76d8\u7a7a\u95f4\u4e0d\u8db3\uff09"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "cloud_mask",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "cloud",
+          "enum" : 
+          [
+            "cloud",
+            "cloud_shadow",
+            "snow"
+          ],
+          "name" : "mask_flag",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "qa_radsat_band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "qa_radsat_bits",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "saturation_level",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Flags describe the delivered values, not the sensor's full quality model; pair with QaMask on QA_PIXEL/SCL for the complete classification.",
+      "A QA_RADSAT band given via qa_radsat_band also receives its own reflectance-domain flag band; consumers should ignore the flag band of the QA band itself."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : 
+    [
+      "The cloud mask must share the input grid (CRS, geotransform, size); mismatched grids are refused, never resampled."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u4e3a\u53cd\u5c04\u7387\u6805\u683c\u7684\u6bcf\u4e2a\u6ce2\u6bb5\u9010\u50cf\u7d20\u5bfc\u51fa uint16 \u8d28\u91cf\u6807\u5fd7\uff08\u9971\u548c\u3001\u8d1f\u503c\u3001\u8d85\u8303\u56f4\u3001\u975e\u6709\u9650\u503c\u3001\u4e91/\u4e91\u5f71/\u96ea\u3001QA_RADSAT \u9971\u548c\u4f4d\uff09\uff0c\u591a\u6e90\u6807\u5fd7\u53d6\u5e76\u96c6\uff0c0 \u8868\u793a\u5e72\u51c0\u50cf\u5143\uff0c\u5e76\u7ed9\u51fa\u6c47\u603b\u62a5\u544a\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Derive per-pixel radiometric QA flags (saturation, negative, over-range, non-finite, cloud/shadow/snow propagation, QA_RADSAT saturation bits) for each band of a reflectance raster, written as uint16 flag bands with a summary report. Flags union across sources; 0 = clean pixel.",
+  "display_name" : "Radiometric QA Flags",
+  "gpu" : false,
+  "id" : "rs:radiometric_qa",
+  "input" : "raster",
+  "notes" : "Flag vocabulary (uint16): bit0 saturation, bit1 negative, bit2 over-range, bit3 non-finite, bit4 cloud, bit5 cloud-shadow, bit6 snow, bit7 QA_RADSAT saturation, bit8 invalid angles. Schema id exp_rs_radiometric_qa_flags/1 is stamped on the output.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "qa",
+    "saturation"
+  ],
+  "task" : "radiometric-normalization"
+}

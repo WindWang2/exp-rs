@@ -38,23 +38,18 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     const auto expectedCatalog =
         sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    // Baseline truth: exactly 32 algorithms declare a taskFamily in code
-    // (7 from the Platform 3.0/4.0 tracks; Foundation 5.0 added the raster
-    // spatial / spectral detection / SAR / temporal-monitor / terrain-flow /
-    // topographic-correction families; rs:detect|segment|embedding declared
-    // tasks without shipped sidecars at the Foundation 5.0 baseline and are
-    // now exported like the rest; Scientific Processing 8.0 added
-    // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
-    // Advanced InSAR 11.0 added rs:sar_remove_topographic_phase,
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion.
-    // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
-    // over the model execution seam).
-    // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
-    // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
-    // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
-    REQUIRE( expectedCatalog.size() == 43 );
-    REQUIRE( expectedCatalog.size() == 43 ); // 39 at the a5b11b7f baseline + 4 Advanced InSAR 11.0
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
+    // Baseline truth: the set of algorithms that declare a taskFamily in code.
+    // History: 43 at the Spectral Intelligence 11.0 baseline (#1097 era).
+    // Track D1 (2026-09-20) refreshed this pin to 53 after the live registry
+    // gained task declarations without sidecars (radiometric/BRDF/solar/
+    // terrain platform tracks: rs:brdf_normalization, rs:radiometric_qa,
+    // rs:solar_geometry, rs:terrain_landform, rs:terrain_solar,
+    // rs:terrain_viewshed) — the catalog was regenerated with
+    // `sicnu_geo_rs_cli --export-catalog` and the four stale sidecars of
+    // operators that no longer declare tasks were removed. Exact equality
+    // (not >=) is the contract: a new task-declaring operator MUST regenerate.
+    REQUIRE( expectedCatalog.size() == 53 );
+    REQUIRE( expectedCatalog.size() == 53 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -131,7 +126,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 43 );
+        REQUIRE( written == 53 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:terrain_landform",
+  "input" : "raster",
+  "notes" : "Multiscale TPI uses square (2r+1)\u00b2 windows (centre excluded). Weiss classes: 0 plains, 1 valley, 2 lower slope, 3 middle slope, 4 upper slope, 5 peak. Geomorphon form classes: 0 flat, 1 peak, 2 pit, 3 ridge, 4 valley, 5 slope, 6 other (v1 subset of the 10-class J&S table).",
+  "output" : "raster",
+  "tags" : 
+  [
+    "terrain",
+    "landform",
+    "geomorphometry"
+  ],
+  "task" : "landform_classification"
+}

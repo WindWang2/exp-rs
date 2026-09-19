@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u6a21\u578b\u4e1a\u52a1\u5316\u843d\u5730",
         "\u5730\u7269\u8981\u7d20\u667a\u80fd\u63d0\u53d6"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "MODEL_NOT_READY",
@@ -46,9 +46,9 @@
       }
     ],
     "family" : "classification",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -56,7 +56,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "string",
@@ -104,7 +104,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -119,7 +119,7 @@
         },
         {
           "default" : "unset",
-          "enum" :
+          "enum" : 
           [
             "unset",
             "none",
@@ -151,7 +151,7 @@
         },
         {
           "default" : "none",
-          "enum" :
+          "enum" : 
           [
             "none",
             "hflip",
@@ -164,7 +164,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -172,21 +172,21 @@
       "temporal"
     ],
     "operator_group" : "ml",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Model must be loadable by cv::dnn::readNetFromONNX.",
       "\u9700\u8981\u5e73\u53f0\u6a21\u578b\u5e93\u4e2d\u7684\u5df2\u6ce8\u518c\u6a21\u578b\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u901a\u7528\u6df1\u5ea6\u5b66\u4e60\u63a8\u7406\u7b97\u5b50\uff1a\u52a0\u8f7d\u5e73\u53f0\u6a21\u578b\u5e93\u4e2d\u7684\u5206\u5272/\u5206\u7c7b/\u68c0\u6d4b\u6a21\u578b\u6267\u884c\u63a8\u7406\uff0c\u8f93\u51fa\u7c7b\u522b\u56fe\u6216\u76ee\u6807\u5217\u8868\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u6df1\u5ea6\u5b66\u4e60\u63a8\u7406",
         "\u6a21\u578b\u90e8\u7f72"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u6df1\u5ea6\u5b66\u4e60\u4e0e\u9065\u611f\u5e94\u7528"
       ],
@@ -201,7 +201,7 @@
   "notes" : "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "inference",
     "onnx",
