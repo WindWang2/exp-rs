@@ -11118,3 +11118,49 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
+# ── Platform 12.0 · Scientific Verification 12 ────────────────────────────
+# Append-only block (track glm53-scientific-verification-12). Do not reorder
+# the blocks above; add new lanes at the end.
+#
+# These lanes close the loop on ERROR LISTS the platform already produces but
+# never asserted were empty. The defects they gate were all live on master:
+#   E-5   data/agent/capabilities/preprocess.json unparseable since #1024;
+#         CapabilityKnowledge::loadProblems() had zero consumers.
+#   E-8a  data/help/diagnostics.json duplicated two ids, one with an invalid
+#         retry enum that caused the whole page to be dropped.
+#   E-8b  the `env` diagnostic family is declared by env_doctor.h and emitted
+#         by env_doctor.cpp but absent from DiagnosticFamily (out-of-scope fix;
+#         the gate still reports it).
+#   E-0   an unprovisioned PROJ_DATA made 5 healthy suites report RED with
+#         product-defect-shaped exceptions.
+sicnu_add_test(test_platform_integrity_12)
+target_link_libraries(test_platform_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_platform_integrity_12)
+
+sicnu_add_test(test_verification_env_12)
+target_link_libraries(test_verification_env_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_env_12)
+
+sicnu_add_test(test_help_integrity_12)
+target_link_libraries(test_help_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_help_integrity_12)
+
+# E-13: a byte comparison cannot tell "content moved" from "the graph no longer
+# holds together". This lane asserts the STRUCTURAL invariant (no dangling edge
+# endpoint) on both the committed snapshot and a fresh live assembly, so a
+# regeneration can never silently bless broken references into the baseline.
+sicnu_add_test(test_snapshot_drift_12)
+target_link_libraries(test_snapshot_drift_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_snapshot_drift_12)
+
+# E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
+# two EVIL MERGES (43dcf19cd truncated-capability-block x19, 4713528ef
+# zero-byte x4). E-15 was the same defect in one file; E-16 is the census.
+# Existing gates each miss it for a structural reason -- one inspects a
+# different directory (test_capability_drift.cpp:63), one reads a failure list
+# nothing asserts empty, one compares a snapshot against itself. This lane
+# asserts the property every consumer assumes: every shipped data file parses.
+sicnu_add_test(test_data_parse_integrity_12)
+target_link_libraries(test_data_parse_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_data_parse_integrity_12)
