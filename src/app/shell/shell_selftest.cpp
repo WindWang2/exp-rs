@@ -24,6 +24,7 @@
 
 #include <qgsmapcanvas.h>
 #include <qgsmaptool.h>
+#include <qgsproject.h>
 
 namespace sicnu::app
 {
@@ -173,11 +174,29 @@ bool runShellSelfTest( QgisDesktopWindow *window, QString *failure )
     return false;
   }
 
-  // 4. Registry map-tool commands: switching tools must stay crash-free.
-  registry->trigger( QStringLiteral( "map.pan" ) );
-  QCoreApplication::processEvents();
+  // 4. Registry map-tool commands: switching tools must change the active
+  //    tool (not merely fail to crash) and stay crash-free.
+  QgsMapCanvas *canvas = window->mapCanvas();
+  if ( !canvas )
+  {
+    setFailure( failure, QStringLiteral( "map canvas unavailable" ) );
+    return false;
+  }
   registry->trigger( QStringLiteral( "map.identify" ) );
   QCoreApplication::processEvents();
+  QgsMapTool *identifyTool = canvas->mapTool();
+  if ( !identifyTool )
+  {
+    setFailure( failure, QStringLiteral( "map.identify did not activate a map tool" ) );
+    return false;
+  }
+  registry->trigger( QStringLiteral( "map.pan" ) );
+  QCoreApplication::processEvents();
+  if ( !canvas->mapTool() || canvas->mapTool() == identifyTool )
+  {
+    setFailure( failure, QStringLiteral( "map.pan did not change the active map tool" ) );
+    return false;
+  }
 
   // 5. Fresh georeferencer window: born clean (#1052), closes without the
   //    "unsaved control points" prompt, and its canvases destroy cleanly
@@ -197,6 +216,46 @@ bool runShellSelfTest( QgisDesktopWindow *window, QString *failure )
   }
   georefWindow->close();
   QCoreApplication::processEvents();
+
+    // 6. Failed project write must never report success (#1052 item 1): point
+    //    the project at a path UNDER A REGULAR FILE (ENOTDIR on every OS), so
+    //    the write provably fails, then require writeProjectFile() to fail
+    //    while the mirrored dirty flag and the project file name survive.
+    const QString savedFileName = QgsProject::instance()->fileName();
+
+    const QString blockerPath =
+      QDir( QDir::tempPath() ).filePath( QStringLiteral( "sicnu-selftest-write-guard.tmp" ) );
+    {
+        QFile blocker( blockerPath );
+        blocker.open( QIODevice::WriteOnly );
+    }
+    const QString unwritablePath = blockerPath + QStringLiteral( "/project.qgs" );
+  QgsProject::instance()->setFileName( unwritablePath );
+  QgsProject::instance()->setDirty( true );
+  const bool dirtyBeforeCheck = window->isProjectDirty();
+
+  const bool writeOk = window->writeProjectFile();
+  const bool dirtySurvived = window->isProjectDirty();
+  const bool nameSurvived = QgsProject::instance()->fileName() == unwritablePath;
+
+  QgsProject::instance()->setFileName( savedFileName );
+  QgsProject::instance()->setDirty( dirtyBeforeCheck );
+
+  if ( writeOk )
+  {
+    setFailure( failure, QStringLiteral( "writeProjectFile reported success for an unwritable path" ) );
+    return false;
+  }
+  if ( !dirtySurvived )
+  {
+    setFailure( failure, QStringLiteral( "a failed project write cleared the mirrored dirty flag" ) );
+    return false;
+  }
+  if ( !nameSurvived )
+  {
+    setFailure( failure, QStringLiteral( "a failed project write changed the project file name" ) );
+    return false;
+  }
 
   delete probeEdit;
   return true;

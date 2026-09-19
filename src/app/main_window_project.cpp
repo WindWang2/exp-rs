@@ -18,6 +18,7 @@
 #include <QCoreApplication>
 #include <QBuffer>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -284,13 +285,31 @@ void QgisDesktopWindow::openProject()
     }
 }
 
+bool QgisDesktopWindow::writeProjectFile( const QString &filePath )
+{
+    QgsProject *project = QgsProject::instance();
+    const QString target = filePath.isEmpty() ? project->fileName() : filePath;
+    const bool written = filePath.isEmpty() ? project->write() : project->write( filePath );
+    if ( !written )
+    {
+        qWarning().noquote() << "project write failed:" << target
+                             << project->error();
+        return false;
+    }
+    updateWindowTitle();
+    refreshWorkspaceBrowser();
+    return true;
+}
+
 void QgisDesktopWindow::saveProject()
 {
     if (QgsProject::instance()->fileName().isEmpty()) {
         saveProjectAs();
     } else {
-        QgsProject::instance()->write();
-        updateWindowTitle();
+        if (!writeProjectFile()) {
+            statusBar()->showMessage(tr("Project save failed — the file was not written"), 6000);
+            return;
+        }
         statusBar()->showMessage(tr("Project saved"), 3000);
     }
 }
@@ -306,9 +325,11 @@ void QgisDesktopWindow::saveProjectAs()
         // state follows Save As instead of bleeding across projects.
         if ( m_projectContext )
             m_projectContext->reopenWorkspaceStore( filePath );
-        QgsProject::instance()->write(filePath);
-        updateWindowTitle();
-        refreshWorkspaceBrowser();
+        if ( !writeProjectFile( filePath ) )
+        {
+            statusBar()->showMessage(tr("Project save failed — the file was not written"), 6000);
+            return;
+        }
         statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
     }
 }

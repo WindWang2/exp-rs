@@ -249,6 +249,14 @@ public:
      */
     Q_INVOKABLE bool loadDataLayer(const QString &filePath);
 
+    /// Writes the project through QgsProject::write() and returns the result.
+    /// Pure I/O + shell bookkeeping (NO dialogs) so the failure contract is
+    /// testable; saveProject()/saveProjectAs() wrap it with the UX.
+    /// Empty @p filePath writes the current project file.
+    bool writeProjectFile( const QString &filePath = QString() );
+    /// Test seam: the dirty flag mirrored from QgsProject::isDirty().
+    bool isProjectDirty() const { return m_projectDirty; }
+
   public slots:
     void addRasterLayer();
     void addVectorLayer();
