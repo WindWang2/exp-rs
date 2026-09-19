@@ -777,7 +777,7 @@ TEST_CASE( "provenance: generator/seed metadata must match the declared foundry 
             GDALOpen( artifact.toUtf8().constData(), GA_Update ) );
         REQUIRE( ds != nullptr );
         ds->SetMetadataItem( "SICNU_GENERATOR", "sicnu_generate_samples" );
-        ds->SetMetadataItem( "SICNU_VERSION", "1.0.0" );
+        ds->SetMetadataItem( "SICNU_GENERATOR_VERSION", "1.0.0" );
         ds->SetMetadataItem( "SICNU_SEED", "42" );
         ds->SetMetadataItem( "SICNU_PROFILE", "lab" );
         ds->SetMetadataItem( "SICNU_PRODUCT", "landsat_sample" );

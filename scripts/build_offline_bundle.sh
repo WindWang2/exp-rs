@@ -35,7 +35,7 @@ skip_samples=0
 incremental=0
 verify_path=""
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '5,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "build_offline_bundle: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do

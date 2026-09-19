@@ -2057,7 +2057,7 @@ static bool runFileCheck( const QString &artifactPath, const LabKernelSpec &spec
 }
 
 /// provenance — the artifact must carry the foundry's dataset metadata
-/// (SICNU_GENERATOR / _SEED / _PRODUCT / _PROFILE / generator_version), so a
+/// (SICNU_GENERATOR / _SEED / _PRODUCT / _PROFILE / _GENERATOR_VERSION), so a
 /// submission computed from a different (or tampered) input can be refused by
 /// the rules themselves. Metadata is read from the already-open raster; every
 /// declared expectation must be present and exactly equal (string compare;
@@ -2128,12 +2128,14 @@ bool runProvenance( const RasterReader &reader, const LabKernelSpec &spec,
     }
     if ( params.isMember( "version" ) )
     {
-        const QString observed = item( "SICNU_VERSION" );
+        // The foundry stamps SICNU_GENERATOR_VERSION (sample_foundry.cpp),
+        // not SICNU_VERSION — the two spellings must not drift.
+        const QString observed = item( "SICNU_GENERATOR_VERSION" );
         const QString expected = QString::fromStdString( params["version"].asString() );
         if ( observed.isEmpty() )
-            failWith( QStringLiteral( "missing provenance metadata SICNU_VERSION" ) );
+            failWith( QStringLiteral( "missing provenance metadata SICNU_GENERATOR_VERSION" ) );
         else if ( observed != expected )
-            failWith( QStringLiteral( "SICNU_VERSION mismatch" ) );
+            failWith( QStringLiteral( "SICNU_GENERATOR_VERSION mismatch" ) );
         outcome.observed[ "version" ] = observed.toStdString();
         outcome.expected[ "version" ] = expected.toStdString();
     }

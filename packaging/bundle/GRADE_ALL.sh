@@ -27,8 +27,8 @@ set -eu
 bundle_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: grade_all.sh <submissions_dir> [lab_id] [out.csv]" >&2
-  echo "  example: grade_all.sh /media/usb/lab1_submissions ndvi_basics grades.csv" >&2
+  echo "usage: GRADE_ALL.sh <submissions_dir> [lab_id] [out.csv]" >&2
+  echo "  example: GRADE_ALL.sh /media/usb/lab1_submissions ndvi_basics grades.csv" >&2
   exit 2
 fi
 

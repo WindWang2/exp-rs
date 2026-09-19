@@ -1099,6 +1099,10 @@ TEST_CASE( "cli --products selects a subset with typed refusals",
     // Two selection spellings at once, or selection plus verify: usage.
     CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample",
                      "--spec=whatever.json" } ) == 2 );
+    // Duplicates inside the list are refused (the CLI never silently
+    // de-duplicates a mistyped selection).
+    CHECK( runCli( { "--out=" + dir.str(),
+                     "--products=dem_sample,dem_sample" } ) == 2 );
     CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample", "--verify" } ) == 2 );
 
     // Happy path: a comma list generates exactly the named products.
@@ -1127,9 +1131,21 @@ TEST_CASE( "cli --list-products prints the catalog and refuses combinations",
            "[foundry][cli][products]" )
 {
     TempDir dir;
-    // runCli hides stdout, so capture via the shell is overkill: assert the
-    // contract that matters — exit 0 alone, exit 2 combined with anything.
     CHECK( runCli( { "--list-products" } ) == 0 );
+    // The printed catalog is exactly productByName's vocabulary.
+    {
+        std::string cmd = shellQuote( SICNU_GENERATE_SAMPLES_BIN );
+        cmd += " --list-products > " + shellQuote( ( dir.path / "list.txt" ).string() );
+        REQUIRE( std::system( cmd.c_str() ) == 0 );
+        std::ifstream in( dir.path / "list.txt" );
+        std::vector<std::string> lines;
+        for ( std::string line; std::getline( in, line ); )
+            if ( !line.empty() )
+                lines.push_back( line );
+        REQUIRE( lines.size() == productCatalog().size() );
+        for ( std::size_t i = 0; i < lines.size(); ++i )
+            CHECK( lines[i] == productName( productCatalog()[ i ] ) );
+    }
     CHECK( runCli( { "--list-products", "--seed=7" } ) == 2 );
     CHECK( runCli( { "--list-products", "--out=" + dir.str() } ) == 2 );
     CHECK( runCli( { "--list-products", "--verify" } ) == 2 );

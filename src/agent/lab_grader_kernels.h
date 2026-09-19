@@ -20,9 +20,10 @@
 //                       existence, byte bounds, PNG page geometry, MapSpec
 //                       validation via the platform validator;
 //   provenance          the artifact must carry the foundry's dataset
-//                       metadata (SICNU_GENERATOR/_SEED/_PRODUCT/_PROFILE/
-//                       _VERSION) with the declared values — a submission
-//                       computed from a different or tampered sample fails.
+//                       metadata (SICNU_GENERATOR/_GENERATOR_VERSION/_SEED/
+//                       _PRODUCT/_PROFILE) with the declared values — a
+//                       submission computed from a different or tampered
+//                       sample fails.
 //
 // Contracts inherited from the D4 grader (ADR 0150):
 //   * every pass streams in bounded windows under the caller's byte budget —

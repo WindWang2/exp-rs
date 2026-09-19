@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # upgrade_labspec.py — LabSpec 1 → LabSpec 2 migration (lab platform 12.0).
 #
-# LabSpec 2 is a strict superset of v1: same required fields, six new optional
+# LabSpec 2 is a strict superset of v1: same required fields, seven new optional
 # structured fields (objective_zh, principles, glossary, expected_artifacts,
 # param_ranges, grading_rules) and `spec_version: 2`. The C++ loader accepts
 # both versions and rejects v2-only keys in v1 documents (src/app/widgets/
@@ -163,7 +163,13 @@ def migrated_bytes(labs_dir, name):
         return raw
     if version != 1:
         raise SystemExit("upgrade_labspec: %s has spec_version %r" % (name, version))
-    return raw.replace('"spec_version": 1', '"spec_version": 2', 1)
+    bumped = raw.replace('"spec_version": 1', '"spec_version": 2', 1)
+    # A differently formatted file would silently no-op the text replace and
+    # make --check pass on an unmigrated spec — verify the parsed result.
+    if json.loads(bumped).get("spec_version") != 2:
+        raise SystemExit("upgrade_labspec: could not bump spec_version in %s"
+                         % name)
+    return bumped
 
 
 def main():

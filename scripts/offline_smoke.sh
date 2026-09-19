@@ -100,6 +100,10 @@ if [ "$env_rc" -ne 0 ] && [ "$env_rc" -ne 2 ]; then
 fi
 grep -q "^ENV DOCTOR " "$out_root/env-doctor.log" \
   || fail "env-doctor produced no verdict line"
+verdict_word=$(grep "^ENV DOCTOR " "$out_root/env-doctor.log" | head -1 | awk '{print $3}')
+if [ "$verdict_word" = "broken" ]; then
+  fail "env-doctor verdict is broken - runtime unusable"
+fi
 echo "   env-doctor verdict: $(tail -1 "$out_root/env-doctor.log") (exit $env_rc)"
 
 echo "== [3/5] lab 1 from inside the bundle (offline pipeline + grade) =="

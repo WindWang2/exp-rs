@@ -55,7 +55,7 @@ CSV_HEADER = [
     "artifact_path", "top_deduction", "message",
 ]
 # Statuses that mean "the submission did not produce a trustworthy grade".
-BAD_STATUSES = ("timeout", "error", "crash", "capped")
+BAD_STATUSES = ("timeout", "error", "crash")
 GRADED_STATUSES = ("pass", "fail")
 
 
@@ -130,10 +130,13 @@ def run_one(args):
         "top_deduction": "",
         "message": "",
     }
-    fd, transcript = tempfile.mkstemp(prefix="grade_", suffix=".json",
-                                      dir=ctx["tmp_dir"])
-    os.close(fd)
+    transcript = ""
     try:
+        # Inside the try: an unwritable report directory is a typed error
+        # row, never an exception escaping the worker's never-raise contract.
+        fd, transcript = tempfile.mkstemp(prefix="grade_", suffix=".json",
+                                          dir=ctx["tmp_dir"])
+        os.close(fd)
         command = build_command(ctx["template"], sys.executable,
                                 ctx["worker"], artifact, transcript,
                                 ctx["extra_args"])
@@ -263,18 +266,29 @@ def _fnmatch(name, pattern):
     return fnmatch.fnmatch(name, pattern)
 
 
+def csv_safe(cell):
+    """Neutralise spreadsheet formula injection: a cell beginning with
+    = + - @ (or TAB/CR) would execute as a formula when a teacher opens the
+    CSV in Excel. Student ids come from filenames and messages from grader
+    stderr — both are attacker-influenced in a classroom."""
+    if isinstance(cell, str) and cell[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + cell
+    return cell
+
+
 def write_csv(path, rows):
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\r\n")
     writer.writerow(CSV_HEADER)
     for row in rows:
         writer.writerow([
-            row["student_id"], row["lab_id"],
+            csv_safe(row["student_id"]), csv_safe(row["lab_id"]),
             "" if row["score"] is None else row["score"],
             "" if row["verdict"] is None else row["verdict"],
             row["status"],
             "" if row["exit_code"] is None else row["exit_code"],
-            row["artifact_path"], row["top_deduction"], row["message"],
+            csv_safe(row["artifact_path"]), csv_safe(row["top_deduction"]),
+            csv_safe(row["message"]),
         ])
     atomic_write(path, "﻿" + buffer.getvalue())
 

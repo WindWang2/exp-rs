@@ -315,6 +315,10 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
           return fail( QStringLiteral( "expected_artifacts path must be a non-empty string" ), 0, labId );
         if ( entry.isMember( "kind" ) )
         {
+          // Guard the scalar read: asString() on an array/object raises
+          // Json::LogicError, which would crash instead of failing typed.
+          if ( !entry[ "kind" ].isString() )
+            return fail( QStringLiteral( "expected_artifacts kind must be raster|vector|file" ), 0, labId );
           const QString kind = stdToQString( entry[ "kind" ].asString() );
           if ( kind != QLatin1String( "raster" ) && kind != QLatin1String( "vector" )
                && kind != QLatin1String( "file" ) )

@@ -57,6 +57,7 @@
 | 阴影 | 各波段极低反射率 |
 
 
+样本数据由确定性生成器 `sicnu_generate_samples` 一键生成（附 SHA-256 清单，可离线分发）：`scripts/gen_samples.sh`，详见 `docs/datasets/lab-samples.md`。
 ## 专题实验（自定义流程，非 LabSpec 面板驱动）
 
 | 实验 | 说明 |
