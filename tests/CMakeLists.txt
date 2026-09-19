@@ -10005,6 +10005,7 @@ endfunction()
 
 sicnu_add_mission_test(test_mission_stage)
 sicnu_add_mission_test(test_mission_surface_parity)
+sicnu_add_mission_test(test_mission_scale_benchmark)
 
 
 add_executable(test_agent_workbench_context

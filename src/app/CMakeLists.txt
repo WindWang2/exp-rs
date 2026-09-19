@@ -130,9 +130,10 @@ add_executable(sicnu_geo_rs
     # D18 mission / scientific workspace context
     workbench/mission_context.cpp
     workbench/mission_context_store.cpp
-    # Unified Mission Workbench 12.0 — mission task space, projection
+    # Unified Mission Workbench 12.0 — mission task space, projection, paged model
     workbench/mission_stage.cpp
     workbench/mission_projection.cpp
+    workbench/mission_timeline_model.cpp
     # D15 classification-change-studio studio seam
     workbench/classification_studio_widget.cpp
     workbench/agent_context_tool.cpp
