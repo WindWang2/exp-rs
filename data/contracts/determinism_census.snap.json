@@ -67,6 +67,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "cartography:produce",
+      "prefix" : "cartography:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit_exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "ProduceOperator",
+        "classFound" : true,
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit_exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "cartography:repair",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
@@ -429,6 +450,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "io:metadata_patch",
+      "prefix" : "io:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "IoMetadataPatchOperator",
+        "classFound" : true,
+        "file" : "operators/io/io_operators.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "io:reproject",
       "prefix" : "io:",
       "runtimeGrade" : "bit_exact",
@@ -443,6 +485,27 @@
         "classFound" : true,
         "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "tolerance",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "io:subdatasets",
+      "prefix" : "io:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "IoSubdatasetsOperator",
+        "classFound" : true,
+        "file" : "operators/io/io_operators.h",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -482,6 +545,27 @@
       {
         "baseDepth" : 0,
         "class" : "IoVectorConvertOperator",
+        "classFound" : true,
+        "file" : "operators/io/io_operators.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "io:verify_dataset",
+      "prefix" : "io:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "IoVerifyDatasetOperator",
         "classFound" : true,
         "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
@@ -922,6 +1006,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:brdf_normalization",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsBrdfNormalizationOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_brdf_normalization_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:change",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -1313,6 +1418,27 @@
         "class" : "RsEmbeddingOperator",
         "classFound" : true,
         "file" : "operators/rs/rs_model_task_operators.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:endmember_analysis",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsEndmemberAnalysisOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_endmember_analysis_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1747,8 +1873,8 @@
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -1778,6 +1904,27 @@
         "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:local_rx_anomaly",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsLocalRxOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_local_rx_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
       }
     },
@@ -1873,8 +2020,8 @@
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -2225,6 +2372,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:quality_mosaic",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsQualityMosaicOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_quality_mosaic_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:radiometric_calibration",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -2238,6 +2406,27 @@
         "class" : "RsRadiometricCalibrationOperator",
         "classFound" : true,
         "file" : "operators/rs/rs_radiometric_calibration_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:radiometric_qa",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsRadiometricQaOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_radiometric_qa_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2282,6 +2471,27 @@
         "file" : "operators/rs/rs_recode_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:register_images",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsRegisterImagesOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_register_images_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
       }
     },
@@ -2457,6 +2667,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:sar_coregister_local",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSarCoregisterLocalOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_sar_coregister_local_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_displacement",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -2541,6 +2772,48 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:sar_network_inversion",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSarNetworkInversionOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_sar_network_inversion_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:sar_pair_network",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSarPairNetworkOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_sar_pair_network_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:sar_phase_filter",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -2596,6 +2869,27 @@
         "class" : "RsSarRatioOperator",
         "classFound" : true,
         "file" : "operators/rs/rs_sar_ratio_operator.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:sar_remove_topographic_phase",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSarRemoveTopographicPhaseOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_sar_remove_topographic_phase_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2879,13 +3173,55 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:solar_geometry",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSolarGeometryOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_solar_geometry_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:sparse_unmixing",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSparseUnmixingOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_sparse_unmixing_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:spectral_band_select",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -2963,6 +3299,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:spectral_similarity",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSpectralSimilarityOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_spectral_similarity_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:spectral_unmixing",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -2976,6 +3333,27 @@
         "class" : "RsSpectralUnmixingOperator",
         "classFound" : true,
         "file" : "operators/rs/rs_spectral_unmixing_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:stack_register",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsStackRegisterOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_stack_register_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3095,8 +3473,8 @@
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -3158,8 +3536,8 @@
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -3216,6 +3594,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:temporal_model_select",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTemporalModelSelectOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_temporal_model_select_operator.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:temporal_monitor",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -3258,13 +3657,34 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:temporal_phenology_multi",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTemporalPhenologyMultiOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_temporal_phenology_multi_operator.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:temporal_region_features",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -3284,8 +3704,8 @@
       "runtimeGrade" : "bit_exact",
       "schemaGrade" : "tolerance",
       "seedPolicy" : "none",
-      "sidecarGrade" : "",
-      "sidecarStochastic" : "",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
       "source" : 
       {
         "baseDepth" : 0,
@@ -3293,6 +3713,48 @@
         "classFound" : true,
         "file" : "operators/rs/rs_temporal_regularize_operator.h",
         "gradeLiteral" : "tolerance",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:temporal_sar_fusion",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTemporalSarFusionOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_temporal_sar_fusion_operator.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:temporal_seasonal_breaks",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact (CI bands: seeded-deterministic)",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTemporalSeasonalBreaksOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_temporal_seasonal_breaks_operator.h",
+        "gradeLiteral" : "bit-exact (CI bands: seeded-deterministic)",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -3427,6 +3889,69 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:terrain_landform",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTerrainLandformOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_terrain_landform_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:terrain_solar",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTerrainSolarOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_terrain_solar_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
+      "operatorId" : "rs:terrain_viewshed",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTerrainViewshedOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_terrain_viewshed_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:threshold_raster",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -3509,6 +4034,6 @@
       }
     }
   ],
-  "entryCount" : 166,
+  "entryCount" : 191,
   "schema" : "exp.determinism_census.v1"
 }
