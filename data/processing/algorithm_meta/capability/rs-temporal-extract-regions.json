@@ -1,7 +1,20 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u8015\u5730",
+        "\u6797\u5730",
+        "\u6c34\u4f53"
+      ],
+      "scenes" : 
+      [
+        "\u591a\u5730\u5757\u7269\u5019\u5bf9\u6bd4",
+        "\u65f6\u5e8f\u76d1\u6d4b"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -17,7 +30,14 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4e3a\u6bcf\u4e2a\u533a\u57df\u63d0\u4f9b\u552f\u4e00\u8c03\u7528\u65b9 id",
+        "when" : "regions \u4e3a\u7a7a\u6216 id \u91cd\u590d"
+      }
+    ],
     "family" : "temporal",
     "io" : 
     {
@@ -165,8 +185,20 @@
     "operator_group" : "temporal",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
+    "summary" : "\u591a\u533a\u57df\u65f6\u5e8f\u63d0\u53d6\uff1a\u4e00\u6b21\u8c03\u7528\u5bf9\u591a\u4e2a\u70b9/\u9762\u63d0\u53d6\u65f6\u5e8f\u7edf\u8ba1\uff0c\u8f93\u51fa\u533a\u57df\u00d7\u65e5\u671f\u8868\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u65f6\u5e8f\u63d0\u53d6",
+        "\u533a\u57df\u7edf\u8ba1"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u65f6\u5e8f\u5206\u6790"
+      ],
+      "exercise" : "\u5bf9\u591a\u5730\u5757\u4e00\u6b21\u63d0\u53d6 NDVI \u65f6\u5e8f\u5e76\u6bd4\u8f83\u7269\u5019\u5dee\u5f02\u3002"
+    }
   },
   "description" : "Extract per-date statistics for MANY points/polygons from a multi-date collection in one call. Regions arrive inline (regions: [{\"id\", \"point\": [x, y] | \"polygon\": [[x, y]...]}]) or as a JSON file. Per region and date the operator reports mean, min, max, population stddev, exact median and the valid-observation count, streamed as CSV rows (region_id,date,t_days,mean,min,max,stddev,median,valid_count). Points map to the pixel under the point; polygons rasterize inside their bounding box by pixel centers. Streaming by date keeps memory O(regions), independent of the raster size outside the region windows.",
   "display_name" : "Temporal Extract Region Series (Batch Multi-ROI)",

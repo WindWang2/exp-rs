@@ -1,15 +1,15 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u68ee\u6797",
         "\u519c\u7530",
         "\u704c\u8349\u5730"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u690d\u88ab\u7269\u5019\u7a81\u53d8\u76d1\u6d4b",
         "\u4f5c\u7269\u5236\u5ea6\u8f6c\u6362\u8bc6\u522b",
@@ -17,12 +17,12 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations \u00d7 terms\u00b2) segmentation + O(tile \u00d7 breaks \u00d7 scenes \u00d7 terms\u00b2) attribution (+ bootstrap_resamples \u00d7 that when compute_ci)",
       "grade" : "bit_exact",
@@ -31,7 +31,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -45,10 +45,10 @@
       }
     ],
     "family" : "temporal",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "string",
@@ -82,7 +82,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "0.050000",
@@ -103,7 +103,7 @@
           "type" : "integer"
         },
         {
-          "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -150,7 +150,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -208,27 +208,27 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Common grid, acquisition times, consistent radiometric state; >= ~2 years for stable harmonics"
     ],
     "schema_version" : 2,
     "summary" : "\u5b63\u8282\u5206\u91cf\u7a81\u53d8\u68c0\u6d4b\u4e0e\u5f52\u56e0\uff1a\u8054\u5408\u8c10\u6ce2+\u8d8b\u52bf\u5206\u6bb5\u540e\uff0c\u7528\u5d4c\u5957\u6a21\u578b F \u68c0\u9a8c\u533a\u5206\u8d8b\u52bf\u7a81\u53d8\u4e0e\u5b63\u8282\u5e45\u76f8\u7a81\u53d8\uff0c\u53ef\u9009 bootstrap \u7f6e\u4fe1\u533a\u95f4\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5b63\u8282\u5206\u91cf\u7a81\u53d8",
         "\u5d4c\u5957 F \u68c0\u9a8c",
         "\u5f52\u56e0\uff08\u8d8b\u52bf vs \u5b63\u8282\uff09",
         "bootstrap \u7f6e\u4fe1\u533a\u95f4"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u690d\u7269\u9065\u611f",
         "\u65f6\u95f4\u5e8f\u5217\u5206\u6790"
@@ -242,7 +242,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "temporal",
     "change-detection",

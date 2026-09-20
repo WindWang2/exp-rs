@@ -206,6 +206,12 @@
       "to" : "rs:band_ratio"
     },
     {
+      "from" : "rs:cem_detection",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:cem_detection"
+    },
+    {
       "from" : "rs:change",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/inference.json",
@@ -830,6 +836,12 @@
       "to" : "rs:spectral_similarity"
     },
     {
+      "from" : "rs:spectral_spatial_fuse",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:spectral_spatial_fuse"
+    },
+    {
       "from" : "rs:spectral_unmixing",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral_transform.json",
@@ -1002,6 +1014,462 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/filter.json",
       "to" : "rs:zonal_stats"
+    },
+    {
+      "from" : "app.commandPalette",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.app.commandPalette"
+    },
+    {
+      "from" : "cartography.compose",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.cartography.compose"
+    },
+    {
+      "from" : "cartography.export",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.cartography.export"
+    },
+    {
+      "from" : "cartography.preflight",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.cartography.preflight"
+    },
+    {
+      "from" : "cartography.repair",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.cartography.repair"
+    },
+    {
+      "from" : "layer.addRaster",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.addRaster"
+    },
+    {
+      "from" : "layer.addVector",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.addVector"
+    },
+    {
+      "from" : "layer.attributeTable",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.attributeTable"
+    },
+    {
+      "from" : "layer.newVector",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.newVector"
+    },
+    {
+      "from" : "layer.properties",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.properties"
+    },
+    {
+      "from" : "layer.remove",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.remove"
+    },
+    {
+      "from" : "layer.saveEdits",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.saveEdits"
+    },
+    {
+      "from" : "layer.toggleEditing",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.toggleEditing"
+    },
+    {
+      "from" : "layer.zoomTo",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.zoomTo"
+    },
+    {
+      "from" : "map.compareLayers",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.compareLayers"
+    },
+    {
+      "from" : "map.identify",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.identify"
+    },
+    {
+      "from" : "map.measureArea",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.measureArea"
+    },
+    {
+      "from" : "map.measureDistance",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.measureDistance"
+    },
+    {
+      "from" : "map.pan",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.pan"
+    },
+    {
+      "from" : "map.refresh",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.refresh"
+    },
+    {
+      "from" : "map.swipe",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.swipe"
+    },
+    {
+      "from" : "map.zoomFull",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomFull"
+    },
+    {
+      "from" : "map.zoomIn",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomIn"
+    },
+    {
+      "from" : "map.zoomOut",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomOut"
+    },
+    {
+      "from" : "project.exit",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.exit"
+    },
+    {
+      "from" : "project.importLayer",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.importLayer"
+    },
+    {
+      "from" : "project.new",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.new"
+    },
+    {
+      "from" : "project.newLayout",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.newLayout"
+    },
+    {
+      "from" : "project.open",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.open"
+    },
+    {
+      "from" : "project.save",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.save"
+    },
+    {
+      "from" : "project.saveAs",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.saveAs"
+    },
+    {
+      "from" : "project.stacBrowse",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.stacBrowse"
+    },
+    {
+      "from" : "rs.applyMask",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.applyMask"
+    },
+    {
+      "from" : "rs.atmospheric",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.atmospheric"
+    },
+    {
+      "from" : "rs.bandMath",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.bandMath"
+    },
+    {
+      "from" : "rs.bandRatio",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.bandRatio"
+    },
+    {
+      "from" : "rs.changeDetection",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.changeDetection"
+    },
+    {
+      "from" : "rs.contrastStretch",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.contrastStretch"
+    },
+    {
+      "from" : "rs.extractBands",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.extractBands"
+    },
+    {
+      "from" : "rs.fusion",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.fusion"
+    },
+    {
+      "from" : "rs.mosaic",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.mosaic"
+    },
+    {
+      "from" : "rs.ortho",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.ortho"
+    },
+    {
+      "from" : "rs.pca",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.pca"
+    },
+    {
+      "from" : "rs.qaMask",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.qaMask"
+    },
+    {
+      "from" : "rs.radiometric",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.radiometric"
+    },
+    {
+      "from" : "rs.spatialFilter",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.spatialFilter"
+    },
+    {
+      "from" : "rs.speckle",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.speckle"
+    },
+    {
+      "from" : "rs.spectralIndex",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.spectralIndex"
+    },
+    {
+      "from" : "rs.temporal",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.temporal"
+    },
+    {
+      "from" : "rs.terrain",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.terrain"
+    },
+    {
+      "from" : "view.linkCenter",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkCenter"
+    },
+    {
+      "from" : "view.linkCursor",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkCursor"
+    },
+    {
+      "from" : "view.linkGroupStatus",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkGroupStatus"
+    },
+    {
+      "from" : "view.linkScale",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkScale"
+    },
+    {
+      "from" : "view.linkUndo",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkUndo"
+    },
+    {
+      "from" : "view.linkUnlinkAll",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkUnlinkAll"
+    },
+    {
+      "from" : "view.linkVisibility",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.view.linkVisibility"
+    },
+    {
+      "from" : "workbench.cartography",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.cartography"
+    },
+    {
+      "from" : "workbench.classify",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.classify"
+    },
+    {
+      "from" : "workbench.classifyStudio",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.classifyStudio"
+    },
+    {
+      "from" : "workbench.datasetExperiment",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.datasetExperiment"
+    },
+    {
+      "from" : "workbench.georefDual",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.georefDual"
+    },
+    {
+      "from" : "workbench.georefI2I",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.georefI2I"
+    },
+    {
+      "from" : "workbench.georefI2M",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.georefI2M"
+    },
+    {
+      "from" : "workbench.ir2Pipeline",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.ir2Pipeline"
+    },
+    {
+      "from" : "workbench.model",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.model"
+    },
+    {
+      "from" : "workbench.obia",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.obia"
+    },
+    {
+      "from" : "workbench.operatorCatalog",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.operatorCatalog"
+    },
+    {
+      "from" : "workbench.processingHistory",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.processingHistory"
+    },
+    {
+      "from" : "workbench.temporal",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.temporal"
+    },
+    {
+      "from" : "workbench.visualAnalytics",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.visualAnalytics"
+    },
+    {
+      "from" : "workflow.new",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.new"
+    },
+    {
+      "from" : "workflow.open",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.open"
+    },
+    {
+      "from" : "workflow.run",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.run"
+    },
+    {
+      "from" : "workflow.save",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.save"
+    },
+    {
+      "from" : "workflow.stop",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.stop"
     },
     {
       "from" : "diagnostic.harness.acquisition_dates_missing",
@@ -1370,12 +1838,6 @@
       "to" : "operator/PolicyRefused"
     },
     {
-      "from" : "diagnostic.operator.policy_refused",
-      "kind" : "diagnostic_for",
-      "origin" : "diagnostics.json",
-      "to" : "operator/PolicyRefused"
-    },
-    {
       "from" : "diagnostic.operator.qgis_processing_error",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1386,12 +1848,6 @@
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
       "to" : "operator/ResourceBudgetExceeded"
-    },
-    {
-      "from" : "diagnostic.operator.runtime_provider_failed",
-      "kind" : "diagnostic_for",
-      "origin" : "diagnostics.json",
-      "to" : "operator/RuntimeProviderFailed"
     },
     {
       "from" : "diagnostic.operator.runtime_provider_failed",
@@ -1668,6 +2124,12 @@
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
       "to" : "rs:brdf_normalization"
+    },
+    {
+      "from" : "rs:cem_detection",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:cem_detection"
     },
     {
       "from" : "rs:change",
@@ -2322,6 +2784,12 @@
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
       "to" : "rs:spectral_similarity"
+    },
+    {
+      "from" : "rs:spectral_spatial_fuse",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:spectral_spatial_fuse"
     },
     {
       "from" : "rs:spectral_unmixing",
@@ -3074,6 +3542,11 @@
       "origin" : "data/agent/capabilities/spectral.json"
     },
     {
+      "id" : "rs:cem_detection",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
       "id" : "rs:change",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/inference.json"
@@ -3590,6 +4063,11 @@
     },
     {
       "id" : "rs:spectral_similarity",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:spectral_spatial_fuse",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/spectral_transform.json"
     },
@@ -5172,6 +5650,386 @@
       "id" : "operator/Unknown",
       "kind" : "error_code",
       "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "command.app.commandPalette",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.cartography.compose",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.cartography.export",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.cartography.preflight",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.cartography.repair",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.addRaster",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.addVector",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.attributeTable",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.newVector",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.properties",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.remove",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.saveEdits",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.toggleEditing",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.zoomTo",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.compareLayers",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.identify",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.measureArea",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.measureDistance",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.pan",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.refresh",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.swipe",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomFull",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomIn",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomOut",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.exit",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.importLayer",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.new",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.newLayout",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.open",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.save",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.saveAs",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.stacBrowse",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.applyMask",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.atmospheric",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.bandMath",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.bandRatio",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.changeDetection",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.contrastStretch",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.extractBands",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.fusion",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.mosaic",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.ortho",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.pca",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.qaMask",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.radiometric",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.spatialFilter",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.speckle",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.spectralIndex",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.temporal",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.terrain",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkCenter",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkCursor",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkGroupStatus",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkScale",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkUndo",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkUnlinkAll",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.view.linkVisibility",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.cartography",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.classify",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.classifyStudio",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.datasetExperiment",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.georefDual",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.georefI2I",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.georefI2M",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.ir2Pipeline",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.model",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.obia",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.operatorCatalog",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.processingHistory",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.temporal",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.visualAnalytics",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.new",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.open",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.run",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.save",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.stop",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
     },
     {
       "id" : "concept.dataset.provenance",
@@ -6757,6 +7615,7 @@
       "attributes" : 
       [
         "input",
+        "loading",
         "output"
       ],
       "id" : "rs:ace",
@@ -6887,6 +7746,17 @@
         "view_zenith"
       ],
       "id" : "rs:brdf_normalization",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "loading",
+        "output"
+      ],
+      "id" : "rs:cem_detection",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -7482,6 +8352,7 @@
       "attributes" : 
       [
         "input",
+        "loading",
         "output"
       ],
       "id" : "rs:matched_filter",
@@ -8484,6 +9355,18 @@
         "scoreOut"
       ],
       "id" : "rs:spectral_similarity",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "beta",
+        "input",
+        "output",
+        "radius"
+      ],
+      "id" : "rs:spectral_spatial_fuse",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -9497,6 +10380,15 @@
     {
       "attributes" : 
       [
+        "review:spectral detection writer reads (Float32 scores)"
+      ],
+      "id" : "rs:cem_detection",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "family:model-runtime + schema read (rs_model_task_operators.h: single-pass, typed JSON artifact exp-rs-classification/1 family)"
       ],
       "id" : "rs:change",
@@ -9668,7 +10560,7 @@
     {
       "attributes" : 
       [
-        "family:spectral + schema read (reduced endmember table artifact written as JSON)"
+        "family:spectral + ADR 0163 (derived spectral-table artifact; sensor projection refuses without wavelength metadata)"
       ],
       "id" : "rs:endmember_analysis",
       "kind" : "scientific_contract",
@@ -9875,7 +10767,7 @@
     {
       "attributes" : 
       [
-        "family:spectral + schema read (dual-window RX distance scores)"
+        "family:spectral + ADR 0163 (dual-window RX quality planes; unscored pixels stay NaN)"
       ],
       "id" : "rs:local_rx_anomaly",
       "kind" : "scientific_contract",
@@ -10424,7 +11316,7 @@
     {
       "attributes" : 
       [
-        "family:spectral + schema read (L1 + non-negative abundances)"
+        "family:spectral + ADR 0163 (FISTA, collinear-atom refusal)"
       ],
       "id" : "rs:sparse_unmixing",
       "kind" : "scientific_contract",
@@ -10469,9 +11361,18 @@
     {
       "attributes" : 
       [
-        "family:spectral + schema read (hybrid SAM/SID score)"
+        "family:spectral + ADR 0163 (bounded ProductNormalized hybrid; classic_tan is unbounded by design)"
       ],
       "id" : "rs:spectral_similarity",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "review:spectral-spatial fusion reads and writes Float32 score planes with NaN NoData"
+      ],
+      "id" : "rs:spectral_spatial_fuse",
       "kind" : "scientific_contract",
       "origin" : "src/contracts/scientific_contract.cpp"
     },

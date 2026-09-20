@@ -2,38 +2,43 @@
 #include "workflow/pipeline_run_coordinator.h"
 
 #include "workflow/plan_optimizer.h"
+#include "workflow/workflow_composer.h"
 #include "workflow/workflow_dag_analyzer.h"
+#include "workflow/workflow_limits.h"
+#include "workflow/workflow_provenance.h"
 
+#include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QSet>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QRegularExpression>
+#include <QtEndian>
 #include <QThread>
 
-#ifdef Q_OS_WIN
-#include <fcntl.h>
-#include <io.h>
-#endif
 #include <QPointer>
 #include <QUuid>
 
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <optional>
 
-#include <fcntl.h>
 #ifdef Q_OS_WIN
-#include <fcntl.h> // _O_WRONLY/_O_BINARY (io.h alone does not define them)
 // _O_WRONLY/_O_BINARY for fsyncFile's Win32 branch live in fcntl.h (MSVC);
 // the POSIX branch below needs the same header for its own flags.
 // Build-unblock for master breakage (see open PR #1009's identical fix).
 #include <fcntl.h>
 #include <io.h>
+#include <share.h>
+#include <sys/stat.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -53,32 +58,105 @@ QString stateKey( ExecutionState state )
     return executionStateString( state );
 }
 
-ExecutionState stateFromKey( const QString &key )
+/// Fail-closed inverse of stateKey: the checkpoint state vocabulary is part
+/// of the format contract — an unknown key means the document is corrupt (or
+/// written by a build with a wider vocabulary, which must bump `version`).
+std::optional<ExecutionState> stateFromKey( const QString &key )
 {
     for ( ExecutionState s :
           { ExecutionState::Pending, ExecutionState::Ready, ExecutionState::Running, ExecutionState::Succeeded,
             ExecutionState::Failed, ExecutionState::Cancelled, ExecutionState::Skipped } )
         if ( executionStateString( s ) == key )
             return s;
-    return ExecutionState::Pending;
+    return std::nullopt;
 }
 
+/// Checkpoint envelope this build writes; the reader accepts the closed set
+/// below. 1.1 adds per-node artifact identity (size / mtime / fingerprint).
+const QString kCheckpointKind = QStringLiteral( "d17_pipeline_checkpoint" );
+const QString kCheckpointVersionCurrent = QStringLiteral( "1.1" );
+const QString kCheckpointVersionLegacy = QStringLiteral( "1.0" );
+
+/// sha256fl: SHA-256 over [8-byte LE size][first <=1MiB][last <=1MiB] — an
+/// O(2 MiB) deterministic identity for arbitrarily large artifacts (whole
+/// file when <= 2 MiB). Empty string when the file cannot be read.
+QString computeArtifactFingerprint( const QString &path, qint64 size )
+{
+    QFile file( path );
+    if ( size < 0 || !file.open( QIODevice::ReadOnly ) )
+        return {};
+    constexpr qint64 kWindow = 1024 * 1024;
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    QByteArray sizeLE( 8, '\0' );
+    qToLittleEndian<qint64>( size, sizeLE.data() );
+    hash.addData( sizeLE );
+    // QFile::read may return a short buffer — loop until the window is
+    // filled so the fingerprint is deterministic for a fixed file.
+    auto readExactly = [&file]( qint64 count ) -> QByteArray {
+        QByteArray out;
+        while ( out.size() < count )
+        {
+            const QByteArray chunk = file.read( count - out.size() );
+            if ( chunk.isEmpty() )
+                break;
+            out.append( chunk );
+        }
+        return out;
+    };
+    const QByteArray head = readExactly( qMin( kWindow, size ) );
+    if ( head.size() != qMin( kWindow, size ) )
+        return {};
+    hash.addData( head );
+    if ( size > kWindow )
+    {
+        if ( !file.seek( size - kWindow ) )
+            return {};
+        const QByteArray tail = readExactly( kWindow );
+        if ( tail.size() != kWindow )
+            return {};
+        hash.addData( tail );
+    }
+    return QStringLiteral( "sha256fl:%1" ).arg( QString::fromLatin1( hash.result().toHex() ) );
+}
+
+/// Canonical-path containment: the artifact must resolve (symlinks included)
+/// to a path strictly inside the canonical run directory. Unresolvable or
+/// empty paths fail closed; the run directory itself does not count.
+bool isContainedInDirectory( const QString &artifactPath, const QString &canonicalRunDir )
+{
+    if ( artifactPath.isEmpty() || canonicalRunDir.isEmpty() )
+        return false;
+    const QString canonicalArtifact = QFileInfo( artifactPath ).canonicalFilePath();
+    if ( canonicalArtifact.isEmpty() )
+        return false;
+    return canonicalArtifact.startsWith( canonicalRunDir + QLatin1Char( '/' ),
+#ifdef Q_OS_WIN
+                                         Qt::CaseInsensitive
+#else
+                                         Qt::CaseSensitive
+#endif
+    );
+}
+
+/// Returns false when the flush itself failed — atomicWriteJson must not
+/// promote a file whose bytes never reached stable storage.
 bool fsyncFile( const QString &path )
 {
 #ifdef Q_OS_WIN
-    const int fd = _wopen( reinterpret_cast<const wchar_t *>( path.utf16() ), _O_WRONLY | _O_BINARY );
-    if ( fd < 0 )
+    int fd = -1;
+    if ( _wsopen_s( &fd, reinterpret_cast<const wchar_t *>( path.utf16() ),
+                    _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE ) != 0 )
         return false;
-    _commit( fd );
+    const int rc = _commit( fd );
     _close( fd );
-    return true;
+    return rc == 0;
 #else
     const int fd = ::open( QFile::encodeName( path ).constData(), O_RDONLY );
     if ( fd < 0 )
         return false;
-    ::fsync( fd );
+    const int rc = ::fsync( fd );
     ::close( fd );
-    return true;
+    return rc == 0;
 #endif
 }
 
@@ -107,26 +185,35 @@ bool runOnCoordinatorThread( PipelineRunCoordinator *self, const std::function<v
     Q_ASSERT( self );
     if ( QThread::currentThread() == self->thread() )
         return false;
-    QMetaObject::invokeMethod( self, body, Qt::BlockingQueuedConnection );
-    return true;
+    // A false return means the marshal itself failed (e.g. dying object):
+    // the caller must run inline rather than return a silently empty answer.
+    return QMetaObject::invokeMethod( self, body, Qt::BlockingQueuedConnection );
 }
 
 /// Two-phase atomic write (DECISIONS D7): tmp -> flush -> fsync -> rename ->
-/// dir fsync. Returns the final path, empty on failure.
+/// dir fsync. Returns the final path, empty on failure. The tmp name is
+/// unique per writer (pid + counter) so concurrent writes to the same target
+/// — e.g. two processes resuming one checkpoint path — cannot interleave
+/// their payloads on a shared tmp file.
 QString atomicWriteJson( const QString &path, const QJsonObject &document )
 {
-    const QString tmp = path + QStringLiteral( ".tmp" );
+    static std::atomic<quint64> s_tmpCounter{ 0 };
+    const QString tmp = path + QStringLiteral( ".tmp.%1.%2" )
+                            .arg( QCoreApplication::applicationPid() )
+                            .arg( s_tmpCounter.fetch_add( 1 ) );
     QFile file( tmp );
     if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
         return {};
     const QByteArray bytes = QJsonDocument( document ).toJson( QJsonDocument::Indented );
-    if ( file.write( bytes ) != bytes.size() )
+    // Writer honours the reader's cap: a document this build cannot re-read
+    // is refused rather than promoted into a poison checkpoint.
+    if ( bytes.size() > kMaxCheckpointDocumentBytes
+         || file.write( bytes ) != bytes.size() || !file.flush() )
     {
         file.close();
         QFile::remove( tmp );
         return {};
     }
-    file.flush();
     file.close();
     if ( !fsyncFile( tmp ) )
     {
@@ -219,12 +306,17 @@ struct PipelineRunCoordinator::RunState
     NodeExecutor executor;
     QThreadPool pool;
     int maxParallelism = 2;
+    QString provenancePath;
 
     QHash<QString, NodeStatusSnapshot> statuses;
     QHash<QString, int> remainingParents; // nodeId -> unfinished parent count
     std::atomic<bool> cancelRequested{ false };
     bool finished = false;
     bool success = false;
+    // Resume attempt counter: persisted in the checkpoint so each attempt's
+    // provenance file gets a distinct suffix — a resumed run must never
+    // overwrite the record of the attempt it reuses artifacts from.
+    int attempt = 0;
 
     ~RunState() { pool.waitForDone(); }
 };
@@ -252,7 +344,22 @@ void PipelineRunCoordinator::setMaxParallelism( int workers )
 
 QString PipelineRunCoordinator::checkpointPath() const
 {
+    QString value;
+    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
+                                 [this, &value] { value = m_state->checkpointPath; } ) )
+        return value;
     return m_state->checkpointPath;
+}
+
+QString PipelineRunCoordinator::provenancePath() const
+{
+    // Written on the affinity thread during finalizeIfDone — an unmarshal'd
+    // read from a UI thread races the QString assignment.
+    QString value;
+    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
+                                 [this, &value] { value = m_state->provenancePath; } ) )
+        return value;
+    return m_state->provenancePath;
 }
 
 bool PipelineRunCoordinator::isRunning() const
@@ -301,15 +408,33 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
 
     if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
-    if ( !WorkflowIR::validateSemantics( def ) )
-        return fail( QStringLiteral( "workflow document is not semantically valid" ) );
+    QString semanticError;
+    if ( !WorkflowIR::validateSemantics( def, &semanticError ) )
+        return fail( QStringLiteral( "workflow document is not semantically valid: %1" )
+                         .arg( semanticError ) );
 
-    const DagAnalysisResult dag = WorkflowDagAnalyzer::analyzeDag( def );
+    // Composition seam: fragment instances flatten to plain nodes before
+    // planning. The executor, checkpoint and lineage signatures only ever
+    // see the expanded document — "workflow:subflow" never reaches them.
+    WorkflowDocument runDef = def;
+    if ( WorkflowComposer::hasSubflowNodes( def ) )
+    {
+        Result<WorkflowDocument> expanded = WorkflowComposer::expandSubflows( def );
+        if ( !expanded.isSuccess() )
+            return fail( expanded.error() );
+        runDef = expanded.value();
+        QString expandedError;
+        if ( !WorkflowIR::validateSemantics( runDef, &expandedError ) )
+            return fail( QStringLiteral( "expanded workflow document is not semantically valid: %1" )
+                             .arg( expandedError ) );
+    }
+
+    const DagAnalysisResult dag = WorkflowDagAnalyzer::analyzeDag( runDef );
     if ( !dag.isAcyclic )
         return fail( dag.errorMessage );
 
     // Fresh state.
-    m_state->def = def;
+    m_state->def = runDef;
     m_state->runDirectory = runDirectory;
     m_state->runId = QUuid::createUuid().toString( QUuid::WithoutBraces );
     m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
@@ -318,9 +443,11 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
     m_state->cancelRequested = false;
     m_state->statuses.clear();
     m_state->remainingParents.clear();
+    m_state->provenancePath.clear();
+    m_state->attempt = 1;
 
-    const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( def );
-    for ( const NodeFact &node : def.nodes )
+    const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( runDef );
+    for ( const NodeFact &node : runDef.nodes )
     {
         NodeStatusSnapshot snapshot;
         snapshot.nodeId = node.nodeId;
@@ -328,7 +455,7 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
         m_state->statuses.insert( node.nodeId, snapshot );
 
         int parents = 0;
-        for ( const EdgeFact &edge : def.edges )
+        for ( const EdgeFact &edge : runDef.edges )
             if ( edge.targetNodeId == node.nodeId )
                 ++parents;
         m_state->remainingParents.insert( node.nodeId, parents );
@@ -348,6 +475,11 @@ void PipelineRunCoordinator::requestCancel()
     // two can never interleave (#1056). Callers already on the affinity thread
     // run inline, which keeps the synchronous pipelineCompleted behaviour.
     if ( runOnCoordinatorThread( this, [this] { requestCancel(); } ) )
+        return;
+    // Cancelling an idle coordinator must not emit a phantom completion:
+    // with no document loaded there is nothing to cancel and finalizeIfDone
+    // would emit "0 succeeded" for a run that never existed.
+    if ( m_state->def.nodes.isEmpty() )
         return;
     m_state->cancelRequested = true;
     markRemaining( ExecutionState::Cancelled );
@@ -502,10 +634,46 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
         // of its outcome — the run as a whole did not produce it.
         snapshot.state = ExecutionState::Cancelled;
     }
+    else if ( result.success && !result.artifactPath.isEmpty() )
+    {
+        // Artifact contract (DECISIONS D3): a reported product must be a real
+        // file that resolves inside the run directory, and it must be
+        // fingerprintable — a success we cannot re-verify on resume is a
+        // contract violation, not a cacheable result.
+        const QFileInfo artifactInfo( result.artifactPath );
+        const QString canonicalRunDir = QDir( m_state->runDirectory ).canonicalPath();
+        if ( !artifactInfo.isFile()
+             || !isContainedInDirectory( result.artifactPath, canonicalRunDir ) )
+        {
+            snapshot.state = ExecutionState::Failed;
+            snapshot.errorMessage =
+                QStringLiteral( "ir2.artifact_outside_run: artifact '%1' is missing or resolves outside run directory '%2' (node '%3')" )
+                    .arg( result.artifactPath, m_state->runDirectory, nodeId );
+        }
+        else if ( ( snapshot.artifactFingerprint =
+                        computeArtifactFingerprint( artifactInfo.canonicalFilePath(), artifactInfo.size() ) )
+                      .isEmpty() )
+        {
+            snapshot.state = ExecutionState::Failed;
+            snapshot.errorMessage =
+                QStringLiteral( "ir2.artifact_unverifiable: cannot fingerprint artifact '%1' (node '%2')" )
+                    .arg( result.artifactPath, nodeId );
+        }
+        else
+        {
+            snapshot.state = ExecutionState::Succeeded;
+            snapshot.outputArtifactPath = result.artifactPath;
+            snapshot.artifactSizeBytes = artifactInfo.size();
+            snapshot.artifactLastModifiedMs =
+                artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+            snapshot.progress = 1.0f;
+        }
+    }
     else if ( result.success )
     {
+        // A sink node may legitimately produce no file; it Succeeds but can
+        // never be a cache hit (no artifact to verify on resume).
         snapshot.state = ExecutionState::Succeeded;
-        snapshot.outputArtifactPath = result.artifactPath;
         snapshot.progress = 1.0f;
     }
     else
@@ -570,6 +738,26 @@ void PipelineRunCoordinator::finalizeIfDone()
     }
     m_state->success = success;
     persistCheckpoint();
+
+    // Provenance (WP5/D9): one queryable lineage record per terminal ATTEMPT,
+    // emitted for successes AND failures — audits need the failure paths
+    // most. The attempt suffix keeps a resumed run from overwriting the
+    // record whose artifacts it marked reusedFrom. A write failure never
+    // fails the run it describes.
+    if ( !m_state->def.nodes.isEmpty() )
+    {
+        const ProvenanceGraph graph = ProvenanceGraph::fromRunState(
+            m_state->runId, m_state->def, m_state->statuses,
+            WorkflowPlanOptimizer::computePlanSignature( m_state->def ) );
+        const QString fileName = m_state->attempt <= 1
+            ? QStringLiteral( "provenance_%1.json" ).arg( m_state->runId )
+            : QStringLiteral( "provenance_%1.attempt%2.json" ).arg( m_state->runId ).arg( m_state->attempt );
+        const QString path = atomicWriteJson( QDir( m_state->runDirectory ).filePath( fileName ),
+                                              graph.toJson() );
+        if ( !path.isEmpty() )
+            m_state->provenancePath = path;
+    }
+
     emit pipelineCompleted(
         success,
         QStringLiteral( "%1 succeeded, %2 skipped, %3 failed, %4 cancelled" )
@@ -585,11 +773,12 @@ void PipelineRunCoordinator::persistCheckpoint()
         return;
 
     QJsonObject document;
-    document.insert( QLatin1String( "kind" ), QStringLiteral( "d17_pipeline_checkpoint" ) );
-    document.insert( QLatin1String( "version" ), QStringLiteral( "1.0" ) );
+    document.insert( QLatin1String( "kind" ), kCheckpointKind );
+    document.insert( QLatin1String( "version" ), kCheckpointVersionCurrent );
     document.insert( QLatin1String( "runId" ), m_state->runId );
     document.insert( QLatin1String( "runDirectory" ), m_state->runDirectory );
     document.insert( QLatin1String( "workflow" ), WorkflowIR::toJson( m_state->def ) );
+    document.insert( QLatin1String( "attempt" ), m_state->attempt );
     document.insert( QLatin1String( "finished" ), m_state->finished );
     document.insert( QLatin1String( "success" ), m_state->success );
     document.insert( QLatin1String( "updatedAt" ),
@@ -606,6 +795,9 @@ void PipelineRunCoordinator::persistCheckpoint()
         entry.insert( QLatin1String( "errorMessage" ), snapshot.errorMessage );
         entry.insert( QLatin1String( "elapsedMs" ), snapshot.elapsedMs );
         entry.insert( QLatin1String( "artifact" ), snapshot.outputArtifactPath );
+        entry.insert( QLatin1String( "artifactSize" ), snapshot.artifactSizeBytes );
+        entry.insert( QLatin1String( "artifactMtimeMs" ), snapshot.artifactLastModifiedMs );
+        entry.insert( QLatin1String( "artifactFingerprint" ), snapshot.artifactFingerprint );
         entry.insert( QLatin1String( "isCacheHit" ), snapshot.isCacheHit );
         entry.insert( QLatin1String( "signature" ), snapshot.lineageSignature );
         nodes.append( entry );
@@ -633,18 +825,63 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
         return fail( QStringLiteral( "cannot open checkpoint '%1'" ).arg( checkpointFilePath ) );
-    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+    // Bounded read (DECISIONS D5): a checkpoint is a small JSON sidecar —
+    // anything past the shared cap is planted or corrupt and must not be
+    // buffered unbounded. Read cap+1 rather than size-then-readAll so a file
+    // growing between the two calls cannot bypass the bound.
+    const QByteArray raw = file.read( kMaxCheckpointDocumentBytes + 1 );
+    if ( raw.size() > kMaxCheckpointDocumentBytes )
+        return fail( QStringLiteral( "checkpoint '%1' exceeds the %2-byte size cap" )
+                         .arg( checkpointFilePath )
+                         .arg( kMaxCheckpointDocumentBytes ) );
+    const QJsonDocument doc = QJsonDocument::fromJson( raw );
     if ( doc.isNull() || !doc.object().value( QLatin1String( "workflow" ) ).isObject() )
         return fail( QStringLiteral( "checkpoint '%1' is not a valid document" ).arg( checkpointFilePath ) );
 
     const QJsonObject document = doc.object();
+    // Envelope gate (DECISIONS D2): unknown kind or a version outside the
+    // closed supported set is refused outright — a checkpoint this build did
+    // not write must never be silently reinterpreted.
+    if ( document.value( QLatin1String( "kind" ) ).toString() != kCheckpointKind )
+        return fail( QStringLiteral( "checkpoint '%1' has unsupported kind '%2'" )
+                         .arg( checkpointFilePath,
+                               document.value( QLatin1String( "kind" ) ).toString() ) );
+    const QString checkpointVersion = document.value( QLatin1String( "version" ) ).toString();
+    if ( checkpointVersion != kCheckpointVersionLegacy
+         && checkpointVersion != kCheckpointVersionCurrent )
+        return fail( QStringLiteral( "checkpoint '%1' has unsupported version '%2'" )
+                         .arg( checkpointFilePath, checkpointVersion ) );
+    // runId is persisted into provenance artifacts; refuse ids that could not
+    // safely name a file. Mirrors isValidRunId in workflow_run.cpp: bounded
+    // length, no leading dot, [A-Za-z0-9._-] only (a leading '.' plus '..' is
+    // the traversal vector — interior dots are legitimate filename chars).
+    const QString runId = document.value( QLatin1String( "runId" ) ).toString();
+    if ( runId.isEmpty() || runId.size() > 128 || runId.startsWith( QLatin1Char( '.' ) )
+         || !runId.contains( QRegularExpression( QStringLiteral( "\\A[A-Za-z0-9._-]+\\z" ) ) ) )
+        return fail( QStringLiteral( "checkpoint '%1' carries an unsafe runId '%2'" )
+                         .arg( checkpointFilePath, runId ) );
     auto parsed = WorkflowIR::fromJson( document.value( QLatin1String( "workflow" ) ).toObject() );
     if ( !parsed.isSuccess() )
         return fail( QStringLiteral( "checkpoint workflow does not parse: %1" ).arg( parsed.error() ) );
 
+    // The checkpoint's embedded workflow gets the SAME gate a fresh document
+    // gets in startRun: semantic validity (dangling endpoints, in-degree)
+    // plus acyclicity. Without this a mutated checkpoint whose edges form a
+    // cycle or reference ghost nodes parses fine, returns true here, and then
+    // deadlocks the resumed run — every cycle node keeps remainingParents > 0
+    // forever, no completion signal ever fires.
+    const WorkflowDocument resumedDef = parsed.value();
+    QString semanticError;
+    if ( !WorkflowIR::validateSemantics( resumedDef, &semanticError ) )
+        return fail( QStringLiteral( "checkpoint workflow is not semantically valid: %1" )
+                         .arg( semanticError ) );
+    const DagAnalysisResult resumedDag = WorkflowDagAnalyzer::analyzeDag( resumedDef );
+    if ( !resumedDag.isAcyclic )
+        return fail( QStringLiteral( "checkpoint workflow is not acyclic: %1" )
+                         .arg( resumedDag.errorMessage ) );
+
     // Validate node set + count BEFORE mutating m_state so a corrupt
     // checkpoint cannot wedge the coordinator as "already active" (#1078c).
-    const WorkflowDocument resumedDef = parsed.value();
     const QJsonArray nodes = document.value( QLatin1String( "nodes" ) ).toArray();
     QSet<QString> seenNodeIds;
     for ( const QJsonValue &value : nodes )
@@ -657,27 +894,18 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     if ( seenNodeIds.size() != resumedDef.nodes.size() )
         return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
 
-    // Fresh scheduling state over the resumed document.
-    m_state->def = resumedDef;
-    m_state->runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
-    m_state->runId = document.value( QLatin1String( "runId" ) ).toString();
-    m_state->checkpointPath = checkpointFilePath;
-    m_state->finished = false;
-    m_state->success = false;
-    m_state->cancelRequested = false;
-    m_state->statuses.clear();
-    m_state->remainingParents.clear();
-
-    // Replay statuses; CacheHit requires BOTH a matching recomputed lineage
-    // signature and a still-existing artifact.
-    const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( m_state->def );
+    // Replay statuses into a LOCAL map — every remaining fail path (state
+    // vocabulary) runs before m_state is touched, so a rejected checkpoint
+    // leaves the coordinator reusable instead of half-loaded.
+    const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( resumedDef );
+    const QString runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
+    const QString canonicalRunDir = QDir( runDirectory ).canonicalPath();
+    QHash<QString, NodeStatusSnapshot> restored;
+    restored.reserve( nodes.size() );
     for ( const QJsonValue &value : nodes )
     {
         const QJsonObject entry = value.toObject();
         const QString nodeId = entry.value( QLatin1String( "nodeId" ) ).toString();
-        const NodeFact *node = m_state->def.findNode( nodeId );
-        if ( !node )
-            return fail( QStringLiteral( "checkpoint references unknown node '%1'" ).arg( nodeId ) );
 
         NodeStatusSnapshot snapshot;
         snapshot.nodeId = nodeId;
@@ -686,39 +914,95 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         snapshot.outputArtifactPath = entry.value( QLatin1String( "artifact" ) ).toString();
         snapshot.progress = static_cast<float>( entry.value( QLatin1String( "progress" ) ).toDouble() );
 
-        const ExecutionState recorded = stateFromKey( entry.value( QLatin1String( "state" ) ).toString() );
+        const QString recordedStateKey = entry.value( QLatin1String( "state" ) ).toString();
+        const std::optional<ExecutionState> recorded = stateFromKey( recordedStateKey );
+        if ( !recorded.has_value() )
+            return fail( QStringLiteral( "checkpoint '%1' records unknown state '%2' for node '%3'" )
+                             .arg( checkpointFilePath, recordedStateKey, nodeId ) );
         const QString recordedSignature = entry.value( QLatin1String( "signature" ) ).toString();
-        const bool artifactExists = !snapshot.outputArtifactPath.isEmpty()
-            && QFileInfo::exists( snapshot.outputArtifactPath );
         const bool signatureMatches = recordedSignature == recomputed.value( nodeId );
 
-        if ( recorded == ExecutionState::Succeeded && artifactExists && signatureMatches )
+        // A node becomes CacheHit iff ALL of: recorded state Succeeded,
+        // lineage signature still matches, and the recorded artifact
+        // re-verifies — exists, resolves inside the recorded run directory,
+        // and matches size / mtime / content fingerprint. Anything less
+        // reverts to Pending and recomputes: a tampered, moved, or foreign
+        // artifact is never served (DECISIONS D3). Checkpoints written
+        // before format 1.1 carry no identity fields and degrade to a full
+        // recompute — correct but cold.
+        bool artifactVerified = false;
+        if ( *recorded == ExecutionState::Succeeded && !snapshot.outputArtifactPath.isEmpty() )
+        {
+            const QFileInfo artifactInfo( snapshot.outputArtifactPath );
+            const qint64 recordedSize = entry.value( QLatin1String( "artifactSize" ) ).toInteger( -1 );
+            const qint64 recordedMtime = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger( -1 );
+            const QString recordedFingerprint =
+                entry.value( QLatin1String( "artifactFingerprint" ) ).toString();
+            const qint64 liveMtime =
+                artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+            artifactVerified =
+                artifactInfo.isFile()
+                && isContainedInDirectory( snapshot.outputArtifactPath, canonicalRunDir )
+                && recordedSize >= 0 && recordedSize == artifactInfo.size() && recordedMtime >= 0
+                && recordedMtime == liveMtime && !recordedFingerprint.isEmpty()
+                && recordedFingerprint
+                       == computeArtifactFingerprint( snapshot.outputArtifactPath, artifactInfo.size() );
+            if ( artifactVerified )
+            {
+                snapshot.artifactSizeBytes = artifactInfo.size();
+                snapshot.artifactLastModifiedMs = liveMtime;
+                snapshot.artifactFingerprint = recordedFingerprint;
+            }
+        }
+
+        if ( *recorded == ExecutionState::Succeeded && artifactVerified && signatureMatches )
         {
             snapshot.state = ExecutionState::Succeeded;
             snapshot.isCacheHit = true;
         }
-        else if ( recorded == ExecutionState::Skipped )
-        {
-            // Skip decisions are re-derived by the frontier; treat as fresh.
-            snapshot.state = ExecutionState::Pending;
-        }
         else
         {
-            snapshot.state = ExecutionState::Pending; // recompute (incl. Failed/Cancelled/Running)
+            // Recompute — Skipped re-derives at the frontier; Failed /
+            // Cancelled / Running and unverifiable Succeeded all re-run.
+            // Stale artifact path AND stale diagnostics are dropped: a
+            // Pending node must not carry a previous attempt's error text
+            // or progress into this run.
+            snapshot.state = ExecutionState::Pending;
+            snapshot.outputArtifactPath.clear();
+            snapshot.errorMessage.clear();
+            snapshot.progress = 0.0f;
+            snapshot.elapsedMs = 0;
         }
         snapshot.lineageSignature = recomputed.value( nodeId );
-        m_state->statuses.insert( nodeId, snapshot );
+        restored.insert( nodeId, snapshot );
     }
-    if ( m_state->statuses.size() != m_state->def.nodes.size() )
+    if ( restored.size() != resumedDef.nodes.size() )
         return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
+
+    // All validation passed — commit to run state in one step. The attempt
+    // counter continues from the checkpoint so this resume's provenance file
+    // does not overwrite the record of the attempt it reuses artifacts from.
+    m_state->def = resumedDef;
+    m_state->runDirectory = runDirectory;
+    m_state->runId = runId;
+    m_state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 0 ) + 1;
+    m_state->checkpointPath = checkpointFilePath;
+    m_state->finished = false;
+    m_state->success = false;
+    m_state->cancelRequested = false;
+    m_state->statuses = restored;
+    m_state->remainingParents.clear();
+    m_state->provenancePath.clear();
 
     // Second pass over the FULL status map (never the partially filled one):
     // count only parents that still need to RUN this round — CacheHit
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    const WorkflowDocument &liveDef = m_state->def;
-    for ( const NodeFact &node : liveDef.nodes )
+    // Iterate the stored document directly (m_state->def was assigned the
+    // parsed checkpoint above): the msbuild/clang builds of this file also
+    // reject the same-scope redefinition of `resumedDef` (C2373).
+    for ( const NodeFact &node : m_state->def.nodes )
     {
         int parents = 0;
         for ( const EdgeFact &edge : m_state->def.edges )

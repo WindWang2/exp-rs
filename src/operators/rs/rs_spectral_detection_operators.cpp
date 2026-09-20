@@ -1,10 +1,11 @@
 /***************************************************************************
  * rs_spectral_detection_operators.cpp — Milestone C (matched filter + ACE)
+ * and Spectral Intelligence 12.0 (CEM).
  *
- * Both detectors share the RX operator's three-pass streaming skeleton
- * (mean pass, covariance pass, score pass) and its valid-pixel predicate;
- * only the per-pixel scoring kernel and the required target parameter
- * differ.
+ * All detectors share the RX operator's streamed valid-pixel predicate;
+ * MF/ACE use three passes (mean, covariance, score) over the mean-centered
+ * background, CEM uses two (correlation, score) over raw second moments.
+ * Only the per-pixel scoring kernel and the background statistics differ.
  ***************************************************************************/
 #include "rs_spectral_detection_operators.h"
 
@@ -13,6 +14,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_anomaly.h"
+#include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -22,6 +24,7 @@
 
 #include <gdal.h>
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
@@ -32,10 +35,11 @@ using namespace params;
 
 namespace {
 
-/// Shared driver. @a kind selects the scoring kernel ("mf" or "ace").
+/// Shared driver. @a kind selects the scoring kernel ("mf", "ace" or "cem").
 Json::Value runDetector( const std::string &kind, const Json::Value &params,
                          RSOperatorContext &context )
 {
+    const bool isCem = ( kind == "cem" );
     const std::string inputPath = requireString( params, "input" );
     const std::string outputPath = requireString( params, "output" );
     if ( !fileExists( inputPath ) )
@@ -91,44 +95,103 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         }
     }
 
+    double loading = 0.0;
+    if ( isCem )
+    {
+        loading = getDouble( params, "loading", 0.0 );
+        if ( !std::isfinite( loading ) || loading < 0.0 )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "'loading' must be a finite value >= 0, got " +
+                                       std::to_string( loading ) );
+    }
+
     SpectralAnomaly::BackgroundStats stats;
+    size_t backgroundSamples = 0;
     int tilesSeen = 0;
-    if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
-            context.throwIfCancelled();
-            SpectralAnomaly::accumulateMean( bip, static_cast<size_t>( tile.width ) * tile.height,
-                                             bandCount, &stats, true, noDataPerBand.data(),
-                                             hasNoDataPerBand.data() );
-            context.reportProgress( ( ++tilesSeen ) * perTile * 0.33, "Background mean" );
-            return true;
-        } ) )
-        throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (mean pass)" );
-    if ( stats.count == 0 )
-        throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
-    SpectralAnomaly::finalizeMean( &stats );
-    context.throwIfCancelled();
-
-    tilesSeen = 0;
-    if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
-            context.throwIfCancelled();
-            SpectralAnomaly::accumulateCovariance( bip, static_cast<size_t>( tile.width ) * tile.height,
-                                                   bandCount, &stats, true, noDataPerBand.data(),
-                                                   hasNoDataPerBand.data() );
-            context.reportProgress( 0.33 + ( ++tilesSeen ) * perTile * 0.33, "Background covariance" );
-            return true;
-        } ) )
-        throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (covariance pass)" );
-    SpectralAnomaly::finalizeCovariance( &stats );
-    context.throwIfCancelled();
-
     std::vector<double> invCov;
-    if ( !SpectralAnomaly::invertCovariance( stats.covariance, bandCount, &invCov ) )
-        throw RSOperatorError( ErrorCode::ComputationError, "Background covariance is singular" );
+    std::vector<double> correlation;
+    double backgroundCondition = -1.0;
+    if ( isCem )
+    {
+        // CEM background: one second-moment pass over the raw spectra.
+        SpectralCem::CorrelationStats cemStats;
+        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                context.throwIfCancelled();
+                SpectralCem::accumulateCorrelation( bip, static_cast<size_t>( tile.width ) * tile.height,
+                                                    bandCount, &cemStats, true, noDataPerBand.data(),
+                                                    hasNoDataPerBand.data() );
+                context.reportProgress( ( ++tilesSeen ) * perTile * 0.5, "Background correlation" );
+                return true;
+            } ) )
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (correlation pass)" );
+        if ( cemStats.count == 0 )
+            throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
+        const int minSamples = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
+        if ( cemStats.count < static_cast<size_t>( minSamples ) )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "CEM background is under-sampled: " + std::to_string( cemStats.count ) +
+                    " valid pixels for " + std::to_string( bandCount ) + " bands (minimum " +
+                    std::to_string( minSamples ) +
+                    "; enable 'loading' to use the regularized floor)" );
+        SpectralCem::finalizeCorrelation( &cemStats );
+        backgroundSamples = cemStats.count;
+        correlation = std::move( cemStats.correlation );
+        context.throwIfCancelled();
+        backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
+    }
+    else
+    {
+        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                context.throwIfCancelled();
+                SpectralAnomaly::accumulateMean( bip, static_cast<size_t>( tile.width ) * tile.height,
+                                                 bandCount, &stats, true, noDataPerBand.data(),
+                                                 hasNoDataPerBand.data() );
+                context.reportProgress( ( ++tilesSeen ) * perTile * 0.33, "Background mean" );
+                return true;
+            } ) )
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (mean pass)" );
+        if ( stats.count == 0 )
+            throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
+        SpectralAnomaly::finalizeMean( &stats );
+        context.throwIfCancelled();
 
+        tilesSeen = 0;
+        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                context.throwIfCancelled();
+                SpectralAnomaly::accumulateCovariance( bip, static_cast<size_t>( tile.width ) * tile.height,
+                                                       bandCount, &stats, true, noDataPerBand.data(),
+                                                       hasNoDataPerBand.data() );
+                context.reportProgress( 0.33 + ( ++tilesSeen ) * perTile * 0.33, "Background covariance" );
+                return true;
+            } ) )
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (covariance pass)" );
+        SpectralAnomaly::finalizeCovariance( &stats );
+        context.throwIfCancelled();
+
+        if ( !SpectralAnomaly::invertCovariance( stats.covariance, bandCount, &invCov ) )
+            throw RSOperatorError( ErrorCode::ComputationError, "Background covariance is singular" );
+        backgroundSamples = stats.count;
+        backgroundCondition = SpectralAnomaly::conditionProxy( stats.covariance, bandCount );
+    }
+
+    std::vector<double> scratch( static_cast<size_t>( bandCount ), 0.0 );
     SpectralDetection::TargetModel model;
-    if ( !SpectralDetection::buildTargetModel( target, bandCount, stats.mean, invCov, &model ) )
-        throw RSOperatorError( ErrorCode::InvalidInputData,
-                               "Target spectrum is degenerate against the background "
-                               "(non-finite values or zero whitened norm)" );
+    SpectralCem::Filter cemFilter;
+    if ( isCem )
+    {
+        if ( !SpectralCem::buildFilter( target, bandCount, correlation, loading, &cemFilter ) )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "Target spectrum is degenerate against the background "
+                                   "correlation (non-finite values or zero constraint denominator)" );
+    }
+    else
+    {
+        if ( !SpectralDetection::buildTargetModel( target, bandCount, stats.mean, invCov, &model ) )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "Target spectrum is degenerate against the background "
+                                   "(non-finite values or zero whitened norm)" );
+    }
 
     GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1, GDT_Float32,
                              ds.geoTransform(), ds.projection() );
@@ -137,8 +200,9 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     out.setNoDataValue( std::numeric_limits<float>::quiet_NaN() );
 
     std::vector<float> tileScores;
-    std::vector<double> scratch( static_cast<size_t>( bandCount ), 0.0 );
     tilesSeen = 0;
+    const double scoreStart = isCem ? 0.5 : 0.66;
+    const double scoreSpan = isCem ? 0.5 : 0.34;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
@@ -147,12 +211,13 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             {
                 const float *x = bip + p * bandCount;
                 tileScores[p] =
-                    ( kind == "mf" ) ? SpectralDetection::matchedFilterScore( x, model, stats.mean, bandCount, &scratch )
-                                     : SpectralDetection::aceScore( x, model, stats.mean, invCov, bandCount, &scratch );
+                    isCem ? SpectralCem::cemScore( x, cemFilter, bandCount, &scratch )
+                          : ( kind == "mf" ) ? SpectralDetection::matchedFilterScore( x, model, stats.mean, bandCount, &scratch )
+                                             : SpectralDetection::aceScore( x, model, stats.mean, invCov, bandCount, &scratch );
             }
             if ( !out.writeTile( 1, tile, tileScores.data() ) )
                 return false;
-            context.reportProgress( 0.66 + ( ++tilesSeen ) * perTile * 0.34, "Scoring" );
+            context.reportProgress( scoreStart + ( ++tilesSeen ) * perTile * scoreSpan, "Scoring" );
             return true;
         } ) )
     {
@@ -170,6 +235,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     result["bandCount"] = bandCount;
     result["width"] = width;
     result["height"] = height;
+    result["backgroundSamples"] = static_cast<Json::UInt64>( backgroundSamples );
+    if ( backgroundCondition >= 0.0 )
+        result["backgroundCondition"] = backgroundCondition;
+    if ( isCem )
+        result["loading"] = loading;
     result["targetSource"] = targetResolved.sourceDescription.toStdString();
     if ( targetResolved.resampled )
         result["targetResampled"] = true;
@@ -179,7 +249,8 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     return result;
 }
 
-Json::Value detectorSchema( const std::string &displayName, const std::string &description )
+Json::Value detectorSchema( const std::string &displayName, const std::string &description,
+                            bool withLoading = false )
 {
     using namespace schema;
     Json::Value props( Json::objectValue );
@@ -189,6 +260,17 @@ Json::Value detectorSchema( const std::string &displayName, const std::string &d
         "target", "targetRef", "Target spectrum (one value per input band, same order)" );
     for ( const auto &key : referenceProps.getMemberNames() )
         props[key] = referenceProps[key];
+    if ( withLoading )
+    {
+        Json::Value loading( Json::objectValue );
+        loading["type"] = "number";
+        loading["minimum"] = 0.0;
+        loading["default"] = 0.0;
+        loading["description"] =
+            "Scaled diagonal loading alpha in R + alpha*(tr(R)/B)*I; enables the "
+            "reduced min-sample floor (B+1 instead of 2B+2).";
+        props["loading"] = loading;
+    }
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
@@ -275,6 +357,44 @@ Json::Value RsAceOperator::executionEstimate() const
 Json::Value RsAceOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
     return runDetector( "ace", params, context );
+}
+
+Json::Value RsCemOperator::schema() const
+{
+    return detectorSchema( displayName(), description(), true );
+}
+Json::Value RsCemOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "spectral" );
+    meta["tags"].append( "detection" );
+    meta["tags"].append( "target" );
+    meta["task"] = "target-detection";
+    meta["notes"] = "Two-pass streaming CEM (background correlation, score) over the "
+                    "shared valid-pixel predicate; scores are signed with the target "
+                    "scoring exactly 1 (distortionless constraint); bit-exact grade.";
+    meta["gpu"] = false;
+    meta["purpose"] = "Target detection tolerant of multiplicative brightness scaling; "
+                      "complements the signed matched filter and the squared ACE.";
+    meta["prerequisites"].append( "'target' must have one finite value per input band." );
+    meta["prerequisites"].append( "At least 2*B+2 valid background pixels (B+1 when "
+                                  "'loading' > 0) — under-sampled scenes are refused." );
+    meta["workflowHints"].append( "Chain rs:threshold_raster to binarize scores; prefer "
+                                  "rs:ace for a bounded [0,1] score." );
+    meta["limitations"].append( "Background statistics come from the input scene itself; "
+                                "a separate background raster is a future extension." );
+    return meta;
+}
+Json::Value RsCemOperator::executionEstimate() const
+{
+    return detectorEstimate();
+}
+Json::Value RsCemOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    return runDetector( "cem", params, context );
 }
 
 } // namespace sicnu::operators::rs

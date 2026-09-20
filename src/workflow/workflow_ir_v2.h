@@ -23,6 +23,7 @@
 //
 
 #include <QString>
+#include <QStringList>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QPointF>
@@ -76,6 +77,12 @@ struct NodeFact
     QVector<PortFact> inputPorts;
     QVector<PortFact> outputPorts;
     QPointF canvasPosition;
+    /// Schema 2.1, additive-optional: for a node materialized by subflow
+    /// expansion, the designer-level fragment-instance node it came from
+    /// (empty for authored nodes). Serialized only when non-empty so 2.0
+    /// documents stay byte-identical; consumed by error attribution and
+    /// provenance.
+    QString originNodeId;
 
     bool operator==( const NodeFact & ) const = default;
 };
@@ -99,7 +106,10 @@ struct EdgeFact
 /// based) and the two collide in any TU that includes both headers.
 struct WorkflowDocument
 {
-    QString version = QStringLiteral( "2.0" );
+    /// Claimed schema version; must be a member of
+    /// WorkflowIR::supportedSchemaVersions() to parse. New documents default
+    /// to the current version.
+    QString version = QStringLiteral( "2.1" );
     QString workflowId;
     QString name;
     QString description;
@@ -120,11 +130,26 @@ class WorkflowIR
   public:
     WorkflowIR() = delete;
 
-    /// Parses a canonical 2.0 document. Fails closed: wrong version,
-    /// malformed node/edge fields, non-object parameters.
+    /// Schema versions this parser accepts, oldest first: {"2.0", "2.1"}.
+    /// "2.1" adds the optional NodeFact::originNodeId — additive-optional
+    /// fields are the sanctioned intra-family extension mechanism: a 2.0
+    /// writer never emits them, and a 2.1 reader tolerates their absence.
+    /// Anything outside this set is refused with the offending version
+    /// named — an older build rejects a newer document *explicitly* instead
+    /// of silently dropping fields it does not understand.
+    static QStringList supportedSchemaVersions();
+    /// The version new documents should claim ("2.1").
+    static QString currentSchemaVersion();
+
+    /// Parses a document whose version is a member of supportedSchemaVersions.
+    /// The document's claimed version is preserved verbatim — a "2.0" input
+    /// round-trips byte-stably as "2.0". Fails closed: unknown/missing
+    /// version, malformed node/edge fields, non-object parameters.
     static Result<WorkflowDocument> fromJson( const QJsonObject &doc );
 
     /// Emits the canonical document (all fields materialized, sorted keys).
+    /// `version` is emitted verbatim — the caller decides what the document
+    /// claims; a document using 2.1-only fields must carry version "2.1".
     static QJsonObject toJson( const WorkflowDocument &def );
 
     /// Structural semantics: unique non-empty ids, edges resolve to existing
@@ -134,9 +159,10 @@ class WorkflowIR
     static bool validateSemantics( const WorkflowDocument &def, QString *outError = nullptr );
 
     /// Lifts an ADR 0149 WorkflowIR 1.0 document (kind "workflow_ir",
-    /// schema_version "1.0") into 2.0. Defaults: radiometricState from the
-    /// artifact numeric-domain facts (dn -> "DN", surface_reflectance -> "BOA",
-    /// toa -> "TOA", else "None"); canvasPosition on a 4-per-row grid.
+    /// schema_version "1.0") into the current schema version. Defaults:
+    /// radiometricState from the artifact numeric-domain facts (dn -> "DN",
+    /// surface_reflectance -> "BOA", toa -> "TOA", else "None");
+    /// canvasPosition on a 4-per-row grid.
     static Result<WorkflowDocument> migrateFromV1( const QJsonObject &v1Doc );
 };
 

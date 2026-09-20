@@ -16,7 +16,29 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "COREGISTRATION_FAILED",
+        "remedy" : "\u66f4\u6362 metric\uff08\u5982 mutual_information\uff09\u3001\u68c0\u67e5\u4e24\u666f\u91cd\u53e0\u4e0e\u8f90\u5c04\u5dee\u5f02\u540e\u91cd\u8bd5",
+        "when" : "\u8de8\u6a21\u6001\u5339\u914d\u88ab\u62d2\uff08too_few_matches\u3001flat_region\u3001low_peak_snr \u7b49\uff09\uff0c\u6216\u5171\u8bc6\u5185\u70b9\u5c11\u4e8e 3 \u4e2a\u3001\u4eff\u5c04\u62df\u5408\u5931\u8d25"
+      },
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u786e\u8ba4\u4e24\u5e45\u5f71\u50cf\u8def\u5f84\u6b63\u786e\u4e14\u53ef\u88ab GDAL \u8bfb\u53d6",
+        "when" : "source \u6216 reference \u6805\u683c\u65e0\u6cd5\u7528 GDAL \u6253\u5f00\uff0c\u6216\u8bfb\u53d6\u5176 band 1 \u5931\u8d25"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u8865\u9f50\u4e09\u4e2a\u5fc5\u9700\u53c2\u6570",
+        "when" : "\u7f3a\u5c11\u5fc5\u9700\u53c2\u6570 source\u3001reference \u6216 output"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u68c0\u67e5\u8f93\u51fa\u8def\u5f84\u53ef\u5199\u3001\u78c1\u76d8\u7a7a\u95f4\u4e0e GDAL \u9a71\u52a8\u53ef\u7528\u6027",
+        "when" : "\u4eff\u5c04\u6c42\u89e3\u540e\u7684\u91cd\u91c7\u6837 warp \u5931\u8d25\uff0c\u6216\u8f93\u51fa GeoTIFF \u521b\u5efa/\u5199\u5165\u5931\u8d25"
+      }
+    ],
     "family" : "io",
     "io" : 
     {
@@ -133,7 +155,7 @@
       "Source and reference rasters readable by GDAL"
     ],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "\u8de8\u6a21\u6001\uff08\u5149\u5b66-SAR\uff09\u5f71\u50cf\u914d\u51c6\uff1a\u5339\u914d\u3001\u62df\u5408\u3001\u91cd\u91c7\u6837\u5230\u53c2\u8003\u6846\u67b6\u5e76\u62a5\u544a CE90/\u6b8b\u5dee\u573a\u8d28\u91cf\uff0c\u62d2\u914d\u65f6 fail-closed \u4e0d\u5199\u8f93\u51fa\uff0c\u4f4e\u7f6e\u4fe1\u7ed3\u679c\u6807\u8bb0\u5f85\u5ba1\u3002",
     "teaching_use" : {}
   },
   "description" : "Cross-modal (optical-SAR) image registration with refusal semantics: match, fit, warp into the reference frame, and report CE90/residual-field quality. Refusals write nothing; low-confidence outputs are flagged.",

@@ -330,7 +330,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         {
             // Matched filter / ACE write ONE continuous detection-score band
             // (Float32, NaN NoData) — a probability-like surface, not classes.
-            for ( const char *id : { "rs:matched_filter", "rs:ace" } )
+            for ( const char *id : { "rs:matched_filter", "rs:ace", "rs:cem_detection" } )
             {
                 ScientificContract c = baseRecord();
                 c.operatorId = id;
@@ -340,6 +340,19 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                 c.wavelengthPolicy = "srf_or_center";
                 c.evidence = "review:spectral detection writer reads (Float32 scores)";
                 rows.push_back( c );
+            }
+            {
+                // Score fusion consumes detection-score planes
+                // (probability-like, NaN NoData) and writes the same kind of
+                // surface (Spectral Intelligence 12.0).
+                ScientificContract fuse = baseRecord();
+                fuse.operatorId = "rs:spectral_spatial_fuse";
+                fuse.inputDomain = "probability";
+                fuse.outputDomain = "probability";
+                fuse.noDataPolicy = "internal_sentinel";
+                fuse.evidence = "review:spectral-spatial fusion reads and writes Float32 "
+                                "score planes with NaN NoData";
+                rows.push_back( fuse );
             }
             // SAM classifies in Float32 label space with -9999 NoData.
             ScientificContract sam = baseRecord();
@@ -379,40 +392,45 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
         {
-            ScientificContract c = baseRecord();
-            c.operatorId = "rs:endmember_analysis";
-            c.inputDomain = "reflectance";
-            c.outputDomain = "table";
-            c.wavelengthPolicy = "srf_or_center";
-            c.evidence = "family:spectral + schema read (reduced endmember table "
-                         "artifact written as JSON)";
-            rows.push_back( c );
-        }
-        {
+            // Spectral Intelligence 11.0 family — contract rows were missing
+            // at the adf8f989 baseline (census gate red).
             ScientificContract c = baseRecord();
             c.operatorId = "rs:local_rx_anomaly";
             c.inputDomain = "reflectance";
             c.outputDomain = "probability";
-            c.wavelengthPolicy = "srf_or_center";
-            c.evidence = "family:spectral + schema read (dual-window RX distance scores)";
-            rows.push_back( c );
-        }
-        {
-            ScientificContract c = baseRecord();
-            c.operatorId = "rs:sparse_unmixing";
-            c.inputDomain = "reflectance";
-            c.outputDomain = "features"; // sparse abundance stack
-            c.wavelengthPolicy = "srf_or_center";
-            c.evidence = "family:spectral + schema read (L1 + non-negative abundances)";
+            c.noDataPolicy = "internal_sentinel";
+            c.evidence = "family:spectral + ADR 0163 (dual-window RX quality planes; "
+                         "unscored pixels stay NaN)";
             rows.push_back( c );
         }
         {
             ScientificContract c = baseRecord();
             c.operatorId = "rs:spectral_similarity";
             c.inputDomain = "reflectance";
-            c.outputDomain = "probability"; // bounded SAM+SID similarity score
+            c.outputDomain = "probability";
             c.wavelengthPolicy = "srf_or_center";
-            c.evidence = "family:spectral + schema read (hybrid SAM/SID score)";
+            c.evidence = "family:spectral + ADR 0163 (bounded ProductNormalized hybrid; "
+                         "classic_tan is unbounded by design)";
+            c.note = "classic_tan form is unbounded; the default form is in [0, 1]";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:sparse_unmixing";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "features"; // abundance stacks, continuous
+            c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + ADR 0163 (FISTA, collinear-atom refusal)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:endmember_analysis";
+            c.inputDomain = "reflectance";
+            c.outputDomain = "table";
+            c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + ADR 0163 (derived spectral-table artifact; "
+                         "sensor projection refuses without wavelength metadata)";
             rows.push_back( c );
         }
 
@@ -441,20 +459,20 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         }
         {
             ScientificContract c = baseRecord();
-            c.operatorId = "rs:dn_to_radiance";
-            c.inputDomain = "dn";
-            c.outputDomain = "radiance";
-            c.scaleOffset = "param_driven";
-            c.evidence = "family:radiometric + schema read";
-            rows.push_back( c );
-        }
-        {
-            ScientificContract c = baseRecord();
             c.operatorId = "rs:brdf_normalization";
             c.inputDomain = "reflectance";
             c.outputDomain = "reflectance";
             c.evidence = "family:radiometric + schema read (sun/view geometry "
                          "normalization to a reference geometry)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:dn_to_radiance";
+            c.inputDomain = "dn";
+            c.outputDomain = "radiance";
+            c.scaleOffset = "param_driven";
+            c.evidence = "family:radiometric + schema read";
             rows.push_back( c );
         }
         {
@@ -843,7 +861,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         }
 
         // --- Terrain ----------------------------------------------------------------------
-        for ( const char *id : { "rs:terrain_analysis", "rs:terrain_flow" } )
+        for ( const char *id : { "rs:terrain_analysis", "rs:terrain_flow",
+                                 "rs:terrain_landform", "rs:terrain_solar" } )
         {
             ScientificContract c = baseRecord();
             c.operatorId = id;
@@ -866,15 +885,6 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.inputDomain = "dn";
             c.outputDomain = "dn";
             c.evidence = "family:import-georef + schema read";
-            rows.push_back( c );
-        }
-        for ( const char *id : { "rs:terrain_landform", "rs:terrain_solar" } )
-        {
-            ScientificContract c = baseRecord();
-            c.operatorId = id;
-            c.inputDomain = "any"; // DEM; accepted in any declared vertical scale
-            c.outputDomain = "features"; // TPI/landform metrics, shadow duration
-            c.evidence = "family:terrain + schema read";
             rows.push_back( c );
         }
         {
@@ -917,6 +927,16 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
         {
+            // Phenology 2.0 (automatic cycles, cross-year, quality flags) —
+            // same feature family as rs:temporal_phenology; the contract row
+            // was missing at the adf8f989 baseline (census gate red).
+            // TI 11.0 phenology 2.0 operators (census coverage repair).
+            ScientificContract c = temporalFamily( "increasing_dates" );
+            c.operatorId = "rs:temporal_phenology_multi";
+            c.outputDomain = "features"; // per-cycle phenology metrics
+            rows.push_back( c );
+        }
+        {
             ScientificContract c = temporalFamily( "increasing_dates" );
             c.operatorId = "rs:temporal_gap_fill";
             c.outputDomain = "features";
@@ -944,13 +964,6 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:temporal_extract_series";
             c.outputDomain = "table";
             c.atomicPublication = "direct_write"; // CSV result file
-            rows.push_back( c );
-        }
-        {
-            // TI 11.0 phenology 2.0 operators (census coverage repair).
-            ScientificContract c = temporalFamily( "increasing_dates" );
-            c.operatorId = "rs:temporal_phenology_multi";
-            c.outputDomain = "features"; // per-cycle phenology metrics
             rows.push_back( c );
         }
         {
@@ -1107,7 +1120,6 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                              "requires srf_or_center)";
                 rows.push_back( c );
             }
-            // SAR / InSAR family (Advanced SAR 10.0 package C headers):
             {
                 ScientificContract c = sarFamily();
                 c.operatorId = "rs:sar_coregister";

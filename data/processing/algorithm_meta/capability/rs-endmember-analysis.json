@@ -16,7 +16,29 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u786e\u8ba4 endmembersRef \u8def\u5f84\uff08\u5982\u4e0a\u6e38 rs:endmember_extraction \u7684 endmembersOut\uff09",
+        "when" : "endmembersRef \u6307\u5411\u7684\u7aef\u5143\u8868\u6587\u4ef6\u4e0d\u5b58\u5728"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u91cd\u65b0\u751f\u6210\u5408\u6cd5\u7aef\u5143\u8868\uff0c\u6216\u5148\u7b5b\u9009/\u5408\u5e76\u5230 512 \u884c\u4ee5\u5185",
+        "when" : "endmembersRef \u4e0d\u662f\u5408\u6cd5\u7684 exp-rs:spectral-table\uff08\u884c\u542b\u975e\u6709\u9650\u503c\u6216\u96f6\u8303\u6570\u3001\u884c\u5bbd\u4e0e bandCount \u4e0d\u4e00\u81f4\uff09\uff0c\u6216\u8f93\u5165\u884c\u6570\u8d85\u8fc7 512 \u884c\u7684\u5f52\u5e76\u4e0a\u9650"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u8f93\u5165\u8868\u884c\u6570\u5bf9\u9f50 ppiCounts\uff0c\u4fee\u6b63\u5e03\u5c14\u53c2\u6570\uff0c\u6216\u5728 64 \u884c\u4ee5\u5185\u518d\u8bf7\u6c42\u89d2\u5ea6\u77e9\u9635",
+        "when" : "ppiCounts \u957f\u5ea6\u4e0e\u8868\u884c\u6570\u4e0d\u7b26\u6216\u542b\u8d1f\u503c\u3001angleMatrix/requireFullCoverage \u975e\u5e03\u5c14\u3001\u7f29\u51cf\u540e\u884c\u6570\u8d85\u8fc7 64 \u4ecd\u8bf7\u6c42\u89d2\u5ea6\u77e9\u9635"
+      },
+      {
+        "code" : "WAVELENGTH_INCOMPATIBLE",
+        "remedy" : "\u4e3a\u7aef\u5143\u8868\u8865\u9f50\u6ce2\u957f\u5143\u6570\u636e\u3001\u4f7f\u7528\u5df2\u6ce8\u518c\u7684 sensor id\uff0c\u6216\u5173\u95ed requireFullCoverage \u5e76\u63a5\u53d7\u672a\u8986\u76d6\u6ce2\u6bb5\u4e3a NaN",
+        "when" : "\u4f20\u611f\u5668\u6295\u5f71\u5931\u8d25\uff1a\u8f93\u5165\u8868\u7f3a\u6ce2\u957f\u5143\u6570\u636e\u3001sensor id \u672a\u5728 data/spectral/sensors.json \u6ce8\u518c\u6216\u672a\u58f0\u660e\u6ce2\u6bb5\u3001\u7aef\u5143\u6ce2\u957f\u8986\u76d6\u4e0d\u8db3\u4e14 requireFullCoverage \u88ab\u5f00\u542f"
+      }
+    ],
     "family" : "spectral",
     "io" : 
     {
@@ -95,7 +117,7 @@
       "Input must be an exp-rs:spectral-table with finite, non-zero endmember rows."
     ],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "\u7aef\u5143\u96c6\u5408\u5206\u6790\uff1a\u6309\u5149\u8c31\u89d2\u805a\u7c7b\u628a\u7aef\u5143\u96c6\u538b\u7f29\u4e3a\u975e\u5197\u4f59\u4ee3\u8868\uff0c\u8f93\u51fa SAM \u89d2\u5ea6\u77e9\u9635\uff0c\u5e76\u53ef\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u7f51\u683c\uff0c\u751f\u6210\u5e26\u6eaf\u6e90\u7684\u5149\u8c31\u8868\u3002",
     "teaching_use" : {}
   },
   "description" : "Reduce an endmember set to non-redundant representatives (spectral-angle clustering), report the SAM matrix, and optionally project onto a sensor grid \u2014 as a provenance-carrying spectral table.",

@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:cem_detection",
+  "input" : "raster",
+  "notes" : "Two-pass streaming CEM (background correlation, score) over the shared valid-pixel predicate; scores are signed with the target scoring exactly 1 (distortionless constraint); bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

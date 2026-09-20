@@ -272,8 +272,10 @@ const std::map<std::string, std::string> &familyMap()
     // hyperspectral: detection, unmixing, transforms, resampling
     { "rs:ace", "hyperspectral" },
     { "rs:continuum_removal", "hyperspectral" },
+    { "rs:cem_detection", "hyperspectral" },
     { "rs:endmember_extraction", "hyperspectral" },
     { "rs:matched_filter", "hyperspectral" },
+    { "rs:spectral_spatial_fuse", "hyperspectral" },
     { "rs:mnf", "hyperspectral" },
     { "rs:rx_anomaly", "hyperspectral" },
     { "rs:spectral_resample", "hyperspectral" },

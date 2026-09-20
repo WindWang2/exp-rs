@@ -167,6 +167,32 @@ Json::Value RsSarBackscatterOperator::run(const Json::Value& params,
                               "band out of range: " + std::to_string(band));
     }
 
+    // Cross-check the assumed input state against the product's declared
+    // SICNU_SAR_CALIBRATION: applying a geometry conversion for the wrong
+    // state silently corrupts the radiometry, and DN-declared products need
+    // rs:sar_calibrate first. A pure numeric-domain conversion (from == to)
+    // applies no geometry, so the declared token is inert there and must
+    // not block an otherwise legitimate dB <-> linear step.
+    const QString declaredCalibration = sicnu::sar::declaredCalibrationToken(src);
+    if (!sameState && !declaredCalibration.isEmpty()) {
+        const QString normalized = sicnu::sar::normalizeCalibration(declaredCalibration);
+        if (normalized.isEmpty()) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input declares unrecognized SICNU_SAR_CALIBRATION='" +
+                    declaredCalibration.toStdString() +
+                    "'; refusing to guess the radiometric state");
+        }
+        if (normalized != QString::fromStdString(fromStr)) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input declares SICNU_SAR_CALIBRATION=" + normalized.toStdString() +
+                    " but fromCalibration=" + fromStr +
+                    "; pass the declared state as fromCalibration (DN products must be "
+                    "calibrated with rs:sar_calibrate first)");
+        }
+    }
+
     // Sentinel declared on the analysis band (NaN when undeclared).
     const float nodata = sicnu::rs::bandNoDataSentinel(src, band);
 

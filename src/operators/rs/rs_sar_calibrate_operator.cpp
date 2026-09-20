@@ -128,6 +128,31 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                               "Cannot open input raster: " + inputPath);
     }
 
+    // Declared-contract preflight: this operator applies the DN formula
+    // sigma0 = DN²/A². Re-applying it to a product that already declares a
+    // calibrated state would double-scale the radiometry, and an unreadable
+    // declared token must not be silently treated as DN — refuse both.
+    const QString declaredCalibration = sicnu::sar::declaredCalibrationToken(src);
+    if (!declaredCalibration.isEmpty()) {
+        const QString normalized = sicnu::sar::normalizeCalibration(declaredCalibration);
+        if (normalized.isEmpty()) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input declares unrecognized SICNU_SAR_CALIBRATION='" +
+                    declaredCalibration.toStdString() +
+                    "'; refusing to guess the radiometric state");
+        }
+        if (normalized != QLatin1String("dn")) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input already declares SICNU_SAR_CALIBRATION=" +
+                    normalized.toStdString() +
+                    "; rs:sar_calibrate applies the DN formula and would double-scale "
+                    "an already-calibrated product. Use rs:sar_backscatter to convert "
+                    "between calibrated states.");
+        }
+    }
+
     const int bandCount = band > 0 ? 1 : src.bandCount();
     const int firstBand = band > 0 ? band : 1;
     if (firstBand < 1 || firstBand > src.bandCount()) {

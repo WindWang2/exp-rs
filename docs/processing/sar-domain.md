@@ -441,3 +441,31 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    data, weights, pattern bounds), `test_sar_platform11.cpp` (registry
    E2E: 1 mm/year velocity recovered exactly; intersect vs perpixel
    semantics).
+
+## 15. Declared calibration state: re-calibration is a typed refusal (SAR 12.0)
+
+1. Every operator that writes a radiometric SAR product also writes the
+   dataset-level `SICNU_SAR_CALIBRATION` token (`sigma0` | `gamma0` |
+   `beta0` | `dn`; accepted input spellings `sigma_naught`/`sigma`/`gamma`/
+   `beta`/`digital_number` normalize onto the canonical tokens — see
+   `sar_metadata.h`). Filtering kernels that are radiometrically neutral
+   (`rs:sar_speckle` spatial and multitemporal) **propagate** the input's
+   declared state onto their output instead of dropping it.
+2. `rs:sar_calibrate` applies the DN formula `sigma0 = (DN² − noise)/A²`.
+   A product declaring any **calibrated** state (`sigma0`/`gamma0`/`beta0`)
+   is a typed refusal (`InvalidParameter`): re-applying the DN formula to
+   an already-calibrated product silently double-scales the radiometry.
+   A declared `dn` (or an absent declaration) is accepted. A declared token
+   the platform cannot interpret is likewise a refusal — never treated as DN.
+3. `rs:sar_backscatter` cross-checks `fromCalibration` against the
+   declared state before applying any geometry factor. Mismatch = typed
+   refusal with the remedy in the message. The pure numeric-domain path
+   (`from == to`, dB ↔ linear) applies no geometry, so it is exempt.
+4. Rationale: the same fail-closed lineage as the declared-`SICNU_SAR_DOMAIN`
+   refusals (§1) — requests that would corrupt radiometry are typed
+   refusals, never approximations.
+5. Evidence: `tests/test_sar_operators.cpp` (re-calibration refusals for
+   every calibrated state, DN acceptance, unrecognized-token refusal,
+   fromCalibration mismatch refusal, matching-state conversion, speckle
+   state propagation incl. multitemporal reference-scene semantics,
+   inert sameState domain conversion).

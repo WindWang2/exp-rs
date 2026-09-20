@@ -1027,6 +1027,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:cem_detection",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsCemOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_spectral_detection_operators.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:change",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -3320,6 +3341,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:spectral_spatial_fuse",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsSpectralSpatialFuseOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_spectral_spatial_fuse_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:spectral_unmixing",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -4034,6 +4076,6 @@
       }
     }
   ],
-  "entryCount" : 191,
+  "entryCount" : 193,
   "schema" : "exp.determinism_census.v1"
 }

@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u4e91\u63a9\u819c\u4fee\u8865",
         "\u5efa\u7b51\u6591\u5757\u6574\u5f62"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -36,9 +36,9 @@
       }
     ],
     "family" : "raster_spatial",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -46,7 +46,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "raster",
@@ -54,7 +54,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "1",
@@ -64,7 +64,7 @@
         },
         {
           "default" : "8",
-          "enum" :
+          "enum" : 
           [
             "4",
             "8"
@@ -81,7 +81,7 @@
         },
         {
           "default" : "dilate",
-          "enum" :
+          "enum" : 
           [
             "erode",
             "dilate",
@@ -100,7 +100,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -111,15 +111,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5f62\u6001\u5b66\u8fd0\u7b97\uff1a\u8150\u8680/\u81a8\u80c0/\u5f00\u95ed\u8fd0\u7b97\u5904\u7406\u4e8c\u503c\u6216\u7070\u5ea6\u6805\u683c\uff0c\u5e38\u7528\u4e8e\u63a9\u819c\u4fee\u6574\u4e0e\u5bf9\u8c61\u5f62\u72b6\u6574\u5f62\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u8150\u8680",
         "\u81a8\u80c0",
         "\u5f00\u95ed\u8fd0\u7b97"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -134,7 +134,7 @@
   "notes" : "Shared primitives/morphology kernel (0/1/255 masks, NoData protected, documented replicate borders). FullRaster contract.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "raster_spatial"
   ],

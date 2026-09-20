@@ -16,7 +16,29 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "TOPO_PHASE_METADATA_MISSING",
+        "remedy" : "\u6309 SICNU_SAR_ORBIT_STATES \u8bed\u6cd5\u8865\u4e24\u666f\u8f68\u9053\u72b6\u6001\uff0c\u5e76\u4f20 wavelengthUm \u6216\u5728\u5e72\u6d89\u56fe\u4e0a\u58f0\u660e\u6ce2\u957f\u5143\u6570\u636e",
+        "when" : "master/slave \u8f68\u9053\u72b6\u6001\u4e32\u65e0\u6cd5\u89e3\u6790\uff0c\u6216\u96f7\u8fbe\u6ce2\u957f\u65e2\u65e0 wavelengthUm \u53c2\u6570\u4e5f\u65e0 SICNU_SAR_WAVELENGTH_UM \u5143\u6570\u636e"
+      },
+      {
+        "code" : "COMPLEX_BANDS_REQUIRED",
+        "remedy" : "\u8f93\u5165\u590d\u5e72\u6d89\u56fe\u6216\u6821\u6b63 band \u6ce2\u6bb5\u53f7",
+        "when" : "\u5e72\u6d89\u56fe\u7684\u6307\u5b9a band \u4e0d\u662f\u590d\uff08CFloat32\uff09\u6ce2\u6bb5"
+      },
+      {
+        "code" : "DEM_CRS_MISMATCH",
+        "remedy" : "\u5148\u628a DEM \u91cd\u6295\u5f71\u5230\u5e72\u6d89\u56fe CRS/\u7f51\u683c\u518d\u6267\u884c",
+        "when" : "DEM \u4e0e\u5e72\u6d89\u56fe CRS \u4e0d\u4e00\u81f4\uff08\u7b97\u5b50\u4e0d\u6267\u884c\u9690\u5f0f\u91cd\u6295\u5f71\uff09"
+      },
+      {
+        "code" : "DEM_EXTENT_INSUFFICIENT",
+        "remedy" : "\u6269\u5927 DEM \u8986\u76d6\u8303\u56f4\uff0c\u6216\u88c1\u526a\u5e72\u6d89\u56fe AOI \u5230 DEM \u8303\u56f4\u5185",
+        "when" : "DEM \u8303\u56f4\u672a\u5b8c\u6574\u8986\u76d6\u5e72\u6d89\u56fe\u50cf\u5143\u4e2d\u5fc3\u6240\u5728\u8303\u56f4"
+      }
+    ],
     "family" : "sar",
     "io" : 
     {
@@ -103,7 +125,7 @@
       "Complex interferogram; DEM above the WGS84 ellipsoid in the interferogram CRS; both scene orbit state vectors; radar wavelength."
     ],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "InSAR \u5730\u5f62\u76f8\u4f4d\u5254\u9664\uff1a\u7528\u4e24\u666f\u8f68\u9053\u7684\u9010\u50cf\u7d20\u4e25\u683c\u8ddd\u79bb\u5dee\u51e0\u4f55\uff0c\u4ece\u590d\u5e72\u6d89\u56fe\u4e2d\u79fb\u9664 DEM/\u8f68\u9053\u5730\u5f62\u76f8\u4f4d\uff0c\u7559\u4e0b\u5f62\u53d8\u4e0e\u5927\u6c14\u76f8\u4f4d\u3002",
     "teaching_use" : {}
   },
   "description" : "Remove the DEM/orbit topographic phase from a complex interferogram using the rigorous per-pixel range-difference geometry of both scene orbits (not an approximation).",

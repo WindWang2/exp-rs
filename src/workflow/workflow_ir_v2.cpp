@@ -9,7 +9,8 @@
 namespace sicnu::workflow {
 namespace {
 
-constexpr const char *kVersion = "2.0";
+constexpr const char *kVersion20 = "2.0";
+constexpr const char *kVersionCurrent = "2.1";
 constexpr const char *kV1Kind = "workflow_ir";
 constexpr const char *kV1SchemaVersion = "1.0";
 // Deterministic migration grid: 4 nodes per row, 280 x 140 px cells.
@@ -140,7 +141,7 @@ PortFact v1Port( const QString &name, const QJsonObject &artifact )
 
 bool WorkflowDocument::isValid() const
 {
-    if ( version != QLatin1String( kVersion ) )
+    if ( !WorkflowIR::supportedSchemaVersions().contains( version ) )
         return false;
     QSet<QString> ids;
     for ( const NodeFact &node : nodes )
@@ -170,14 +171,28 @@ const EdgeFact *WorkflowDocument::findEdge( const QString &id ) const
     return nullptr;
 }
 
+QStringList WorkflowIR::supportedSchemaVersions()
+{
+    return { QStringLiteral( "2.0" ), QStringLiteral( "2.1" ) };
+}
+
+QString WorkflowIR::currentSchemaVersion()
+{
+    return QStringLiteral( "2.1" );
+}
+
 Result<WorkflowDocument> WorkflowIR::fromJson( const QJsonObject &doc )
 {
-    if ( doc.value( QLatin1String( "version" ) ).toString() != QLatin1String( kVersion ) )
+    const QString claimed = doc.value( QLatin1String( "version" ) ).toString();
+    if ( claimed != QLatin1String( kVersion20 ) && claimed != QLatin1String( kVersionCurrent ) )
         return Result<WorkflowDocument>::error(
-            QStringLiteral( "unsupported or missing 'version' (expected \"%1\")" ).arg( QLatin1String( kVersion ) ) );
+            QStringLiteral( "unsupported or missing workflow IR version '%1' (supported: %2)" )
+                .arg( claimed, supportedSchemaVersions().join( QLatin1String( ", " ) ) ) );
 
     WorkflowDocument def;
-    def.version = QLatin1String( kVersion );
+    // Preserve the claimed version: a 2.0 document stays "2.0" through the
+    // round-trip; additive-optional fields parse on both members.
+    def.version = claimed;
     def.workflowId = doc.value( QLatin1String( "workflowId" ) ).toString();
     def.name = doc.value( QLatin1String( "name" ) ).toString();
     def.description = doc.value( QLatin1String( "description" ) ).toString();
@@ -218,6 +233,10 @@ Result<WorkflowDocument> WorkflowIR::fromJson( const QJsonObject &doc )
             return Result<WorkflowDocument>::error(
                 QStringLiteral( "node '%1': canvasPosition needs numeric 'x' and 'y'" ).arg( node.nodeId ) );
         node.canvasPosition = QPointF( x.toDouble(), y.toDouble() );
+
+        // 2.1 additive-optional: composition provenance. Absent/empty for
+        // authored nodes; only ever written by subflow expansion.
+        node.originNodeId = nodeObj.value( QLatin1String( "originNodeId" ) ).toString();
 
         for ( const QString &listKey : { QStringLiteral( "inputPorts" ), QStringLiteral( "outputPorts" ) } )
         {
@@ -291,6 +310,8 @@ QJsonObject WorkflowIR::toJson( const WorkflowDocument &def )
         nodeObj.insert( QLatin1String( "operatorId" ), node.operatorId );
         nodeObj.insert( QLatin1String( "outputPorts" ), portsToJson( node.outputPorts ) );
         nodeObj.insert( QLatin1String( "parameters" ), node.parameters );
+        if ( !node.originNodeId.isEmpty() )
+            nodeObj.insert( QLatin1String( "originNodeId" ), node.originNodeId );
         nodes.append( nodeObj );
     }
     doc.insert( QLatin1String( "nodes" ), nodes );
@@ -306,6 +327,13 @@ bool WorkflowIR::validateSemantics( const WorkflowDocument &def, QString *outErr
             *outError = message;
         return false;
     };
+
+    // The claimed schema version is semantic input: a document asserting a
+    // version outside the closed set is not executable — a run built on it
+    // would write checkpoints this build's own reader refuses.
+    if ( !supportedSchemaVersions().contains( def.version ) )
+        return fail( QStringLiteral( "workflow document claims unsupported version '%1' (supported: %2)" )
+                         .arg( def.version, supportedSchemaVersions().join( QLatin1String( ", " ) ) ) );
 
     QSet<QString> nodeIds;
     for ( const NodeFact &node : def.nodes )
@@ -365,7 +393,7 @@ Result<WorkflowDocument> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
         return Result<WorkflowDocument>::error( QStringLiteral( "V1 migration: unsupported schema_version" ) );
 
     WorkflowDocument def;
-    def.version = QLatin1String( kVersion );
+    def.version = QLatin1String( kVersionCurrent ); // migrations land on the current schema
     def.workflowId = v1Doc.value( QLatin1String( "ir_id" ) ).toString();
     def.name = v1Doc.value( QLatin1String( "goal" ) ).toString();
     def.description = QStringLiteral( "Migrated from WorkflowIR 1.0 (%1)" )

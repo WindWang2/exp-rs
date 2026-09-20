@@ -87,6 +87,8 @@ SAR 配准精化：对同网格复 SLC 对做幅度域 patch 归一化互相关�
 
 ## rs:sar_coregister_local
 
+SAR 局部配准：在同网格复 SLC 对上估计 patch NCC 偏移场（抛物线亚像元精化+中值滤波），把从景重采样到主景网格，输出偏移场与全局平移。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输入：master（raster）、slave（raster）
@@ -94,6 +96,11 @@ SAR 配准精化：对同网格复 SLC 对做幅度域 patch 归一化互相关�
 - 参数：masterBand（numeric）、medianRadius（numeric）、minPeakRatio（numeric）、offsetFieldOutput（string）、output（string）、patchSize（numeric）、patchStride（numeric）、searchRadius（numeric）、slaveBand（numeric）
 - 前置条件：Same-grid complex SLC pair (rs:sar_coregister preflight semantics apply).
 - 局限：Translation-field model: no affine/polynomial warp and no DEM-based refinement; strong range ramps need a lattice finer than the ramp scale.；Both planes are materialized behind a 2 GiB gate (MEMORY_BUDGET_EXCEEDED beyond — use a smaller AOI).
+- 失败模式：
+  - `COMPLEX_BANDS_REQUIRED` — master 或 slave 的指定波段不是复数（CFloat32）SLC 波段。处置：输入复 SLC 数据或校正 masterBand/slaveBand 波段号
+  - `GRID_MISMATCH` — master 与 slave 不共享 CRS、分辨率、原点与范围，或两景栅格尺寸不同。处置：先对齐为同网格 SLC 对（或换用可以外部对齐的产品）
+  - `INSUFFICIENT_MEMORY` — 两景复平面物化超过 2 GiB 预算（约 48 字节/像素）。处置：缩小 AOI 后重试
+  - `COREGISTRATION_FAILED` — 置信 patch 少于 3 个——两景去相关严重，或 searchRadius 小于真实配准偏差。处置：增大 searchRadius/patchSize，或检查两景相关性
 
 ## rs:sar_displacement
 
@@ -176,14 +183,23 @@ InSAR 干涉图：对同网格配准的复 SLC 对生成 s1·conj(s2) 干涉复�
 
 ## rs:sar_network_inversion
 
+InSAR 网络反演：小基线线性反演，从连通成对网络的逐对解缠视线向位移栅格求解各历元位移与线性速度场，附拟合 RMS 与缺失数据质量账。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输出：displacementOutput（raster）、rmsOutput（raster）、velocityOutput（raster）
 - 参数：displacementInputs（string）、displacementOutput（string）、epochTemporalYears（string）、maskStrategy（enum）、maxPatterns（integer）、pairWeights（string）、pairs（string）、rmsOutput（string）、velocityOutput（string）
 - 前置条件：Connected pair network (rs:sar_pair_network) and per-pair unwrapped displacement rasters on one grid.
 - 局限：LINEAR small-baseline model: atmospheric phase stays in the epoch displacements — NOT PSI (no PS selection, no APS separation).；Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond).
+- 失败模式：
+  - `NETWORK_INVERSION_RANK_DEFICIENT` — pair/epoch 契约无效（每对 master 索引未大于 slave、计数不一致或权重 ≤ 0），或某缺失模式的历元方程组秩亏。处置：校正 pairs 的 [masterEpoch, slaveEpoch]（注意其索引方向与 rs:sar_pair_network 输出相反）并保证权重 > 0
+  - `NETWORK_INVERSION_PATTERN_BLOWUP` — 互异缺失数据模式数超过 maxPatterns 缓存上限。处置：改用 maskStrategy=intersect，或在确认代价后调大 maxPatterns
+  - `NETWORK_INVERSION_PAIR_LIMIT` — 输入位移栅格（成对数）超过 64 对的模式掩码上限。处置：拆分网络分批反演
+  - `NETWORK_INVERSION_EPOCH_LIMIT` — epoch 数超过 200 上限。处置：减少历元数（合并或裁剪场景）后重试
 
 ## rs:sar_pair_network
+
+InSAR 成对网络：在重处理前按时间/垂直基线约束从场景真值栈（轨道、波长、采集时刻）筛选干涉对并构建连通性网络，fail-closed 类型化拒绝。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
@@ -191,6 +207,11 @@ InSAR 干涉图：对同网格配准的复 SLC 对生成 s1·conj(s2) 干涉复�
 - 参数：allowDisconnected（boolean）、maxPerpendicularM（numeric）、maxTemporalDays（numeric）、minPerpendicularM（numeric）、outputFile（string）、referenceIdx（numeric）、scenes（string）、strategy（enum）
 - 前置条件：Scene truth stack: orbit states + acquisition UTC + one common wavelength.
 - 局限：Screening B⊥ is evaluated at each master's orbit mid-time nadir — a graph metric, not a per-pixel baseline product.；Bounded scale: 512 scenes, 65536 pairs (typed refusals beyond).
+- 失败模式：
+  - `SCENE_TRUTH_INVALID` — 任一场景真值缺失或非法（缺 acquisitionUtc/wavelengthUm），或场景数超过 512、可用对超过 65536、referenceIdx 越界。处置：补齐各场景的采集时刻、波长与轨道状态，并裁剪网络规模
+  - `ORBIT_SEGMENT_INVALID` — 轨道状态段无效（少于 2 个状态、时间非严格升序有限或速度退化）。处置：按 SICNU_SAR_ORBIT_STATES 语法修复该场景的轨道串
+  - `WAVELENGTH_INCOMPATIBLE` — 某场景波长与参考场景波长相对偏差超过 1e-9。处置：统一全栈为同一雷达波长（µm）
+  - `PAIR_GRAPH_DISCONNECTED` — 约束过滤后图为空，或滤波后的图有多个连通分量且未设 allowDisconnected。处置：放宽 maxTemporalDays 或垂直基线约束，或设 allowDisconnected=true 取分量图做 QA
 
 ## rs:sar_phase_filter
 
@@ -252,6 +273,8 @@ SAR 双通道或多时相比值运算：突出散射机制差异，常用于水�
 
 ## rs:sar_remove_topographic_phase
 
+InSAR 地形相位剔除：用两景轨道的逐像素严格距离差几何，从复干涉图中移除 DEM/轨道地形相位，留下形变与大气相位。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输入：dem（raster）、interferogram（raster）
@@ -259,6 +282,11 @@ SAR 双通道或多时相比值运算：突出散射机制差异，常用于水�
 - 参数：band（numeric）、demBand（numeric）、masterOrbitStates（string）、output（string）、slaveOrbitStates（string）、topoPhaseOutput（string）、wavelengthUm（numeric）
 - 前置条件：Complex interferogram; DEM above the WGS84 ellipsoid in the interferogram CRS; both scene orbit state vectors; radar wavelength.
 - 局限：North-up axis-aligned grids only; DEM must share the interferogram CRS and cover it (warp/clip otherwise).；Height sensitivity degenerates near zero B⊥ — the removal is exact for the given DEM, but pairs without perpendicular baseline carry no height signal to remove.
+- 失败模式：
+  - `TOPO_PHASE_METADATA_MISSING` — master/slave 轨道状态串无法解析，或雷达波长既无 wavelengthUm 参数也无 SICNU_SAR_WAVELENGTH_UM 元数据。处置：按 SICNU_SAR_ORBIT_STATES 语法补两景轨道状态，并传 wavelengthUm 或在干涉图上声明波长元数据
+  - `COMPLEX_BANDS_REQUIRED` — 干涉图的指定 band 不是复（CFloat32）波段。处置：输入复干涉图或校正 band 波段号
+  - `DEM_CRS_MISMATCH` — DEM 与干涉图 CRS 不一致（算子不执行隐式重投影）。处置：先把 DEM 重投影到干涉图 CRS/网格再执行
+  - `DEM_EXTENT_INSUFFICIENT` — DEM 范围未完整覆盖干涉图像元中心所在范围。处置：扩大 DEM 覆盖范围，或裁剪干涉图 AOI 到 DEM 范围内
 
 ## rs:sar_speckle
 

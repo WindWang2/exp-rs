@@ -16,7 +16,29 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "SCENE_TRUTH_INVALID",
+        "remedy" : "\u8865\u9f50\u5404\u573a\u666f\u7684\u91c7\u96c6\u65f6\u523b\u3001\u6ce2\u957f\u4e0e\u8f68\u9053\u72b6\u6001\uff0c\u5e76\u88c1\u526a\u7f51\u7edc\u89c4\u6a21",
+        "when" : "\u4efb\u4e00\u573a\u666f\u771f\u503c\u7f3a\u5931\u6216\u975e\u6cd5\uff08\u7f3a acquisitionUtc/wavelengthUm\uff09\uff0c\u6216\u573a\u666f\u6570\u8d85\u8fc7 512\u3001\u53ef\u7528\u5bf9\u8d85\u8fc7 65536\u3001referenceIdx \u8d8a\u754c"
+      },
+      {
+        "code" : "ORBIT_SEGMENT_INVALID",
+        "remedy" : "\u6309 SICNU_SAR_ORBIT_STATES \u8bed\u6cd5\u4fee\u590d\u8be5\u573a\u666f\u7684\u8f68\u9053\u4e32",
+        "when" : "\u8f68\u9053\u72b6\u6001\u6bb5\u65e0\u6548\uff08\u5c11\u4e8e 2 \u4e2a\u72b6\u6001\u3001\u65f6\u95f4\u975e\u4e25\u683c\u5347\u5e8f\u6709\u9650\u6216\u901f\u5ea6\u9000\u5316\uff09"
+      },
+      {
+        "code" : "WAVELENGTH_INCOMPATIBLE",
+        "remedy" : "\u7edf\u4e00\u5168\u6808\u4e3a\u540c\u4e00\u96f7\u8fbe\u6ce2\u957f\uff08\u00b5m\uff09",
+        "when" : "\u67d0\u573a\u666f\u6ce2\u957f\u4e0e\u53c2\u8003\u573a\u666f\u6ce2\u957f\u76f8\u5bf9\u504f\u5dee\u8d85\u8fc7 1e-9"
+      },
+      {
+        "code" : "PAIR_GRAPH_DISCONNECTED",
+        "remedy" : "\u653e\u5bbd maxTemporalDays \u6216\u5782\u76f4\u57fa\u7ebf\u7ea6\u675f\uff0c\u6216\u8bbe allowDisconnected=true \u53d6\u5206\u91cf\u56fe\u505a QA",
+        "when" : "\u7ea6\u675f\u8fc7\u6ee4\u540e\u56fe\u4e3a\u7a7a\uff0c\u6216\u6ee4\u6ce2\u540e\u7684\u56fe\u6709\u591a\u4e2a\u8fde\u901a\u5206\u91cf\u4e14\u672a\u8bbe allowDisconnected"
+      }
+    ],
     "family" : "sar",
     "io" : 
     {
@@ -100,7 +122,7 @@
       "Scene truth stack: orbit states + acquisition UTC + one common wavelength."
     ],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "InSAR \u6210\u5bf9\u7f51\u7edc\uff1a\u5728\u91cd\u5904\u7406\u524d\u6309\u65f6\u95f4/\u5782\u76f4\u57fa\u7ebf\u7ea6\u675f\u4ece\u573a\u666f\u771f\u503c\u6808\uff08\u8f68\u9053\u3001\u6ce2\u957f\u3001\u91c7\u96c6\u65f6\u523b\uff09\u7b5b\u9009\u5e72\u6d89\u5bf9\u5e76\u6784\u5efa\u8fde\u901a\u6027\u7f51\u7edc\uff0cfail-closed \u7c7b\u578b\u5316\u62d2\u7edd\u3002",
     "teaching_use" : {}
   },
   "description" : "Build a time/space-baseline-constrained pair network from a scene truth stack (orbits, wavelengths, acquisition dates) with connectivity QA and typed fail-closed semantics.",

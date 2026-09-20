@@ -544,6 +544,10 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
     engine.shutdownForTests();
     auto &center = TaskCenter::instance();
     center.resetResourceProfileLimits();
+    // 12.0: this is a drain-throughput benchmark, not an admission-control
+    // test — the 10k submit burst would trip the 4096-task pending bound
+    // (refused with -1) and distort the drain measurement it exists to take.
+    center.setMaxPendingTasks( 0 );
 
     engine.clearExecutors();
     engine.registerExecutor( "ep8:", []( const sicnu::jobs::JobRequest &req,
@@ -565,7 +569,9 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
         {
             sicnu::jobs::JobRequest r = ep8Request( "ep8:tiny" );
             r.params["i"] = i;
-            ids.push_back( center.submitJob( r ) );
+            const long id = center.submitJob( r );
+            REQUIRE( id > 0 ); // fail fast if admission ever refuses (12.0 bound)
+            ids.push_back( id );
         }
         REQUIRE( ids.size() == static_cast<size_t>( n ) );
 
@@ -634,6 +640,7 @@ TEST_CASE( "Short-job drain scales without the pre-8.0 admission cliff",
 
     engine.clearExecutors();
     center.clearCompletedTasks();
+    center.resetResourceProfileLimits(); // restore the 12.0 pending bound
     engine.shutdownForTests();
 }
 

@@ -1,7 +1,18 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5149\u5b66\u573a\u666f"
+      ],
+      "scenes" : 
+      [
+        "MNF \u53bb\u566a",
+        "\u5206\u91cf\u7a7a\u95f4\u5206\u6790\u56de\u5199\u6ce2\u6bb5\u7a7a\u95f4"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -16,7 +27,14 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5148\u8fd0\u884c rs:mnf \u5e76\u4fdd\u7559\u5176\u7edf\u8ba1 sidecar",
+        "when" : "\u8f93\u5165\u7f3a\u5c11 MNF \u53d8\u6362\u5143\u6570\u636e"
+      }
+    ],
     "family" : "spectral",
     "io" : 
     {
@@ -90,8 +108,21 @@
       "Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load."
     ],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
+    "summary" : "MNF \u9006\u53d8\u6362\uff1a\u7531 MNF \u5206\u91cf\u91cd\u5efa\u539f\u59cb\u6ce2\u6bb5\u7a7a\u95f4\uff0c\u652f\u6301\u566a\u58f0\u5206\u91cf\u7f6e\u96f6\u540e\u7684\u53bb\u566a\u91cd\u5efa\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "MNF",
+        "\u9006\u53d8\u6362",
+        "\u566a\u58f0\u5206\u79bb"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u5c06\u566a\u58f0\u5206\u91cf\u7f6e\u96f6\u540e\u9006\u53d8\u6362\uff0c\u5bf9\u6bd4\u53bb\u566a\u524d\u540e\u7684\u5149\u8c31\u66f2\u7ebf\u3002"
+    }
   },
   "description" : "Reconstruct band space from MNF components using the transform model artifact from rs:mnf (full inverse or a quantified component subset).",
   "display_name" : "Inverse MNF",

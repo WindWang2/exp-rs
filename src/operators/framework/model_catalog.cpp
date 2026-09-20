@@ -449,6 +449,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     providerObj.value( QStringLiteral( "interpreter" ) ).toString().toStdString();
   info.runtime.provider.timeoutMs = providerObj.value( QStringLiteral( "timeout_ms" ) ).toInt( 30000 );
   info.runtime.provider.maxBodyMb = providerObj.value( QStringLiteral( "max_body_mb" ) ).toInt( 256 );
+  // Ordered provider fallback chain (validated in the contract-sanity block
+  // below; registration is checked at acquire so a not-built provider
+  // degrades to a recorded attempt, not a broken scan).
+  if ( const QJsonValue fbVal = runtimeObj.value( QStringLiteral( "framework_fallback" ) ); fbVal.isArray() )
+  {
+    for ( const auto &v : fbVal.toArray() )
+      info.runtime.frameworkFallback.push_back( v.toString().toStdString() );
+  }
 
   // Tiling support flag: nested tiling.supported, legacy supports_tiling, in that order.
   info.supportsTiling = runtimeObj.contains( QStringLiteral( "supports_tiling" ) )
@@ -571,6 +579,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "polarizations", "temporal_length", "radiometric_state", "resolution_range",
                           "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "supports_tiling",
                           "package",
+                          // Model ensemble surface
+                          "ensemble",
                           // Platform 10.0 EO domain truth section
                           "eo",
                           // legacy freeform version string superseded by
@@ -656,8 +666,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                         "postprocess.", &unknown );
     collectUnknownKeys( runtimeObj,
                         { "gpu", "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "device",
-                          "provider", "supports_tiling" },
+                          "provider", "supports_tiling", "framework_fallback" },
                         "runtime.", &unknown );
+    collectUnknownKeys( obj.value( QStringLiteral( "ensemble" ) ).toObject(),
+                        { "members", "combination", "uncertainty" }, "ensemble.", &unknown );
     if ( runtimeObj.contains( QStringLiteral( "provider" ) )
          && runtimeObj.value( QStringLiteral( "provider" ) ).isObject() )
       collectUnknownKeys( runtimeObj.value( QStringLiteral( "provider" ) ).toObject(),
@@ -793,6 +805,92 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     markInvalid( "runtime.provider is declared for framework '" + info.framework
                    + "' which executes in-process - provider connections apply to the 'http' and "
                    "'python' frameworks only" );
+  }
+
+  // Provider fallback chain shape: 1..4 entries, no duplicates, never the
+  // primary framework. A cycle-free chain is guaranteed by the no-duplicate
+  // + no-primary rules (entries are only ever tried once, in order).
+  if ( !info.runtime.frameworkFallback.empty() )
+  {
+    const std::vector<std::string> &chain = info.runtime.frameworkFallback;
+    if ( chain.size() > 4 )
+      markInvalid( "runtime.framework_fallback declares " + std::to_string( chain.size() )
+                     + " entries; the maximum chain length is 4" );
+    for ( const std::string &token : chain )
+    {
+      if ( token.empty() )
+        markInvalid( "runtime.framework_fallback entries must be non-empty framework tokens" );
+      else if ( token == info.framework )
+        markInvalid( "runtime.framework_fallback must not repeat the primary framework '"
+                       + info.framework + "'" );
+    }
+    for ( std::size_t i = 0; i < chain.size(); ++i )
+      for ( std::size_t j = i + 1; j < chain.size(); ++j )
+        if ( chain[i] == chain[j] )
+          markInvalid( "runtime.framework_fallback declares '" + chain[i] + "' twice" );
+  }
+
+  // Ensemble contract: closed vocabulary, member count/weights, and the
+  // structural exclusions (an ensemble is artifact-less; detection decode
+  // and the ensemble surface are mutually exclusive).
+  if ( obj.contains( QStringLiteral( "ensemble" ) ) )
+  {
+    const QJsonValue ensembleVal = obj.value( QStringLiteral( "ensemble" ) );
+    if ( ensembleVal.isObject() )
+    {
+      info.ensemble.declared = true;
+      const QJsonObject ensembleObj = ensembleVal.toObject();
+      info.ensemble.combination = ensembleObj.value( QStringLiteral( "combination" ) ).toString().toStdString();
+      info.ensemble.uncertainty = ensembleObj.value( QStringLiteral( "uncertainty" ) ).toString().toStdString();
+      if ( const QJsonValue membersVal = ensembleObj.value( QStringLiteral( "members" ) ); membersVal.isArray() )
+      {
+        int memberIndex = 0;
+        for ( const auto &entry : membersVal.toArray() )
+        {
+          if ( entry.isObject() )
+          {
+            ModelEnsembleMemberContract member;
+            member.model = entry.toObject().value( QStringLiteral( "model" ) ).toString().toStdString();
+            const QJsonValue weightVal = entry.toObject().value( QStringLiteral( "weight" ) );
+            if ( weightVal.isDouble() )
+              member.weight = weightVal.toDouble( 1.0 );
+            else
+              markInvalid( "ensemble.members[" + std::to_string( memberIndex )
+                             + "].weight must be a number" );
+            info.ensemble.members.push_back( std::move( member ) );
+          }
+          else if ( entry.isString() )
+          {
+            // Shorthand: "members": ["model-a", "model-b"] — equal weights.
+            ModelEnsembleMemberContract member;
+            member.model = entry.toString().toStdString();
+            info.ensemble.members.push_back( std::move( member ) );
+          }
+          else
+          {
+            markInvalid( "ensemble.members[" + std::to_string( memberIndex )
+                           + "] must be an object ({model, weight}) or a model id string" );
+          }
+          ++memberIndex;
+        }
+      }
+      else if ( !membersVal.isUndefined() && !membersVal.isNull() )
+      {
+        markInvalid( "ensemble.members must be an array" );
+      }
+      if ( const std::string issue = info.ensemble.validate(); !issue.empty() )
+        markInvalid( issue );
+      if ( info.ensemble.declared && !info.artifact.path.empty() )
+        markInvalid( "an ensemble manifest declares no weights of its own - remove artifact.path "
+                     "(members carry their own artifacts)" );
+      if ( info.ensemble.declared && info.output.detectionDeclared )
+        markInvalid( "ensemble execution covers raster products only - output.detection decode "
+                       "cannot be combined with an ensemble" );
+    }
+    else
+    {
+      markInvalid( "ensemble must be an object" );
+    }
   }
 
   // Platform 8.0: NCTHW is the explicit-time-axis layout and is legal only
@@ -1230,6 +1328,57 @@ std::string ModelDetectionContract::validate() const
   return {};
 }
 
+// Ensemble member count ceiling: an ensemble materializes every member's
+// staged probability stack, so the member axis is a bounded allocation axis,
+// not an unbounded one (#1044 failure class).
+inline constexpr int kMaxEnsembleMembers = 16;
+
+std::string ModelEnsembleContract::validate() const
+{
+  if ( members.size() < 2 )
+    return "ensemble.members must declare at least 2 members";
+  if ( static_cast<int>( members.size() ) > kMaxEnsembleMembers )
+    return "ensemble.members declares " + std::to_string( members.size() )
+             + " members; the maximum is " + std::to_string( kMaxEnsembleMembers );
+  for ( std::size_t i = 0; i < members.size(); ++i )
+  {
+    if ( members[i].model.empty() )
+      return "ensemble.members[" + std::to_string( i ) + "] declares no model reference";
+    if ( !std::isfinite( members[i].weight ) || members[i].weight < 0.0
+         || members[i].weight > 1.0e9 )
+      return "ensemble.members[" + std::to_string( i ) + "] weight must be a finite value in [0, 1e9]";
+  }
+  // Duplicate member references would double-count one model's vote/weight —
+  // a silent semantics change. Reference them twice with two weights? That is
+  // what the weight field is FOR; a duplicate entry is always an authoring bug.
+  for ( std::size_t i = 0; i < members.size(); ++i )
+    for ( std::size_t j = i + 1; j < members.size(); ++j )
+      if ( members[i].model == members[j].model )
+        return "ensemble.members references model '" + members[i].model + "' twice";
+  const std::string combo = effectiveCombination();
+  if ( combo != "weighted_mean" && combo != "weighted_vote" )
+    return "ensemble.combination '" + combination
+             + "' is unsupported (supported: weighted_mean, weighted_vote, mean)";
+  const std::string unc = uncertainty.empty() ? "auto" : uncertainty;
+  if ( unc != "auto" && unc != "none" && unc != "variance" && unc != "agreement" )
+    return "ensemble.uncertainty '" + uncertainty
+             + "' is unsupported (supported: auto, none, variance, agreement)";
+  if ( unc == "variance" && combo == "weighted_vote" )
+    return "ensemble.uncertainty 'variance' contradicts combination 'weighted_vote' "
+             "(per-class variance is undefined over hard-label votes; use 'agreement')";
+  if ( unc == "agreement" && combo == "weighted_mean" )
+    return "ensemble.uncertainty 'agreement' contradicts combination 'weighted_mean' "
+             "(vote share is undefined without a vote; use 'variance')";
+  return {};
+}
+
+std::string ModelEnsembleContract::effectiveCombination() const
+{
+  if ( combination.empty() || combination == "mean" )
+    return "weighted_mean";
+  return combination;
+}
+
 std::string ModelInfo::identityTag() const
 {
   const std::string idPart = stableId();
@@ -1364,7 +1513,29 @@ Json::Value ModelInfo::toJson() const
       p["max_body_mb"] = static_cast<Json::Int64>( runtime.provider.maxBodyMb );
     runtimeJson["provider"] = p;
   }
+  if ( !runtime.frameworkFallback.empty() )
+    appendJsonArray( runtimeJson, "framework_fallback", runtime.frameworkFallback );
   out["runtime"] = runtimeJson;
+  // Ensemble contract projection (additive; re-registering an inspected
+  // manifest must keep working, so members round-trip as objects).
+  if ( ensemble.declared )
+  {
+    Json::Value ensembleJson( Json::objectValue );
+    Json::Value membersJson( Json::arrayValue );
+    for ( const ModelEnsembleMemberContract &member : ensemble.members )
+    {
+      Json::Value m( Json::objectValue );
+      m["model"] = member.model;
+      m["weight"] = member.weight;
+      membersJson.append( m );
+    }
+    ensembleJson["members"] = membersJson;
+    if ( !ensemble.combination.empty() )
+      ensembleJson["combination"] = ensemble.combination;
+    if ( !ensemble.uncertainty.empty() )
+      ensembleJson["uncertainty"] = ensemble.uncertainty;
+    out["ensemble"] = ensembleJson;
+  }
 
   // Manifest v2 surface (additive; PART B consumers ignore unknown keys).
   out["readiness"] = modelReadinessName( readiness );
@@ -1827,9 +1998,16 @@ void ModelCatalog::ensureLoadedLocked() const
       // Catalog-static readiness: contract errors parsed above already set
       // InvalidManifest; otherwise verify the artifact itself (which sets
       // MissingArtifact / ChecksumMismatch / InvalidManifest on failure).
+      // Ensemble manifests carry no weights of their own — their member
+      // references are validated after the full scan (validateEnsembleMembers).
       if ( info.readiness == ModelReadiness::InvalidManifest )
       {
         // reason kept from parseManifest
+      }
+      else if ( info.ensemble.declared )
+      {
+        info.readiness = ModelReadiness::Ready;
+        info.readinessReason.clear();
       }
       else if ( verifyArtifactLocked( info ) )
       {
@@ -1839,7 +2017,78 @@ void ModelCatalog::ensureLoadedLocked() const
       mModels.push_back( std::move( info ) );
     }
   }
+  validateEnsembleMembersLocked();
   mLoaded = true;
+}
+
+/// Post-scan ensemble member validation. Runs once per load with every
+/// scanned entry in hand: each member reference must resolve to exactly one
+/// OTHER catalog entry, and that entry must not itself be an ensemble (no
+/// nesting — a nested ensemble would multiply the member axis silently).
+/// Caller holds the catalog mutex.
+void ModelCatalog::validateEnsembleMembersLocked() const
+{
+  for ( ModelInfo &ensemble : mModels )
+  {
+    if ( !ensemble.ensemble.declared || ensemble.readiness == ModelReadiness::InvalidManifest )
+      continue;
+    for ( const ModelEnsembleMemberContract &member : ensemble.ensemble.members )
+    {
+      const std::string &ref = member.model;
+      std::size_t matches = 0;
+      bool memberIsEnsemble = false;
+      ModelReadiness memberReadiness = ModelReadiness::Ready;
+      std::string memberReadinessReason;
+      for ( const ModelInfo &candidate : mModels )
+      {
+        if ( candidate.stableId() == ref || candidate.identityTag() == ref || candidate.name == ref )
+        {
+          ++matches;
+          memberIsEnsemble = candidate.ensemble.declared;
+          memberReadiness = candidate.readiness;
+          memberReadinessReason = candidate.readinessReason;
+        }
+      }
+      if ( matches == 1 && ( ref == ensemble.stableId() || ref == ensemble.identityTag()
+                             || ref == ensemble.name ) )
+      {
+        ensemble.readiness = ModelReadiness::InvalidManifest;
+        ensemble.readinessReason = "ensemble.members references the ensemble itself ('" + ref + "')";
+        break;
+      }
+      if ( matches == 0 )
+      {
+        ensemble.readiness = ModelReadiness::InvalidManifest;
+        ensemble.readinessReason = "ensemble.members reference '" + ref
+                                     + "' resolves to no catalog model";
+        break;
+      }
+      if ( matches > 1 )
+      {
+        ensemble.readiness = ModelReadiness::InvalidManifest;
+        ensemble.readinessReason = "ensemble.members reference '" + ref
+                                     + "' is ambiguous (" + std::to_string( matches )
+                                     + " catalog matches)";
+        break;
+      }
+      if ( memberIsEnsemble )
+      {
+        ensemble.readiness = ModelReadiness::InvalidManifest;
+        ensemble.readinessReason = "ensemble.members reference '" + ref
+                                     + "' is itself an ensemble - nesting is not supported";
+        break;
+      }
+      if ( memberReadiness != ModelReadiness::Ready )
+      {
+        // A broken member (missing weights, checksum mismatch) must not be
+        // listed as a runnable ensemble — the ensemble inherits the verdict.
+        ensemble.readiness = ModelReadiness::InvalidManifest;
+        ensemble.readinessReason = "ensemble.members reference '" + ref + "' is not ready: "
+                                     + memberReadinessReason;
+        break;
+      }
+    }
+  }
 }
 
 void ModelCatalog::reload()
@@ -2212,6 +2461,17 @@ std::optional<std::string> ModelCatalog::resolveArtifactPath( const std::string 
                                                   : model->readinessReason );
     return std::nullopt;
   }
+  // Ensemble entries carry no weights of their own — there is no artifact
+  // path to resolve. Execution must go by reference through the model
+  // execution service (resolveModelReference + the ensemble engine).
+  if ( model->ensemble.declared )
+  {
+    if ( error )
+      *error = "model '" + model->name
+                 + "' is an ensemble and resolves no weight file; execute it by reference "
+                   "through the inference operators (rs:infer / task adapters)";
+    return std::nullopt;
+  }
   return model->resolvedArtifactPath;
 }
 
@@ -2245,8 +2505,65 @@ bool ModelCatalog::registerManifestJson( const std::string &json, const std::str
   std::lock_guard<std::mutex> lock( catalogMutex() );
   // Artifact verification (sets Ready / MissingArtifact / ChecksumMismatch).
   // A not-ready entry still registers — the registry mirrors reality; runs
-  // refuse non-ready models at execution time.
-  verifyArtifactLocked( info );
+  // refuse non-ready models at execution time. Ensemble entries carry no
+  // weights of their own: readiness is Ready only when every member
+  // reference resolves against the full registry (scanned + registered),
+  // mirroring the post-scan validation of the file-discovery path.
+  if ( info.ensemble.declared )
+  {
+    info.readiness = ModelReadiness::Ready;
+    info.readinessReason.clear();
+    for ( const ModelEnsembleMemberContract &member : info.ensemble.members )
+    {
+      const std::string &ref = member.model;
+      const char *why = nullptr;
+      // Self-reference first: a fresh registration is not yet in the lists,
+      // so the direct comparison is the only reliable check.
+      if ( ref == info.stableId() || ref == info.identityTag() || ref == info.name )
+        why = "ensemble.members references the ensemble itself";
+      std::size_t matches = 0;
+      bool memberIsEnsemble = false;
+      ModelReadiness memberReadiness = ModelReadiness::Ready;
+      std::string memberReadinessReason;
+      if ( !why )
+      {
+        const auto consider = [ & ]( const ModelInfo &candidate ) {
+          if ( candidate.stableId() == ref || candidate.identityTag() == ref || candidate.name == ref )
+          {
+            ++matches;
+            memberIsEnsemble = candidate.ensemble.declared;
+            memberReadiness = candidate.readiness;
+            memberReadinessReason = candidate.readinessReason;
+          }
+        };
+        for ( const ModelInfo &candidate : mRegistered )
+          consider( candidate );
+        for ( const ModelInfo &candidate : mModels )
+          consider( candidate );
+        if ( matches == 0 )
+          why = "ensemble.members reference resolves to no catalog model";
+        else if ( matches > 1 )
+          why = "ensemble.members reference is ambiguous";
+        else if ( memberIsEnsemble )
+          why = "ensemble.members reference is itself an ensemble - nesting is not supported";
+        else if ( memberReadiness != ModelReadiness::Ready )
+          why = "ensemble.members reference is not ready";
+      }
+      if ( why )
+      {
+        info.readiness = ModelReadiness::InvalidManifest;
+        info.readinessReason = std::string( why ) + " ('" + ref + "')"
+                                 + ( memberReadinessReason.empty()
+                                       ? std::string()
+                                       : ": " + memberReadinessReason );
+        break;
+      }
+    }
+  }
+  else
+  {
+    verifyArtifactLocked( info );
+  }
   if ( info.readiness == ModelReadiness::Ready )
     info.readinessReason.clear();
   const std::string stable = info.stableId();

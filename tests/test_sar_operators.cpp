@@ -50,9 +50,11 @@ struct AppInit
 
 /// Writes a single-band Float32 raster. Default grid is EPSG:32648 /
 /// GT {500000, 10, 0, 4500000, 0, -10}. @a geoTransform overrides the origin
-/// and pixel size; @a sarDomain stamps SICNU_SAR_DOMAIN when non-null.
+/// and pixel size; @a sarDomain stamps SICNU_SAR_DOMAIN when non-null;
+/// @a sarCalibration stamps SICNU_SAR_CALIBRATION when non-null.
 bool writeRaster( const QString &path, const std::vector<float> &values, int width, int height,
-                  const double *geoTransform = nullptr, const char *sarDomain = nullptr )
+                  const double *geoTransform = nullptr, const char *sarDomain = nullptr,
+                  const char *sarCalibration = nullptr )
 {
     ensureGdalInit();
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
@@ -75,6 +77,8 @@ bool writeRaster( const QString &path, const std::vector<float> &values, int wid
     }
     if ( sarDomain && sarDomain[0] != '\0' )
         GDALSetMetadataItem( ds, sicnu::sar::kDomainKey, sarDomain, nullptr );
+    if ( sarCalibration && sarCalibration[0] != '\0' )
+        GDALSetMetadataItem( ds, sicnu::sar::kCalibrationKey, sarCalibration, nullptr );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
     if ( GDALRasterIO( band, GF_Write, 0, 0, width, height,
                        const_cast<float *>( values.data() ), width, height, GDT_Float32,
@@ -944,4 +948,266 @@ TEST_CASE( "rs:sar_terrain_masks local_incidence_orbit refuses scenes without th
     params["product"] = "local_incidence_orbit";
     RSOperatorContext ctx;
     REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+}
+
+TEST_CASE( "rs:sar_calibrate refuses to re-calibrate an already-calibrated product",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_calibrate" );
+    REQUIRE( op != nullptr );
+
+    // Applying the DN formula sigma0 = DN^2/A^2 to a product that already
+    // declares sigma0/gamma0/beta0 would double-scale it: the seam must
+    // fail closed instead of producing a plausible-looking raster.
+    for ( const char *declared : { "sigma0", "gamma0", "beta0" } )
+    {
+        const QString tag = QString::fromLatin1( declared );
+        const QString input = tmp.filePath( "cal_" + tag + ".tif" );
+        const QString output = tmp.filePath( "out_" + tag + ".tif" );
+        REQUIRE( writeRaster( input, std::vector<float>( 16, 4.0f ), 4, 4,
+                              nullptr, "linear_power", declared ) );
+
+        Json::Value params( Json::objectValue );
+        params["input"] = input.toStdString();
+        params["output"] = output.toStdString();
+        params["calibrationA"] = 2.0;
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+        // No output may be left behind on the refused path.
+        REQUIRE( !QFileInfo::exists( output ) );
+    }
+}
+
+TEST_CASE( "rs:sar_calibrate accepts products that declare DN calibration",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "dn_declared.tif" );
+    const QString output = tmp.filePath( "sigma0_from_dn.tif" );
+
+    // DN = 4 everywhere; A = 2 → sigma0 = 16/4 = 4.0 linear.
+    REQUIRE( writeRaster( input, std::vector<float>( 16, 4.0f ), 4, 4,
+                          nullptr, nullptr, "dn" ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_calibrate" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["calibrationA"] = 2.0;
+
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+    REQUIRE( result["calibration"].asString() == "sigma0" );
+    for ( float v : readBand( output ) )
+        REQUIRE( v == Approx( 4.0f ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "rs:sar_calibrate refuses unrecognized declared calibration tokens",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "typo.tif" );
+    const QString output = tmp.filePath( "typo_out.tif" );
+
+    // A declared token the platform cannot interpret must not be silently
+    // treated as DN — the declared contract is unreadable, so refuse.
+    REQUIRE( writeRaster( input, std::vector<float>( 16, 4.0f ), 4, 4,
+                          nullptr, nullptr, "sigm0" ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_calibrate" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["calibrationA"] = 2.0;
+
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    REQUIRE( !QFileInfo::exists( output ) );
+}
+
+TEST_CASE( "rs:sar_backscatter refuses fromCalibration that contradicts the declared state",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_backscatter" );
+    REQUIRE( op != nullptr );
+
+    // The product declares sigma0; claiming gamma0 would apply the wrong
+    // geometry factor and silently corrupt the radiometry.
+    const QString input = tmp.filePath( "declared_sigma0.tif" );
+    const QString output = tmp.filePath( "mismatch.tif" );
+    REQUIRE( writeRaster( input, std::vector<float>( 4, 0.25f ), 2, 2,
+                          nullptr, "linear_power", "sigma0" ) );
+
+    Json::Value mismatch( Json::objectValue );
+    mismatch["input"] = input.toStdString();
+    mismatch["output"] = output.toStdString();
+    mismatch["fromCalibration"] = "gamma0";
+    mismatch["toCalibration"] = "beta0";
+    mismatch["incidenceDeg"] = 45.0;
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS( op->run( mismatch, ctx ), RSOperatorError );
+    REQUIRE( !QFileInfo::exists( output ) );
+
+    // DN-declared input is likewise refused: the geometry conversion needs a
+    // calibrated state, and the honest answer is to point at rs:sar_calibrate.
+    const QString dnInput = tmp.filePath( "declared_dn.tif" );
+    REQUIRE( writeRaster( dnInput, std::vector<float>( 4, 0.25f ), 2, 2,
+                          nullptr, nullptr, "dn" ) );
+    Json::Value fromDn( Json::objectValue );
+    fromDn["input"] = dnInput.toStdString();
+    fromDn["output"] = output.toStdString();
+    fromDn["fromCalibration"] = "sigma0";
+    fromDn["toCalibration"] = "gamma0";
+    fromDn["incidenceDeg"] = 60.0;
+    RSOperatorContext ctx2;
+    REQUIRE_THROWS_AS( op->run( fromDn, ctx2 ), RSOperatorError );
+    REQUIRE( !QFileInfo::exists( output ) );
+
+    // Matching declaration still converts: sigma0 = 0.25 at 60° → gamma0 = 0.5.
+    const QString okOutput = tmp.filePath( "matched.tif" );
+    Json::Value matched( Json::objectValue );
+    matched["input"] = input.toStdString();
+    matched["output"] = okOutput.toStdString();
+    matched["fromCalibration"] = "sigma0";
+    matched["toCalibration"] = "gamma0";
+    matched["incidenceDeg"] = 60.0;
+    RSOperatorContext ctx3;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( matched, ctx3 ) );
+    REQUIRE( result["calibration"].asString() == "gamma0" );
+    for ( float v : readBand( okOutput ) )
+        REQUIRE( v == Approx( 0.5f ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "rs:sar_speckle preserves the declared calibration state on its output",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "sigma0_in.tif" );
+    const QString output = tmp.filePath( "despeckled.tif" );
+
+    // Filtering preserves the radiometric quantity: a sigma0 product stays a
+    // sigma0 product, so the output must carry the declared state for
+    // downstream re-ingestion (and re-calibration guards).
+    REQUIRE( writeRaster( input, std::vector<float>( 16, 4.0f ), 4, 4,
+                          nullptr, "linear_power", "sigma0" ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_speckle" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["method"] = "lee";
+    params["kernelSize"] = 3;
+
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( output ) );
+    GDALDatasetH h = static_cast<GDALDatasetH>( ds.dataset() );
+    const char *calibration = GDALGetMetadataItem( h, "SICNU_SAR_CALIBRATION", nullptr );
+    const char *state = GDALGetMetadataItem( h, "SICNU_RADIOMETRIC_STATE", nullptr );
+    REQUIRE( calibration != nullptr );
+    REQUIRE( std::string( calibration ) == "sigma0" );
+    REQUIRE( state != nullptr );
+    REQUIRE( std::string( state ) == "sigma0" );
+}
+
+TEST_CASE( "rs:sar_speckle multitemporal propagates the reference scene's declared state",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "sigma0_ref.tif" );
+    const QString companion = tmp.filePath( "gamma0_companion.tif" );
+    const QString output = tmp.filePath( "despeckled_mt.tif" );
+
+    // The reference declares sigma0; the companion declares a DIFFERENT
+    // state (gamma0) to pin that the propagated declaration comes from the
+    // reference scene, never from a companion scene.
+    REQUIRE( writeRaster( input, std::vector<float>( 16, 4.0f ), 4, 4,
+                          nullptr, "linear_power", "sigma0" ) );
+    REQUIRE( writeRaster( companion, std::vector<float>( 16, 6.0f ), 4, 4,
+                          nullptr, "linear_power", "gamma0" ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_speckle" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["method"] = "multitemporal";
+    params["kernelSize"] = 3;
+    Json::Value companions( Json::arrayValue );
+    companions.append( companion.toStdString() );
+    params["companionScenes"] = companions;
+
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( output ) );
+    GDALDatasetH h = static_cast<GDALDatasetH>( ds.dataset() );
+    const char *calibration = GDALGetMetadataItem( h, "SICNU_SAR_CALIBRATION", nullptr );
+    const char *state = GDALGetMetadataItem( h, "SICNU_RADIOMETRIC_STATE", nullptr );
+    REQUIRE( calibration != nullptr );
+    REQUIRE( std::string( calibration ) == "sigma0" );
+    REQUIRE( state != nullptr );
+    REQUIRE( std::string( state ) == "sigma0" );
+    const char *method = GDALGetMetadataItem( h, "SICNU_SAR_SPECKLE", nullptr );
+    REQUIRE( method != nullptr );
+    REQUIRE( std::string( method ) == "multitemporal" );
+}
+
+TEST_CASE( "rs:sar_backscatter pure domain conversion ignores the declared state",
+           "[sar][operator]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString input = tmp.filePath( "gamma0_domain.tif" );
+    const QString output = tmp.filePath( "gamma0_db.tif" );
+
+    // from == to applies no geometry (10*log10 only), so a declared state
+    // that differs from the (inert) fromCalibration must not block the run.
+    REQUIRE( writeRaster( input, std::vector<float>( 4, 0.25f ), 2, 2,
+                          nullptr, "linear_power", "gamma0" ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_backscatter" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["output"] = output.toStdString();
+    params["fromCalibration"] = "sigma0";
+    params["toCalibration"] = "sigma0";
+    params["inputDomain"] = "linear_power";
+    params["outputDomain"] = "db";
+
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+    // 0.25 linear power → -6.0206 dB.
+    for ( float v : readBand( output ) )
+        REQUIRE( v == Approx( -6.0206f ).margin( 1e-3 ) );
 }

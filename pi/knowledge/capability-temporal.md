@@ -73,10 +73,19 @@
 
 ## rs:temporal_extract_regions
 
+多区域时序提取：一次调用对多个点/面提取时序统计，输出区域×日期表。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：emptyCells（integer）、medianEnabled（boolean）、output（table）、pointRegions（integer）、polygonRegions（integer）、regionCount（integer）、rowsWritten（integer）、sceneCount（integer）、timeEnd（string）、timeStart（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、max_regions（integer）、median_budget_mb（numeric）、output（string）、regions（string）、regions_file（string）、scenes（string）
+- 适用地物：耕地、林地、水体
+- 适用场景：多地块物候对比、时序监测
+- 失败模式：
+  - `INVALID_PARAMETER` — regions 为空或 id 重复。处置：为每个区域提供唯一调用方 id
+- 教学概念：时序提取、区域统计
+- 适用课程：遥感时序分析
+- 典型练习：对多地块一次提取 NDVI 时序并比较物候差异。
 
 ## rs:temporal_extract_series
 
@@ -114,10 +123,19 @@
 
 ## rs:temporal_harmonic_breaks
 
+季节调整趋势断裂分割：逐段谐波+线性趋势重拟合（BFAST/CCDP 思想的诚实实现）。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：epochDate（string）、meanBreakMagnitude（numeric）、memory（json）、output（raster）、pixelsWithBreaks（integer）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、direction（enum）、duplicate_policy（enum）、harmonics（integer）、maxBreaks（integer）、minImprovement（numeric）、minMagnitude（numeric）、minSegmentDays（numeric）、output（string）、recoveryTolerance（numeric）、robust（boolean）、scenes（string）、tile_size（integer）
+- 适用地物：耕地、林地
+- 适用场景：扰动检测、物候突变分析
+- 失败模式：
+  - `INVALID_PARAMETER` — 时序过短无法拟合。处置：保证足够时相数或降低谐波阶数
+- 教学概念：谐波模型、趋势断裂、扰动恢复
+- 适用课程：遥感时序分析
+- 典型练习：对长时序 NDVI 检测扰动年份并解释 recovery 语义。
 
 ## rs:temporal_harmonic_fit
 
@@ -228,17 +246,35 @@
 
 ## rs:temporal_region_features
 
+区域级时序特征表：质量、分布、Sen/OLS 趋势、异常与多物候特征，带版本化 schema sidecar。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：featureCount（integer）、output（table）、regionCount（integer）、sceneCount（integer）、schema（string）、sidecar（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、change_harmonics（integer）、collection（string）、cycles（integer）、direction（enum）、duplicate_policy（enum）、max_regions（integer）、output（string）、regions（string）、regions_file（string）、scenes（string）、seasonEndDoy（integer）、seasonStartDoy（integer）、sidecar_path（string）、trend_method（enum）
+- 适用地物：耕地、林地、水体
+- 适用场景：样本特征生成、监督学习前处理
+- 失败模式：
+  - `INVALID_PARAMETER` — region id 与时序表不匹配。处置：先运行 rs:temporal_extract_regions 保持一致 id
+- 教学概念：时序特征工程、Sen 趋势
+- 适用课程：遥感时序分析
+- 典型练习：生成区域特征表并与标签联接构建分类样本。
 
 ## rs:temporal_regularize
+
+规则日历重采样：将不规则时相重排到 16 天/月等规则日历，带有效计数与填充计数溯源波段。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bands（integer）、cadenceDays（numeric）、calendarEnd（string）、calendarPoints（integer）、calendarStart（string）、filledFraction（numeric）、memory（json）、output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、cadence（string）、collection（string）、duplicate_policy（enum）、lambda（numeric）、max_gap_nodes（integer）、max_window_days（numeric）、method（enum）、output（string）、scenes（string）、tile_size（integer）
+- 适用地物：耕地、林地
+- 适用场景：规则时序构建、多源时相对齐
+- 失败模式：
+  - `INVALID_PARAMETER` — calendar 非法或外推请求。处置：使用 16d/monthly 等受支持日历；不外推
+- 教学概念：规则日历、重采样、插值
+- 适用课程：遥感时序分析
+- 典型练习：将不规则获取重排到 16 天日历并检查 filled_count。
 
 ## rs:temporal_sar_fusion
 

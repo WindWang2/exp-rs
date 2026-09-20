@@ -124,6 +124,29 @@ QMap<QString, QString> WorkflowPlanOptimizer::computeLineageSignatures( const Wo
     return signatures;
 }
 
+QString WorkflowPlanOptimizer::computePlanSignature( const WorkflowDocument &def )
+{
+    const QMap<QString, QString> nodeSigs = computeLineageSignatures( def );
+
+    // Canonical multiset: "n:<id>=<sig>" per node plus "e:<src>.<sport>->
+    // <dst>.<dport>" per edge. Edge ids are deliberately excluded — they are
+    // bookkeeping labels, not topology. Sorting makes the digest invariant
+    // to serialization order.
+    QStringList parts;
+    parts.reserve( nodeSigs.size() + def.edges.size() );
+    for ( auto it = nodeSigs.cbegin(); it != nodeSigs.cend(); ++it )
+        parts.append( QStringLiteral( "n:%1=%2" ).arg( it.key(), it.value() ) );
+    for ( const EdgeFact &edge : def.edges )
+        parts.append( QStringLiteral( "e:%1.%2->%3.%4" )
+                          .arg( edge.sourceNodeId, edge.sourcePortName,
+                                edge.targetNodeId, edge.targetPortName ) );
+    parts.sort();
+
+    const QByteArray digest = QCryptographicHash::hash(
+        parts.join( QLatin1Char( '\n' ) ).toUtf8(), QCryptographicHash::Sha256 );
+    return QString::fromLatin1( digest.toHex() );
+}
+
 WorkflowDocument WorkflowPlanOptimizer::optimizePlan( const WorkflowDocument &def,
                                                         const QSet<QString> &targetSinkNodeIds,
                                                         OptimizationReport *outReport,

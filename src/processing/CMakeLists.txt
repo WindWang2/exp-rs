@@ -37,6 +37,9 @@ add_library(sicnu_processing SHARED
     algorithms/topographic_correction.cpp
     algorithms/spectral_derivative.cpp
     algorithms/spectral_detection.cpp
+    algorithms/spectral_cem.cpp
+    algorithms/spectral_library_scale.cpp
+    algorithms/spectral_spatial_fusion.cpp
     algorithms/sar/sar_dualpol.cpp
     algorithms/sar/sar_terrain_geometry.cpp
     algorithms/sar/sar_orbit.cpp

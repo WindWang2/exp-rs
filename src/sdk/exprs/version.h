@@ -36,6 +36,10 @@
  ***************************************************************************/
 #pragma once
 
+#include <stdexcept>
+#include <string>
+#include <system_error>
+
 #define EXP_RS_PLUGIN_API_VERSION_MAJOR 3
 #define EXP_RS_PLUGIN_API_VERSION_MINOR 0
 #define EXP_RS_PLUGIN_ABI_VERSION 1
@@ -83,6 +87,108 @@ inline int supportedManifestVersion() { return EXP_RS_MANIFEST_VERSION; }
 inline bool isPluginApiCompatible( const PluginApiVersion &host, const PluginApiVersion &declared )
 {
     return declared.major == host.major && declared.minor <= host.minor;
+}
+
+/**
+ * Parses a "MAJOR.MINOR" API-version literal (used by the min/max host
+ * range negotiation, plugin-platform 12.0). Returns false for anything
+ * that is not exactly two non-empty DIGIT-ONLY parts (no sign, no spaces,
+ * no extra components), so a malformed bound fails closed as a typed
+ * validation error.
+ */
+inline bool parseApiVersion( const std::string &text, PluginApiVersion &out )
+{
+    const std::string separator = ".";
+    const size_t position = text.find( separator );
+    if ( position == std::string::npos || position == 0 || position + 1 >= text.size() )
+        return false;
+    const std::string majorText = text.substr( 0, position );
+    const std::string minorText = text.substr( position + 1 );
+    if ( minorText.find( separator ) != std::string::npos )
+        return false;
+    // Digit-only pre-check: std::stoi would happily accept "-1" / "+3" /
+    // " 3" (and only fail on trailing junk), which would let a signed bound
+    // through the compatibility gate.
+    const auto digitsOnly = []( const std::string &part ) {
+        for ( char c : part )
+        {
+            if ( !( c >= '0' && c <= '9' ) )
+                return false;
+        }
+        return !part.empty();
+    };
+    if ( !digitsOnly( majorText ) || !digitsOnly( minorText ) )
+        return false;
+    try
+    {
+        size_t consumed = 0;
+        const int major = std::stoi( majorText, &consumed );
+        if ( consumed != majorText.size() )
+            return false;
+        const int minor = std::stoi( minorText, &consumed );
+        if ( consumed != minorText.size() )
+            return false;
+        out = PluginApiVersion{ major, minor };
+        return true;
+    }
+    catch ( const std::exception & )
+    {
+        return false;
+    }
+}
+
+/**
+ * WP1 (plugin-platform 12.0): the host-API range a plugin was validated
+ * against. A manifest may OPTIONALLY declare "min_host_api"/"max_host_api"
+ * ("MAJOR.MINOR"); an empty @p minHostApi / maxHostApi means the bound was
+ * not declared and the plain isPluginApiCompatible rule applies. When
+ * declared, the host version must sit inside [min, max] INCLUSIVE; an empty
+ * string bound is skipped so a manifest can declare only one side. On refusal
+ * @p offendingField names the bound that rejected the host ("min_host_api" or
+ * "max_host_api"), so a diagnostic can attribute the failure to the exact
+ * manifest field instead of guessing.
+ */
+inline bool isHostApiWithinRange( const PluginApiVersion &host, const std::string &minHostApi,
+                                  const std::string &maxHostApi, std::string &error,
+                                  std::string &offendingField )
+{
+    if ( !minHostApi.empty() )
+    {
+        PluginApiVersion minimum{};
+        if ( !parseApiVersion( minHostApi, minimum ) )
+        {
+            error = "min_host_api '" + minHostApi + "' must be MAJOR.MINOR";
+            offendingField = "min_host_api";
+            return false;
+        }
+        if ( host.major != minimum.major ? host.major < minimum.major
+                                         : host.minor < minimum.minor )
+        {
+            error = "host API " + std::to_string( host.major ) + "." + std::to_string( host.minor )
+                    + " is below the plugin's declared minimum " + minHostApi;
+            offendingField = "min_host_api";
+            return false;
+        }
+    }
+    if ( !maxHostApi.empty() )
+    {
+        PluginApiVersion maximum{};
+        if ( !parseApiVersion( maxHostApi, maximum ) )
+        {
+            error = "max_host_api '" + maxHostApi + "' must be MAJOR.MINOR";
+            offendingField = "max_host_api";
+            return false;
+        }
+        if ( host.major != maximum.major ? host.major > maximum.major
+                                         : host.minor > maximum.minor )
+        {
+            error = "host API " + std::to_string( host.major ) + "." + std::to_string( host.minor )
+                    + " is above the plugin's declared maximum " + maxHostApi;
+            offendingField = "max_host_api";
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace exprs

@@ -922,6 +922,10 @@ TEST_CASE( "admission structures stay bounded and correct at 100k logical tasks"
     center.setMaxAutoRetries( 0 );
     center.setGlobalConcurrencyLimit( 1 );
 
+    // 12.0: this scale test intentionally parks 100k live tasks in the
+    // admission structures — the pending bound must be off for it.
+    center.setMaxPendingTasks( 0 );
+
     static std::atomic<bool> releaseHolder{ false };
     releaseHolder.store( false );
     engine.registerExecutor( "ep9:wall",

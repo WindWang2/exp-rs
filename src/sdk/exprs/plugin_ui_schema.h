@@ -53,6 +53,13 @@ struct PluginUiSchemaLimits
     size_t maxStringLength = 256;     ///< labels, titles, ids, option strings
     size_t maxGroupDepth = 4;
     size_t maxEventValueBytes = 4096; ///< serialized "value" of one ui event (9.0)
+    /// Nesting depth of a ui event value. The byte cap alone does not bound
+    /// the recursion a hostile event can trigger: 4096 bytes of "[[[…]]]" is
+    /// ~2000 levels, and the host/worker JSON readers stack-overflow far below
+    /// that. The value travels inside an envelope (~3 wrapper levels), so the
+    /// transport limit in exprs/ipc_envelope.cpp must stay comfortably above
+    /// this + the wrapper.
+    size_t maxEventValueDepth = 32;
 };
 
 struct PluginUiSchemaParseResult

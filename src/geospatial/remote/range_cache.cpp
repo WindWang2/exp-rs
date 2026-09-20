@@ -36,13 +36,16 @@
 #include <algorithm>
 #include <condition_variable>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <list>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -168,9 +171,18 @@ struct ResourceEntry
   std::uint64_t generation = 0;       // bumped on invalidation (drops blocks)
   std::unordered_map<std::uint64_t, std::list<CachedBlock>::iterator> blocks;
   std::list<CachedBlock> lru;         // front = most recently used
+  std::uint64_t bytesCached = 0;      // 12.0: sum of this entry's block bytes
+                                      // (per-resource budget basis)
   std::mutex fetchMutex;
   std::uint64_t sizeBytes = 0;
   bool hasSize = false;
+  // 12.0 TTL basis: the steady-clock millisecond stamp of the last
+  // successful identity proof (creation or fresh probe). Atomic: Open
+  // reads it for expiry while a probe may refresh it concurrently.
+  std::atomic<std::int64_t> provenAtMs{ 0 };
+  // 12.0 fetch cancellation: when set, in-flight fetch results are
+  // discarded and new fetches degrade to the fallback (see cancelFetches).
+  std::atomic<bool> fetchCancelled{ false };
   // 11.0 object-store mode (D-1102): the payload is a network VSI object —
   // fetched through the VSI stack under the live credential window (GDAL
   // signs), with the fallback re-opening that same spelling.
@@ -196,6 +208,8 @@ class CacheStore
     std::atomic<std::uint64_t> dedupHits{ 0 };
     std::atomic<std::uint64_t> maxInFlightBytes{ 0 };
     std::atomic<std::uint64_t> diskHits{ 0 };
+    std::atomic<std::uint64_t> retriedFetches{ 0 };
+    std::atomic<std::uint64_t> maxCachedBytes{ 0 };
 
     // ── 9.0 global fetch admission ─────────────────────────────────────────
     // Bounds the bytes concurrently in flight across all ranged GETs. The
@@ -235,6 +249,30 @@ class CacheStore
     {
       std::lock_guard<std::mutex> lock( mAdmissionMutex );
       return mInFlightBytes;
+    }
+
+    static std::int64_t steadyNowMs()
+    {
+      return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch() ).count();
+    }
+
+    /// True when the entry's identity proof is older than the TTL (seconds;
+    /// 0 = never expires). Read under the store lock for a consistent
+    /// decision against a concurrent re-probe.
+    /// 12.0: refreshes the TTL basis after a successful revalidation.
+    void touchEntryProven( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      entry->provenAtMs.store( steadyNowMs() );
+    }
+
+    bool entryExpired( const std::shared_ptr<ResourceEntry> &entry, int ttlSeconds )
+    {
+      if ( ttlSeconds <= 0 )
+        return false;
+      std::lock_guard<std::mutex> lock( mMutex );
+      const std::int64_t ageMs = steadyNowMs() - entry->provenAtMs.load();
+      return ageMs > static_cast<std::int64_t>( ttlSeconds ) * 1000;
     }
 
     std::shared_ptr<ResourceEntry> findResource( const std::string &key )
@@ -280,6 +318,8 @@ class CacheStore
       {
         entry = std::make_shared<ResourceEntry>();
         entry->requestUrl = requestUrl;
+        // A veto recorded before the first open survives creation.
+        entry->fetchCancelled.store( mCancelledFetches.count( key ) > 0 );
       }
       // A fresh probe describes the CURRENT origin state: always refresh the
       // stored identity (an invalidated entry keeps its old validators
@@ -287,6 +327,7 @@ class CacheStore
       entry->identity = identity;
       entry->hasSize = identity.hasSize;
       entry->sizeBytes = identity.sizeBytes;
+      entry->provenAtMs.store( steadyNowMs() );
       return entry;
     }
 
@@ -306,10 +347,12 @@ class CacheStore
         entry->vsiObject = true;
         entry->vsiPath = vsiPath;
         entry->credentialContext = credentialContext;
+        entry->fetchCancelled.store( mCancelledFetches.count( key ) > 0 );
       }
       entry->identity = identity;
       entry->hasSize = identity.hasSize;
       entry->sizeBytes = identity.sizeBytes;
+      entry->provenAtMs.store( steadyNowMs() );
       return entry;
     }
 
@@ -324,6 +367,34 @@ class CacheStore
       releaseBlocks( it->second );
       it->second->generation += 1;
       invalidations.fetch_add( 1 );
+    }
+
+    /// 12.0 fetch-cancel veto (see RemoteRangeCache::cancelFetches). The
+    /// veto is recorded per KEY (not per entry object): cancelling before
+    /// the resource exists seeds the set, and every entry created later
+    /// inherits it. Unknown resources are a no-op only for resume.
+    void setFetchCancelled( const std::string &key, bool cancelled )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      if ( cancelled )
+      {
+        mCancelledFetches.insert( key );
+        const auto it = mResources.find( key );
+        if ( it != mResources.end() )
+          it->second->fetchCancelled.store( true );
+        return;
+      }
+      mCancelledFetches.erase( key );
+      const auto it = mResources.find( key );
+      if ( it != mResources.end() )
+        it->second->fetchCancelled.store( false );
+    }
+
+    bool fetchCancelled( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      // The flag lives on the entry (shared ownership keeps it alive); the
+      // store lock is not needed for an atomic load.
+      return entry->fetchCancelled.load();
     }
 
     void dropAll()
@@ -415,7 +486,7 @@ class CacheStore
     void insertBytes( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
                       std::uint64_t fetchConfigGeneration, std::uint64_t expectedGeneration,
-                      std::uint64_t maxCacheBytes )
+                      std::uint64_t maxCacheBytes, std::uint64_t maxBytesPerResource )
     {
       std::lock_guard<std::mutex> lock( mMutex );
       if ( fetchConfigGeneration != configGeneration )
@@ -424,6 +495,7 @@ class CacheStore
         return; // 9.0 review: the resource was invalidated mid-fetch — these are
                 // OLD-CONTENT bytes and must never enter the fresh generation
       mMaxCacheBytes = maxCacheBytes;
+      mMaxBytesPerResource = maxBytesPerResource;
       std::uint64_t offsetInRun = 0;
       std::uint64_t blockIndex = runStart / blockSize;
       // The first block may be partially written when the run starts
@@ -436,7 +508,7 @@ class CacheStore
         offsetInRun += chunk;
         blockIndex += 1;
       }
-      evictUnderBudget();
+      evictUnderBudget( entry );
     }
 
     /// 9.0 M3 — disk layer: the content-identity basis of a resource, or ""
@@ -459,7 +531,7 @@ class CacheStore
     bool loadBlocksFromDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t firstBlock,
                              std::uint64_t lastBlock, std::uint64_t expectedGeneration,
                              std::uint64_t blockSize, std::uint64_t fetchConfigGeneration,
-                             std::uint64_t maxCacheBytes )
+                             std::uint64_t maxCacheBytes, std::uint64_t maxBytesPerResource )
     {
       const std::string basis = diskBasis( entry );
       if ( basis.empty() )
@@ -469,6 +541,11 @@ class CacheStore
         std::lock_guard<std::mutex> lock( mMutex );
         if ( entry->generation != expectedGeneration )
           return false;
+        // Install the fetch's config snapshot (same discipline as
+        // insertBytes): the eviction below must run against the caps the
+        // caller's snapshot declared, not a stale store value.
+        mMaxCacheBytes = maxCacheBytes;
+        mMaxBytesPerResource = maxBytesPerResource;
         for ( std::uint64_t b = firstBlock; b <= lastBlock; ++b )
           if ( entry->blocks.find( b ) == entry->blocks.end() )
             missing.push_back( b );
@@ -484,7 +561,7 @@ class CacheStore
           if ( fetchConfigGeneration != configGeneration || entry->generation != expectedGeneration )
             return loaded; // config/generation moved: stop feeding stale blocks
           insertOne( entry, blockIndex, data.data(), data.size() );
-          evictUnderBudget();
+          evictUnderBudget( entry );
         }
         loaded = true;
       }
@@ -595,6 +672,10 @@ class CacheStore
       }
       mResources.clear();
       mBytesCached = 0;
+      // The high-water is a GAUGE of the store's content: when the content
+      // is fully dropped, the observed peak resets with it (counters like
+      // evictions stay lifetime; the peak describes the current population).
+      maxCachedBytes.store( 0 );
     }
 
     void releaseBlocks( const std::shared_ptr<ResourceEntry> &entry )
@@ -604,6 +685,7 @@ class CacheStore
         mGlobalLru.erase( block.touch );
         mBytesCached -= block.data->size();
       }
+      entry->bytesCached = 0;
       entry->lru.clear();
       entry->blocks.clear();
     }
@@ -621,6 +703,7 @@ class CacheStore
         if ( existing->second->data->size() >= size )
           return; // a racing fetch filled it with at least as much
         mBytesCached -= existing->second->data->size();
+        entry->bytesCached -= existing->second->data->size();
         mGlobalLru.erase( existing->second->touch );
         entry->lru.erase( existing->second );
         entry->blocks.erase( existing );
@@ -631,36 +714,66 @@ class CacheStore
       mGlobalLru.push_front( TouchEntry{ entry, blockIndex } );
       block.touch = mGlobalLru.begin();
       mBytesCached += size;
+      entry->bytesCached += size;
       entry->lru.push_front( std::move( block ) );
       entry->blocks[blockIndex] = entry->lru.begin();
     }
 
-    void evictUnderBudget()
+    /// Evicts under the GLOBAL byte budget and (12.0) the per-resource cap
+    /// of the entry that just grew. Assumes mMutex is held.
+    void evictUnderBudget( const std::shared_ptr<ResourceEntry> &entry )
     {
       while ( mBytesCached > mMaxCacheBytes && !mGlobalLru.empty() )
       {
         const TouchEntry victim = mGlobalLru.back();
-        const std::shared_ptr<ResourceEntry> entry = victim.entry;
-        const auto blockIt = entry->blocks.find( victim.blockIndex );
-        if ( blockIt == entry->blocks.end() )
+        const std::shared_ptr<ResourceEntry> victimEntry = victim.entry;
+        const auto blockIt = victimEntry->blocks.find( victim.blockIndex );
+        if ( blockIt == victimEntry->blocks.end() )
         {
           mGlobalLru.pop_back();
           continue;
         }
         mBytesCached -= blockIt->second->data->size();
-        entry->lru.erase( blockIt->second );
-        entry->blocks.erase( blockIt );
+        victimEntry->bytesCached -= blockIt->second->data->size();
+        victimEntry->lru.erase( blockIt->second );
+        victimEntry->blocks.erase( blockIt );
         mGlobalLru.pop_back();
         evictions.fetch_add( 1 );
+      }
+      // 12.0: one resource cannot hog the global budget — evict the
+      // resource's OWN LRU tail while it is over its cap.
+      if ( mMaxBytesPerResource > 0 )
+      {
+        while ( entry->bytesCached > mMaxBytesPerResource && !entry->lru.empty() )
+        {
+          const CachedBlock &victim = entry->lru.back();
+          mBytesCached -= victim.data->size();
+          entry->bytesCached -= victim.data->size();
+          mGlobalLru.erase( victim.touch );
+          entry->blocks.erase( victim.index );
+          entry->lru.pop_back();
+          evictions.fetch_add( 1 );
+        }
+      }
+      // 12.0 high-water mark of total cached bytes (updated while the
+      // insert's lock is still held, right after eviction settled).
+      std::uint64_t peak = maxCachedBytes.load();
+      while ( mBytesCached > peak && !maxCachedBytes.compare_exchange_weak( peak, mBytesCached ) )
+      {
       }
     }
 
     std::mutex mMutex;
     std::map<std::string, std::shared_ptr<ResourceEntry>> mResources;
+    /// 12.0: resources whose fetches are vetoed, keyed independently of the
+    /// entry lifetime — a cancel that lands before the first open (or across
+    /// a TTL/invalidate recreation) must survive entry churn.
+    std::set<std::string> mCancelledFetches;
     std::list<TouchEntry> mGlobalLru;   // front = most recently used
     std::uint64_t mBytesCached = 0;
     std::uint64_t configGeneration = 1; // bumped on every config update
     std::uint64_t mMaxCacheBytes = 64ull * 1024 * 1024;
+    std::uint64_t mMaxBytesPerResource = 0; // 12.0: 0 = unlimited
 
     std::mutex mAdmissionMutex;
     std::condition_variable mAdmissionCv;
@@ -680,10 +793,12 @@ CacheStore &store()
   return *g_store;
 }
 
-/// Coalesced ranged fetch of [start,end). Returns the bytes actually read
-/// (may be shorter at EOF). Throws GeoError on transport failure.
-std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint64_t start,
-                                       std::uint64_t endExclusive, const RangeCacheConfig &config )
+/// Coalesced ranged fetch of [start,end) — a SINGLE attempt. Returns the
+/// bytes actually read (may be shorter at EOF). Throws GeoError on
+/// transport failure. (Retry/backoff lives in fetchRange.)
+std::vector<unsigned char> fetchRangeOnce( const std::string &requestUrl, std::uint64_t start,
+                                           std::uint64_t endExclusive,
+                                           const RangeCacheConfig &config )
 {
   HttpFetchOptions options;
   options.timeoutSeconds = config.timeoutSeconds;
@@ -780,6 +895,59 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
   if ( start == 0 )
     return result.body; // a short answer from byte 0 is still the file head
   throw GeoError( ErrorCode::Unsupported, "range_cache: origin answer does not cover the requested range" );
+}
+
+/// Coalesced ranged fetch of [start,end) with the configured retry/backoff.
+/// Only transport-shaped failures (NetworkError, Timeout) are retried — a
+/// refused or unsupported answer would fail identically on every attempt.
+/// The sleep is bounded (base << attempt, capped) and the attempt count is
+/// clamped, so a hostile origin cannot pin a reader forever.
+std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint64_t start,
+                                       std::uint64_t endExclusive, const RangeCacheConfig &config,
+                                       CacheStore *telemetryStore = nullptr )
+{
+  const int attempts =
+    config.fetchAttempts < 1 ? 1 : ( config.fetchAttempts > 8 ? 8 : config.fetchAttempts );
+  for ( int attempt = 1;; ++attempt )
+  {
+    try
+    {
+      return fetchRangeOnce( requestUrl, start, endExclusive, config );
+    }
+    catch ( const GeoError &error )
+    {
+      // Transport-shaped failures retry; refused answers do not. A >=400
+      // carries its status in details — a 403/404/410/416 would fail
+      // identically on every attempt, so only server-side/transient codes
+      // (5xx, 429) deserve a second try.
+      bool refused4xx = false;
+      if ( error.details().isMember( "status" ) )
+      {
+        const Json::Value &status = error.details()["status"];
+        refused4xx = status.isInt() && status.asInt() >= 400 && status.asInt() < 500 &&
+                     status.asInt() != 429;
+      }
+      const bool retryable = ( error.code() == ErrorCode::NetworkError ||
+                               error.code() == ErrorCode::Timeout ) &&
+                             !refused4xx;
+      if ( !retryable || attempt >= attempts )
+        throw;
+      if ( telemetryStore != nullptr )
+        telemetryStore->retriedFetches.fetch_add( 1 );
+      const int baseMs = config.retryBackoffBaseMs > 0 ? config.retryBackoffBaseMs : 0;
+      const int capMs = config.retryBackoffMaxMs > 0 ? config.retryBackoffMaxMs : 0;
+      std::uint64_t delayMs = 0;
+      if ( baseMs > 0 )
+      {
+        const int shift = attempt - 1 > 6 ? 6 : attempt - 1; // clamp the shift
+        delayMs = static_cast<std::uint64_t>( baseMs ) << shift;
+        if ( capMs > 0 && delayMs > static_cast<std::uint64_t>( capMs ) )
+          delayMs = static_cast<std::uint64_t>( capMs );
+      }
+      if ( delayMs > 0 )
+        std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
+    }
+  }
 }
 
 /// Builds the entry identity of an object probe from VSI-stack HEAD facts.
@@ -1066,7 +1234,8 @@ class RangeCacheHandle final : public VSIVirtualHandle
       // network work. Disk blocks are content-identity keyed; a hit fills
       // the memory blocks and serves without an origin request.
       if ( cache.loadBlocksFromDisk( mEntry, firstBlock, lastBlock, mGeneration, blockSize,
-                                     fetchConfigGeneration, config.maxCacheBytes )
+                                     fetchConfigGeneration, config.maxCacheBytes,
+                                     config.maxBytesPerResource )
            && cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
       {
         cache.hits.fetch_add( 1 );
@@ -1098,12 +1267,22 @@ class RangeCacheHandle final : public VSIVirtualHandle
       const std::uint64_t fetchEnd = std::min<std::uint64_t>(
         mSize,
         std::min<std::uint64_t>( fetchStart + config.maxSingleFetchBytes, position + length ) );
+
+      // 12.0 fetch-cancel veto: a cancelled resource starts no new origin
+      // fetch — the reader degrades to the direct fallback (the correctness
+      // gate), and no cancelled bytes can ever be published.
+      if ( cache.fetchCancelled( mEntry ) )
+        return fallbackRead( destination, position, fetchEnd - position );
+
       std::vector<unsigned char> bytes;
       try
       {
         // Global in-flight byte bound (9.0): admit before the ranged GET,
         // release after — the gate never holds the store lock and waits
-        // only for other resources' fetches to drain.
+        // only for other resources' fetches to drain. 12.0 note: the guard
+        // spans the WHOLE fetchRange call INCLUDING its backoff sleeps — a
+        // retrying fetch keeps its reservation (bounded by fetchAttempts ×
+        // backoff cap), trading admission fairness for simplicity.
         struct InFlightAdmission
         {
           CacheStore &cache;
@@ -1119,9 +1298,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
 
         bytes = mEntry->vsiObject
                   ? fetchRangeVsi( mEntry->vsiPath, fetchStart, fetchEnd )
-                  : fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
-        cache.coalescedFetches.fetch_add( 1 );
-        cache.bytesFetched.fetch_add( bytes.size() );
+                  : fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config, &cache );
       }
       catch ( const GeoError & )
       {
@@ -1129,11 +1306,21 @@ class RangeCacheHandle final : public VSIVirtualHandle
         // same bytes straight through /vsicurl/.
         return fallbackRead( destination, position, fetchEnd - position );
       }
+      // 12.0: the fetch completed but the veto landed while it was in
+      // flight — these bytes are DISCARDED (never inserted into the memory
+      // store or the disk layer, never served, never counted as fetched —
+      // the transfer's outcome was "cancelled", not "delivered"). The
+      // fallback read answers this reader; a later resumeFetches()
+      // re-enables caching honestly.
+      if ( cache.fetchCancelled( mEntry ) )
+        return fallbackRead( destination, position, fetchEnd - position );
       if ( bytes.empty() )
         return fallbackRead( destination, position, fetchEnd - position );
+      cache.coalescedFetches.fetch_add( 1 );
+      cache.bytesFetched.fetch_add( bytes.size() );
 
       cache.insertBytes( mEntry, fetchStart, bytes, blockSize, fetchConfigGeneration,
-                         mGeneration, config.maxCacheBytes );
+                         mGeneration, config.maxCacheBytes, config.maxBytesPerResource );
       // 9.0 M3 write-through: publish the fetched run to the disk layer
       // (atomically, checksummed). A no-op when the layer is disabled or the
       // identity is unprovable, or when the resource was invalidated while
@@ -1241,7 +1428,15 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 
       // Identity: probe once, then revalidate per the declared policy. A
       // validator mismatch invalidates the resource's cached bytes.
+      // 12.0: an entry past its declared TTL is dropped FIRST — the trust
+      // horizon applies regardless of the stale policy, and the open
+      // re-proves the resource from scratch (fresh identity, fresh blocks).
       std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
+      if ( entry != nullptr && cache.entryExpired( entry, config.entryTtlSeconds ) )
+      {
+        cache.invalidate( key );
+        entry = nullptr;
+      }
       if ( entry != nullptr && config.stalePolicy == RangeCacheStalePolicy::RevalidateOnOpen )
       {
         if ( vsiObject )
@@ -1284,6 +1479,10 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
             // would collapse every later read to EOF.
             if ( validator.identity().hasSize )
               cache.updateEntrySize( entry, validator.identity().sizeBytes );
+            // The origin just re-proved the content (12.0): that refreshes
+            // the TTL basis too — an actively-revalidated resource is not
+            // aged out by wall-clock time alone.
+            cache.touchEntryProven( entry );
           }
           // Inconclusive (offline, size-only origins): keep serving — this is
           // the caller's declared trust level, and the revalidation attempt is
@@ -1457,13 +1656,18 @@ Json::Value RangeCacheConfig::toJson() const
 {
   Json::Value json;
   json["max_cache_bytes"] = static_cast<Json::UInt64>( maxCacheBytes );
+  json["max_bytes_per_resource"] = static_cast<Json::UInt64>( maxBytesPerResource );
   json["max_single_fetch_bytes"] = static_cast<Json::UInt64>( maxSingleFetchBytes );
   json["block_size"] = static_cast<Json::UInt64>( blockSize );
   json["stale_policy"] = rangeCacheStalePolicyName( stalePolicy );
+  json["entry_ttl_seconds"] = entryTtlSeconds;
   json["timeout_seconds"] = timeoutSeconds;
   json["connect_timeout_seconds"] = connectTimeoutSeconds;
   json["max_retries"] = maxRetries;
   json["max_concurrent_fetch_bytes"] = static_cast<Json::UInt64>( maxConcurrentFetchBytes );
+  json["fetch_attempts"] = fetchAttempts;
+  json["retry_backoff_base_ms"] = retryBackoffBaseMs;
+  json["retry_backoff_max_ms"] = retryBackoffMaxMs;
   json["disk_directory"] = diskDirectory;
   json["disk_max_bytes"] = static_cast<Json::UInt64>( diskMaxBytes );
   return json;
@@ -1483,6 +1687,8 @@ Json::Value RangeCacheTelemetry::toJson() const
   json["revalidations"] = static_cast<Json::UInt64>( revalidations );
   json["dedup_hits"] = static_cast<Json::UInt64>( dedupHits );
   json["max_in_flight_fetch_bytes"] = static_cast<Json::UInt64>( maxInFlightFetchBytes );
+  json["retried_fetches"] = static_cast<Json::UInt64>( retriedFetches );
+  json["max_cached_bytes"] = static_cast<Json::UInt64>( maxCachedBytes );
   // 9.0 read amplification: origin bytes pulled per byte served. 0 when
   // nothing was served yet (no denominator — never fabricate a ratio).
   json["read_amplification"] =
@@ -1576,6 +1782,48 @@ void RemoteRangeCache::invalidateResource( const std::string &url )
   g_store->invalidate( resourceKey( requestUrl ) );
 }
 
+void RemoteRangeCache::cancelFetches( const std::string &url )
+{
+  std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
+  if ( !g_store )
+    return;
+  std::string requestUrl;
+  std::string reason;
+  std::string vsiPath;
+  if ( !underlyingUrl( url, requestUrl, reason, &vsiPath ) )
+    throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: not a remote resource: " + reason );
+  if ( !vsiPath.empty() )
+  {
+    g_store->setFetchCancelled( objectResourceKey( vsiPath, currentRangeCacheCredentialContext() ),
+                                true );
+    if ( !currentRangeCacheCredentialContext().empty() )
+      g_store->setFetchCancelled( objectResourceKey( vsiPath, std::string() ), true );
+    return;
+  }
+  g_store->setFetchCancelled( resourceKey( requestUrl ), true );
+}
+
+void RemoteRangeCache::resumeFetches( const std::string &url )
+{
+  std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
+  if ( !g_store )
+    return;
+  std::string requestUrl;
+  std::string reason;
+  std::string vsiPath;
+  if ( !underlyingUrl( url, requestUrl, reason, &vsiPath ) )
+    throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: not a remote resource: " + reason );
+  if ( !vsiPath.empty() )
+  {
+    g_store->setFetchCancelled( objectResourceKey( vsiPath, currentRangeCacheCredentialContext() ),
+                                false );
+    if ( !currentRangeCacheCredentialContext().empty() )
+      g_store->setFetchCancelled( objectResourceKey( vsiPath, std::string() ), false );
+    return;
+  }
+  g_store->setFetchCancelled( resourceKey( requestUrl ), false );
+}
+
 Json::Value RemoteRangeCache::telemetryJson()
 {
   std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
@@ -1593,8 +1841,11 @@ Json::Value RemoteRangeCache::telemetryJson()
   telemetry.revalidations = g_store->revalidations.load();
   telemetry.dedupHits = g_store->dedupHits.load();
   telemetry.maxInFlightFetchBytes = g_store->maxInFlightBytes.load();
+  telemetry.retriedFetches = g_store->retriedFetches.load();
+  telemetry.maxCachedBytes = g_store->maxCachedBytes.load();
   Json::Value json = telemetry.toJson();
   json["cached_bytes"] = static_cast<Json::UInt64>( g_store->cachedBytes() );
+  json["max_cached_bytes"] = static_cast<Json::UInt64>( g_store->maxCachedBytes.load() );
   json["in_flight_fetch_bytes"] = static_cast<Json::UInt64>( g_store->inFlightBytes() );
   json["disk_hits"] = static_cast<Json::UInt64>( g_store->diskHits.load() );
   json["disk"] = RangeDiskBlockStore::stats().toJson();

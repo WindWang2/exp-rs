@@ -1,0 +1,107 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "loading",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "target",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "targetRef",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Background statistics come from the input scene itself; a separate background raster is a future extension."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "'target' must have one finite value per input band.",
+      "At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) \u2014 under-sampled scenes are refused."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Constrained energy minimization target detection against the scene correlation background: the target scores exactly 1.",
+  "display_name" : "CEM Detector",
+  "gpu" : false,
+  "id" : "rs:cem_detection",
+  "input" : "raster",
+  "notes" : "Two-pass streaming CEM (background correlation, score) over the shared valid-pixel predicate; scores are signed with the target scoring exactly 1 (distortionless constraint); bit-exact grade.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

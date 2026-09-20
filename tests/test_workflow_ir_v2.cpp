@@ -271,7 +271,7 @@ TEST_CASE( "migrateFromV1 lifts the ADR 0149 document with defaulted facts", "[d
     REQUIRE( result.isSuccess() );
 
     const WorkflowDocument &def = result.value();
-    REQUIRE( def.version == QStringLiteral( "2.0" ) );
+    REQUIRE( def.version == QStringLiteral( "2.1" ) ); // migrations land on the current schema
     REQUIRE( def.nodes.size() == 2 );
     REQUIRE( def.edges.size() == 1 );
 
@@ -335,4 +335,115 @@ TEST_CASE( "migrateFromV1 fails closed on malformed V1 documents", "[d17][workfl
     {
         REQUIRE_FALSE( WorkflowIR::migrateFromV1( QJsonObject{} ).isSuccess() );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Schema versioning (flash-workflow-engine-12 / DECISIONS D7): closed
+// accept-set {"2.0","2.1"}, claimed version preserved verbatim, unknown
+// versions refused by name, additive-optional fields round-trip.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Schema version set: known versions accepted, future refused by name", "[d17][workflow][ir]" )
+{
+    REQUIRE( WorkflowIR::supportedSchemaVersions()
+             == QStringList{ QStringLiteral( "2.0" ), QStringLiteral( "2.1" ) } );
+    REQUIRE( WorkflowIR::currentSchemaVersion() == QStringLiteral( "2.1" ) );
+
+    const QJsonObject base = loadGoldenJson( QStringLiteral( "minimal_single_node_v2.json" ) );
+
+    // A vN-1 (2.0) fixture migrates into the current IR unchanged and keeps
+    // its claimed version — round-trip is byte-stable.
+    auto v20 = WorkflowIR::fromJson( base );
+    REQUIRE( v20.isSuccess() );
+    REQUIRE( v20.value().version == QStringLiteral( "2.0" ) );
+    REQUIRE( QJsonDocument( WorkflowIR::toJson( v20.value() ) ).toJson( QJsonDocument::Indented )
+             == QJsonDocument( base ).toJson( QJsonDocument::Indented ) );
+
+    // The same document claiming the current version parses identically.
+    QJsonObject v21Doc = base;
+    v21Doc[QStringLiteral( "version" )] = QStringLiteral( "2.1" );
+    auto v21 = WorkflowIR::fromJson( v21Doc );
+    REQUIRE( v21.isSuccess() );
+    REQUIRE( v21.value().version == QStringLiteral( "2.1" ) );
+
+    // Unknown/future versions are refused and the error names the offender.
+    for ( const QString &bad : { QStringLiteral( "9.9" ), QStringLiteral( "3.0" ),
+                                 QStringLiteral( "2.2" ), QStringLiteral( "v2" ) } )
+    {
+        QJsonObject doc = base;
+        doc[QStringLiteral( "version" )] = bad;
+        const auto result = WorkflowIR::fromJson( doc );
+        INFO( "version: " << bad.toStdString() );
+        REQUIRE_FALSE( result.isSuccess() );
+        REQUIRE( result.error().contains( bad ) );
+        REQUIRE( result.error().contains( QStringLiteral( "2.1" ) ) ); // names the supported set
+    }
+}
+
+TEST_CASE( "isValid accepts every supported schema version", "[d17][workflow][ir]" )
+{
+    WorkflowDocument def;
+    REQUIRE( def.version == WorkflowIR::currentSchemaVersion() ); // new docs claim current
+    REQUIRE( def.isValid() );
+    def.version = QStringLiteral( "2.0" );
+    REQUIRE( def.isValid() );
+    def.version = QStringLiteral( "9.9" );
+    REQUIRE_FALSE( def.isValid() );
+}
+
+TEST_CASE( "2.1 originNodeId is additive-optional and round-trips", "[d17][workflow][ir]" )
+{
+    WorkflowDocument def; // default claims 2.1
+    NodeFact node;
+    node.nodeId = QStringLiteral( "n1" );
+    node.operatorId = QStringLiteral( "rs:step" );
+    node.parameters = QJsonObject{};
+    node.canvasPosition = QPointF( 0, 0 );
+    node.originNodeId = QStringLiteral( "fragment_a" );
+    def.nodes = { node };
+
+    // Field materializes when set.
+    const QJsonObject json = WorkflowIR::toJson( def );
+    REQUIRE( json[QStringLiteral( "nodes" )].toArray()[0].toObject()
+                 .value( QLatin1String( "originNodeId" ) )
+                 .toString()
+             == QStringLiteral( "fragment_a" ) );
+    const auto reparsed = WorkflowIR::fromJson( json );
+    REQUIRE( reparsed.isSuccess() );
+    REQUIRE( reparsed.value() == def );
+
+    // Absent when empty — a 2.0-shaped document stays byte-identical.
+    WorkflowDocument plain;
+    plain.version = QStringLiteral( "2.0" );
+    node.originNodeId.clear();
+    plain.nodes = { node };
+    const QJsonObject plainJson = WorkflowIR::toJson( plain );
+    REQUIRE( !plainJson[QStringLiteral( "nodes" )].toArray()[0].toObject()
+                  .contains( QLatin1String( "originNodeId" ) ) );
+}
+
+TEST_CASE( "Unknown top-level and metadata keys survive the round-trip", "[d17][workflow][ir]" )
+{
+    // The sanctioned extension channel: metadata/parameters objects pass
+    // through verbatim, so forward-extension payloads are never silently
+    // dropped by a parser that does not understand them yet.
+    const QJsonObject base = loadGoldenJson( QStringLiteral( "minimal_single_node_v2.json" ) );
+    auto parsed = WorkflowIR::fromJson( base );
+    REQUIRE( parsed.isSuccess() );
+    WorkflowDocument def = parsed.value();
+    def.metadata.insert( QStringLiteral( "x-extension" ),
+                         QJsonObject{ { QStringLiteral( "alpha" ), 1 },
+                                      { QStringLiteral( "nested" ),
+                                        QJsonObject{ { QStringLiteral( "k" ),
+                                                     QStringLiteral( "v" ) } } } } );
+    const auto reparsed = WorkflowIR::fromJson( WorkflowIR::toJson( def ) );
+    REQUIRE( reparsed.isSuccess() );
+    REQUIRE( reparsed.value() == def );
+    REQUIRE( reparsed.value().metadata.value( QLatin1String( "x-extension" ) )
+                 .toObject()
+                 .value( QLatin1String( "nested" ) )
+                 .toObject()
+                 .value( QLatin1String( "k" ) )
+                 .toString()
+             == QStringLiteral( "v" ) );
 }

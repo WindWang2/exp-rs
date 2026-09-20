@@ -70,6 +70,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/detection_postprocess.cpp
         runtime/detection_tile_engine.cpp
         runtime/model_execution_service.cpp
+        runtime/model_ensemble.cpp
         runtime/provenance_verify.cpp
     )
     message(STATUS "OpenCV operators enabled (imgproc found)")
@@ -159,6 +160,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_radiometric_qa_operator.cpp
     rs/rs_spectral_derivative_operator.cpp
     rs/rs_spectral_detection_operators.cpp
+    rs/rs_spectral_spatial_fuse_operator.cpp
     rs/rs_sar_dualpol_operator.cpp
     rs/rs_sar_terrain_masks_operator.cpp
     rs/rs_sar_geocode_operator.cpp

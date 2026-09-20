@@ -80,7 +80,20 @@ bool ManifestPort::fromJson( const Json::Value &json, ManifestPort &out, std::st
         return false;
     if ( json.isMember( "type" ) && json["type"].isString() )
         out.type = json["type"].asString();
-    out.required = json.get( "required", false ).asBool();
+    // "required" is a BOOLEAN field. Type-checked BEFORE the cast (same class
+    // as issue #1038): json.get(key, false).asBool() returns the present value
+    // when the key exists, and asBool() throws on a string/array/object — a
+    // manifest with "required": "yes" must be a typed field error, not an
+    // exception out of the manifest reader.
+    if ( json.isMember( "required" ) )
+    {
+        if ( !json["required"].isBool() )
+        {
+            error = "'required' must be a boolean";
+            return false;
+        }
+        out.required = json["required"].asBool();
+    }
     if ( json.isMember( "description" ) && json["description"].isString() )
         out.description = json["description"].asString();
     if ( json.isMember( "default" ) )
@@ -536,6 +549,10 @@ Json::Value PluginManifest::toJson() const
     json["version"] = version;
     json["api_version"] = apiVersion;
     json["abi_version"] = abiVersion;
+    if ( !minHostApi.empty() )
+        json["min_host_api"] = minHostApi;
+    if ( !maxHostApi.empty() )
+        json["max_host_api"] = maxHostApi;
     // Structured declarations round-trip too: the discovery index, the
     // record snapshot and the host-process worker's load params all travel
     // through toJson(), and losing them silently disabled the capability
@@ -657,6 +674,8 @@ bool parsePluginManifestObject( const Json::Value &json, PluginManifest &out,
          || !readOptionalString( json, "name", out.name, error )
          || !readOptionalString( json, "version", out.version, error )
          || !readOptionalString( json, "api_version", out.apiVersion, error )
+         || !readOptionalString( json, "min_host_api", out.minHostApi, error )
+         || !readOptionalString( json, "max_host_api", out.maxHostApi, error )
          || !readOptionalString( json, "description", out.description, error )
          || !readOptionalString( json, "vendor", out.vendor, error )
          || !readOptionalString( json, "license", out.license, error )
@@ -832,13 +851,46 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
     }
     std::stringstream buffer;
     buffer << input.rdbuf();
+    const std::string document = buffer.str();
     Json::Value root;
-    Json::Value parseErrors;
-    Json::Reader reader;
-    if ( !reader.parse( buffer.str(), root, false ) )
+    // The manifest is file content from a plugin package: untrusted. The
+    // legacy Json::Reader cannot bound its own recursion (a ~40 KB manifest
+    // nested 20k levels deep stack-overflows the caller), so the parse goes
+    // through the bounded Char reader with an explicit stackLimit — the
+    // manifest contract is shallow, so 64 levels is far above any real one.
+    Json::CharReaderBuilder builder;
+    // allowComments keeps the legacy Json::Reader grammar (manifests may
+    // carry // comments); stackLimit closes the unbounded-recursion defect.
+    builder[ "allowComments" ] = true;
+    builder[ "stackLimit" ] = 128;
+    std::string parseError;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    // Guarded: the reader THROWS when the depth bound is exceeded, and a
+    // manifest is untrusted file content — the refusal has to be typed.
+    try
+    {
+        if ( !reader->parse( document.data(), document.data() + document.size(), &root,
+                             &parseError ) )
+        {
+            error.code = PluginDiagnosticCode::ManifestInvalidJson;
+            error.message = "invalid JSON: " + parseError;
+            return false;
+        }
+    }
+    catch ( const Json::Exception &exception )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidJson;
-        error.message = "invalid JSON: " + reader.getFormattedErrorMessages();
+        error.message = std::string( "invalid JSON: " ) + exception.what();
+        return false;
+    }
+    // A manifest root that is not an object (array, string, number, bool) is
+    // a typed JSON error: jsoncpp's isMember()/find() THROW on non-object
+    // roots, so the shape is checked before any member access (#1038's class),
+    // and the check sits after the parse guard so the message stays coherent.
+    if ( !root.isObject() )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidJson;
+        error.message = "manifest root must be a JSON object";
         return false;
     }
     // Type-checked BEFORE the cast (issue #1038): a wrong-typed version must

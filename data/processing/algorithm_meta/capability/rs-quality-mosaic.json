@@ -16,7 +16,29 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309 schema \u6821\u6b63\u53c2\u6570\u4e0e\u679a\u4e3e\u503c\uff0cbandCount \u53d6\u4e0d\u8d85\u8fc7\u6700\u5c0f\u8f93\u5165\u6ce2\u6bb5\u6570\u7684\u503c",
+        "when" : "\u7f3a\u5c11\u5fc5\u9700\u53c2\u6570 inputs/output\uff0c\u6216 method\u3001balancing.rejectPolicy\u3001blending.mode \u679a\u4e3e\u975e\u6cd5\u3001bandCount \u8d85\u8fc7\u6700\u5c0f\u8f93\u5165\u6ce2\u6bb5\u6570"
+      },
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u5c06\u5404\u8f93\u5165\u91cd\u6295\u5f71/\u91cd\u91c7\u6837\u5230\u540c\u4e00\u53c2\u8003\u7f51\u683c\uff0c\u5e76\u4fee\u6b63\u4e91\u63a9\u6a21\u7684\u5730\u7406\u914d\u51c6",
+        "when" : "\u8f93\u5165\u672a\u5171\u914d\u51c6\u5230\u540c\u4e00 CRS/\u50cf\u7d20\u7f51\u683c\uff08CRS\u3001\u50cf\u7d20\u5c3a\u5bf8\u3001Y \u65b9\u5411\u6216\u65cb\u8f6c/\u526a\u5207\u4e0d\u4e00\u81f4\uff09\uff0c\u6216\u4e91\u63a9\u6a21\u4e0e\u573a\u666f\u5730\u7406\u914d\u51c6\u4e0d\u7b26"
+      },
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5\u8f93\u5165\u8def\u5f84\u4e0e\u6587\u4ef6\u5b8c\u6574\u6027",
+        "when" : "\u8f93\u5165\u6805\u683c\u8def\u5f84\u4e0d\u5b58\u5728\u6216\u65e0\u6cd5\u7528 GDAL \u6253\u5f00"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u653e\u5bbd balancing.minGain/maxGain \u6216\u6539\u7528 rejectPolicy=drop\uff0c\u5e76\u786e\u8ba4\u8f93\u51fa\u76ee\u5f55\u53ef\u5199",
+        "when" : "\u8f90\u5c04\u5747\u8861\u88ab\u62d2\uff08\u589e\u76ca\u5f02\u5e38\u4e14 rejectPolicy \u4e3a fail\uff09\uff0c\u6216\u62fc\u63a5\u74e6\u7247\u8bfb\u5199\u4e0e\u8f93\u51fa\u53d1\u5e03\u5931\u8d25"
+      }
+    ],
     "family" : "raster_spatial",
     "io" : 
     {
@@ -136,7 +158,7 @@
     "operator_group" : "composition",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "\u751f\u4ea7\u7ea7\u8d28\u91cf\u9576\u5d4c\uff1a\u8f90\u5c04\u5747\u8861\u3001\u63a5\u7f1d\u7ebf\u3001\u7fbd\u5316\u8fc7\u6e21\u4e0e\u9010\u50cf\u7d20\u6765\u6e90\u6eaf\u6e90\uff0c\u8f93\u51fa\u5206\u5757\u539f\u5b50\u5316 GeoTIFF\u3001\u91d1\u5b57\u5854\u4e0e\u8d28\u91cf\u62a5\u544a\u3002",
     "teaching_use" : {}
   },
   "description" : "Seam-lined, radiometrically balanced quality mosaic with per-pixel provenance, feather blending, tiled atomic output, overviews and a quality report.",
