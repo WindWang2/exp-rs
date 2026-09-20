@@ -507,13 +507,23 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    `SICNU_SAR_CALIBRATION=sigma0`, `SICNU_SAR_DOMAIN=linear_power`,
    `SICNU_RADIOMETRIC_STATE=sigma0` — plus the additive per-band map
    `SICNU_SAR_GEOCODE_BAND_STATES = sigma0,gamma0,incidence_deg,
-   incidence_deg,mask_class` (the product is inherently mixed; one dataset
+   local_incidence_deg,mask_class` (the product is inherently mixed; one dataset
    token cannot describe five bands). `result.bandStates` mirrors the key.
+   On the legacy undeclared path the sigma0 assumption is persisted as
+   `SICNU_SAR_STATE_ASSUMED=sigma0_legacy_undeclared` (same for the terrain
+   operators), so downstream guards can see the assumption instead of trusting
+   a bare token. **gamma0 vocabulary**: within this family the `gamma0` token
+   means *terrain-flattened gamma0* (RTC factor applied). `rs:sar_backscatter`'s
+   gamma0 is a different product — a pure geometric normalization
+   (sigma0/cos θ) — and must be converted back with `gamma0ToSigma0` before
+   entering this family; the geocode refusal covers every gamma0 flavor.
 5. **DN LUT calibration.** `rs:sar_calibrate` accepts a per-row calibration
    LUT: a plain-text sidecar with exactly one finite, positive calibration
    constant per input row, referenced by the `calibrationLut` parameter or the
    declared `SICNU_SAR_CALIBRATION_LUT` metadata (resolved relative to the
-   raster). Per pixel/row r: `sigma0 = (DN² − noiseLinear)/A(r)²`, with the
+   raster and confined to its directory — a declared path that escapes it is
+   refused). The explicit `calibrationLut` parameter overrides the declared
+   sidecar and is used verbatim (CWD-relative or absolute). Per pixel/row r: `sigma0 = (DN² − noiseLinear)/A(r)²`, with the
    same NoData and nonpositive-power policies as the constant path.
    Interpolation is defined as *none* — a row-count mismatch, an unreadable
    file, a non-numeric or non-positive entry is a typed refusal; the constant

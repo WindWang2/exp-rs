@@ -8,6 +8,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -489,7 +490,7 @@ TEST_CASE( "SAR radiometric census behavioral gate: declared state on every outp
         REQUIRE( metaItem( out, sicnu::sar::kCalibrationKey ) == "sigma0" );
         REQUIRE( metaItem( out, sicnu::sar::kRadiometricStateKey ) == "sigma0" );
         REQUIRE( metaItem( out, "SICNU_SAR_GEOCODE_BAND_STATES" )
-                 == "sigma0,gamma0,incidence_deg,incidence_deg,mask_class" );
+                 == "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class" );
     }
 
     // ── rs:sar_ratio: derived pair metric, not a backscatter calibration ──
@@ -700,6 +701,69 @@ TEST_CASE( "ratio refuses scenes declaring different radiometric states",
     REQUIRE( !QFileInfo::exists( out ) );
 }
 
+TEST_CASE( "ratio refuses conflicting and derived input declarations",
+           "[sar][radiometry][derived]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Conflicting declarations on one input: unreadable contract, refuse.
+    {
+        const QString a = tmp.filePath( "conf_a.tif" );
+        const QString b = tmp.filePath( "conf_b.tif" );
+        const QString out = tmp.filePath( "conf_out.tif" );
+        REQUIRE( writeRasterEx( a, std::vector<float>( 16, 0.4f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, "sigma0" },
+                                  { sicnu::sar::kRadiometricStateKey, "gamma0" } } ) );
+        REQUIRE( writeRasterEx( b, std::vector<float>( 16, 0.2f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = out.toStdString();
+        REQUIRE_THROWS_AS( runOp( "rs:sar_ratio", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+
+    // Derived inputs: a ratio of pair metrics / texture measures is undefined.
+    for ( const char *derived : { "sar_pair_metric", "sar_texture" } )
+    {
+        const QString a = tmp.filePath( QStringLiteral( "der_a_%1.tif" ).arg( QString::fromLatin1( derived ) ) );
+        const QString b = tmp.filePath( QStringLiteral( "der_b_%1.tif" ).arg( QString::fromLatin1( derived ) ) );
+        const QString out = tmp.filePath( QStringLiteral( "der_out_%1.tif" ).arg( QString::fromLatin1( derived ) ) );
+        REQUIRE( writeRasterEx( a, std::vector<float>( 16, 1.0f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, derived },
+                                  { sicnu::sar::kRadiometricStateKey, derived } } ) );
+        REQUIRE( writeRasterEx( b, std::vector<float>( 16, 2.0f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, derived },
+                                  { sicnu::sar::kRadiometricStateKey, derived } } ) );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = out.toStdString();
+        REQUIRE_THROWS_AS( runOp( "rs:sar_ratio", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+
+    // An unrecognized token is named as such, not silently "undeclared".
+    {
+        const QString a = tmp.filePath( "unk_a.tif" );
+        const QString b = tmp.filePath( "unk_b.tif" );
+        const QString out = tmp.filePath( "unk_out.tif" );
+        REQUIRE( writeRasterEx( a, std::vector<float>( 16, 0.4f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
+        REQUIRE( writeRasterEx( b, std::vector<float>( 16, 0.2f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, "sigm0" } } ) );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = out.toStdString();
+        REQUIRE_THROWS_AS( runOp( "rs:sar_ratio", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // O6 — DN LUT calibration: hand-computed per-row oracle + fail-closed refusals.
 // ---------------------------------------------------------------------------
@@ -819,6 +883,87 @@ TEST_CASE( "calibrate reads a declared LUT path and refuses when it is missing",
     REQUIRE( !QFileInfo::exists( brokenOut ) );
 }
 
+TEST_CASE( "calibrate LUT resolution: precedence, containment and count direction",
+           "[sar][radiometry][lut]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // A subdirectory keeps the absolute-declared-path case inside the raster's
+    // directory (containment is against traversal, not against subdirectories).
+    REQUIRE( QDir( tmp.path() ).mkdir( "sidecar" ) );
+    const QString subLut = tmp.filePath( "sidecar/abs_lut.txt" );
+    REQUIRE( writeTextFile( subLut, QStringLiteral( "2\n2\n2\n2\n" ) ) );
+
+    // Declared ABSOLUTE path inside the raster directory resolves.
+    {
+        const QString in = tmp.filePath( "abs_in.tif" );
+        const QString out = tmp.filePath( "abs_out.tif" );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4,
+                                { { "SICNU_SAR_CALIBRATION_LUT", subLut.toStdString() } } ) );
+        Json::Value params = baseParams( in, out );
+        runOp( "rs:sar_calibrate", params );
+        for ( float v : readBand( out ) )
+            REQUIRE( v == Approx( 25.0f ).margin( 1e-5 ) );
+    }
+
+    // The explicit parameter overrides the declared sidecar.
+    {
+        const QString in = tmp.filePath( "prec_in.tif" );
+        const QString out = tmp.filePath( "prec_out.tif" );
+        const QString paramLut = tmp.filePath( "prec_lut.txt" );
+        REQUIRE( writeTextFile( paramLut, QStringLiteral( "5\n5\n5\n5\n" ) ) );
+        // A declared sidecar with a DIFFERENT constant: if the parameter did
+        // not win, the pixels would be 100/4 = 25 instead of 100/25 = 4.
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4,
+                                { { "SICNU_SAR_CALIBRATION_LUT", "declared_lut.txt" } } ) );
+        Json::Value params = baseParams( in, out );
+        params["calibrationLut"] = paramLut.toStdString();
+        runOp( "rs:sar_calibrate", params );
+        for ( float v : readBand( out ) )
+            REQUIRE( v == Approx( 4.0f ).margin( 1e-5 ) );
+    }
+
+    // Declared path escaping the raster's directory is refused (traversal).
+    {
+        const QString in = tmp.filePath( "escape_in.tif" );
+        const QString out = tmp.filePath( "escape_out.tif" );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4,
+                                { { "SICNU_SAR_CALIBRATION_LUT",
+                                    "../outside_lut.txt" } } ) );
+        Json::Value params = baseParams( in, out );
+        REQUIRE_THROWS_AS( runOp( "rs:sar_calibrate", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+
+    // More values than rows is refused (no silent truncation).
+    {
+        const QString in = tmp.filePath( "more_in.tif" );
+        const QString out = tmp.filePath( "more_out.tif" );
+        const QString lut = tmp.filePath( "more_lut.txt" );
+        REQUIRE( writeTextFile( lut, QStringLiteral( "2\n2\n2\n2\n2\n" ) ) );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4, {} ) );
+        Json::Value params = baseParams( in, out );
+        params["calibrationLut"] = lut.toStdString();
+        REQUIRE_THROWS_AS( runOp( "rs:sar_calibrate", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+
+    // A 0-byte LUT is refused (row count 0 != raster rows).
+    {
+        const QString in = tmp.filePath( "zero_in.tif" );
+        const QString out = tmp.filePath( "zero_out.tif" );
+        const QString lut = tmp.filePath( "zero_lut.txt" );
+        REQUIRE( writeTextFile( lut, QString() ) );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4, {} ) );
+        Json::Value params = baseParams( in, out );
+        params["calibrationLut"] = lut.toStdString();
+        REQUIRE_THROWS_AS( runOp( "rs:sar_calibrate", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // O7 — end-to-end chain provenance: import → calibrate → speckle → terrain →
 // geocode → derived, with state transitions, refusals and readback.
@@ -889,8 +1034,12 @@ TEST_CASE( "end-to-end SAR chain preserves and transitions radiometric state",
     flattenScene( sigmaB, gammaB );
     REQUIRE( metaItem( gammaA, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
 
-    // geocode on the gamma0 product is a typed refusal: the RTC factor is
-    // already applied and must not be applied twice.
+    // geocode on the gamma0 product is a typed refusal: its gamma0 band
+    // applies sin(thetaL)/sin(theta0) to sigma0, so a declared gamma0 input
+    // would receive a second terrain factor. (rs:sar_backscatter's gamma0 is a
+    // different product — a pure geometric normalization — and must be
+    // converted back with gamma0ToSigma0 before geocoding; the refusal is
+    // fail-closed for every gamma0 flavor.)
     {
         const QString dem = tmp.filePath( "chain_geo_dem.tif" );
         REQUIRE( writeGeoDem( dem ) );
@@ -922,7 +1071,7 @@ TEST_CASE( "end-to-end SAR chain preserves and transitions radiometric state",
         runOp( "rs:sar_geocode", params );
         REQUIRE( metaItem( out8, sicnu::sar::kRadiometricStateKey ) == "sigma0" );
         REQUIRE( metaItem( out8, "SICNU_SAR_GEOCODE_BAND_STATES" )
-                 == "sigma0,gamma0,incidence_deg,incidence_deg,mask_class" );
+                 == "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class" );
     }
 
     // ── derived: ratio over the two gamma0 scenes declares the derived token ──
