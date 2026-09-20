@@ -1289,6 +1289,47 @@ TEST_CASE( "snapshot capture is bounded, verified and fail-closed",
             fs::remove( root + "/src/link.txt", ec );
         }
     }
+    // Markerless snapshot: a dir that never got its completion marker is
+    // never trusted — verify refuses without caring about payload content
+    // (O2.4's literal case; tampered-payload above covers the marker-lies
+    // branch, this covers the !is_regular_file(marker) branch).
+    {
+        const std::string bare = root + "/snapshots/no-marker";
+        fs::create_directories( bare, ec );
+        { std::ofstream f( bare + "/a.txt" ); f << "alpha"; }
+        { std::ofstream f( bare + "/plugin.json" );
+          f << "{\"id\":\"org.test.snap\"}"; }
+        std::string error;
+        REQUIRE_FALSE( verifyPluginSnapshot( bare, "org.test.snap", error ) );
+    }
+    // Env-driven budgets (O2.2/O2.3's plumbing): SICNU_PLUGIN_SNAPSHOT_MAX_*
+    // feeds fromEnvironment — real values read through, signed input and
+    // non-numeric input fall back to defaults, below-floor clamps.
+    {
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", "8192" );
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_FILES", "16" );
+        PluginSnapshotBudget envBudget = PluginSnapshotBudget::fromEnvironment();
+        REQUIRE( envBudget.maxBytes == 8192 );
+        REQUIRE( envBudget.maxFiles == 16 );
+
+        // Signed input is rejected outright (strtoull would wrap "-5" into
+        // a huge value and MAX OUT the bound instead of failing closed).
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", "-5" );
+        envBudget = PluginSnapshotBudget::fromEnvironment();
+        REQUIRE( envBudget.maxBytes == PluginSnapshotBudget{}.maxBytes );
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", "bogus" );
+        envBudget = PluginSnapshotBudget::fromEnvironment();
+        REQUIRE( envBudget.maxBytes == PluginSnapshotBudget{}.maxBytes );
+        // Below the floor clamps UP — a hostile env cannot turn the bound
+        // into an effective no-snapshot.
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", "8" );
+        qputenv( "SICNU_PLUGIN_SNAPSHOT_MAX_FILES", "1" );
+        envBudget = PluginSnapshotBudget::fromEnvironment();
+        REQUIRE( envBudget.maxBytes == 4096 );
+        REQUIRE( envBudget.maxFiles == 8 );
+        qunsetenv( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES" );
+        qunsetenv( "SICNU_PLUGIN_SNAPSHOT_MAX_FILES" );
+    }
     fs::remove_all( root, ec );
 }
 

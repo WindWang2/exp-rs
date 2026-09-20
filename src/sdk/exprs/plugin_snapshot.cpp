@@ -783,6 +783,11 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
             const std::string id = name.substr( legacyPrefix.size() );
             if ( std::find( liveIds.begin(), liveIds.end(), id ) != liveIds.end() )
                 continue;
+            // Same fail-closed rule as the new-grammar branches: a
+            // foreign-owned dir in a shared temp root is outside our trust
+            // boundary — never reconciled by us.
+            if ( !dirOwnedByUs( it->path() ) )
+                continue;
             std::error_code removeError;
             fsn::remove_all( it->path(), removeError );
             if ( !removeError )

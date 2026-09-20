@@ -286,3 +286,55 @@ races the transaction.
   with v1 intact and reloaded.
 
 All four plugin/IPC test binaries re-verified green after the fixes.
+
+## Review round 4 — spec-review P2 dispositions
+
+Independent spec review (round 4): **no P0/P1** — all four oracle groups
+verified. Six P2s dispositioned as follows:
+
+### Fixed (P2)
+- TOCTOU `TrustRejected` was added to `mDiagnostics` before the commit
+  `refresh()` — refreshUnlocked clears the log, so the refusal evidence
+  was always erased. Now recorded into `installLog` (merged AFTER
+  refresh), surviving either path.
+- The `!intact` rollback path had the same bug inverted: the
+  `ResourceMissing` restore-failure diagnostic was added BEFORE its
+  refresh(). Moved after — evidence survives.
+- `options.migrateState` was invoked bare at both call sites — a throwing
+  caller-supplied callback escaped the lifecycle transaction untyped
+  (the ownership RAII would still clear, but the upgrade snapshot
+  residue outlived the call and no typed diagnostic existed). New
+  `migrateStateSafely` wraps both sites: a throw counts as a failed
+  migration (typed InitializationFailed refusal).
+- `setEnabled(id,false)` racing an upgrade rollback left the restored
+  generation consistently Disabled — `oldGenerationOk` rejected it and
+  misreported an intact rollback as `Failed`. Disabled now counts as a
+  usable restore outcome when the plugin was loaded going in (bytes
+  intact + deliberately not loaded).
+- `uninstallPlugin` drained/unloaded BEFORE checking the user-root
+  target — a shadowed record (record resolves to an earlier discovery
+  root) could unload the wrong generation and then fail removal anyway.
+  Same shadow guard as installOrUpgrade now runs before the drain:
+  refuses without unloading or removing anything.
+- The legacy `plugin-last-good-*` sweep branch lacked the
+  `dirOwnedByUs` check — a foreign-owned dir in a shared temp root was
+  inside our delete set. Now skipped, same fail-closed rule as the
+  new-grammar branches.
+
+### Test gaps closed (P2)
+- Env-budget plumbing: `SICNU_PLUGIN_SNAPSHOT_MAX_BYTES/_MAX_FILES` read
+  through `fromEnvironment`, signed/non-numeric input falls back,
+  below-floor values clamp up (the floor makes an env-driven real
+  exceed impossible in a small fixture — enforcement itself is covered
+  by the struct-budget cases).
+- Literal markerless snapshot: a dir without `snapshot.marker.json`
+  refuses `verifyPluginSnapshot` regardless of payload content (the
+  `!is_regular_file(marker)` branch; tampered-payload already covered
+  the marker-lies branch).
+- Promote-rename failure: dispositioned as not-feasible-without-fault-
+  injection — there is no deterministic way to fail only the publish
+  rename in a unit test without an instrumented filesystem. The code
+  path is the same fail-closed ladder as the other staged-rename errors.
+
+All four plugin/IPC test binaries re-verified green (134/110/226/327
+assertions).

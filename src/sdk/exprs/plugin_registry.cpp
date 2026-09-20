@@ -58,6 +58,23 @@ int snapshotWaitMs()
                : 30000;
 }
 
+/// A caller-supplied migrateState callback must never escape the lifecycle
+/// transaction untyped: a throw is a failed migration (typed refusal), not
+/// an exception through load/reload/installOrUpgrade — the RAII guard would
+/// clear ownership, but the upgrade snapshot residue would outlive the call.
+bool migrateStateSafely( const std::function<bool( const std::string & )> &fn,
+                         const std::string &pluginDir )
+{
+    try
+    {
+        return fn( pluginDir );
+    }
+    catch ( ... )
+    {
+        return false;
+    }
+}
+
 } // namespace
 
 namespace exprs {
@@ -1138,8 +1155,10 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     }
 
     // Step 3: state migration runs while the OLD code is still loaded, so a
-    // failed migration aborts the reload with nothing changed.
-    if ( options.migrateState && !options.migrateState( pluginDir ) )
+    // failed migration aborts the reload with nothing changed. A THROWING
+    // migrateState counts as a failed migration too — a caller-supplied
+    // callback must never escape this transaction untyped.
+    if ( options.migrateState && !migrateStateSafely( options.migrateState, pluginDir ) )
     {
         addDiagnostic( PluginDiagnosticCode::InitializationFailed,
                        PluginDiagnosticSeverity::Error,
@@ -1463,7 +1482,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
 
     // Step 6: state migration while the OLD version is still loaded — a
     // failed migration aborts with nothing changed (same seam as reload()).
-    if ( options.migrateState && !options.migrateState( target ) )
+    if ( options.migrateState && !migrateStateSafely( options.migrateState, target ) )
     {
         dropUpgradeSnapshot();
         addDiagnostic( PluginDiagnosticCode::InitializationFailed,
@@ -1503,7 +1522,18 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     //   otherwise (the same bad-state set as the step-9 publish check).
     const auto oldGenerationOk = [&]() -> bool {
         if ( wasLoaded )
-            return load( id );
+        {
+            if ( load( id ) )
+                return true;
+            // A setEnabled(false) racing the transaction leaves the
+            // restored generation consistently Disabled — the old bytes
+            // are intact and deliberately not loaded, which IS a usable
+            // restore outcome (a Failed here would misreport an intact
+            // rollback as unrecoverable).
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            const PluginRecord *entry = record( id );
+            return entry && entry->state == PluginState::Disabled;
+        }
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         const PluginRecord *entry = record( id );
         return entry && entry->state != PluginState::Broken
@@ -1554,12 +1584,15 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
              || landed.id != fresh.id || landed.version != fresh.version )
         {
             installed = false;
-            addDiagnostic( PluginDiagnosticCode::TrustRejected,
-                           PluginDiagnosticSeverity::Error,
-                           "install/upgrade refused: the landed bytes do not "
-                           "match the gated manifest (source changed "
-                           "mid-transaction)",
-                           id );
+            // Record into installLog, not mDiagnostics: the refresh()
+            // below clears mDiagnostics, while installLog is merged AFTER
+            // it — the refusal evidence survives either way.
+            installLog.add( PluginDiagnosticCode::TrustRejected,
+                            PluginDiagnosticSeverity::Error,
+                            "install/upgrade refused: the landed bytes do not "
+                            "match the gated manifest (source changed "
+                            "mid-transaction)",
+                            id );
         }
     }
     if ( !installed )
@@ -1581,13 +1614,17 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         if ( !intact )
         {
             std::string restoreError;
-            if ( !restorePluginSnapshot( upgradeDir, target, id, restoreError ) )
+            const bool restored =
+                restorePluginSnapshot( upgradeDir, target, id, restoreError );
+            refresh();
+            // AFTER refresh(): refreshUnlocked() clears mDiagnostics — an
+            // earlier add would erase the restore-failure evidence.
+            if ( !restored )
                 addDiagnostic( PluginDiagnosticCode::ResourceMissing,
                                PluginDiagnosticSeverity::Error,
                                "install/upgrade rollback could not restore "
                                "the snapshot: " + restoreError,
                                id );
-            refresh();
         }
         if ( oldGenerationOk() )
         {
@@ -1730,6 +1767,29 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
                               PluginDiagnosticSeverity::Error,
                               "uninstall refused: a load is in flight for this "
                               "plugin; retry once it settles",
+                              pluginId );
+            return false;
+        }
+    }
+
+    // Shadow guard BEFORE the drain (same rule as installOrUpgrade): the
+    // record may resolve to an earlier discovery root — unloading THAT
+    // generation to remove a user-root copy would be wrong, and with no
+    // user copy at all the uninstall would fail after a pointless unload.
+    const std::string target =
+        PluginDiscovery::userPluginRoot() + "/" + pluginId;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( pluginId );
+        if ( entry && entry->directory != target )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "uninstall refused: '" + pluginId + "' resolves to "
+                                  + entry->directory
+                                  + " outside the user plugin root (an earlier "
+                                    "discovery root shadows it); nothing was "
+                                    "uninstalled or unloaded",
                               pluginId );
             return false;
         }
