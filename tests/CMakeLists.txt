@@ -11574,3 +11574,59 @@ endif()
 # standard sicnu_add_test registration is kept and the vendored gui is built
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
+
+# ---------------------------------------------------------------------------
+# Platform 13.0: EO Model Runtime 13.0 ensemble execution (this track).
+# All three suites share the model-runtime closure; appended at the tail so
+# parallel tracks' append-only hunks stay conflict-free.
+# ---------------------------------------------------------------------------
+sicnu_add_test(test_ensemble_detection TIMEOUT 300)
+target_link_libraries(test_ensemble_detection PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_ensemble_detection)
+target_include_directories(test_ensemble_detection PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+sicnu_add_test(test_ensemble_scene TIMEOUT 300)
+target_link_libraries(test_ensemble_scene PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_ensemble_scene)
+target_include_directories(test_ensemble_scene PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+sicnu_add_test(test_ensemble_parallel TIMEOUT 600 RUN_SERIAL TRUE)
+target_link_libraries(test_ensemble_parallel PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_ensemble_parallel)
+target_include_directories(test_ensemble_parallel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
