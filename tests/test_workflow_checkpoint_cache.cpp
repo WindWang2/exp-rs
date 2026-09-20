@@ -17,6 +17,7 @@
 #include <QSignalSpy>
 #include <QtEndian>
 #include <QTimer>
+#include <QThread>
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,8 @@
 #include "workflow/pipeline_run_coordinator.h"
 #include "workflow/workflow_provenance.h"
 #include "workflow/workflow_dag_analyzer.h"
+
+#include "runtime/observability/fault_registry.h"
 
 using namespace sicnu::workflow;
 
@@ -98,6 +101,17 @@ bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 2000
     QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
     loop.exec();
     return spy.count() >= 1 || coordinator.hasCompleted();
+}
+
+/// Waits for a foreign thread while pumping events: a blocking marshal onto
+/// the affinity thread only completes when this (the affinity) thread
+/// services its event loop.
+bool waitForThread( QThread *thread, int timeoutMs = 30000 )
+{
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
+    while ( !thread->isFinished() && QDateTime::currentMSecsSinceEpoch() < deadline )
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    return thread->isFinished();
 }
 
 } // namespace
@@ -483,9 +497,7 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
     // The reader blocks inside marshalled accessor calls until the
     // coordinator's thread services them: keep pumping events until it
     // observed the terminal state (bounded — then release it via `stop`).
-    const qint64 pumpDeadline = QDateTime::currentMSecsSinceEpoch() + 30000;
-    while ( !reader->isFinished() && QDateTime::currentMSecsSinceEpoch() < pumpDeadline )
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    REQUIRE( waitForThread( reader ) );
     stop.store( true );
     REQUIRE( reader->wait( 30000 ) );
     delete reader;
@@ -1502,4 +1514,548 @@ TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][wo
         (void) provResult.isSuccess();
     }
     SUCCEED( "150+120 mutations: no crash, all fail-closed" );
+}
+
+// ---------------------------------------------------------------------------
+// Track 13 (workflow durability): strong artifact identity, coordinator
+// affinity, and recovery stress. See
+// .planning/ds41-workflow-durability-13/DECISIONS.md.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Deterministic pseudo-random filler (LCG): a mid-file rewrite is a real
+/// content change, not a re-run of identical bytes.
+quint64 lcgNext( quint64 &state )
+{
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return state;
+}
+
+/// Writes @p bytes of pseudo-random data for node_1 (a small artifact for
+/// every other node). @p ready (optional) is set once the artifact is fully
+/// on disk — the signal a cancelling thread waits for.
+NodeExecutor bigArtifactExecutor( qint64 bytes, std::atomic<bool> *ready = nullptr,
+                                  QString *outPath = nullptr )
+{
+    return [bytes, ready, outPath]( const NodeFact &node, const QHash<QString, QString> &,
+                                    const QString &runDirectory ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        QDir().mkpath( runDirectory );
+        const QString artifact =
+            QDir( runDirectory ).filePath( QStringLiteral( "%1.artifact" ).arg( node.nodeId ) );
+        QFile file( artifact );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        {
+            result.errorMessage = QStringLiteral( "cannot write big artifact for '%1'" ).arg( node.nodeId );
+            return result;
+        }
+        if ( node.nodeId == QLatin1String( "node_1" ) )
+        {
+            QByteArray block( 1024 * 1024, '\0' );
+            quint64 state = 0x9E3779B97F4A7C15ULL;
+            qint64 written = 0;
+            while ( written < bytes )
+            {
+                const qint64 chunk = qMin<qint64>( block.size(), bytes - written );
+                for ( int i = 0; i < chunk; ++i )
+                    block[i] = static_cast<char>( lcgNext( state ) >> 33 );
+                if ( file.write( block.constData(), chunk ) != chunk )
+                {
+                    result.errorMessage = QStringLiteral( "short write for '%1'" ).arg( node.nodeId );
+                    return result;
+                }
+                written += chunk;
+            }
+            if ( outPath )
+                *outPath = artifact;
+        }
+        else
+        {
+            file.write( QByteArrayLiteral( "small" ) );
+        }
+        file.close();
+        if ( ready )
+            ready->store( true, std::memory_order_release );
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    };
+}
+
+/// Rewrites @p count bytes at @p offset with different content, preserving
+/// the file size — and restores the recorded mtime so ONLY a content hash
+/// can see the change.
+bool tamperMiddle( const QString &path, qint64 offset, qint64 count, qint64 recordedMtimeMs )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadWrite ) )
+        return false;
+    if ( !file.seek( offset ) )
+        return false;
+    const QByteArray garbage( static_cast<qsizetype>( count ), 'Z' );
+    if ( file.write( garbage ) != garbage.size() )
+        return false;
+    file.close();
+    return restoreMtime( path, recordedMtimeMs );
+}
+
+/// Independent wall-time cost of hashing @p path in 1 MiB chunks — the
+/// reference the cancel-latency assertion calibrates against.
+qint64 fullHashCostMs( const QString &path )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return -1;
+    const qint64 started = QDateTime::currentMSecsSinceEpoch();
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    while ( !file.atEnd() )
+        hash.addData( file.read( 1024 * 1024 ) );
+    const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - started;
+    file.close();
+    return hash.result().isEmpty() ? -1 : elapsed;
+}
+
+int tmpResidueCount( const QString &dir )
+{
+    return QDir( dir ).entryList( QStringList{ QStringLiteral( "*.tmp.*" ) }, QDir::Files ).size();
+}
+
+} // namespace
+
+TEST_CASE( "A mid-file tamper of a large artifact is caught by the full identity scheme",
+           "[d17][workflow][identity]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "identity-full" ) );
+    QString bigPath;
+    QString checkpoint;
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( bigArtifactExecutor( 3 * 1024 * 1024, nullptr, &bigPath ) );
+        REQUIRE( coordinator.startRun( chain( 2 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpoint = coordinator.checkpointPath();
+    }
+    REQUIRE( QFile::exists( bigPath ) );
+    REQUIRE( QFileInfo( bigPath ).size() == 3 * 1024 * 1024 );
+
+    // Auto records sha256full exactly when the artifact outgrows the fast
+    // window — the middle of a >2 MiB file is where sha256fl is blind.
+    const QJsonObject doc = readJsonObject( checkpoint );
+    const QJsonObject entry = nodeEntry( doc, QStringLiteral( "node_1" ) );
+    const QString recorded = entry.value( QLatin1String( "artifactFingerprint" ) ).toString();
+    REQUIRE( recorded.startsWith( QStringLiteral( "sha256full:" ) ) );
+    const qint64 recordedMtime = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger();
+
+    // Adversarial rewrite: 64 KiB in the MIDDLE, same size, mtime restored.
+    REQUIRE( tamperMiddle( bigPath, 1024 * 1024 + 512 * 1024, 64 * 1024, recordedMtime ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    // The tampered node recomputes; the untouched small-artifact sibling
+    // (recorded sha256fl) stays a verified cache hit.
+    REQUIRE( executed.load() == 1 );
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).state == ExecutionState::Succeeded );
+    REQUIRE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+}
+
+TEST_CASE( "The legacy sha256fl scheme keeps its documented fast-window semantics",
+           "[d17][workflow][identity]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "identity-fast" ) );
+    QString bigPath;
+    QString checkpoint;
+    {
+        PipelineRunCoordinator coordinator;
+        // Fast forces the legacy scheme for every artifact — including the
+        // 3 MiB one whose middle sha256fl cannot see.
+        coordinator.setArtifactIdentityMode( ArtifactIdentityMode::Fast );
+        coordinator.setExecutor( bigArtifactExecutor( 3 * 1024 * 1024, nullptr, &bigPath ) );
+        REQUIRE( coordinator.startRun( chain( 2 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpoint = coordinator.checkpointPath();
+    }
+    const QJsonObject entry = nodeEntry( readJsonObject( checkpoint ), QStringLiteral( "node_1" ) );
+    REQUIRE( entry.value( QLatin1String( "artifactFingerprint" ) ).toString()
+             == QStringLiteral( "sha256fl:%1" ).arg(
+                 testFingerprint( bigPath, QFileInfo( bigPath ).size() ).mid( 9 ) ) );
+    const qint64 recordedMtime = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger();
+
+    // The SAME adversarial fixture the full scheme catches: a mid-file
+    // rewrite is invisible to the fast window. This is the documented legacy
+    // limitation (flash-workflow-engine-12 DECISIONS D3) — asserted here so
+    // the discrimination of the full-mode oracle above is provable, not
+    // assumed: identical bytes, identical mtime, opposite verdicts.
+    REQUIRE( tamperMiddle( bigPath, 1024 * 1024 + 512 * 1024, 64 * 1024, recordedMtime ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 0 ); // served: the fast scheme's own contract
+    REQUIRE( resumeCoordinator.getAllStatuses().value( QStringLiteral( "node_1" ) ).isCacheHit );
+}
+
+TEST_CASE( "An unknown artifact fingerprint tag fails closed", "[d17][workflow][identity]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "identity-tag" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    for ( const QString forged : { QStringLiteral( "sha256md5:deadbeef" ),
+                                   QStringLiteral( "sha1:deadbeef" ),
+                                   QStringLiteral( "" ) } )
+    {
+        QJsonObject doc = readJsonObject( checkpoint );
+        mutateNodeEntry( doc, QStringLiteral( "node_2" ), [&forged]( QJsonObject &entry ) {
+            entry.insert( QLatin1String( "artifactFingerprint" ), forged );
+        } );
+        REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+        std::atomic<int> executed{ 0 };
+        PipelineRunCoordinator resumeCoordinator;
+        resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+        QString error;
+        REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+        REQUIRE( waitForCompleted( resumeCoordinator ) );
+        INFO( qPrintable( forged ) );
+        REQUIRE( executed.load() == 1 );
+        REQUIRE_FALSE( resumeCoordinator.getAllStatuses().value( QStringLiteral( "node_2" ) ).isCacheHit );
+    }
+}
+
+TEST_CASE( "A foreign-thread identity-mode change applies to the next success",
+           "[d17][workflow][affinity]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "affinity-mode" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+
+    // Every public mutator marshals onto the affinity thread: a foreign
+    // caller's setArtifactIdentityMode must land before startRun reads it.
+    QThread *setter = QThread::create( [&coordinator]() {
+        coordinator.setArtifactIdentityMode( ArtifactIdentityMode::Full );
+        coordinator.setMaxParallelism( 3 );
+    } );
+    setter->start();
+    REQUIRE( waitForThread( setter ) );
+    delete setter;
+
+    REQUIRE( coordinator.artifactIdentityMode() == ArtifactIdentityMode::Full );
+    REQUIRE( coordinator.startRun( chain( 2 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const QString checkpoint = coordinator.checkpointPath();
+    const QJsonObject entry = nodeEntry( readJsonObject( checkpoint ), QStringLiteral( "node_1" ) );
+    // Full mode records the whole-file scheme even for a tiny artifact.
+    REQUIRE( entry.value( QLatin1String( "artifactFingerprint" ) ).toString()
+             .startsWith( QStringLiteral( "sha256full:" ) ) );
+}
+
+TEST_CASE( "A foreign-thread startRun while a run is active is refused, not raced",
+           "[d17][workflow][affinity]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "affinity-double-start" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    REQUIRE( coordinator.startRun( chain( 12 ), dir ) );
+
+    std::atomic<int> accepted{ 0 };
+    QString errorSeen; // written by the intruder, read after its join
+    QThread *intruder = QThread::create( [&coordinator, &accepted, &errorSeen, &dir]() {
+        QString error;
+        if ( coordinator.startRun( chain( 12 ), dir, &error ) )
+            accepted.fetch_add( 1 );
+        else
+            errorSeen = error; // join below publishes it
+    } );
+    intruder->start();
+    REQUIRE( waitForCompleted( coordinator ) );
+    REQUIRE( waitForThread( intruder ) );
+    delete intruder;
+
+    // The marshalled mutator observes the live run and refuses it — the same
+    // answer the affinity thread would have given, with no state race.
+    REQUIRE( accepted.load() == 0 );
+    REQUIRE( errorSeen.contains( QStringLiteral( "already active" ) ) );
+
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 12 );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "requestCancel during a whole-file hash returns promptly and cancels the node",
+           "[d17][workflow][identity][cancel]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "cancel-hash" ) );
+    constexpr qint64 kBigBytes = 512 * 1024 * 1024;
+    std::atomic<bool> ready{ false };
+
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( bigArtifactExecutor( kBigBytes, &ready ) );
+    REQUIRE( coordinator.startRun( chain( 1 ), dir ) );
+
+    // Cancel as soon as the artifact is fully written — i.e. while the
+    // affinity thread is (about to be) inside the whole-file hash.
+    std::atomic<qint64> cancelMs{ -1 };
+    QThread *canceller = QThread::create( [&coordinator, &ready, &cancelMs]() {
+        while ( !ready.load( std::memory_order_acquire ) )
+            QThread::yieldCurrentThread();
+        QThread::msleep( 50 ); // let the hash get deep into the file
+        const qint64 started = QDateTime::currentMSecsSinceEpoch();
+        coordinator.requestCancel();
+        cancelMs.store( QDateTime::currentMSecsSinceEpoch() - started );
+    } );
+    canceller->start();
+    REQUIRE( waitForCompleted( coordinator, 120000 ) );
+    REQUIRE( waitForThread( canceller, 60000 ) );
+    delete canceller;
+
+    // The node is Cancelled — the run as a whole did not produce it — and no
+    // identity was recorded for the aborted hash.
+    const auto statuses = coordinator.getAllStatuses();
+    const NodeStatusSnapshot snapshot = statuses.value( QStringLiteral( "node_1" ) );
+    REQUIRE( snapshot.state == ExecutionState::Cancelled );
+    REQUIRE( snapshot.artifactFingerprint.isEmpty() );
+    REQUIRE( coordinator.hasCompleted() );
+    REQUIRE_FALSE( coordinator.isRunning() );
+
+    // Promptness: requestCancel never waits for the whole file — it returns
+    // after the hash aborts (one chunk) plus the marshal, which is strictly
+    // cheaper than hashing the artifact end to end.
+    const qint64 hashMs = fullHashCostMs(
+        QDir( dir ).filePath( QStringLiteral( "node_1.artifact" ) ) );
+    INFO( qPrintable( QStringLiteral( "cancelMs=%1 fullHashMs=%2" )
+                          .arg( cancelMs.load() ).arg( hashMs ) ) );
+    REQUIRE( hashMs > 0 );
+    REQUIRE( cancelMs.load() >= 0 );
+    REQUIRE( cancelMs.load() < hashMs );
+
+    // No partial publish: the checkpoint on disk parses and records the
+    // cancelled node without an artifact identity; no tmp residue remains.
+    const QString checkpoint = coordinator.checkpointPath();
+    REQUIRE( QFile::exists( checkpoint ) );
+    const QJsonObject entry = nodeEntry( readJsonObject( checkpoint ), QStringLiteral( "node_1" ) );
+    REQUIRE( entry.value( QLatin1String( "state" ) ).toString() == QStringLiteral( "Cancelled" ) );
+    REQUIRE( entry.value( QLatin1String( "artifactFingerprint" ) ).toString().isEmpty() );
+    REQUIRE( tmpResidueCount( dir ) == 0 );
+}
+
+TEST_CASE( "A foreign-thread destruction mid-run drains without racing the owner",
+           "[d17][workflow][affinity][lifetime]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "affinity-destroy" ) );
+    PipelineRunCoordinator *coordinator = new PipelineRunCoordinator;
+    coordinator->setExecutor( []( const NodeFact &node, const QHash<QString, QString> &,
+                                  const QString &runDirectory ) -> NodeExecutionResult {
+        QThread::msleep( 25 ); // keep the run alive across the destruction
+        return makeSyntheticNodeExecutor()( node, {}, runDirectory );
+    } );
+    coordinator->setMaxParallelism( 2 );
+    REQUIRE( coordinator->startRun( chain( 8 ), dir ) );
+
+    std::atomic<bool> destroyed{ false };
+    QThread *killer = QThread::create( [&coordinator, &destroyed]() {
+        QThread::msleep( 60 ); // mid-run: nodes dispatched, completions queued
+        delete coordinator;    // foreign-thread destruction
+        destroyed.store( true );
+    } );
+    killer->start();
+
+    // The affinity thread services the destructor's marshalled drain; keep
+    // pumping events until it lands (bounded).
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + 60000;
+    while ( !destroyed.load() && QDateTime::currentMSecsSinceEpoch() < deadline )
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+    REQUIRE( destroyed.load() );
+    REQUIRE( waitForThread( killer, 60000 ) );
+    delete killer;
+    SUCCEED( "foreign-thread destruction completed without deadlock or crash" );
+}
+
+TEST_CASE( "Concurrent foreign readers never observe a torn run state",
+           "[d17][workflow][affinity]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "affinity-readers" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> torn{ 0 };
+    std::atomic<int> reads{ 0 };
+    QThread *reader = QThread::create( [&coordinator, &stop, &torn, &reads]() {
+        while ( !stop.load() )
+        {
+            const auto statuses = coordinator.getAllStatuses();
+            const bool running = coordinator.isRunning();
+            const bool completed = coordinator.hasCompleted();
+            const QString checkpoint = coordinator.checkpointPath();
+            const QString provenance = coordinator.provenancePath();
+            if ( statuses.size() != 10 )
+                torn.fetch_add( 1 );
+            for ( const NodeStatusSnapshot &snapshot : statuses )
+            {
+                if ( executionStateString( snapshot.state ) == QLatin1String( "Unknown" ) )
+                    torn.fetch_add( 1 );
+                // A recorded identity must be one of the known schemes.
+                if ( !snapshot.artifactFingerprint.isEmpty()
+                     && !snapshot.artifactFingerprint.startsWith( QStringLiteral( "sha256" ) ) )
+                    torn.fetch_add( 1 );
+            }
+            if ( !running && !completed && checkpoint.isEmpty() && provenance.isEmpty() )
+                torn.fetch_add( 1 ); // idle reads must be self-consistent
+            reads.fetch_add( 1 );
+            if ( completed )
+                break;
+        }
+    } );
+    REQUIRE( coordinator.startRun( chain( 10 ), dir ) );
+    reader->start();
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    REQUIRE( waitForThread( reader ) );
+    stop.store( true );
+    REQUIRE( reader->wait( 30000 ) );
+    delete reader;
+
+    CHECK( torn.load() == 0 );
+    CHECK( reads.load() > 0 );
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 10 );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "A crash at the checkpoint publish boundary keeps the previous checkpoint intact",
+           "[d17][workflow][recovery]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "crash-publish" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+    const QJsonObject before = readJsonObject( checkpoint );
+
+    // Arm the publish fault: every subsequent checkpoint rename fails and
+    // routes through the real failure branch (tmp removed, nothing promoted).
+    sicnu::runtime::observability::fault::ArmedFault armed{
+        sicnu::runtime::observability::fault::FaultAction{
+            "d17_checkpoint.publish", sicnu::runtime::observability::fault::Mode::Always, 1, "" }
+    };
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    // The checkpoint still loads and the resume still completes: a failed
+    // persist is a lost recovery aid, never a failed run.
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const QJsonObject after = readJsonObject( checkpoint );
+    // The on-disk document is byte-identical to the pre-crash one: the
+    // rename never happened, so nothing torn or half-written was promoted.
+    REQUIRE( after == before );
+    REQUIRE( executed.load() == 0 ); // every node stayed a verified cache hit
+    REQUIRE( tmpResidueCount( runDir ) == 0 );
+}
+
+TEST_CASE( "A failed provenance publish never fails the run and leaves no residue",
+           "[d17][workflow][recovery]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "crash-provenance" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    sicnu::runtime::observability::fault::ArmedFault armed{
+        sicnu::runtime::observability::fault::FaultAction{
+            "d17_provenance.publish", sicnu::runtime::observability::fault::Mode::Always, 1, "" }
+    };
+    bool completed = false;
+    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted,
+                      [&completed]( bool success, const QString & ) { completed = success; } );
+    REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    // Provenance is audit output: the run succeeds, no provenance path is
+    // published, and the failed publish left no tmp residue behind.
+    REQUIRE( completed );
+    REQUIRE( coordinator.provenancePath().isEmpty() );
+    REQUIRE( tmpResidueCount( dir ) == 0 );
+    REQUIRE( QDir( dir ).entryList( QStringList{ QStringLiteral( "provenance_*" ) }, QDir::Files )
+                 .isEmpty() );
+}
+
+TEST_CASE( "A corrupt provenance file beside a valid checkpoint does not affect resume",
+           "[d17][workflow][recovery]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "provenance-corrupt" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Plant a corrupt provenance record in the run directory.
+    const QString planted = QDir( runDir ).filePath( QStringLiteral( "provenance_evil.json" ) );
+    {
+        QFile file( planted );
+        REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        REQUIRE( file.write( "{\"kind\":\"d17_provenance\",\"edges\":[dangling" ) > 0 );
+    }
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 0 ); // full verified prefix, provenance ignored
+    for ( const NodeStatusSnapshot &snapshot : resumeCoordinator.getAllStatuses() )
+        REQUIRE( snapshot.isCacheHit );
+}
+
+TEST_CASE( "A moved artifact is never served on resume", "[d17][workflow][identity]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "artifact-moved" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    const QJsonObject entry = nodeEntry( readJsonObject( checkpoint ), QStringLiteral( "node_2" ) );
+    const QString artifact = entry.value( QLatin1String( "artifact" ) ).toString();
+    REQUIRE( QFile::exists( artifact ) );
+    const QString elsewhere = scratchDir( QStringLiteral( "moved-away" ) )
+        + QLatin1Char( '/' ) + QFileInfo( artifact ).fileName();
+    REQUIRE( QFile::rename( artifact, elsewhere ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 1 );
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
 }

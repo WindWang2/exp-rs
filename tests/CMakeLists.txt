@@ -10753,6 +10753,30 @@ foreach(_d17_embeds_coordinator
     test_d17_workflow_pipeline_e2e)
   target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
 endforeach()
+
+# --- Track 13 (workflow durability): Engine-2.0 lineage envelope, checkpoint
+# election, legacy migration and runId fuzz. Light lane: the checkpoint/run
+# sources are compiled directly so the suite stays independent of the
+# qgis/task_center chain (same pattern as the D17 targets above).
+add_executable(test_workflow_durability_13 test_workflow_durability_13.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_definition.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
+)
+target_link_libraries(test_workflow_durability_13 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Network
+  jsoncpp
+)
+target_include_directories(test_workflow_durability_13 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_durability_13)
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------
