@@ -244,9 +244,17 @@ rem ---------------------------------------------------------------------------
 shift
 set "BDIR=%REPO_ROOT%\build-smoke"
 set "BASECACHE="
+set "CATCH2SRC="
 :smoke_args
 if "%~1"=="--build-dir" (set "BDIR=%~2" & shift & shift & goto :smoke_args)
 if "%~1"=="--base-cache" (set "BASECACHE=%~2" & shift & shift & goto :smoke_args)
+if "%~1"=="--catch2-source" (set "CATCH2SRC=%~2" & shift & shift & goto :smoke_args)
+rem A relative build dir would land in the CURRENT directory (e.g. under
+rem scripts\windows); anchor it to the repo root like the POSIX wrapper does.
+if "%BDIR:~1,2%"==":\" goto :smoke_bdir_done
+if "%BDIR:~1,1%"==":" goto :smoke_bdir_done
+set "BDIR=%REPO_ROOT%\%BDIR%"
+:smoke_bdir_done
 if exist "%BDIR%" (
   echo build.cmd: removing stale build dir %BDIR% ^(clean-tree gate^)
   rmdir /s /q "%BDIR%"
@@ -275,6 +283,13 @@ if not "%BASECACHE%"=="" (
   rem would arrive at the callee as two arguments.
   set "SEED=!SEED! "-DVCPKG_MANIFEST_MODE=OFF""
   echo build.cmd: seeded toolchain locations from %BASECACHE% ^(dependencies re-discovered fresh^)
+)
+if not "%CATCH2SRC%"=="" (
+  rem Offline escape hatch: the repo's own Catch2 FetchContent (locked tag
+  rem v3.7.1) is the only network step in configure; point it at a prepared
+  rem clone so the gate never needs egress.
+  set "SEED=%SEED% "-DFETCHCONTENT_SOURCE_DIR_CATCH2=%CATCH2SRC%""
+  echo build.cmd: using local Catch2 source %CATCH2SRC%
 )
 call :run_logged configure cmake -G Ninja -S "%REPO_ROOT%" -B "%BDIR%" %SEED%
 if errorlevel 1 (echo build.cmd: smoke: clean-tree configure FAILED 1>&2 & exit /b 1)

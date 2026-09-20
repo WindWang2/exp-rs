@@ -260,7 +260,8 @@ cmd_configure() {
             --preset) preset=$2; shift 2 ;;
             --build-type) build_type=$2; shift 2 ;;
             --base-cache) base_cache=$2; shift 2 ;;
-            --) shift; extra=("$@"); break ;;
+            --) shift; extra+=("$@"); break ;;
+            -D*) extra+=("$1"); shift ;;
             *) fail "configure: unknown option: $1" ;;
         esac
     done
@@ -324,10 +325,12 @@ cmd_test() {
 cmd_smoke() {
     local build_dir="$repo_root/build-smoke"
     local base_cache=""
+    local catch2_source=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --build-dir) build_dir=$2; shift 2 ;;
             --base-cache) base_cache=$2; shift 2 ;;
+            --catch2-source) catch2_source=$2; shift 2 ;;
             *) fail "smoke: unknown option: $1" ;;
         esac
     done
@@ -340,8 +343,14 @@ cmd_smoke() {
         rm -rf "$build_dir"
     fi
     mkdir -p "$build_dir" || fail "smoke: cannot create $build_dir"
-    if [ -n "$base_cache" ]; then
-        cmd_configure --build-dir "$build_dir" --base-cache "$base_cache" || {
+    local seeded=()
+    [ -n "$base_cache" ] && seeded+=(--base-cache "$base_cache")
+    # Offline escape hatch: the repo's own Catch2 FetchContent (locked tag
+    # v3.7.1) is the only network step in configure; point it at a prepared
+    # clone so the gate never needs egress.
+    [ -n "$catch2_source" ] && seeded+=(-DFETCHCONTENT_SOURCE_DIR_CATCH2="$catch2_source")
+    if [ ${#seeded[@]} -gt 0 ]; then
+        cmd_configure --build-dir "$build_dir" -- "${seeded[@]}" || {
             local elog="$(log_dir)/configure/run.log"
             if grep -qE "rc.*not found|系统找不到指定的文件|CMake Error at CMakeTestCXXCompiler|is not able to compile a simple test" "$elog" 2>/dev/null; then
                 note "the compiler cannot link — the MSVC developer environment is missing."
