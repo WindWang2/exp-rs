@@ -59,6 +59,10 @@ Out of scope (recorded, not fixed):
   not fabricated.
 - The F1/HelpCenter/help-viewer consolidation (help-system tracks).
 
+## Cross-track compile-break repair (please route to the workflow track)
+
+`origin/master` @ `adf8f9895` does **not compile**: commit `61a8c9b0d` ("fix(workflow): unwedge resume/cancel state-machine dead ends", 2026-09-19 23:38, ancestor of HEAD) declared `const WorkflowDocument resumedDef = parsed.value();` and later `const WorkflowDocument &resumedDef = m_state->def;` in the same function body of `PipelineRunCoordinator::resumeFromCheckpoint` (MSVC C2373/C2530/C2143). `m_state->def` is assigned from `resumedDef` four lines above the second use, so the second declaration is a pure alias of identical content. This PR removes that one line (commit `8a95744b8`) because `sicnu_workflow` is a link dependency of the capability test targets and no gate could be built or verified while master was broken. If the workflow track's intended resolution differs (e.g. renaming), re-land theirs and drop this hunk — behavior is identical either way.
+
 ## Design
 
 Authority map (`.planning/ds41-capability-help-sync/AUTHORITY_MAP.md`): the
