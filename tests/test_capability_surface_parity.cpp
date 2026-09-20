@@ -79,6 +79,24 @@ using namespace sicnu::help;
 
 namespace {
 
+/// Constructed before any TEST_CASE body: resolveRuntimeDataPath() walks up
+/// from applicationDirPath(), which needs an application instance to return
+/// anything other than an empty path.
+struct AppInitializer
+{
+    AppInitializer()
+    {
+        if ( !QCoreApplication::instance() )
+        {
+            static int argc = 1;
+            static char arg0[] = "test_capability_surface_parity";
+            static char *argv[] = { arg0 };
+            new QCoreApplication( argc, argv );
+        }
+    }
+};
+const AppInitializer g_appInitializer;
+
 std::string canonicalJson( const Json::Value &value )
 {
     Json::StreamWriterBuilder builder;
@@ -129,8 +147,11 @@ struct Bootstrap
             registryRs.push_back( name );
         std::sort( registryRs.begin(), registryRs.end() );
 
+        // Task-declaring universe = EVERY descriptor with a task family,
+        // provider algorithms included (gdal:polygonize legitimately declares
+        // one and has a sidecar A); the rs: filter would wrongly flag it.
         for ( const auto &desc : processing::AtomicAlgorithmRegistry::instance().listDescriptors() )
-          if ( desc.id.rfind( "rs:", 0 ) == 0 && !desc.agentMetadata.taskFamily.empty() )
+          if ( !desc.agentMetadata.taskFamily.empty() )
             taskDeclaring.push_back( desc.id );
         std::sort( taskDeclaring.begin(), taskDeclaring.end() );
 
@@ -425,10 +446,11 @@ TEST_CASE( "get_algorithm_schema matches the descriptor and the CLI raw schema o
         REQUIRE( server.callTool( QStringLiteral( "get_algorithm_schema" ),
                                   QVariantMap{ { QStringLiteral( "algorithm_id" ),
                                                  QString::fromStdString( id ) } } ) );
-        const QVariant schemaOutVariant = server.toolOutput();
-        const QVariantMap schemaOut = schemaOutVariant.toMap();
-        const QVariant inputSchema = schemaOut.value( QStringLiteral( "input_schema" ) );
-        REQUIRE( inputSchema.isValid() );
+        const QVariantMap schemaOut = server.toolOutput().toMap();
+        // handleGetAlgorithmSchema spreads the input schema at the TOP LEVEL
+        // (properties/required/title/type) plus algorithm_id/outputs/metadata.
+        const QVariant inputSchema = QVariant( schemaOut );
+        REQUIRE( inputSchema.toMap().contains( QStringLiteral( "properties" ) ) );
         const auto descriptorParams = paramSignatures( adapter->descriptor().toInputSchema() );
         const auto projectedParams = paramSignatures( inputSchema );
         REQUIRE( projectedParams == descriptorParams );
