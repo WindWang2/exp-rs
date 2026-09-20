@@ -208,6 +208,11 @@ struct MirrorVerifyReport
     std::uint64_t unreferencedFiles = 0;  ///< files in chunks/ the manifest
                                           ///< never names (orphans)
     std::uint64_t unreferencedBytes = 0;  ///< orphan file bytes
+    /// 13.0: chunk-dir entries verify could not classify — a name that does
+    /// not convert to UTF-8 (Windows invalid boundary), a failed stat, or
+    /// a symlink/reparse point. Counted so the audit admits what it could
+    /// not see instead of reporting a clean mirror.
+    std::uint64_t unclassifiedEntries = 0;
     std::uint64_t bytesChecked = 0;       ///< payload bytes hashed
     bool manifestUnreadable = false;      ///< verify REFUSES to conclude
                                           ///< (maintenance must not act)
@@ -239,6 +244,14 @@ struct MirrorPruneReport
 {
     bool manifestUnreadable = false;    ///< prune REFUSED to act
     std::uint64_t orphanFilesRemoved = 0;   ///< files the manifest never named
+    /// 13.0: orphans prune REFUSED to delete — a name that does not
+    /// convert to UTF-8 (cannot prove it unreferenced) or a
+    /// symlink/reparse point (never delete through a link). The file is
+    /// left in place; the count is the refusal audit.
+    std::uint64_t orphanFilesRefused = 0;
+    /// 13.0: orphans whose removal was attempted and failed (locked file,
+    /// read-only directory, racing unlink) — fail-closed, file kept.
+    std::uint64_t orphanFilesFailed = 0;
     std::uint64_t deadEntriesRemoved = 0;   ///< entries whose file was gone
     std::uint64_t expiredEntriesRemoved = 0;///< entries past maxAgeSeconds
     std::uint64_t quotaEntriesRemoved = 0;  ///< entries dropped for the budget

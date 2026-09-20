@@ -405,3 +405,7 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+# ds41-geospatial-maintenance-13 (Track H): track planning notes (markdown only; logs stay local).
+!.planning/ds41-geospatial-maintenance-13/
+.planning/ds41-geospatial-maintenance-13/*
+!.planning/ds41-geospatial-maintenance-13/*.md
