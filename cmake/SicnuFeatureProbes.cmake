@@ -99,7 +99,10 @@ macro(sicnu_feature_probe macro_name description)
                 "(values containing ';' cannot be passed; use comma expressions in CODE)")
         endif()
     endforeach()
-    if(NOT _sfp_mode STREQUAL "")
+    # Single-value keywords must have consumed their value; DEPENDS is
+    # multi-value and legitimately stays armed until the next keyword or the
+    # end of the argument list.
+    if(NOT _sfp_mode STREQUAL "" AND NOT _sfp_mode STREQUAL "deps")
         message(FATAL_ERROR
             "sicnu_feature_probe(${macro_name}): keyword ${_sfp_mode} has no value "
             "(a value equal to a keyword string is consumed as the keyword)")
