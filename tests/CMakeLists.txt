@@ -11623,3 +11623,21 @@ target_include_directories(test_spectral_detection_13 PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_detection_13)
+
+# Spectral Intelligence 13.0 work package B: independent background raster.
+add_executable(test_spectral_background_raster test_spectral_background_raster.cpp)
+target_link_libraries(test_spectral_background_raster PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_background_raster)
+target_include_directories(test_spectral_background_raster PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_spectral_background_raster)

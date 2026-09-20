@@ -20,6 +20,7 @@
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
 #include "processing/algorithms/spectral_osp.h"
+#include "processing/algorithms/spectral_resampling.h"
 #include "processing/algorithms/spectral_tcimf.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -134,7 +135,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     const int totalTiles = stream.tileCount();
     const double perTile = totalTiles > 0 ? 1.0 / totalTiles : 0.0;
 
-    // Declared-NoData predicate identical to the RX operator's.
+    // Declared-NoData predicate identical to the RX operator's (scene raster).
     std::vector<float> noDataPerBand( static_cast<size_t>( bandCount ), 0.0f );
     std::vector<uint8_t> hasNoDataPerBand( static_cast<size_t>( bandCount ), 0 );
     for ( int b = 0; b < bandCount; ++b )
@@ -146,6 +147,92 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             hasNoDataPerBand[static_cast<size_t>( b )] = 1;
             noDataPerBand[static_cast<size_t>( b )] = static_cast<float>( nd );
         }
+    }
+
+    // ---- Optional independent background raster (Spectral Intelligence 13.0,
+    // WP-B). The detectors need only SPECTRAL statistics from the background,
+    // so the raster must be spectrally compatible (same band count, wavelength
+    // grid reconcilable onto the scene grid) but NOT spatially co-registered:
+    // no shared CRS/size/grid is required. Per-pixel association is not
+    // performed by any detector, so none is demanded.
+    std::string backgroundPath = getString( params, "background", std::string() );
+    bool hasBackground = false;
+    bool backgroundResampled = false;
+    bool backgroundPartial = false;
+    bool backgroundGaussian = false;
+    std::vector<float> backgroundCenters; ///< background grid centers (nm) when resampling
+    GdalDatasetWrapper backgroundDs;
+    std::vector<float> backgroundNoDataPerBand( static_cast<size_t>( bandCount ), 0.0f );
+    std::vector<uint8_t> backgroundHasNoDataPerBand( static_cast<size_t>( bandCount ), 0 );
+    if ( !isOsp && !backgroundPath.empty() )
+    {
+        if ( !fileExists( backgroundPath ) )
+            throw RSOperatorError( ErrorCode::FileNotFound,
+                                   "Background raster not found: " + backgroundPath );
+        if ( !backgroundDs.open( QString::fromStdString( backgroundPath ) ) )
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "Failed to open background raster: " + backgroundPath );
+        if ( backgroundDs.bandCount() != bandCount )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "background raster has " + std::to_string( backgroundDs.bandCount() ) +
+                    " bands, the scene has " + std::to_string( bandCount ) +
+                    "; spectral background statistics require matching band counts" );
+        QString backgroundGridError;
+        const RasterWavelengthGrid backgroundGrid =
+            RasterWavelengthGrid::read( backgroundDs, allBands, &backgroundGridError );
+        if ( !backgroundGridError.isEmpty() )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   backgroundGridError.toStdString() );
+        if ( backgroundGrid.present && inputGrid.present &&
+             backgroundGrid.grid.centersNm != inputGrid.grid.centersNm )
+        {
+            // Both sides carry grids and they differ: reconcile the background
+            // spectra onto the scene grid with the shared kernels (Gaussian SRF
+            // when both sides carry FWHM, linear otherwise — same rule as the
+            // reference seam).
+            const float *dstFwhm =
+                inputGrid.grid.hasFwhm() ? inputGrid.grid.fwhmNm.data() : nullptr;
+            SpectralResampling::CoverageReport coverage;
+            if ( !SpectralResampling::analyzeResamplingCoverage(
+                     backgroundGrid.grid.centersNm.data(), bandCount,
+                     inputGrid.grid.centersNm.data(), dstFwhm, bandCount, &coverage ) )
+                throw RSOperatorError( ErrorCode::InvalidInputData,
+                                       "background wavelength grid is not strictly increasing" );
+            if ( coverage.none > 0 )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "background raster wavelength coverage does not reach " +
+                        std::to_string( coverage.none ) + " scene band(s): " +
+                        std::to_string( inputGrid.grid.centersNm.front() ) + "-" +
+                        std::to_string( inputGrid.grid.centersNm.back() ) +
+                        " nm scene grid vs background " +
+                        std::to_string( backgroundGrid.grid.centersNm.front() ) + "-" +
+                        std::to_string( backgroundGrid.grid.centersNm.back() ) + " nm" );
+            backgroundResampled = true;
+            backgroundPartial = coverage.partial > 0;
+            backgroundGaussian = inputGrid.grid.hasFwhm() && backgroundGrid.grid.hasFwhm();
+            backgroundCenters = backgroundGrid.grid.centersNm;
+        }
+        else if ( backgroundGrid.present && !inputGrid.present )
+        {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "cannot reconcile the background raster: it carries WAVELENGTH metadata "
+                "but the scene does not; either stamp the scene grid or drop the "
+                "background grid so band-order interpretation applies" );
+        }
+        for ( int b = 0; b < bandCount; ++b )
+        {
+            bool hasNoData = false;
+            const double nd = backgroundDs.bandNoDataValue( b + 1, &hasNoData );
+            if ( hasNoData )
+            {
+                backgroundHasNoDataPerBand[static_cast<size_t>( b )] = 1;
+                backgroundNoDataPerBand[static_cast<size_t>( b )] = static_cast<float>( nd );
+            }
+        }
+        hasBackground = true;
     }
 
     double loading = 0.0;
@@ -164,68 +251,153 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     std::vector<double> invCov;
     std::vector<double> correlation;
     double backgroundCondition = -1.0;
-    if ( usesCorrelation )
+    if ( !isOsp )
     {
-        // CEM/TCIMF background: one second-moment pass over the raw spectra.
-        SpectralCem::CorrelationStats cemStats;
-        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
-                context.throwIfCancelled();
-                SpectralCem::accumulateCorrelation( bip, static_cast<size_t>( tile.width ) * tile.height,
-                                                    bandCount, &cemStats, true, noDataPerBand.data(),
-                                                    hasNoDataPerBand.data() );
-                context.reportProgress( ( ++tilesSeen ) * perTile * 0.5, "Background correlation" );
-                return true;
-            } ) )
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (correlation pass)" );
-        if ( cemStats.count == 0 )
-            throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
-        const int minSamples = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
-        if ( cemStats.count < static_cast<size_t>( minSamples ) )
-            throw RSOperatorError(
-                ErrorCode::InvalidInputData,
-                kind + " background is under-sampled: " + std::to_string( cemStats.count ) +
-                    " valid pixels for " + std::to_string( bandCount ) + " bands (minimum " +
-                    std::to_string( minSamples ) +
-                    "; enable 'loading' to use the regularized floor)" );
-        SpectralCem::finalizeCorrelation( &cemStats );
-        backgroundSamples = cemStats.count;
-        correlation = std::move( cemStats.correlation );
-        context.throwIfCancelled();
-        backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
-    }
-    else if ( !isOsp )
-    {
-        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
-                context.throwIfCancelled();
-                SpectralAnomaly::accumulateMean( bip, static_cast<size_t>( tile.width ) * tile.height,
-                                                 bandCount, &stats, true, noDataPerBand.data(),
-                                                 hasNoDataPerBand.data() );
-                context.reportProgress( ( ++tilesSeen ) * perTile * 0.33, "Background mean" );
-                return true;
-            } ) )
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (mean pass)" );
-        if ( stats.count == 0 )
-            throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
-        SpectralAnomaly::finalizeMean( &stats );
-        context.throwIfCancelled();
+        // Background statistics source: the independent background raster when
+        // given, otherwise the scene itself. The pass order and accumulators
+        // are identical on both paths — only the pixels differ.
+        GdalMultibandBlockStream backgroundStream( hasBackground ? backgroundDs : ds, bandCount,
+                                                   kTile, kTile );
+        const int backgroundTotalTiles = backgroundStream.tileCount();
+        const double backgroundPerTile =
+            backgroundTotalTiles > 0 ? 1.0 / backgroundTotalTiles : 0.0;
+        const float *bgNoData = hasBackground ? backgroundNoDataPerBand.data()
+                                              : noDataPerBand.data();
+        const uint8_t *bgHasNoData = hasBackground ? backgroundHasNoDataPerBand.data()
+                                                   : hasNoDataPerBand.data();
+        // Resampled-tile scratch (only touched when the grids differ).
+        std::vector<float> resampledTile;
+        const float kNaNf = std::numeric_limits<float>::quiet_NaN();
 
-        tilesSeen = 0;
-        if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
-                context.throwIfCancelled();
-                SpectralAnomaly::accumulateCovariance( bip, static_cast<size_t>( tile.width ) * tile.height,
-                                                       bandCount, &stats, true, noDataPerBand.data(),
-                                                       hasNoDataPerBand.data() );
-                context.reportProgress( 0.33 + ( ++tilesSeen ) * perTile * 0.33, "Background covariance" );
-                return true;
-            } ) )
-            throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (covariance pass)" );
-        SpectralAnomaly::finalizeCovariance( &stats );
-        context.throwIfCancelled();
+        // Resamples one background tile onto the scene grid, NaN-filling pixels
+        // that are invalid under the background NoData predicate or whose
+        // resampling fails. Invalid pixels are excluded from the statistics by
+        // the non-finite predicate, never scored as if valid.
+        auto resampleTile = [&]( const GdalMultibandBlockStream::Tile &tile,
+                                 const float *bip ) -> const float * {
+            if ( !backgroundResampled )
+                return bip;
+            const size_t pixels = static_cast<size_t>( tile.width ) * tile.height;
+            resampledTile.assign( pixels * bandCount, kNaNf );
+            for ( size_t p = 0; p < pixels; ++p )
+            {
+                const float *x = bip + p * bandCount;
+                bool pixelValid = true;
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    const float v = x[b];
+                    const bool checkNd = bgHasNoData && bgHasNoData[static_cast<size_t>( b )];
+                    if ( !std::isfinite( v ) || ( checkNd && v == bgNoData[static_cast<size_t>( b )] ) )
+                    {
+                        pixelValid = false;
+                        break;
+                    }
+                }
+                if ( !pixelValid )
+                    continue;
+                float *dst = resampledTile.data() + p * bandCount;
+                const bool ok =
+                    backgroundGaussian
+                        ? SpectralResampling::resampleSpectrumGaussian(
+                              x, backgroundCenters.data(), bandCount,
+                              inputGrid.grid.centersNm.data(),
+                              inputGrid.grid.fwhmNm.data(), bandCount, dst )
+                        : SpectralResampling::resampleSpectrum(
+                              x, backgroundCenters.data(), bandCount,
+                              inputGrid.grid.centersNm.data(), bandCount, dst );
+                if ( !ok )
+                    continue; // stays NaN → excluded by the predicate
+                for ( int b = 0; b < bandCount; ++b )
+                    if ( !std::isfinite( dst[b] ) )
+                    {
+                        for ( int b2 = 0; b2 < bandCount; ++b2 )
+                            dst[b2] = kNaNf;
+                        break;
+                    }
+            }
+            return resampledTile.data();
+        };
 
-        if ( !SpectralAnomaly::invertCovariance( stats.covariance, bandCount, &invCov ) )
-            throw RSOperatorError( ErrorCode::ComputationError, "Background covariance is singular" );
-        backgroundSamples = stats.count;
-        backgroundCondition = SpectralAnomaly::conditionProxy( stats.covariance, bandCount );
+        auto forEachBackgroundTile = [&]( auto &&fn ) {
+            return backgroundStream.forEach(
+                [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                    return fn( tile, resampleTile( tile, bip ) );
+                } );
+        };
+
+        if ( usesCorrelation )
+        {
+            // CEM/TCIMF background: one second-moment pass over the raw spectra.
+            SpectralCem::CorrelationStats cemStats;
+            if ( !forEachBackgroundTile(
+                     [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                         context.throwIfCancelled();
+                         SpectralCem::accumulateCorrelation(
+                             bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
+                             &cemStats, true, bgNoData, bgHasNoData );
+                         context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.5,
+                                                 "Background correlation" );
+                         return true;
+                     } ) )
+                throw RSOperatorError( ErrorCode::GdalError,
+                                       "Failed to stream background tiles (correlation pass)" );
+            if ( cemStats.count == 0 )
+                throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
+            const int minSamples = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
+            if ( cemStats.count < static_cast<size_t>( minSamples ) )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    kind + " background is under-sampled: " + std::to_string( cemStats.count ) +
+                        " valid pixels for " + std::to_string( bandCount ) + " bands (minimum " +
+                        std::to_string( minSamples ) +
+                        "; enable 'loading' to use the regularized floor)" );
+            SpectralCem::finalizeCorrelation( &cemStats );
+            backgroundSamples = cemStats.count;
+            correlation = std::move( cemStats.correlation );
+            context.throwIfCancelled();
+            backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
+        }
+        else
+        {
+            if ( !forEachBackgroundTile(
+                     [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                         context.throwIfCancelled();
+                         SpectralAnomaly::accumulateMean(
+                             bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
+                             &stats, true, bgNoData, bgHasNoData );
+                         context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.33,
+                                                 "Background mean" );
+                         return true;
+                     } ) )
+                throw RSOperatorError( ErrorCode::GdalError,
+                                       "Failed to stream background tiles (mean pass)" );
+            if ( stats.count == 0 )
+                throw RSOperatorError( ErrorCode::InvalidInputData, "No valid pixels found" );
+            SpectralAnomaly::finalizeMean( &stats );
+            context.throwIfCancelled();
+
+            tilesSeen = 0;
+            if ( !forEachBackgroundTile(
+                     [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+                         context.throwIfCancelled();
+                         SpectralAnomaly::accumulateCovariance(
+                             bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
+                             &stats, true, bgNoData, bgHasNoData );
+                         context.reportProgress( 0.33 + ( ++tilesSeen ) * backgroundPerTile * 0.33,
+                                                 "Background covariance" );
+                         return true;
+                     } ) )
+                throw RSOperatorError( ErrorCode::GdalError,
+                                       "Failed to stream background tiles (covariance pass)" );
+            SpectralAnomaly::finalizeCovariance( &stats );
+            context.throwIfCancelled();
+
+            if ( !SpectralAnomaly::invertCovariance( stats.covariance, bandCount, &invCov ) )
+                throw RSOperatorError( ErrorCode::ComputationError,
+                                       "Background covariance is singular" );
+            backgroundSamples = stats.count;
+            backgroundCondition = SpectralAnomaly::conditionProxy( stats.covariance, bandCount );
+        }
     }
 
     std::vector<double> scratch( static_cast<size_t>( bandCount ), 0.0 );
@@ -313,6 +485,14 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         result["backgroundSamples"] = static_cast<Json::UInt64>( backgroundSamples );
         if ( backgroundCondition >= 0.0 )
             result["backgroundCondition"] = backgroundCondition;
+        result["backgroundSource"] =
+            hasBackground ? backgroundPath : std::string( "scene" );
+        if ( hasBackground && backgroundResampled )
+        {
+            result["backgroundResampled"] = true;
+            result["backgroundCoverage"] =
+                backgroundPartial ? std::string( "partial" ) : std::string( "full" );
+        }
     }
     if ( usesCorrelation )
         result["loading"] = loading;
@@ -337,12 +517,22 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
 }
 
 Json::Value detectorSchema( const std::string &displayName, const std::string &description,
-                            bool withLoading = false, bool withInterference = false )
+                            bool withLoading = false, bool withInterference = false,
+                            bool withBackground = false )
 {
     using namespace schema;
     Json::Value props( Json::objectValue );
     props["input"] = makeRasterParam( "input", "Input multi-band raster" );
     props["output"] = makeOutputParam( "output", "Single-band detection score raster", "tif" );
+    if ( withBackground )
+    {
+        props["background"] =
+            makeRasterParam( "background",
+                            "Optional independent background raster for the background "
+                            "statistics (same band count; a differing wavelength grid is "
+                            "resampled onto the scene grid — no spatial co-registration "
+                            "required)" );
+    }
     const Json::Value referenceProps = referenceInputSchemaProps(
         "target", "targetRef", "Target spectrum (one value per input band, same order)" );
     for ( const auto &key : referenceProps.getMemberNames() )
@@ -397,7 +587,7 @@ Json::Value detectorEstimate()
 
 Json::Value RsMatchedFilterOperator::schema() const
 {
-    return detectorSchema( displayName(), description() );
+    return detectorSchema( displayName(), description(), false, false, true );
 }
 Json::Value RsMatchedFilterOperator::metadata() const
 {
@@ -416,7 +606,9 @@ Json::Value RsMatchedFilterOperator::metadata() const
     meta["purpose"] = "Detect pixels spectrally similar to a supplied target spectrum.";
     meta["prerequisites"].append( "'target' must have one finite value per input band." );
     meta["workflowHints"].append( "Chain rs:threshold_raster to binarize scores; combine with rs:rx_anomaly when no target is known." );
-    meta["limitations"].append( "Background statistics come from the input scene itself; a separate background raster is a future extension." );
+    meta["limitations"].append( "Background statistics come from the input scene by default; "
+                                "'background' accepts an independent background raster (spectral "
+                                "statistics only — no spatial co-registration required)." );
     return meta;
 }
 Json::Value RsMatchedFilterOperator::executionEstimate() const
@@ -430,7 +622,7 @@ Json::Value RsMatchedFilterOperator::run( const Json::Value &params, RSOperatorC
 
 Json::Value RsAceOperator::schema() const
 {
-    return detectorSchema( displayName(), description() );
+    return detectorSchema( displayName(), description(), false, false, true );
 }
 Json::Value RsAceOperator::metadata() const
 {
@@ -463,7 +655,7 @@ Json::Value RsAceOperator::run( const Json::Value &params, RSOperatorContext &co
 
 Json::Value RsCemOperator::schema() const
 {
-    return detectorSchema( displayName(), description(), true );
+    return detectorSchema( displayName(), description(), true, false, true );
 }
 Json::Value RsCemOperator::metadata() const
 {
@@ -486,8 +678,9 @@ Json::Value RsCemOperator::metadata() const
                                   "'loading' > 0) — under-sampled scenes are refused." );
     meta["workflowHints"].append( "Chain rs:threshold_raster to binarize scores; prefer "
                                   "rs:ace for a bounded [0,1] score." );
-    meta["limitations"].append( "Background statistics come from the input scene itself; "
-                                "a separate background raster is a future extension." );
+    meta["limitations"].append( "Background statistics come from the input scene by default; "
+                                "'background' accepts an independent background raster (spectral "
+                                "statistics only — no spatial co-registration required)." );
     return meta;
 }
 Json::Value RsCemOperator::executionEstimate() const
@@ -501,7 +694,7 @@ Json::Value RsCemOperator::run( const Json::Value &params, RSOperatorContext &co
 
 Json::Value RsTcimfOperator::schema() const
 {
-    return detectorSchema( displayName(), description(), true, true );
+    return detectorSchema( displayName(), description(), true, true, true );
 }
 Json::Value RsTcimfOperator::metadata() const
 {
@@ -528,8 +721,9 @@ Json::Value RsTcimfOperator::metadata() const
     meta["workflowHints"].append( "Feed rs:endmember_extraction or library materials of "
                                   "the undesired classes as interference; with no "
                                   "interference the filter is exactly CEM." );
-    meta["limitations"].append( "Background statistics come from the input scene itself; "
-                                "a separate background raster is a future extension." );
+    meta["limitations"].append( "Background statistics come from the input scene by default; "
+                                "'background' accepts an independent background raster (spectral "
+                                "statistics only — no spatial co-registration required)." );
     meta["limitations"].append( "Interference spectra must be linearly independent under "
                                 "the background metric; a target inside the interference "
                                 "span is refused." );
