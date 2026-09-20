@@ -1,0 +1,51 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "MSVC 1938",
+    "cores" : 16,
+    "cpu_model" : null,
+    "os" : "windows"
+  },
+  "extra" : 
+  {
+    "max_abs_error" : 3.8144801237649517e-06,
+    "mismatched_pixels" : 0,
+    "side" : 256
+  },
+  "generated_at" : "2026-09-20T04:46:35Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 109.375,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 18,
+    "peak_rss_mb" : 18,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 816129,
+    "read_ops" : 288,
+    "wall_ms" : 110.8938,
+    "write_bytes" : 262898,
+    "write_ops" : 16
+  },
+  "scale" : {},
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "max_abs_error" : 3.8144801237649517e-06,
+    "value_equivalent" : true
+  },
+  "workload" : "obs_io_write_roundtrip"
+}

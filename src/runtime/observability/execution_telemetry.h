@@ -43,6 +43,11 @@ enum class EventKind : uint8_t
     RunResumed,
     RssSample,
     VramSample,
+    /// 12.0: a task reached Canceled; valueNanos carries the cancel latency
+    /// (request → terminal), subject carries the typed cancel reason. Only
+    /// emitted for cancels with a request stamp — an engine-side cancel with
+    /// no TaskCenter request increments tasks_canceled without an event.
+    Cancelled,
 };
 
 inline const char *eventKindName( EventKind kind )
@@ -65,6 +70,7 @@ inline const char *eventKindName( EventKind kind )
     case EventKind::RunResumed: return "run_resumed";
     case EventKind::RssSample: return "rss_sample";
     case EventKind::VramSample: return "vram_sample";
+    case EventKind::Cancelled: return "cancelled";
     }
     return "unknown";
 }
@@ -97,6 +103,9 @@ enum class Counter : uint8_t
     ArtifactsRegistered,
     ArtifactsReclaimed,
     ResourceLeaksDetected, ///< execution 11.0: governor teardowns with live leases
+    TasksRefused,        ///< 12.0: submissions refused by the pending bound
+    TasksAged,           ///< 12.0: candidates promoted by the aging sweep
+    CancelWatchdogFired, ///< 12.0: stranded Cancelling tasks finalized by the watchdog
     _Count
 };
 

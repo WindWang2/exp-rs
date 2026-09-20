@@ -93,20 +93,29 @@ TEST_CASE( "Sessions round-trip through save/load with typed failures", "[contex
   CHECK( error.code == "INVALID_PARAMETER" );
 
   // The same filename-safety contract applies to the read/delete/resume
-  // paths — a pre-arranged escaped file must not be loadable or deletable
-  // through a hostile id (#1056).
-  REQUIRE( QDir( kStoreDir ).mkpath( QStringLiteral( "harness_session_../" ) ) );
+  // paths (#1056). The contract is "the hostile id is refused BEFORE the
+  // filesystem is touched", so the pre-arranged escaped file only proves the
+  // refusal is not merely "file missing". A trailing-".." directory name is
+  // not creatable on Windows (the platform strips it), so the on-disk probe
+  // is POSIX-only; the id-refusal assertions below run everywhere.
+  const QString escapedPath = kStoreDir + QStringLiteral( "/harness_session_../escape.json" );
+#ifndef _WIN32
+  REQUIRE( QDir().mkpath( kStoreDir + QStringLiteral( "/harness_session_../" ) ) );
   {
-    QFile escaped( QDir( kStoreDir ).filePath( QStringLiteral( "harness_session_../escape.json" ) ) );
+    QFile escaped( escapedPath );
     REQUIRE( escaped.open( QIODevice::WriteOnly ) );
     escaped.write( "{\"kind\":\"harness_session\",\"schema_version\":\"1.0\",\"session_id\":\"escape\"}" );
     escaped.close();
   }
+#endif
   error = HarnessError{};
   CHECK( !store.loadSession( "../escape", error ).has_value() );
   CHECK( error.code == "INVALID_PARAMETER" );
   CHECK_FALSE( store.deleteSession( "../escape" ) );
-  CHECK( QFile::exists( QDir( kStoreDir ).filePath( QStringLiteral( "harness_session_../escape.json" ) ) ) );
+#ifndef _WIN32
+  // The pre-arranged file is still there: the delete never happened.
+  CHECK( QFile::exists( escapedPath ) );
+#endif
   error = HarnessError{};
   CHECK( !store.resumeSession( "../escape", error ).has_value() );
   CHECK( error.code == "INVALID_PARAMETER" );

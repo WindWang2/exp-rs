@@ -138,12 +138,13 @@ CleanupReport CleanupService::plan( const CleanupOptions &options ) const
                                   && !row.canonicalSource.startsWith( QLatin1String( "/vsi" ) )
                                   && !row.canonicalSource.startsWith( QLatin1String( "http" ) )
                                   && !QFileInfo::exists( row.canonicalSource );
-        // Protection direction (review P1-19): a row is referenced when its
-        // DERIVED outputs exist — edges where the asset is the INPUT (the
-        // outgoing flag queries the asset's own provenance, not consumers).
+        // Protection direction (12.0, single source of truth): a row is
+        // referenced when ANY relationship row still points at it — dataset
+        // memberships, result inputs, run outputs or downstream lineage
+        // edges. The same predicate guards removeAsset, so plan() and
+        // execute() can never disagree about what is removable (O4).
         const bool referenced =
-            !m_service.store().directEdges( row.assetId, false ).isEmpty()
-            || !m_service.resultsDependingOnAsset( row.assetId ).isEmpty();
+            !m_service.store().collectAssetReferences( row.assetId, 1 ).isEmpty();
 
         if ( localMissing && referenced )
         {
@@ -205,11 +206,12 @@ int CleanupReport::execute( WorkspaceService &service )
         if ( candidate.code != QLatin1String( "cleanup.orphan_row" )
              && candidate.code != QLatin1String( "cleanup.orphan_result" ) )
             continue;
-        // Re-validate at execution time: a reference created after plan()
-        // must abort the removal (stale candidate protection).
+        // Re-validate at execution time with the SAME predicate plan() used
+        // (plus the removeAsset guard as the final backstop): a reference
+        // created after plan() must abort the removal (stale candidate
+        // protection).
         if ( candidate.entityKind == QLatin1String( "asset" )
-             && ( !service.store().directEdges( candidate.entityId, false ).isEmpty()
-                  || !service.resultsDependingOnAsset( candidate.entityId ).isEmpty() ) )
+             && !service.store().collectAssetReferences( candidate.entityId, 1 ).isEmpty() )
             continue;
         if ( candidate.entityKind == QLatin1String( "asset" ) )
         {

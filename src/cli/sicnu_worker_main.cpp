@@ -316,8 +316,13 @@ int main( int argc, char **argv )
         Json::Value frame;
         if ( !sicnu::runtime::worker::parseFrame( line, frame ) )
             continue;
-        const std::string op = frame["op"].asString();
-        const std::string jobId = frame["jobId"].asString();
+        // parseFrame only checks the PRESENCE of "op" (an unknown op is the
+        // caller's business), so the value is type-checked here before the
+        // string conversion — jsoncpp's asString() throws on a non-string.
+        const std::string op = frame[ "op" ].isString() ? frame[ "op" ].asString()
+                                                       : std::string();
+        const std::string jobId = frame[ "jobId" ].isString() ? frame[ "jobId" ].asString()
+                                                              : std::string();
         if ( op == "shutdown" )
         {
             cancelFlag = true;

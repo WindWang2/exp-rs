@@ -1,6 +1,6 @@
 // scripts/capability_knowledge_tool.cpp
 //
-// D8 capability knowledge generator (ADR 0146). One binary, three jobs:
+// D8 capability knowledge generator (ADR 0154). One binary, three jobs:
 //
 //   gen-meta   Derive the v2 capability sidecars for every registered rs:
 //              operator

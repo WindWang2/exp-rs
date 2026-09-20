@@ -49,9 +49,25 @@ bool isInside( const fs::path &root, const fs::path &candidate )
         return false;
     if ( candidateText.compare( 0, rootText.size(), rootText ) != 0 )
         return false;
-    if ( rootText.back() == '/' )
+    if ( rootText.empty() || rootText.back() == '/' )
         return true;
     return candidateText[rootText.size()] == '/';
+}
+
+/// Builds a platform path from the policy's UTF-8 text inputs.
+///
+/// std::filesystem's std::string constructor decodes with the process' ANSI
+/// code page on MSVC, which THROWS std::system_error for UTF-8 byte sequences
+/// that have no ANSI mapping ("unicode-é中.txt" from a manifest on a zh-CN
+/// host). Path text here is UTF-8 by contract (manifests, IPC, path fields), so
+/// the UTF-8 decoding constructor is used, and the conversion is still
+/// guarded: a byte sequence that is not valid UTF-8 cannot be a path we could
+/// resolve anyway, and it must surface as a typed rejection rather than an
+/// exception out of the policy.
+fs::path pathFromUtf8( const std::string &text )
+{
+    return fs::path( std::u8string( reinterpret_cast<const char8_t *>( text.data() ),
+                                    text.size() ) );
 }
 
 } // namespace
@@ -60,31 +76,59 @@ PathPolicyRejection PathPolicy::checkRelativeLexically( const std::string &candi
 {
     if ( candidate.empty() )
         return PathPolicyRejection::Empty;
-    const fs::path path( candidate );
-    if ( path.is_absolute() )
-        return PathPolicyRejection::Absolute;
-    for ( const fs::path &component : path )
+    // The whole body is guarded: MSVC's std::filesystem converts through the
+    // process' ANSI code page and THROWS lazily (component iteration, compare)
+    // for text that has no ANSI mapping. A path that the platform cannot even
+    // express can never be a manifest-relative payload, so that is a typed
+    // rejection rather than an exception out of the policy.
+    try
     {
-        if ( component == ".." )
-            return PathPolicyRejection::DotDot;
+        const fs::path path = pathFromUtf8( candidate );
+        if ( path.is_absolute() )
+            return PathPolicyRejection::Absolute;
+        for ( const fs::path &component : path )
+        {
+            if ( component == ".." )
+                return PathPolicyRejection::DotDot;
+        }
+        return PathPolicyRejection::Accepted;
     }
-    return PathPolicyRejection::Accepted;
+    catch ( const std::exception & )
+    {
+        return PathPolicyRejection::NotCanonical;
+    }
 }
 
 std::string PathPolicy::canonical( const std::string &path )
 {
     if ( path.empty() )
         return {};
-    std::error_code error;
-    const fs::path resolved = fs::weakly_canonical( fs::path( path ), error );
-    if ( error )
+    try
+    {
+        std::error_code error;
+        const fs::path resolved = fs::weakly_canonical( pathFromUtf8( path ), error );
+        if ( error )
+            return {};
+        return resolved.generic_string();
+    }
+    catch ( const std::exception & )
+    {
         return {};
-    return resolved.generic_string();
+    }
 }
 
 bool PathPolicy::isAbsolute( const std::string &path )
 {
-    return !path.empty() && fs::path( path ).is_absolute();
+    if ( path.empty() )
+        return false;
+    try
+    {
+        return pathFromUtf8( path ).is_absolute();
+    }
+    catch ( const std::exception & )
+    {
+        return false;
+    }
 }
 
 PathPolicyRejection PathPolicy::checkPayloadInsideRoot( const std::string &root,
@@ -96,40 +140,57 @@ PathPolicyRejection PathPolicy::checkPayloadInsideRoot( const std::string &root,
     if ( lexical != PathPolicyRejection::Accepted )
         return lexical;
 
-    std::error_code error;
-    const fs::path canonicalRoot = fs::canonical( fs::path( root ), error );
-    if ( error )
+    try
+    {
+        std::error_code error;
+        const fs::path canonicalRoot = fs::canonical( pathFromUtf8( root ), error );
+        if ( error )
+            return PathPolicyRejection::NotCanonical;
+
+        // weakly_canonical follows symlinks on the existing prefix — a symlink
+        // inside the root pointing outside resolves to the outside target.
+        const fs::path resolved =
+            fs::weakly_canonical( canonicalRoot / pathFromUtf8( candidate ), error );
+        if ( error )
+            return PathPolicyRejection::NotCanonical;
+
+        if ( !fs::exists( resolved, error ) )
+            return PathPolicyRejection::Missing;
+        if ( !fs::is_regular_file( resolved, error ) )
+            return PathPolicyRejection::NotRegularFile;
+        if ( !isInside( canonicalRoot, resolved ) )
+            return PathPolicyRejection::OutsideRoot;
+
+        resolvedPath = resolved.generic_string();
+        return PathPolicyRejection::Accepted;
+    }
+    catch ( const std::exception & )
+    {
+        // Unrepresentable text (or any other platform conversion surprise):
+        // the payload is refused, never resolved by accident.
         return PathPolicyRejection::NotCanonical;
-
-    // weakly_canonical follows symlinks on the existing prefix — a symlink
-    // inside the root pointing outside resolves to the outside target.
-    const fs::path resolved = fs::weakly_canonical( canonicalRoot / fs::path( candidate ), error );
-    if ( error )
-        return PathPolicyRejection::NotCanonical;
-
-    if ( !fs::exists( resolved, error ) )
-        return PathPolicyRejection::Missing;
-    if ( !fs::is_regular_file( resolved, error ) )
-        return PathPolicyRejection::NotRegularFile;
-    if ( !isInside( canonicalRoot, resolved ) )
-        return PathPolicyRejection::OutsideRoot;
-
-    resolvedPath = resolved.generic_string();
-    return PathPolicyRejection::Accepted;
+    }
 }
 
 bool PathPolicy::resolvesInsideRoot( const std::string &root, const std::string &candidate )
 {
     if ( root.empty() || candidate.empty() )
         return false;
-    std::error_code error;
-    const fs::path canonicalRoot = fs::weakly_canonical( fs::path( root ), error );
-    if ( error )
+    try
+    {
+        std::error_code error;
+        const fs::path canonicalRoot = fs::weakly_canonical( pathFromUtf8( root ), error );
+        if ( error )
+            return false;
+        const fs::path resolved = fs::weakly_canonical( pathFromUtf8( candidate ), error );
+        if ( error )
+            return false;
+        return isInside( canonicalRoot, resolved );
+    }
+    catch ( const std::exception & )
+    {
         return false;
-    const fs::path resolved = fs::weakly_canonical( fs::path( candidate ), error );
-    if ( error )
-        return false;
-    return isInside( canonicalRoot, resolved );
+    }
 }
 
 std::string PathPolicy::workspaceRoot()

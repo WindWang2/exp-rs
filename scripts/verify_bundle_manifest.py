@@ -63,6 +63,25 @@ def _validate_v2_sections(manifest, findings):
             findings.append("%s must be an object" % key)
 
 
+def _unsafe_bundle_rel(rel):
+    """True when @p rel (a required[] entry or file path) could escape the
+    bundle: empty/non-string, absolute, drive-qualified, or containing a '..'
+    segment. Applied to required[] entries too, not just files[] — a hostile
+    required path must not turn the existence check into a probe outside the
+    bundle."""
+    if not isinstance(rel, str) or not rel:
+        return True
+    if os.path.isabs(rel):
+        return True
+    normalized = rel.replace("\\", "/")
+    if len(normalized) >= 2 and normalized[0].isalpha() and normalized[1] == ":":
+        return True  # drive-qualified (C:/...) — absolute on Windows
+    parts = normalized.split("/")
+    if parts and parts[-1] == "":
+        parts = parts[:-1]  # trailing slash of a required prefix
+    return ".." in parts
+
+
 def verify_bundle(root):
     """Verify the bundle at @p root. Never raises on bad input; the result
     carries the verdict. Unverifiable manifests return ok=False with an
@@ -167,9 +186,17 @@ def verify_bundle(root):
             if rel != "manifest.json" and rel not in listed:
                 bad.append("unlisted file: %s" % rel)
 
-    for required in manifest.get("required", []):
+    required_list = manifest.get("required", [])
+    if not isinstance(required_list, list):
+        bad.append("required[] must be an array")
+        required_list = []
+    for required in required_list:
+        if _unsafe_bundle_rel(required):
+            bad.append("unsafe required entry: %r" % (required,))
+            continue
         if required.endswith("/"):
-            if not any(isinstance(e, dict) and str(e.get("path", "")).startswith(required)
+            if not any(isinstance(e, dict) and isinstance(e.get("path"), str)
+                       and e["path"].replace("\\", "/").startswith(required)
                        for e in entries):
                 bad.append("required prefix empty: %s" % required)
         elif not os.path.exists(os.path.join(root, required)):

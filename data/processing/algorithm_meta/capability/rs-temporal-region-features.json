@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
     "applicability" : 
@@ -26,7 +21,6 @@
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(scenes \u00d7 totalRegionWindowPixels) I/O + O(regions \u00d7 (scenes\u00b2 + model))",
@@ -36,12 +30,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "failure_modes" : 
     [
       {
@@ -88,7 +76,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -104,7 +91,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -140,7 +126,6 @@
         },
         {
           "default" : "none",
-          "enum" :
           "enum" : 
           [
             "none",
@@ -153,7 +138,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -208,7 +192,6 @@
         },
         {
           "default" : "sen",
-          "enum" :
           "enum" : 
           [
             "sen",
@@ -221,7 +204,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -229,8 +211,6 @@
     "operator_group" : "temporal",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
     "summary" : "\u533a\u57df\u7ea7\u65f6\u5e8f\u7279\u5f81\u8868\uff1a\u8d28\u91cf\u3001\u5206\u5e03\u3001Sen/OLS \u8d8b\u52bf\u3001\u5f02\u5e38\u4e0e\u591a\u7269\u5019\u7279\u5f81\uff0c\u5e26\u7248\u672c\u5316 schema sidecar\u3002",
     "teaching_use" : 
     {
@@ -252,7 +232,6 @@
   "input" : "",
   "output" : "",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

@@ -1,26 +1,26 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
       "notes" : "\u4ec5\u7528\u4e8e\u663e\u793a\uff0c\u4e0d\u8981\u5bf9\u62c9\u4f38\u7ed3\u679c\u518d\u505a\u5b9a\u91cf\u53cd\u6f14\u3002",
-      "scenes" :
+      "scenes" : 
       [
         "\u5236\u56fe\u51fa\u56fe\u524d\u7684\u663e\u793a\u4f18\u5316",
         " Screenshots \u4e0e\u62a5\u544a\u63d2\u56fe\u7684\u53ef\u89c6\u5316\u589e\u5f3a"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "optical",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -47,7 +47,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -61,7 +61,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "2",
@@ -71,7 +71,7 @@
         },
         {
           "default" : "linear",
-          "enum" :
+          "enum" : 
           [
             "linear",
             "percent_clip",
@@ -102,7 +102,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -113,14 +113,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5bf9\u6bd4\u5ea6\u62c9\u4f38\uff1a\u6309\u767e\u5206\u4f4d\u6216\u7ebf\u6027\u622a\u65ad\u628a\u5f71\u50cf\u7070\u5ea6\u6620\u5c04\u5230\u663e\u793a\u52a8\u6001\u8303\u56f4\uff0c\u5c5e\u4e8e\u663e\u793a\u7ea7\u589e\u5f3a\uff0c\u4e0d\u6539\u53d8\u5b9a\u91cf\u8bed\u4e49\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u76f4\u65b9\u56fe\u62c9\u4f38",
         "\u7070\u5ea6\u6620\u5c04"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -133,7 +133,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "contrast",
     "stretch",

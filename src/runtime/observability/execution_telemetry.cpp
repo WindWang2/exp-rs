@@ -53,6 +53,9 @@ const char *counterName( Counter counter )
     case Counter::ArtifactsRegistered: return "artifacts_registered";
     case Counter::ArtifactsReclaimed: return "artifacts_reclaimed";
     case Counter::ResourceLeaksDetected: return "resource_leaks_detected";
+    case Counter::TasksRefused: return "tasks_refused";
+    case Counter::TasksAged: return "tasks_aged";
+    case Counter::CancelWatchdogFired: return "cancel_watchdog_fired";
     case Counter::_Count: break;
     }
     return "unknown";

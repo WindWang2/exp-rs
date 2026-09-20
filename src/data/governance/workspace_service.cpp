@@ -294,7 +294,12 @@ qint64 WorkspaceService::mirrorAllAssets( bool reconcileGhosts )
         for ( const QString &storedId : m_store.assetIds() )
         {
             if ( !liveIds.contains( storedId ) )
-                ( void ) m_store.removeAsset( storedId );
+                // Ghost reconciliation mirrors an already-decided authority:
+                // the asset row is dead everywhere, cascade the relationship
+                // cleanup explicitly (12.0 removeAsset guard defaults to
+                // refuse for every other caller).
+                ( void ) m_store.removeAsset( storedId,
+                                              GovernanceStore::RemoveAssetPolicy::Cascade );
         }
     }
     return mirrored;
@@ -326,8 +331,11 @@ void WorkspaceService::onAssetChanged( const AssetId &id )
 
 void WorkspaceService::onAssetRemoved( const AssetId &id )
 {
-    // Catalog removal only — never touches payload bytes.
-    ( void ) m_store.removeAsset( id.toString() );
+    // Catalog removal only — never touches payload bytes. The DataManager is
+    // the authority and has already decided the asset is gone; mirror that
+    // decision with the explicit cascade policy (12.0 removeAsset guard).
+    ( void ) m_store.removeAsset( id.toString(),
+                                  GovernanceStore::RemoveAssetPolicy::Cascade );
     emit entityChanged( QStringLiteral( "asset" ), id.toString() );
 }
 

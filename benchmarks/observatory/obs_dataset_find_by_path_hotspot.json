@@ -1,0 +1,51 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 0,
+    "pages_requested" : 64,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "MSVC 1938",
+    "cores" : 16,
+    "cpu_model" : null,
+    "os" : "windows"
+  },
+  "extra" : {},
+  "generated_at" : "2026-09-20T04:48:02Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 7171.875,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 55,
+    "peak_rss_mb" : null,
+    "peak_rss_unavailable_reason" : "watermark never rose above the 1 MiB / 2 ms sample resolution; see docs/perf-observatory.md",
+    "read_bytes" : 0,
+    "read_ops" : 0,
+    "wall_ms" : 7388.6746999999996,
+    "write_bytes" : 0,
+    "write_ops" : 0
+  },
+  "scale" : {},
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "hotspot" : "source/data/data_manager.cpp findByPath redoes virtualPathAliases + QFileInfo canonicalization for every record on every probe",
+    "identity_branch_slowdown_x" : 20.786631545306104,
+    "inferred" : false,
+    "localish_path_us_per_probe" : 115448.04218749999,
+    "localish_path_us_per_record" : 57.724021093749997,
+    "measured" : true,
+    "virtual_path_us_per_probe" : 5553.9562499999993
+  },
+  "workload" : "obs_dataset_find_by_path_hotspot"
+}

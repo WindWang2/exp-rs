@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u77ff\u7269",
         "\u6c34\u4f53"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u77ff\u7269\u5438\u6536\u7279\u5f81\u589e\u5f3a",
         "\u6559\u5b66\u6f14\u793a\u6bd4\u503c\u8fd0\u7b97"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -38,9 +38,9 @@
       }
     ],
     "family" : "spectral",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -48,7 +48,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -62,7 +62,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "3",
@@ -84,7 +84,7 @@
         },
         {
           "default" : "ratio",
-          "enum" :
+          "enum" : 
           [
             "ratio",
             "ihs"
@@ -112,11 +112,11 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "IHS masks NoData/sentinel pixels to NaN in all components."
     ],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -127,14 +127,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u901a\u7528\u6ce2\u6bb5\u6bd4\u503c\u8fd0\u7b97\uff1a\u4efb\u9009\u4e24\u4e2a\u6ce2\u6bb5\u505a\u6bd4\u503c\uff0c\u7a81\u51fa\u5438\u6536\u7279\u5f81\u4e0e\u6ce2\u6bb5\u5dee\u5f02\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u6ce2\u6bb5\u6bd4\u503c",
         "\u5149\u8c31\u7279\u5f81"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -147,7 +147,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "band-ratio",
     "ihs",

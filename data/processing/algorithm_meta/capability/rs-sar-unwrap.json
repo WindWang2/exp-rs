@@ -88,6 +88,22 @@
           "type" : "string"
         },
         {
+          "name" : "providerArgs",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "providerBin",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "600",
+          "name" : "providerTimeoutSec",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
           "default" : "1",
           "name" : "qualityBand",
           "required" : false,

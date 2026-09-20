@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u6c34\u4f53",
         "\u519c\u7530",
         "\u5efa\u6210\u533a\uff08SAR\uff09"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u6d2a\u6d9d\u8303\u56f4\u5feb\u901f\u5236\u56fe",
         "\u519c\u4f5c\u7269\u5012\u4f0f\u76d1\u6d4b"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : true
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "tolerance",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "GRID_MISMATCH",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "sar",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -60,7 +60,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "numeric",
@@ -93,7 +93,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "1",
@@ -109,7 +109,7 @@
         },
         {
           "default" : "none",
-          "enum" :
+          "enum" : 
           [
             "none",
             "erode",
@@ -129,7 +129,7 @@
         },
         {
           "default" : "linear_power",
-          "enum" :
+          "enum" : 
           [
             "linear_power",
             "db"
@@ -179,7 +179,7 @@
         },
         {
           "default" : "otsu",
-          "enum" :
+          "enum" : 
           [
             "manual",
             "otsu",
@@ -192,31 +192,31 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "Incoherent change only \u2014 no coherent/interferometric phase analysis.",
       "Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.",
       "If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first)."
     ],
-    "modality" :
+    "modality" : 
     [
       "sar"
     ],
     "operator_group" : "sar",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "\u4e24\u671f SAR \u5f71\u50cf\u987b\u540c\u6781\u5316\u3001\u540c\u7f51\u683c\uff1b\u5efa\u8bae\u5148 rs:sar_speckle \u6ee4\u6ce2\u3002"
     ],
     "schema_version" : 2,
     "summary" : "SAR \u53cc\u65f6\u76f8\u53d8\u5316\u68c0\u6d4b\uff1a\u6bd4\u8f83\u4e24\u666f\u914d\u51c6 SAR \u5f71\u50cf\u7684\u540e\u5411\u6563\u5c04\u5e45\u5ea6\u5dee\u5f02\uff0c\u63a2\u6d4b\u5730\u8868\u53d8\u5316\uff08\u6d2a\u6d9d\u3001\u5012\u4f0f\u3001\u6ed1\u5761\u5f15\u8d77\u7684\u5e45\u5ea6\u53d8\u5316\u7b49\uff1b\u4e0d\u542b InSAR \u76f8\u4f4d\uff09\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "SAR \u53d8\u5316\u68c0\u6d4b",
         "\u540e\u5411\u6563\u5c04\u5dee\u5f02"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u5fae\u6ce2\u9065\u611f"
       ],
@@ -229,7 +229,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "sar",
     "change",

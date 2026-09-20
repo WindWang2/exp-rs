@@ -1,6 +1,6 @@
 // test_cn_products.cpp — Chinese satellite product adapters (GF-1/2/6, ZY-3,
 // HJ-1A/1B CCD): identity, CRESDA sidecar parsing, band-role tables, import
-// operators and the headless GF-1 end-to-end chain (ADR 0146).
+// operators and the headless GF-1 end-to-end chain (ADR 0157).
 //
 // All fixtures are synthetic (a few KB of XML + tiny GeoTIFFs); no real
 // imagery is committed anywhere (tests synthesise at runtime).

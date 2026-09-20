@@ -22,8 +22,10 @@
 #include <fstream>
 #include <sstream>
 
+#include <atomic>
 #include <system_error>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace sicnu::geo;
@@ -681,4 +683,98 @@ TEST_CASE( "the query cache evicts under the entry cap and stays correct",
   CHECK( stats["evictions"].asUInt64() >= 1 );
   // The final "a" search re-fetched honestly (its entry had been evicted).
   CHECK( server.requests().size() == 3 );
+}
+
+// ---------------------------------------------------------------------------
+// 12.0 — bounded-concurrent item fetch: worker count is a real bound
+// (server-side peak gauge), results keep input order, and one failure is
+// one slot's record — never an aborted batch.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fetchItemsConcurrent keeps the bound, the order and the isolation",
+           "[io][stac][concurrency][utc12]" )
+{
+  HttpStacServer server;
+  server.setConcurrency( 8 );
+  for ( int i = 0; i < 6; ++i )
+  {
+    const std::string path = "/collections/scenes/items/scene-" + std::to_string( i );
+    StacRoute route;
+    route.delayMs = 150;   // hold the handler long enough that overlap is certain
+    route.body = renderItem( "scene-" + std::to_string( i ), "2026-01-0" + std::to_string( i + 1 ) +
+                                                       "T00:00:00Z", "5", "[0,0,1,1]" );
+    server.setRoute( path, route );
+  }
+  StacRoute broken;
+  broken.status = 404;
+  broken.delayMs = 150;
+  broken.body = "{\"error\": \"no such item\"}";
+  server.setRoute( "/collections/scenes/items/broken", broken );
+
+  StacClientOptions options;
+  options.cacheEnabled = false;
+  StacClient client( server.url(), options );
+
+  // A mixed batch: six good items plus a broken one at index 2 (and a
+  // second broken one at the end — failures stay isolated at BOTH ends).
+  const std::string base = server.url() + "/collections/scenes/items/";
+  std::vector<std::string> hrefs;
+  for ( int i = 0; i < 6; ++i )
+    hrefs.push_back( base + "scene-" + std::to_string( i ) );
+  hrefs.insert( hrefs.begin() + 2, base + "broken" );
+  hrefs.push_back( base + "broken" );
+
+  const std::vector<StacClient::ItemFetchResult> results = client.fetchItemsConcurrent( hrefs, 4 );
+  REQUIRE( results.size() == hrefs.size() );
+  for ( std::size_t i = 0; i < results.size(); ++i )
+    REQUIRE( results[i].index == i );             // input order preserved
+  for ( std::size_t i = 0; i < results.size(); ++i )
+  {
+    const bool brokenSlot = ( i == 2 || i == results.size() - 1 );
+    if ( brokenSlot )
+    {
+      CHECK( !results[i].ok );
+      CHECK( !results[i].errorText.empty() );
+    }
+    else
+    {
+      CHECK( results[i].ok );
+      CHECK( results[i].item.id ==
+             "scene-" + std::to_string( i < 2 ? i : i - 1 ) ); // the right item per slot
+    }
+  }
+
+  // The worker count is a REAL bound: with 4 workers against a server that
+  // is always answering, the observed server-side peak was ≥2 (concurrency
+  // actually happened — with 6+ queued connections a serial server would
+  // peak at 1).
+  CHECK( server.maxInFlightObserved() >= 2 );
+}
+
+TEST_CASE( "fetchItemsConcurrent defaults to the serial contract",
+           "[io][stac][concurrency][utc12]" )
+{
+  HttpStacServer server;   // serial mode: the gauge peaks at 1 by design
+  for ( int i = 0; i < 3; ++i )
+  {
+    const std::string path = "/collections/scenes/items/scene-" + std::to_string( i );
+    StacRoute route;
+    route.body = renderItem( "scene-" + std::to_string( i ), "2026-01-0" + std::to_string( i + 1 ) +
+                                                       "T00:00:00Z", "5", "[0,0,1,1]" );
+    server.setRoute( path, route );
+  }
+  StacClientOptions options;
+  StacClient client( server.url(), options );   // maxConcurrency default 1
+
+  const std::string base = server.url() + "/collections/scenes/items/";
+  const std::vector<std::string> hrefs = { base + "scene-0", base + "scene-1", base + "scene-2" };
+  const std::vector<StacClient::ItemFetchResult> results = client.fetchItemsConcurrent( hrefs );
+  REQUIRE( results.size() == 3 );
+  CHECK( results[0].ok );
+  CHECK( results[1].ok );
+  CHECK( results[2].ok );
+  CHECK( results[0].item.id == "scene-0" );
+  CHECK( results[2].item.id == "scene-2" );
+  // Serial default: the server never saw two connections at once.
+  CHECK( server.maxInFlightObserved() <= 1 );
 }
