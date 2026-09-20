@@ -15,6 +15,8 @@
 #include "processing/algorithms/spectral_anomaly.h"
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
+#include "processing/algorithms/spectral_osp.h"
+#include "processing/algorithms/spectral_tcimf.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -85,32 +87,58 @@ std::vector<float> buildScene( RsSyntheticRasterBuilder &builder, int W, int H, 
     return bip;
 }
 
-// In-process whole-scene reference for one detector kind.
+// In-process whole-scene reference for one detector kind. @a interference
+// carries the undesired spectra (bands values each) for the TCIMF/OSP kinds;
+// it is ignored by the covariance-based kinds.
 std::vector<float> referenceScores( const std::string &kind,
                                     const std::vector<float> &bip, int W, int H, int B,
-                                    bool withNoData )
+                                    bool withNoData,
+                                    const std::vector<std::vector<float>> &interference = {} )
 {
     const size_t count = static_cast<size_t>( W ) * H;
     std::vector<float> noData( static_cast<size_t>( B ), -9999.0f );
     std::vector<uint8_t> hasNoData( static_cast<size_t>( B ), withNoData ? 1 : 0 );
 
     std::vector<float> scores( count );
-    if ( kind == "cem" )
+    std::vector<float> target( static_cast<size_t>( B ) );
+    for ( int b = 0; b < B; ++b )
+        target[static_cast<size_t>( b )] = 30.0f + 10.0f * b;
+
+    if ( kind == "osp" )
+    {
+        // OSP consumes no background statistics: filter, then score.
+        SpectralOsp::Filter filter;
+        REQUIRE( SpectralOsp::buildFilter( target.data(), B, interference, &filter ) );
+        std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
+        for ( size_t p = 0; p < count; ++p )
+            scores[p] = SpectralOsp::ospScore( bip.data() + p * B, filter, B, &scratch );
+        return scores;
+    }
+
+    if ( kind == "cem" || kind == "tcimf" )
     {
         SpectralCem::CorrelationStats stats;
         SpectralCem::accumulateCorrelation( bip.data(), count, B, &stats, true,
                                             noData.data(), hasNoData.data() );
         SpectralCem::finalizeCorrelation( &stats );
-        std::vector<float> target( B );
-        for ( int b = 0; b < B; ++b )
-            target[static_cast<size_t>( b )] = 30.0f + 10.0f * b;
-        SpectralCem::Filter filter;
-        REQUIRE( SpectralCem::buildFilter( target.data(), B, stats.correlation, 0.0, &filter ) );
+        if ( kind == "cem" )
+        {
+            SpectralCem::Filter filter;
+            REQUIRE( SpectralCem::buildFilter( target.data(), B, stats.correlation, 0.0, &filter ) );
+            std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
+            for ( size_t p = 0; p < count; ++p )
+                scores[p] = SpectralCem::cemScore( bip.data() + p * B, filter, B, &scratch );
+            return scores;
+        }
+        SpectralTcimf::Filter filter;
+        REQUIRE( SpectralTcimf::buildFilter( target.data(), B, interference, stats.correlation,
+                                             0.0, &filter ) );
         std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
         for ( size_t p = 0; p < count; ++p )
-            scores[p] = SpectralCem::cemScore( bip.data() + p * B, filter, B, &scratch );
+            scores[p] = SpectralTcimf::tcimfScore( bip.data() + p * B, filter, B, &scratch );
+        return scores;
     }
-    else
+
     {
         SpectralAnomaly::BackgroundStats stats;
         SpectralAnomaly::accumulateMean( bip.data(), count, B, &stats, true,
@@ -121,9 +149,6 @@ std::vector<float> referenceScores( const std::string &kind,
         SpectralAnomaly::finalizeCovariance( &stats );
         std::vector<double> invCov;
         REQUIRE( SpectralAnomaly::invertCovariance( stats.covariance, B, &invCov ) );
-        std::vector<float> target( B );
-        for ( int b = 0; b < B; ++b )
-            target[static_cast<size_t>( b )] = 30.0f + 10.0f * b;
         SpectralDetection::TargetModel model;
         REQUIRE( SpectralDetection::buildTargetModel( target.data(), B, stats.mean, invCov, &model ) );
         std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
@@ -145,7 +170,8 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
     constexpr int kB = 4;
     constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 
-    auto runCase = []( const char *opName, int W, int H, bool exact, bool withNoData ) {
+    auto runCase = []( const char *opName, int W, int H, bool exact, bool withNoData,
+                       const Json::Value &interference = Json::Value() ) {
         QTemporaryDir tmp;
         REQUIRE( tmp.isValid() );
         const QString inputPath = tmp.path() + "/in.tif";
@@ -176,6 +202,8 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
         params["input"] = inputPath.toStdString();
         params["output"] = outputPath.toStdString();
         params["target"] = target;
+        if ( !interference.isNull() )
+            params["interference"] = interference;
         RSOperatorContext ctx;
         Json::Value result;
         REQUIRE_NOTHROW( result = op->run( params, ctx ) );
@@ -190,8 +218,21 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
             kind = "mf";
         else if ( kind == "cem_detection" )
             kind = "cem";
+        else if ( kind == "tcimf_detection" )
+            kind = "tcimf";
+        else if ( kind == "osp_detection" )
+            kind = "osp";
+        std::vector<std::vector<float>> interferenceSpectra;
+        if ( !interference.isNull() )
+            for ( const auto &row : interference )
+            {
+                std::vector<float> s;
+                for ( const auto &v : row )
+                    s.push_back( static_cast<float>( v.asDouble() ) );
+                interferenceSpectra.push_back( std::move( s ) );
+            }
         const std::vector<float> ref =
-            referenceScores( kind, bip, W, H, kB, withNoData );
+            referenceScores( kind, bip, W, H, kB, withNoData, interferenceSpectra );
 
         double maxRelErr = 0.0;
         for ( size_t p = 0; p < ref.size(); ++p )
@@ -218,6 +259,19 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
             INFO( "max relative error: " << maxRelErr );
     };
 
+    // Interference spectrum for the TCIMF/OSP kinds: linearly independent of
+    // the planted target (30,40,50,60) and of itself across bands.
+    auto makeInterference = []() {
+        Json::Value rows( Json::arrayValue );
+        Json::Value row( Json::arrayValue );
+        row.append( 10.0 );
+        row.append( 40.0 );
+        row.append( 20.0 );
+        row.append( 60.0 );
+        rows.append( row );
+        return rows;
+    };
+
     for ( const char *opName : { "rs:matched_filter", "rs:ace", "rs:cem_detection" } )
     {
         DYNAMIC_SECTION( "single tile (10x10): " << opName )
@@ -231,6 +285,24 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
         DYNAMIC_SECTION( "multi tile (300x300, tile=256): " << opName )
         {
             runCase( opName, 300, 300, false, false );
+        }
+    }
+
+    // Spectral Intelligence 13.0: TCIMF shares the CEM background pass; OSP
+    // has none. Both stream like the covariance detectors.
+    for ( const char *opName : { "rs:tcimf_detection", "rs:osp_detection" } )
+    {
+        DYNAMIC_SECTION( "single tile (10x10): " << opName )
+        {
+            runCase( opName, 10, 10, true, false, makeInterference() );
+        }
+        DYNAMIC_SECTION( "single tile with declared NoData (10x10): " << opName )
+        {
+            runCase( opName, 10, 10, true, true, makeInterference() );
+        }
+        DYNAMIC_SECTION( "multi tile (300x300, tile=256): " << opName )
+        {
+            runCase( opName, 300, 300, false, false, makeInterference() );
         }
     }
 }

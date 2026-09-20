@@ -38,6 +38,8 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_derivative.cpp
     algorithms/spectral_detection.cpp
     algorithms/spectral_cem.cpp
+    algorithms/spectral_osp.cpp
+    algorithms/spectral_tcimf.cpp
     algorithms/spectral_library_scale.cpp
     algorithms/spectral_spatial_fusion.cpp
     algorithms/sar/sar_dualpol.cpp

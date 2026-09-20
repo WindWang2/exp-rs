@@ -1,10 +1,13 @@
 /***************************************************************************
- * rs_spectral_detection_operators.cpp — Milestone C (matched filter + ACE)
- * and Spectral Intelligence 12.0 (CEM).
+ * rs_spectral_detection_operators.cpp — Milestone C (matched filter + ACE),
+ * Spectral Intelligence 12.0 (CEM) and Spectral Intelligence 13.0
+ * (TCIMF, OSP).
  *
- * All detectors share the RX operator's streamed valid-pixel predicate;
- * MF/ACE use three passes (mean, covariance, score) over the mean-centered
- * background, CEM uses two (correlation, score) over raw second moments.
+ * All detectors share the RX operator's streamed valid-pixel predicate.
+ * Background matrix by family:
+ *   MF/ACE    mean + covariance (mean-centered), three passes
+ *   CEM/TCIMF correlation (raw second moment), two passes
+ *   OSP       none — the undesired subspace is an input, one scoring pass
  * Only the per-pixel scoring kernel and the background statistics differ.
  ***************************************************************************/
 #include "rs_spectral_detection_operators.h"
@@ -16,6 +19,8 @@
 #include "processing/algorithms/spectral_anomaly.h"
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
+#include "processing/algorithms/spectral_osp.h"
+#include "processing/algorithms/spectral_tcimf.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "rs_spectral_reference_input.h"
@@ -35,15 +40,30 @@ using namespace params;
 
 namespace {
 
-/// Shared driver. @a kind selects the scoring kernel ("mf", "ace" or "cem").
+/// Shared driver. @a kind selects the scoring kernel
+/// ("mf", "ace", "cem", "tcimf" or "osp").
 Json::Value runDetector( const std::string &kind, const Json::Value &params,
                          RSOperatorContext &context )
 {
     const bool isCem = ( kind == "cem" );
+    const bool isTcimf = ( kind == "tcimf" );
+    const bool isOsp = ( kind == "osp" );
+    const bool usesCorrelation = isCem || isTcimf; // second-moment background
+    const bool usesInterference = isTcimf || isOsp;
     const std::string inputPath = requireString( params, "input" );
     const std::string outputPath = requireString( params, "output" );
     if ( !fileExists( inputPath ) )
         throw RSOperatorError( ErrorCode::FileNotFound, "Input raster not found: " + inputPath );
+
+    // OSP has no background pass, so a background raster would be silently
+    // ignored — refuse instead of letting the caller believe it was used.
+    if ( isOsp && params.isMember( "background" ) && params["background"].isString() &&
+         !params["background"].asString().empty() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "rs:osp_detection consumes no background statistics: the "
+                               "undesired subspace comes from 'interference'; use "
+                               "rs:tcimf_detection or rs:cem_detection with 'background' "
+                               "for background-driven detection" );
 
     ensureGdalInit();
 
@@ -76,6 +96,39 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                                "'target' must resolve to exactly one spectrum, got " +
                                    std::to_string( targetResolved.count ) );
 
+    // Interference (undesired) signatures through the same seam. 'libraryPath'
+    // stays reserved for the target: interference uses 'interference' /
+    // 'interferenceRef' so a library-sourced target cannot silently double as
+    // the interference matrix.
+    ResolvedSpectralReference interferenceResolved;
+    std::vector<std::vector<float>> interference;
+    if ( usesInterference )
+    {
+        bool hasInterferenceSource =
+            ( params.isMember( "interference" ) && params["interference"].isArray() &&
+              !params["interference"].empty() ) ||
+            ( params.isMember( "interferenceRef" ) && params["interferenceRef"].isString() &&
+              !params["interferenceRef"].asString().empty() );
+        if ( !hasInterferenceSource )
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                kind + " detection requires 'interference' (array of spectra) or "
+                      "'interferenceRef' (spectral-table/library path); 'libraryPath' is "
+                      "reserved for the target" );
+        interferenceResolved = resolveSpectralReference(
+            params, "interference", "interferenceRef", ds, allBands, inputGrid );
+        if ( interferenceResolved.count < 1 )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "'interference' must resolve to at least one spectrum" );
+        interference.reserve( static_cast<size_t>( interferenceResolved.count ) );
+        for ( int c = 0; c < interferenceResolved.count; ++c )
+        {
+            const float *row = interferenceResolved.flat.data() +
+                               static_cast<size_t>( c ) * interferenceResolved.width;
+            interference.emplace_back( row, row + interferenceResolved.width );
+        }
+    }
+
     constexpr int kTile = 256;
     GdalMultibandBlockStream stream( ds, bandCount, kTile, kTile );
     const int totalTiles = stream.tileCount();
@@ -96,7 +149,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     }
 
     double loading = 0.0;
-    if ( isCem )
+    if ( usesCorrelation )
     {
         loading = getDouble( params, "loading", 0.0 );
         if ( !std::isfinite( loading ) || loading < 0.0 )
@@ -111,9 +164,9 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     std::vector<double> invCov;
     std::vector<double> correlation;
     double backgroundCondition = -1.0;
-    if ( isCem )
+    if ( usesCorrelation )
     {
-        // CEM background: one second-moment pass over the raw spectra.
+        // CEM/TCIMF background: one second-moment pass over the raw spectra.
         SpectralCem::CorrelationStats cemStats;
         if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                 context.throwIfCancelled();
@@ -130,7 +183,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         if ( cemStats.count < static_cast<size_t>( minSamples ) )
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
-                "CEM background is under-sampled: " + std::to_string( cemStats.count ) +
+                kind + " background is under-sampled: " + std::to_string( cemStats.count ) +
                     " valid pixels for " + std::to_string( bandCount ) + " bands (minimum " +
                     std::to_string( minSamples ) +
                     "; enable 'loading' to use the regularized floor)" );
@@ -140,7 +193,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         context.throwIfCancelled();
         backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
     }
-    else
+    else if ( !isOsp )
     {
         if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                 context.throwIfCancelled();
@@ -178,7 +231,25 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     std::vector<double> scratch( static_cast<size_t>( bandCount ), 0.0 );
     SpectralDetection::TargetModel model;
     SpectralCem::Filter cemFilter;
-    if ( isCem )
+    SpectralTcimf::Filter tcimfFilter;
+    SpectralOsp::Filter ospFilter;
+    double interferenceCondition = -1.0;
+    QString buildError;
+    if ( isOsp )
+    {
+        if ( !SpectralOsp::buildFilter( target, bandCount, interference, &ospFilter, &buildError,
+                                        &interferenceCondition ) )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "OSP filter is degenerate: " + buildError.toStdString() );
+    }
+    else if ( isTcimf )
+    {
+        if ( !SpectralTcimf::buildFilter( target, bandCount, interference, correlation, loading,
+                                          &tcimfFilter, &buildError, &interferenceCondition ) )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "TCIMF filter is degenerate: " + buildError.toStdString() );
+    }
+    else if ( isCem )
     {
         if ( !SpectralCem::buildFilter( target, bandCount, correlation, loading, &cemFilter ) )
             throw RSOperatorError( ErrorCode::InvalidInputData,
@@ -201,8 +272,8 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
 
     std::vector<float> tileScores;
     tilesSeen = 0;
-    const double scoreStart = isCem ? 0.5 : 0.66;
-    const double scoreSpan = isCem ? 0.5 : 0.34;
+    const double scoreStart = isOsp ? 0.0 : ( usesCorrelation ? 0.5 : 0.66 );
+    const double scoreSpan = isOsp ? 1.0 : ( usesCorrelation ? 0.5 : 0.34 );
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
@@ -211,9 +282,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             {
                 const float *x = bip + p * bandCount;
                 tileScores[p] =
-                    isCem ? SpectralCem::cemScore( x, cemFilter, bandCount, &scratch )
-                          : ( kind == "mf" ) ? SpectralDetection::matchedFilterScore( x, model, stats.mean, bandCount, &scratch )
-                                             : SpectralDetection::aceScore( x, model, stats.mean, invCov, bandCount, &scratch );
+                    isOsp ? SpectralOsp::ospScore( x, ospFilter, bandCount, &scratch )
+                    : isTcimf ? SpectralTcimf::tcimfScore( x, tcimfFilter, bandCount, &scratch )
+                    : isCem ? SpectralCem::cemScore( x, cemFilter, bandCount, &scratch )
+                    : ( kind == "mf" ) ? SpectralDetection::matchedFilterScore( x, model, stats.mean, bandCount, &scratch )
+                                       : SpectralDetection::aceScore( x, model, stats.mean, invCov, bandCount, &scratch );
             }
             if ( !out.writeTile( 1, tile, tileScores.data() ) )
                 return false;
@@ -235,11 +308,25 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     result["bandCount"] = bandCount;
     result["width"] = width;
     result["height"] = height;
-    result["backgroundSamples"] = static_cast<Json::UInt64>( backgroundSamples );
-    if ( backgroundCondition >= 0.0 )
-        result["backgroundCondition"] = backgroundCondition;
-    if ( isCem )
+    if ( !isOsp )
+    {
+        result["backgroundSamples"] = static_cast<Json::UInt64>( backgroundSamples );
+        if ( backgroundCondition >= 0.0 )
+            result["backgroundCondition"] = backgroundCondition;
+    }
+    if ( usesCorrelation )
         result["loading"] = loading;
+    if ( usesInterference )
+    {
+        result["interferenceCount"] = static_cast<Json::UInt64>( interference.size() );
+        if ( interferenceCondition >= 0.0 )
+            result["interferenceCondition"] = interferenceCondition;
+        result["interferenceSource"] = interferenceResolved.sourceDescription.toStdString();
+        if ( interferenceResolved.resampled )
+            result["interferenceResampled"] = true;
+        if ( !interferenceResolved.license.isEmpty() )
+            result["interferenceLicense"] = interferenceResolved.license.toStdString();
+    }
     result["targetSource"] = targetResolved.sourceDescription.toStdString();
     if ( targetResolved.resampled )
         result["targetResampled"] = true;
@@ -250,7 +337,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
 }
 
 Json::Value detectorSchema( const std::string &displayName, const std::string &description,
-                            bool withLoading = false )
+                            bool withLoading = false, bool withInterference = false )
 {
     using namespace schema;
     Json::Value props( Json::objectValue );
@@ -270,6 +357,21 @@ Json::Value detectorSchema( const std::string &displayName, const std::string &d
             "Scaled diagonal loading alpha in R + alpha*(tr(R)/B)*I; enables the "
             "reduced min-sample floor (B+1 instead of 2B+2).";
         props["loading"] = loading;
+    }
+    if ( withInterference )
+    {
+        const Json::Value interferenceProps = referenceInputSchemaProps(
+            "interference", "interferenceRef",
+            "Undesired signatures (array of spectra, one value per input band each; the "
+            "first element disambiguates a single flat spectrum)" );
+        for ( const auto &key : interferenceProps.getMemberNames() )
+        {
+            // 'libraryPath'/'libraryMaterials' stay reserved for the target;
+            // only the inline and artifact keys are offered for interference.
+            if ( key == "libraryPath" || key == "libraryMaterials" )
+                continue;
+            props[key] = interferenceProps[key];
+        }
     }
 
     Json::Value outputs( Json::objectValue );
@@ -395,6 +497,92 @@ Json::Value RsCemOperator::executionEstimate() const
 Json::Value RsCemOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
     return runDetector( "cem", params, context );
+}
+
+Json::Value RsTcimfOperator::schema() const
+{
+    return detectorSchema( displayName(), description(), true, true );
+}
+Json::Value RsTcimfOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "spectral" );
+    meta["tags"].append( "detection" );
+    meta["tags"].append( "target" );
+    meta["task"] = "target-detection";
+    meta["notes"] = "Two-pass streaming TCIMF (background correlation, score) over the "
+                    "shared valid-pixel predicate: the CEM filter with exact null "
+                    "constraints on the interference signatures (target scores 1, "
+                    "interference scores 0); bit-exact grade.";
+    meta["gpu"] = false;
+    meta["purpose"] = "Target detection with known undesired signatures suppressed: "
+                      "the constrained companion of CEM.";
+    meta["prerequisites"].append( "'target' must have one finite value per input band." );
+    meta["prerequisites"].append( "At least 2*B+2 valid background pixels (B+1 when "
+                                  "'loading' > 0) — under-sampled scenes are refused." );
+    meta["prerequisites"].append( "'interference' (or 'interferenceRef') must resolve to "
+                                  "at least one finite, non-zero spectrum per input band." );
+    meta["workflowHints"].append( "Feed rs:endmember_extraction or library materials of "
+                                  "the undesired classes as interference; with no "
+                                  "interference the filter is exactly CEM." );
+    meta["limitations"].append( "Background statistics come from the input scene itself; "
+                                "a separate background raster is a future extension." );
+    meta["limitations"].append( "Interference spectra must be linearly independent under "
+                                "the background metric; a target inside the interference "
+                                "span is refused." );
+    return meta;
+}
+Json::Value RsTcimfOperator::executionEstimate() const
+{
+    return detectorEstimate();
+}
+Json::Value RsTcimfOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    return runDetector( "tcimf", params, context );
+}
+
+Json::Value RsOspOperator::schema() const
+{
+    return detectorSchema( displayName(), description(), false, true );
+}
+Json::Value RsOspOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "spectral" );
+    meta["tags"].append( "detection" );
+    meta["tags"].append( "target" );
+    meta["task"] = "target-detection";
+    meta["notes"] = "Single-pass streaming OSP: orthogonal projection of the target "
+                    "onto the complement of the undesired signature subspace; every "
+                    "interference signature scores exactly 0; bit-exact grade.";
+    meta["gpu"] = false;
+    meta["purpose"] = "Target detection when the undesired subspace is known: unlike "
+                      "the covariance-based detectors, OSP needs no background pass.";
+    meta["prerequisites"].append( "'target' must have one finite value per input band." );
+    meta["prerequisites"].append( "'interference' (or 'interferenceRef') must resolve to "
+                                  "at least one finite, non-zero spectrum per input band, "
+                                  "linearly independent of the others." );
+    meta["workflowHints"].append( "Scores are signed and scale with the target "
+                                  "magnitude (OSP is not brightness-invariant); chain "
+                                  "rs:threshold_raster to binarize." );
+    meta["limitations"].append( "A target that lies (numerically) inside the undesired "
+                                "subspace is refused — no filter can suppress the "
+                                "interference and keep the target at the same time." );
+    return meta;
+}
+Json::Value RsOspOperator::executionEstimate() const
+{
+    return detectorEstimate();
+}
+Json::Value RsOspOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    return runDetector( "osp", params, context );
 }
 
 } // namespace sicnu::operators::rs

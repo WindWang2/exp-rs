@@ -11574,3 +11574,52 @@ endif()
 # standard sicnu_add_test registration is kept and the vendored gui is built
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
+
+# Spectral Intelligence 13.0 work package A: TCIMF / OSP detector kernels.
+add_executable(test_spectral_tcimf test_spectral_tcimf.cpp)
+target_link_libraries(test_spectral_tcimf PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_tcimf)
+target_include_directories(test_spectral_tcimf PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_tcimf)
+
+add_executable(test_spectral_osp test_spectral_osp.cpp)
+target_link_libraries(test_spectral_osp PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_osp)
+target_include_directories(test_spectral_osp PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_osp)
+
+# Spectral Intelligence 13.0 work package A: TCIMF / OSP operator contracts.
+add_executable(test_spectral_detection_13 test_spectral_detection_13.cpp)
+target_link_libraries(test_spectral_detection_13 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection_13)
+target_include_directories(test_spectral_detection_13 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_spectral_detection_13)

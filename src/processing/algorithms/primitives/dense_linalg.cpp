@@ -78,4 +78,67 @@ bool invertDenseMatrix( const std::vector<double> &m, int n, std::vector<double>
     return true;
 }
 
+namespace
+{
+
+/// Dominant eigenvalue of a symmetric matrix via power iteration (same
+/// deterministic recipe as SpectralAnomaly::conditionProxy: normalized ones
+/// start, 1e-12 relative Rayleigh residual early exit, hard iteration cap).
+/// Returns -1 when the iteration cannot produce a finite positive value.
+double dominantEigenvalue( const std::vector<double> &m, int n )
+{
+    if ( n <= 0 || m.size() != static_cast<size_t>( n ) * n )
+        return -1.0;
+    std::vector<double> v( static_cast<size_t>( n ),
+                           1.0 / std::sqrt( static_cast<double>( n ) ) );
+    double lambda = -1.0;
+    for ( int it = 0; it < 128; ++it )
+    {
+        std::vector<double> w( static_cast<size_t>( n ), 0.0 );
+        double vw = 0.0;
+        double norm2 = 0.0;
+        for ( int i = 0; i < n; ++i )
+        {
+            const size_t rowOffset = static_cast<size_t>( i ) * n;
+            double row = 0.0;
+            for ( int j = 0; j < n; ++j )
+                row += m[rowOffset + j] * v[static_cast<size_t>( j )];
+            w[static_cast<size_t>( i )] = row;
+            vw += v[static_cast<size_t>( i )] * row;
+            norm2 += row * row;
+        }
+        if ( !std::isfinite( norm2 ) || !( norm2 > 0.0 ) || !std::isfinite( vw ) )
+            return -1.0;
+        lambda = vw;
+        const double norm = std::sqrt( norm2 );
+        if ( std::fabs( norm - lambda ) <= 1e-12 * std::max( 1.0, norm ) )
+            break;
+        for ( int i = 0; i < n; ++i )
+            v[static_cast<size_t>( i )] = w[static_cast<size_t>( i )] / norm;
+    }
+    if ( !std::isfinite( lambda ) || !( lambda > 0.0 ) )
+        return -1.0;
+    return lambda;
+}
+
+} // namespace
+
+double conditionNumber( const std::vector<double> &m, int n )
+{
+    const double lambdaMax = dominantEigenvalue( m, n );
+    if ( !( lambdaMax > 0.0 ) )
+        return -1.0;
+    std::vector<double> inverse;
+    if ( !invertDenseMatrix( m, n, &inverse ) )
+        return -1.0;
+    // λmax(A⁻¹) = 1/λmin(A) for a symmetric positive-definite A.
+    const double lambdaMaxInverse = dominantEigenvalue( inverse, n );
+    if ( !( lambdaMaxInverse > 0.0 ) )
+        return -1.0;
+    const double cond = lambdaMax * lambdaMaxInverse;
+    if ( !std::isfinite( cond ) || !( cond >= 1.0 ) )
+        return -1.0;
+    return cond;
+}
+
 } // namespace sicnu::primitives

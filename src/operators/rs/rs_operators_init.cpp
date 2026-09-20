@@ -197,6 +197,8 @@ REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
 REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
 REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
 REGISTER_RS_OPERATOR(RsCemOperator, "rs:cem_detection")
+REGISTER_RS_OPERATOR(RsTcimfOperator, "rs:tcimf_detection")
+REGISTER_RS_OPERATOR(RsOspOperator, "rs:osp_detection")
 REGISTER_RS_OPERATOR(RsSpectralSpatialFuseOperator, "rs:spectral_spatial_fuse")
 REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
@@ -386,6 +388,8 @@ void initBuiltinRsOperators() {
   add( "rs:matched_filter", [] { return std::make_unique<RsMatchedFilterOperator>(); } );
   add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
   add( "rs:cem_detection", [] { return std::make_unique<RsCemOperator>(); } );
+  add( "rs:tcimf_detection", [] { return std::make_unique<RsTcimfOperator>(); } );
+  add( "rs:osp_detection", [] { return std::make_unique<RsOspOperator>(); } );
   add( "rs:spectral_spatial_fuse", [] { return std::make_unique<RsSpectralSpatialFuseOperator>(); } );
   add( "rs:sar_dualpol_features", [] { return std::make_unique<RsSarDualPolOperator>(); } );
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
