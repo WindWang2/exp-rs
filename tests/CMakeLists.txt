@@ -6061,6 +6061,11 @@ if(TARGET sicnu_operators)
   # Platform 3.0 SAR operator end-to-end (synthetic fixtures).
   sicnu_add_test(test_sar_operators)
 
+  # SAR Radiometric State 13.0 (Track E): operator census, declared-state
+  # behavioral gates, derived-product semantics, DN LUT calibration and the
+  # end-to-end chain provenance oracle.
+  sicnu_add_test(test_sar_radiometric_state)
+
   # Platform 3.0 feature cube contract.
   sicnu_add_test(test_feature_cube)
 
