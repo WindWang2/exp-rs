@@ -13,10 +13,12 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
+#include <QFileInfo>
 #include <QString>
 
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace sicnu::operators::rs {
 
@@ -41,7 +43,8 @@ Json::Value RsSarCalibrateOperator::schema() const {
     props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output calibrated sigma0 raster (Float32)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band (0 = all bands calibrated independently)", 1);
-    props["calibrationA"] = makeNumberParam("calibrationA", "Calibration constant A (sigma0 = DN²/A²; use the product's A value)", 1.0);
+    props["calibrationA"] = makeNumberParam("calibrationA", "Calibration constant A (sigma0 = DN²/A²; use the product's A value). Inert on the LUT path", 1.0);
+    props["calibrationLut"] = makeStringParam("calibrationLut", "Per-row calibration LUT sidecar path: one finite positive constant per input row. Overrides the declared SICNU_SAR_CALIBRATION_LUT; missing or malformed is a typed refusal, never a constant fallback", "");
     props["noiseLinear"] = makeNumberParam("noiseLinear", "Additive noise power to subtract before scaling (linear, 0 disables)", 0.0);
     props["outputDomain"] = makeEnumParam("outputDomain", "Output numeric domain", s_domains, "linear_power");
     props["polarizations"] = makeStringParam("polarizations", "Comma-separated polarizations (e.g. VV,VH) recorded on the output", "");
@@ -72,12 +75,15 @@ Json::Value RsSarCalibrateOperator::metadata() const {
     meta["prerequisites"].append("SAR amplitude/DN raster; the calibration constant A must "
                                  "match the product convention (Sentinel-1 GRD: per-beam "
                                  "constant from the annotation, simplified here to one "
-                                 "constant per run).");
+                                 "constant per run), or a per-row calibration LUT sidecar "
+                                 "(one constant per input row).");
     meta["workflowHints"].append("Calibrate before speckle filtering or change detection: "
                                  "rs:sar_calibrate -> rs:sar_speckle.");
     meta["workflowHints"].append("dB output is 10·log10(power); nonpositive power becomes NoData.");
-    meta["limitations"].append("LUT-based calibration (per-block/per-pixel annotation LUTs) is "
-                               "not applied; use a constant A or pre-calibrated input.");
+    meta["limitations"].append("LUT calibration reads a per-row sidecar (one constant per "
+                               "input row, no interpolation); annotation-XML LUTs are not "
+                               "parsed and a missing LUT is a typed refusal, never a "
+                               "constant-A fallback.");
     Json::Value contract(Json::objectValue);
     contract["modality"] = "sar";
     meta["x-rs-contract"] = contract;
@@ -108,6 +114,7 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
 
     const int band = getInt(params, "band", 1);
     const double calibrationA = getDouble(params, "calibrationA", 1.0);
+    const std::string calibrationLutPath = getString(params, "calibrationLut", "");
     const double noiseLinear = getDouble(params, "noiseLinear", 0.0);
     const std::string domainStr = getEnum(params, "outputDomain", s_domains, "linear_power");
     const sicnu::sar::SarDomain domain = domainStr == "db"
@@ -129,27 +136,89 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
     }
 
     // Declared-contract preflight: this operator applies the DN formula
-    // sigma0 = DN²/A². Re-applying it to a product that already declares a
-    // calibrated state would double-scale the radiometry, and an unreadable
-    // declared token must not be silently treated as DN — refuse both.
-    const QString declaredCalibration = sicnu::sar::declaredCalibrationToken(src);
-    if (!declaredCalibration.isEmpty()) {
-        const QString normalized = sicnu::sar::normalizeCalibration(declaredCalibration);
-        if (normalized.isEmpty()) {
+    // sigma0 = (DN² − noise)/A². Re-applying it to a product that already
+    // declares a calibrated state would double-scale the radiometry, a derived
+    // product (pair metric / texture) carries no backscatter at all, and an
+    // unreadable declared token must not be silently treated as DN — refuse
+    // all three. A declared `dn` (or an absent declaration) is accepted.
+    const sicnu::sar::SarStateRead declared =
+        sicnu::sar::readDeclaredSarState( src );
+    if ( declared.conflict )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares conflicting SICNU_SAR_CALIBRATION='" +
+                declared.calibration.toStdString() + "' and SICNU_RADIOMETRIC_STATE='" +
+                declared.state.toStdString() +
+                "'; refusing to guess the radiometric state" );
+    }
+    if ( !declared.token.isEmpty() )
+    {
+        const QString normalized = sicnu::sar::normalizeCalibration( declared.token );
+        if ( normalized.isEmpty() )
+        {
+            if ( sicnu::sar::isSarDerivedState( declared.token ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "input declares the derived SAR product '" + declared.token.toStdString() +
+                        "' (pair metric / texture), which carries no backscatter "
+                        "calibration; rs:sar_calibrate applies the DN formula and cannot "
+                        "recalibrate a derived product" );
+            }
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
                 "input declares unrecognized SICNU_SAR_CALIBRATION='" +
-                    declaredCalibration.toStdString() +
-                    "'; refusing to guess the radiometric state");
+                    declared.token.toStdString() +
+                    "'; refusing to guess the radiometric state" );
         }
-        if (normalized != QLatin1String("dn")) {
+        if ( normalized != QLatin1String( "dn" ) )
+        {
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
                 "input already declares SICNU_SAR_CALIBRATION=" +
                     normalized.toStdString() +
                     "; rs:sar_calibrate applies the DN formula and would double-scale "
                     "an already-calibrated product. Use rs:sar_backscatter to convert "
-                    "between calibrated states.");
+                    "between calibrated states." );
+        }
+    }
+
+    // LUT resolution (Radiometric State 13.0): an explicit calibrationLut
+    // parameter overrides the declared SICNU_SAR_CALIBRATION_LUT sidecar,
+    // which resolves relative to the input raster. Missing, malformed or
+    // row-count-mismatched LUTs are typed refusals — the constant A is never
+    // substituted for an unreadable calibration contract.
+    std::vector<double> lutRowA;
+    const std::vector<double> *lutRowAPtr = nullptr;
+    {
+        QString lutPath;
+        if ( !calibrationLutPath.empty() )
+        {
+            lutPath = QString::fromStdString( calibrationLutPath );
+        }
+        else
+        {
+            const QString declaredLut =
+                sicnu::sar::datasetMeta( src, sicnu::sar::kCalibrationLutKey ).trimmed();
+            if ( !declaredLut.isEmpty() )
+            {
+                const QFileInfo declaredInfo( declaredLut );
+                lutPath = declaredInfo.isAbsolute()
+                              ? declaredLut
+                              : QFileInfo( QString::fromStdString( inputPath ) ).absolutePath() + "/"
+                                    + declaredLut;
+            }
+        }
+        if ( !lutPath.isEmpty() )
+        {
+            QString lutError;
+            if ( !sicnu::sar::parseCalibrationLut( lutPath, src.height(), &lutRowA, &lutError ) )
+            {
+                throw RSOperatorError( ErrorCode::InvalidParameter,
+                                       "calibration LUT refused: " + lutError.toStdString() );
+            }
+            lutRowAPtr = &lutRowA;
         }
     }
 
@@ -172,13 +241,14 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
     dst.setNoDataValue(std::numeric_limits<float>::quiet_NaN());
 
     // Single-band fast path streams through the calibrated kernel directly;
-    // multi-band runs calibrate each band independently (same constants).
+    // multi-band runs calibrate each band independently (same constants, and
+    // the same per-row LUT — one grid, one row mapping).
     bool ok = true;
     for (int b = 0; b < bandCount && ok; ++b) {
         context.throwIfCancelled();
         ok = sicnu::sar::calibrateRaster(src, firstBand + b, calibrationA, noiseLinear, domain,
                                          nodata, dst, 256, b + 1, polarizations, sensor,
-                                         incidenceDeg, 0.0);
+                                         incidenceDeg, 0.0, lutRowAPtr);
         context.reportProgress(0.1 + 0.85 * (b + 1) / bandCount, "Calibrated band");
     }
     if (!ok) {

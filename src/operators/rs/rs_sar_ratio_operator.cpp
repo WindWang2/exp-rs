@@ -65,6 +65,10 @@ Json::Value RsSarRatioOperator::schema() const {
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Pair-metric raster path");
     outputs["outputType"] = makeStringParam("outputType", "Pair metric written to the output");
+    outputs["radiometricState"] = makeStringParam("radiometricState",
+                                                  "Declared radiometric state of the output "
+                                                  "(sar_pair_metric — a derived product, not a "
+                                                  "backscatter calibration)");
     outputs["bands"] = makeIntegerParam("bands", "Number of output bands");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
@@ -93,6 +97,13 @@ Json::Value RsSarRatioOperator::metadata() const {
     meta["units"] = units;
     meta["limitations"].append("Scenes must share CRS, pixel size, origin and extent; "
                                "no hidden resampling is applied.");
+    meta["limitations"].append("Both inputs must declare the same recognized radiometric "
+                               "state (or nothing); a sigma0/gamma0 mix or a derived input "
+                               "is a typed refusal.");
+    meta["limitations"].append("The output is a derived pair metric "
+                               "(SICNU_RADIOMETRIC_STATE=sar_pair_metric), not a backscatter "
+                               "calibration; rs:sar_calibrate and rs:sar_backscatter refuse "
+                               "it.");
     meta["limitations"].append("If either input declares SICNU_SAR_DOMAIN=db and "
                                "inputDomain is left at linear_power, the operator refuses "
                                "(pass inputDomain=db to convert, or convert first).");
@@ -206,6 +217,44 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
         ratioParams.inputIsDb = false;
     }
 
+    // Declared radiometric-state preflight (Radiometric State 13.0): a pair
+    // metric compares two quantities, so both scenes must declare the SAME
+    // recognized state (or nothing at all — legacy DN pairs). A sigma0/gamma0
+    // mix, a derived input or an unreadable token is a typed refusal: the
+    // quotient would silently mix different physical quantities.
+    const sicnu::sar::SarStateRead stateA = sicnu::sar::readDeclaredSarState(srcA);
+    const sicnu::sar::SarStateRead stateB = sicnu::sar::readDeclaredSarState(srcB);
+    for ( const sicnu::sar::SarStateRead *read : { &stateA, &stateB } )
+    {
+        if ( read->conflict )
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input declares conflicting SICNU_SAR_CALIBRATION='" +
+                    read->calibration.toStdString() + "' and SICNU_RADIOMETRIC_STATE='" +
+                    read->state.toStdString() + "'; refusing to guess the radiometric state" );
+    }
+    const QString stateTokenA = sicnu::sar::recognizedSarState( srcA );
+    const QString stateTokenB = sicnu::sar::recognizedSarState( srcB );
+    if ( stateTokenA != stateTokenB )
+    {
+        const QString labelA =
+            stateTokenA.isEmpty() ? QStringLiteral( "undeclared" ) : stateTokenA;
+        const QString labelB =
+            stateTokenB.isEmpty() ? QStringLiteral( "undeclared" ) : stateTokenB;
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "inputs declare different radiometric states ('" + labelA.toStdString() +
+                "' vs '" + labelB.toStdString() +
+                "'); a pair metric over different quantities is not physically meaningful" );
+    }
+    if ( sicnu::sar::isSarDerivedState( stateTokenA ) )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "inputs declare the derived SAR product '" + stateTokenA.toStdString() +
+                "' (pair metric / texture); a ratio of derived products is not defined" );
+    }
+
     // Declared sentinels on the analysis bands (NaN when undeclared).
     const float nodataA = sicnu::rs::bandNoDataSentinel(srcA, bandA);
     const float nodataB = sicnu::rs::bandNoDataSentinel(srcB, bandB);
@@ -227,6 +276,16 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError, "SAR ratio failed while streaming");
     }
 
+    // Derived-product semantics (Radiometric State 13.0): a pair metric is a
+    // dimensionless comparison, NOT a backscatter calibration. Declaring the
+    // derived token keeps the product out of the calibration/backscatter
+    // family (both refuse it) instead of letting it re-ingest as undeclared
+    // DN and be re-calibrated as if it were backscatter.
+    dst.setMetadataItem("SICNU_RADIOMETRIC_STATE",
+                        QString::fromLatin1(sicnu::sar::kDerivedPairMetricState));
+    dst.setMetadataItem(sicnu::sar::kCalibrationKey,
+                        QString::fromLatin1(sicnu::sar::kDerivedPairMetricState));
+
     QString error;
     if (!dst.closeWithError(&error)) {
         throw RSOperatorError(ErrorCode::GdalError, "Failed to finalize output: " +
@@ -237,6 +296,7 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["outputType"] = outputTypeStr;
     result["bands"] = 1;
+    result["radiometricState"] = sicnu::sar::kDerivedPairMetricState;
     context.reportProgress(1.0, "SAR pair metric complete");
     return result;
 }

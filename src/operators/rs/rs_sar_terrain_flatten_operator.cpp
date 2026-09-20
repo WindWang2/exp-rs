@@ -190,6 +190,20 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
                                "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
+    // Declared-state preflight: the flattening factor sigma0·cosθ0/cosθi is
+    // only lawful for sigma0 input. A declared gamma0/beta0 would be
+    // double-corrected, a derived product carries no backscatter, and a
+    // conflicting or unreadable declaration is never guessed. Legacy products
+    // that declare nothing are accepted with a warning (the factor is applied
+    // under the documented sigma0 assumption).
+    QString stateReason;
+    const sicnu::sar::SarStateCheck stateCheck =
+        sicnu::sar::checkDeclaredState( src, QLatin1String( "sigma0" ), &stateReason );
+    if ( stateCheck == sicnu::sar::SarStateCheck::Refused )
+        throw RSOperatorError( ErrorCode::InvalidParameter, stateReason.toStdString() );
+    if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
+        context.logWarning( "input declares no SICNU_SAR_CALIBRATION; applying the sigma0 "
+                            "terrain-flattening factor under the documented sigma0 assumption" );
     if (band < 1 || band > src.bandCount()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(band));
