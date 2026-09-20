@@ -2,7 +2,7 @@
 
 # 雷达 SAR 处理（sar）
 
-共 19 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 23 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:sar_backscatter
 
@@ -85,6 +85,16 @@ SAR 配准精化：对同网格复 SLC 对做幅度域 patch 归一化互相关�
 - 适用课程：微波遥感
 - 典型练习：对人工平移的合成 SLC 对估计平移量并验证恢复精度（亚像元级）。
 
+## rs:sar_coregister_local
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：master（raster）、slave（raster）
+- 输出：offsetFieldOutput（raster）、output（raster）
+- 参数：masterBand（numeric）、medianRadius（numeric）、minPeakRatio（numeric）、offsetFieldOutput（string）、output（string）、patchSize（numeric）、patchStride（numeric）、searchRadius（numeric）、slaveBand（numeric）
+- 前置条件：Same-grid complex SLC pair (rs:sar_coregister preflight semantics apply).
+- 局限：Translation-field model: no affine/polynomial warp and no DEM-based refinement; strong range ramps need a lattice finer than the ramp scale.；Both planes are materialized behind a 2 GiB gate (MEMORY_BUDGET_EXCEEDED beyond — use a smaller AOI).
+
 ## rs:sar_displacement
 
 InSAR 形变：把解缠相位按 d_los = −λ·φ/(4π) 转换为视线向形变（米），附带 Itoh 不连续率诊断（输入疑似仍为缠绕相位时告警）。
@@ -164,6 +174,24 @@ InSAR 干涉图：对同网格配准的复 SLC 对生成 s1·conj(s2) 干涉复�
 - 适用课程：微波遥感
 - 典型练习：对合成 SLC 对生成干涉图并解释相干性从 1（完全相干）到 0（失相干）的物理含义。
 
+## rs:sar_network_inversion
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输出：displacementOutput（raster）、rmsOutput（raster）、velocityOutput（raster）
+- 参数：displacementInputs（string）、displacementOutput（string）、epochTemporalYears（string）、maskStrategy（enum）、maxPatterns（integer）、pairWeights（string）、pairs（string）、rmsOutput（string）、velocityOutput（string）
+- 前置条件：Connected pair network (rs:sar_pair_network) and per-pair unwrapped displacement rasters on one grid.
+- 局限：LINEAR small-baseline model: atmospheric phase stays in the epoch displacements — NOT PSI (no PS selection, no APS separation).；Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond).
+
+## rs:sar_pair_network
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输出：outputFile（json）
+- 参数：allowDisconnected（boolean）、maxPerpendicularM（numeric）、maxTemporalDays（numeric）、minPerpendicularM（numeric）、outputFile（string）、referenceIdx（numeric）、scenes（string）、strategy（enum）
+- 前置条件：Scene truth stack: orbit states + acquisition UTC + one common wavelength.
+- 局限：Screening B⊥ is evaluated at each master's orbit mid-time nadir — a graph metric, not a per-pixel baseline product.；Bounded scale: 512 scenes, 65536 pairs (typed refusals beyond).
+
 ## rs:sar_phase_filter
 
 InSAR 相位滤波：对复干涉图做 Goldstein-Werner 空间自适应滤波，抑制相位噪声，输出单位相量复栅格。
@@ -221,6 +249,16 @@ SAR 双通道或多时相比值运算：突出散射机制差异，常用于水�
 - 教学概念：通道比值、散射机制
 - 适用课程：微波遥感
 - 典型练习：生成 VV/VH 比值图并解释镜面、体散射与二面角区域的取值差异。
+
+## rs:sar_remove_topographic_phase
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：dem（raster）、interferogram（raster）
+- 输出：output（raster）、topoPhaseOutput（raster）
+- 参数：band（numeric）、demBand（numeric）、masterOrbitStates（string）、output（string）、slaveOrbitStates（string）、topoPhaseOutput（string）、wavelengthUm（numeric）
+- 前置条件：Complex interferogram; DEM above the WGS84 ellipsoid in the interferogram CRS; both scene orbit state vectors; radar wavelength.
+- 局限：North-up axis-aligned grids only; DEM must share the interferogram CRS and cover it (warp/clip otherwise).；Height sensitivity degenerates near zero B⊥ — the removal is exact for the given DEM, but pairs without perpendicular baseline carry no height signal to remove.
 
 ## rs:sar_speckle
 
@@ -367,7 +405,7 @@ InSAR 相位解缠：内建参考实现（质量引导洪泛、确定性），�
 - 模态：sar
 - 输入：input（raster）、qualityInput（raster）
 - 输出：output（raster）、unwrappedPixels（string）
-- 参数：band（numeric）、output（string）、provider（string）、qualityBand（numeric）
+- 参数：band（numeric）、output（string）、provider（string）、providerArgs（string）、providerBin（string）、providerTimeoutSec（numeric）、qualityBand（numeric）
 - 前置条件：Complex interferogram (ideally filtered via rs:sar_phase_filter); optional coherence raster for quality guidance.；输入应为滤波后的复干涉图（rs:sar_phase_filter）；可选相干性栅格引导种子顺序。
 - 局限：Single-scale plane unwrapping: 2 GiB plane budget (MEMORY_BUDGET_EXCEEDED beyond; use a smaller AOI).；Dense residue fields yield wrong 2π branches — no branch-cut/MCF global optimization is claimed.；参考实现不感知残差点、不做全局最优（非 SNAPHU/MCF 语义）；残差密集场会产生错误 2π 分支。；单尺度整平面解缠，2 GiB 预算（超出拒绝 MEMORY_BUDGET_EXCEEDED）——用更小 AOI 或外部 provider。
 - 适用地物：任意地物（SAR）

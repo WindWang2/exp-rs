@@ -1,31 +1,13 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u8015\u5730",
-        "\u6797\u5730"
-      ],
-      "scenes" : 
-      [
-        "\u6270\u52a8\u68c0\u6d4b",
-        "\u7269\u5019\u7a81\u53d8\u5206\u6790"
-      ]
-    },
+    "applicability" : {},
     "band_roles" : {},
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations + tile \u00d7 segments \u00d7 scenes \u00d7 terms\u00b2)",
@@ -36,19 +18,6 @@
       "stochastic" : false
     },
     "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
-    "failure_modes" : 
-    [
-      {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u4fdd\u8bc1\u8db3\u591f\u65f6\u76f8\u6570\u6216\u964d\u4f4e\u8c10\u6ce2\u9636\u6570",
-        "when" : "\u65f6\u5e8f\u8fc7\u77ed\u65e0\u6cd5\u62df\u5408"
-      }
-    ],
     "family" : "temporal",
     "io" : 
     {
@@ -87,7 +56,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -103,7 +71,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -127,7 +94,6 @@
         },
         {
           "default" : "none",
-          "enum" :
           "enum" : 
           [
             "none",
@@ -140,7 +106,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -211,7 +176,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -221,21 +185,6 @@
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
-    "summary" : "\u5b63\u8282\u8c03\u6574\u8d8b\u52bf\u65ad\u88c2\u5206\u5272\uff1a\u9010\u6bb5\u8c10\u6ce2+\u7ebf\u6027\u8d8b\u52bf\u91cd\u62df\u5408\uff08BFAST/CCDP \u601d\u60f3\u7684\u8bda\u5b9e\u5b9e\u73b0\uff09\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u8c10\u6ce2\u6a21\u578b",
-        "\u8d8b\u52bf\u65ad\u88c2",
-        "\u6270\u52a8\u6062\u590d"
-      ],
-      "courses" : 
-      [
-        "\u9065\u611f\u65f6\u5e8f\u5206\u6790"
-      ],
-      "exercise" : "\u5bf9\u957f\u65f6\u5e8f NDVI \u68c0\u6d4b\u6270\u52a8\u5e74\u4efd\u5e76\u89e3\u91ca recovery \u8bed\u4e49\u3002"
-    }
   },
   "description" : "Joint seasonal-trend change segmentation: each segment models a linear trend PLUS seasonal harmonics (sin/cos of 2*PI*k*t/365.25), and breaks are detected as trend changes of the seasonality-adjusted residual, greedily, while each split lowers the residual RSS by more than minImprovement and both sides keep the minimum segment length. Greedy BFAST/CCDC-inspired method - NOT the full BFAST (no iterative season/trend alternation) or CCDC (no L1 / per-segment model selection). Outputs per pixel: break count, per-break calendar day offsets and fitted-level jump magnitudes, first/last segment slopes, overall RMSE/R2; with a declared disturbance direction, the first onset day and its recovery length (days; negative when never recovered).",
   "display_name" : "Temporal Harmonic Breaks (Joint Seasonal-Trend Change)",
@@ -243,7 +192,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

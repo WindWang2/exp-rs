@@ -1,0 +1,166 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "atoms",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "convergedFraction",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "lambda",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "meanError",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "meanIterations",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "collinearAngleDegrees",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "endmembers",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "endmembersRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "errorOut",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0.010000",
+          "name" : "lambda",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "2000",
+          "name" : "maxIterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "sumToOnePenalty",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0.000000",
+          "name" : "tolerance",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Sum-to-one is a penalty (like the FCLS solver), not a hard constraint; report mean |sum-1| via sumToOnePenalty QA if needed.",
+      "Near-duplicate atoms (below collinearAngleDegrees) refuse: an L1 split across near-identical atoms is not interpretable."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "Atoms must use the same band order and units as the input raster."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Sparse abundance estimation (L1 + non-negativity, optional sum-to-one penalty) with FISTA; supports overcomplete dictionaries.",
+  "display_name" : "Sparse Unmixing (L1 + Non-negative)",
+  "id" : "rs:sparse_unmixing",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "hyperspectral",
+    "unmixing",
+    "sparse"
+  ],
+  "task" : "unmixing"
+}

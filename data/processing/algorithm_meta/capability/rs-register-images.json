@@ -1,0 +1,151 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "io",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "ce90Px",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "coverageRatio",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "inlierCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "inlierRmsePx",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "reason",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "rmsePx",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "status",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1024",
+          "name" : "maxDim",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "auto",
+          "enum" : 
+          [
+            "auto",
+            "phase_correlation",
+            "mutual_information",
+            "ncc"
+          ],
+          "name" : "metric",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "reference",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "reportPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "bilinear",
+          "enum" : 
+          [
+            "nearest",
+            "bilinear",
+            "cubic",
+            "lanczos"
+          ],
+          "name" : "resampling",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "source",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "geometric",
+    "prerequisites" : 
+    [
+      "Source and reference rasters readable by GDAL"
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Cross-modal (optical-SAR) image registration with refusal semantics: match, fit, warp into the reference frame, and report CE90/residual-field quality. Refusals write nothing; low-confidence outputs are flagged.",
+  "display_name" : "Image Registration",
+  "id" : "rs:register_images",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "registration",
+    "multimodal",
+    "optical-sar"
+  ]
+}

@@ -25,7 +25,7 @@
       [
         {
           "data_kind" : "integer",
-          "name" : "entries",
+          "name" : "inputRows",
           "required" : true
         },
         {
@@ -33,23 +33,28 @@
           "file_format" : "json",
           "name" : "output",
           "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outputRows",
+          "required" : true
         }
       ],
       "parameters" : 
       [
         {
-          "name" : "libraryPath",
+          "name" : "angleMatrix",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "endmembersRef",
           "required" : true,
           "type" : "string"
         },
         {
-          "name" : "materials",
-          "required" : false,
-          "type" : "string"
-        },
-        {
-          "default" : "0.500000",
-          "name" : "nearDuplicateAngleDeg",
+          "default" : "2",
+          "name" : "mergeAngleDegrees",
           "required" : false,
           "type" : "numeric"
         },
@@ -59,27 +64,26 @@
           "type" : "string"
         },
         {
+          "name" : "ppiCounts",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "requireFullCoverage",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
           "name" : "sensor",
           "required" : false,
           "type" : "string"
-        },
-        {
-          "default" : "0",
-          "name" : "wavelengthMax",
-          "required" : false,
-          "type" : "numeric"
-        },
-        {
-          "default" : "0",
-          "name" : "wavelengthMin",
-          "required" : false,
-          "type" : "numeric"
         }
       ]
     },
     "limitations" : 
     [
-      "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
+      "Reduction caps at 512 input rows; the angle matrix embed caps at 64 rows (payload bound).",
+      "Projection reflects the reduced NATIVE-space set; angles change under resampling by design."
     ],
     "modality" : 
     [
@@ -88,21 +92,23 @@
     "operator_group" : "spectral",
     "prerequisites" : 
     [
-      "The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids."
+      "Input must be an exp-rs:spectral-table with finite, non-zero endmember rows."
     ],
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
   },
-  "description" : "Subset a validated spectral library by material or wavelength window and optionally project it onto a sensor band grid; writes a library-format artifact with near-duplicate QA.",
-  "display_name" : "Library Select",
-  "id" : "rs:library_select",
+  "description" : "Reduce an endmember set to non-redundant representatives (spectral-angle clustering), report the SAM matrix, and optionally project onto a sensor grid \u2014 as a provenance-carrying spectral table.",
+  "display_name" : "Endmember Analysis",
+  "id" : "rs:endmember_analysis",
   "input" : "",
   "output" : "",
   "schema_version" : 2,
   "tags" : 
   [
     "spectral",
+    "endmember",
     "library"
-  ]
+  ],
+  "task" : "endmember-analysis"
 }

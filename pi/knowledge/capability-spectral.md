@@ -2,7 +2,7 @@
 
 # 光谱指数与波段运算（spectral）
 
-共 15 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 19 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:band_math
 
@@ -40,6 +40,15 @@
 - 教学概念：波段比值、光谱特征
 - 适用课程：遥感数字图像处理
 - 典型练习：用 Landsat band5/band4 比值复现简单植被指数并讨论其与 NDVI 的关系。
+
+## rs:endmember_analysis
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：inputRows（integer）、output（json）、outputRows（integer）
+- 参数：angleMatrix（boolean）、endmembersRef（string）、mergeAngleDegrees（numeric）、output（string）、ppiCounts（integer）、requireFullCoverage（boolean）、sensor（string）
+- 前置条件：Input must be an exp-rs:spectral-table with finite, non-zero endmember rows.
+- 局限：Reduction caps at 512 input rows; the angle matrix embed caps at 64 rows (payload bound).；Projection reflects the reduced NATIVE-space set; angles change under resampling by design.
 
 ## rs:evi
 
@@ -80,21 +89,21 @@
 
 ## rs:library_select
 
-光谱库检索与子集：按材料或波长窗口筛选经验库条目，可投影到传感器波段网格。
-
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：entries（integer）、output（json）
 - 参数：libraryPath（string）、materials（string）、nearDuplicateAngleDeg（numeric）、output（string）、sensor（string）、wavelengthMax（numeric）、wavelengthMin（numeric）
 - 前置条件：The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids.
 - 局限：Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself.
-- 适用地物：矿物/材料样区
-- 适用场景：光谱库构建、端元筛选
-- 失败模式：
-  - `INVALID_PARAMETER` — libraryPath 缺失或格式非法。处置：提供 data/spectral 格式的已验证光谱库
-- 教学概念：光谱库、SAM 匹配
-- 适用课程：高光谱遥感
-- 典型练习：从光谱库中筛选研究区端元并投影到传感器波段。
+
+## rs:local_rx_anomaly
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：covariance（string）、max（numeric）、mean（numeric）、output（raster）、scoredPixels（integer）、unscoredPixels（integer）
+- 参数：covariance（enum）、innerWindow（integer）、loading（numeric）、minSamples（integer）、outerWindow（integer）、output（string）、qualityOut（string）
+- 局限：Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.；Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics.
 
 ## rs:mndwi
 
@@ -118,8 +127,6 @@
 
 ## rs:mnf_inverse
 
-MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置零后的去噪重建。
-
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
@@ -127,13 +134,6 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 参数：components（integer）、errorOut（string）、output（string）、spectrumOut（string）、spectrumRef（string）、transform（string）
 - 前置条件：Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load.
 - 局限：Component subsets are a documented approximation: the dropped components' contribution is reported via errorOut / reconstructionError, never silently ignored.
-- 适用地物：任意光学场景
-- 适用场景：MNF 去噪、分量空间分析回写波段空间
-- 失败模式：
-  - `INVALID_PARAMETER` — 输入缺少 MNF 变换元数据。处置：先运行 rs:mnf 并保留其统计 sidecar
-- 教学概念：MNF、逆变换、噪声分离
-- 适用课程：高光谱遥感
-- 典型练习：将噪声分量置零后逆变换，对比去噪前后的光谱曲线。
 
 ## rs:ndbi
 
@@ -234,9 +234,17 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 典型练习：在荒漠草原区比较 NDVI 与 SAVI 对稀疏植被的敏感度。
 - 可接上游：rs:atmospheric_correction
 
-## rs:spectral_band_select
+## rs:sparse_unmixing
 
-按索引或波长范围选择/剔除波段（坏波段剔除与子集提取）。
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：atoms（integer）、convergedFraction（numeric）、lambda（numeric）、meanError（numeric）、meanIterations（numeric）、output（raster）
+- 参数：bands（integer）、collinearAngleDegrees（numeric）、endmembers（string）、endmembersRef（string）、errorOut（string）、lambda（numeric）、libraryMaterials（string）、libraryPath（string）、maxIterations（integer）、output（string）、sumToOnePenalty（numeric）、tolerance（numeric）
+- 前置条件：Atoms must use the same band order and units as the input raster.
+- 局限：Sum-to-one is a penalty (like the FCLS solver), not a hard constraint; report mean |sum-1| via sumToOnePenalty QA if needed.；Near-duplicate atoms (below collinearAngleDegrees) refuse: an L1 split across near-identical atoms is not interpretable.
+
+## rs:spectral_band_select
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
@@ -245,13 +253,6 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 参数：bands（integer）、excludeRanges（json）、output（string）、wavelengthMax（numeric）、wavelengthMin（numeric）
 - 前置条件：wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not.
 - 局限：Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm.
-- 适用地物：任意光学场景
-- 适用场景：坏波段剔除、波段子集
-- 失败模式：
-  - `INVALID_PARAMETER` — 波段索引越界或波长窗口为空。处置：检查波段数与波长范围
-- 教学概念：坏波段、波长选择
-- 适用课程：高光谱遥感
-- 典型练习：剔除水汽吸收波段后重跑分类对比精度。
 
 ## rs:spectral_derivative
 
@@ -293,4 +294,14 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 典型练习：对同一景影像分别计算 NDVI、NDWI、NDBI 并合成 RGB 假彩色判读。
 - 可接上游：rs:atmospheric_correction
 - 可接下游：rs:change_normalized_difference
+
+## rs:spectral_similarity
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：form（string）、meanScore（numeric）、output（raster）、refs（integer）
+- 参数：bands（integer）、form（enum）、libraryMaterials（string）、libraryPath（string）、output（string）、refs（string）、refsRef（string）、scoreOut（string）
+- 前置条件：References must be reflectance-like (non-negative) on the same band grid as the input.
+- 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.
 

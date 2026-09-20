@@ -2,7 +2,7 @@
 
 # 栅格空间分析（raster_spatial）
 
-共 15 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 16 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:align
 
@@ -162,6 +162,13 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 教学概念：欧氏距离、缓冲区
 - 适用课程：GIS 原理
 - 典型练习：生成距最近河流距离图并按 500m 阈值划定缓冲带。
+
+## rs:quality_mosaic
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、height（integer）、inputCount（integer）、output（raster）、rejectedInputs（integer）、seamCount（integer）、width（integer）
+- 参数：balancing（string）、bandCount（integer）、blending（string）、inputs（string）、method（enum）、output（string）、overviews（string）、provenance（string）、qualityWeights（string）、reportOutput（string）、seamline（string）
 
 ## rs:rasterize
 

@@ -1,0 +1,120 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "cloud_mask",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "cloud",
+          "enum" : 
+          [
+            "cloud",
+            "cloud_shadow",
+            "snow"
+          ],
+          "name" : "mask_flag",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "qa_radsat_band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "qa_radsat_bits",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "saturation_level",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Flags describe the delivered values, not the sensor's full quality model; pair with QaMask on QA_PIXEL/SCL for the complete classification.",
+      "A QA_RADSAT band given via qa_radsat_band also receives its own reflectance-domain flag band; consumers should ignore the flag band of the QA band itself."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : 
+    [
+      "The cloud mask must share the input grid (CRS, geotransform, size); mismatched grids are refused, never resampled."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Derive per-pixel radiometric QA flags (saturation, negative, over-range, non-finite, cloud/shadow/snow propagation, QA_RADSAT saturation bits) for each band of a reflectance raster, written as uint16 flag bands with a summary report. Flags union across sources; 0 = clean pixel.",
+  "display_name" : "Radiometric QA Flags",
+  "gpu" : false,
+  "id" : "rs:radiometric_qa",
+  "input" : "raster",
+  "notes" : "Flag vocabulary (uint16): bit0 saturation, bit1 negative, bit2 over-range, bit3 non-finite, bit4 cloud, bit5 cloud-shadow, bit6 snow, bit7 QA_RADSAT saturation, bit8 invalid angles. Schema id exp_rs_radiometric_qa_flags/1 is stamped on the output.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "qa",
+    "saturation"
+  ],
+  "task" : "radiometric-normalization"
+}

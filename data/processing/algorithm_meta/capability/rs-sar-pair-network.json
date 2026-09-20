@@ -1,0 +1,119 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "json",
+          "file_format" : "json",
+          "name" : "outputFile",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "false",
+          "name" : "allowDisconnected",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "maxPerpendicularM",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "maxTemporalDays",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "minPerpendicularM",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "outputFile",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "referenceIdx",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "scenes",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "all_pairs",
+          "enum" : 
+          [
+            "all_pairs",
+            "consecutive"
+          ],
+          "name" : "strategy",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Screening B\u22a5 is evaluated at each master's orbit mid-time nadir \u2014 a graph metric, not a per-pixel baseline product.",
+      "Bounded scale: 512 scenes, 65536 pairs (typed refusals beyond)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Scene truth stack: orbit states + acquisition UTC + one common wavelength."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Build a time/space-baseline-constrained pair network from a scene truth stack (orbits, wavelengths, acquisition dates) with connectivity QA and typed fail-closed semantics.",
+  "display_name" : "InSAR Pair Network",
+  "gpu" : false,
+  "id" : "rs:sar_pair_network",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

@@ -1,0 +1,114 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "earth_sun_factor",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "sun_azimuth",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "sun_elevation",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "date",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "latitude",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "longitude",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "name" : "utc_time",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "write_metadata",
+          "required" : false,
+          "type" : "boolean"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Below-horizon suns are still stamped for traceability; downstream operators refuse to calibrate with them (sun_above_horizon=false and elevation <= 0 in the record).",
+      "In-place metadata update requires a writable raster; read-only sources are refused with a typed error."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : 
+    [
+      "Acquisition date and UTC time (e.g. Landsat MTL DATE_ACQUIRED + SCENE_CENTER_TIME) and the scene centre latitude/longitude."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Compute sun elevation/azimuth, solar declination, earth-sun distance and the inverse-square earth-sun factor from acquisition date/time and scene centre (Spencer 1971 / NOAA closed forms). Optionally writes SICNU_SUN_ZENITH, SICNU_SUN_AZIMUTH, SICNU_SUN_ELEVATION, SICNU_EARTH_SUN_FACTOR and SICNU_EARTH_SUN_DISTANCE_AU dataset metadata onto the input raster.",
+  "display_name" : "Solar Geometry",
+  "gpu" : false,
+  "id" : "rs:solar_geometry",
+  "input" : "raster",
+  "notes" : "Spencer (1971) Fourier series + NOAA general form; ~0.05 deg accuracy, no atmospheric refraction (calibration geometry uses the true position).",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "solar-geometry",
+    "calibration"
+  ],
+  "task" : "radiometric-normalization"
+}

@@ -1,0 +1,105 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "io",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "disconnectedScenes",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "maxEdgeResidualPx",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "reference",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "rmsEdgeResidualPx",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "status",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "[]",
+          "name" : "observations",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "reference",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "reportPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "[]",
+          "name" : "scenes",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "geometric",
+    "prerequisites" : 
+    [
+      "Pairwise translations measured by rs:register_images (or the agent tool)"
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Multi-scene stack registration: global translation least squares over pairwise observations with loop-closure drift metrics.",
+  "display_name" : "Stack Registration",
+  "id" : "rs:stack_register",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "registration",
+    "stack",
+    "block-adjustment"
+  ]
+}

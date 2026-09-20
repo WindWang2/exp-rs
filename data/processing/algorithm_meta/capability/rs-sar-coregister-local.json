@@ -1,0 +1,136 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "master",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "slave",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "offsetFieldOutput",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "masterBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "medianRadius",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1.200000",
+          "name" : "minPeakRatio",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "offsetFieldOutput",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "64",
+          "name" : "patchSize",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "32",
+          "name" : "patchStride",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "8",
+          "name" : "searchRadius",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "slaveBand",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Translation-field model: no affine/polynomial warp and no DEM-based refinement; strong range ramps need a lattice finer than the ramp scale.",
+      "Both planes are materialized behind a 2 GiB gate (MEMORY_BUDGET_EXCEEDED beyond \u2014 use a smaller AOI)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Same-grid complex SLC pair (rs:sar_coregister preflight semantics apply)."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Estimate a local offset field between same-grid complex SLC rasters (patch NCC lattice with sub-pixel refinement and median filtering) and resample the slave onto the master.",
+  "display_name" : "SAR Local Coregistration",
+  "gpu" : false,
+  "id" : "rs:sar_coregister_local",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

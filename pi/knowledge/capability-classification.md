@@ -189,8 +189,8 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar、multimodal
 - 输入：input（raster）、training（vector）
-- 输出：classes（integer）、imbalanceWarnings（string）、kappa（numeric）、meanConfidence（numeric）、mode（string）、output（raster）、overallAccuracy（numeric）、perClassMetrics（string）、trainSamples（integer）、trainSamplesByClass（string）
-- 参数：bands（integer）、classField（string）、maxSamplesPerClass（integer）、method（enum）、modelIn（string）、modelOut（string）、output（string）、probabilityOutput（string）、scale（boolean）、seed（integer）、testSplit（numeric）
+- 输出：classes（integer）、imbalanceWarnings（string）、kappa（numeric）、meanConfidence（numeric）、mode（string）、output（raster）、overallAccuracy（numeric）、perClassMetrics（string）、trainSamples（integer）、trainSamplesByClass（string）、uncertaintyOutput（string）
+- 参数：bands（integer）、classField（string）、maxSamplesPerClass（integer）、method（enum）、modelIn（string）、modelOut（string）、output（string）、probabilityOutput（string）、rejectThreshold（numeric）、scale（boolean）、seed（integer）、testSplit（numeric）、uncertaintyMeasure（enum）、uncertaintyOutput（string）
 - 前置条件：Train mode: training polygons must overlap the raster；Predict-only: modelIn must match method and band set；需要标注训练数据；输入特征建议先统一网格与量纲。
 - 适用地物：农田、森林、城市、水体
 - 适用场景：土地覆盖/利用制图、作物分布制图

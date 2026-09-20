@@ -1,0 +1,142 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "covariance",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "max",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "mean",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "scoredPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "unscoredPixels",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "full",
+          "enum" : 
+          [
+            "full",
+            "diagonal"
+          ],
+          "name" : "covariance",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "innerWindow",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.001000",
+          "name" : "loading",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "minSamples",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "outerWindow",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "qualityOut",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.",
+      "Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Reed-Xiaoli distance to the local background (dual window with guard), with scaled diagonal loading and per-pixel quality counts.",
+  "display_name" : "Local (Dual-Window) RX Anomaly Detection",
+  "id" : "rs:local_rx_anomaly",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "rx",
+    "anomaly",
+    "hyperspectral",
+    "local"
+  ],
+  "task" : "anomaly-detection"
+}

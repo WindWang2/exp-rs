@@ -1,0 +1,155 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "inputCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "integer",
+          "item_type" : "integer",
+          "name" : "rejectedInputs",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "seamCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "balancing",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "bandCount",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "blending",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "inputs",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "seamline",
+          "enum" : 
+          [
+            "seamline",
+            "quality"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "overviews",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "provenance",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "qualityWeights",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "reportOutput",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "seamline",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "composition",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Seam-lined, radiometrically balanced quality mosaic with per-pixel provenance, feather blending, tiled atomic output, overviews and a quality report.",
+  "display_name" : "Quality Mosaic",
+  "id" : "rs:quality_mosaic",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "mosaic",
+    "seamline",
+    "quality",
+    "composition"
+  ]
+}

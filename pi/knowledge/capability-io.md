@@ -2,7 +2,7 @@
 
 # 数据导入（io）
 
-共 8 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 10 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:cn_product_import
 
@@ -112,6 +112,14 @@ MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影�
 - 适用课程：遥感数据处理
 - 典型练习：导入一年 MOD13Q1 NDVI 并重投影到研究区 UTM 网格。
 
+## rs:register_images
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical、sar
+- 输出：ce90Px（numeric）、coverageRatio（numeric）、inlierCount（integer）、inlierRmsePx（numeric）、output（raster）、reason（string）、rmsePx（numeric）、status（string）
+- 参数：maxDim（integer）、metric（enum）、output（string）、reference（string）、reportPath（string）、resampling（enum）、source（string）
+- 前置条件：Source and reference rasters readable by GDAL
+
 ## rs:sentinel2_import
 
 Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率（含 10/20/60m 多分辨率组织）与 SCL 掩膜。
@@ -129,6 +137,14 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 适用课程：遥感数据处理
 - 典型练习：导入 L1C 产品并组织 10m 四波段子集供后续指数计算。
 - 可接下游：rs:atmospheric_correction
+
+## rs:stack_register
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical、sar
+- 输出：disconnectedScenes（integer）、maxEdgeResidualPx（numeric）、reference（string）、rmsEdgeResidualPx（numeric）、status（string）
+- 参数：observations（string）、reference（string）、reportPath（string）、scenes（string）
+- 前置条件：Pairwise translations measured by rs:register_images (or the agent tool)
 
 ## rs:zy3_import
 

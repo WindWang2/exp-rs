@@ -1,32 +1,13 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u8015\u5730",
-        "\u6797\u5730",
-        "\u6c34\u4f53"
-      ],
-      "scenes" : 
-      [
-        "\u6837\u672c\u7279\u5f81\u751f\u6210",
-        "\u76d1\u7763\u5b66\u4e60\u524d\u5904\u7406"
-      ]
-    },
+    "applicability" : {},
     "band_roles" : {},
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(scenes \u00d7 totalRegionWindowPixels) I/O + O(regions \u00d7 (scenes\u00b2 + model))",
@@ -37,19 +18,6 @@
       "stochastic" : false
     },
     "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
-    "failure_modes" : 
-    [
-      {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u5148\u8fd0\u884c rs:temporal_extract_regions \u4fdd\u6301\u4e00\u81f4 id",
-        "when" : "region id \u4e0e\u65f6\u5e8f\u8868\u4e0d\u5339\u914d"
-      }
-    ],
     "family" : "temporal",
     "io" : 
     {
@@ -88,7 +56,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -104,7 +71,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -140,7 +106,6 @@
         },
         {
           "default" : "none",
-          "enum" :
           "enum" : 
           [
             "none",
@@ -153,7 +118,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -208,7 +172,6 @@
         },
         {
           "default" : "sen",
-          "enum" :
           "enum" : 
           [
             "sen",
@@ -221,7 +184,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -231,20 +193,6 @@
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
-    "summary" : "\u533a\u57df\u7ea7\u65f6\u5e8f\u7279\u5f81\u8868\uff1a\u8d28\u91cf\u3001\u5206\u5e03\u3001Sen/OLS \u8d8b\u52bf\u3001\u5f02\u5e38\u4e0e\u591a\u7269\u5019\u7279\u5f81\uff0c\u5e26\u7248\u672c\u5316 schema sidecar\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u65f6\u5e8f\u7279\u5f81\u5de5\u7a0b",
-        "Sen \u8d8b\u52bf"
-      ],
-      "courses" : 
-      [
-        "\u9065\u611f\u65f6\u5e8f\u5206\u6790"
-      ],
-      "exercise" : "\u751f\u6210\u533a\u57df\u7279\u5f81\u8868\u5e76\u4e0e\u6807\u7b7e\u8054\u63a5\u6784\u5efa\u5206\u7c7b\u6837\u672c\u3002"
-    }
   },
   "description" : "Compute a typed per-region temporal feature table for ML / agent consumption: series quality (valid_fraction), distribution (mean/stddev/min/max), robust trend (Sen slope + Mann-Kendall p, or OLS), anomalies (most recent z-score, max |z|), change (break count, first break day, max magnitude from the joint harmonic+trend segmentation; optional disturbance onset and recovery), and multi-cycle phenology (per-cycle median across years of SOS/POS/EOS/LOS/amplitude/integral). Output is one CSV row per region with a versioned JSON schema sidecar (exp_rs_temporal_region_features/1) so label tables join by region_id.",
   "display_name" : "Temporal Region Features (ML Table)",
@@ -252,7 +200,6 @@
   "input" : "",
   "output" : "",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

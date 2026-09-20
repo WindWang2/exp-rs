@@ -1,0 +1,135 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "f_geo",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "f_vol",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "ref_relative_azimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "ref_view_zenith",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "-1",
+          "name" : "sun_azimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "-1",
+          "name" : "sun_zenith",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "-1",
+          "name" : "view_azimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "-1",
+          "name" : "view_zenith",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Single-scene weights cannot be fitted from the scene itself; for angle-less two-date leveling use the BrdfNormalization::PairStatistics::fitCFactor API (mean-preserving c = mean(ref)/mean(target)).",
+      "Non-finite pixels pass through as NaN NoData."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : 
+    [
+      "Sun and view angles via parameters or SICNU_SUN_* / SICNU_VIEW_* dataset metadata \u2014 a missing angle is a typed refusal (use rs:solar_geometry to stamp sun angles).",
+      "Per-band kernel weights (f_vol, f_geo); the normalization denominator must stay positive."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Normalize optical reflectance from the observed sun/view geometry to a reference geometry (nadir view by default) with the Ross-Thick + Li-Sparse-Reciprocal kernels. Requires per-band kernel weights and sun/view angles (parameters or SICNU_* metadata); refuses when the geometry or weights are missing/nonphysical.",
+  "display_name" : "BRDF Normalization",
+  "gpu" : false,
+  "id" : "rs:brdf_normalization",
+  "input" : "raster",
+  "notes" : "Ross-Thick + Li-Sparse-Reciprocal (Lucht et al. 2000); single-pass streaming; bit-exact grade (single-threaded, fixed order). Kernel weights are band-specific physical quantities \u2014 derive them from multi-angle observations or published per-biome values; do not guess.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "brdf",
+    "view-angle"
+  ],
+  "task" : "radiometric-normalization"
+}

@@ -25,7 +25,7 @@
 
 ## rs:terrain_flow
 
-地形水文分析：填洼与平地解析、D8/D∞ 流向、汇流累积、河网提取（Strahler 级序）、流域划分与出口识别，服务流域建模。
+地形水文分析：由 DEM 计算流向、汇流累积并提取汇水区/河网，服务流域建模。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：dem
@@ -33,16 +33,15 @@
 - 输出：output（raster）、product（string）
 - 参数：include_segments（enum）、nodata（numeric）、output（string）、pour_points（string）、product（enum）、threshold（numeric）
 - 前置条件：Projected DEM recommended; routing is cell-based (orthogonal 1, diagonal sqrt(2)).
-- 局限：stream_network/directions run on the filled surface of this run; D∞ accumulation uses the single steepest-facet receiver (no fraction splitting, documented follow-up).；Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound.
+- 局限：stream_network/directions run on the filled surface of this run; D∞ accumulation uses the single steepest-facet receiver (no fraction splitting, documented follow-up).；Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound.；Filled flats are sinks (direction 0); no flat-resolution routing is attempted (documented debt for a future epsilon-gradient variant).
 - 适用地物：流域、河谷、山地
 - 适用场景：流域划分、河网提取、水文站选址分析
 - 失败模式：
-  - `INVALID_PARAMETER` — threshold 小于 1（累积计数为自包含计数）。处置：提高 threshold 或使用默认值 50
-  - `INVALID_PARAMETER` — product=watershed 缺少 pour_points 或格式非法。处置：以 'col,row' 分号分隔给出流域出口
-  - `INSUFFICIENT_MEMORY` — 大区域高分辨率 DEM 流向计算内存超限。处置：分幅处理、重采样降低分辨率，或在预算内提高 SICNU_TERRAIN_MAX_CELLS
-- 教学概念：D8 流向、D∞ 流向、汇流累积、Strahler 河流级序、流域
+  - `INVALID_PARAMETER` — DEM 存在洼地导致流向中断。处置：先执行填洼（fill sinks）选项或预处理
+  - `INSUFFICIENT_MEMORY` — 大区域高分辨率 DEM 流向计算内存超限。处置：分幅处理或重采样降低分辨率
+- 教学概念：D8 流向、汇流累积、流域
 - 适用课程：GIS 原理、水文建模
-- 典型练习：从 DEM 填洼并解析平地后提取研究区主河网（含级序）并与真实水系对比。
+- 典型练习：从 DEM 填洼后提取研究区主河网并与真实水系对比。
 
 ## rs:terrain_landform
 

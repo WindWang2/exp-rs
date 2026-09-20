@@ -1,31 +1,13 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u8015\u5730",
-        "\u6797\u5730"
-      ],
-      "scenes" : 
-      [
-        "\u89c4\u5219\u65f6\u5e8f\u6784\u5efa",
-        "\u591a\u6e90\u65f6\u76f8\u5bf9\u9f50"
-      ]
-    },
+    "applicability" : {},
     "band_roles" : {},
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes + tile \u00d7 calendarPoints)",
@@ -36,19 +18,6 @@
       "stochastic" : false
     },
     "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
-    "failure_modes" : 
-    [
-      {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u4f7f\u7528 16d/monthly \u7b49\u53d7\u652f\u6301\u65e5\u5386\uff1b\u4e0d\u5916\u63a8",
-        "when" : "calendar \u975e\u6cd5\u6216\u5916\u63a8\u8bf7\u6c42"
-      }
-    ],
     "family" : "temporal",
     "io" : 
     {
@@ -102,7 +71,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -118,7 +86,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -148,7 +115,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -178,7 +144,6 @@
         },
         {
           "default" : "linear",
-          "enum" :
           "enum" : 
           [
             "nearest",
@@ -209,7 +174,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -219,21 +183,6 @@
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
-    "summary" : "\u89c4\u5219\u65e5\u5386\u91cd\u91c7\u6837\uff1a\u5c06\u4e0d\u89c4\u5219\u65f6\u76f8\u91cd\u6392\u5230 16 \u5929/\u6708\u7b49\u89c4\u5219\u65e5\u5386\uff0c\u5e26\u6709\u6548\u8ba1\u6570\u4e0e\u586b\u5145\u8ba1\u6570\u6eaf\u6e90\u6ce2\u6bb5\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u89c4\u5219\u65e5\u5386",
-        "\u91cd\u91c7\u6837",
-        "\u63d2\u503c"
-      ],
-      "courses" : 
-      [
-        "\u9065\u611f\u65f6\u5e8f\u5206\u6790"
-      ],
-      "exercise" : "\u5c06\u4e0d\u89c4\u5219\u83b7\u53d6\u91cd\u6392\u5230 16 \u5929\u65e5\u5386\u5e76\u68c0\u67e5 filled_count\u3002"
-    }
   },
   "description" : "Re-cast an irregular acquisition series onto a regular calendar (e.g. every 16 days, or monthly) so downstream series models see a uniform grid. Methods: nearest (closest observation within max_window_days, ties -> earlier), window_mean (mean of the observations inside the window), linear (time-weighted interpolation between the bracketing observations), whittaker (penalized smoother defined on the calendar grid; bridges data-free runs up to max_gap_nodes). No method extrapolates past the observed span. Every calendar point carries valid_count / filled_count provenance bands so synthetic values stay distinguishable from observed ones.",
   "display_name" : "Temporal Regularize (Regular Calendar)",
@@ -241,7 +190,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

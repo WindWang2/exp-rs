@@ -2,7 +2,7 @@
 
 # 光学预处理（optical）
 
-共 17 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 20 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:apply_mask
 
@@ -95,6 +95,16 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 教学概念：经验大气校正、辐射传输
 - 适用课程：定量遥感基础
 - 典型练习：对 MODIS 与 Sentinel-2 影像各执行 QUAC，检查反射率量纲一致性。
+
+## rs:brdf_normalization
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：bandCount（integer）、output（raster）
+- 参数：f_geo（numeric）、f_vol（numeric）、output（string）、ref_relative_azimuth（numeric）、ref_view_zenith（numeric）、sun_azimuth（numeric）、sun_zenith（numeric）、view_azimuth（numeric）、view_zenith（numeric）
+- 前置条件：Sun and view angles via parameters or SICNU_SUN_* / SICNU_VIEW_* dataset metadata — a missing angle is a typed refusal (use rs:solar_geometry to stamp sun angles).；Per-band kernel weights (f_vol, f_geo); the normalization denominator must stay positive.
+- 局限：Single-scene weights cannot be fitted from the scene itself; for angle-less two-date leveling use the BrdfNormalization::PairStatistics::fitCFactor API (mean-preserving c = mean(ref)/mean(target)).；Non-finite pixels pass through as NaN NoData.
 
 ## rs:contrast_stretch
 
@@ -251,8 +261,8 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 确定性：逐位一致（bit_exact）
 - 模态：multimodal、optical
 - 输入：ms（raster）、pan（raster）
-- 输出：bands（integer）、method（string）、output（raster）
-- 参数：blueIdx（integer）、greenIdx（integer）、method（enum）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
+- 输出：bands（integer）、method（string）、output（raster）、qualityPassed（boolean）、qualityReport（string）
+- 参数：blueIdx（integer）、greenIdx（integer）、method（enum）、msWeights（numeric）、output（string）、panWeight（numeric）、qualityReport（string）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.；全色与多光谱输入必须几何配准且位于同一网格（ADR 0098）。
 - 局限：IHS requires exactly 3 MS bands mapped to R/G/B.
 - 适用地物：城市、农田、海岸带
@@ -303,6 +313,26 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 适用课程：定量遥感基础
 - 典型练习：把两景不同日期的影像定标到 TOA 反射率，比较季节光照差异。
 - 可接上游：rs:dn_to_radiance
+
+## rs:radiometric_qa
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：cloud_mask（raster）、input（raster）
+- 输出：bandCount（integer）、output（raster）
+- 参数：mask_flag（enum）、output（string）、qa_radsat_band（integer）、qa_radsat_bits（string）、saturation_level（numeric）
+- 前置条件：The cloud mask must share the input grid (CRS, geotransform, size); mismatched grids are refused, never resampled.
+- 局限：Flags describe the delivered values, not the sensor's full quality model; pair with QaMask on QA_PIXEL/SCL for the complete classification.；A QA_RADSAT band given via qa_radsat_band also receives its own reflectance-domain flag band; consumers should ignore the flag band of the QA band itself.
+
+## rs:solar_geometry
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：earth_sun_factor（numeric）、sun_azimuth（numeric）、sun_elevation（numeric）
+- 参数：date（string）、latitude（numeric）、longitude（numeric）、utc_time（string）、write_metadata（boolean）
+- 前置条件：Acquisition date and UTC time (e.g. Landsat MTL DATE_ACQUIRED + SCENE_CENTER_TIME) and the scene centre latitude/longitude.
+- 局限：Below-horizon suns are still stamped for traceability; downstream operators refuse to calibrate with them (sun_above_horizon=false and elevation <= 0 in the record).；In-place metadata update requires a writable raster; read-only sources are refused with a typed error.
 
 ## rs:topographic_correction
 

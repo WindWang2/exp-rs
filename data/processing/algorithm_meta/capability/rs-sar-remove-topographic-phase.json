@@ -1,0 +1,122 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "dem",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "interferogram",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "topoPhaseOutput",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "demBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "masterOrbitStates",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "slaveOrbitStates",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "topoPhaseOutput",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthUm",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "North-up axis-aligned grids only; DEM must share the interferogram CRS and cover it (warp/clip otherwise).",
+      "Height sensitivity degenerates near zero B\u22a5 \u2014 the removal is exact for the given DEM, but pairs without perpendicular baseline carry no height signal to remove."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Complex interferogram; DEM above the WGS84 ellipsoid in the interferogram CRS; both scene orbit state vectors; radar wavelength."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Remove the DEM/orbit topographic phase from a complex interferogram using the rigorous per-pixel range-difference geometry of both scene orbits (not an approximation).",
+  "display_name" : "InSAR Topographic Phase Removal",
+  "gpu" : false,
+  "id" : "rs:sar_remove_topographic_phase",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

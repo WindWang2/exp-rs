@@ -11,8 +11,8 @@
     "determinism" : 
     {
       "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
       "side_effects" : false,
       "stochastic" : false
     },
@@ -31,54 +31,80 @@
       "outputs" : 
       [
         {
+          "data_kind" : "string",
+          "name" : "form",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "meanScore",
+          "required" : true
+        },
+        {
           "data_kind" : "raster",
           "name" : "output",
           "required" : true
         },
         {
-          "data_kind" : "json",
-          "file_format" : "json",
-          "name" : "spectrumOut",
+          "data_kind" : "integer",
+          "name" : "refs",
           "required" : true
         }
       ],
       "parameters" : 
       [
         {
-          "name" : "components",
+          "default" : "0",
+          "name" : "bands",
           "required" : false,
           "type" : "integer"
         },
         {
-          "name" : "errorOut",
+          "default" : "product_normalized",
+          "enum" : 
+          [
+            "product_normalized",
+            "classic_tan"
+          ],
+          "name" : "form",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
           "required" : false,
           "type" : "string"
         },
         {
           "name" : "output",
-          "required" : false,
-          "type" : "string"
-        },
-        {
-          "name" : "spectrumOut",
-          "required" : false,
-          "type" : "string"
-        },
-        {
-          "name" : "spectrumRef",
-          "required" : false,
-          "type" : "string"
-        },
-        {
-          "name" : "transform",
           "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "refs",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "refsRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "scoreOut",
+          "required" : false,
           "type" : "string"
         }
       ]
     },
     "limitations" : 
     [
-      "Component subsets are a documented approximation: the dropped components' contribution is reported via errorOut / reconstructionError, never silently ignored."
+      "Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class."
     ],
     "modality" : 
     [
@@ -87,22 +113,23 @@
     "operator_group" : "spectral",
     "prerequisites" : 
     [
-      "Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load."
+      "References must be reflectance-like (non-negative) on the same band grid as the input."
     ],
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
   },
-  "description" : "Reconstruct band space from MNF components using the transform model artifact from rs:mnf (full inverse or a quantified component subset).",
-  "display_name" : "Inverse MNF",
-  "id" : "rs:mnf_inverse",
+  "description" : "Hybrid spectral similarity combining SAM and SID (bounded product or classic tan form); classifies pixels to the most similar reference.",
+  "display_name" : "SID-SAM Hybrid Similarity",
+  "id" : "rs:spectral_similarity",
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
   "tags" : 
   [
-    "mnf",
+    "spectral",
     "hyperspectral",
-    "inverse-transform"
-  ]
+    "similarity"
+  ],
+  "task" : "classification"
 }

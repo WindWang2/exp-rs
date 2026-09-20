@@ -52,9 +52,12 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
     // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
     // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
-    REQUIRE( expectedCatalog.size() == 43 );
-    REQUIRE( expectedCatalog.size() == 43 ); // 39 at the a5b11b7f baseline + 4 Advanced InSAR 11.0
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
+    // Temporal Phenology 12.0 reconciles the upstream drift that landed after
+    // the pin: rs:brdf_normalization, rs:radiometric_qa, rs:solar_geometry
+    // (radiometric-normalization), rs:terrain_landform (landform_classification),
+    // rs:terrain_solar (solar_terrain), rs:terrain_viewshed (visibility) and
+    // four more task-bearing registrations now declare task families.
+    REQUIRE( expectedCatalog.size() == 53 ); // 43 at the Spectral-11 pin + 10 upstream drift reconciliation
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -131,7 +134,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 43 );
+        REQUIRE( written == static_cast<int>( expectedCatalog.size() ) );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );
