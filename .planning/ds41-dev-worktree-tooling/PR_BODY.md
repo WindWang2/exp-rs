@@ -4,10 +4,13 @@ Baseline SHA: `adf8f98952422fe9c386c56d64d5fb6a4a6642f1` (live `origin/master` a
 
 ## Live dedup result (re-verified at PR time, not at brief time)
 
-- Open PRs: **7** — all product tracks (#1116–#1122: geospatial fabric, data/experiment, model runtime, hyperspectral, offline labs, mission workbench, scientific verification). None touches `scripts/dev/**` or `docs/development/**`.
+- Open PRs at PR creation: **9**, of which 8 are parallel tracks (#1116–#1123: geospatial fabric, data/experiment, model runtime, hyperspectral, offline labs, mission workbench, scientific verification, boundary fuzz) and one is this PR (#1124). None touches `scripts/dev/**` or `docs/development/**`.
 - Open issues: **0**.
-- File-level overlap of this PR's 26 paths against those PRs, remote branches, and sibling worktrees (produced by `scripts/dev/overlap_scan.py`, the tool this PR adds):
-  - **open PR #1120 (`agent/flash-offline-labs-12`) touches `.gitignore`** — verified by `gh pr diff 1120`: it appends its own `.planning/flash-offline-labs-12/` whitelist block at the same anchor (after the `ds41-range-cache-msvc` block). Same for sibling worktrees `ds41-performance-observatory`, `flash-sar-polsar-12`, `flash-taskcenter-runtime-12`, `flash-temporal-phenology-12`, which each append a track whitelist block.
+- File-level overlap of this PR's **30** paths against those PRs, remote branches, and sibling worktrees (produced by `scripts/dev/overlap_scan.py --from-HEAD`, the tool this PR adds, run on the final state): the ONLY overlapping path is `.gitignore`, and every hit is the same class of change.
+  - **open PR #1120 (`agent/flash-offline-labs-12`) touches `.gitignore`** — verified by `gh pr diff 1120`: it appends its own `.planning/flash-offline-labs-12/` whitelist block at the same anchor (after the `ds41-range-cache-msvc` block).
+  - **open PR #1123 (`agent/ds41-fuzz-boundaries`) touches `.gitignore`** — verified by `gh pr diff 1123`: it appends its own whitelist block at the same anchor (opened after this track's first dedup pass, before the PR).
+  - Sibling worktrees `ds41-performance-observatory`, `flash-sar-polsar-12`, `flash-taskcenter-runtime-12`, `flash-temporal-phenology-12` each carry an uncommitted `.gitignore` whitelist append (in-flight work by other agents).
+  - No overlap on `scripts/dev/**`, `docs/development/**`, or this track's `.planning` directory from any PR, branch, or worktree.
   - **Expected conflict hotspot: `.gitignore`** — every track appends a 4-line block at the same anchor. Both blocks are additive and semantically independent; the correct resolution is to keep both. No other file is touched by any other PR or branch.
 - 13 historical `agent/*` / `fix/*` remote branches classified (`scripts/dev/stale_branches.py`, full table in `.planning/ds41-dev-worktree-tooling/BASELINE.md`): all superseded or residue; one (`agent/ds41-http-fetch-strict`) carries an unmerged regression test `tests/test_io_http_fetch.cpp` that its merged PR (#1110) dropped. Reported as a handoff, deliberately **not** ported — `tests/**` is outside this track's ownership.
 
