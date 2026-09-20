@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QUuid>
+#include <algorithm>
 #include <utility>
 
 #include "framework/json_params_converter.h"
@@ -23,6 +24,7 @@
 #include "framework/worker_execution_route.h"
 #include "framework/execution_resource_bridge.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "runtime/observability/fault_point.h"
 #include "runtime/observability/trace.h"
 #include "data/data_manager.h"
 #include "data/execution_identity_resolver.h"
@@ -85,7 +87,40 @@ void unlinkScratchOutputs( const QStringList &paths )
             QFile::remove( path );
     }
 }
+
 } // namespace
+
+/// 12.0: parse descriptor agentMetadata.execution into AdmissionDims. Shared
+/// by the lock-free warm paths (enqueueTask / submitPipeline) — the cached
+/// admissionDimsLocked never re-reads a descriptor under m_mutex (#1097).
+/// All keys optional; absent = 0/no gate (TaskResourceBudget2 contract).
+TaskCenter::AdmissionDims TaskCenter::parseAdmissionDims( const Json::Value &execution )
+{
+    AdmissionDims dims;
+    if ( !execution.isObject() )
+        return dims;
+    const Json::Value &tempDisk = execution["temporaryDiskBytes"];
+    if ( tempDisk.isNumeric() )
+        dims.tempDiskMb = static_cast<unsigned int>(
+            tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
+    const Json::Value &vram = execution["estimatedVramBytes"];
+    if ( vram.isNumeric() )
+        dims.vramMb = static_cast<unsigned int>(
+            vram.asUInt64() / ( 1024ull * 1024ull ) );
+    const Json::Value &cpu = execution["cpuThreads"];
+    if ( cpu.isNumeric() )
+        dims.cpuThreads = static_cast<unsigned int>( cpu.asUInt64() );
+    const Json::Value &diskRead = execution["diskReadWeight"];
+    if ( diskRead.isNumeric() )
+        dims.diskReadWeight = std::min<unsigned int>( diskRead.asUInt64(), 100 );
+    const Json::Value &diskWrite = execution["diskWriteWeight"];
+    if ( diskWrite.isNumeric() )
+        dims.diskWriteWeight = std::min<unsigned int>( diskWrite.asUInt64(), 100 );
+    const Json::Value &network = execution["networkWeight"];
+    if ( network.isNumeric() )
+        dims.networkWeight = std::min<unsigned int>( network.asUInt64(), 100 );
+    return dims;
+}
 
 static QString findOutputPathInParams( const QVariantMap &params )
 {
@@ -250,6 +285,10 @@ QString TaskCenter::explainDump() const
 void TaskCenter::shutdown()
 {
     m_isShuttingDown.store( true );
+    // 12.0 D4: stop the watchdog before teardown — cancelAllForShutdown
+    // force-finalizes every non-terminal task anyway, and the join must run
+    // with no scheduler lock held.
+    stopWatchdog();
     {
         QMutexLocker locker( &m_mutex );
         m_waitCondition.wakeAll();
@@ -383,6 +422,8 @@ void TaskCenter::shutdownForTests()
         m_nextReadySerial = 1;
         m_admissionPass = 0;
         m_manualQueued.clear();
+        m_liveTaskCount = 0;
+        m_armedCancelDeadlines = 0;
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -509,6 +550,16 @@ void TaskCenter::resetResourceProfileLimits()
         bool ok = false;
         const int envRetries = qEnvironmentVariableIntValue( "SICNU_TASK_MAX_AUTO_RETRIES", &ok );
         m_maxAutoRetries = std::clamp( ok ? envRetries : 1, 0, 3 );
+    }
+    {
+        // 12.0 env-driven defaults (0 = off for each knob).
+        bool ok = false;
+        const int envAging = qEnvironmentVariableIntValue( "SICNU_TASK_AGING_MS", &ok );
+        m_agingIntervalMs = ok ? static_cast<unsigned int>( std::max( 0, envAging ) ) : 5000u;
+        const int envPending = qEnvironmentVariableIntValue( "SICNU_TASK_MAX_PENDING", &ok );
+        m_maxPendingTasks = ok ? static_cast<unsigned int>( std::max( 0, envPending ) ) : 4096u;
+        const int envCancelMs = qEnvironmentVariableIntValue( "SICNU_TASK_CANCEL_TIMEOUT_MS", &ok );
+        m_cancelWatchdogMs = ok ? static_cast<unsigned int>( std::max( 0, envCancelMs ) ) : 30000u;
     }
     // Keep the resource-aware budget consistent with the restored watermark so a
     // test reset returns to the default scheduling behavior (perf/architecture goal).
@@ -686,6 +737,125 @@ unsigned int TaskCenter::ioHeavyLimit() const
     return m_ioHeavyLimit;
 }
 
+// --- Track 12: fairness / bounded queue / cancel watchdog -------------------
+
+void TaskCenter::setAgingIntervalMs( unsigned int intervalMs )
+{
+    QMutexLocker locker( &m_mutex );
+    m_agingIntervalMs = intervalMs;
+}
+
+unsigned int TaskCenter::agingIntervalMs() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_agingIntervalMs;
+}
+
+void TaskCenter::setMaxPendingTasks( unsigned int maxTasks )
+{
+    QMutexLocker locker( &m_mutex );
+    m_maxPendingTasks = maxTasks;
+}
+
+unsigned int TaskCenter::maxPendingTasks() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_maxPendingTasks;
+}
+
+unsigned int TaskCenter::pendingTaskCount() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_liveTaskCount;
+}
+
+void TaskCenter::setCancelWatchdogMs( unsigned int timeoutMs )
+{
+    QMutexLocker locker( &m_mutex );
+    m_cancelWatchdogMs = timeoutMs;
+    if ( timeoutMs == 0 )
+    {
+        // Disarm honestly: deadlines armed under the old timeout must not
+        // keep firing after the watchdog is disabled.
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+            it->cancelDeadline = {};
+        m_armedCancelDeadlines = 0;
+    }
+    else
+    {
+        // Re-arm honestly: tasks that entered Cancelling while the watchdog
+        // was disabled carry no deadline — without this they stay unprotected
+        // forever and strand on a lost record. Deadline anchors at the
+        // original request stamp (cancel latency keeps its meaning); a task
+        // whose window already passed is picked up by the very next tick.
+        unsigned int armed = 0;
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            AlgorithmTaskInfo &info = it.value();
+            if ( info.status != TaskStatus::Cancelling
+                 || info.cancelDeadline != std::chrono::steady_clock::time_point{} )
+                continue;
+            const auto base = info.cancelRequestStamp
+                                      != std::chrono::steady_clock::time_point{}
+                                  ? info.cancelRequestStamp
+                                  : std::chrono::steady_clock::now();
+            info.cancelDeadline = base + std::chrono::milliseconds( timeoutMs );
+            ++armed;
+        }
+        m_armedCancelDeadlines += armed;
+        if ( armed > 0 )
+            ensureWatchdogStartedLocked();
+    }
+}
+
+unsigned int TaskCenter::cancelWatchdogMs() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_cancelWatchdogMs;
+}
+
+void TaskCenter::setCpuThreadLimit( unsigned int maxThreads )
+{
+    {
+        QMutexLocker locker( &m_mutex );
+        sicnu::SchedulerLimits limits = m_budget2.limits();
+        limits.cpuThreads = maxThreads;
+        m_budget2.setLimits( limits );
+        processNextQueuedTasks(); // dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
+}
+
+void TaskCenter::setIoWeightLimits( unsigned int diskRead, unsigned int diskWrite,
+                                    unsigned int network )
+{
+    {
+        QMutexLocker locker( &m_mutex );
+        sicnu::SchedulerLimits limits = m_budget2.limits();
+        limits.diskReadWeight = diskRead;
+        limits.diskWriteWeight = diskWrite;
+        limits.networkWeight = network;
+        m_budget2.setLimits( limits );
+        processNextQueuedTasks(); // dynamic availability
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
+}
+
+void TaskCenter::setInteractiveReservePercent( unsigned int percent )
+{
+    {
+        QMutexLocker locker( &m_mutex );
+        sicnu::SchedulerLimits limits = m_budget2.limits();
+        limits.interactiveReservePercent = std::min( percent, 100u );
+        m_budget2.setLimits( limits );
+        processNextQueuedTasks(); // dynamic availability — like the other setters
+    }
+    flushPendingLaunches();
+    flushPendingSignals();
+}
+
 TaskCenter::AdmissionDims TaskCenter::admissionDimsLocked( const AlgorithmTaskInfo &task ) const
 {
     if ( m_admissionDimsCache.contains( task.taskId ) )
@@ -808,8 +978,54 @@ void TaskCenter::fireTaskCompletionCallbacks( long taskId )
 }
 
 TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
-                                                     unsigned int resourceEstimateOverrideMb ) const
+                                                     unsigned int resourceEstimateOverrideMb,
+                                                     const QString &source ) const
 {
+    // 12.0 (residual #1097): resolve the registry-dependent inputs — profile,
+    // admission dims, isolated-route predicate, RAM estimate — OUTSIDE
+    // m_mutex. The adapter lookup can lazy-construct QGIS providers and the
+    // estimate resolver takes the registry lock; both stalled the scheduler
+    // when they ran inside it.
+    const ProviderResourceProfile profile = resolveResourceProfile( algorithmId );
+    const bool isolateRoute = processing::shouldRunIsolated( algorithmId );
+    AdmissionDims candidateDims;
+    unsigned int resolvedMb = resourceEstimateOverrideMb;
+    try
+    {
+        auto adapter =
+            processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
+        if ( adapter )
+        {
+            const auto desc = adapter->descriptor();
+            candidateDims = parseAdmissionDims( desc.agentMetadata.execution );
+            candidateDims.ioHeavy = desc.agentMetadata.ioHeavy;
+        }
+    }
+    catch ( ... )
+    {
+        candidateDims = AdmissionDims{};
+    }
+    if ( resolvedMb == 0 )
+    {
+        TaskEstimateResolver resolverCopy;
+        {
+            QMutexLocker copyLock( &m_mutex );
+            resolverCopy = m_resourceBudget.estimateResolver();
+        }
+        try
+        {
+            const TaskResourceEstimate est =
+                resolverCopy ? resolverCopy( algorithmId.toStdString() )
+                             : TaskResourceEstimate{};
+            resolvedMb = est.ramMb > 0 ? est.ramMb
+                                       : defaultEstimateMbForClass( est.memoryClass );
+        }
+        catch ( ... )
+        {
+            resolvedMb = 0;
+        }
+    }
+
     TaskAdmissionSnapshot snap;
     QMutexLocker locker( &m_mutex );
 
@@ -817,9 +1033,21 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     snap.globalLimit = m_globalConcurrencyLimit > 0
                          ? m_globalConcurrencyLimit
                          : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
+    snap.pendingCount = m_liveTaskCount;
+    snap.pendingCap = m_maxPendingTasks;
+    snap.queueFull = m_maxPendingTasks > 0 && m_liveTaskCount >= m_maxPendingTasks;
+    if ( snap.queueFull )
+    {
+        // Refused outright — not a resource hold: the task is never queued.
+        snap.reason = QStringLiteral( "Pending task bound reached (%1/%2)." )
+                          .arg( m_liveTaskCount )
+                          .arg( m_maxPendingTasks );
+        return snap;
+    }
 
-    const ProviderResourceProfile profile = resolveResourceProfile( algorithmId );
     unsigned int runningInProfile = 0;
+    unsigned int isolatedCount = 0;
+    unsigned int ioHeavyCount = 0;
     for ( const auto &t : m_tasks )
     {
         // Mirror the admission pass exactly: Dispatching holds a slot until
@@ -832,11 +1060,13 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
         snap.runningMb += taskEstimateMbLocked( t );
         if ( t.resourceProfile == profile )
             ++runningInProfile;
+        if ( t.isolatedRoute )
+            ++isolatedCount;
+        if ( admissionDimsLocked( t ).ioHeavy )
+            ++ioHeavyCount;
     }
 
-    snap.candidateMb = resourceEstimateOverrideMb > 0
-                         ? resourceEstimateOverrideMb
-                         : estimateMbForAlgorithmLocked( algorithmId.toStdString() );
+    snap.candidateMb = resolvedMb;
     snap.transientActive = m_active.transientChildren;
     snap.transientCap = kMaxTransientChildren;
 
@@ -847,16 +1077,24 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
                           .arg( snap.globalLimit );
         return snap;
     }
+    if ( m_resourceMonitor.memoryPressureHigh() )
+    {
+        snap.rssHold = true;
+        snap.reason = QStringLiteral( "Process RSS at/above the watermark." );
+        return snap;
+    }
     const unsigned int profileMax = limitForProfileLocked( profile );
     if ( runningInProfile >= profileMax )
     {
         snap.reason = QStringLiteral( "Profile worker slots exhausted (%1/%2)." ).arg( runningInProfile ).arg( profileMax );
         return snap;
     }
-    if ( m_resourceMonitor.memoryPressureHigh() )
+    if ( isolateRoute
+         && isolatedCount >= static_cast<unsigned int>( std::max( 1, processing::isolatedJobLimit() ) ) )
     {
-        snap.rssHold = true;
-        snap.reason = QStringLiteral( "Process RSS at/above the watermark." );
+        snap.reason = QStringLiteral( "Isolated worker slots exhausted (%1/%2)." )
+                          .arg( isolatedCount )
+                          .arg( std::max( 1, processing::isolatedJobLimit() ) );
         return snap;
     }
     if ( !m_resourceBudget.canLaunch( snap.runningMb, snap.candidateMb ) )
@@ -864,6 +1102,39 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
         snap.reason = QStringLiteral( "RAM budget: projected %1 MiB > budget %2 MiB." )
                           .arg( snap.runningMb + snap.candidateMb )
                           .arg( snap.budgetMb );
+        return snap;
+    }
+    // 12.0: the multi-dimension weight gates the real pass consults. The
+    // candidate reports its declared lane; a preflight caller has no queue
+    // stamp, so the reserve check evaluates the declared class only.
+    if ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0
+         || candidateDims.cpuThreads > 0 || candidateDims.diskReadWeight > 0
+         || candidateDims.diskWriteWeight > 0 || candidateDims.networkWeight > 0 )
+    {
+        sicnu::ResourceRequest candidateRequest;
+        candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
+        candidateRequest.vramMb = candidateDims.vramMb;
+        candidateRequest.cpuThreads = candidateDims.cpuThreads;
+        candidateRequest.diskReadWeight = candidateDims.diskReadWeight;
+        candidateRequest.diskWriteWeight = candidateDims.diskWriteWeight;
+        candidateRequest.networkWeight = candidateDims.networkWeight;
+        // Evaluate the lane the caller actually declares — an interactive
+        // preflight must report the reserve verdict it would get at enqueue.
+        candidateRequest.latencyClass = latencyClassForSource( source );
+        candidateRequest.submitStamp = std::chrono::steady_clock::now();
+        candidateRequest.priority = 1;
+        if ( !m_budget2.canLaunch( m_active.usage2, candidateRequest,
+                                   std::chrono::steady_clock::now() ) )
+        {
+            snap.reason = QStringLiteral( "Weight admission: declared dimensions exceed the active-set caps." );
+            return snap;
+        }
+    }
+    if ( candidateDims.ioHeavy && m_ioHeavyLimit > 0 && ioHeavyCount >= m_ioHeavyLimit )
+    {
+        snap.reason = QStringLiteral( "IO-heavy slots exhausted (%1/%2)." )
+                          .arg( ioHeavyCount )
+                          .arg( m_ioHeavyLimit );
         return snap;
     }
     snap.wouldAdmit = true;
@@ -1259,20 +1530,27 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     if ( m_isShuttingDown.load() )
         return -1; // no new work after shutdown (#684)
     sicnu::data::DataManager *catalogForWarm = nullptr;
+    TaskEstimateResolver estimateResolverCopy;
     // 8.0 WP-F (review P1 fix): the remote-identity probe is network I/O —
     // perform it HERE, lock-free on the submitting thread, so the collector's
     // resolver consult under m_mutex resolves from the warm session cache.
+    // 12.0: also snapshot the estimate resolver so the RAM estimate resolves
+    // lock-free below instead of under m_mutex (residual #1097).
     {
         QMutexLocker catalogLocker( &m_mutex );
         catalogForWarm = m_catalog;
+        estimateResolverCopy = m_resourceBudget.estimateResolver();
     }
     sicnu::temporal::warmExecutionIdentityCache( catalogForWarm, params );
     // #1097 / #930: QGIS registry lazy-construction (and descriptor JSON) must
     // not run under m_mutex — first touch of an unknown provider id builds
     // QgsProcessingAlgorithm adapters and would stall every terminal /
-    // progress / cancel. Resolve the adapter + admission dims HERE, lock-free.
+    // progress / cancel. Resolve the adapter + admission dims + resource
+    // profile + RAM estimate HERE, lock-free.
     QString warmedAlgorithmName = algorithmId;
     AdmissionDims warmedDims;
+    const ProviderResourceProfile warmedProfile = resolveResourceProfile( algorithmId );
+    unsigned int warmedEstimateMb = 0;
     try
     {
         auto adapter =
@@ -1281,24 +1559,27 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         {
             const auto desc = adapter->descriptor();
             warmedAlgorithmName = QString::fromStdString( desc.displayName );
+            warmedDims = parseAdmissionDims( desc.agentMetadata.execution );
             warmedDims.ioHeavy = desc.agentMetadata.ioHeavy;
-            const Json::Value &execution = desc.agentMetadata.execution;
-            if ( execution.isObject() )
-            {
-                const Json::Value &tempDisk = execution["temporaryDiskBytes"];
-                if ( tempDisk.isNumeric() )
-                    warmedDims.tempDiskMb = static_cast<unsigned int>(
-                        tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
-                const Json::Value &vram = execution["estimatedVramBytes"];
-                if ( vram.isNumeric() )
-                    warmedDims.vramMb = static_cast<unsigned int>(
-                        vram.asUInt64() / ( 1024ull * 1024ull ) );
-            }
         }
     }
     catch ( ... )
     {
         warmedDims = AdmissionDims{};
+    }
+    try
+    {
+        // Mirrors TaskResourceBudget::resolve (resolver + conservative
+        // class fallback) without touching m_resourceBudget unlocked.
+        const TaskResourceEstimate est =
+            estimateResolverCopy ? estimateResolverCopy( algorithmId.toStdString() )
+                                 : TaskResourceEstimate{};
+        warmedEstimateMb = est.ramMb > 0 ? est.ramMb
+                                         : defaultEstimateMbForClass( est.memoryClass );
+    }
+    catch ( ... )
+    {
+        warmedEstimateMb = 0;
     }
     long id = -1;
     std::optional<PendingSubmissionFingerprint> pendingFingerprint;
@@ -1310,6 +1591,19 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         // completion callbacks never firing (review P1).
         if ( m_isShuttingDown.load() )
             return -1;
+        // 12.0 D3 bounded queue: refuse (never silently drop) when the live
+        // task count is saturated — the same -1 sentinel as shutdown, plus a
+        // telemetry increment so the refusal is observable.
+        if ( m_maxPendingTasks > 0 && m_liveTaskCount >= m_maxPendingTasks )
+        {
+            sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+                sicnu::runtime::observability::Counter::TasksRefused );
+            traceTaskEvent( "admission", "queue_full", -1, algorithmId,
+                            QStringLiteral( "pending=%1 cap=%2" )
+                                .arg( m_liveTaskCount )
+                                .arg( m_maxPendingTasks ) );
+            return -1;
+        }
         id = m_nextTaskId++;
         AlgorithmTaskInfo info;
         info.taskId = id;
@@ -1317,9 +1611,17 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.priority = priority;
         info.parentTaskIds = parentTaskIds;
         info.autoDispatch = autoDispatch;
-        info.resourceProfile = resolveResourceProfile( algorithmId );
+        info.resourceProfile = warmedProfile;
         info.resourceEstimateOverrideMb = resourceEstimateOverrideMb;
         info.source = source;
+        info.enqueueSteadyStamp = std::chrono::steady_clock::now();
+        info.effectivePriority = static_cast<int>( priority );
+        info.latencyClass = latencyClassForSource( source );
+        if ( warmedEstimateMb > 0 )
+        {
+            info.resolvedEstimateMb = warmedEstimateMb;
+            info.estimateResolved = true;
+        }
 
         // 9.0 M0/M1 structured hierarchy stamp (immutable after creation):
         // a submission from a JobEngine worker thread gets the bounded
@@ -1353,6 +1655,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                                  .arg( static_cast<int>( priority ) ) );
 
         m_tasks[id] = info;
+        ++m_liveTaskCount;
+        sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+            sicnu::runtime::observability::Counter::TasksSubmitted );
         // Seed so admissionDimsLocked never re-enters the QGIS registry under
         // m_mutex for this task (#1097).
         m_admissionDimsCache[id] = warmedDims;
@@ -1519,6 +1824,15 @@ void TaskCenter::ensureJobListener()
 
 void TaskCenter::onJobRecord( const sicnu::jobs::JobRecord &record )
 {
+    // 12.0 D4: opportunistic watchdog pass — any engine event is a chance to
+    // finalize a sibling's stranded Cancelling (early-outs when unarmed).
+    enforceCancelDeadlines();
+    // 12.0 D8 fault injection: swallowing the listener record exercises the
+    // real lost-record path — a dropped terminal record strands the task in
+    // Cancelling until the watchdog deadline finalizes it (and any record
+    // arriving after that finalization is a foreign-job no-op).
+    if ( SICNU_FAULT_POINT( "taskcenter.jobrecord" ) )
+        return;
     long taskId = -1;
     {
         QMutexLocker locker( &m_mutex );
@@ -1683,6 +1997,11 @@ unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) c
 {
     if ( task.resourceEstimateOverrideMb > 0 )
         return task.resourceEstimateOverrideMb;
+    // 12.0 (residual #1097): production submissions warm the estimate on the
+    // submitting thread before the record is inserted — never re-enter the
+    // registry under m_mutex.
+    if ( task.estimateResolved )
+        return task.resolvedEstimateMb;
     // #702: the registry-backed resolver takes the registry mutex (and reads
     // descriptor JSON) — re-running it for every active task on every
     // scheduling pass under m_mutex was pure repeat work. An algorithm's
@@ -1723,6 +2042,7 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         Q_ASSERT( !"terminal task status must never transition to a non-terminal status" );
         return;
     }
+    const TaskStatus oldStatus = task.status;
     const bool wasActive = isActiveStatus( task.status );
     const bool wasReadyLike = task.status == TaskStatus::Queued
                               || task.status == TaskStatus::WaitingResource;
@@ -1743,6 +2063,10 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb -= dims.tempDiskMb;
         m_active.usage2.vramMb -= dims.vramMb;
+        m_active.usage2.cpuThreads -= dims.cpuThreads;
+        m_active.usage2.diskReadWeight -= dims.diskReadWeight;
+        m_active.usage2.diskWriteWeight -= dims.diskWriteWeight;
+        m_active.usage2.networkWeight -= dims.networkWeight;
         if ( dims.ioHeavy )
             --m_active.ioHeavy;
         auto &slot = m_active.byProfile[task.resourceProfile];
@@ -1760,11 +2084,89 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb += dims.tempDiskMb;
         m_active.usage2.vramMb += dims.vramMb;
+        m_active.usage2.cpuThreads += dims.cpuThreads;
+        m_active.usage2.diskReadWeight += dims.diskReadWeight;
+        m_active.usage2.diskWriteWeight += dims.diskWriteWeight;
+        m_active.usage2.networkWeight += dims.networkWeight;
         if ( dims.ioHeavy )
             ++m_active.ioHeavy;
         ++m_active.byProfile[task.resourceProfile];
     }
     task.status = newStatus;
+
+    // 12.0 observability funnel: every terminal transition passes through
+    // this seam exactly once (absorbing guard above), so the counters are
+    // exact. Completion callbacks / pipeline bookkeeping stay at the
+    // callers (they own the snapshot semantics).
+    auto &telemetry = sicnu::runtime::observability::ExecutionTelemetry::instance();
+    if ( isTerminalStatus( newStatus ) && !isTerminalStatus( oldStatus ) )
+    {
+        --m_liveTaskCount;
+        switch ( newStatus )
+        {
+        case TaskStatus::Completed:
+            telemetry.increment( sicnu::runtime::observability::Counter::TasksCompleted );
+            break;
+        case TaskStatus::Failed:
+            telemetry.increment( sicnu::runtime::observability::Counter::TasksFailed );
+            break;
+        case TaskStatus::Canceled:
+            telemetry.increment( sicnu::runtime::observability::Counter::TasksCanceled );
+            break;
+        default:
+            break;
+        }
+        if ( task.runStartStamp != std::chrono::steady_clock::time_point{} )
+        {
+            const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now() - task.runStartStamp )
+                                   .count();
+            telemetry.recordSimple( sicnu::runtime::observability::EventKind::ExecutionEnd,
+                                    task.taskId, nanos );
+        }
+        if ( newStatus == TaskStatus::Canceled
+             && task.cancelRequestStamp != std::chrono::steady_clock::time_point{} )
+        {
+            const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now() - task.cancelRequestStamp )
+                                   .count();
+            telemetry.recordSimple( sicnu::runtime::observability::EventKind::Cancelled,
+                                    task.taskId, nanos,
+                                    taskCancelReasonName( task.cancelReason ) );
+        }
+    }
+    if ( newStatus == TaskStatus::Dispatching )
+    {
+        // Queue wait = accepted → staged-for-engine dispatch.
+        const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - task.enqueueSteadyStamp )
+                               .count();
+        telemetry.recordSimple( sicnu::runtime::observability::EventKind::QueueWait,
+                                task.taskId, nanos );
+        telemetry.recordSimple( sicnu::runtime::observability::EventKind::Dispatched,
+                                task.taskId, 0 );
+    }
+    if ( newStatus == TaskStatus::Running
+         && task.runStartStamp == std::chrono::steady_clock::time_point{} )
+    {
+        task.runStartStamp = std::chrono::steady_clock::now();
+        telemetry.recordSimple( sicnu::runtime::observability::EventKind::ExecutionStart,
+                                task.taskId, 0 );
+    }
+    // 12.0 D4 watchdog bookkeeping: arm on Cancelling entry (the only writer
+    // is cascadeCancelTargetsLocked, which also stamps cancelRequestStamp);
+    // disarm on any exit — the deadline is meaningless outside Cancelling.
+    if ( task.status == TaskStatus::Cancelling && oldStatus != TaskStatus::Cancelling
+         && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
+    {
+        ++m_armedCancelDeadlines;
+    }
+    else if ( oldStatus == TaskStatus::Cancelling && task.status != TaskStatus::Cancelling
+              && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
+    {
+        task.cancelDeadline = {};
+        --m_armedCancelDeadlines;
+    }
 
     // 9.0 M5: actual-usage observation — one RSS sample on every terminal
     // transition, into the bounded trace ring. Gated on Trace::enabled()
@@ -1914,12 +2316,14 @@ bool TaskCenter::isLaunchCandidateLocked( const AlgorithmTaskInfo &task ) const
 
 void TaskCenter::pushReadyCandidateLocked( long taskId )
 {
-    const auto it = m_tasks.constFind( taskId );
-    if ( it == m_tasks.constEnd() || !isLaunchCandidateLocked( *it ) )
+    const auto it = m_tasks.find( taskId );
+    if ( it == m_tasks.end() || !isLaunchCandidateLocked( *it ) )
         return;
+    const int effective = effectivePriorityLocked( *it, std::chrono::steady_clock::now() );
+    it->effectivePriority = effective;
     const unsigned long long serial = ++m_nextReadySerial;
     m_readySerial[taskId] = serial;
-    m_readyHeap.push( ReadyEntry{ 0, static_cast<int>( it->priority ), taskId, serial } );
+    m_readyHeap.push( ReadyEntry{ 0, effective, taskId, serial } );
 }
 
 void TaskCenter::dropReadyCandidateLocked( long taskId )
@@ -1927,11 +2331,88 @@ void TaskCenter::dropReadyCandidateLocked( long taskId )
     m_readySerial.remove( taskId );
 }
 
+int TaskCenter::effectivePriorityLocked( const AlgorithmTaskInfo &task,
+                                         std::chrono::steady_clock::time_point now ) const
+{
+    const int base = static_cast<int>( task.priority );
+    if ( m_agingIntervalMs == 0
+         || task.enqueueSteadyStamp == std::chrono::steady_clock::time_point{} )
+        return base;
+    // 12.0 D1: delegate to the (previously unwired) budget2 aging helper —
+    // one promotion level per interval of queue wait, floored at 0.
+    sicnu::ResourceRequest request;
+    request.submitStamp = task.enqueueSteadyStamp;
+    request.priority = base;
+    return sicnu::agedPriority( request, now,
+                                std::chrono::milliseconds( m_agingIntervalMs ) );
+}
+
+void TaskCenter::applyAgingSweepLocked()
+{
+    if ( m_agingIntervalMs == 0 )
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    // m_readySerial keys = the live candidate set (stale heap entries share
+    // the taskId key; each live candidate is visited once). Collect first —
+    // the sweep mutates m_readySerial.
+    const QList<long> candidateIds = m_readySerial.keys();
+    unsigned int promoted = 0;
+    for ( long taskId : candidateIds )
+    {
+        const auto it = m_tasks.find( taskId );
+        if ( it == m_tasks.end() || !isLaunchCandidateLocked( *it ) )
+            continue;
+        AlgorithmTaskInfo &task = *it;
+        const int effective = effectivePriorityLocked( task, now );
+        if ( effective >= task.effectivePriority )
+            continue; // no promotion this pass (or already at floor 0)
+        task.effectivePriority = effective;
+        const unsigned long long serial = ++m_nextReadySerial;
+        m_readySerial[taskId] = serial;
+        // Epoch 0: the promoted candidate rejoins ahead of same-priority
+        // entries rotated by per-candidate gate holds — it waited longest.
+        m_readyHeap.push( ReadyEntry{ 0, effective, taskId, serial } );
+        ++promoted;
+    }
+    if ( promoted > 0 )
+    {
+        auto &telemetry = sicnu::runtime::observability::ExecutionTelemetry::instance();
+        for ( unsigned int i = 0; i < promoted; ++i )
+            telemetry.increment( sicnu::runtime::observability::Counter::TasksAged );
+        traceTaskEvent( "admission", "aged_promotion", -1, QString(),
+                        QStringLiteral( "promoted=%1" ).arg( promoted ) );
+    }
+}
+
+sicnu::LatencyClass TaskCenter::latencyClassForSource( const QString &source )
+{
+    // 12.0 D2: submission-surface → workload lane. Interactive = surfaces a
+    // human or agent caller waits on (JobRequest.source vocabulary:
+    // ui|task_panel|dialog|toolbox|module|mcp|workflow plus gui/agent/pi/
+    // guided_lab); Batch = prefetch-style bulk work; everything else
+    // (workflow machinery, dispatcher, cli, plane) = Background.
+    if ( source == QLatin1String( "gui" ) || source == QLatin1String( "ui" )
+         || source == QLatin1String( "dialog" ) || source == QLatin1String( "toolbox" )
+         || source == QLatin1String( "task_panel" ) || source == QLatin1String( "module" )
+         || source == QLatin1String( "guided_lab" ) || source == QLatin1String( "app" )
+         || source == QLatin1String( "agent" ) || source == QLatin1String( "mcp" )
+         || source == QLatin1String( "pi" ) )
+        return sicnu::LatencyClass::Interactive;
+    if ( source == QLatin1String( "prefetch" ) || source == QLatin1String( "cache" )
+         || source == QLatin1String( "batch" ) || source == QLatin1String( "batch_dialog" ) )
+        return sicnu::LatencyClass::Batch;
+    return sicnu::LatencyClass::Background;
+}
+
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
     if ( m_isShuttingDown.load() )
         return; // shutdown stages nothing new (#684)
+    // 12.0 D1: aging promotion runs BEFORE the pop loop so a long-waiting
+    // low-priority candidate competes with fresh high-priority work this
+    // very pass (bounded by the live-candidate count, not the task map).
+    applyAgingSweepLocked();
     const unsigned int globalMax = m_globalConcurrencyLimit > 0
                                      ? m_globalConcurrencyLimit
                                      : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
@@ -2083,18 +2564,34 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
-        // Execution Plane 7.0: multi-dimension admission (TaskResourceBudget2)
-        // over descriptor-declared temporary disk and VRAM. A dimension cap
-        // of 0 disables the gate; never-starve mirrors the RAM gate (when
-        // nothing is running, a declared estimate never blocks the only
-        // candidate).
+        // Execution Plane 7.0 + 12.0: multi-dimension admission
+        // (TaskResourceBudget2) over descriptor-declared temp disk, VRAM,
+        // cpuThreads and the 0..100 disk/network weights — plus the
+        // interactive reserve on weight dims (an Interactive candidate, or
+        // one aged to top priority, admits against the full cap). A
+        // dimension cap of 0 disables that gate; never-starve mirrors the
+        // RAM gate (when nothing is running, a declared estimate never
+        // blocks the only candidate).
         const AdmissionDims candidateDims = admissionDimsLocked( task );
         if ( !transientChild && m_active.total > 0
-             && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0 ) )
+             && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0
+                  || candidateDims.cpuThreads > 0 || candidateDims.diskReadWeight > 0
+                  || candidateDims.diskWriteWeight > 0 || candidateDims.networkWeight > 0 ) )
         {
             sicnu::ResourceRequest candidateRequest;
             candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
             candidateRequest.vramMb = candidateDims.vramMb;
+            candidateRequest.cpuThreads = candidateDims.cpuThreads;
+            candidateRequest.diskReadWeight = candidateDims.diskReadWeight;
+            candidateRequest.diskWriteWeight = candidateDims.diskWriteWeight;
+            candidateRequest.networkWeight = candidateDims.networkWeight;
+            candidateRequest.latencyClass = task.latencyClass;
+            // effectivePriority is already heap-aged at the configured
+            // interval; stamp now() so canLaunch's internal agedPriority
+            // (fixed 5 s default) does not double-age — the reserve bypass
+            // must honor the same promotion the heap just applied.
+            candidateRequest.submitStamp = std::chrono::steady_clock::now();
+            candidateRequest.priority = task.effectivePriority;
             if ( !m_budget2.canLaunch( m_active.usage2, candidateRequest,
                                        std::chrono::steady_clock::now() ) )
             {
@@ -2384,12 +2881,18 @@ void TaskCenter::flushPendingLaunches()
         }
 
         std::string submittedId;
-        if ( launch.hasExecutor )
-            submittedId = sicnu::jobs::JobEngine::instance().submitWithId(
-                launch.request, jobId, std::move( launch.executor ),
-                std::move( launch.onCancel ) );
-        else
-            submittedId = sicnu::jobs::JobEngine::instance().submitWithId( launch.request, jobId );
+        // 12.0 D8 fault injection: skipping the engine submit exercises the
+        // REAL refused-submit branch below — the pre-registration rolls back
+        // and the task fails typed instead of stranding in Dispatching.
+        if ( !SICNU_FAULT_POINT( "taskcenter.dispatch" ) )
+        {
+            if ( launch.hasExecutor )
+                submittedId = sicnu::jobs::JobEngine::instance().submitWithId(
+                    launch.request, jobId, std::move( launch.executor ),
+                    std::move( launch.onCancel ) );
+            else
+                submittedId = sicnu::jobs::JobEngine::instance().submitWithId( launch.request, jobId );
+        }
 
         if ( submittedId.empty() )
         {
@@ -2518,8 +3021,8 @@ void TaskCenter::markTaskCompleted( long taskId,
         setTaskStatusLocked( m_tasks[taskId], TaskStatus::Completed );
         traceTaskEvent( "terminal", "ok", taskId, m_tasks[taskId].algorithmId );
         m_tasks[taskId].resultPayload = resultPayload;
-        sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
-            sicnu::runtime::observability::Counter::TasksCompleted );
+        // 12.0: TasksCompleted is counted at the setTaskStatusLocked seam —
+        // one funnel for all terminal transitions.
         m_tasks[taskId].progressPercentage = 1.0;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task completed successfully." ) )
@@ -2638,14 +3141,32 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
         const bool isUserRoot = ( targetId == userRootId );
         // 9.0 M3: every target carries the CALLER's typed reason (User /
         // Shutdown / StructuredJoin) — the root must not be hardcoded to
-        // User or a shutdown teardown would mislabel its roots.
-        info.cancelReason = reason;
+        // User or a shutdown teardown would mislabel its roots. A repeated
+        // cancel inside one Cancelling episode keeps the FIRST reason.
+        if ( info.status != TaskStatus::Cancelling )
+            info.cancelReason = reason;
         if ( !info.jobId.empty() )
         {
             // Dispatched work: the worker observes the cancel flag and the
             // terminal Canceled record arrives via the listener. Track the
             // in-between explicitly so entries/UI can show "cancelling".
+            // 12.0 D4: stamp the request + arm the watchdog BEFORE the
+            // transition — setTaskStatusLocked counts armed deadlines at the
+            // seam. Stamping on Cancelling ENTRY (rather than once-ever)
+            // covers resurrection paths (auto-retry, a stray Running record):
+            // a task re-canceled after leaving Cancelling gets a fresh
+            // deadline, while a repeat cancel inside one episode keeps the
+            // FIRST request's deadline (bounded latency measured from the
+            // initial request).
+            if ( info.status != TaskStatus::Cancelling )
+            {
+                info.cancelRequestStamp = std::chrono::steady_clock::now();
+                if ( m_cancelWatchdogMs > 0 )
+                    info.cancelDeadline = info.cancelRequestStamp
+                                          + std::chrono::milliseconds( m_cancelWatchdogMs );
+            }
             setTaskStatusLocked( info, TaskStatus::Cancelling );
+            ensureWatchdogStartedLocked();
             jobCancelTargets.emplace_back( info.jobId, targetId );
             info.logBuffer.append( isUserRoot
                                      ? QStringLiteral( "Cancellation requested by user." )
@@ -2720,6 +3241,98 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
             fireTaskCompletionCallbacks( targetId );
         }
     }
+}
+
+void TaskCenter::ensureWatchdogStartedLocked()
+{
+    // m_mutex held. Thread creation takes no scheduler locks; the new thread
+    // blocks on m_mutex until the caller releases — no lock ordering issue.
+    // Shutdown early-out: cancelAllForShutdown cascades into here AFTER
+    // stopWatchdog() joined the thread — respawning then would leak a live
+    // watchdog past shutdown()'s return (review P2).
+    if ( m_watchdogThread.joinable() || m_cancelWatchdogMs == 0
+         || m_isShuttingDown.load() )
+        return;
+    m_watchdogStop.store( false );
+    m_watchdogThread = std::thread( [this]() { watchdogMain(); } );
+}
+
+void TaskCenter::stopWatchdog()
+{
+    // No m_mutex held: the watchdog needs it to finish its current enforce
+    // pass and observe the stop flag before joining.
+    m_watchdogStop.store( true );
+    {
+        std::lock_guard<std::mutex> lock( m_watchdogMutex );
+        m_watchdogCv.notify_all();
+    }
+    if ( m_watchdogThread.joinable() )
+        m_watchdogThread.join();
+}
+
+void TaskCenter::watchdogMain()
+{
+    std::unique_lock<std::mutex> lock( m_watchdogMutex );
+    while ( !m_watchdogStop.load( std::memory_order_relaxed ) )
+    {
+        // Bounded poll: the cv exists for prompt STOP, not for wake-on-arm —
+        // a 25 ms tick is far below any configured cancel timeout.
+        m_watchdogCv.wait_for( lock, std::chrono::milliseconds( 25 ) );
+        if ( m_watchdogStop.load( std::memory_order_relaxed ) )
+            break;
+        lock.unlock();
+        enforceCancelDeadlines();
+        lock.lock();
+    }
+}
+
+void TaskCenter::enforceCancelDeadlines()
+{
+    QList<long> firedIds;
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( m_armedCancelDeadlines == 0 )
+            return; // one comparison when nothing is armed
+        const auto now = std::chrono::steady_clock::now();
+        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        {
+            AlgorithmTaskInfo &info = it.value();
+            if ( info.status != TaskStatus::Cancelling
+                 || info.cancelDeadline == std::chrono::steady_clock::time_point{}
+                 || now < info.cancelDeadline )
+                continue;
+            // The worker never delivered a terminal record within the
+            // cancel window (hung executor, lost record, engine bug) —
+            // finalize so waiters, slots and completion callbacks resolve.
+            // Detaching the job mapping first turns a late record into a
+            // foreign-job no-op instead of a terminal-status violation.
+            const std::string jobId = info.jobId;
+            if ( !jobId.empty() )
+                m_taskByJobId.remove( jobId );
+            setTaskStatusLocked( info, TaskStatus::Canceled );
+            if ( info.cancelReason == TaskCancelReason::None )
+                info.cancelReason = TaskCancelReason::Engine;
+            info.errorMessage = QStringLiteral(
+                                    "Cancel watchdog: no terminal worker record within %1 ms." )
+                                    .arg( m_cancelWatchdogMs );
+            info.endTime = QDateTime::currentDateTimeUtc();
+            info.logBuffer.append(
+                QString( QStringLiteral( "[%1] %2" ) )
+                    .arg( info.endTime.toString( QStringLiteral( "hh:mm:ss" ) ),
+                          info.errorMessage ) );
+            updatePipelineForTaskLocked( it.key() );
+            queueTaskUpdatedLocked( it.key() );
+            traceTaskEvent( "cancel", "watchdog_timeout", it.key(), info.algorithmId );
+            sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+                sicnu::runtime::observability::Counter::CancelWatchdogFired );
+            firedIds.append( it.key() );
+        }
+    }
+    if ( firedIds.isEmpty() )
+        return;
+    flushPendingSignals();
+    for ( long id : firedIds )
+        fireTaskCompletionCallbacks( id );
 }
 
 const char *taskCancelReasonName( TaskCancelReason reason )
@@ -2807,6 +3420,13 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             info.errorMessage.clear();
             info.endTime = QDateTime();
             info.progressPercentage = 0.0;
+            // 12.0 review P1: the retried run must cancel cleanly — a stale
+            // request stamp would suppress re-stamping in the cascade
+            // (stamp-once rule), leaving the new attempt's Cancelling entry
+            // with no armed deadline and no watchdog coverage.
+            info.cancelRequestStamp = {};
+            info.cancelDeadline = {};
+            info.cancelReason = TaskCancelReason::None;
             if ( !deadJobId.empty() )
                 m_taskByJobId.remove( deadJobId );
             // The retried run records fresh identity: drop the failed
@@ -3272,12 +3892,14 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         fusedPlan = sicnu::processing::planFusedChain( def );
 
     sicnu::data::DataManager *catalogForWarm = nullptr;
+    TaskEstimateResolver estimateResolverCopy;
     // 8.0 WP-F (review P1 fix): warm the remote-identity session cache for
     // every step's params BEFORE the mutex section (network I/O must never
     // run under the scheduler lock).
     {
         QMutexLocker catalogLocker( &m_mutex );
         catalogForWarm = m_catalog;
+        estimateResolverCopy = m_resourceBudget.estimateResolver();
     }
     if ( catalogForWarm )
     {
@@ -3286,8 +3908,11 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 catalogForWarm, sicnu::processing::jsonParamsToVariantMap( step.params ) );
     }
 
-    // #1097 / #930: warm admission dims outside m_mutex (per unique operator id).
+    // #1097 / #930 + 12.0: warm admission dims, resource profiles and RAM
+    // estimates outside m_mutex (per unique operator id).
     QMap<QString, AdmissionDims> warmedDimsByAlgo;
+    QMap<QString, unsigned int> warmedEstimateByAlgo;
+    QMap<QString, ProviderResourceProfile> warmedProfileByAlgo;
     auto warmDimsFor = [&warmedDimsByAlgo]( const QString &algoId ) -> AdmissionDims {
         if ( warmedDimsByAlgo.contains( algoId ) )
             return warmedDimsByAlgo.value( algoId );
@@ -3299,19 +3924,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             if ( adapter )
             {
                 const auto desc = adapter->descriptor();
+                dims = parseAdmissionDims( desc.agentMetadata.execution );
                 dims.ioHeavy = desc.agentMetadata.ioHeavy;
-                const Json::Value &execution = desc.agentMetadata.execution;
-                if ( execution.isObject() )
-                {
-                    const Json::Value &tempDisk = execution["temporaryDiskBytes"];
-                    if ( tempDisk.isNumeric() )
-                        dims.tempDiskMb = static_cast<unsigned int>(
-                            tempDisk.asUInt64() / ( 1024ull * 1024ull ) );
-                    const Json::Value &vram = execution["estimatedVramBytes"];
-                    if ( vram.isNumeric() )
-                        dims.vramMb = static_cast<unsigned int>(
-                            vram.asUInt64() / ( 1024ull * 1024ull ) );
-                }
             }
         }
         catch ( ... )
@@ -3324,7 +3938,31 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     for ( const auto &step : def.steps )
     {
         if ( step.kind == sicnu::workflow::StepKind::Operator && !step.operatorId.empty() )
-            (void) warmDimsFor( QString::fromStdString( step.operatorId ) );
+        {
+            const QString algoId = QString::fromStdString( step.operatorId );
+            (void) warmDimsFor( algoId );
+            if ( !warmedProfileByAlgo.contains( algoId ) )
+                warmedProfileByAlgo.insert( algoId, resolveResourceProfile( algoId ) );
+            if ( !warmedEstimateByAlgo.contains( algoId ) )
+            {
+                unsigned int mb = 0;
+                try
+                {
+                    // Mirrors TaskResourceBudget::resolve without touching
+                    // m_resourceBudget unlocked (residual #1097).
+                    const TaskResourceEstimate est =
+                        estimateResolverCopy ? estimateResolverCopy( algoId.toStdString() )
+                                             : TaskResourceEstimate{};
+                    mb = est.ramMb > 0 ? est.ramMb
+                                       : defaultEstimateMbForClass( est.memoryClass );
+                }
+                catch ( ... )
+                {
+                    mb = 0;
+                }
+                warmedEstimateByAlgo.insert( algoId, mb );
+            }
+        }
     }
 
     long pipelineId = -1;
@@ -3334,9 +3972,30 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     std::vector<PendingSubmissionFingerprint> pendingFingerprints;
     {
         QMutexLocker locker( &m_mutex );
+        // 12.0 D3: refuse the pipeline ATOMICALLY (before creating any step)
+        // when its dispatchable steps would exceed the pending bound — a
+        // half-created pipeline would strand DAG children on parents that
+        // never ran.
+        unsigned int dispatchableCount = 0;
+        for ( const auto &s : def.steps )
+        {
+            if ( s.kind == sicnu::workflow::StepKind::Operator && !s.operatorId.empty() )
+                ++dispatchableCount;
+        }
+        if ( m_maxPendingTasks > 0
+             && m_liveTaskCount + dispatchableCount > m_maxPendingTasks )
+        {
+            sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+                sicnu::runtime::observability::Counter::TasksRefused );
+            traceTaskEvent( "admission", "queue_full", -1,
+                            QString::fromStdString( def.id ),
+                            QStringLiteral( "pipeline steps=%1 pending=%2 cap=%3" )
+                                .arg( dispatchableCount )
+                                .arg( m_liveTaskCount )
+                                .arg( m_maxPendingTasks ) );
+            return -1;
+        }
         pipelineId = m_nextPipelineId++;
-        sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
-            sicnu::runtime::observability::Counter::TasksSubmitted );
         PipelineExecutionInfo pipeInfo;
         pipeInfo.pipelineId = pipelineId;
         pipeInfo.definitionId = QString::fromStdString( def.id );
@@ -3385,7 +4044,21 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
             info.autoDispatch = true;
-            info.resourceProfile = resolveResourceProfile( info.algorithmId );
+            info.resourceProfile = warmedProfileByAlgo.value( info.algorithmId,
+                                                              ProviderResourceProfile::InProcessThread );
+            // The queue-wait stamp starts at PIPELINE submission, not at
+            // dependency unblock: DAG-blocked wait accrues aging credit, so a
+            // long-blocked step joins the heap already promoted. Deliberate —
+            // "submitted earlier" is the fairness contract (review P3 note).
+            info.enqueueSteadyStamp = std::chrono::steady_clock::now();
+            info.effectivePriority = static_cast<int>( info.priority );
+            info.latencyClass = sicnu::LatencyClass::Background; // pipeline machinery
+            const unsigned int warmedMb = warmedEstimateByAlgo.value( info.algorithmId, 0u );
+            if ( warmedMb > 0 )
+            {
+                info.resolvedEstimateMb = warmedMb;
+                info.estimateResolved = true;
+            }
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 
@@ -3422,7 +4095,14 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                                            QString::fromStdString( stepId ) ) );
 
             m_tasks[taskId] = info;
-            m_admissionDimsCache[taskId] = warmDimsFor( info.algorithmId );
+            ++m_liveTaskCount;
+            sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
+                sicnu::runtime::observability::Counter::TasksSubmitted );
+            // Under m_mutex: read the PRE-WARMED map only — warmDimsFor's
+            // miss branch touches the algorithm registry (lazy QGIS provider
+            // construction) and must never run under the scheduler lock
+            // (residual #1097). Every operator step was warmed above.
+            m_admissionDimsCache[taskId] = warmedDimsByAlgo.value( info.algorithmId );
             // 8.0 WP-A: derived admission state for the pipeline step
             // (children index + ready-heap / manual-queue registration; fused
             // members are autoDispatch=false and land on the manual list,

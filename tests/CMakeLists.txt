@@ -3138,6 +3138,12 @@ target_compile_definitions(test_execution_plane_8 PRIVATE
 # its own process via catch_discover_tests).
 sicnu_add_test(test_execution_plane_9 TIMEOUT 2400 RUN_SERIAL TRUE)
 
+# Track 12 TaskCenter runtime — aging fairness, bounded pending queue,
+# cancel watchdog, weight admission, execution telemetry. RUN_SERIAL:
+# shares the TaskCenter/JobEngine singletons and asserts wall-clock
+# ordering (aged promotion) that must not race neighboring suites.
+sicnu_add_test(test_task_center_12 TIMEOUT 300 RUN_SERIAL TRUE)
+
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
