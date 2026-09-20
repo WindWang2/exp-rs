@@ -629,6 +629,13 @@ QJsonObject nodeEntry( const QJsonObject &doc, const QString &nodeId )
     return {};
 }
 
+/// The runId embedded in a checkpoint filename (checkpoint_<runId>.json).
+QString runIdOf( const QString &checkpointPath )
+{
+    return QFileInfo( checkpointPath ).completeBaseName().mid(
+        QStringLiteral( "checkpoint_" ).size() );
+}
+
 } // namespace
 
 TEST_CASE( "Resume rejects a checkpoint with a foreign kind", "[d17][workflow][engine]" )
@@ -1235,11 +1242,17 @@ TEST_CASE( "A resumed run records cache hits as reusedFrom edges", "[d17][workfl
     REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile ) );
     REQUIRE( waitForCompleted( resumeCoordinator ) );
 
-    // The resumed attempt writes a SUFFIXED record — the first attempt's
+    // The resumed attempt writes into attempt-<N>/ — the first attempt's
     // provenance_<runId>.json is preserved so the lineage an audit needs
-    // (who produced the reused artifacts) is still queryable.
-    REQUIRE( resumeCoordinator.provenancePath().contains( QStringLiteral( "attempt2" ) ) );
-    const ProvenanceGraph graph = loadProvenance( resumeCoordinator.provenancePath() );
+    // (who produced the reused artifacts) is still queryable. The lineage
+    // lives in a path SEGMENT and the user identity in the filename, so no
+    // runId can collide with the attempt encoding (Track 13, DECISIONS D6).
+    const QString attempt2Path = resumeCoordinator.provenancePath();
+    REQUIRE( attempt2Path.contains( QStringLiteral( "attempt-2" ) ) );
+    // Identity stays in the filename; the lineage is the parent directory.
+    REQUIRE( QFileInfo( attempt2Path ).fileName()
+             == QStringLiteral( "provenance_%1.json" ).arg( runIdOf( checkpointFile ) ) );
+    const ProvenanceGraph graph = loadProvenance( attempt2Path );
     for ( int i = 1; i <= 3; ++i )
     {
         const QString execId = QStringLiteral( "node:node_%1" ).arg( i );
@@ -1248,14 +1261,16 @@ TEST_CASE( "A resumed run records cache hits as reusedFrom edges", "[d17][workfl
     }
     // The consumed artifact's producer is absent in THIS attempt's record —
     // it was produced by the previous attempt and lives in that record,
-    // which the attempt suffix preserved.
+    // which the attempt segment preserved.
     const QStringList consumed2 = graph.consumedBy( QStringLiteral( "node:node_2" ) );
     REQUIRE( consumed2.size() == 1 );
     REQUIRE( graph.producerOf( consumed2.first() ).isEmpty() );
 
+    // The attempt-1 record sits at the canonical location in the run dir:
+    // checkpoint_<runId>.json gives the runId, provenance_<runId>.json the
+    // sibling record name.
     const QString firstAttemptPath =
-        QString( resumeCoordinator.provenancePath() )
-            .replace( QStringLiteral( ".attempt2.json" ), QStringLiteral( ".json" ) );
+        QDir( dir ).filePath( QStringLiteral( "provenance_%1.json" ).arg( runIdOf( checkpointFile ) ) );
     REQUIRE( QFile::exists( firstAttemptPath ) );
     const ProvenanceGraph first = loadProvenance( firstAttemptPath );
     REQUIRE( !first.producerOf( consumed2.first() ).isEmpty() ); // producer resolvable

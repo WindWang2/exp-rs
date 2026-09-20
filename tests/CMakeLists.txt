@@ -10600,6 +10600,12 @@ sicnu_discover_tests(test_georef_crs_pick_failclosed)
 # =============================================================================
 # D17 — workflow pipeline designer (ADR 0162)
 # =============================================================================
+# The D17 engine sources call SICNU_FAULT_POINT (workflow_checkpoint.cpp,
+# pipeline_run_coordinator.cpp); the Qt-free leaf registry is compiled into
+# the light targets directly so they stay independent of sicnu_runtime.
+set(SICNU_FAULT_REGISTRY_SOURCE
+  ${CMAKE_SOURCE_DIR}/src/runtime/observability/fault_registry.cpp
+)
 # D17 test targets are deliberately MINIMAL: Catch2 + Qt (Core/Gui/Widgets as
 # needed) + jsoncpp where the LabSpec loader is compiled in. They do not link
 # the qgis/processing/task_center chain, so the whole designer suite builds
@@ -10680,6 +10686,7 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test jsoncpp sicnu_operators
 )
 
@@ -10691,6 +10698,7 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test
 )
 
@@ -10730,6 +10738,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test jsoncpp
 )
 

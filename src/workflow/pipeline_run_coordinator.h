@@ -31,6 +31,15 @@
 // Node work is an injectable NodeExecutor — production may bind real
 // operators, tests bind deterministic synthetic ones.
 //
+// Threading contract (Track 13): every public entry point marshals itself
+// onto the coordinator's affinity thread (Qt::BlockingQueuedConnection; the
+// call runs inline when the caller already lives there). The affinity thread
+// never blocks on a foreign thread, so no call can deadlock against it; a
+// foreign caller may block until the owner is idle, bounded by the owner's
+// current unit of work. requestCancel is two-phase so a canceller never waits
+// on a whole-file hash. Destroy the coordinator on its affinity thread (the
+// fast path) — a foreign-thread destruction is safe but marshals a drain.
+//
 
 #include <QHash>
 #include <QObject>
@@ -57,6 +66,25 @@ enum class ExecutionState
 
 QString executionStateString( ExecutionState state ); // "Pending", ...
 
+/// Artifact identity strength for node successes (Track 13, DECISIONS D2).
+/// The recorded tag is self-describing ("sha256fl:" / "sha256full:"), so the
+/// resume verifier always re-derives with the algorithm that stamped it —
+/// legacy checkpoints keep fast verification and never need migration.
+enum class ArtifactIdentityMode
+{
+    /// sha256fl: [8B LE size][first ≤1MiB][last ≤1MiB] — whole file when
+    /// ≤ 2 MiB. O(2 MiB) per artifact; cannot see a mid-file rewrite of a
+    /// larger artifact.
+    Fast,
+    /// sha256full: same framing, then the WHOLE file streamed in bounded
+    /// chunks with a cancel poll — closes the mid-file blind spot for
+    /// arbitrarily large artifacts.
+    Full,
+    /// Full exactly when the artifact is larger than the fast window (i.e.
+    /// when Fast would have a blind spot), Fast below. Default.
+    Auto
+};
+
 struct NodeStatusSnapshot
 {
     QString nodeId;
@@ -70,7 +98,11 @@ struct NodeStatusSnapshot
     /// predates checkpoint format 1.1 (which forces a conservative recompute).
     qint64 artifactSizeBytes = -1;
     qint64 artifactLastModifiedMs = -1;
-    QString artifactFingerprint; // "sha256fl:<hex>" — see coordinator cpp
+    /// "sha256fl:<hex>" (legacy scheme) or "sha256full:<hex>" (whole-file,
+    /// Track 13). Empty when no artifact was produced, the run predates
+    /// checkpoint format 1.1 (which forces a conservative recompute), or the
+    /// node was cancelled while its identity was being computed.
+    QString artifactFingerprint;
     bool isCacheHit = false;
     QString lineageSignature;
 };
@@ -134,13 +166,22 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
     void setExecutor( NodeExecutor executor );
     void setMaxParallelism( int workers );
 
+    /// Artifact identity strength for subsequent node successes (default
+    /// Auto). Affects only what NEW successes record; resume verification
+    /// follows each recorded tag.
+    void setArtifactIdentityMode( ArtifactIdentityMode mode );
+    ArtifactIdentityMode artifactIdentityMode() const;
+
     /// The checkpoint file this run persists to (empty when idle).
     QString checkpointPath() const;
 
     /// The provenance graph written when the run reached a terminal state
-    /// (`provenance_<runId>.json` beside the checkpoint; empty when the run
-    /// has not finalized or the write failed — provenance is audit output,
-    /// it must never fail the run it describes).
+    /// (`provenance_<runId>.json` beside the checkpoint for the first attempt;
+    /// `attempt-<N>/provenance_<runId>.json` inside the run directory for
+    /// later attempts — the lineage lives in a path segment so a user-named
+    /// runId can never collide with it). Empty when the run has not finalized
+    /// or the write failed — provenance is audit output, it must never fail
+    /// the run it describes).
     QString provenancePath() const;
 
     signals:
@@ -151,6 +192,13 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
 
   private:
     struct RunState;
+
+    /// Affinity-thread bodies behind the public marshalling entry points
+    /// (startRun / resumeFromCheckpoint). Callers reach them only through the
+    /// public methods, which guarantee they run on the owner thread.
+    bool startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory, QString *outError );
+    bool resumeOnAffinity( const QString &checkpointFilePath, QString *outError );
+    void requestCancelOnAffinity();
 
     void dispatchReadyNodes();
     void onNodeFinished( const QString &nodeId, NodeExecutionResult result, qint64 elapsedMs );
