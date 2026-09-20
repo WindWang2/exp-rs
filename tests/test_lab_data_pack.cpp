@@ -316,8 +316,44 @@ TEST_CASE( "committed lab packs all load cleanly", "[lab_pack][drift]" )
   REQUIRE( packs.size() >= 16 ); // 16 lab ids + grading_corpus
 }
 
+namespace
+{
+/// data/labs/lab-registry.json is the authority for lab identity: a lab may be
+/// known under a legacy id (the D3 `sar_processing` vocabulary) and its pack
+/// may be filed under that legacy name. Both sides are canonicalised here so
+/// the parity assertion compares canonical ids on both sides. Failing to
+/// resolve aliases made this gate red the moment a canonical lab was added.
+QString canonicalizeLabId( const QString &id, const QJsonObject &registry )
+{
+  const QJsonObject canonical = registry.value( "canonical" ).toObject();
+  for ( auto it = canonical.constBegin(); it != canonical.constEnd(); ++it )
+  {
+    const QJsonArray aliases = it.value().toObject().value( "aliases" ).toArray();
+    for ( const QJsonValue &alias : aliases )
+    {
+      if ( alias.toString() == id )
+        return it.key();
+    }
+  }
+  return id;
+}
+
+QJsonObject loadLabRegistry()
+{
+  QFile file( labsSourceRoot() + "/data/labs/lab-registry.json" );
+  REQUIRE( file.open( QIODevice::ReadOnly ) );
+  const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+  REQUIRE( doc.isObject() );
+  return doc.object();
+}
+} // namespace
+
 TEST_CASE( "every lab has a pack; every pack names a known lab", "[lab_pack][drift]" )
 {
+  const QJsonObject registry = loadLabRegistry();
+  const QJsonObject aliasPacks = registry.value( "alias_packs" ).toObject();
+  const QJsonObject nonLabPacks = registry.value( "non_lab_packs" ).toObject();
+
   QDir labsDir( labsSourceRoot() + "/data/labs" );
   QSet<QString> labIds;
   for ( const QFileInfo &entry :
@@ -328,7 +364,7 @@ TEST_CASE( "every lab has a pack; every pack names a known lab", "[lab_pack][dri
     // lab ids come from the document; both formats carry "id".
     const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
     REQUIRE( doc.isObject() );
-    labIds.insert( doc.object().value( "id" ).toString() );
+    labIds.insert( canonicalizeLabId( doc.object().value( "id" ).toString(), registry ) );
   }
   REQUIRE( !labIds.isEmpty() );
 
@@ -337,9 +373,11 @@ TEST_CASE( "every lab has a pack; every pack names a known lab", "[lab_pack][dri
   for ( const QFileInfo &entry :
         packsDir.entryInfoList( QStringList() << "*.pack.json", QDir::Files ) )
   {
-    if ( entry.baseName() == QLatin1String( "grading_corpus" ) )
-      continue; // deployment unit of the grading corpus, not a lab
-    packIds.insert( entry.baseName() );
+    const QString base = entry.baseName();
+    if ( nonLabPacks.contains( base ) )
+      continue; // declared deployment unit, not a lab (e.g. grading_corpus)
+    const QJsonValue target = aliasPacks.value( base );
+    packIds.insert( target.isString() ? target.toString() : base );
   }
   REQUIRE( packIds == labIds );
 }
