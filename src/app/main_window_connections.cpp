@@ -3,12 +3,16 @@
 
 #include "data_project_serializer.h"
 #include "workbench/mission_context_store.h"
+#include "workbench/mission_run_authority.h"
+#include "workbench/mission_run_resolver.h"
+#include "workbench/mission_runtime_store.h"
 #include "active_view_host.h"
 #include "layer_tree_menu.h"
 #include "project_context.h"
 #include "widgets/histogram_stretch_widget.h"
 #include "processing/framework/task_center.h"
 
+#include <QDateTime>
 #include <QStatusBar>
 #include <QSignalBlocker>
 #include <QMessageBox>
@@ -107,7 +111,17 @@ void QgisDesktopWindow::setupConnections()
     connect( QgsProject::instance(), &QgsProject::layersRemoved, this, [this]() {
         updateCanvasEmptyState();
         updateLayersEmptyState();
+        // Mission Runtime 13.0: a deleted layer is a dangling reference —
+        // reconcile the task space against the live layer set so dependent
+        // tasks become Stale instead of pointing at nothing.
+        reconcileMissionRuntimeAfterLayerChange();
     } );
+    connect( QgsProject::instance(), &QgsProject::layerWasAdded, this,
+             [this]( QgsMapLayer *layer ) {
+                 if ( layer )
+                     connect( layer, &QgsMapLayer::nameChanged, this,
+                              [this]() { syncMissionLayerDisplayNames(); } );
+             } );
 
     // Project signals
     connect(QgsProject::instance(), &QgsProject::readProject,
@@ -296,6 +310,76 @@ void QgisDesktopWindow::onRenderComplete(QPainter *painter)
     }
 }
 
+void QgisDesktopWindow::reconcileMissionRuntimeAfterLayerChange()
+{
+    const QString projectPath = QgsProject::instance()->fileName();
+    if ( projectPath.isEmpty() || m_missionRuntime.timeline.tasks().isEmpty() )
+        return;
+    sicnu::app::MissionRuntimeState state;
+    QString err;
+    if ( !sicnu::app::loadMissionRuntime( projectPath, QDomDocument(), state, &err ) )
+        return;
+    const sicnu::app::MissionRefResolver resolver =
+        []( const QString &refId ) -> sicnu::app::MissionRefStatus {
+        sicnu::app::MissionRefStatus status;
+        if ( !QgsProject::instance()->mapLayer( refId ) )
+        {
+            status.alive = false;
+            status.reason = QStringLiteral( "deleted_layer" );
+        }
+        return status;
+    };
+    const sicnu::app::MissionReconciliation rec =
+        sicnu::app::reconcileMission( state.timeline, resolver );
+    if ( !rec.hasIssues() )
+        return;
+    sicnu::app::applyReconciliation( state.timeline, rec,
+                                     QDateTime::currentDateTimeUtc().toString( Qt::ISODate ) );
+    QString saveErr;
+    QDomDocument doc;
+    if ( sicnu::app::saveMissionRuntime( projectPath, doc, state, &saveErr ) )
+    {
+        m_missionRuntime = state;
+        if ( m_missionPanel )
+        {
+            m_missionPanel->setTimeline( state.timeline );
+            m_missionPanel->setMissionHeader(
+                state.context.missionId, state.timeline.currentStage(),
+                state.timeline.revision(), state.timeline.lastEventSeq() );
+        }
+        statusBar()->showMessage(
+            tr( "Mission: %1 task(s) marked stale after a layer was removed" )
+                .arg( rec.staleTaskIds.size() ),
+            5000 );
+    }
+    else
+    {
+        qWarning( "mission reconcile persist: %s", qPrintable( saveErr ) );
+    }
+}
+
+void QgisDesktopWindow::syncMissionLayerDisplayNames()
+{
+    // Layer ids are stable across renames, so the timeline is unaffected;
+    // only the mission context's display names need to stay honest.
+    bool changed = false;
+    for ( sicnu::app::WorkbenchObjectRef &ref : m_mission.layers )
+    {
+        if ( QgsMapLayer *layer = QgsProject::instance()->mapLayer( ref.id ) )
+        {
+            if ( ref.displayName != layer->name() )
+            {
+                ref.displayName = layer->name();
+                changed = true;
+            }
+        }
+    }
+    if ( changed && m_missionPanel )
+        m_missionPanel->setMissionHeader(
+            m_mission.missionId, m_missionRuntime.timeline.currentStage(),
+            m_missionRuntime.timeline.revision(), m_missionRuntime.timeline.lastEventSeq() );
+}
+
 void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
 {
     if ( m_projectContext )
@@ -344,36 +428,65 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
     }
     updateEditingUI(activeVl);
 
-    // D18: restore MissionContext (sidecar preferred, XML dual-write fallback).
+    // Mission Runtime 13.0: restore the single-authority runtime (context +
+    // task-space timeline). A 12.0 timeline sidecar is migrated here; a
+    // corrupt authority fails closed without discarding the artifact.
     {
         const QString projectPath = QgsProject::instance()->fileName();
-        bool missionLoaded = false;
+        sicnu::app::MissionRuntimeState runtime;
         QString missionErr;
-        sicnu::app::MissionContext restored;
-        if ( sicnu::app::restoreMissionContextWithProject( projectPath, doc, restored,
-                                                           &missionLoaded, &missionErr ) )
+        if ( sicnu::app::loadMissionRuntime( projectPath, doc, runtime, &missionErr ) )
         {
-            if ( missionLoaded )
+            m_missionRuntime = runtime;
+            m_mission = runtime.context;
+            sicnu::app::ensureMissionId( m_mission );
+            if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
+                m_mission.projectRef = projectPath;
+            m_missionRuntime.context = m_mission;
+
+            // A task left Running by a crashed session must not report
+            // Running after the reopen — reconcile against the live
+            // execution authorities before any surface reads the timeline.
+            const sicnu::app::MissionRunReconciliation runReport =
+                sicnu::app::reconcileRunAuthority(
+                    m_missionRuntime.timeline, sicnu::app::resolveMissionRunStatus,
+                    QDateTime::currentDateTimeUtc().toString( Qt::ISODate ) );
+            const bool reconciled = runReport.staleFromRun > 0
+                                    || runReport.succeededFromRun > 0
+                                    || runReport.failedFromRun > 0
+                                    || runReport.canceledFromRun > 0;
+            if ( reconciled )
             {
-                m_mission = restored;
-                sicnu::app::ensureMissionId( m_mission );
-                if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
-                    m_mission.projectRef = projectPath;
+                sicnu::app::MissionRuntimeState persisted = m_missionRuntime;
+                QString saveErr;
+                QDomDocument saveDoc;
+                if ( !sicnu::app::saveMissionRuntime( projectPath, saveDoc, persisted, &saveErr ) )
+                    qWarning( "mission runtime reconcile persist: %s", qPrintable( saveErr ) );
+                else
+                    m_missionRuntime = persisted;
+            }
+
+            if ( runtime.authorityLoaded )
                 statusBar()->showMessage(
                     tr( "Project loaded · mission %1 restored" )
                         .arg( m_mission.missionId.left( 8 ) ),
                     4000 );
-            }
             else
-            {
                 statusBar()->showMessage( tr( "Project loaded" ), 3000 );
+            if ( m_missionPanel )
+            {
+                m_missionPanel->setTimeline( m_missionRuntime.timeline );
+                m_missionPanel->setMissionHeader(
+                    m_mission.missionId, m_missionRuntime.timeline.currentStage(),
+                    m_missionRuntime.timeline.revision(),
+                    m_missionRuntime.timeline.lastEventSeq() );
             }
         }
         else
         {
-            statusBar()->showMessage( tr( "Project loaded" ), 3000 );
-            if ( !missionErr.isEmpty() )
-                qWarning( "mission restore: %s", qPrintable( missionErr ) );
+            statusBar()->showMessage(
+                tr( "Project loaded · mission runtime unavailable: %1" ).arg( missionErr ), 8000 );
+            qWarning( "mission runtime restore: %s", qPrintable( missionErr ) );
         }
     }
 }
@@ -395,21 +508,28 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
         }
     }
 
-    // D18: dual-write MissionContext (sidecar + sicnuMissionContext XML).
-    // Not inside DataProjectSerializer (governance v3 downgrade risk) — see D-M5.
+    // Mission Runtime 13.0: one authority write — the live context plus the
+    // task-space timeline embedded in its metadata (sidecar + XML). The live
+    // context (studio publishes, active workflow) rides inside the runtime so
+    // there is exactly one persisted document. Not inside
+    // DataProjectSerializer (governance v3 downgrade risk) — see D-M5.
     {
         const QString projectPath = QgsProject::instance()->fileName();
         if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
             m_mission.projectRef = projectPath;
         sicnu::app::ensureMissionId( m_mission );
+        m_missionRuntime.context = m_mission;
         QString missionErr;
-        if ( !sicnu::app::persistMissionContextWithProject( projectPath, doc, m_mission,
-                                                            &missionErr ) )
+        if ( !sicnu::app::saveMissionRuntime( projectPath, doc, m_missionRuntime, &missionErr ) )
         {
             QMessageBox::warning(
                 this, tr( "Mission Context" ),
-                tr( "Project saved, but MissionContext persistence failed:\n%1" )
+                tr( "Project saved, but mission runtime persistence failed:\n%1" )
                     .arg( missionErr ) );
+        }
+        else
+        {
+            m_mission = m_missionRuntime.context;
         }
     }
     statusBar()->showMessage(tr("Project saved"), 2000);

@@ -293,7 +293,9 @@ QVector<MissionTask> MissionTimeline::tasksForStage( MissionStage stage ) const
 MissionOutcome MissionTimeline::transition( const QString &taskId,
                                             MissionTaskStatus to,
                                             const QString &iso,
-                                            const QString &note )
+                                            const QString &note,
+                                            const QString &errorCode,
+                                            const QString &errorMessage )
 {
     MissionTask *t = mutableTask( taskId );
     if ( t == nullptr )
@@ -342,6 +344,11 @@ MissionOutcome MissionTimeline::transition( const QString &taskId,
                 t->errorMessage.clear();
                 break;
             case MissionTaskStatus::Failed:
+                t->endedIso = iso;
+                // The latest failure wins; an empty pair clears a previous one.
+                t->errorCode = errorCode;
+                t->errorMessage = errorMessage;
+                break;
             case MissionTaskStatus::Stale:
                 t->endedIso = iso;
                 break;

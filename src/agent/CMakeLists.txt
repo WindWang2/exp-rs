@@ -138,8 +138,18 @@ add_library(sicnu_agent SHARED
   spatial_tools/governance_tools.cpp
   spatial_tools/governance_tools.h
   spatial_tools/spatial_tool.cpp
+  spatial_tools/spatial_tool_registry.cpp
+  # Mission Runtime 13.0 — the real mission:* tool objects plus the Qt-Core
+  # mission value model they project. The QGIS-dependent persistence chain
+  # stays in the app layer behind the MissionAuthority interface, so this
+  # shared library links no app sources.
+  spatial_tools/mission_tools.cpp
+  ../app/workbench/mission_stage.cpp
+  ../app/workbench/mission_projection.cpp
+  ../app/workbench/mission_run_authority.cpp
   tools/geometric_tool.cpp
   spatial_tools/spatial_tool.h
+  spatial_tools/mission_tools.h
   spatial_tools/raster_inspect_tool.cpp
   spatial_tools/raster_inspect_tool.h
   # D13 · Radiometric Spectral Workbench: agent spectral tools

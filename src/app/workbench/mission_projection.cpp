@@ -171,14 +171,17 @@ const QVector<MissionSurfaceEntry> &missionSurfaceRegistry()
         // --- MCP / Agent tool ids (family "mission", allowed in
         //     surface_registry.cpp kAllowed and Pi EXP_RS_TOOL_CATEGORIES) ---
         { QStringLiteral( "mission:context" ), MissionSurface::AgentTool,
-          QStringLiteral( "Read the current mission context projection: layers, selection, "
-                          "extent, CRS, temporal window, current run and recent artifacts." ) },
+          QStringLiteral( "Read the current mission snapshot: identity, project reference, "
+                          "stage summary, task counts and the bounded object lists (layers, "
+                          "results, …)." ) },
         { QStringLiteral( "mission:timeline" ), MissionSurface::AgentTool,
           QStringLiteral( "Read the mission task timeline: stage summary, tasks and events "
                           "after an optional cursor (since_seq)." ) },
         { QStringLiteral( "mission:advance" ), MissionSurface::AgentTool,
-          QStringLiteral( "Request a mission task transition (start/cancel/retry). Routes "
-                          "through TaskCenter; rejects illegal transitions without mutating." ) },
+          QStringLiteral( "Request a mission task transition (start/succeed/fail/cancel/"
+                          "retry), bind or unbind its run authority, or reconcile "
+                          "references. Rejects illegal transitions without mutating; "
+                          "start requires a verifiable run authority (no fake Running)." ) },
 
         // --- CommandRegistry ids (desktop shell) ---
         { QStringLiteral( "mission.timeline.show" ), MissionSurface::AppCommand,

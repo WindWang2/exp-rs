@@ -202,11 +202,15 @@ public:
     QVector<MissionTask> tasksForStage( MissionStage stage ) const;
 
     /// Fail-closed status transition. Rejects unknown tasks, illegal pairs and
-    /// transitions that would resurrect a stale run reference.
+    /// transitions that would resurrect a stale run reference. @p errorCode /
+    /// @p errorMessage are recorded on the task when @p to is Failed (the
+    /// latest failure wins; empty values clear a previous one).
     MissionOutcome transition( const QString &taskId,
                                MissionTaskStatus to,
                                const QString &iso,
-                               const QString &note = {} );
+                               const QString &note = {},
+                               const QString &errorCode = {},
+                               const QString &errorMessage = {} );
 
     /// Failed/Canceled/Stale -> Pending, keeping the retry lineage. Does NOT
     /// bump `attempts` by itself: an attempt is counted when the task is handed

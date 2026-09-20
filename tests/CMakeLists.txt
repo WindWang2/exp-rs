@@ -11574,3 +11574,67 @@ endif()
 # standard sicnu_add_test registration is kept and the vendored gui is built
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
+
+# ---------------------------------------------------------------------------
+# Mission Runtime 13.0 — single-authority persistence, real mission:* tools,
+# surface parity and scale gates.
+#
+# These targets compile the REAL mission domain sources (the same files the
+# desktop shell and sicnu_agent compile) so the gates exercise production
+# code. The Qt-Core-only task-space lanes above (test_mission_stage,
+# test_mission_surface_parity, test_mission_scale_benchmark) stay untouched;
+# these four add the persistence chain (which reaches QGIS through
+# object_identity / selection_context, exactly like test_mission_context) and
+# the agent tool objects (spatial_tool_registry + contracts + mission_tools,
+# which are QGIS-free by construction).
+# ---------------------------------------------------------------------------
+set(SICNU_MISSION_RUNTIME_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_run_authority.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_tool_authority.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/mission_tools.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/spatial_tool_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/contracts/spatial_contracts.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/harness/harness_actions.cpp
+)
+
+function(sicnu_add_mission_runtime_test NAME)
+  add_executable(${NAME} ${NAME}.cpp ${SICNU_MISSION_RUNTIME_SOURCES})
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Xml
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_data
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # The parity gate parses the real MCP dispatch / provider / Pi bridge /
+  # CMake registrations from the source tree, so a forgotten surface wiring
+  # fails the test.
+  target_compile_definitions(${NAME} PRIVATE
+    SICNU_MISSION_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  sicnu_link_jsoncpp(${NAME})
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_mission_runtime_test(test_mission_runtime_persistence)
+sicnu_add_mission_runtime_test(test_mission_tools)
+sicnu_add_mission_runtime_test(test_mission_runtime_parity)
+sicnu_add_mission_runtime_test(test_mission_runtime_scale)

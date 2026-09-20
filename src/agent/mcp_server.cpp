@@ -946,6 +946,15 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
+            else if (toolName.startsWith(QStringLiteral("mission:")))
+            {
+                // Mission Runtime 13.0: the mission:* tools are registry tools
+                // over the single-authority mission runtime store
+                // (spatial_tools/mission_tools.cpp). They join the
+                // registry-backed dispatch — an allowed-but-unregistered id
+                // used to fall through to "Algorithm not registered".
+                resultData = handleSpatialToolCall(toolName, arguments);
+            }
             else if (toolName.startsWith(QStringLiteral("view:")) ||
                      toolName.startsWith(QStringLiteral("roi:")) ||
                      toolName.startsWith(QStringLiteral("canvas:")) ||

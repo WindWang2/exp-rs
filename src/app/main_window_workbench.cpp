@@ -9,6 +9,8 @@
  ***************************************************************************/
 #include "main_window.h"
 
+#include <QDateTime>
+
 #include "app/help/help_system_controller.h"
 #include "panels/data_manager_panel.h"
 #include "panels/workspace_browser_panel.h"
@@ -27,6 +29,10 @@
 #include "workbench/model_workbench_panel.h"
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
+#include "workbench/mission_runtime_store.h"
+#include "workbench/mission_timeline_panel.h"
+#include "workbench/mission_tool_host_install.h"
+#include "agent/spatial_tools/mission_tools.h"
 // F11 unblocking include (pre-existing master break): this TU dereferences
 // the rs::app::GeorefDualWindow returned by openGeorefDualWindow() (passes
 // it to addDockWidget and reads members) but relied on a transitive include
@@ -507,6 +513,34 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             m_windowMenu->addAction( action );
     }
 
+    // ── Mission Runtime 13.0 — mission task space surface ─────────────
+    // One host wiring for both execution modes of this binary (the headless
+    // --mcp branch calls the same installer from main.cpp).
+    sicnu::app::installMissionToolHost();
+
+    m_missionPanel = new sicnu::app::MissionTimelinePanel( this );
+    m_missionPanel->setObjectName( QStringLiteral( "missionTimelineDock" ) );
+    m_missionPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea |
+                                     Qt::BottomDockWidgetArea );
+    addDockWidget( Qt::BottomDockWidgetArea, m_missionPanel );
+    m_missionPanel->hide(); // available on demand (窗口 menu / registry command)
+    connect( m_missionPanel, &sicnu::app::MissionTimelinePanel::taskSelected, this,
+             [this]( const QString &taskId, sicnu::app::MissionTaskStatus status ) {
+                 if ( m_selectionContext )
+                     m_selectionContext->notifyMissionTaskSelection( taskId, status );
+             } );
+    connect( m_missionPanel, &sicnu::app::MissionTimelinePanel::refreshRequested, this,
+             &QgisDesktopWindow::refreshMissionRuntime );
+    connect( m_missionPanel, &sicnu::app::MissionTimelinePanel::retryRequested, this,
+             [this]( const QString & ) { retrySelectedMissionTask(); } );
+    connect( m_missionPanel, &sicnu::app::MissionTimelinePanel::resumeRequested, this,
+             [this]( const QString & ) { resumeSelectedMissionTask(); } );
+    if ( m_windowMenu )
+    {
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "mission.timeline.show" ), true ) )
+            m_windowMenu->addAction( action );
+    }
+
     // ── Temporal Workbench (Workbench 7.0 §D) ─────────────────────────
     // Timeline + paginated scene browser over DataManager temporal
     // collections; preview/compare route through the existing seams.
@@ -923,4 +957,135 @@ void QgisDesktopWindow::showOperatorCatalog()
     m_operatorCatalogPanel->show();
     m_operatorCatalogPanel->raise();
     m_operatorCatalogPanel->activateWindow();
+}
+
+// ── Mission Runtime 13.0 — mission task space surface ─────────────────────
+
+void QgisDesktopWindow::refreshMissionRuntime()
+{
+    const QString projectPath = QgsProject::instance()->fileName();
+    sicnu::app::MissionRuntimeState state;
+    QString err;
+    if ( !sicnu::app::loadMissionRuntime( projectPath, QDomDocument(), state, &err ) )
+    {
+        // Fail closed and explain: a corrupt authority must never be
+        // silently replaced by an empty task space.
+        statusBar()->showMessage( tr( "Mission runtime unavailable: %1" ).arg( err ), 8000 );
+        if ( m_missionPanel )
+        {
+            m_missionPanel->setTimeline( sicnu::app::MissionTimeline() );
+            m_missionPanel->setMissionHeader( QString(), sicnu::app::MissionStage::Import, 0, 0 );
+        }
+        return;
+    }
+
+    for ( const QString &notice : state.notices )
+    {
+        if ( notice == QLatin1String( "timeline_migrated_from_legacy_sidecar" ) )
+            statusBar()->showMessage( tr( "Mission timeline migrated from the 12.0 sidecar" ),
+                                      6000 );
+        else if ( notice == QLatin1String( "authority_recovered_from_last_good" ) )
+            statusBar()->showMessage(
+                tr( "Mission context recovered from the last known good state" ), 8000 );
+    }
+
+    // A reopened project must not report a task as Running whose execution
+    // no longer exists (crash residue) — reconcile before any surface reads.
+    const sicnu::app::MissionRunReconciliation runReport = sicnu::app::reconcileRunAuthority(
+        state.timeline, sicnu::app::resolveMissionRunStatus,
+        QDateTime::currentDateTimeUtc().toString( Qt::ISODate ) );
+    if ( runReport.staleFromRun > 0 || runReport.succeededFromRun > 0 || runReport.failedFromRun > 0
+         || runReport.canceledFromRun > 0 )
+    {
+        // Persist the reconciled truth so every surface (and the next open)
+        // agrees.
+        sicnu::app::MissionRuntimeState persisted = state;
+        QString saveErr;
+        QDomDocument doc;
+        sicnu::app::saveMissionRuntime( projectPath, doc, persisted, &saveErr );
+        state = persisted;
+    }
+
+    m_missionRuntime = state;
+    m_mission = state.context;
+    if ( m_missionPanel )
+    {
+        m_missionPanel->setTimeline( state.timeline );
+        m_missionPanel->setMissionHeader( state.context.missionId, state.timeline.currentStage(),
+                                          state.timeline.revision(),
+                                          state.timeline.lastEventSeq() );
+    }
+}
+
+void QgisDesktopWindow::showMissionTimelinePanel()
+{
+    if ( !m_missionPanel )
+        return;
+    refreshMissionRuntime();
+    m_missionPanel->show();
+    m_missionPanel->raise();
+    m_missionPanel->activateWindow();
+}
+
+void QgisDesktopWindow::retrySelectedMissionTask()
+{
+    if ( !m_selectionContext )
+        return;
+    const auto snap = m_selectionContext->snapshot();
+    if ( !snap.hasMissionTaskSelection )
+    {
+        statusBar()->showMessage( tr( "Select a mission task first" ), 4000 );
+        return;
+    }
+    const sicnu::agent::spatial_tools::MissionActionResult result = sicnu::agent::spatial_tools::
+        applyMissionAction( snap.selectedMissionTaskId, QStringLiteral( "retry" ) );
+    if ( result.transportFailure )
+    {
+        statusBar()->showMessage(
+            tr( "Mission task retry failed: %1" )
+                .arg( result.errorMessage.isEmpty() ? result.errorCode : result.errorMessage ),
+            6000 );
+        return;
+    }
+    statusBar()->showMessage(
+        result.applied ? tr( "Mission task requeued" )
+                       : tr( "Mission task not retryable: %1" ).arg( result.reason ),
+        4000 );
+    refreshMissionRuntime();
+}
+
+void QgisDesktopWindow::resumeSelectedMissionTask()
+{
+    if ( !m_selectionContext )
+        return;
+    const auto snap = m_selectionContext->snapshot();
+    if ( !snap.hasMissionTaskSelection )
+    {
+        statusBar()->showMessage( tr( "Select a mission task first" ), 4000 );
+        return;
+    }
+    // Resume = re-bind the references first (a stale task may reference
+    // layers that came back), then requeue — the same two actions the agent
+    // surface exposes, in the same order.
+    const sicnu::agent::spatial_tools::MissionActionResult reconciled = sicnu::agent::spatial_tools::
+        applyMissionAction( snap.selectedMissionTaskId, QStringLiteral( "reconcile" ) );
+    const sicnu::agent::spatial_tools::MissionActionResult result = sicnu::agent::spatial_tools::
+        applyMissionAction( snap.selectedMissionTaskId, QStringLiteral( "retry" ) );
+    if ( result.transportFailure || reconciled.transportFailure )
+    {
+        statusBar()->showMessage(
+            tr( "Mission task resume failed: %1" )
+                .arg( ( result.transportFailure ? result.errorMessage : reconciled.errorMessage )
+                          .isEmpty()
+                          ? result.errorCode
+                          : ( result.transportFailure ? result.errorMessage
+                                                      : reconciled.errorMessage ) ),
+            6000 );
+        return;
+    }
+    statusBar()->showMessage(
+        result.applied ? tr( "Mission task resumed" )
+                       : tr( "Mission task not resumable: %1" ).arg( result.reason ),
+        4000 );
+    refreshMissionRuntime();
 }

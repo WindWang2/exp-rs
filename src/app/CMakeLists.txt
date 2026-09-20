@@ -134,6 +134,16 @@ add_executable(sicnu_geo_rs
     workbench/mission_stage.cpp
     workbench/mission_projection.cpp
     workbench/mission_timeline_model.cpp
+    workbench/mission_timeline_store.cpp
+    # Mission Runtime 13.0 — single-authority persistence, run authority,
+    # tool host wiring, timeline dock
+    workbench/mission_timeline_bridge.cpp
+    workbench/mission_runtime_store.cpp
+    workbench/mission_run_authority.cpp
+    workbench/mission_run_resolver.cpp
+    workbench/mission_tool_authority.cpp
+    workbench/mission_tool_host_install.cpp
+    workbench/mission_timeline_panel.cpp
     # D15 classification-change-studio studio seam
     workbench/classification_studio_widget.cpp
     workbench/agent_context_tool.cpp
