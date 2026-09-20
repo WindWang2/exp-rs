@@ -1456,6 +1456,94 @@ TEST_CASE( "concurrent installOrUpgrade on the same id refuses the second",
     REQUIRE( fixture.installedVersion() == "2.0.0" );
 }
 
+TEST_CASE( "installOrUpgrade refuses a plugin shadowed by an earlier root",
+           "[plugin][upgrade][p13]" )
+{
+    // Discovery is first-root-wins: a same-id plugin in an earlier root
+    // shadows the user-root copy. Installing here would write bytes
+    // discovery never surfaces; on the upgrade path it would also drain
+    // the SHADOWING generation and then report a false Upgraded. The
+    // shadow guard refuses both branches typed.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    const std::string bundledRoot = fixture.root + "/bundled-plugins";
+    std::error_code ec;
+    std::filesystem::create_directories( bundledRoot, ec );
+    fixture.writePackage( "src-shadow", "1.0.0", true );
+    std::filesystem::rename( fixture.root + "/src-shadow",
+                             bundledRoot + "/" + fixture.id, ec );
+    REQUIRE( !ec );
+
+    PluginRegistryOptions options;
+    options.roots = { bundledRoot, fixture.userRoot };
+    options.tempDirectory = fixture.root;
+    options.policy.allowThirdPartyNative = true;
+    registry.configure( options );
+
+    // Fresh-install shadow: the id already resolves to the bundled copy —
+    // a user-root install would sit permanently invisible.
+    fixture.writePackage( "src-v2", "2.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v2" ).status
+             == PluginRegistry::PluginUpgradeStatus::Refused );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::TrustRejected ) );
+    REQUIRE_FALSE( std::filesystem::exists( fixture.targetDir() ) );
+
+    // Upgrade shadow: plant a user-root copy directly (what a prior install
+    // would have left), keep the bundled shadow — the upgrade must refuse
+    // rather than drain the bundled generation and report a false Upgraded.
+    std::filesystem::copy( bundledRoot + "/" + fixture.id, fixture.targetDir(),
+                           std::filesystem::copy_options::recursive, ec );
+    REQUIRE( !ec );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v2" ).status
+             == PluginRegistry::PluginUpgradeStatus::Refused );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::TrustRejected ) );
+    // The shadowed user copy is untouched: still the planted v1 bytes.
+    REQUIRE( fixture.installedVersion() == "1.0.0" );
+}
+
+TEST_CASE( "installOrUpgrade rolls back when the package fails checksum verification",
+           "[plugin][upgrade][p13]" )
+{
+    // A package.checksums digest that can never match the staged payload
+    // fails install() AFTER the drain — the post-drain failure leg: the
+    // old bytes are still on disk (install aborted before the swap), the
+    // old generation reloads, and the status is RolledBack (never Failed —
+    // the previous install was fully intact).
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+    REQUIRE( registry.load( fixture.id ) );
+    REQUIRE( registry.isLoaded( fixture.id ) );
+
+    const std::string dir = fixture.root + "/src-v2";
+    std::filesystem::create_directories( dir );
+    {
+        std::ofstream manifest( dir + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": ")" + fixture.id + R"(",
+            "name": "Upgrade Fixture",
+            "version": "2.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": )" << pluginAbiVersion() << R"(,
+            "entrypoint_kind": "manifest",
+            "capabilities": ["operator", "external_tools"],
+            "permissions": ["external_process", "filesystem_read"],
+            "package": { "checksums": { "plugin.json": "0000000000000000000000000000000000000000000000000000000000000000" } }
+        })";
+    }
+
+    const PluginRegistry::PluginUpgradeResult result =
+        registry.installOrUpgrade( dir );
+    REQUIRE( result.status == PluginRegistry::PluginUpgradeStatus::RolledBack );
+    REQUIRE( fixture.installedVersion() == "1.0.0" );
+    REQUIRE( registry.isLoaded( fixture.id ) );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::PluginUpgradeRolledBack ) );
+    REQUIRE( fixture.snapshotRootEntries().empty() );
+}
+
 TEST_CASE( "registry teardown joins an in-flight snapshot capture",
            "[plugin][snapshot][p13]" )
 {

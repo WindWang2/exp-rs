@@ -1000,6 +1000,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     bool loaded = false;
     bool hostedOop = false;
     PluginManifest loadedManifest;
+    std::string tempDirectory;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         const PluginRecord *entry = record( pluginId );
@@ -1011,6 +1012,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
         }
         pluginDir = entry->directory;
         loadedManifest = entry->manifest;
+        tempDirectory = mOptions.tempDirectory;
         loaded = std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
                      return e.pluginId == pluginId;
                  } ) != mLoaded.end();
@@ -1049,7 +1051,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
         }
         PluginValidationRequest request;
         request.pluginDir = pluginDir;
-        request.tempDirectory = mOptions.tempDirectory;
+        request.tempDirectory = tempDirectory;
         PluginDiagnosticLog freshLog;
         if ( !PluginManifestValidator::validate( fresh, request, freshLog )
              || freshLog.hasErrorsFor( pluginId ) )
@@ -1081,7 +1083,9 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     waitForSnapshotJob( pluginId, snapshotWaitMs() );
     const std::string snapshotDir = lastGoodSnapshotPath( pluginId );
     bool haveSnapshot = false;
-    if ( !std::filesystem::exists( snapshotDir ) )
+    std::error_code snapshotDirError;
+    if ( !std::filesystem::exists( snapshotDir, snapshotDirError )
+         || snapshotDirError )
     {
         addDiagnostic( PluginDiagnosticCode::ResourceMissing, PluginDiagnosticSeverity::Warning,
                        "hot reload has no last-known-good snapshot; a failed reload "
@@ -1382,29 +1386,32 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         }
     }
 
+    // Shadow guard (both branches, any state): the registry's record for
+    // this id may resolve to a DIFFERENT root — discovery is first-root-wins
+    // and bundled/dev roots outrank the user root. Installing here then
+    // produces a copy discovery never surfaces; on the upgrade path it
+    // would also drain the SHADOWING generation, swap bytes nobody loads,
+    // then report Upgraded while the old code keeps running. Refuse typed.
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( id );
+        if ( entry && entry->directory != target )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "install/upgrade refused: '" + id + "' resolves to "
+                                  + entry->directory
+                                  + " outside the user plugin root (an earlier "
+                                    "discovery root shadows this install); the "
+                                    "install is untouched",
+                              id );
+            result.status = PluginUpgradeStatus::Refused;
+            return result;
+        }
+    }
+
     if ( !hadPrevious )
     {
-        // Fresh install — but a plugin with this id LOADED from a different
-        // root (a dev tree shadows the user root by root order) would leave
-        // the running generation stale and produce duplicate-id records.
-        // Refuse typed rather than silently shadowing.
-        {
-            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            const PluginRecord *entry = record( id );
-            if ( entry && entry->state == PluginState::Loaded
-                 && entry->directory != target )
-            {
-                mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
-                                  PluginDiagnosticSeverity::Error,
-                                  "install refused: '" + id + "' is loaded from "
-                                      + entry->directory
-                                      + " outside the user plugin root; unload "
-                                        "it before installing",
-                                  id );
-                result.status = PluginUpgradeStatus::Refused;
-                return result;
-            }
-        }
         PluginDiagnosticLog installLog;
         std::string installedDir;
         const bool installed =
@@ -1743,7 +1750,7 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     std::string snapshotDir;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            mDiagnostics.merge( log );
+        mDiagnostics.merge( log );
         snapshotDir = lastGoodSnapshotPath( pluginId );
     }
     if ( !ok )

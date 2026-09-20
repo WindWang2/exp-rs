@@ -772,7 +772,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         if ( !registry.uninstallPlugin( args.takeFirst().toStdString() ) )
         {
             const Json::Value diagnostics = registry.diagnostics().toJson();
-            return io.finish( false, "plugin", diagnostics, 1, diagnostics,
+            return io.finish( false, "plugin", {}, 1, diagnostics,
                               "uninstall failed" );
         }
         return io.finish( true, "plugin", {}, 0, registry.diagnostics().toJson() );

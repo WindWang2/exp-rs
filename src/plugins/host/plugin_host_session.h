@@ -174,7 +174,13 @@ public:
     /// True when the worker advertised protocol 1.2 "directionalFrameCaps"
     /// in its hello features (the host then applies per-direction caps after
     /// plugin.load; a 1.1 worker keeps exact 1.1 shared-cap semantics).
-    bool peerSupportsDirectionalFrameCaps() const { return mPeerDirectionalCaps; }
+    bool peerSupportsDirectionalFrameCaps() const
+    {
+        // mPeerDirectionalCaps is written under mStateMutex on the reader
+        // thread during hello handling — the read takes the same lock.
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        return mPeerDirectionalCaps;
+    }
     /// Applies the host-side per-direction frame caps derived from the
     /// effective quota (send = maxRequestBytes, recv = maxResponseBytes).
     /// MUST run only after plugin.load succeeded — the plugin.load frame

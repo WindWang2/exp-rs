@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <limits>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -44,7 +45,13 @@ namespace {
 /// alive → residue kept).
 bool pidAlive( long pid )
 {
-    if ( pid <= 0 )
+    // A pid outside int's range cannot name a live process on any
+    // platform — the static_cast below would TRUNCATE (LONG_MAX -> -1 ->
+    // kill() reports EPERM), so bound first and treat it as dead.
+    if ( pid <= 0
+         || static_cast<unsigned long>( pid )
+                > static_cast<unsigned long>(
+                    std::numeric_limits<int>::max() ) )
         return false;
 #ifdef _WIN32
     HANDLE handle = ::OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
@@ -97,17 +104,6 @@ uint64_t envUint64( const char *name, uint64_t fallback, uint64_t floor )
         return fallback;
     return std::max<uint64_t>( parsed, floor );
 }
-
-/// Names that may appear inside the snapshot root, decomposed for the
-/// sweep. Anything else is foreign and never touched.
-enum class EntryKind
-{
-    Foreign,
-    Staging,       ///< <anything>~staging-<pid>-<seq>
-    ParkedOld,     ///< <anything>~old-<pid>-<seq>
-    Upgrade,       ///< upgrade-<id>-<pid>
-    LastGood,      ///< last-good-<id>
-};
 
 bool allSafeNameChars( const std::string &name )
 {
@@ -728,7 +724,10 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
                 continue;
             const fs::path dest = rootPath / base;
             std::error_code destError;
-            if ( !fsn::exists( dest, destError ) && !destError )
+            const bool destPresent = fsn::exists( dest, destError );
+            if ( destError )
+                continue; // indeterminate — keep the only backup, retry next sweep
+            if ( !destPresent )
             {
                 std::error_code renameError;
                 fsn::rename( entry, dest, renameError );

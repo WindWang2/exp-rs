@@ -523,8 +523,22 @@ TEST_CASE( "crashed swap parks restore the missing install and live parks are ke
     REQUIRE( fs::exists( livePark ) );
     REQUIRE_FALSE( fs::exists( userRoot + "/" + liveId ) );
 
+    // A planted park whose digit tail overflows long must not throw out of
+    // reconcile: the saturating parse lands on the dead-owner path, so a
+    // missing target is still restored (the tail is grammar-valid).
+    const std::string hugeId = "org.test.parkhuge";
+    const std::string hugePark =
+        staging + "/" + hugeId + "~old.999999999999999999999999999999";
+    fs::remove_all( userRoot + "/" + hugeId, ec );
+    fs::remove_all( hugePark, ec );
+    plantPark( hugeId + "~old.999999999999999999999999999999", hugeId );
+    exprs::PluginPackage::reconcileStaging( userRoot );
+    REQUIRE( fs::exists( userRoot + "/" + hugeId + "/plugin.json" ) );
+    REQUIRE_FALSE( fs::exists( hugePark ) );
+
     fs::remove_all( userRoot + "/" + lostId, ec );
     fs::remove_all( userRoot + "/" + keptId, ec );
+    fs::remove_all( userRoot + "/" + hugeId, ec );
     fs::remove_all( livePark, ec );
 }
 

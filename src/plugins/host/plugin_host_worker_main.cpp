@@ -940,7 +940,6 @@ int main( int argc, char **argv )
     channel.setCancelSink( [&cancels]( long long id ) { cancels.cancel( id ); } );
 
     PluginManifest manifest;
-    bool manifestLoaded = false;
     WorkerSink sink;
     std::unique_ptr<WorkerHostServices> services;
     LoadedPlugin loadedInstance;
@@ -983,7 +982,6 @@ int main( int argc, char **argv )
                 continue;
             }
             manifest = parsed;
-            manifestLoaded = true;
             sink.setManifest( &manifest );
 
             // Protocol 1.1/1.2 downward frame-cap negotiation: never raise a
@@ -1062,7 +1060,6 @@ int main( int argc, char **argv )
                 // a one-plugin-per-process isolation guarantee means the
                 // launcher will kill this worker and start fresh.
                 manifest = PluginManifest();
-                manifestLoaded = false;
                 sink.setManifest( nullptr );
                 services.reset();
                 continue;

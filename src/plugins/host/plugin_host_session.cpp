@@ -692,7 +692,9 @@ void PluginHostProcessSession::killProcess( const char *reason )
             ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
         ::kill( pid, SIGKILL );
         int status = 0;
-        ::waitpid( pid, &status, 0 );
+        while ( ::waitpid( pid, &status, 0 ) < 0 && errno == EINTR )
+        {
+        }
         mProcessHandle = nullptr;
         mProcessGroupId = -1;
     }
@@ -916,11 +918,6 @@ IpcChannel::Outcome PluginHostProcessSession::requestImpl(
         // Per-id cancel already went out (channel); this waits the grace
         // window and then kills (sole request) or poisons (peers in flight).
         escalateTimeout( 0 );
-        outcome.error.message += "; the request was cancelled (worker killed or scheduled for kill)";
-    }
-
-    if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
-    {
         outcome.error.message += "; the request was cancelled and the worker was killed or poisoned";
     }
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
@@ -1056,9 +1053,10 @@ bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
             }
 #else
             int status = 0;
-            if ( ::waitpid( static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) ),
-                            &status, WNOHANG )
-                 != 0 )
+            const pid_t waited =
+                ::waitpid( static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) ),
+                           &status, WNOHANG );
+            if ( waited > 0 || ( waited < 0 && errno != EINTR ) )
             {
                 exited = true;
                 break;

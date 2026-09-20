@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <limits>
+#include <cstdlib>
 #include <chrono>
 #include <array>
 #include <cstdint>
@@ -275,7 +277,13 @@ long currentProcessId()
 /// off). Same contract as the snapshot sweep's probe.
 bool pidAlive( long pid )
 {
-    if ( pid <= 0 )
+    // A pid outside int's range cannot name a live process on any
+    // platform — the static_cast below would TRUNCATE (LONG_MAX -> -1 ->
+    // kill() reports EPERM), so bound first and treat it as dead.
+    if ( pid <= 0
+         || static_cast<unsigned long>( pid )
+                > static_cast<unsigned long>(
+                    std::numeric_limits<int>::max() ) )
         return false;
 #ifdef _WIN32
     HANDLE handle = ::OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
@@ -387,7 +395,13 @@ void PluginPackage::reconcileStaging( const std::string &userRoot )
                 && pidText.find_first_not_of( "0123456789" ) == std::string::npos;
             if ( strictPark )
             {
-                const long owner = std::stol( pidText );
+                // strtol, never stol: a planted dir name can carry a digit
+                // tail that overflows long — saturate to LONG_MAX instead
+                // of throwing std::out_of_range through install/configure
+                // (fail-CLOSED convention; a pid that large cannot exist,
+                // so saturation lands on the dead-owner path).
+                errno = 0;
+                const long owner = std::strtol( pidText.c_str(), nullptr, 10 );
                 if ( owner == ownPid || pidAlive( owner ) )
                     continue;
                 const fs::path target = fs::path( userRoot ) / id;
@@ -424,7 +438,10 @@ void PluginPackage::reconcileStaging( const std::string &userRoot )
         if ( timeError )
             continue;
         if ( now - lastWrite > std::chrono::hours( 24 ) )
-            fsn::remove_all( entry, ec );
+        {
+            std::error_code removeError;
+            fsn::remove_all( entry, removeError );
+        }
     }
 }
 
@@ -636,13 +653,7 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     // "<id>~old.<pid>": '~' cannot appear in a plugin id, so the park
     // grammar is unambiguous even for ids that themselves contain ".old".
     const std::string backupDir = stagingRoot + "/" + manifest.id + "~old."
-                                  + std::to_string( static_cast<long>(
-#ifdef _WIN32
-        ::GetCurrentProcessId()
-#else
-        ::getpid()
-#endif
-        ) );
+                                  + std::to_string( currentProcessId() );
     removeTree( backupDir );
     const bool hadPrevious = isDirectory( target );
     if ( hadPrevious )

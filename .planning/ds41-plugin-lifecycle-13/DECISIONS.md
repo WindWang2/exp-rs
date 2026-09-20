@@ -237,3 +237,52 @@ races the transaction.
   Missing .so → every manifest lands Broken ("plugin is not loadable").
 - Registered CTest names are Catch2 titles, not binary names; the oracle's
   -R regex is aspirational — run the four binaries directly.
+
+## Independent review round 3 (post-green) — findings & dispositions
+
+### Fixed (P1)
+- `reconcileStaging` `std::stol` on an unbounded `~old.<pid>` tail could
+  throw `std::out_of_range` through configure()/install() (a planted
+  residue dir wedges every later operation — plugin-writable, persistent).
+  Now `strtol` + saturation; `pidAlive` additionally bounds `pid > INT_MAX`
+  to dead in BOTH copies (the raw static_cast<pid_t> truncated LONG_MAX to
+  -1, making kill(-1,0) report EPERM=alive — a planted park would have been
+  kept forever). Test: oversized tail restores like any dead-owner park.
+- `installOrUpgrade` false `Upgraded` under root shadowing: a same-id
+  record resolving to an earlier discovery root (bundled/dev outranks the
+  user root) meant the upgrade drained the shadowing generation, swapped
+  bytes nothing loads, and still reported Upgraded. New shadow guard
+  refuses whenever `record(id)->directory != target` — both branches, any
+  state (the old fresh-install check only covered Loaded). Test covers
+  fresh-install AND upgrade shadow.
+- `peerSupportsDirectionalFrameCaps()` read `mPeerDirectionalCaps` lock-free
+  while hello handling writes it under mStateMutex → takes the mutex.
+- `reload()` used the throwing `std::filesystem::exists` — now the
+  error_code overload (typed-boundary convention; an indeterminate stat
+  also counts as "no usable snapshot", the safe direction).
+
+### Fixed (P2)
+- `shutdownImpl` WNOHANG waitpid `!= 0` conflated EINTR/ECHILD with
+  "exited" — an EINTR skipped the kill ladder and orphaned worker+group.
+  Now `> 0` or non-EINTR error counts as exited; EINTR retries.
+- killProcess's blocking `waitpid` now retries EINTR (no zombie on a
+  signal-interrupted reap).
+- Snapshot sweep `~old-` park: indeterminate dest stat now KEEPS the only
+  backup (was: dropped it — contradicted reconcileStaging's explicit
+  keep-on-error rule).
+- Merged the duplicated Timeout message blocks in requestImpl (merge
+  leftover appended two contradictory suffixes).
+- Removed dead `EntryKind` enum (sweep uses splitSuffix/prefix checks),
+  dead `manifestLoaded` store in worker main, stale `.staging-`/`.old-`
+  grammar in plugin_snapshot.h docs, shared-`ec` reuse in reconcile's age
+  rule, unlocked `mOptions.tempDirectory` read in reload's lock-drop
+  region, double-diagnostics payload in CLI uninstall failure path,
+  duplicated inline pid fetch (now currentProcessId()).
+
+### Test gaps closed
+- Oversized `~old.<pid>` tail → dead-owner restore, no throw.
+- Shadowed topology (bundled + user copy) → Refused on both branches.
+- `package.checksums` mismatch → post-drain install failure → RolledBack
+  with v1 intact and reloaded.
+
+All four plugin/IPC test binaries re-verified green after the fixes.
