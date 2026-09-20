@@ -20,6 +20,9 @@
 
 #include "operators/framework/rs_operator_context.h"
 
+#include <QString>
+
+#include <array>
 #include <string>
 #include <vector>
 
@@ -39,6 +42,21 @@ struct DetectionTileStats
   int rasterHeight = 0;
 };
 
+/// Publishes a georeferenced detection vector (GPKG | GeoJSON | ESRI
+/// Shapefile by extension) with the canonical fields (class / confidence /
+/// tile_x / tile_y) and one rectangle polygon per box, in RASTER pixel →
+/// map coordinates. Stage-then-rename atomic publish (backup/rollback on
+/// failure); removes shapefile sidecars with the main file. Shared by the
+/// single-model engine and the ensemble fusion path so ONE writer contract
+/// exists (Platform 13.0).
+/// @param classes the class vocabulary the boxes' classId indexes into.
+/// @throws RSOperatorError on any write/publish failure (no partial output).
+void writeDetectionVector( const std::vector<DetectionBox> &boxes,
+                           const std::vector<std::string> &classes,
+                           const std::array<double, 6> &geoTransform,
+                           const QString &projection,
+                           const std::string &outputPath );
+
 class DetectionTileEngine
 {
   public:
@@ -48,12 +66,17 @@ class DetectionTileEngine
      * Run tiled detection over the input raster and publish a georeferenced
      * vector (driver by extension: GPKG | GeoJSON | ESRI Shapefile).
      * @param bands 1-based band numbers to feed (empty = all bands)
+     * @param collectedBoxes when non-null the run collects the decoded,
+     *        seam-resolved, NMS-deduplicated boxes (raster pixel coordinates)
+     *        and publishes NO vector — the ensemble fusion path consumes the
+     *        boxes and writes the product itself.
      * @throws RSOperatorError on contract/read/forward/write failure or
      *         cancellation. No output file is left behind on failure.
      */
     DetectionTileStats run( const std::string &inputPath, const std::vector<int> &bands,
                             const std::string &outputPath, RSOperatorContext &context,
-                            const TileInferenceRunOptions &options = TileInferenceRunOptions{} );
+                            const TileInferenceRunOptions &options = TileInferenceRunOptions{},
+                            std::vector<DetectionBox> *collectedBoxes = nullptr );
 
     /// Static contract check (empty = executable): detection contract declared
     /// and valid, resize to_input with a fixed graph input, head enumerated or

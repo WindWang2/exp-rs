@@ -106,6 +106,184 @@ DetectionTileEngine::DetectionTileEngine( ModelInfo model, ModelRuntimePtr runti
 {
 }
 
+void writeDetectionVector( const std::vector<DetectionBox> &boxes,
+                           const std::vector<std::string> &classes,
+                           const std::array<double, 6> &geoTransform,
+                           const QString &projection,
+                           const std::string &outputPath )
+{
+  // --- Atomic vector publish: same-dir temp + rename (repo .tmp~ convention).
+  const QFileInfo outFi( QString::fromStdString( outputPath ) );
+  const QString workPath = outFi.absolutePath() + QLatin1Char( '/' ) + outFi.completeBaseName()
+                           + QStringLiteral( ".tmp~." ) + outFi.suffix();
+  QDir().mkpath( outFi.absolutePath() );
+  removeVectorFiles( workPath );
+
+  GDALAllRegister();
+  OGRRegisterAll();
+  GDALDriverH driver = GDALGetDriverByName( vectorDriverName( outputPath ).c_str() );
+  if ( !driver )
+  {
+    removeVectorFiles( workPath );
+    throw RSOperatorError( ErrorCode::GdalError, "vector driver not available" );
+  }
+  GDALDatasetH outDs = GDALCreate( driver, workPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  if ( !outDs )
+  {
+    removeVectorFiles( workPath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to create detection output: " + workPath.toStdString() );
+  }
+  OGRSpatialReferenceH srs = nullptr;
+  if ( !projection.isEmpty() )
+  {
+    srs = OSRNewSpatialReference( nullptr );
+    if ( OSRSetFromUserInput( srs, projection.toUtf8().constData() ) != OGRERR_NONE )
+    {
+      OSRDestroySpatialReference( srs );
+      srs = nullptr;
+    }
+  }
+  OGRLayerH layer = GDALDatasetCreateLayer( outDs, "detections", srs, wkbPolygon, nullptr );
+  if ( srs )
+    OSRDestroySpatialReference( srs );
+  if ( !layer )
+  {
+    GDALClose( outDs );
+    removeVectorFiles( workPath );
+    throw RSOperatorError( ErrorCode::GdalError, "failed to create detections layer" );
+  }
+  const char *fieldNames[] = { "class", "confidence", "tile_x", "tile_y" };
+  const OGRFieldType fieldTypes[] = { OFTString, OFTReal, OFTInteger, OFTInteger };
+  for ( int i = 0; i < 4; ++i )
+  {
+    OGRFieldDefnH field = OGR_Fld_Create( fieldNames[i], fieldTypes[i] );
+    if ( OGR_L_CreateField( layer, field, TRUE ) != OGRERR_NONE )
+    {
+      OGR_Fld_Destroy( field );
+      GDALClose( outDs );
+      removeVectorFiles( workPath );
+      throw RSOperatorError( ErrorCode::GdalError,
+                             std::string( "failed to create field: " ) + fieldNames[i] );
+    }
+    OGR_Fld_Destroy( field );
+  }
+
+  for ( const DetectionBox &box : boxes )
+  {
+    // Raster pixel corners → map coordinates (GDAL geotransform, corner origin).
+    const double gx1 = geoTransform[0] + box.x * geoTransform[1] + box.y * geoTransform[2];
+    const double gy1 = geoTransform[3] + box.x * geoTransform[4] + box.y * geoTransform[5];
+    const double gx2 = geoTransform[0] + ( box.x + box.w ) * geoTransform[1]
+                       + ( box.y + box.h ) * geoTransform[2];
+    const double gy2 = geoTransform[3] + ( box.x + box.w ) * geoTransform[4]
+                       + ( box.y + box.h ) * geoTransform[5];
+
+    const std::size_t classIndex = static_cast<std::size_t>(
+      std::min( box.classId, static_cast<int>( classes.size() ) - 1 ) );
+    const std::string className = classes[classIndex];
+
+    OGRFeatureH feature = OGR_F_Create( OGR_L_GetLayerDefn( layer ) );
+    OGR_F_SetFieldString( feature, OGR_F_GetFieldIndex( feature, "class" ), className.c_str() );
+    OGR_F_SetFieldDouble( feature, OGR_F_GetFieldIndex( feature, "confidence" ), box.confidence );
+    OGR_F_SetFieldInteger( feature, OGR_F_GetFieldIndex( feature, "tile_x" ),
+                           static_cast<int>( box.x ) );
+    OGR_F_SetFieldInteger( feature, OGR_F_GetFieldIndex( feature, "tile_y" ),
+                           static_cast<int>( box.y ) );
+
+    static const int ringCount = 5;
+    double xs[5] = { gx1, gx2, gx2, gx1, gx1 };
+    double ys[5] = { gy1, gy1, gy2, gy2, gy1 };
+    OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
+    for ( int i = 0; i < ringCount; ++i )
+      OGR_G_AddPoint_2D( ring, xs[i], ys[i] );
+    OGRGeometryH polygon = OGR_G_CreateGeometry( wkbPolygon );
+    OGR_G_AddGeometryDirectly( polygon, ring );
+    OGR_F_SetGeometryDirectly( feature, polygon );
+
+    if ( OGR_L_CreateFeature( layer, feature ) != OGRERR_NONE )
+    {
+      OGR_F_Destroy( feature );
+      GDALClose( outDs );
+      removeVectorFiles( workPath );
+      throw RSOperatorError( ErrorCode::GdalError, "failed to write detection feature" );
+    }
+    OGR_F_Destroy( feature );
+  }
+  GDALClose( outDs );
+
+  // Publish: back up any previous output, rename the stage files onto the
+  // caller's path (sidecars checked — a shapefile without .shx is invalid),
+  // and restore the backup if any step fails.
+  const QString finalPath = QString::fromStdString( outputPath );
+  const bool isShp = outFi.suffix().toLower() == QLatin1String( "shp" );
+  auto sidecarPaths = [ & ]( const QString &main ) {
+    const QFileInfo fi( main );
+    const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
+    QStringList paths;
+    if ( isShp )
+      for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg" } )
+        paths << base + QString::fromLatin1( ext );
+    return paths;
+  };
+  const QStringList finalSidecars = sidecarPaths( finalPath );
+  const QStringList workSidecars = sidecarPaths( workPath );
+
+  auto publishAll = [ & ]() -> bool {
+    if ( !QFile::rename( workPath, finalPath ) )
+      return false;
+    for ( int i = 0; i < workSidecars.size(); ++i )
+    {
+      if ( QFile::exists( workSidecars[i] )
+           && !QFile::rename( workSidecars[i], finalSidecars[i] ) )
+        return false;
+    }
+    return true;
+  };
+
+  // Move the previous output (main + sidecars) aside.
+  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
+  QStringList backupSidecars;
+  for ( const QString &sidecar : finalSidecars )
+    backupSidecars << sidecar + QStringLiteral( ".prev~" );
+  const bool hadExisting = QFile::exists( finalPath );
+  if ( hadExisting )
+  {
+    removeVectorFiles( backupPath );
+    if ( !QFile::rename( finalPath, backupPath ) )
+    {
+      removeVectorFiles( workPath );
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "failed to back up the previous detection output: " + outputPath );
+    }
+    for ( int i = 0; i < finalSidecars.size(); ++i )
+    {
+      if ( QFile::exists( finalSidecars[i] ) )
+        QFile::rename( finalSidecars[i], backupSidecars[i] );
+    }
+  }
+
+  if ( !publishAll() )
+  {
+    removeVectorFiles( workPath );
+    removeVectorFiles( finalPath ); // a partial publish must not look like a result
+    if ( hadExisting )
+    {
+      QFile::rename( backupPath, finalPath );
+      for ( int i = 0; i < backupSidecars.size(); ++i )
+      {
+        if ( QFile::exists( backupSidecars[i] ) )
+          QFile::rename( backupSidecars[i], finalSidecars[i] );
+      }
+    }
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to publish detection output to: " + outputPath );
+  }
+  removeVectorFiles( backupPath );
+  for ( const QString &sidecar : backupSidecars )
+    QFile::remove( sidecar );
+}
+
 std::string DetectionTileEngine::checkContract( const ModelInfo &model )
 {
   if ( !model.output.detectionDeclared )
@@ -122,7 +300,8 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
                                              const std::vector<int> &bands,
                                              const std::string &outputPath,
                                              RSOperatorContext &context,
-                                             const TileInferenceRunOptions &options )
+                                             const TileInferenceRunOptions &options,
+                                             std::vector<DetectionBox> *collectedBoxes )
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "detection engine has no runtime session" );
@@ -474,179 +653,18 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   stats.detectionsKept = static_cast<int>( detections.size() );
 
   context.throwIfCancelled();
+  if ( collectedBoxes )
+  {
+    // Ensemble fusion path: the caller owns the product; the member run
+    // publishes nothing and hands its deduplicated boxes back in RASTER
+    // pixel coordinates (the frame the fusion operates in).
+    *collectedBoxes = detections;
+    context.reportProgressForced( 1.0, "Tiled detection complete" );
+    return stats;
+  }
   context.reportProgress( 0.95, "Writing detection vector: " + std::to_string( stats.detectionsKept )
                                   + " detections" );
-
-  // --- Atomic vector publish: same-dir temp + rename (repo .tmp~ convention).
-  const QFileInfo outFi( QString::fromStdString( outputPath ) );
-  const QString workPath = outFi.absolutePath() + QLatin1Char( '/' ) + outFi.completeBaseName()
-                           + QStringLiteral( ".tmp~." ) + outFi.suffix();
-  QDir().mkpath( outFi.absolutePath() );
-  removeVectorFiles( workPath );
-
-  GDALAllRegister();
-  OGRRegisterAll();
-  GDALDriverH driver = GDALGetDriverByName( vectorDriverName( outputPath ).c_str() );
-  if ( !driver )
-  {
-    removeVectorFiles( workPath );
-    throw RSOperatorError( ErrorCode::GdalError, "vector driver not available" );
-  }
-  GDALDatasetH outDs = GDALCreate( driver, workPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
-  if ( !outDs )
-  {
-    removeVectorFiles( workPath );
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to create detection output: " + workPath.toStdString() );
-  }
-  OGRSpatialReferenceH srs = nullptr;
-  if ( !ds.projection().isEmpty() )
-  {
-    srs = OSRNewSpatialReference( nullptr );
-    if ( OSRSetFromUserInput( srs, ds.projection().toUtf8().constData() ) != OGRERR_NONE )
-    {
-      OSRDestroySpatialReference( srs );
-      srs = nullptr;
-    }
-  }
-  OGRLayerH layer = GDALDatasetCreateLayer( outDs, "detections", srs, wkbPolygon, nullptr );
-  if ( srs )
-    OSRDestroySpatialReference( srs );
-  if ( !layer )
-  {
-    GDALClose( outDs );
-    removeVectorFiles( workPath );
-    throw RSOperatorError( ErrorCode::GdalError, "failed to create detections layer" );
-  }
-  const char *fieldNames[] = { "class", "confidence", "tile_x", "tile_y" };
-  const OGRFieldType fieldTypes[] = { OFTString, OFTReal, OFTInteger, OFTInteger };
-  for ( int i = 0; i < 4; ++i )
-  {
-    OGRFieldDefnH field = OGR_Fld_Create( fieldNames[i], fieldTypes[i] );
-    if ( OGR_L_CreateField( layer, field, TRUE ) != OGRERR_NONE )
-    {
-      OGR_Fld_Destroy( field );
-      GDALClose( outDs );
-      removeVectorFiles( workPath );
-      throw RSOperatorError( ErrorCode::GdalError,
-                             std::string( "failed to create field: " ) + fieldNames[i] );
-    }
-    OGR_Fld_Destroy( field );
-  }
-
-  for ( const DetectionBox &box : detections )
-  {
-    // Raster pixel corners → map coordinates (GDAL geotransform, corner origin).
-    const double gx1 = geoTransform[0] + box.x * geoTransform[1] + box.y * geoTransform[2];
-    const double gy1 = geoTransform[3] + box.x * geoTransform[4] + box.y * geoTransform[5];
-    const double gx2 = geoTransform[0] + ( box.x + box.w ) * geoTransform[1]
-                       + ( box.y + box.h ) * geoTransform[2];
-    const double gy2 = geoTransform[3] + ( box.x + box.w ) * geoTransform[4]
-                       + ( box.y + box.h ) * geoTransform[5];
-
-    const std::size_t classIndex = static_cast<std::size_t>(
-      std::min( box.classId, static_cast<int>( det.classes.size() ) - 1 ) );
-    const std::string className = det.classes[classIndex];
-
-    OGRFeatureH feature = OGR_F_Create( OGR_L_GetLayerDefn( layer ) );
-    OGR_F_SetFieldString( feature, OGR_F_GetFieldIndex( feature, "class" ), className.c_str() );
-    OGR_F_SetFieldDouble( feature, OGR_F_GetFieldIndex( feature, "confidence" ), box.confidence );
-    OGR_F_SetFieldInteger( feature, OGR_F_GetFieldIndex( feature, "tile_x" ),
-                           static_cast<int>( box.x ) );
-    OGR_F_SetFieldInteger( feature, OGR_F_GetFieldIndex( feature, "tile_y" ),
-                           static_cast<int>( box.y ) );
-
-    static const int ringCount = 5;
-    double xs[5] = { gx1, gx2, gx2, gx1, gx1 };
-    double ys[5] = { gy1, gy1, gy2, gy2, gy1 };
-    OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
-    for ( int i = 0; i < ringCount; ++i )
-      OGR_G_AddPoint_2D( ring, xs[i], ys[i] );
-    OGRGeometryH polygon = OGR_G_CreateGeometry( wkbPolygon );
-    OGR_G_AddGeometryDirectly( polygon, ring );
-    OGR_F_SetGeometryDirectly( feature, polygon );
-
-    if ( OGR_L_CreateFeature( layer, feature ) != OGRERR_NONE )
-    {
-      OGR_F_Destroy( feature );
-      GDALClose( outDs );
-      removeVectorFiles( workPath );
-      throw RSOperatorError( ErrorCode::GdalError, "failed to write detection feature" );
-    }
-    OGR_F_Destroy( feature );
-  }
-  GDALClose( outDs );
-
-  // Publish: back up any previous output, rename the stage files onto the
-  // caller's path (sidecars checked — a shapefile without .shx is invalid),
-  // and restore the backup if any step fails.
-  const QString finalPath = QString::fromStdString( outputPath );
-  const bool isShp = outFi.suffix().toLower() == QLatin1String( "shp" );
-  auto sidecarPaths = [ & ]( const QString &main ) {
-    const QFileInfo fi( main );
-    const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
-    QStringList paths;
-    if ( isShp )
-      for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg" } )
-        paths << base + QString::fromLatin1( ext );
-    return paths;
-  };
-  const QStringList finalSidecars = sidecarPaths( finalPath );
-  const QStringList workSidecars = sidecarPaths( workPath );
-
-  auto publishAll = [ & ]() -> bool {
-    if ( !QFile::rename( workPath, finalPath ) )
-      return false;
-    for ( int i = 0; i < workSidecars.size(); ++i )
-    {
-      if ( QFile::exists( workSidecars[i] )
-           && !QFile::rename( workSidecars[i], finalSidecars[i] ) )
-        return false;
-    }
-    return true;
-  };
-
-  // Move the previous output (main + sidecars) aside.
-  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
-  QStringList backupSidecars;
-  for ( const QString &sidecar : finalSidecars )
-    backupSidecars << sidecar + QStringLiteral( ".prev~" );
-  const bool hadExisting = QFile::exists( finalPath );
-  if ( hadExisting )
-  {
-    removeVectorFiles( backupPath );
-    if ( !QFile::rename( finalPath, backupPath ) )
-    {
-      removeVectorFiles( workPath );
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "failed to back up the previous detection output: " + outputPath );
-    }
-    for ( int i = 0; i < finalSidecars.size(); ++i )
-    {
-      if ( QFile::exists( finalSidecars[i] ) )
-        QFile::rename( finalSidecars[i], backupSidecars[i] );
-    }
-  }
-
-  if ( !publishAll() )
-  {
-    removeVectorFiles( workPath );
-    removeVectorFiles( finalPath ); // a partial publish must not look like a result
-    if ( hadExisting )
-    {
-      QFile::rename( backupPath, finalPath );
-      for ( int i = 0; i < backupSidecars.size(); ++i )
-      {
-        if ( QFile::exists( backupSidecars[i] ) )
-          QFile::rename( backupSidecars[i], finalSidecars[i] );
-      }
-    }
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to publish detection output to: " + outputPath );
-  }
-  removeVectorFiles( backupPath );
-  for ( const QString &sidecar : backupSidecars )
-    QFile::remove( sidecar );
+  writeDetectionVector( detections, det.classes, geoTransform, ds.projection(), outputPath );
 
   context.reportProgressForced( 1.0, "Tiled detection complete" );
   return stats;
