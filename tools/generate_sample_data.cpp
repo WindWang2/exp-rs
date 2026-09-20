@@ -1,7 +1,8 @@
 // generate_sample_data.cpp — CLI for the lab sample data foundry (goal D1).
 //
 // sicnu_generate_samples --out=<dir> [--profile=lab|stress] [--seed=<n>]
-//                         [--spec=<file-or-dir>] [--verify] [--help]
+//                         [--spec=<file-or-dir>] [--products=a,b,c]
+//                         [--list-products] [--verify] [--help]
 //
 // Exit codes (typed, part of the contract in docs/adr/0164):
 //   0  success (or verify passed)
@@ -32,16 +33,22 @@ void printUsage( std::FILE *out )
     "%s %s — deterministic lab sample data foundry (docs/labs)\n\n"
     "usage:\n"
     "  sicnu_generate_samples --out=<dir> [--profile=lab|stress] [--seed=<n>]\n"
-    "                         [--spec=<file-or-dir>] [--verify] [--help]\n\n"
+    "                         [--spec=<file-or-dir>] [--products=<a,b,c>]\n"
+    "                         [--list-products] [--verify] [--help]\n\n"
     "options:\n"
     "  --out=<dir>       output directory (default: data/samples relative to cwd)\n"
     "  --profile=<name>  lab (256x256, default) | stress (2048x2048)\n"
     "  --seed=<n>        32-bit PRNG seed (default: 42)\n"
     "  --spec=<path>     JSON spec (or directory of *.json) declaring the products\n"
     "                    to generate; see docs/adr/0164. Without it: full set.\n"
+    "  --products=<ids>  comma-separated catalog ids to generate, e.g.\n"
+    "                    --products=dem_sample,change_before. Convenience form of\n"
+    "                    --spec; combining both is a usage error. Truth companions\n"
+    "                    of a selected product are generated with it.\n"
+    "  --list-products   print the catalog ids (one per line) and exit 0\n"
     "  --verify          re-check an existing directory against its manifest.json\n"
     "  --help            this text\n\n"
-    "products (catalog ids for --spec):\n",
+    "products (catalog ids for --spec / --products):\n",
     kGeneratorName, kGeneratorVersion );
   for ( Product p : productCatalog() )
     std::fprintf( out, "  %s\n", productName( p ) );
@@ -73,6 +80,39 @@ bool parseSeed( const std::string &text, uint32_t *out )
   return true;
 }
 
+/// Split "a,b,c" on commas. Empty entries (",a,", trailing comma) are usage
+/// errors, not silent drops — a mistyped id must never shrink the selection.
+bool parseProductList( const std::string &text, std::vector<Product> *out,
+                       std::string *error )
+{
+  std::vector<Product> products;
+  std::size_t begin = 0;
+  while ( true )
+  {
+    const std::size_t comma = text.find( ',', begin );
+    const std::string id = comma == std::string::npos
+                               ? text.substr( begin )
+                               : text.substr( begin, comma - begin );
+    if ( id.empty() )
+    {
+      *error = "empty product id in --products='" + text + "'";
+      return false;
+    }
+    const std::optional<Product> product = productByName( id );
+    if ( !product )
+    {
+      *error = "unknown product '" + id + "' in --products='" + text + "'";
+      return false;
+    }
+    products.push_back( *product );
+    if ( comma == std::string::npos )
+      break;
+    begin = comma + 1;
+  }
+  *out = std::move( products );
+  return true;
+}
+
 int usageError( const std::string &message )
 {
   std::fprintf( stderr, "usage-error: %s\nSee --help.\n", message.c_str() );
@@ -85,9 +125,11 @@ int main( int argc, char *argv[] )
 {
   Options options;
   bool do_verify = false;
+  bool do_list = false;
   bool has_profile = false;
   bool has_seed = false;
   bool has_spec = false;
+  bool has_products = false;
   std::string spec_path;
 
   for ( int i = 1; i < argc; ++i )
@@ -97,6 +139,11 @@ int main( int argc, char *argv[] )
     {
       printUsage( stdout );
       return 0;
+    }
+    if ( arg == "--list-products" )
+    {
+      do_list = true;
+      continue;
     }
     if ( startsWith( arg, "--out=" ) )
     {
@@ -125,6 +172,15 @@ int main( int argc, char *argv[] )
       has_spec = true;
       continue;
     }
+    if ( startsWith( arg, "--products=" ) )
+    {
+      const std::string list = arg.substr( 11 );
+      std::string error;
+      if ( !parseProductList( list, &options.products, &error ) )
+        return usageError( error );
+      has_products = true;
+      continue;
+    }
     if ( arg == "--verify" )
     {
       do_verify = true;
@@ -133,11 +189,27 @@ int main( int argc, char *argv[] )
     return usageError( "unrecognized argument '" + arg + "'" );
   }
 
+  if ( do_list )
+  {
+    // Catalog listing is a complete no-op otherwise: it takes no output
+    // directory and combines with nothing that generates data.
+    if ( has_profile || has_seed || has_spec || has_products || do_verify ||
+         !options.out_dir.empty() )
+      return usageError( "--list-products takes no other arguments" );
+    for ( Product p : productCatalog() )
+      std::printf( "%s\n", productName( p ) );
+    return 0;
+  }
+
   if ( options.out_dir.empty() )
     options.out_dir = "data/samples";
 
-  if ( do_verify && ( has_profile || has_seed || has_spec ) )
-    return usageError( "--verify takes only --out (profile/seed/spec generate data)" );
+  if ( do_verify && ( has_profile || has_seed || has_spec || has_products ) )
+    return usageError( "--verify takes only --out (profile/seed/spec/products generate data)" );
+
+  if ( has_spec && has_products )
+    return usageError( "--spec and --products are two spellings of the same "
+                       "selection; use exactly one" );
 
   if ( do_verify )
   {

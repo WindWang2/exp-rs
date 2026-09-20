@@ -2,15 +2,25 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sicnu-geo-rs/schemas/labspec.schema.json",
   "title": "SICNU GEO RS LabSpec",
-  "description": "Declarative specification of an undergraduate remote-sensing lab exercise. One file drives the guided workflow UI, headless execution (operator_id + params), auto-grading (grading_ref) and generated documentation (scripts/gen_lab_docs.py). Authoring guide: docs/labs/LABSPEC.md.",
+  "description": "Declarative specification of an undergraduate remote-sensing lab exercise. One file drives the guided workflow UI, headless execution (operator_id + params), auto-grading (grading_ref / grading_rules) and generated documentation (scripts/gen_lab_docs.py). LabSpec 2 (spec_version 2, lab platform 12.0) is a strict superset of v1: it adds structured Chinese teaching content (objective_zh, glossary), expected artifacts, pedagogical parameter allow-ranges and an explicit grading_rules pointer. The C++ loader (src/app/widgets/lab_spec_loader.cpp) is authoritative; it accepts 1 and 2 and rejects v2-only keys in v1 documents. Authoring guide: docs/labs/LABSPEC.md.",
   "type": "object",
-  "required": ["spec_version", "id", "title", "title_zh", "objective", "steps"],
+  "required": [
+    "spec_version",
+    "id",
+    "title",
+    "title_zh",
+    "objective",
+    "steps"
+  ],
   "additionalProperties": false,
   "properties": {
     "spec_version": {
       "type": "integer",
-      "const": 1,
-      "description": "LabSpec contract version; bump on breaking changes (see ADR 0146)."
+      "enum": [
+        1,
+        2
+      ],
+      "description": "LabSpec contract version; 2 is the strict superset (see ADR 0146 and docs/labs/LABSPEC.md)."
     },
     "id": {
       "type": "string",
@@ -34,17 +44,23 @@
     },
     "prerequisites": {
       "type": "array",
-      "items": { "$ref": "#/$defs/data_ref" },
+      "items": {
+        "$ref": "#/$defs/data_ref"
+      },
       "description": "Data the student must load before stepping through the lab (paths relative to the project root)."
     },
     "steps": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/step" }
+      "items": {
+        "$ref": "#/$defs/step"
+      }
     },
     "grading_ref": {
       "type": "object",
-      "required": ["pipeline"],
+      "required": [
+        "pipeline"
+      ],
       "additionalProperties": false,
       "properties": {
         "pipeline": {
@@ -57,23 +73,187 @@
     },
     "thinking_questions": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "description": "Open questions printed in the generated lab document."
+    },
+    "objective_zh": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Chinese teaching objective (中文教学目标); v2 only."
+    },
+    "glossary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "term",
+          "term_zh",
+          "definition_zh"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "term": {
+            "type": "string",
+            "minLength": 1
+          },
+          "term_zh": {
+            "type": "string",
+            "minLength": 1
+          },
+          "definition_zh": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "description": "Bilingual terms the lab introduces; v2 only."
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project-root-relative output the student must produce (outputs/...)."
+          },
+          "kind": {
+            "enum": [
+              "raster",
+              "vector",
+              "file"
+            ]
+          },
+          "note_zh": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "description": "Artifacts a completed lab must contain; drift-guarded by tests; v2 only."
+    },
+    "param_ranges": {
+      "type": "object",
+      "patternProperties": {
+        "^(rs|opencv):[a-z0-9_]+$": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "min"
+                ]
+              },
+              {
+                "required": [
+                  "max"
+                ]
+              },
+              {
+                "required": [
+                  "values"
+                ]
+              }
+            ],
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "values": {
+                "type": "array",
+                "minItems": 1
+              },
+              "note_zh": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Pedagogical parameter allow-ranges per operator (the Processing Registry remains the runtime authority); min<=max is validated by the loader; v2 only."
+    },
+    "grading_rules": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path (project-root relative) to the sicnu.lab.rules/1 grading rules file, e.g. data/labs/grading/ndvi_basics.rules.json — the file the `lab --lab <id> --grade` seam actually reads; v2 only."
+    },
+    "principles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "heading",
+          "body"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "heading": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "formulas": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "description": "Structured theory blocks (heading/body/formulas) rendered into the generated lab document; v2 only."
+    },
+    "prerequisite_knowledge": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Prior labs/concepts the student needs, as free strings — prerequisites[] remains the data-ref list; v2 only."
     }
   },
   "$defs": {
     "data_ref": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "additionalProperties": false,
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "note": { "type": "string" }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string"
+        }
       }
     },
     "step": {
       "type": "object",
-      "required": ["title", "title_zh", "description_zh"],
+      "required": [
+        "title",
+        "title_zh",
+        "description_zh"
+      ],
       "additionalProperties": false,
       "properties": {
         "title": {
@@ -115,13 +295,63 @@
         }
       },
       "dependencies": {
-        "params": ["operator_id"]
+        "params": [
+          "operator_id"
+        ]
       },
       "oneOf": [
-        { "required": ["operator_id"] },
-        { "required": ["action"] },
-        { "not": { "anyOf": [ { "required": ["operator_id"] }, { "required": ["action"] } ] } }
+        {
+          "required": [
+            "operator_id"
+          ]
+        },
+        {
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "operator_id"
+                ]
+              },
+              {
+                "required": [
+                  "action"
+                ]
+              }
+            ]
+          }
+        }
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "spec_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "spec_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "objective_zh": false,
+          "glossary": false,
+          "expected_artifacts": false,
+          "param_ranges": false,
+          "grading_rules": false,
+          "principles": false,
+          "prerequisite_knowledge": false
+        }
+      }
+    }
+  ]
 }

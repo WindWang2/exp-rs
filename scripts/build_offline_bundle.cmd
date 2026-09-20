@@ -158,7 +158,7 @@ echo == copying one-click scripts and docs ==
 rem VERIFY.sh + tools/verify_bundle_manifest.py ship on Windows bundles too:
 rem schema /2 requires them and a Linux grader machine may verify the same
 rem bundle (the in-bundle Linux check reuses the shipped python verifier).
-for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md) do (
+for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd GRADE_ALL.sh VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md) do (
   copy /Y "%REPO_ROOT%\packaging\bundle\%%F" "%BUNDLE%\%%F" >nul || exit /b 1
 )
 mkdir "%BUNDLE%\tools" 2>nul

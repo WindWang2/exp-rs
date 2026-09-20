@@ -63,6 +63,7 @@
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/algorithm_meta_store.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/rs/rs_product_import_plan.h"
 #include <csignal>
 #ifdef _WIN32
 #include <windows.h>

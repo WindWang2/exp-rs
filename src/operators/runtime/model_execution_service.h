@@ -78,6 +78,17 @@ struct ModelExecutionResult
 /// the full readiness pipeline.
 ModelInfo resolveModelReference( const std::string &modelReference, std::string *errorDetail );
 
+/// Contract gates shared by every execution surface (rs:infer 3.0 contract,
+/// exposed so the ensemble engine applies the SAME gates to its members):
+/// temporal / multi-input models must be fed through the multi-input request
+/// — a silent single-frame or single-branch run is the #646 failure class.
+void rejectUnwiredContracts( const ModelInfo &model,
+                             const std::vector<NamedRasterFeed> &namedInputs );
+
+/// Feature-cube preflight: when the input carries a feature cube contract,
+/// the model's declared band roles must cover it. Plain rasters skip this.
+void preflightFeatureCube( const ModelInfo &model, const std::string &inputPath );
+
 /// Execute one model run end-to-end. Throws RSOperatorError on any failure;
 /// never leaves a partial output behind (atomic publication in the engines).
 ModelExecutionResult runModelInference( const ModelExecutionRequest &request,

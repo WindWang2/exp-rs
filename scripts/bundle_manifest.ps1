@@ -112,11 +112,19 @@ function Test-Bundle([string] $root) {
     }
   }
   foreach ($req in $m.required) {
+    # Containment (lab platform 12.0): mirrors the canonical verifier's
+    # _unsafe_bundle_rel — absolute, drive-qualified or ..-carrying required
+    # entries are findings, never probes outside the bundle.
+    $norm = ($req -replace "/", "\")
+    $unsafe = [string]::IsNullOrEmpty($req) -or
+              [IO.Path]::IsPathRooted($norm) -or
+              ($norm -match "(^|\\)\.\.($|\\)")
+    if ($unsafe) { $bad += "unsafe required entry: $req"; continue }
     if ($req.EndsWith("/")) {
       $hit = $false
       foreach ($f in $m.files) { if ($f.path.StartsWith($req)) { $hit = $true; break } }
       if (-not $hit) { $bad += "required prefix empty: $req" }
-    } elseif (-not (Test-Path -LiteralPath (Join-Path $root ($req -replace "/", "\")))) {
+    } elseif (-not (Test-Path -LiteralPath (Join-Path $root $norm))) {
       $bad += "required missing: $req"
     }
   }

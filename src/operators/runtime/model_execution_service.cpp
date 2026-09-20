@@ -6,6 +6,7 @@
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/detection_tile_engine.h"
+#include "operators/runtime/model_ensemble.h"
 #include "operators/runtime/tile_inference_engine.h"
 
 #include "processing/features/feature_cube.h"
@@ -65,13 +66,12 @@ ModelInfo resolveModelReference( const std::string &modelReference, std::string 
   return *model;
 }
 
-namespace {
-
-/// Contract gates shared by every surface (inherited from rs:infer 3.0).
-/// Platform 7.0: temporal / multi-input models execute through the
-/// runMultiInput path — the loud refusal now applies only when the caller
-/// did NOT provide the named feeds the contract demands (a silent single
-/// frame or single branch run would be the #646 failure class).
+/// Contract gates shared by every surface (declared in the service header so
+/// the ensemble engine applies the SAME gates to its members). Platform 7.0:
+/// temporal / multi-input models execute through the runMultiInput path — the
+/// loud refusal applies when the caller did NOT provide the named feeds the
+/// contract demands (a silent single frame or single branch run would be the
+/// #646 failure class).
 void rejectUnwiredContracts( const ModelInfo &model,
                              const std::vector<NamedRasterFeed> &namedInputs )
 {
@@ -128,8 +128,6 @@ void preflightFeatureCube( const ModelInfo &model, const std::string &inputPath 
   }
 }
 
-} // namespace
-
 ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                                         RSOperatorContext &context )
 {
@@ -160,6 +158,26 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                              : ErrorCode::InvalidInputData;
     throw RSOperatorError( code, errorDetail.empty() ? "model is not ready" : errorDetail );
   }
+
+  // Platform 10.0 task INTENT gate applies to ensembles too: a task adapter
+  // carries a canonical EO task; the ensemble manifest's task must agree
+  // before any member runs (checked BEFORE the route so the ensemble path
+  // cannot bypass it).
+  if ( !request.requiredEoTask.empty() && !model.ensemble.declared
+       && sicnu::operators::canonicalEoTask( model.task ) != request.requiredEoTask )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "model '" + model.name + "' declares task '" + model.task
+        + "' which carries no '" + request.requiredEoTask
+        + "' contract — this operator requires a model whose canonical task is '"
+        + request.requiredEoTask + "' (fix the manifest task or pick the matching operator)" );
+
+  // Manifest-defined ensemble models route to their own execution path —
+  // they have no artifact and no session of their own; every member runs
+  // through the ordinary engine and the products are combined (see
+  // model_ensemble.h for the combination semantics and the typed refusals).
+  if ( model.ensemble.declared )
+    return runEnsembleInference( model, request, context );
 
   // Runtime-layer verdict: provider availability + device/VRAM feasibility.
   auto &registry = ModelRuntimeRegistry::instance();
@@ -216,9 +234,9 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                            "Failed to load model session: fault-injected acquire failure" );
   }
   std::string loadError;
-  const auto session = request.deviceToken.empty()
-                         ? registry.acquire( model, &loadError )
-                         : registry.acquire( model, device, &loadError );
+  ProviderSelectionReport selection;
+  const RequestedDevice *explicitDevice = request.deviceToken.empty() ? nullptr : &device;
+  const auto session = registry.acquireWithFallback( model, explicitDevice, &loadError, &selection );
   if ( !session )
     throw RSOperatorError( ErrorCode::ComputationError,
                            "Failed to load model session: " + loadError );
@@ -254,6 +272,11 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   // Detection knob overrides apply to a COPY of the contract (the catalog
   // entry itself is never mutated by a run).
   ModelInfo effectiveModel = model;
+  // Provider strategy: when a fallback candidate won the acquisition, the
+  // engine/provenance surfaces must name the framework that ACTUALLY
+  // executes (the sidecar's model.framework is part of the product identity).
+  if ( !selection.resolvedFramework.empty() )
+    effectiveModel.framework = selection.resolvedFramework;
   if ( request.asDetection
        && ( request.confOverride >= 0.0 || request.nmsIouOverride >= 0.0 ) )
   {
@@ -295,6 +318,8 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     for ( const auto &cls : effectiveModel.output.detection.classes )
       classes.append( cls );
     payload["classes"] = classes;
+    if ( selection.attempts.size() > 1 )
+      payload["provider_selection"] = selection.toJson();
     result.payload = payload;
     return result;
   }
@@ -340,6 +365,10 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     if ( !provider.empty() )
       payload["provider"] = provider;
   }
+  // Provider strategy: a fallback that fired is never silent — the payload
+  // carries the full attempt trail (frameworks, registration, load verdicts).
+  if ( selection.attempts.size() > 1 )
+    payload["provider_selection"] = selection.toJson();
   if ( result.rasterStats.batchReductions > 0 )
     payload["batchReductions"] = result.rasterStats.batchReductions;
   // Platform 9.0 (M6): per-product-class metadata for Labels/Mask products.

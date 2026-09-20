@@ -364,6 +364,30 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+# flash-offline-labs-12 (lab platform 12.0): track planning notes.
+!.planning/flash-offline-labs-12/
+.planning/flash-offline-labs-12/*
+!.planning/flash-offline-labs-12/*.md
+
+# ds41-fuzz-boundaries (parser/IPC/path/checkpoint boundary fuzz track):
+# track planning notes (markdown only; logs stay local).
+!.planning/ds41-fuzz-boundaries/
+.planning/ds41-fuzz-boundaries/*
+!.planning/ds41-fuzz-boundaries/*.md
+# ds41-dev-worktree-tooling (Track D5): agent dev tooling track planning notes (markdown only; logs stay local).
+!.planning/ds41-dev-worktree-tooling/
+.planning/ds41-dev-worktree-tooling/*
+!.planning/ds41-dev-worktree-tooling/*.md
+
+# ds41-performance-observatory: track planning notes (markdown only; logs stay local).
+!.planning/ds41-performance-observatory/
+.planning/ds41-performance-observatory/*
+!.planning/ds41-performance-observatory/*.md
+# ds41-build-portability (Track D2): cross-platform build, dependency doctor &
+# local gate — track planning notes (markdown only; logs stay local).
+!.planning/ds41-build-portability/
+.planning/ds41-build-portability/*
+!.planning/ds41-build-portability/*.md
 
 # ds41-capability-help-sync (Track D1): track planning notes (markdown only; logs stay local).
 !.planning/ds41-capability-help-sync/

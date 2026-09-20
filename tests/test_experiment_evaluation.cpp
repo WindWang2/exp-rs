@@ -12,12 +12,15 @@
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 #include "experiment/lineage.h"
+#include "experiment/repeat_execution.h"
 #include "experiment/reproduction_bundle.h"
+#include "experiment/reproduction_bundle_import.h"
 
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <sqlite3.h>
@@ -759,4 +762,407 @@ TEST_CASE( "ExperimentStore upsertRun validation runs inside transaction",
     const auto loaded = store.runById( QStringLiteral( "run-tx" ) );
     REQUIRE( loaded.has_value() );
     CHECK( loaded->status() == RunStatus::Running );
+}
+
+TEST_CASE( "repeat-execution classifier separates duplicate, rerun, deviation and new",
+           "[experiment][repeat][identity]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "repeat classification" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-1" ), experiment.experimentId() );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( store.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    run.artifacts().append( ExperimentRun::Artifact{
+        QStringLiteral( "out.tif" ), QStringLiteral( "primary" ),
+        QStringLiteral( "digest-a" ), 100 } );
+    run.setMetrics( QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.85 } } );
+    REQUIRE( store.upsertRun( run ).has_value() );
+    const QString resultFp = run.resultFingerprint();
+
+    RepeatExecutionClassifier classifier( store );
+
+    // Malformed asks are typed failures, never verdicts.
+    RunExecutionIdentity blank;
+    CHECK( !classifier.classify( blank ).has_value() );
+
+    // Same identity + same result fingerprint → duplicate execution.
+    const auto duplicate = classifier.classify( run.executionIdentity(), resultFp );
+    REQUIRE( duplicate.has_value() );
+    CHECK( duplicate->classification == RepeatExecutionClassifier::Classification::SameExecution );
+    CHECK( duplicate->matchedRunIds.contains( QStringLiteral( "run-1" ) ) );
+
+    // Same identity, results differ → rerun; the verdict reports the
+    // matched run's declared determinism honesty.
+    const QString otherResult = runResultFingerprint(
+        { QStringLiteral( "digest-b" ) }, QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.5 } } );
+    const auto rerun = classifier.classify( run.executionIdentity(), otherResult );
+    REQUIRE( rerun.has_value() );
+    CHECK( rerun->classification ==
+           RepeatExecutionClassifier::Classification::EquivalentRerun );
+    CHECK( !rerun->reasons.isEmpty() );
+
+    // Same identity, no result evidence yet → duplicate CANDIDATE (the
+    // classifier refuses to guess duplicate-vs-rerun).
+    const auto candidate = classifier.classify( run.executionIdentity() );
+    REQUIRE( candidate.has_value() );
+    CHECK( candidate->classification ==
+           RepeatExecutionClassifier::Classification::SameIdentity );
+
+    // Unknown identity → new.
+    RunExecutionIdentity fresh = run.executionIdentity();
+    fresh.seed = 77;
+    const auto freshVerdict = classifier.classify( fresh );
+    REQUIRE( freshVerdict.has_value() );
+    CHECK( freshVerdict->classification == RepeatExecutionClassifier::Classification::New );
+
+    // Same platform executionRef under DIFFERENT pins → deviated, with the
+    // pin-level comparison attached.
+    ExperimentRun changed = makeRun( QStringLiteral( "run-2" ), experiment.experimentId() );
+    changed.setSeed( 43 ); // a real pin change under the SAME execution ref
+    changed.setExecutionRef( QStringLiteral( "task-9" ) );
+    changed.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( changed ).has_value() );
+    RunExecutionIdentity refIdentity = run.executionIdentity(); // original pins
+    refIdentity.seed = 999; // matches NO recorded run (unique twin-less pins)
+    const auto deviated =
+        classifier.classify( refIdentity, QString(), QStringLiteral( "task-9" ) );
+    REQUIRE( deviated.has_value() );
+    CHECK( deviated->classification == RepeatExecutionClassifier::Classification::Deviated );
+    CHECK( deviated->matchedRunIds.contains( QStringLiteral( "run-2" ) ) );
+    CHECK( !deviated->pinComparison.isEmpty() );
+
+    // Environment drift is evidence and never a verdict downgrade.
+    QJsonObject fields;
+    fields.insert( QStringLiteral( "platform" ), QStringLiteral( "linux" ) );
+    RunEnvironment repeatEnv = RunEnvironment::fromFields( fields );
+    const auto drifted = classifier.classify( run.executionIdentity(), resultFp, QString(),
+                                              repeatEnv );
+    REQUIRE( drifted.has_value() );
+    CHECK( drifted->classification ==
+           RepeatExecutionClassifier::Classification::SameExecution );
+    CHECK( !drifted->environmentDrift.isEmpty() );
+
+    // Verdict JSON round-trip carries the classification + evidence.
+    const QJsonObject json = drifted->toJson();
+    CHECK( json.value( QStringLiteral( "classification" ) ).toString() ==
+           QStringLiteral( "same_execution" ) );
+    CHECK( json.value( QStringLiteral( "schema_version" ) ) ==
+           kRepeatExecutionSchemaVersion );
+}
+
+TEST_CASE( "batch run upsert is all-or-nothing; batch metric save follows the "
+           "conflict rule",
+           "[experiment][store][batch]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "batch" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    auto makeBatchRun = [ & ]( const QString &id, quint64 seed )
+    {
+        ExperimentRun run = makeRun( id, experiment.experimentId() );
+        run.setSeed( seed );
+        run.setStatus( RunStatus::Created );
+        return run;
+    };
+
+    // Advance the whole batch once: four Created runs land whole.
+    QVector<ExperimentRun> valid;
+    valid.append( makeBatchRun( QStringLiteral( "b-1" ), 1 ) );
+    valid.append( makeBatchRun( QStringLiteral( "b-2" ), 2 ) );
+    valid.append( makeBatchRun( QStringLiteral( "b-3" ), 3 ) );
+    valid.append( makeBatchRun( QStringLiteral( "b-4" ), 4 ) );
+    QVector<ExperimentRun> fresh = valid;
+    REQUIRE( store.upsertRunsBatch( fresh ).has_value() );
+    CHECK( store.runCount() == 4 );
+
+    // A batch whose middle roll is invalid leaves NOTHING behind: b-1 may
+    // advance, but b-2 claims a Completed state without ever running — the
+    // refusal rolls back b-1's advance too.
+    QVector<ExperimentRun> mixed;
+    ExperimentRun advance = makeBatchRun( QStringLiteral( "b-1" ), 1 );
+    advance.setStatus( RunStatus::Running );
+    mixed.append( advance );
+    ExperimentRun illegal = makeBatchRun( QStringLiteral( "b-2" ), 2 );
+    illegal.setStatus( RunStatus::Completed ); // Created -> Completed is refused
+    mixed.append( illegal );
+    ExperimentRun advance3 = makeBatchRun( QStringLiteral( "b-3" ), 3 );
+    advance3.setStatus( RunStatus::Running );
+    mixed.append( advance3 );
+    const auto rejected = store.upsertRunsBatch( mixed );
+    CHECK_FALSE( rejected.has_value() );
+    CHECK( rejected.diagnostics().first().code == QStringLiteral( "experiment.bad_transition" ) );
+    CHECK( store.runCount() == 4 );
+    CHECK( store.runById( QStringLiteral( "b-1" ) )->status() == RunStatus::Created );
+    CHECK( store.runById( QStringLiteral( "b-3" ) )->status() == RunStatus::Created );
+    CHECK_FALSE( store.runById( QStringLiteral( "b-2" ) )->status() == RunStatus::Completed );
+
+    // Same-status re-submission is a refusal for the batch, exactly like the
+    // single-run path ("correction = new run", never a silent rewrite).
+    const auto idempotent = store.upsertRunsBatch( fresh );
+    CHECK_FALSE( idempotent.has_value() );
+    CHECK( idempotent.diagnostics().first().code == QStringLiteral( "experiment.bad_transition" ) );
+    CHECK( store.runCount() == 4 );
+
+    // Metric batches: two records land together; a conflicting re-save rolls
+    // the whole batch back (the new record in it is NOT persisted).
+    MetricRecord first;
+    first.runId = QStringLiteral( "b-1" );
+    first.protocol.setDatasetVersionId( QStringLiteral( "dv" ) );
+    first.protocol.setSplitManifestId( QStringLiteral( "sm" ) );
+    first.protocol.setSubset( QStringLiteral( "test" ) );
+    first.metrics = QJsonObject{ { QStringLiteral( "acc" ), 0.9 } };
+    MetricRecord second = first;
+    second.runId = QStringLiteral( "b-2" );
+    REQUIRE( store.saveMetricRecordsBatch( { first, second } ).has_value() );
+    MetricRecord conflicting = first;
+    conflicting.metrics = QJsonObject{ { QStringLiteral( "acc" ), 0.1 } };
+    MetricRecord third = first;
+    third.runId = QStringLiteral( "b-3" );
+    const auto batchConflict = store.saveMetricRecordsBatch( { conflicting, third } );
+    CHECK( !batchConflict.has_value() );
+    CHECK( batchConflict.diagnostics().first().code == QStringLiteral( "experiment.conflict" ) );
+    CHECK( !store.metricRecordForRun( QStringLiteral( "b-3" ) ).has_value() );
+}
+
+TEST_CASE( "keyset cursor paging covers deep run ranges exactly once and fails "
+           "typed on misuse",
+           "[experiment][store][cursor]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "cursor" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    constexpr int kRuns = 250;
+    QVector<ExperimentRun> batch;
+    batch.reserve( kRuns );
+    for ( int i = 0; i < kRuns; ++i )
+    {
+        ExperimentRun run = makeRun( QStringLiteral( "run-%1" ).arg( i, 3, 10, QLatin1Char( '0' ) ),
+                                     experiment.experimentId() );
+        run.setStatus( RunStatus::Created );
+        batch.append( run );
+    }
+    REQUIRE( store.upsertRunsBatch( batch ).has_value() );
+
+    // Full walk: 250 runs in pages of 40, order identical to listRuns.
+    QStringList viaCursor;
+    QString cursor;
+    while ( true )
+    {
+        const auto page = store.listRunsByCursor( experiment.experimentId(), QString(),
+                                                  QString(), cursor, 40 );
+        REQUIRE( page.has_value() );
+        CHECK( page->total == kRuns );
+        for ( const ExperimentRun &run : page->runs )
+            viaCursor.append( run.runId() );
+        if ( page->nextCursor.isEmpty() )
+            break;
+        cursor = page->nextCursor;
+    }
+    REQUIRE( viaCursor.size() == kRuns );
+    CHECK( viaCursor.size() == QSet<QString>( viaCursor.cbegin(), viaCursor.cend() ).size() );
+    const auto fullList = store.listRuns( experiment.experimentId(), QString(), QString(), 0,
+                                          ExperimentStore::kMaxPageSize );
+    REQUIRE( fullList.has_value() );
+    QStringList viaOffset;
+    for ( const ExperimentRun &run : fullList->second )
+        viaOffset.append( run.runId() );
+    CHECK( viaCursor == viaOffset );
+
+    // A cursor replayed under a DIFFERENT filter is a typed mismatch, never
+    // a silent rescan.
+    const auto firstPage = store.listRunsByCursor( experiment.experimentId(), QString(),
+                                                   QString(), QString(), 40 );
+    REQUIRE( firstPage.has_value() );
+    CHECK( firstPage->nextCursor.isEmpty() == false );
+    const auto mismatched = store.listRunsByCursor( QStringLiteral( "other-experiment" ),
+                                                    QString(), QString(),
+                                                    firstPage->nextCursor, 40 );
+    CHECK( !mismatched.has_value() );
+    CHECK( mismatched.diagnostics().first().code ==
+           QStringLiteral( "experiment.cursor_mismatch" ) );
+
+    // A tampered cursor is cursor_invalid, not a crash or a fabricated page.
+    const auto tampered = store.listRunsByCursor(
+        experiment.experimentId(), QString(), QString(),
+        firstPage->nextCursor.left( firstPage->nextCursor.size() / 2 ), 40 );
+    CHECK( !tampered.has_value() );
+    CHECK( tampered.diagnostics().first().code == QStringLiteral( "data.cursor_invalid" ) );
+
+    // Status filter + cursor compose.
+    QString runningCursor;
+    qint64 runningSeen = 0;
+    while ( true )
+    {
+        const auto page = store.listRunsByCursor(
+            QString(), QString(), runStatusToString( RunStatus::Created ), runningCursor, 100 );
+        REQUIRE( page.has_value() );
+        runningSeen += page->runs.size();
+        if ( page->nextCursor.isEmpty() )
+            break;
+        runningCursor = page->nextCursor;
+    }
+    CHECK( runningSeen == kRuns );
+}
+
+TEST_CASE( "reproduction bundle imports offline: integrity gates, identity "
+           "preservation and idempotent re-import",
+           "[experiment][repro][import]" )
+{
+    // --- export from store A -------------------------------------------------
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    MetricRecord record;
+    record.runId = QStringLiteral( "run-src" );
+    record.protocol.setDatasetVersionId( committed->versionId() );
+    record.protocol.setSplitManifestId( run.splitManifestId() );
+    record.protocol.setSubset( QStringLiteral( "test" ) );
+    record.metrics = QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.9 } };
+    REQUIRE( experiments.saveMetricRecord( record ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    // --- import into a FRESH store B -----------------------------------------
+    ExperimentStore target;
+    REQUIRE( target.open( dir.filePath( QStringLiteral( "target.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions importOptions;
+    importOptions.bundleDir = exportReport.bundlePath;
+    importOptions.targetExperimentId = QStringLiteral( "exp-dst" );
+
+    // A missing target experiment is a typed refusal.
+    ReproductionBundleImportOptions orphaned = importOptions;
+    orphaned.targetExperimentId = QStringLiteral( "exp-nowhere" );
+    CHECK_FALSE( importer.importRun( orphaned ).ok );
+
+    // Integrity gate: a tampered bundle never reaches the store.
+    const QString tamperedBundle = dir.filePath( QStringLiteral( "tampered" ) );
+    QDir().mkpath( tamperedBundle );
+    for ( const QString &name :
+          { QStringLiteral( "manifest.json" ), QStringLiteral( "run_config.json" ),
+            QStringLiteral( "environment.json" ), QStringLiteral( "checksums.txt" ) } )
+        QFile::copy( QDir( exportReport.bundlePath ).filePath( name ),
+                     QDir( tamperedBundle ).filePath( name ) );
+    {
+        QFile tampered( QDir( tamperedBundle ).filePath( QStringLiteral( "run_config.json" ) ) );
+        REQUIRE( tampered.open( QIODevice::WriteOnly | QIODevice::Append ) );
+        tampered.write( " " );
+    }
+    ReproductionBundleImportOptions tamperedOptions = importOptions;
+    tamperedOptions.bundleDir = tamperedBundle;
+    const auto tamperedReport = importer.importRun( tamperedOptions );
+    CHECK_FALSE( tamperedReport.ok );
+    CHECK( tamperedReport.warnings.join( QLatin1Char( ';' ) )
+               .contains( QLatin1String( "checksum" ) ) );
+    CHECK( target.runCount() == 0 );
+
+    // keepOriginalRunId onto an occupied id with DIFFERENT identity refuses
+    // (the Created-status run could otherwise be silently overwritten).
+    Experiment occupier;
+    occupier.setExperimentId( QStringLiteral( "exp-occ" ) );
+    occupier.setName( QStringLiteral( "occupier" ) );
+    REQUIRE( target.upsertExperiment( occupier ).has_value() );
+    ExperimentRun existing = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-occ" ) );
+    existing.setSeed( 123 ); // different identity from the bundle
+    existing.setStatus( RunStatus::Created );
+    REQUIRE( target.upsertRun( existing ).has_value() );
+    ReproductionBundleImportOptions keepOptions = importOptions;
+    keepOptions.keepOriginalRunId = true;
+    keepOptions.targetExperimentId = QStringLiteral( "exp-occ" );
+    const auto refused = importer.importRun( keepOptions );
+    CHECK_FALSE( refused.ok );
+    CHECK( refused.warnings.join( QLatin1Char( ';' ) )
+               .contains( QLatin1String( "already exists" ) ) );
+    CHECK( target.runById( QStringLiteral( "run-src" ) )->seed() == 123 );
+
+    // The clean bundle imports: identity preserved, lifecycle honest.
+    const auto importReport = importer.importRun( importOptions );
+    REQUIRE( importReport.ok );
+    CHECK( importReport.originalRunId == QStringLiteral( "run-src" ) );
+    CHECK( importReport.runId != QStringLiteral( "run-src" ) ); // fresh id by default
+    CHECK_FALSE( importReport.alreadyPresent );
+    const auto installed = target.runById( importReport.runId );
+    REQUIRE( installed.has_value() );
+    CHECK( installed->status() == RunStatus::Created ); // never a fake lifecycle
+    CHECK( runExecutionFingerprint( installed->executionIdentity() ) ==
+           runExecutionFingerprint( run.executionIdentity() ) );
+    CHECK( installed->executionRef() == QStringLiteral( "bundle:run-src" ) );
+    // Metrics evidence installed beside the run.
+    CHECK( target.metricRecordForRun( importReport.runId ).has_value() );
+    // The classifier recognizes the imported evidence as the same execution.
+    RepeatExecutionClassifier classifier( target );
+    const auto duplicate = classifier.classify( run.executionIdentity(),
+                                                run.resultFingerprint() );
+    REQUIRE( duplicate.has_value() );
+    CHECK( duplicate->classification ==
+           RepeatExecutionClassifier::Classification::SameExecution );
+
+    // Re-importing the same bundle is an idempotent no-op.
+    const auto again = importer.importRun( importOptions );
+    REQUIRE( again.ok );
+    CHECK( again.alreadyPresent );
+    CHECK( again.runId == importReport.runId );
+    CHECK( target.runCount() == 2 ); // the imported run + the occupier
+
+    CHECK( target.runById( QStringLiteral( "run-src" ) )->seed() == 123 );
 }
