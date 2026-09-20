@@ -124,3 +124,12 @@ twice mid-run (recovered via dangling commits). The work branch is therefore
 
 - Pass 1 (data-repair correctness, read-only): 7/7 PASS; findings R1/R2 (commit-message corrections: 7 duplicated ids, "emptied" not "truncated") and R3 (repeated INVALID_PARAMETER code across distinct causes in 3 sidecars — accepted; `errorCatalog()` aggregates by code and `manifestPage` surfaces both `when` conditions) recorded in `.planning/ds41-capability-help-sync/EVIDENCE.md`.
 - Pass 2 (final diff incl. the two new test files, read-only; reviewer independently re-ran the four gates): **P0 = 0**. P1-1 (exemption reason text was wrong for ~31/39 rows — fixed to the verified common cause) and P1-2 (schema parity ignored `items.type` and the `required` set — signatures extended; both fixed with the gates re-verified green) are resolved in `2b5709386`. P2 items recorded in EVIDENCE.md.
+
+## Conflict hotspots with the parallel fleet (verified live at PR creation)
+
+At PR creation the fleet had 11 open PRs. Live overlap check (file-level):
+- `src/workflow/pipeline_run_coordinator.cpp` — the master compile break was fixed independently by PRs #1117, #1118, #1120, #1125 (they RENAME the colliding local; this PR DELETES the redundant alias — both semantically neutral, same line region). Resolution: keep either side; the surviving declaration must be the one the loop uses.
+- `src/cli/cli_commands.cpp` — the master compile break was also fixed by PR #1120. Same guidance.
+- `data/processing/algorithm_meta/**` — Layer-A/B regenerated here; PR #1119 also regenerates Layer-A for its new spectral operators. Resolution: after merge, re-run `sicnu_geo_rs_cli --export-catalog` + `capability_knowledge_tool gen-meta`; the gates then re-pin the union.
+- `tests/CMakeLists.txt` — append-only registrations by PRs #1116/#1117/#1118/#1120/#1121; conflicts are trivial appends.
+- `data/agent/capabilities/*` + `pi/knowledge/*` — repaired/regenerated here; neighbouring knowledge tracks may re-land their own entries (merge and regenerate).
