@@ -1,6 +1,8 @@
 // src/operators/runtime/detection_tile_engine.cpp
 #include "operators/runtime/detection_tile_engine.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include "operators/framework/bounded_math.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -126,6 +128,14 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
   {
     removeVectorFiles( workPath );
     throw RSOperatorError( ErrorCode::GdalError, "vector driver not available" );
+  }
+  // Test-only fault injection: routes through the REAL write-failure branch
+  // so the ensemble publish guard's restore path is provable.
+  if ( SICNU_FAULT_POINT( "detection.write_vector" ) )
+  {
+    removeVectorFiles( workPath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to create detection output: fault-injected failure" );
   }
   GDALDatasetH outDs = GDALCreate( driver, workPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
   if ( !outDs )

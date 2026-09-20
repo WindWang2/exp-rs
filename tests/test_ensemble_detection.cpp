@@ -20,6 +20,8 @@
 #include "operators/runtime/model_runtime.h"
 #include "synthetic_raster_builder.h"
 
+#include "runtime/observability/fault_registry.h"
+
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -693,6 +695,187 @@ TEST_CASE( "detection ensemble publishes an empty product when no member detects
   const QStringList residue = QDir( dir.path() ).entryList( { "*.tmp~*", ".*.tmp~*" },
                                                             QDir::Files | QDir::Hidden );
   CHECK( residue.empty() );
+}
+
+TEST_CASE( "a sidecar failure restores the previous detection product intact",
+           "[models][ensemble][detection][publish]" )
+{
+  RegistryReset reset;
+  // Two members whose fused product differs by weight, published to a SHAPEFILE
+  // output: the rollback must restore the .shp AND its .dbf/.shx/.prj/.cpg
+  // companions together (a torn shapefile is the failure mode this guards).
+  DetectionHead headA;
+  headA.candidates = { { 8, 8, 4, 4, 1.0f, 0.9f, 0.1f },
+                       { 2, 2, 2, 2, 1.0f, 0.1f, 0.9f } };
+  DetectionHead headB;
+  headB.candidates = { { 9, 8, 4, 4, 1.0f, 0.8f, 0.2f } };
+  const DetectionProviderGuard guardA( "shpfw-a", headA );
+  const DetectionProviderGuard guardB( "shpfw-b", headB );
+  QTemporaryDir dir;
+  registerManifest( detectionMemberManifest( "shp-a", "shpfw-a", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "shp-a/model.json" ) ).toStdString() );
+  registerManifest( detectionMemberManifest( "shp-b", "shpfw-b", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "shp-b/model.json" ) ).toStdString() );
+
+  auto registerEnsemble = [ & ]( const std::string &name, double weightA, double weightB ) {
+    Json::Value ensemble( Json::objectValue );
+    ensemble["name"] = name;
+    ensemble["task"] = "detection";
+    ensemble["framework"] = "onnx";
+    Json::Value members( Json::arrayValue );
+    Json::Value a( Json::objectValue );
+    a["model"] = "shp-a";
+    a["weight"] = weightA;
+    members.append( a );
+    Json::Value b( Json::objectValue );
+    b["model"] = "shp-b";
+    b["weight"] = weightB;
+    members.append( b );
+    ensemble["ensemble"]["members"] = members;
+    ensemble["ensemble"]["combination"] = "wbf";
+    registerManifest( ensemble, dir.filePath( QString::fromStdString( name ) + "/model.json" )
+                                  .toStdString() );
+  };
+  // Equal weights fuse the class-0 pair to 0.85; 3:1 weights fuse it to
+  // (2.7+0.8)/2 × 2/4 = 0.875 — distinguishable products.
+  registerEnsemble( "shp-ens-a", 1.0, 1.0 );
+  registerEnsemble( "shp-ens-b", 3.0, 1.0 );
+
+  const QString input = dir.filePath( QStringLiteral( "det_input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+  builder.withConstantValue( 1, 10.0f );
+  builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+
+  const QString output = dir.filePath( QStringLiteral( "fused.shp" ) );
+  // Shapefile companions share the base name (fused.dbf, not fused.shp.dbf).
+  const QString shapeBase = QFileInfo( output ).absolutePath() + QStringLiteral( "/fused" );
+  const QStringList companions = { shapeBase + QStringLiteral( ".dbf" ),
+                                   shapeBase + QStringLiteral( ".shx" ),
+                                   shapeBase + QStringLiteral( ".prj" ) };
+  RSOperatorContext context;
+
+  ModelExecutionRequest first;
+  first.inputPath = input.toStdString();
+  first.outputPath = output.toStdString();
+  first.modelReference = "shp-ens-a";
+  first.asDetection = true;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( first, context ) );
+  REQUIRE( QFile::exists( output ) );
+  // Two features: the fused class-0 pair (0.85) and member A's lone class-1
+  // box (0.9 scaled by min(2,1)/2 = 0.45).
+  const std::vector<VectorFeature> before = readDetectionVector( output );
+  REQUIRE( before.size() == 2 );
+  const float firstConfidence = static_cast<float>( before[0].confidence );
+  CHECK( firstConfidence == Catch::Approx( 0.85f ).margin( 1e-4f ) );
+
+  {
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "ensemble.publish_sidecar", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    ModelExecutionRequest second;
+    second.inputPath = input.toStdString();
+    second.outputPath = output.toStdString();
+    second.modelReference = "shp-ens-b";
+    second.asDetection = true;
+    REQUIRE_THROWS( sicnu::operators::runtime::runModelInference( second, context ) );
+
+    // The previous product is restored INTACT: same features (the fused 0.85
+    // product, not the 0.875 one) and the sidecar set is consistent — the
+    // vector still reads back the same features.
+    const std::vector<VectorFeature> after = readDetectionVector( output );
+    REQUIRE( after.size() == before.size() );
+    for ( std::size_t i = 0; i < before.size(); ++i )
+    {
+      CHECK( after[i].className == before[i].className );
+      CHECK( after[i].confidence == before[i].confidence );
+      CHECK( after[i].minX == before[i].minX );
+    }
+    // Sidecars exist and no residue remains.
+    for ( const QString &companion : companions )
+      CHECK( QFile::exists( companion ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".ensemble-prev~" ) ) );
+    for ( const QString &companion : companions )
+    {
+      CHECK_FALSE( QFile::exists( companion + QStringLiteral( ".prev~" ) ) );
+      CHECK_FALSE( QFile::exists( companion + QStringLiteral( ".ensemble-prev~" ) ) );
+    }
+  }
+
+  // Disarmed: a third run succeeds and republishes.
+  ModelExecutionRequest third;
+  third.inputPath = input.toStdString();
+  third.outputPath = output.toStdString();
+  third.modelReference = "shp-ens-b";
+  third.asDetection = true;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( third, context ) );
+  CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+  const std::vector<VectorFeature> replaced = readDetectionVector( output );
+  REQUIRE( replaced.size() == 2 );
+  CHECK( replaced[0].confidence == Catch::Approx( 0.875f ).margin( 1e-4f ) );
+}
+
+TEST_CASE( "a writer failure restores the previous detection product",
+           "[models][ensemble][detection][publish]" )
+{
+  RegistryReset reset;
+  DetectionHead head;
+  head.candidates = { { 8, 8, 4, 4, 1.0f, 0.9f, 0.1f } };
+  const DetectionProviderGuard guard( "wrfw", head );
+  QTemporaryDir dir;
+  registerManifest( detectionMemberManifest( "wr-a", "wrfw", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "wr-a/model.json" ) ).toStdString() );
+  registerManifest( detectionMemberManifest( "wr-b", "wrfw", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "wr-b/model.json" ) ).toStdString() );
+
+  Json::Value ensemble( Json::objectValue );
+  ensemble["name"] = "wr-ens";
+  ensemble["task"] = "detection";
+  ensemble["framework"] = "onnx";
+  Json::Value members( Json::arrayValue );
+  members.append( "wr-a" );
+  members.append( "wr-b" );
+  ensemble["ensemble"]["members"] = members;
+  ensemble["ensemble"]["combination"] = "wbf";
+  registerManifest( ensemble, dir.filePath( QStringLiteral( "wr-ens/model.json" ) ).toStdString() );
+
+  const QString input = dir.filePath( QStringLiteral( "det_input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+  builder.withConstantValue( 1, 10.0f );
+  builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+
+  const QString output = dir.filePath( QStringLiteral( "wr.gpkg" ) );
+  RSOperatorContext context;
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.outputPath = output.toStdString();
+  request.modelReference = "wr-ens";
+  request.asDetection = true;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+  const std::vector<VectorFeature> before = readDetectionVector( output );
+  REQUIRE( before.size() == 1 );
+
+  {
+    // The vector WRITER fails after the ensemble already moved the previous
+    // product aside: the publish guard must restore it and leave no residue.
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "detection.write_vector", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    REQUIRE_THROWS_WITH( sicnu::operators::runtime::runModelInference( request, context ),
+                         Catch::Matchers::ContainsSubstring( "fault-injected failure" ) );
+
+    const std::vector<VectorFeature> after = readDetectionVector( output );
+    REQUIRE( after.size() == before.size() );
+    CHECK( after[0].confidence == before[0].confidence );
+    CHECK( after[0].className == before[0].className );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".ensemble-prev~" ) ) );
+    // The previous product's own sidecar is restored WITH it (it describes the
+    // restored product — never a mismatched pair).
+    CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+  }
+
+  // Disarmed: the same run succeeds again.
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+  CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
 }
 
 TEST_CASE( "single-model detection runs stay behavior-compatible",

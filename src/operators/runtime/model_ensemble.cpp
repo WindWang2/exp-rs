@@ -129,6 +129,96 @@ bool publishSidecar( const QString &finalPath, const Json::Value &provenance, st
   return true;
 }
 
+/// Shapefile companions for a vector output (empty for GPKG/GeoJSON) — the
+/// same set the detection writer publishes and must roll back atomically.
+QStringList detectionSidecars( const QString &main )
+{
+  const QFileInfo fi( main );
+  if ( fi.suffix().toLower() != QLatin1String( "shp" ) )
+    return {};
+  const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
+  return { base + QStringLiteral( ".dbf" ), base + QStringLiteral( ".shx" ),
+           base + QStringLiteral( ".prj" ), base + QStringLiteral( ".cpg" ) };
+}
+
+void removeWithSidecars( const QString &main )
+{
+  QFile::remove( main );
+  for ( const QString &sidecar : detectionSidecars( main ) )
+    QFile::remove( sidecar );
+}
+
+/// Owns the PREVIOUS detection product across the vector publish and the
+/// sidecar write: the previous product (main + shapefile sidecars + provenance
+/// sidecar) is moved aside on construction and restored on unwind — a throw
+/// from the writer OR the sidecar publish leaves the previous product exactly
+/// as it was, never a torn one and never a hidden backup. Disarmed after a
+/// successful sidecar publish (the backup is then removed).
+///
+/// The backup suffix is deliberately NOT the vector writer's own ".prev~"
+/// (which it unconditionally cleans up at the end of a successful publish,
+/// sidecars included): a shared name would have the writer delete this
+/// guard's backup. ".ensemble-prev~" is unique to this guard.
+class DetectionPublishGuard
+{
+  public:
+    explicit DetectionPublishGuard( const QString &finalPath )
+        : m_final( finalPath ),
+          m_backup( finalPath + QStringLiteral( ".ensemble-prev~" ) )
+    {
+      m_hadExisting = QFile::exists( m_final );
+      if ( !m_hadExisting )
+        return;
+      removeWithSidecars( m_backup );
+      if ( !QFile::rename( m_final, m_backup ) )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "detection ensemble could not back up the previous product: "
+                                 + finalPath.toStdString() );
+      for ( const QString &sidecar : detectionSidecars( m_final ) )
+        if ( QFile::exists( sidecar ) )
+          QFile::rename( sidecar, sidecar + QStringLiteral( ".ensemble-prev~" ) );
+      if ( QFile::exists( m_final + QStringLiteral( ".prov.json" ) ) )
+        QFile::rename( m_final + QStringLiteral( ".prov.json" ),
+                       m_backup + QStringLiteral( ".prov.json" ) );
+    }
+    ~DetectionPublishGuard()
+    {
+      if ( m_disarmed )
+        return;
+      removeWithSidecars( m_final );
+      if ( !m_hadExisting )
+        return;
+      QFile::rename( m_backup, m_final );
+      for ( const QString &sidecar : detectionSidecars( m_final ) )
+      {
+        const QString backupSidecar = sidecar + QStringLiteral( ".ensemble-prev~" );
+        if ( QFile::exists( backupSidecar ) )
+          QFile::rename( backupSidecar, sidecar );
+      }
+      const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+      if ( QFile::exists( backupProv ) )
+        QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+    }
+    void disarm()
+    {
+      m_disarmed = true;
+      if ( m_hadExisting )
+      {
+        removeWithSidecars( m_backup );
+        QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+      }
+    }
+
+    DetectionPublishGuard( const DetectionPublishGuard & ) = delete;
+    DetectionPublishGuard &operator=( const DetectionPublishGuard & ) = delete;
+
+  private:
+    QString m_final;
+    QString m_backup;
+    bool m_hadExisting = false;
+    bool m_disarmed = false;
+};
+
 /// Per-member execution record for the payload, the provenance sidecar and
 /// the parallel worker bookkeeping. Worker-owned fields (failure/aborted) are
 /// written by exactly one worker thread each; the main thread reads them only
@@ -196,7 +286,8 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
     member["identity_tag"] = run.model.identityTag();
     if ( !run.model.contentDigest.empty() )
       member["content_digest"] = run.model.contentDigest;
-    member["framework"] = run.model.framework;
+    member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                  : run.selection.resolvedFramework;
     member["weight"] = run.weight;
     if ( run.session )
     {
@@ -715,23 +806,11 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     if ( !input.open( QString::fromStdString( request.inputPath ) ) )
       throw RSOperatorError( ErrorCode::GdalError,
                              "failed to open input raster: " + request.inputPath );
-    // Back up any previous product (main + shapefile sidecars + sidecar)
-    // BEFORE publishing: the vector writer's internal backup only covers its
-    // own rename, and a sidecar failure must still be able to restore the
-    // previous product (the single-model engine's documented invariant).
+    // The publish guard owns the previous product across the vector publish
+    // AND the sidecar write: any failure (including a throw from the writer)
+    // restores it exactly — main file, shapefile sidecars and provenance.
     const QString detectionFinal = QString::fromStdString( request.outputPath );
-    const QString detectionBackup = detectionFinal + QStringLiteral( ".prev~" );
-    const bool detectionHadExisting = QFile::exists( detectionFinal );
-    if ( detectionHadExisting )
-    {
-      QFile::remove( detectionBackup );
-      if ( !QFile::rename( detectionFinal, detectionBackup ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "detection ensemble could not back up the previous product: "
-                                 + request.outputPath );
-      QFile::rename( detectionFinal + QStringLiteral( ".prov.json" ),
-                     detectionBackup + QStringLiteral( ".prov.json" ) );
-    }
+    DetectionPublishGuard publishGuard( detectionFinal );
     writeDetectionVector( fused.boxes, vocabulary, input.geoTransform(), input.projection(),
                           request.outputPath );
 
@@ -762,23 +841,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     provenance["output"]["features"] = static_cast<Json::UInt64>( fused.clusters );
     std::string sidecarError;
     if ( !publishSidecar( detectionFinal, provenance, &sidecarError ) )
-    {
-      // Restore the previous product instead of leaving the new one without
-      // provenance and the old one destroyed.
-      QFile::remove( detectionFinal );
-      if ( detectionHadExisting )
-      {
-        QFile::rename( detectionBackup, detectionFinal );
-        QFile::rename( detectionBackup + QStringLiteral( ".prov.json" ),
-                       detectionFinal + QStringLiteral( ".prov.json" ) );
-      }
       throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
-    }
-    if ( detectionHadExisting )
-    {
-      QFile::remove( detectionBackup );
-      QFile::remove( detectionBackup + QStringLiteral( ".prov.json" ) );
-    }
+    publishGuard.disarm();
 
     ModelExecutionResult result;
     result.identityTag = ensembleModel.identityTag();

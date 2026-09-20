@@ -65,8 +65,8 @@ Refusals: a member without a detection contract or with a different class
 vocabulary (names AND order — classId indexes the vocabulary, so a silent
 remap would relabel the product); a detection request on a non-`wbf`
 combination; a `wbf` manifest on a non-detection request. Provenance records
-algorithm, thresholds, pooled/gated/fused counts and per-member absorption
-(`fusion` block in the sidecar).
+the algorithm, the thresholds, the pooled/gated/clustered/merged counts and
+the per-member surviving/merged counts (`fusion` block in the sidecar).
 
 ## Decision 2 — Scene-classification ensembles
 
