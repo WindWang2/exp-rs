@@ -405,3 +405,8 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+
+# flash-spectral-intelligence-13 (Track D): track planning notes (markdown only; logs stay local).
+!.planning/flash-spectral-intelligence-13/
+.planning/flash-spectral-intelligence-13/*
+!.planning/flash-spectral-intelligence-13/*.md
