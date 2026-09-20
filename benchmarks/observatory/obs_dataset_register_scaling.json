@@ -1,0 +1,71 @@
+{
+  "complexity" : 
+  {
+    "exponent" : 2.2533457711871367,
+    "model" : "super-linear",
+    "points" : 
+    [
+      {
+        "ms" : 1256.7743,
+        "n" : 1000
+      },
+      {
+        "ms" : 5992.1400999999996,
+        "n" : 2000
+      }
+    ]
+  },
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 0,
+    "pages_requested" : 0,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "MSVC 1938",
+    "cores" : 16,
+    "cpu_model" : null,
+    "os" : "windows"
+  },
+  "extra" : 
+  {
+    "assets_registered" : 2000
+  },
+  "generated_at" : "2026-09-20T04:46:43Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 5796.875,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 51,
+    "peak_rss_mb" : 8,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 0,
+    "wall_ms" : 5992.1400999999996,
+    "write_bytes" : 0,
+    "write_ops" : 0
+  },
+  "scale" : 
+  {
+    "items" : 2000,
+    "kind" : "small",
+    "probes" : 0
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "assets_half" : 1000,
+    "assets_n" : 2000,
+    "exponent" : 2.2533457711871367
+  },
+  "workload" : "obs_dataset_register_scaling"
+}
