@@ -341,7 +341,15 @@ cmd_smoke() {
     fi
     mkdir -p "$build_dir" || fail "smoke: cannot create $build_dir"
     if [ -n "$base_cache" ]; then
-        cmd_configure --build-dir "$build_dir" --base-cache "$base_cache" || return 1
+        cmd_configure --build-dir "$build_dir" --base-cache "$base_cache" || {
+            local elog="$(log_dir)/configure/run.log"
+            if grep -qE "rc.*not found|系统找不到指定的文件|CMake Error at CMakeTestCXXCompiler|is not able to compile a simple test" "$elog" 2>/dev/null; then
+                note "the compiler cannot link — the MSVC developer environment is missing."
+                note "run from a Developer Prompt, or use the Windows wrapper (scripts\\windows\\build.cmd smoke),"
+                note "which loads vcvars64 before configuring."
+            fi
+            return 1
+        }
     else
         cmd_configure --build-dir "$build_dir" || return 1
     fi

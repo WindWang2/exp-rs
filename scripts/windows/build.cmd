@@ -137,17 +137,27 @@ exit /b 1
 
 rem ---------------------------------------------------------------------------
 rem run_logged <name> <cmd...>: redirect to log dir, type it back, SUMMARY on failure
+rem NOTE: %* does NOT reflect shift inside a called label, so the command is
+rem rebuilt argument by argument, each quoted - that is what keeps paths with
+rem spaces (C:/Program Files/...) in one piece through the final `call`.
 rem ---------------------------------------------------------------------------
 :run_logged
 set "LGNAME=%~1"
 shift
+set "RLARGS="
+:rl_collect
+if "%~1"=="" goto :rl_run
+set "RLARGS=%RLARGS% "%~1""
+shift
+goto :rl_collect
+:rl_run
 set "LGDIR=%LOG_ROOT%\%LGNAME%"
 if not exist "%LGDIR%" mkdir "%LGDIR%"
-call %* > "%LGDIR%\run.log" 2>&1
+call %RLARGS% > "%LGDIR%\run.log" 2>&1
 set "LGRC=%ERRORLEVEL%"
 type "%LGDIR%\run.log"
 if not "%LGRC%"=="0" (
-  > "%LGDIR%\SUMMARY.txt" echo command: %*
+  > "%LGDIR%\SUMMARY.txt" echo command: %RLARGS%
   >> "%LGDIR%\SUMMARY.txt" echo exit: %LGRC%
   >> "%LGDIR%\SUMMARY.txt" echo --- error/failed lines ---
   findstr /n /r /c:"error:" /c:"FAILED:" /c:"failed" /c:"CMake Error" "%LGDIR%\run.log" >> "%LGDIR%\SUMMARY.txt"
@@ -258,7 +268,10 @@ echo   configure log: %LOG_ROOT%\configure\run.log
 exit /b 0
 
 :seed_arg
-for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$m=Select-String -Path '%~2' -Pattern '^%~1:[A-Z]*=(.*)$' | Select-Object -Last 1; if($m){$m.Matches[0].Groups[1].Value}"`) do set "SEED=%SEED% -D%~1=%%V"
+rem Each seeded value is quoted as a whole (-D"KEY=value with spaces") because
+rem run_logged re-splits the command line: an unquoted path containing spaces
+rem (C:/Program Files/...) would be torn into several arguments.
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$m=Select-String -Path '%~2' -Pattern '^%~1:[A-Z]*=(.*)$' | Select-Object -Last 1; if($m){$m.Matches[0].Groups[1].Value}"`) do set "SEED=%SEED% -D"%~1=%%V""
 exit /b 0
 
 rem ---------------------------------------------------------------------------
