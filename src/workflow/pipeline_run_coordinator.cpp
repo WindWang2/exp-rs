@@ -2,6 +2,7 @@
 #include "workflow/pipeline_run_coordinator.h"
 
 #include "workflow/plan_optimizer.h"
+#include "workflow/workflow_composer.h"
 #include "workflow/workflow_dag_analyzer.h"
 #include "workflow/workflow_limits.h"
 
@@ -358,12 +359,26 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
     if ( !WorkflowIR::validateSemantics( def ) )
         return fail( QStringLiteral( "workflow document is not semantically valid" ) );
 
-    const DagAnalysisResult dag = WorkflowDagAnalyzer::analyzeDag( def );
+    // Composition seam: fragment instances flatten to plain nodes before
+    // planning. The executor, checkpoint and lineage signatures only ever
+    // see the expanded document — "workflow:subflow" never reaches them.
+    WorkflowDocument runDef = def;
+    if ( WorkflowComposer::hasSubflowNodes( def ) )
+    {
+        Result<WorkflowDocument> expanded = WorkflowComposer::expandSubflows( def );
+        if ( !expanded.isSuccess() )
+            return fail( expanded.error() );
+        runDef = expanded.value();
+        if ( !WorkflowIR::validateSemantics( runDef ) )
+            return fail( QStringLiteral( "expanded workflow document is not semantically valid" ) );
+    }
+
+    const DagAnalysisResult dag = WorkflowDagAnalyzer::analyzeDag( runDef );
     if ( !dag.isAcyclic )
         return fail( dag.errorMessage );
 
     // Fresh state.
-    m_state->def = def;
+    m_state->def = runDef;
     m_state->runDirectory = runDirectory;
     m_state->runId = QUuid::createUuid().toString( QUuid::WithoutBraces );
     m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
@@ -373,8 +388,8 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
     m_state->statuses.clear();
     m_state->remainingParents.clear();
 
-    const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( def );
-    for ( const NodeFact &node : def.nodes )
+    const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( runDef );
+    for ( const NodeFact &node : runDef.nodes )
     {
         NodeStatusSnapshot snapshot;
         snapshot.nodeId = node.nodeId;
@@ -382,7 +397,7 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
         m_state->statuses.insert( node.nodeId, snapshot );
 
         int parents = 0;
-        for ( const EdgeFact &edge : def.edges )
+        for ( const EdgeFact &edge : runDef.edges )
             if ( edge.targetNodeId == node.nodeId )
                 ++parents;
         m_state->remainingParents.insert( node.nodeId, parents );

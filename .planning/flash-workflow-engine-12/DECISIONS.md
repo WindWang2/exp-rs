@@ -103,19 +103,32 @@ node came from). Serialized only when non-empty, so 2.0 documents stay
 byte-identical. Extension data that must survive older readers stays inside
 `metadata`/`parameters`, which round-trip verbatim (now pinned by a test).
 
-## D8 — WP2 composition sketch (next iterations)
+## D8 — WP2 composition (implemented)
 
 `operatorId == "workflow:subflow"` marks a fragment instance;
-`parameters.fragment` = embedded WorkflowDocument (hermetic) or a file
-reference; `parameters.bindings` = template substitution map. Expansion
-(`workflow_composer`) flattens fragments into the parent document with
-namespaced ids `subflowNodeId/internalNodeId` — lineage stays deterministic
+`parameters.fragment` = embedded WorkflowDocument (hermetic only — file/path
+references are refused fail-closed because they would make the expanded
+graph depend on non-document state); `parameters.interface` maps instance
+ports to fragment internals
+(`{"inputs": {"<instancePort>": {"node","port"}}, "outputs": {...}}`);
+`parameters.bindings` = `{"<fragNodeId>": {"<param>": value}}` merged into
+fragment node parameters before inlining.
+
+`WorkflowComposer::expandSubflows` flattens fragments into the parent
+document with namespaced ids `subflowNodeId__internalNodeId` — the
+separator is `__`, not `/`, because the registry executor's `isSafeNodeId`
+(#1032) rejects path separators in node ids. Lineage stays deterministic
 because expanded ids are a pure function of the authored graph. Origin
 attribution rides in expanded nodes' `NodeFact::originNodeId` (first-class
-since schema 2.1, D7) so failures and provenance point back at the
-designer-level node. Typed-port compatibility at fragment boundaries reuses
-`contract_checker`'s closed mismatch vocabulary rather than a second
-ruleset.
+since schema 2.1, D7). Nested subflows expand recursively (depth cap 8);
+expanded-id collisions, unmapped interface ports, unknown binding targets
+and invalid fragments all fail closed naming the instance node.
+
+Integration: `PipelineRunCoordinator::startRun` expands after authored-doc
+validation and before DAG analysis — executors, checkpoints and signatures
+only ever see the flat document, so composition adds zero new run-state
+semantics. Boundary contract checking falls out for free: rewired edges
+are inspected by `inspectContracts` on the expanded document.
 
 ## D9 — WP5 provenance sketch
 

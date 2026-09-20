@@ -973,3 +973,117 @@ TEST_CASE( "A cancelled run resumes to full success", "[d17][workflow][engine]" 
     for ( const NodeStatusSnapshot &snapshot : statuses )
         REQUIRE( snapshot.state == ExecutionState::Succeeded );
 }
+
+// ---------------------------------------------------------------------------
+// WP2 composition: subflow instances expand before planning; the run only
+// ever sees flat, namespaced nodes.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+WorkflowDocument subflowParentDoc()
+{
+    // Fragment: f_in -> f_out (both synthetic steps).
+    WorkflowDocument frag;
+    frag.version = QStringLiteral( "2.1" );
+    frag.nodes = { chainNode( QStringLiteral( "f_in" ), QStringLiteral( "rs:step" ) ),
+                   chainNode( QStringLiteral( "f_out" ), QStringLiteral( "rs:step" ) ) };
+    frag.edges = { EdgeFact{ QStringLiteral( "e_f" ), QStringLiteral( "f_in" ), QStringLiteral( "output" ),
+                             QStringLiteral( "f_out" ), QStringLiteral( "input" ) } };
+
+    NodeFact sub;
+    sub.nodeId = QStringLiteral( "S" );
+    sub.operatorId = QStringLiteral( "workflow:subflow" );
+    sub.displayName = QStringLiteral( "S" );
+    sub.canvasPosition = QPointF( 0, 0 );
+    sub.inputPorts = { PortFact{ QStringLiteral( "input" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                                 QStringLiteral( "None" ), 0, 0, 1, true } };
+    sub.outputPorts = { PortFact{ QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                                  QStringLiteral( "None" ), 0, 0, 1, false } };
+    sub.parameters = QJsonObject{
+        { QStringLiteral( "fragment" ), WorkflowIR::toJson( frag ) },
+        { QStringLiteral( "interface" ),
+          QJsonObject{
+              { QStringLiteral( "inputs" ),
+                QJsonObject{ { QStringLiteral( "input" ), QJsonObject{ { QStringLiteral( "node" ), QStringLiteral( "f_in" ) },
+                                                                       { QStringLiteral( "port" ), QStringLiteral( "input" ) } } } } },
+              { QStringLiteral( "outputs" ),
+                QJsonObject{ { QStringLiteral( "output" ), QJsonObject{ { QStringLiteral( "node" ), QStringLiteral( "f_out" ) },
+                                                                        { QStringLiteral( "port" ), QStringLiteral( "output" ) } } } } } } } };
+
+    WorkflowDocument def;
+    def.workflowId = QStringLiteral( "wf-subflow-parent" );
+    NodeFact src = chainNode( QStringLiteral( "src" ), QStringLiteral( "rs:step" ) );
+    src.inputPorts.clear();
+    NodeFact sink = chainNode( QStringLiteral( "sink" ), QStringLiteral( "rs:step" ) );
+    sink.outputPorts.clear();
+    def.nodes = { src, sub, sink };
+    def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "src" ), QStringLiteral( "output" ),
+                            QStringLiteral( "S" ), QStringLiteral( "input" ) },
+                  EdgeFact{ QStringLiteral( "e2" ), QStringLiteral( "S" ), QStringLiteral( "output" ),
+                            QStringLiteral( "sink" ), QStringLiteral( "input" ) } };
+    return def;
+}
+
+} // namespace
+
+TEST_CASE( "A subflow instance runs as expanded nodes and resumes as cache hits", "[d17][workflow][engine][composition]" )
+{
+    const QString dir = scratchDir( QStringLiteral( "subflow-e2e" ) );
+    QString checkpointFile;
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( makeSyntheticNodeExecutor() );
+        QString error;
+        REQUIRE( coordinator.startRun( subflowParentDoc(), dir, &error ) );
+        INFO( error.toStdString() );
+        REQUIRE( waitForCompleted( coordinator ) );
+
+        const auto statuses = coordinator.getAllStatuses();
+        REQUIRE( statuses.size() == 4 ); // src + S__f_in + S__f_out + sink
+        for ( const QString &id : { QStringLiteral( "src" ), QStringLiteral( "S__f_in" ),
+                                    QStringLiteral( "S__f_out" ), QStringLiteral( "sink" ) } )
+        {
+            INFO( id.toStdString() );
+            REQUIRE( statuses.contains( id ) );
+            REQUIRE( statuses.value( id ).state == ExecutionState::Succeeded );
+            REQUIRE( QFile::exists( statuses.value( id ).outputArtifactPath ) );
+        }
+        checkpointFile = coordinator.checkpointPath();
+        REQUIRE( QFile::exists( checkpointFile ) );
+    }
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    INFO( error.toStdString() );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 4 );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+    {
+        INFO( snapshot.nodeId.toStdString() );
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+        REQUIRE( snapshot.isCacheHit ); // expanded ids are stable -> full reuse
+    }
+}
+
+TEST_CASE( "startRun refuses an unexpandable subflow and names the instance", "[d17][workflow][engine][composition]" )
+{
+    WorkflowDocument def = subflowParentDoc();
+    // Break the interface: point the output mapping at a missing port.
+    QJsonObject iface = def.nodes[1].parameters[QStringLiteral( "interface" )].toObject();
+    iface[QStringLiteral( "outputs" )] = QJsonObject{
+        { QStringLiteral( "output" ), QJsonObject{ { QStringLiteral( "node" ), QStringLiteral( "f_out" ) },
+                                                   { QStringLiteral( "port" ), QStringLiteral( "gone" ) } } } };
+    def.nodes[1].parameters[QStringLiteral( "interface" )] = iface;
+
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE_FALSE( coordinator.startRun( def, scratchDir( QStringLiteral( "subflow-bad" ) ), &error ) );
+    REQUIRE( error.contains( QStringLiteral( "'S'" ) ) );
+    REQUIRE( error.contains( QStringLiteral( "f_out" ) ) );
+}
