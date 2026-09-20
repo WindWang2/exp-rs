@@ -9,13 +9,14 @@ required unless a test name says so).
 
 | Item | Command | Expected |
 |---|---|---|
-| Live run on this repo | `python scripts/dev/preflight.py --json` | exit 0; JSON contains `master_sha` = current `git rev-parse origin/master`, `open_prs`/`open_issues` counts (0/0 at baseline), `merged_recent` list, `worktrees` with this track's worktree present, `historical_branches` with non-negative ahead/behind for all 13 `agent/*`/`fix/*` branches |
-| Consistency with source of truth | `python scripts/dev/preflight.py --json \| python -c "import json,sys;d=json.load(sys.stdin);assert d['master_sha'].startswith('adf8f989')"` (SHA refreshed at run time via `git rev-parse origin/master`) | exit 0 — preflight's SHA equals git's and gh's HEAD |
+| Live run on this repo | `python scripts/dev/preflight.py --json` | exit 0; JSON contains `trunk_ref` (`origin/master`), `master.sha` = current `git rev-parse origin/master`, `github.open_pr_count` / `open_issue_count` (0/0 at baseline), `github.merged_recent` list, `worktrees` with this track's worktree present, `historical_branches` with non-negative ahead/behind for every non-trunk `agent/*`/`fix/*` branch |
+| Consistency with source of truth | `python scripts/dev/preflight.py --json \| python -c "import json,sys,subprocess;d=json.load(sys.stdin);assert d['master']['sha']==subprocess.run(['git','rev-parse','origin/master'],capture_output=True,text=True).stdout.strip()"` (SHA refreshed at run time) | exit 0 — preflight's SHA equals git's and gh's HEAD |
 | Degradation (offline/gh missing) | `PATH= python scripts/dev/preflight.py --json` (no `gh` on PATH) | exit 0; `github` section reports `"available": false` and every PR/issue field is marked `not-executed` instead of crashing |
 | Determinism | two consecutive runs, compare after removing timestamps | identical payloads |
 
-Covered by: `scripts/dev/tests/test_preflight.py` (fixture-repo unit tests + live smoke test
-marked `network` and skipped when `gh`/network is unavailable).
+Covered by: `scripts/dev/tests/test_preflight.py` (fixture-repo tests; the gh-degradation
+assertion runs unconditionally when `gh` is absent from PATH, and is conditional otherwise
+because a live `gh` legitimately succeeds).
 
 ## Oracle 2 — Worktree creation fails closed on unsafe conditions
 
@@ -24,9 +25,10 @@ marked `network` and skipped when `gh`/network is unavailable).
 | Duplicate branch | `python scripts/dev/new_worktree.py --path <dir> --branch agent/ds41-dev-worktree-tooling` (branch exists) | non-zero exit; message names the existing ref; **no branch, no worktree, no path created** (verified by `git worktree list` unchanged and the path still absent) |
 | Existing path | `python scripts/dev/new_worktree.py --path ../exp-rs-worktrees/ds41-dev-worktree-tooling --branch <fresh-name>` | non-zero exit; message says the path exists / is registered; nothing created |
 | Dirty tree | fixture repo with a modified tracked file | non-zero exit listing dirty entries; `git worktree list` unchanged |
-| On `master` | fixture repo with `master` checked out | non-zero exit refusing to branch from a `master` checkout |
+| Dirty `master` | fixture repo with `master` checked out and a modified tracked file | non-zero exit naming the dirty entries; nothing created (a *clean* master checkout is the sanctioned bootstrap and is allowed — `test_clean_master_allows_bootstrap`) |
 | Happy path | fixture repo, clean, `--branch t/x --path wt-x` | exit 0; worktree created at fresh `origin/master`-equivalent base; `git -C wt-x rev-parse HEAD` equals base; prints JSON summary |
-| Rollback | fixture repo where `git worktree add` is forced to fail (stub git on PATH) | non-zero exit; the branch created moments earlier is removed (no orphan branch left) |
+| Rollback | `git worktree add` forced to fail (in-process stub, no PATH games) | non-zero exit; the branch created moments earlier is removed (no orphan branch left) |
+| Flag-shaped `--branch` | `--branch=-m` (and `-c`, `-t`, `--unset-upstream`, …) | refused by `git check-ref-format --branch` before any git mutation; the current branch is not renamed or deleted |
 
 Covered by: `scripts/dev/tests/test_new_worktree.py` (hermetic temp repos; `git` stub for the
 rollback case) plus a real-repo negative case (duplicate branch, read-only attempt).
@@ -37,9 +39,10 @@ rollback case) plus a real-repo negative case (duplicate branch, read-only attem
 |---|---|---|
 | Fail-fast refusal | two `python scripts/dev/resource_guard.py --lock-dir <d> -- <sleep-cmd>` started simultaneously | exactly one exits 0; the other exits with the documented "busy" code (75) and prints the holder's pid/command/age; second process did **not** run the payload |
 | Serialization | same pair with `--wait` | both exit 0; the second starts only after the first releases (observed via each process's start/end timestamps) |
-| Parallelism clamp | `python scripts/dev/resource_guard.py --lock-dir <d> -- cmake --build b --parallel 8` (stub cmake that echoes its args) | stub receives `--parallel 2` or lower; `ninja -j9`/`make -j9` are clamped to 2; env forces `CMAKE_BUILD_PARALLEL_LEVEL`/`CTEST_PARALLEL_LEVEL` ≤ 2 |
-| Stale lock recovery | lock file left behind by a dead pid, age > threshold | guard breaks it, records the break in the lock file, proceeds; live holder is never broken |
-| Release on failure | payload exits non-zero | guard releases the lock (next acquisition succeeds immediately) and propagates the payload's exit code |
+| Parallelism clamp | `python scripts/dev/resource_guard.py --lock-dir <d> -- cmake --build b --parallel 8` (stub cmake that echoes its args) | stub receives `--parallel 2` or lower; `ninja -j9`/`make -j9` are clamped to 2; env forces `CMAKE_BUILD_PARALLEL_LEVEL`/`CTEST_PARALLEL_LEVEL` ≤ 2 and strips any inherited `MAKEFLAGS=-jN` |
+| Stale lock recovery | lock file left behind by a dead pid, age > threshold | guard breaks it (bytes re-verified immediately before the unlink), proceeds; live holder is never broken; an empty/corrupt lock is breakable by the file's own mtime age, so a SIGKILLed holder cannot brick the build dir |
+| Release on failure | payload exits non-zero (or is missing) | guard releases the lock (next acquisition succeeds immediately) and propagates the payload's exit code |
+| One lock per build dir | relative vs absolute `--lock-dir` spellings (and junctions/symlinks to the same tree) | one lock file, keyed through `os.path.realpath` |
 
 Covered by: `scripts/dev/tests/test_resource_guard.py` (subprocess-level concurrency; stub
 payloads that write timestamps).

@@ -17,6 +17,14 @@ usable from any worktree of this repository; shared helpers live in
 Exit codes across the suite: `0` success (possibly degraded), `1` genuine
 failure, `2` refused (fail-closed precondition), `75` busy (lock held).
 
+The lock file is `<build-dir>.agent-build.lock` — a sibling of, never inside,
+the build tree — keyed through `os.path.realpath` (one lock per directory
+regardless of spelling), created atomically with its holder record (mode
+`0600`), and breakable only when the recorded pid is dead and the record (or
+the file's own mtime, for an empty/corrupt lock) is older than
+`--stale-after`. If the build directory's parent does not exist yet, the
+guard creates it once and then acquires.
+
 ## Usage
 
 ```bash

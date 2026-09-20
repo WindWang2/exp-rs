@@ -159,6 +159,119 @@ class ConcurrencyTest(unittest.TestCase):
 
 
 class LockLifecycleTest(unittest.TestCase):
+    def test_empty_lock_file_is_breakable_once_old(self) -> None:
+        """A lock with no readable holder record must not brick the build dir
+        (e.g. the holder was SIGKILLed between creating and writing it)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            lock = root / "build.agent-build.lock"
+            lock.write_text("", encoding="utf-8")
+            old = time.time() - 7200.0
+            os.utime(lock, (old, old))
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"), "--stale-after", "60",
+                             "--", sys.executable, "-c", "print('ran')"], cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse(lock.exists())
+
+    def test_corrupt_lock_file_is_breakable_once_old(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            lock = root / "build.agent-build.lock"
+            lock.write_text("not json at all {{{", encoding="utf-8")
+            old = time.time() - 7200.0
+            os.utime(lock, (old, old))
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"), "--stale-after", "60",
+                             "--", sys.executable, "-c", "print('ran')"], cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_fresh_empty_lock_still_blocks(self) -> None:
+        """Breakability requires the age gate even for an unreadable record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            (root / "build.agent-build.lock").write_text("", encoding="utf-8")
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"), "--stale-after", "3600",
+                             "--", sys.executable, "-c", "print('ran')"], cwd=root)
+            self.assertEqual(proc.returncode, 75, proc.stderr)
+
+    def test_mkdir_parent_creates_then_acquires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "deep" / "deeper" / "build"
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(target),
+                             "--", sys.executable, "-c",
+                             "import pathlib; "
+                             f"pathlib.Path(r'{root / 'ok.txt'}').write_text('ok')"],
+                            cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((root / "ok.txt").exists())
+
+    def test_lock_file_has_holder_record(self) -> None:
+        """The lock must exist WITH its holder record (no empty window)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            proc = run_tool("resource_guard.py",
+                            ["--lock-dir", str(root / "build"),
+                             "--", sys.executable, "-c",
+                              "import pathlib,json; "
+                              f"pathlib.Path(r'{root / 'seen.json'}').write_text("
+                              f"pathlib.Path(r'{root / 'build.agent-build.lock'}')"
+                              ".read_text(encoding='utf-8'))"],
+                            cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            holder = json.loads((root / "seen.json").read_text(encoding="utf-8"))
+            self.assertIsInstance(holder["pid"], int)
+            self.assertGreater(holder["pid"], 0)
+            self.assertIn("command", holder)
+            self.assertIn("started_monotonic", holder)
+
+    def test_inherited_makeflags_j_is_stripped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            out = root / "mk.txt"
+            probe = ("import os, pathlib; "
+                     f"pathlib.Path(r'{out}').write_text(os.environ.get('MAKEFLAGS',''))")
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parents[1]
+                                     / "resource_guard.py"),
+                 "--lock-dir", str(root / "build"), "--",
+                 sys.executable, "-c", probe],
+                cwd=str(root), capture_output=True, text=True, timeout=120,
+                env={**os.environ, "MAKEFLAGS": "-j8"})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(out.read_text(encoding="utf-8"), "-j2")
+
+    def test_two_spellings_of_one_build_dir_share_one_lock(self) -> None:
+        """Relative and absolute spellings must key to the same lock."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "build").mkdir()
+            seen: list[str] = []
+            probe = (
+                "import pathlib;"
+                f"pathlib.Path(r'{root / 'locks.txt'}').write_text("
+                "'\\n'.join(sorted(p.name for p in "
+                f"pathlib.Path(r'{root}').iterdir() if p.name.endswith('.agent-build.lock'))))"
+            )
+            for spelling in ("build", str(root / "build")):
+                proc = subprocess.run(
+                    [sys.executable, str(Path(__file__).resolve().parents[1]
+                                         / "resource_guard.py"),
+                     "--lock-dir", spelling, "--", sys.executable, "-c", probe],
+                    cwd=str(root), capture_output=True, text=True, timeout=120)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                seen += (root / "locks.txt").read_text(encoding="utf-8").splitlines()
+            # both spellings must hold the SAME single lock file while running
+            self.assertEqual(seen, ["build.agent-build.lock"] * 2, seen)
+
     def test_payload_failure_releases_lock_and_propagates_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

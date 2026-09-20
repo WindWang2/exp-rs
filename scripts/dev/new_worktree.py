@@ -69,6 +69,28 @@ def _suffixed(name: str, base_sha: str) -> str:
     return f"{name}-{stamp}-{base_sha[:8]}"
 
 
+def _valid_ref_name(repo: Path, name: str) -> bool:
+    """True only when git accepts `name` as a branch name (NOT an option).
+
+    `git check-ref-format --branch <name>` is the authority: it rejects
+    option-shaped names such as `-m` (git itself exits with a usage error),
+    which `git branch <name> <sha>` would otherwise parse as a switch — the
+    `-m` case being a destructive rename of the current branch. Note the
+    command takes no `--` separator (git's parser rejects it) and no
+    `--allow-onelevel` (incompatible with `--branch` in some versions).
+    """
+    proc = run_git(repo, ["check-ref-format", "--branch", name])
+    return proc.returncode == 0
+
+
+def _rollback_branch(repo: Path, name: str) -> None:
+    """Delete the branch created by phase 1, verifying it is really gone."""
+    proc = run_git(repo, ["branch", "-D", "--", name])
+    if proc.returncode != 0 or _branch_exists(repo, name):
+        print(f"warning: rollback of branch {name} incomplete: "
+              f"{proc.stderr.strip()[:200]}; delete it manually", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -167,25 +189,32 @@ def _run(args: argparse.Namespace, cwd: Path) -> int:
         else:
             return _refuse(f"branch already exists ({existing}): {args.branch}")
 
+    # Reject anything git would parse as an OPTION, not a ref name: `--branch
+    # -m` would otherwise reach `git branch -m <sha>` and RENAME the current
+    # branch. `--` separators below are the second line of defence.
+    if not _valid_ref_name(repo, args.branch):
+        return _refuse(f"not a valid branch name: {args.branch!r} "
+                       "(git check-ref-format --branch rejected it)")
+
     # Phase 1: create the branch at the resolved base.
-    created = run_git(repo, ["branch", args.branch, base_sha])
+    created = run_git(repo, ["branch", "--", args.branch, base_sha])
     if created.returncode != 0:
         return _refuse(f"git branch failed (race or policy): {created.stderr.strip()}")
 
     # Phase 2: attach the worktree; roll the branch back on any failure.
-    added = run(["git", "-C", str(repo), "worktree", "add", str(target), args.branch],
-                cwd=repo, timeout=600.0)
+    added = run(["git", "-C", str(repo), "worktree", "add", "--", str(target),
+                 args.branch], cwd=repo, timeout=600.0)
     if added.returncode != 0:
-        run_git(repo, ["branch", "-D", args.branch])
+        _rollback_branch(repo, args.branch)
         return _refuse(f"git worktree add failed: {added.stderr.strip()[:300]} "
                        "(branch rolled back)")
     # worktree add can also fail *after* registering the path partially; make
     # the failure observable rather than silent.
     proc = run_git(target, ["rev-parse", "HEAD"])
     if proc.returncode != 0:
-        run(["git", "-C", str(repo), "worktree", "remove", "--force", str(target)],
+        run(["git", "-C", str(repo), "worktree", "remove", "--force", "--", str(target)],
             timeout=120.0)
-        run_git(repo, ["branch", "-D", args.branch])
+        _rollback_branch(repo, args.branch)
         return _refuse("worktree registered but HEAD unreadable; rolled back")
 
     payload = {

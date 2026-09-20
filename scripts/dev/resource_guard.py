@@ -37,6 +37,7 @@ import argparse
 import errno
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -44,86 +45,139 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from dev_common import EXIT_BUSY, EXIT_REFUSED, emit, pid_alive, run_streamed  # noqa: E402
+from dev_common import (  # noqa: E402
+    EXIT_BUSY, EXIT_FAILURE, EXIT_REFUSED, emit, pid_alive, run_streamed,
+)
 
 LOCK_SUFFIX = ".agent-build.lock"
 _PARALLEL_ENV = {"CMAKE_BUILD_PARALLEL_LEVEL", "CTEST_PARALLEL_LEVEL"}
 
 
 def lock_path_for(build_dir: Path) -> Path:
-    """Lock file keyed to the build directory (sibling file, never inside)."""
-    return build_dir.parent / (build_dir.name + LOCK_SUFFIX)
+    """Lock file keyed to the build directory (sibling file, never inside).
 
-
-def _norm(path: Path) -> str:
-    resolved = Path(path).resolve()
-    return os.path.normcase(str(resolved)) if os.name == "nt" else str(resolved)
+    The build dir is canonicalised with realpath so that two spellings of one
+    directory (relative vs absolute, case differences on Windows, a junction
+    or symlink to the same tree) resolve to ONE lock file.
+    """
+    real = Path(os.path.realpath(str(build_dir)))
+    return real.parent / (real.name + LOCK_SUFFIX)
 
 
 def _read_holder(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, ValueError):
         return {}
 
 
-def _write_holder(path: Path, payload: list[str]) -> dict:
-    holder = {
+def _holder_record(payload: list[str]) -> dict:
+    return {
         "pid": os.getpid(),
         "host": socket.gethostname(),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "started_monotonic": time.monotonic(),
         "command": payload,
     }
-    path.write_text(json.dumps(holder, indent=2), encoding="utf-8")
-    return holder
 
 
 def _is_stale(path: Path, stale_after: float) -> tuple[bool, dict]:
+    """Decide whether an existing lock may be broken.
+
+    Both gates must say "dead": the recorded holder pid (host-local) must not
+    be alive, and the lock must be older than `stale_after`. Age comes from
+    the holder record when it is readable, and from the file's own mtime
+    otherwise — an empty or corrupt lock (e.g. the holder was SIGKILLed in the
+    window between creating the file and writing its record) must still be
+    breakable once old enough, or nobody could ever build here again.
+    """
     holder = _read_holder(path)
     pid = holder.get("pid")
     if isinstance(pid, int) and pid_alive(pid):
         return False, holder
     started = holder.get("started_monotonic")
-    if not isinstance(started, (int, float)):
-        return False, holder
-    age = time.monotonic() - started
+    if isinstance(started, (int, float)):
+        age = time.monotonic() - started
+    else:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return False, holder
     if age < stale_after:
         return False, holder
     return True, holder
+
+
+def _break_if_still_stale(lock_path: Path, before: bytes, stale_after: float
+                          ) -> bool:
+    """Unlink a stale lock ONLY if it still holds the exact bytes we judged.
+
+    Re-reading before the unlink closes the TOCTOU window in which another
+    process replaces the lock with a LIVE holder's record: if the bytes
+    changed, the lock is no longer ours to break and we report busy instead.
+    """
+    try:
+        current = lock_path.read_bytes()
+    except FileNotFoundError:
+        return True  # already gone; the next acquisition attempt will create it
+    except OSError:
+        return False
+    if current != before:
+        return False
+    stale, _holder = _is_stale(lock_path, stale_after)
+    if not stale:
+        return False
+    try:
+        lock_path.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float,
             verbose: bool) -> tuple[bool, dict]:
     """Try to take the lock until the wait budget runs out.
 
-    Returns (acquired, info). Never breaks a lock whose recorded holder is
-    still alive, and only breaks a dead holder's lock past the staleness age.
+    The lock file is created atomically WITH its holder record (write to a
+    temp file, then os.link into place) so there is no window in which the
+    lock exists but is empty/unparseable. Never breaks a lock whose recorded
+    holder is alive, and only breaks a dead holder's lock past the staleness
+    age, re-verifying the bytes immediately before the unlink.
     """
     deadline = time.monotonic() + max(wait, 0.0)
     waited = 0.0
     tried_mkdir = False
     while True:
+        holder = _holder_record(payload)
+        staged = lock_path.parent / (lock_path.name + f".{os.getpid()}.staged")
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            # 0o600: the lock file records the build command; on a shared
+            # multi-user build host it should not be world-readable.
+            fd = os.open(str(staged), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, json.dumps(holder, indent=2).encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.link(str(staged), str(lock_path))
+            staged.unlink()
+            return True, {"waited": round(waited, 3)}
         except FileExistsError:
+            try:
+                staged.unlink()
+            except OSError:
+                pass
             stale, holder = _is_stale(lock_path, stale_after)
             if stale:
-                # Unlink-then-recreate is safe here: the recorded holder is
-                # dead (pid liveness checked) and older than the staleness
-                # threshold. A live holder's lock is never broken. The clock
-                # and pid are host-local, so this only ever breaks locks from
-                # THIS machine — a shared network build dir stays busy
-                # (fail-closed) rather than being stolen.
                 try:
-                    lock_path.unlink()
-                    continue
+                    before = lock_path.read_bytes()
                 except OSError:
-                    # Someone else recreated it between our check and the
-                    # unlink: fall through to the busy path below.
-                    pass
+                    before = b""
+                if _break_if_still_stale(lock_path, before, stale_after):
+                    continue
+                stale = False
             if time.monotonic() >= deadline:
-                return False, {"reason": "busy", "holder": holder, "waited": round(waited, 3)}
+                return False, {"reason": "busy", "holder": holder,
+                               "waited": round(waited, 3)}
             if verbose:
                 print(f"resource-guard: build dir busy (holder pid "
                       f"{holder.get('pid')}, cmd {holder.get('command')}); waiting",
@@ -132,6 +186,10 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
             waited += 0.5
             continue
         except OSError as exc:
+            try:
+                staged.unlink()
+            except OSError:
+                pass
             if exc.errno == errno.ENOENT and not tried_mkdir:
                 # The build directory's parent does not exist yet (the build
                 # tree was never configured): create it once. A missing
@@ -143,10 +201,7 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
                     continue
                 except OSError:
                     pass
-            return False, {"reason": f"cannot create lock file: {exc}"}
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(_write_holder(lock_path, payload), indent=2))
-        return True, {"waited": round(waited, 3)}
+            return False, {"reason": f"cannot create lock file: {exc.errno} {exc}"}
 
 
 def release(lock_path: Path) -> None:
@@ -202,11 +257,18 @@ def clamp_parallelism(argv: list[str], cap: int) -> tuple[list[str], list[str]]:
 
 
 def governed_env(cap: int) -> dict[str, str]:
+    """Environment for the payload with the parallelism cap applied.
+
+    An inherited `MAKEFLAGS=-jN` would otherwise defeat the cap for `make`,
+    so every `-j<digits>` token is stripped before the cap is appended.
+    """
     env = dict(os.environ)
     env["CMAKE_BUILD_PARALLEL_LEVEL"] = str(cap)
     env["CTEST_PARALLEL_LEVEL"] = str(cap)
-    if "MAKEFLAGS" not in env or "-j" not in env["MAKEFLAGS"]:
-        env["MAKEFLAGS"] = f"-j{cap}"
+    makeflags = env.get("MAKEFLAGS", "")
+    tokens = [t for t in makeflags.split() if not re.fullmatch(r"-j\d*", t)]
+    tokens.append(f"-j{cap}")
+    env["MAKEFLAGS"] = " ".join(tokens)
     return env
 
 
@@ -261,18 +323,38 @@ def main(argv: list[str] | None = None) -> int:
     acquired, info = acquire(lock_path, payload_cmd, args.wait, args.stale_after,
                              verbose=not args.json)
     if not acquired:
-        record = {"acquired": False, "lock": str(lock_path), "detail": info,
-                  "exit_code": EXIT_BUSY}
+        reason = info.get("reason", "busy")
+        if reason == "busy":
+            message = (f"refused: build dir {build_dir} is locked by pid "
+                       f"{info.get('holder', {}).get('pid')} "
+                       f"(waited {info.get('waited')}s); another build is writing it")
+            record = {"acquired": False, "lock": str(lock_path),
+                      "detail": info, "exit_code": EXIT_BUSY}
+            code = EXIT_BUSY
+        else:
+            # lock-creation failure (permissions, EMFILE, …) is a hard
+            # failure, not contention — never reported as "busy"
+            message = (f"refused: cannot create lock file {lock_path} for build dir "
+                       f"{build_dir}: {reason}")
+            record = {"acquired": False, "lock": str(lock_path),
+                      "detail": info, "exit_code": EXIT_FAILURE}
+            code = EXIT_FAILURE
         if args.json:
             print(json.dumps(record, indent=2))
         else:
-            print(f"refused: build dir {build_dir} is locked by pid "
-                  f"{info.get('holder', {}).get('pid')} (waited {info.get('waited')}s); "
-                  f"another build is writing it", file=sys.stderr)
-        return EXIT_BUSY
+            print(message, file=sys.stderr)
+        return code
 
     try:
-        proc = run_streamed(payload_cmd, env=governed_env(args.parallel))
+        try:
+            proc = run_streamed(payload_cmd, env=governed_env(args.parallel))
+        except FileNotFoundError:
+            print(f"refused: payload command not found: {payload_cmd[0]}",
+                  file=sys.stderr)
+            return EXIT_FAILURE
+        except KeyboardInterrupt:
+            print("resource-guard: interrupted; lock released", file=sys.stderr)
+            return 130
         record = {"acquired": True, "lock": str(lock_path),
                   "lock_dir": str(build_dir), "command": payload_cmd,
                   "parallel_cap": args.parallel, "waited_for_lock": info.get("waited"),

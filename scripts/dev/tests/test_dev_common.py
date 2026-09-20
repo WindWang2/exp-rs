@@ -76,5 +76,49 @@ class MarkerTest(unittest.TestCase):
                          {"status": "not-executed", "reason": "no network"})
 
 
+class RetryPolicyTest(unittest.TestCase):
+    def test_mutating_branch_calls_run_exactly_once(self) -> None:
+        # P1-4 regression: the read-only allowlist must key on the full argv,
+        # not the bare subcommand, or `git branch -D` (the rollback) would be
+        # retried up to 3 times.
+        import subprocess
+        from _fixtures import TempRepo
+        calls: list[list[str]] = []
+
+        real_run = subprocess.run
+
+        class FakeResult:
+            returncode = 1
+            stdout = ""
+            stderr = "stubbed failure"
+
+        def fake_run(argv, *a, **kw):
+            calls.append(list(argv[3:]) if argv[:3] == ["git", "-C", str(tmp_repo)] else list(argv))
+            return FakeResult()
+
+        with TempRepo() as fx:
+            import dev_common
+            tmp_repo = fx.repo
+            dev_common.subprocess.run = fake_run
+            try:
+                for args in (["branch", "track/new", "HEAD"],   # create
+                             ["branch", "-D", "track/new"],     # rollback
+                             ["branch", "--list"]):             # read
+                    dev_common.run_git(fx.repo, args, retries=3)
+            finally:
+                dev_common.subprocess.run = real_run
+
+        by_args = {}
+        for argv in calls:
+            by_args.setdefault(tuple(argv[:2]), 0)
+            by_args[tuple(argv[:2])] += 1
+        self.assertEqual(by_args.get(("branch", "track/new")), 1,
+                         "a creating git branch call was retried")
+        self.assertEqual(by_args.get(("branch", "-D")), 1,
+                         "a destructive git branch -D call was retried")
+        self.assertEqual(by_args.get(("branch", "--list")), 3,
+                         "a read-only branch listing should retry")
+
+
 if __name__ == "__main__":
     unittest.main()

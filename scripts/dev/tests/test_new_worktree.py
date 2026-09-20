@@ -63,6 +63,52 @@ class HappyPathTest(unittest.TestCase):
                                 for n in branch_names(fx.repo)))
 
 
+class FlagInjectionTest(unittest.TestCase):
+    """A branch name that git would parse as an OPTION must be refused."""
+
+    def test_flag_shaped_branch_name_is_refused_and_renames_nothing(self) -> None:
+        with TempRepo() as fx:
+            before = branch_names(fx.repo)
+            self.assertIn(TRUNK, before)
+            proc = run_tool("new_worktree.py",
+                            ["--path", str(fx.root / "wt-flag"), "--branch=-m",
+                             "--base", f"origin/{TRUNK}", "--no-fetch"], cwd=fx.repo)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("not a valid branch name", proc.stderr)
+            # the trunk branch must still exist and still be the trunk
+            self.assertEqual(branch_names(fx.repo), before,
+                             "a flag-shaped --branch renamed or deleted a branch")
+            self.assertFalse((fx.root / "wt-flag").exists())
+
+    def test_option_like_names_all_refused(self) -> None:
+        with TempRepo() as fx:
+            for name in ("-c", "-t", "--unset-upstream", "-d", "-D", "--edit-description"):
+                before = branch_names(fx.repo)
+                proc = run_tool("new_worktree.py",
+                                ["--path", str(fx.root / "wt-flag2"),
+                                 f"--branch={name}", "--base", f"origin/{TRUNK}",
+                                 "--no-fetch"], cwd=fx.repo)
+                self.assertEqual(proc.returncode, 2, f"{name}: {proc.stderr}")
+                self.assertEqual(branch_names(fx.repo), before, name)
+
+    def test_remote_only_branch_name_is_a_conflict(self) -> None:
+        with TempRepo() as fx:
+            add_branch(fx.repo, "feature/remoteonly", touch=["r.txt"],
+                       commit_message="c: remoteonly")
+            git(fx.repo, "push", "origin", "feature/remoteonly")
+            git(fx.repo, "checkout", TRUNK)
+            git(fx.repo, "branch", "-D", "feature/remoteonly")  # local gone, remote stays
+            before = branch_names(fx.repo)
+            proc = run_tool("new_worktree.py",
+                            ["--path", str(fx.root / "wt-remote"),
+                             "--branch", "feature/remoteonly",
+                             "--base", f"origin/{TRUNK}", "--no-fetch"], cwd=fx.repo)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("refused: branch already exists (remote-tracking ref",
+                          proc.stderr)
+            self.assertEqual(branch_names(fx.repo), before)
+
+
 class RefusalTest(unittest.TestCase):
     def test_duplicate_branch_refuses_and_creates_nothing(self) -> None:
         with TempRepo() as fx:

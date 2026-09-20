@@ -82,12 +82,11 @@ MUTATIONS = [
         tool="resource_guard.py",
         test_module="test_resource_guard.py",
         test_class="ConcurrencyTest",
-        old='''        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:''',
-        new='''        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_WRONLY, 0o644)
-        except FileExistsError:''',
+        # Realistic defect: lock creation stops being exclusive (the
+        # os.O_CREAT|O_EXCL / atomic os.link hand-off replaced by a plain
+        # create-if-missing), so two writers can both "acquire".
+        old='''            os.link(str(staged), str(lock_path))''',
+        new='''            os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)''',
     ),
     Mutation(
         name="stale-lock-safety",
@@ -95,19 +94,21 @@ MUTATIONS = [
         test_module="test_resource_guard.py",
         test_class="LockLifecycleTest",
         # Realistic defect class: "every existing lock is stale" — i.e. no
-        # staleness gating at all. Note this deliberately mutates BOTH gates
-        # (pid liveness and age): each gate alone is defence in depth for the
-        # other, so a mutation that disables only one is NOT observable by
-        # the live-holder test and would prove nothing about it. The
-        # dead-holder test separately pins the positive path (dead + old →
-        # broken).
-        old='''    pid = holder.get("pid")
+        # staleness gating at all (neither the pid gate nor the age gate,
+        # including the mtime fallback for unreadable records). The
+        # live-holder test must catch that.
+        old='''    holder = _read_holder(path)
+    pid = holder.get("pid")
     if isinstance(pid, int) and pid_alive(pid):
         return False, holder
     started = holder.get("started_monotonic")
-    if not isinstance(started, (int, float)):
-        return False, holder
-    age = time.monotonic() - started
+    if isinstance(started, (int, float)):
+        age = time.monotonic() - started
+    else:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return False, holder
     if age < stale_after:
         return False, holder
     return True, holder''',

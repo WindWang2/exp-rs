@@ -32,14 +32,29 @@ EXIT_FAILURE = 1
 EXIT_REFUSED = 2
 EXIT_BUSY = 75  # EX_TEMPFAIL — lock held by another process
 
-# git subcommands that only read repository state. Under parallel agents a
-# concurrent `git fetch --prune` can transiently re-resolve these refs; a short
-# retry rides that out. Anything that mutates is excluded and fails closed.
-_GIT_READONLY_HEADS = {
-    "rev-parse", "log", "show", "status", "worktree", "branch", "diff",
-    "for-each-ref", "ls-remote", "ls-files", "cat-file", "symbolic-ref",
-    "merge-base", "rev-list", "describe", "config", "check-ignore",
-}
+# Exact argument prefixes of git commands that only READ repository state.
+# Matched on the full leading tuple, not the bare subcommand: `git branch`
+# is read-only with `--list` but a mutation when it creates or deletes a
+# branch, and `git config` is read-only only with `--get`/`--list`. Under
+# parallel agents a concurrent `git fetch --prune` can transiently
+# re-resolve these refs; a short retry rides that out. Anything that
+# mutates is excluded and fails closed after exactly one attempt.
+_GIT_READONLY_PATTERNS = [
+    ("rev-parse",), ("log",), ("show",), ("status",),
+    ("worktree", "list"),
+    ("branch", "--list"), ("branch", "-a"), ("branch", "-r"),
+    ("branch", "--show-current"), ("branch", "--contains"),
+    ("diff",), ("for-each-ref",), ("ls-remote",), ("ls-files",), ("cat-file",),
+    ("symbolic-ref",), ("merge-base",), ("rev-list",), ("describe",),
+    ("config", "--get"), ("config", "--list"), ("check-ignore",),
+    ("remote", "get-url"), ("remote", "-v"),
+]
+
+
+def _is_readonly_git(args: list[str]) -> bool:
+    if not args:
+        return False
+    return any(tuple(args[:len(pat)]) == pat for pat in _GIT_READONLY_PATTERNS)
 
 
 class ToolError(Exception):
@@ -82,7 +97,7 @@ def run_git(git_dir: Path | None, args: list[str], retries: int = 3,
     if git_dir is not None:
         argv += ["-C", str(git_dir)]
     argv += args
-    attempts = retries if args and args[0] in _GIT_READONLY_HEADS else 1
+    attempts = retries if _is_readonly_git(args) else 1
     last: subprocess.CompletedProcess | None = None
     for attempt in range(1, attempts + 1):
         try:

@@ -104,6 +104,33 @@ def collect_overlap_evidence(repo: Path, planned: list[str], base: str,
     """Gather overlap evidence for `planned` paths from every available source."""
     evidence: dict = {"planned_paths": planned, "open_prs": [], "merged_prs": [],
                       "remote_branches": [], "sibling_worktrees": []}
+    # An unresolvable base would silently produce ZERO evidence for the
+    # git-based sources; record it as not-executed instead.
+    base_proc = run_git(repo, ["rev-parse", "--verify", "--quiet", base])
+    if base_proc.returncode != 0:
+        evidence["remote_branches"] = {
+            "status": "not-executed",
+            "reason": f"base ref {base!r} does not resolve "
+                      "(git fetch it, or pass --base with an existing ref)",
+        }
+    else:
+        proc = run_git(repo, ["for-each-ref", "--format=%(refname:short)",
+                              "refs/remotes/origin"])
+        if proc.returncode == 0:
+            names = [ln.strip() for ln in proc.stdout.splitlines()
+                     if ln.strip().startswith("origin/")
+                     and len(ln.strip()) > len("origin/")
+                     and ln.strip() not in ("origin/HEAD", base)]
+            for name in sorted(names):
+                files = _branch_changed_files(repo, name, base)
+                hits = sorted({f for f in files if _matches(planned, f)})
+                if hits:
+                    ahead = git_ok(repo, ["rev-list", "--count", f"{base}..{name}"]).strip()
+                    behind = git_ok(repo, ["rev-list", "--count", f"{name}..{base}"]).strip()
+                    evidence["remote_branches"].append({
+                        "branch": name, "ahead_vs_base": int(ahead or 0),
+                        "behind_base": int(behind or 0), "overlapping_paths": hits,
+                    })
 
     open_prs, why = gh_json(repo, [
         "pr", "list", "--state", "open", "--limit", "100", "--json",
@@ -135,24 +162,6 @@ def collect_overlap_evidence(repo: Path, planned: list[str], base: str,
                         "overlapping_paths": sorted(set(hits)),
                     })
 
-    proc = run_git(repo, ["for-each-ref", "--format=%(refname:short)",
-                          "refs/remotes/origin"])
-    if proc.returncode == 0:
-        names = [ln.strip() for ln in proc.stdout.splitlines()
-                 if ln.strip().startswith("origin/")
-                 and len(ln.strip()) > len("origin/")
-                 and ln.strip() not in ("origin/HEAD", "origin/master")]
-        for name in sorted(names):
-            files = _branch_changed_files(repo, name, base)
-            hits = sorted({f for f in files if _matches(planned, f)})
-            if hits:
-                ahead = git_ok(repo, ["rev-list", "--count", f"{base}..{name}"]).strip()
-                behind = git_ok(repo, ["rev-list", "--count", f"{name}..{base}"]).strip()
-                evidence["remote_branches"].append({
-                    "branch": name, "ahead_vs_base": int(ahead or 0),
-                    "behind_base": int(behind or 0), "overlapping_paths": hits,
-                })
-
     for wt in _worktree_changes(repo):
         hits = sorted({f for f in wt["changed_files"] if _matches(planned, f)})
         if hits:
@@ -163,10 +172,16 @@ def collect_overlap_evidence(repo: Path, planned: list[str], base: str,
     return evidence
 
 
-def _head_changed_files(repo: Path, base: str) -> list[str]:
+def _head_changed_files(repo: Path, base: str) -> tuple[list[str], str | None]:
+    """(changed files, None) or ([], reason) when the base does not resolve."""
+    proc = run_git(repo, ["rev-parse", "--verify", "--quiet", base])
+    if proc.returncode != 0:
+        return [], (f"base ref {base!r} does not resolve "
+                    "(git fetch it, or pass --base with an existing ref)")
     proc = run_git(repo, ["diff", "--name-only", f"{base}...HEAD"])
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()] \
-        if proc.returncode == 0 else []
+    if proc.returncode != 0:
+        return [], f"git diff {base}...HEAD failed: {proc.stderr.strip()[:120]}"
+    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()], None
 
 
 def _human(ev: dict) -> list[str]:
@@ -219,7 +234,12 @@ def main(argv: list[str] | None = None) -> int:
         repo = _repo()
         planned = _normalize(args.paths)
         if getattr(args, "from_HEAD") or not planned:
-            head_files = _head_changed_files(repo, args.base)
+            head_files, why = _head_changed_files(repo, args.base)
+            if why is not None and not planned:
+                print(f"overlap scan failed: {why}", file=sys.stderr)
+                return EXIT_FAILURE
+            if why is not None:
+                print(f"warning: {why}", file=sys.stderr)
             for f in head_files:
                 if f not in planned:
                     planned.append(f)

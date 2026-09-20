@@ -44,19 +44,26 @@ REQUIRED_SECTIONS = [
 def _group(files: list[str]) -> dict[str, list[str]]:
     def is_header(f: str) -> bool:
         return f.endswith((".h", ".hpp"))
-    def is_test(f: str) -> bool:
+    def is_tooling_test(f: str) -> bool:
+        return f.startswith("scripts/") and "/tests/" in f
+    def is_cpp_test(f: str) -> bool:
         return f.startswith("tests/")
     def is_public_api(f: str) -> bool:
         return is_header(f) and (f.startswith("src/") or f.startswith("include/"))
     def is_doc(f: str) -> bool:
         return f.endswith((".md", ".txt")) or f.startswith("docs/")
+    def is_tooling(f: str) -> bool:
+        return f.startswith("scripts/")
     groups: dict[str, list[str]] = {"sources": [], "public_headers": [],
-                                    "tests": [], "docs": [], "other": []}
+                                    "tests": [], "dev_tooling": [],
+                                    "docs": [], "other": []}
     for f in files:
         if is_public_api(f):
             groups["public_headers"].append(f)
-        elif is_test(f):
+        elif is_tooling_test(f) or is_cpp_test(f):
             groups["tests"].append(f)
+        elif is_tooling(f):
+            groups["dev_tooling"].append(f)
         elif is_doc(f):
             groups["docs"].append(f)
         elif f.startswith("src/"):
@@ -216,17 +223,16 @@ def main(argv: list[str] | None = None) -> int:
     payload = dict(data)
     payload["pr_body"] = body
     payload["required_sections_present"] = True
-    if args.json:
-        emit(payload, True)
-        return 0
     if args.out:
         Path(args.out).write_text(body, encoding="utf-8")
         print(f"review pack written to {args.out} "
               f"({len(data['changed_files'])} changed files, "
               f"{len(data['commits'])} commits, "
               f"diff --check {'clean' if data['diff_check']['clean'] else 'DIRTY'})")
-    else:
+    elif not args.json:
         print(body)
+    if args.json:
+        emit(payload, True)
     return 0
 
 

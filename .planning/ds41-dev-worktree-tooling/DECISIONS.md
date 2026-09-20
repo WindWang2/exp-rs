@@ -22,11 +22,17 @@ alternatives, per `.agents/AGENTS.md` unattended-mode rule.
 ## D-002 — Locking primitive: `os.open(..., O_CREAT|O_EXCL)` lock file, not `fcntl`/`msvcrt`
 
 - **Context:** the guard must work on Windows (this host), Linux and macOS.
-- **Decision:** create-with-exclusive-flag lock file inside a per-build-dir `.devlock`
-  directory; holder metadata (pid, host, boot-relative start time, command) written into the
-  lock file for diagnostics; stale-lock breaking requires the recorded pid to be dead *and* the
-  lock age to exceed `--stale-after` (default 3600 s). PID liveness uses `os.kill(pid, 0)` on
-  POSIX and `OpenProcess` via `ctypes` on Windows.
+- **Decision:** the lock file is a sibling of the build directory
+  (`<build-dir>.agent-build.lock`, never inside the build tree), keyed through
+  `os.path.realpath` so relative/absolute spellings and junctions/symlinks of one
+  directory share one lock. It is created atomically WITH its holder record
+  (pid, host, monotonic start, command) via a staged file + `os.link`, so
+  there is no window in which the lock exists but is empty. Stale-lock
+  breaking requires the recorded pid to be dead *and* the age
+  (holder record when readable, else the file's own mtime) to exceed
+  `--stale-after` (default 3600 s), and the bytes are re-verified immediately
+  before the unlink. PID liveness uses `os.kill(pid, 0)` on POSIX and
+  `OpenProcess` via `ctypes` on Windows.
 - **Alternatives rejected:** `fcntl.flock` (POSIX only), `msvcrt.locking` (Windows only),
   directory-rename tricks (not atomic across platforms).
 
@@ -34,8 +40,9 @@ alternatives, per `.agents/AGENTS.md` unattended-mode rule.
 
 - **Context:** the oracle requires "拒绝/序列化" (refused **or** serialized).
 - **Decision:** default refuses immediately with exit code 75 (`EX_TEMPFAIL`) so CI-like callers
-  can branch on it; `--wait <seconds>` (default 900) serializes with a bounded wait; both paths
-  are tested. The payload never starts until the lock is held.
+  can branch on it; `--wait <seconds>` (default 0 = fail fast, opt into serialization with e.g.
+  `--wait 900`) serializes with a bounded wait; both paths are tested. The payload never starts
+  until the lock is held.
 - **Alternative rejected:** silent queue with no bound — hides contention and can deadlock a
   pipeline forever.
 
@@ -123,7 +130,7 @@ alternatives, per `.agents/AGENTS.md` unattended-mode rule.
 - **Decision:** `scripts/dev/preflight.py`, `overlap_scan.py`, `new_worktree.py`,
   `resource_guard.py`, `review_pack.py`, `stale_branches.py`, plus `dev_common.py`
   (shared git/gh helpers, retry, JSON output, exit codes) and `scripts/dev/tests/`
-  (unittest). A thin `scripts/dev/README.md` documents the commands; the user-facing guide is
-  `docs/development/agent-dev-tooling.md`.
+  (unittest + `mutation_checks.py`). A thin `scripts/dev/README.md` documents the commands;
+  the user-facing guide is `docs/development/README.md`.
 - **Alternative rejected:** a single `devtools.py` with subcommands — six independent entry
   points are independently invocable from any track's worktree and independently testable.
