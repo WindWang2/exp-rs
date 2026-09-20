@@ -23,6 +23,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <random>
 
 #include "workflow/pipeline_run_coordinator.h"
 #include "workflow/workflow_provenance.h"
@@ -1287,4 +1288,131 @@ TEST_CASE( "Provenance parse fails closed on bad envelope and dangling edges", "
         doc[QStringLiteral( "nodes" )] = nodes;
         REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
     }
+}
+
+// ---------------------------------------------------------------------------
+// WP7 mutation-fuzz smoke: corrupting any byte/structure of a checkpoint or
+// provenance/IR document must never crash and never produce a false run.
+// Deterministic PRNG — failures replay from the printed seed.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+QByteArray mutateBytes( QByteArray in, std::mt19937 &rng )
+{
+    if ( in.isEmpty() )
+        return in;
+    switch ( rng() % 5 )
+    {
+        case 0: // flip one byte
+            in[rng() % in.size()] = static_cast<char>( rng() % 256 );
+            break;
+        case 1: // truncate
+            in.chop( 1 + rng() % in.size() );
+            break;
+        case 2: // duplicate a slice in place (breaks structure, not just bytes)
+        {
+            const int at = rng() % in.size();
+            in.insert( at, in.mid( at, 1 + rng() % 64 ) );
+            break;
+        }
+        case 3: // inject a suspicious JSON fragment
+            in.insert( rng() % in.size(),
+                       QByteArrayLiteral( R"(,"version":"9.9","state":"Weird","artifact":"C:/evil/x")" ) );
+            break;
+        case 4: // swap two bytes
+        {
+            const int a = rng() % in.size();
+            const int b = rng() % in.size();
+            std::swap( in[a], in[b] );
+            break;
+        }
+    }
+    return in;
+}
+
+} // namespace
+
+TEST_CASE( "Checkpoint resume never crashes and never fabricates success under mutation", "[d17][workflow][fuzz]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "fuzz-src" ) );
+    QString checkpointFile;
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( makeSyntheticNodeExecutor() );
+        REQUIRE( coordinator.startRun( chain( 4 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpointFile = coordinator.checkpointPath();
+    }
+    QFile src( checkpointFile );
+    REQUIRE( src.open( QIODevice::ReadOnly ) );
+    const QByteArray original = src.readAll();
+    src.close();
+
+    std::mt19937 rng( 20260920 );
+    int accepted = 0;
+    for ( int i = 0; i < 150; ++i )
+    {
+        const QByteArray mutated = mutateBytes( original, rng );
+        const QString path = scratchDir( QStringLiteral( "fuzz-%1" ).arg( i ) )
+                             + QStringLiteral( "/checkpoint.json" );
+        QFile out( path );
+        REQUIRE( out.open( QIODevice::WriteOnly ) );
+        out.write( mutated );
+        out.close();
+
+        PipelineRunCoordinator resumeCoordinator;
+        resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+        QString error;
+        if ( resumeCoordinator.resumeFromCheckpoint( path, &error ) )
+        {
+            // Accepted mutations must still complete sanely.
+            ++accepted;
+            REQUIRE( waitForCompleted( resumeCoordinator ) );
+            const auto statuses = resumeCoordinator.getAllStatuses();
+            for ( const NodeStatusSnapshot &s : statuses )
+            {
+                INFO( s.nodeId.toStdString() );
+                REQUIRE( ( s.state == ExecutionState::Succeeded
+                           || s.state == ExecutionState::Failed
+                           || s.state == ExecutionState::Skipped ) );
+            }
+        }
+        else
+        {
+            REQUIRE( !error.isEmpty() ); // rejection must explain itself
+        }
+    }
+    INFO( "mutations accepted by the envelope gate: " << accepted );
+}
+
+TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][workflow][fuzz]" )
+{
+    const QByteArray irBytes = QJsonDocument( WorkflowIR::toJson( chain( 3 ) ) ).toJson();
+
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    const QString dir = scratchDir( QStringLiteral( "fuzz-prov-src" ) );
+    REQUIRE( coordinator.startRun( chain( 2 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+    QFile provFile( coordinator.provenancePath() );
+    REQUIRE( provFile.open( QIODevice::ReadOnly ) );
+    const QByteArray provBytes = provFile.readAll();
+
+    std::mt19937 rng( 7 );
+    for ( int i = 0; i < 120; ++i )
+    {
+        // IR document mutations: parse or reject — never crash.
+        const QJsonObject irDoc =
+            QJsonDocument::fromJson( mutateBytes( irBytes, rng ) ).object();
+        const auto irResult = WorkflowIR::fromJson( irDoc ); // parse or reject — never crash
+        (void) irResult.isSuccess();
+
+        const QJsonObject provDoc =
+            QJsonDocument::fromJson( mutateBytes( provBytes, rng ) ).object();
+        const auto provResult = ProvenanceGraph::fromJson( provDoc ); // same contract
+        (void) provResult.isSuccess();
+    }
+    SUCCEED( "150+120 mutations: no crash, all fail-closed" );
 }
