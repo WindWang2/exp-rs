@@ -64,11 +64,6 @@ namespace
 
 constexpr int kIterationsPerSeed = 300;
 
-IpcFrameLimits defaultLimits()
-{
-    return IpcFrameLimits{};
-}
-
 /// Failure reason for the truncation/corruption property, or nullopt when the
 /// property holds. Doubles as the ddmin predicate in the directed defect case.
 std::optional<std::string> wireOracle( const std::string &wire, bool peerClosed,

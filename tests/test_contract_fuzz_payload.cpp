@@ -561,6 +561,35 @@ TEST_CASE( "plugin ui schema fuzz: worker-supplied commandId of the wrong type "
                 mentionsDepth = true;
         CHECK( mentionsDepth );
 
+        // A WIDE but shallow value is accepted: the cap is on nesting DEPTH,
+        // not on the number of containers (a wide value used to be refused by
+        // a node-counting implementation of the same check).
+        {
+            // Sized to stay WELL under the byte cap (4096) so only the depth
+            // rule can refuse it: ~60 items x ~24 bytes.
+            Json::Value wide( Json::arrayValue );
+            for ( int i = 0; i < 60; ++i )
+            {
+                Json::Value item( Json::objectValue );
+                item[ "id" ] = "i." + std::to_string( i );
+                item[ "label" ] = "L" + std::to_string( i );
+                wide.append( item );
+            }
+            CHECK( Json::writeString( [] {
+                       Json::StreamWriterBuilder builder;
+                       builder[ "indentation" ] = "";
+                       return builder;
+                   }(), wide ).size()
+                   < 4096 );
+            Json::Value wideEvent( Json::objectValue );
+            wideEvent[ "contributionId" ] = "menu.refresh";
+            wideEvent[ "controlId" ] = "ctl.name";
+            wideEvent[ "eventType" ] = "changed";
+            wideEvent[ "value" ] = wide;
+            REQUIRE_NOTHROW( result = exprs::validateUiEvent( wideEvent ) );
+            CHECK( result.ok() );
+        }
+
         // At the cap it is accepted (32 levels + the value wrapper).
         Json::Value shallow( Json::objectValue );
         Json::Value *walk = &shallow;
@@ -994,7 +1023,9 @@ TEST_CASE( "manifest file fuzz: loadManifestFromFile is total on hostile files",
     for ( const int depth : { 16, 64, 256, 900, 4096, 65536, 200000 } )
     {
         const std::string bomb = sicnu::fuzz::depthBomb( depth );
-        const std::string deepValue = bomb.substr( 5 ); // strip {"a": and trailing }
+        // Use only the bracketed part of the bomb, so the fixture is a
+        // well-formed JSON value rather than relying on failIfExtra=false.
+        const std::string deepValue = bomb.substr( 5, bomb.size() - 6 );
         exprs::PluginManifest manifest;
         exprs::PluginDiagnostic error;
         bool ok = true;

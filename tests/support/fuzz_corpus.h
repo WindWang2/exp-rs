@@ -318,7 +318,7 @@ inline const std::vector<std::string> &pathCorpus()
         // EVERY host, so the D5 totality pin is host-independent.
         entries.push_back( std::string( "\xFF\xFE", 2 ) );
         entries.push_back( std::string( "a\x80" "b", 3 ) );
-        entries.push_back( std::string( "\xC3" "alone.txt", 9 ) );
+        entries.push_back( std::string( "lone\xC3.txt", 9 ) );  // lone lead byte: invalid UTF-8
         entries.push_back( std::string( "\xE4\xB8" "trunc.txt", 11 ) );
         return entries;
     }();

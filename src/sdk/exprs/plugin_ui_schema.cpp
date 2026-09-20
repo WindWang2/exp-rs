@@ -495,34 +495,37 @@ PluginUiEventParseResult validateUiEvent( const Json::Value &event,
         // Depth bound FIRST: the byte cap does not bound the recursion a
         // hostile event can trigger (4096 bytes of "[[[…]]]" is ~2000 levels,
         // and the readers stack-overflow far below that). Iterative walk, so
-        // the check itself cannot overflow.
-        size_t maxDepthSeen = 0;
-        std::vector<const Json::Value *> pending = { &value };
-        bool tooDeep = false;
-        while ( !pending.empty() && !tooDeep )
+        // the check itself cannot overflow. Each pending entry carries its
+        // DEPTH (not a node counter): a wide value and a deep one are different
+        // things, and only the deep one has to be refused.
+        struct Pending
         {
-            const Json::Value *current = pending.back();
+            const Json::Value *value;
+            size_t depth;
+        };
+        std::vector<Pending> pending = { { &value, 1 } };
+        while ( !pending.empty() )
+        {
+            const Pending current = pending.back();
             pending.pop_back();
-            if ( current->isObject() || current->isArray() )
+            if ( !current.value->isObject() && !current.value->isArray() )
+                continue;
+            if ( current.depth > limits.maxEventValueDepth )
             {
-                ++maxDepthSeen;
-                if ( maxDepthSeen > limits.maxEventValueDepth )
-                {
-                    fail( result.errors, "event.value",
-                          "value nesting exceeds the depth cap ("
-                              + std::to_string( limits.maxEventValueDepth ) + " levels)" );
-                    return result;
-                }
-                if ( current->isObject() )
-                {
-                    for ( const std::string &key : current->getMemberNames() )
-                        pending.push_back( &( ( *current )[ key ] ) );
-                }
-                else
-                {
-                    for ( Json::ArrayIndex index = 0; index < current->size(); ++index )
-                        pending.push_back( &( ( *current )[ index ] ) );
-                }
+                fail( result.errors, "event.value",
+                      "value nesting exceeds the depth cap ("
+                          + std::to_string( limits.maxEventValueDepth ) + " levels)" );
+                return result;
+            }
+            if ( current.value->isObject() )
+            {
+                for ( const std::string &key : current.value->getMemberNames() )
+                    pending.push_back( { &( ( *current.value )[ key ] ), current.depth + 1 } );
+            }
+            else
+            {
+                for ( Json::ArrayIndex index = 0; index < current.value->size(); ++index )
+                    pending.push_back( { &( ( *current.value )[ index ] ), current.depth + 1 } );
             }
         }
 

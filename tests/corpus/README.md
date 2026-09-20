@@ -253,3 +253,26 @@ Verdict was SHIP-WITH-FIXES; every finding is dispositioned below.
 | F9 `resolvedPath` encoding undocumented | P2 | **FIXED** — documented as the platform narrow encoding (the form callers feed back into std::filesystem). |
 | F10 legacy `Json::Reader` grammar narrowed (comments) | P2 | **FIXED** — `allowComments` preserved on all three migrated readers. |
 | F11–F14 (unused constant, missing `<fstream>`, OWNERSHIP wording, PR_BODY.md ignore) | NIT | **FIXED** — plus PR_BODY.md stays out of the repository entirely (the PR is created directly with `gh pr create`). |
+
+## Re-review disposition (second pass, verdict SHIP, no residual P0/P1)
+
+The reviewer's re-verification confirmed both P1s closed and found one defect
+**introduced by the remediation itself**, now fixed:
+
+- **Depth-cap implementation counted container NODES, not depth** — a wide but
+  shallow value (e.g. 60 sibling objects, ~1.4 KB) was refused as "value nesting
+  exceeds the depth cap (32 levels)". The walk now carries a depth per pending
+  entry; the wide-value-accepted case pins the corrected semantics (the lane
+  sizes the fixture well under the byte cap so only the depth rule can refuse
+  it, and asserts that in the test itself).
+- **`frame["op"].asString()` was unguarded at both parseFrame call sites**
+  (`src/cli/sicnu_worker_main.cpp`, `src/processing/framework/local_worker_host.cpp`)
+  — pre-existing on master, but the new lane pins `{"v":1,"op":42}` as parseable,
+  so leaving it would have made the pin a lie. Both reads are now type-checked.
+- Nits fixed: the manifest depth fixture now emits a well-formed JSON value
+  (previously relied on `failIfExtra=false`), the invalid-UTF-8 corpus entry's
+  byte length corrected, dead `defaultLimits()` helper removed.
+
+Final verification with these fixes: frame 13111/12, payload 6478/10,
+paths 6692/4 assertions — two consecutive passes — plus the ASan lane
+(zero reports).
