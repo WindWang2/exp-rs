@@ -393,3 +393,7 @@ data/labs/_tmp/
 !.planning/ds41-capability-help-sync/
 .planning/ds41-capability-help-sync/*
 !.planning/ds41-capability-help-sync/*.md
+# flash-taskcenter-runtime-12: track planning notes (markdown only; logs stay local).
+!.planning/flash-taskcenter-runtime-12/
+.planning/flash-taskcenter-runtime-12/*
+!.planning/flash-taskcenter-runtime-12/*.md

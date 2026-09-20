@@ -87,7 +87,8 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
   auto &center = sicnu::TaskCenter::instance();
   const long taskId = center.enqueueTask( request.algorithmId, request.params, request.autoLoad,
                                           request.priority, request.parentTaskIds, request.autoDispatch,
-                                          request.resourceEstimateMb, request.source );
+                                          request.resourceEstimateMb, request.source,
+                                          request.latencyClass );
 
   auto shared = std::make_shared<ExecutionHandle::Shared>();
   shared->taskId = taskId;
@@ -415,10 +416,14 @@ unsigned int ExecutionPlane::estimateFromPreflight( const std::string &algorithm
   return 0;
 }
 
-sicnu::TaskAdmissionSnapshot ExecutionPlane::admissionSnapshot( const QString &algorithmId,
-                                                                unsigned int resourceEstimateMb ) const
+sicnu::TaskAdmissionSnapshot ExecutionPlane::admissionSnapshot(
+    const QString &algorithmId,
+    unsigned int resourceEstimateMb,
+    const QString &source,
+    std::optional<sicnu::LatencyClass> latencyClassOverride ) const
 {
-  return sicnu::TaskCenter::instance().admissionSnapshot( algorithmId, resourceEstimateMb );
+  return sicnu::TaskCenter::instance().admissionSnapshot(
+      algorithmId, resourceEstimateMb, source, latencyClassOverride );
 }
 
 // ---------------------------------------------------------------------------
