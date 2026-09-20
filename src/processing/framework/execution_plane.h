@@ -40,6 +40,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "framework/task_center.h"
 
@@ -80,6 +81,10 @@ struct ExecutionRequest
   /// feeds; see ExecutionPlane::estimateFromPreflight.
   unsigned int resourceEstimateMb = 0;
   QList<long> parentTaskIds;        ///< DAG gating (workflow pipelines)
+  /// 12.0 D2: explicit workload lane for the interactive-reserve weight
+  /// gate. Unset → the `source` tag maps to a lane (ui/mcp/agent →
+  /// Interactive, prefetch/batch → Batch, else Background).
+  std::optional<sicnu::LatencyClass> latencyClass;
   std::chrono::milliseconds timeout{ 0 }; ///< enforced by await/awaitResult
   bool cancelOnTimeout = true;      ///< request TaskCenter cancel when the deadline hits
 };
@@ -283,8 +288,14 @@ class ExecutionPlane
     static unsigned int estimateFromPreflight( const std::string &algorithmId, const Json::Value &params );
 
     /// Point-in-time admission snapshot passthrough (see TaskCenter).
-    sicnu::TaskAdmissionSnapshot admissionSnapshot( const QString &algorithmId,
-                                                    unsigned int resourceEstimateMb = 0 ) const;
+    /// @a source / @a latencyClassOverride let a preflight probe the lane the
+    /// real submission would occupy (12.0 D2 — e.g. an explicit
+    /// ExecutionRequest.latencyClass).
+    sicnu::TaskAdmissionSnapshot admissionSnapshot(
+        const QString &algorithmId,
+        unsigned int resourceEstimateMb = 0,
+        const QString &source = QString(),
+        std::optional<sicnu::LatencyClass> latencyClassOverride = std::nullopt ) const;
 
   private:
     ExecutionPlane() = default;

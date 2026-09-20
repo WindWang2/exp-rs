@@ -13,11 +13,16 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QPointer>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <string>
 #include <functional>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -189,6 +194,32 @@ struct AlgorithmTaskInfo {
     /// root submissions. Orthogonal to parentTaskIds (DAG data-dependency
     /// edges): ownerTaskId is the structured-concurrency OWNERSHIP edge.
     long ownerTaskId = -1;
+    /// 12.0 fairness: steady-clock stamp of admission into the queue, feeding
+    /// the aging promotion (sicnu::agedPriority). Kept across in-place
+    /// auto-retries — queue-wait credit accumulates; a resurrected task does
+    /// not rejoin the heap at zero wait.
+    std::chrono::steady_clock::time_point enqueueSteadyStamp;
+    /// Effective heap priority after aging (equals the base priority until
+    /// promoted). Observability mirror of the value the ready heap carries.
+    int effectivePriority = static_cast<int>( TaskPriority::Normal );
+    /// 12.0: workload lane resolved at enqueue from the submission source.
+    /// Feeds ResourceRequest.latencyClass so the interactive-reserve weight
+    /// gate protects UI/agent work from batch saturation. Not a preemption
+    /// mechanism — admission-only.
+    LatencyClass latencyClass = LatencyClass::Background;
+    /// 12.0 cancel watchdog: steady-clock deadline armed when the task enters
+    /// Cancelling (cancelWatchdogMs). An expired deadline finalizes the task
+    /// Canceled — keeping the request's typed reason — when the worker's
+    /// terminal record never arrives (attribution rides the
+    /// CancelWatchdogFired counter + cancel/watchdog_timeout trace). Zero
+    /// time_point = unarmed.
+    std::chrono::steady_clock::time_point cancelDeadline;
+    /// Steady-clock stamp of the cancel request — the cancel-latency
+    /// telemetry event measures against it. Zero until Cancelling.
+    std::chrono::steady_clock::time_point cancelRequestStamp;
+    /// Steady-clock stamp of the Dispatching→Running flip — ExecutionEnd
+    /// duration telemetry measures against it. Zero until first Running.
+    std::chrono::steady_clock::time_point runStartStamp;
 };
 
 struct PipelineExecutionInfo {
@@ -220,6 +251,12 @@ struct TaskAdmissionSnapshot
     /// 9.0 M5: transient-child allowance state at snapshot time.
     unsigned int transientActive = 0;
     unsigned int transientCap = 0;
+    /// 12.0: bounded-pending state at snapshot time (cap 0 = unbounded).
+    unsigned int pendingCount = 0;
+    unsigned int pendingCap = 0;
+    /// True when a submission would be REFUSED outright (pending cap hit) —
+    /// distinct from wouldAdmit=false, which means "held, not dropped".
+    bool queueFull = false;
     QString reason;                ///< human-readable hold reason when !wouldAdmit
 };
 
@@ -240,6 +277,10 @@ public:
 
     static TaskCenter& instance();
 
+    /// @a latencyClassOverride (12.0 D2): an explicit workload lane wins over
+    /// the `source`→lane map — callers that cannot express their class via a
+    /// source tag (or intentionally run interactive-class work from a
+    /// background-tagged entry) force it here. Unset → `source` mapping.
     long enqueueTask(const QString& algorithmId,
                      const QVariantMap& params,
                      bool autoLoad = true,
@@ -247,7 +288,8 @@ public:
                      const QList<long>& parentTaskIds = QList<long>(),
                      bool autoDispatch = false,
                      unsigned int resourceEstimateOverrideMb = 0,
-                     const QString& source = QString());
+                     const QString& source = QString(),
+                     std::optional<LatencyClass> latencyClassOverride = std::nullopt);
 
     /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
     long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
@@ -335,8 +377,20 @@ public:
     /// Point-in-time admission snapshot for a candidate (see struct). Pure
     /// query shared by the ExecutionPlane and preflight consumers so
     /// "Preflight → Resource Admission → TaskCenter" consults one logic.
+    /// @a source is the submission tag (JobRequest.source vocabulary) — the
+    /// weight gate evaluates that lane's latency class so a preflight for a
+    /// "gui"/"mcp" candidate reports the interactive-reserve verdict it
+    /// would actually get (review P2; empty = Background, pre-12.0 behavior).
+    /// @a latencyClassOverride mirrors the enqueueTask override (D2): set it
+    /// when the eventual submission would carry an explicit lane.
+    /// Known limits vs the live pass: the candidate is modeled at
+    /// TaskPriority::Normal with no queue stamp (aging is not simulated) and
+    /// the worker-originated transient-child bypass does not apply — both
+    /// are conservative (snapshot may under-report admission, never over-).
     TaskAdmissionSnapshot admissionSnapshot(const QString& algorithmId,
-                                            unsigned int resourceEstimateOverrideMb = 0) const;
+                                            unsigned int resourceEstimateOverrideMb = 0,
+                                            const QString& source = QString(),
+                                            std::optional<LatencyClass> latencyClassOverride = std::nullopt) const;
 
     /// Wait for task to reach a terminal status or timeout.
     AlgorithmTaskInfo waitForTask( long taskId,
@@ -398,6 +452,45 @@ public:
     /// off (default).
     void setIoHeavyLimit( unsigned int maxConcurrent );
     unsigned int ioHeavyLimit() const;
+
+    /// --- Track 12: fairness / bounded queue / cancel watchdog -------------
+    /// Starvation-free scheduling: a queued candidate's effective priority
+    /// improves by one level per @a intervalMs of queue wait (floor 0),
+    /// applied by an aging sweep at the head of every admission pass —
+    /// static High beats static Low immediately, but a long-waiting Low
+    /// eventually outranks fresh High work so a sustained high-priority
+    /// stream cannot starve it forever. 0 disables aging (strict static
+    /// priority, pre-12.0 behavior). Default: SICNU_TASK_AGING_MS else 5000.
+    void setAgingIntervalMs( unsigned int intervalMs );
+    unsigned int agingIntervalMs() const;
+    /// Hard bound on live (non-terminal) tasks. A submission arriving while
+    /// the bound is saturated is REFUSED with -1 (the same sentinel as the
+    /// shutdown path) plus a TasksRefused telemetry increment — bounded
+    /// backpressure instead of unbounded queue growth. A pipeline submission
+    /// is refused atomically before creating any step task. 0 = unbounded.
+    /// Default: SICNU_TASK_MAX_PENDING else 4096.
+    void setMaxPendingTasks( unsigned int maxTasks );
+    unsigned int maxPendingTasks() const;
+    unsigned int pendingTaskCount() const;
+    /// Bounded cancel latency: a task still in Cancelling @a timeoutMs after
+    /// the request (worker gone without a terminal record) is finalized
+    /// Canceled with reason Engine so waiters and slots never strand.
+    /// 0 disables. Default: SICNU_TASK_CANCEL_TIMEOUT_MS else 30000.
+    void setCancelWatchdogMs( unsigned int timeoutMs );
+    unsigned int cancelWatchdogMs() const;
+    /// Sum cap on descriptor-declared cpuThreads across active tasks
+    /// (execution.cpuThreads). 0 = gate off (default — the RAM/slot gates
+    /// already bound parallelism; opt-in).
+    void setCpuThreadLimit( unsigned int maxThreads );
+    /// Sum caps on descriptor-declared 0..100 disk/network weights across
+    /// active tasks (execution.diskReadWeight / diskWriteWeight /
+    /// networkWeight). Each cap 0 = gate off; SchedulerLimits defaults are
+    /// 100. Non-interactive candidates also respect the interactive reserve.
+    void setIoWeightLimits( unsigned int diskRead, unsigned int diskWrite,
+                            unsigned int network );
+    /// Fraction (0..100) of each weight cap reserved for Interactive-class
+    /// candidates (and candidates aged to top priority). Default 25.
+    void setInteractiveReservePercent( unsigned int percent );
 
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
@@ -469,7 +562,8 @@ private:
                        CancelHook onCancel,
                        bool autoLoad,
                        TaskPriority priority,
-                       const QList<long>& parentTaskIds);
+                       const QList<long>& parentTaskIds,
+                       std::optional<LatencyClass> latencyClassOverride = std::nullopt);
     /// Shutdown finalization (#684): cancel every non-terminal task (engine
     /// flags armed, queued jobs cancelled), then — after the engine joined —
     /// force any task still in Dispatching/Running/Cancelling to Canceled so
@@ -554,17 +648,39 @@ private:
     /// Bounded transient auto-retry cap (0..3; default 1, env-overridable).
     int m_maxAutoRetries = 1;
     /// Per-task declared admission dimensions (descriptor-derived, resolved
-    /// once per task like the RAM estimate cache).
+    /// once per task like the RAM estimate cache). Weight dims are 0..100
+    /// relative loads; a dimension of 0 means "does not gate on this
+    /// resource" (TaskResourceBudget2 contract).
     struct AdmissionDims
     {
         unsigned int tempDiskMb = 0;
         unsigned int vramMb = 0;
+        unsigned int cpuThreads = 0;
+        unsigned int diskReadWeight = 0;
+        unsigned int diskWriteWeight = 0;
+        unsigned int networkWeight = 0;
         bool ioHeavy = false;
+        /// Copy the six declared dimensions into a budget2 request shell —
+        /// latencyClass / priority / submitStamp stay caller-owned (the
+        /// admission pass fills task state, the snapshot fills the lane).
+        sicnu::ResourceRequest toResourceRequest() const;
     };
     mutable QMap<long, AdmissionDims> m_admissionDimsCache;
     /// Descriptor-backed admission dimensions for @a task (cached; a
     /// descriptor failure yields all-zero dims = no gating).
     AdmissionDims admissionDimsLocked( const AlgorithmTaskInfo &task ) const;
+    /// 12.0: lock-free descriptor warm — adapter lookup + execution dims +
+    /// ioHeavy (+ optional display name) for the warm paths (enqueueTask /
+    /// submitPipeline / snapshot). All-zero dims on any failure.
+    static AdmissionDims descriptorDimsForAlgorithm( const QString &algorithmId,
+                                                     QString *displayNameOut = nullptr );
+    /// Resolver + conservative class fallback, mirroring
+    /// TaskResourceBudget::resolve without touching m_resourceBudget
+    /// unlocked (residual #1097). 0 on failure/unknown.
+    static unsigned int estimateMbForAlgorithm( const TaskEstimateResolver &resolver,
+                                                const QString &algorithmId );
+    /// Shared descriptor agentMetadata.execution parser for the warm paths.
+    static AdmissionDims parseAdmissionDims( const Json::Value &execution );
     /// Per-algorithm cached RAM estimate for paths with NO per-task id
     /// (admissionSnapshot's candidate, resolveEstimateMb): the registry-backed
     /// resolver parses descriptor JSON, so without this cache every admission
@@ -683,6 +799,35 @@ private:
     /// candidates rotate FIFO across passes, so the cap never strands work.
     static constexpr unsigned int kAdmissionScanFloor = 32;
 
+    /// 12.0 D3: live (non-terminal) task count for the pending bound.
+    /// Incremented on task insertion, decremented on the terminal transition
+    /// inside setTaskStatusLocked (the single transition seam), reset by
+    /// shutdownForTests. clearCompletedTasks only removes terminal tasks, so
+    /// it never touches the count.
+    unsigned int m_liveTaskCount = 0;
+    /// 12.0 D1: aging promotion interval (0 = off). Set from
+    /// SICNU_TASK_AGING_MS (default 5000) in resetResourceProfileLimits.
+    unsigned int m_agingIntervalMs = 5000;
+    /// 12.0 D3: pending bound (0 = unbounded). SICNU_TASK_MAX_PENDING, else 4096.
+    unsigned int m_maxPendingTasks = 4096;
+    /// 12.0 D4: cancel watchdog timeout (0 = off).
+    /// SICNU_TASK_CANCEL_TIMEOUT_MS, else 30000.
+    unsigned int m_cancelWatchdogMs = 30000;
+    /// Count of Cancelling tasks with an armed deadline — enforceCancelDeadlines
+    /// early-outs on 0 so opportunistic calls cost one comparison.
+    unsigned int m_armedCancelDeadlines = 0;
+    /// 12.0 D4 watchdog thread. Lock discipline: watchdogMain alternates
+    /// m_watchdogMutex (cv wait) and m_mutex (enforce) — never holds one while
+    /// acquiring the other, and scheduler code never touches m_watchdogMutex,
+    /// so the two lock domains cannot deadlock. stopWatchdog takes the thread
+    /// object under m_mutex (atomic against ensureWatchdogStartedLocked's
+    /// check+spawn) and joins it WITHOUT m_mutex (the thread needs it to
+    /// finish its enforce pass).
+    std::thread m_watchdogThread;
+    std::atomic<bool> m_watchdogStop{ false };
+    std::mutex m_watchdogMutex;
+    std::condition_variable m_watchdogCv;
+
     /// True when @p task may be staged for launch by the admission pass
     /// (launch-candidate predicate). m_mutex held.
     bool isLaunchCandidateLocked( const AlgorithmTaskInfo &task ) const;
@@ -693,6 +838,35 @@ private:
     void pushReadyCandidateLocked( long taskId );
     /// Invalidates the task's heap entries (lazy deletion on next pop).
     void dropReadyCandidateLocked( long taskId );
+
+    /// 12.0 D1: aging sweep at the head of every admission pass — recomputes
+    /// each live candidate's effective priority (agedPriority over the
+    /// enqueue stamp) and re-pushes improvers with fresh serials; stale heap
+    /// entries die lazily on pop. Bounded by the ready-candidate count.
+    /// m_mutex held; a no-op when m_agingIntervalMs == 0.
+    void applyAgingSweepLocked();
+    /// The task's effective heap priority at @a now: base priority promoted
+    /// by one level per m_agingIntervalMs of queue wait (floor 0). m_mutex held.
+    int effectivePriorityLocked( const AlgorithmTaskInfo &task,
+                                 std::chrono::steady_clock::time_point now ) const;
+    /// Workload lane from the submission source tag (D2): UI/dialog/agent/
+    /// panel surfaces map to Interactive, workflow/pipeline machinery to
+    /// Background, prefetch/batch-dialog to Batch. Static — no scheduler state.
+    static LatencyClass latencyClassForSource( const QString &source );
+
+    /// 12.0 D4: finalize Cancelling tasks whose cancelDeadline has passed
+    /// (the worker vanished without a terminal record). Takes and releases
+    /// m_mutex internally; safe to call from any thread. Called by the
+    /// watchdog thread (25 ms tick) and opportunistically at the top of
+    /// onJobRecord (early-out when nothing is armed).
+    void enforceCancelDeadlines();
+    /// Lazily starts the watchdog thread on the first armed deadline.
+    /// m_mutex held (thread creation itself takes no scheduler locks).
+    void ensureWatchdogStartedLocked();
+    /// Signals + joins the watchdog thread. Must be called WITHOUT m_mutex
+    /// (the thread needs it to make progress before exiting).
+    void stopWatchdog();
+    void watchdogMain();
 
     /// Non-autoDispatch (manual/QgsTask) queued tasks with satisfied parents:
     /// legacy behavior applies placeholder substitution to them on every
