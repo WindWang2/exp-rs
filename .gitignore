@@ -388,3 +388,8 @@ data/labs/_tmp/
 !.planning/ds41-build-portability/
 .planning/ds41-build-portability/*
 !.planning/ds41-build-portability/*.md
+
+# ds41-capability-help-sync (Track D1): track planning notes (markdown only; logs stay local).
+!.planning/ds41-capability-help-sync/
+.planning/ds41-capability-help-sync/*
+!.planning/ds41-capability-help-sync/*.md

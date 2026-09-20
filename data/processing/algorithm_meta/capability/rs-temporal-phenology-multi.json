@@ -1,15 +1,15 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u519c\u7530",
         "\u679c\u56ed",
         "\u8349\u5730"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u591a\u719f\u5236\u8bc6\u522b",
         "\u8de8\u5e74\u4f5c\u7269\u7a97\u53e3",
@@ -17,12 +17,12 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 (decomposition + per-cycle thresholding)) \u2014 bounded by maxCyclesPerYear",
       "grade" : "bit_exact",
@@ -31,7 +31,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -45,10 +45,10 @@
       }
     ],
     "family" : "temporal",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "numeric",
@@ -77,7 +77,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -92,7 +92,7 @@
           "type" : "integer"
         },
         {
-          "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -121,7 +121,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -179,27 +179,27 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Common grid, acquisition times; >= ~2 full years for stable climatology; >= ~12 valid samples"
     ],
     "schema_version" : 2,
     "summary" : "\u7269\u5019 2.0\uff1a\u81ea\u52a8\u591a\u5468\u671f\u5019\u9009\uff08\u5cf0\u503c\u68c0\u6d4b\uff09\u3001\u8de8\u5e74\u7a97\u53e3\u6309\u6536\u83b7\u5e74\u5f52\u5c5e\u3001\u9010\u7a97\u53e3\u8d28\u91cf\u65d7\u6807\uff1b\u4f4e\u8986\u76d6\u7a97\u53e3\u62d2\u7edd\u8f93\u51fa\u800c\u975e\u786c\u731c\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u81ea\u52a8\u5468\u671f\u5019\u9009",
         "\u8de8\u5e74\uff08\u6536\u83b7\u5e74\uff09\u7a97\u53e3",
         "\u8d28\u91cf\u65d7\u6807\u4e0e\u62d2\u7edd\u8bed\u4e49",
         "\u591a\u719f\u5236\u6307\u6570"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u519c\u4e1a\u9065\u611f",
         "\u7269\u5019\u5b66"
@@ -213,7 +213,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "temporal",
     "phenology",

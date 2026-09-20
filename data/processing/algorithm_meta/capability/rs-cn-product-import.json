@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u4e0d\u786e\u5b9a\u4ea7\u54c1\u5bb6\u65cf\u65f6\u7684\u7edf\u4e00\u5165\u53e3",
         "Agent \u81ea\u52a8\u5316\u6570\u636e\u51c6\u5907"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -46,10 +46,10 @@
       }
     ],
     "family" : "io",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -78,7 +78,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "false",
@@ -104,21 +104,21 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "data-formats",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Product directory with CRESDA sidecar XML and TIFF (offline)",
       "\u79bb\u7ebf\u53ef\u7528\uff1a\u4ec5\u89e3\u6790\u4ea7\u54c1\u81ea\u5e26\u6587\u4ef6\uff1b\u4f20\u611f\u5668\u753b\u50cf\u6765\u81ea data/products/sensor_profiles\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u56fd\u4ea7\u536b\u661f\u4ea7\u54c1\u7edf\u4e00\u5bfc\u5165\uff1a\u81ea\u52a8\u8bc6\u522b GF-1/2/6/7\u3001ZY-3\u3001ZY-1 02C\u3001HJ-1/2 CCD \u5bb6\u65cf\uff0c\u8d70\u6807\u51c6\u5316\u5bfc\u5165\u8ba1\u5212\uff08\u8bc6\u522b\u2192\u68c0\u67e5\u2192\u6821\u9a8c\u2192\u7ec4\u6210\u89e3\u6790\u2192\u89d2\u8272\u6620\u5c04\u2192\u53ef\u9009\u5b9a\u6807\u2192\u5806\u6808\u2192\u6eaf\u6e90\uff09\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u4ea7\u54c1\u8bc6\u522b",
         "sidecar \u4e16\u4ee3\u68c0\u6d4b",
@@ -126,7 +126,7 @@
         "\u53ef\u9009\u5b9a\u6807",
         "\u5bfc\u5165\u6eaf\u6e90"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u636e\u5904\u7406"
       ],
@@ -139,7 +139,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "cn-satellite",
     "gaofen",

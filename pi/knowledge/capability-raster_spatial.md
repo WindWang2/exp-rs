@@ -2,7 +2,7 @@
 
 # 栅格空间分析（raster_spatial）
 
-共 15 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 16 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:align
 
@@ -162,6 +162,20 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 教学概念：欧氏距离、缓冲区
 - 适用课程：GIS 原理
 - 典型练习：生成距最近河流距离图并按 500m 阈值划定缓冲带。
+
+## rs:quality_mosaic
+
+生产级质量镶嵌：辐射均衡、接缝线、羽化过渡与逐像素来源溯源，输出分块原子化 GeoTIFF、金字塔与质量报告。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、height（integer）、inputCount（integer）、output（raster）、rejectedInputs（integer）、seamCount（integer）、width（integer）
+- 参数：balancing（string）、bandCount（integer）、blending（string）、inputs（string）、method（enum）、output（string）、overviews（string）、provenance（string）、qualityWeights（string）、reportOutput（string）、seamline（string）
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少必需参数 inputs/output，或 method、balancing.rejectPolicy、blending.mode 枚举非法、bandCount 超过最小输入波段数。处置：按 schema 校正参数与枚举值，bandCount 取不超过最小输入波段数的值
+  - `GRID_MISMATCH` — 输入未共配准到同一 CRS/像素网格（CRS、像素尺寸、Y 方向或旋转/剪切不一致），或云掩模与场景地理配准不符。处置：先将各输入重投影/重采样到同一参考网格，并修正云掩模的地理配准
+  - `DATASET_NOT_FOUND` — 输入栅格路径不存在或无法用 GDAL 打开。处置：检查输入路径与文件完整性
+  - `EXECUTION_FAILED` — 辐射均衡被拒（增益异常且 rejectPolicy 为 fail），或拼接瓦片读写与输出发布失败。处置：放宽 balancing.minGain/maxGain 或改用 rejectPolicy=drop，并确认输出目录可写
 
 ## rs:rasterize
 

@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
     "applicability" : 
@@ -25,7 +20,6 @@
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations + tile \u00d7 segments \u00d7 scenes \u00d7 terms\u00b2)",
@@ -35,12 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "failure_modes" : 
     [
       {
@@ -87,7 +75,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -103,7 +90,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -127,7 +113,6 @@
         },
         {
           "default" : "none",
-          "enum" :
           "enum" : 
           [
             "none",
@@ -140,7 +125,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -211,7 +195,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -219,8 +202,6 @@
     "operator_group" : "temporal",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
     "summary" : "\u5b63\u8282\u8c03\u6574\u8d8b\u52bf\u65ad\u88c2\u5206\u5272\uff1a\u9010\u6bb5\u8c10\u6ce2+\u7ebf\u6027\u8d8b\u52bf\u91cd\u62df\u5408\uff08BFAST/CCDP \u601d\u60f3\u7684\u8bda\u5b9e\u5b9e\u73b0\uff09\u3002",
     "teaching_use" : 
     {
@@ -243,7 +224,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

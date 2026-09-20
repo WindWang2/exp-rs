@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "Landsat \u5b58\u6863\u6570\u636e\u5904\u7406\u5165\u53e3",
         "\u957f\u65f6\u5e8f\u751f\u4ea7\u7684\u6807\u51c6\u5316\u8f93\u5165"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -36,10 +36,10 @@
       }
     ],
     "family" : "io",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -58,7 +58,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -78,27 +78,27 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "thermal"
     ],
     "operator_group" : "data-formats",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Scene directory with *_MTL.txt and band GeoTIFFs"
     ],
     "schema_version" : 2,
     "summary" : "Landsat \u6570\u636e\u5bfc\u5165\uff1a\u8bfb\u53d6 Landsat \u7cfb\u5217\uff085/7/8/9\uff09\u4ea7\u54c1\u5305\uff0c\u81ea\u52a8\u89e3\u6790\u5143\u6570\u636e\u5b8c\u6210\u5b9a\u6807\u3001\u89d2\u5ea6\u4e0e QA \u6ce2\u6bb5\u7ec4\u7ec7\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "Landsat \u4ea7\u54c1\u7ed3\u6784",
         "\u5143\u6570\u636e\u89e3\u6790",
         "\u8f90\u5c04\u5b9a\u6807"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u636e\u5904\u7406"
       ],
@@ -111,7 +111,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "landsat",
     "import",

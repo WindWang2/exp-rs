@@ -2310,6 +2310,50 @@ target_compile_definitions(test_surface_parity PRIVATE
 )
 sicnu_discover_tests(test_surface_parity)
 
+# Track D1 (ds41-capability-help-sync): capability surface parity gate.
+# registry descriptors <-> sidecar A <-> sidecar B <-> help operator topics
+# <-> MCP list_algorithms/get_algorithm_schema <-> CLI algorithms list/--schema.
+# Compiles mcp_server.cpp in-process (same pattern as test_surface_parity) so
+# the MCP handlers share one registry state with the assertions.
+add_executable(test_capability_surface_parity test_capability_surface_parity.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_capability_surface_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_capability_surface_parity PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_capability_surface_parity PRIVATE jsoncpp)
+endif()
+target_include_directories(test_capability_surface_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_capability_surface_parity PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_capability_surface_parity PRIVATE
+  SICNU_TEST_CAPABILITY_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+add_dependencies(test_capability_surface_parity sicnu_geo_rs_cli)
+sicnu_discover_tests(test_capability_surface_parity)
+
+# Track D1: capability completeness gate (summary / failure_modes / io
+# contracts, with the enumerated collection-style io.inputs exemptions).
+sicnu_add_test(test_capability_completeness)
+sicnu_link_jsoncpp(test_capability_completeness)
+
 # Surface-11 protocol suite: progress relay, artifact_read, redaction,
 # initialize negatives. Same in-process mcp_server.cpp pattern.
 add_executable(test_surface_protocol test_surface_protocol.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)

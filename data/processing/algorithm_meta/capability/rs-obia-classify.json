@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u57ce\u5e02",
         "\u519c\u7530",
         "\u6797\u5730"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u9762\u5411\u5bf9\u8c61\u571f\u5730\u8986\u76d6\u5236\u56fe",
         "\u5efa\u7b51/\u690d\u88ab\u5bf9\u8c61\u63d0\u53d6"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "TRAINING_INVALID",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "obia",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -63,7 +63,7 @@
           "required" : false
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "string",
@@ -92,7 +92,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -123,7 +123,7 @@
         },
         {
           "default" : "mean",
-          "enum" :
+          "enum" : 
           [
             "mean",
             "full"
@@ -134,7 +134,7 @@
         },
         {
           "default" : "svm",
-          "enum" :
+          "enum" : 
           [
             "svm",
             "normal_bayes",
@@ -217,7 +217,7 @@
         },
         {
           "default" : "grid",
-          "enum" :
+          "enum" : 
           [
             "grid",
             "quantize"
@@ -235,27 +235,27 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
       "multimodal"
     ],
     "operator_group" : "obia",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "\u9700\u8981\u5bf9\u8c61\u7279\u5f81\u8868\uff08rs:obia_features\uff09\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u5bf9\u8c61\u7ea7\u5206\u7c7b\uff1a\u57fa\u4e8e\u5bf9\u8c61\u7279\u5f81\u7528\u89c4\u5219\u6216\u6a21\u578b\u7ed9\u5bf9\u8c61\u8d4b\u7c7b\u522b\uff0c\u8f93\u51fa\u77e2\u91cf/\u6805\u683c\u7c7b\u522b\u56fe\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5bf9\u8c61\u5206\u7c7b",
         "\u89c4\u5219\u96c6"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
       ],
@@ -268,7 +268,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "obia",
     "object-based",

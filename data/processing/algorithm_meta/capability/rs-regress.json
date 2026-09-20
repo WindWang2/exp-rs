@@ -16,7 +16,24 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "MODEL_NOT_READY",
+        "remedy" : "\u5728\u6a21\u578b\u5e93\u6ce8\u518c\u6a21\u578b\u5e76\u786e\u8ba4\u6743\u91cd\u8def\u5f84\uff1b\u6309 executionEstimate \u8bc4\u4f30\u5206\u5757\u6267\u884c",
+        "when" : "\u6a21\u578b\u672a\u6ce8\u518c\u3001\u6743\u91cd\u6587\u4ef6\u7f3a\u5931\uff0c\u6216\u8fd0\u884c\u65f6\u5224\u636e\uff08\u8bbe\u5907/\u663e\u5b58\uff09\u4e0d\u53ef\u7528"
+      },
+      {
+        "code" : "MODEL_INCOMPATIBLE",
+        "remedy" : "\u6539\u7528 task \u4e3a regression \u7684\u6a21\u578b",
+        "when" : "\u6a21\u578b\u6e05\u5355\u7684 canonical EO task \u4e0d\u662f regression"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309 schema \u63d0\u4f9b\u5fc5\u586b\u53c2\u6570",
+        "when" : "\u53c2\u6570\u4e0d\u662f JSON \u5bf9\u8c61\uff0c\u6216\u7f3a\u5c11 input/model/output \u5fc5\u586b\u9879"
+      }
+    ],
     "family" : "classification",
     "io" : 
     {
@@ -127,7 +144,7 @@
     "operator_group" : "ml",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "\u8fde\u7eed\u503c\u56de\u5f52\uff1a\u5bf9\u6805\u683c\u6267\u884c\u56de\u5f52\u6a21\u578b\uff0c\u8f93\u51fa\u6bcf\u4e2a\u6e05\u5355\u8f93\u51fa\u901a\u9053\u4e00\u6761\u8fde\u7eed\u503c\u6ce2\u6bb5\uff08\u65e0 argmax\u3001\u65e0\u7c7b\u522b\u5806\u6808\uff09\uff1b\u503c\u8bed\u4e49\u9075\u5faa\u6a21\u578b\u5951\u7ea6\uff0cNoData \u50cf\u7d20\u4fdd\u6301 NoData\u3002",
     "teaching_use" : {}
   },
   "description" : "Run a regression model on a raster; publishes the continuous-value output band(s) (one per manifest output channel).",

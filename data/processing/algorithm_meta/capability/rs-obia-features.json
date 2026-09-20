@@ -1,26 +1,26 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u57ce\u5e02",
         "\u519c\u7530"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u5bf9\u8c61\u5206\u7c7b\u7279\u5f81\u5de5\u7a0b",
         "\u5bf9\u8c61\u7ea7\u7edf\u8ba1\u5206\u6790"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "obia",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -52,7 +52,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -76,7 +76,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -91,26 +91,26 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar"
     ],
     "operator_group" : "obia",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "\u9700\u8981\u5148\u6709\u5206\u5272\u5bf9\u8c61\u56fe\u5c42\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u5bf9\u8c61\u7279\u5f81\u8ba1\u7b97\uff1a\u4e3a\u5206\u5272\u5bf9\u8c61\u7edf\u8ba1\u5149\u8c31\u5747\u503c\u3001\u5f62\u72b6\u6307\u6570\u3001\u7eb9\u7406\u7b49\u7279\u5f81\uff0c\u5f62\u6210\u5bf9\u8c61\u7ea7\u7279\u5f81\u8868\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5bf9\u8c61\u7279\u5f81",
         "\u5f62\u72b6\u6307\u6570"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
       ],
@@ -123,7 +123,7 @@
   "input" : "raster",
   "output" : "",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "obia",
     "features",

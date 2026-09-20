@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
     "applicability" : 
@@ -25,7 +20,6 @@
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes + tile \u00d7 calendarPoints)",
@@ -35,12 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
-    "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "failure_modes" : 
     [
       {
@@ -102,7 +90,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -118,7 +105,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -148,7 +134,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -178,7 +163,6 @@
         },
         {
           "default" : "linear",
-          "enum" :
           "enum" : 
           [
             "nearest",
@@ -209,7 +193,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -217,8 +200,6 @@
     "operator_group" : "temporal",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
     "summary" : "\u89c4\u5219\u65e5\u5386\u91cd\u91c7\u6837\uff1a\u5c06\u4e0d\u89c4\u5219\u65f6\u76f8\u91cd\u6392\u5230 16 \u5929/\u6708\u7b49\u89c4\u5219\u65e5\u5386\uff0c\u5e26\u6709\u6548\u8ba1\u6570\u4e0e\u586b\u5145\u8ba1\u6570\u6eaf\u6e90\u6ce2\u6bb5\u3002",
     "teaching_use" : 
     {
@@ -241,7 +222,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",
