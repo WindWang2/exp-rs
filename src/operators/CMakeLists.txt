@@ -68,6 +68,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/tensorrt_provider.cpp
         runtime/openvino_provider.cpp
         runtime/detection_postprocess.cpp
+        runtime/detection_fusion.cpp
         runtime/detection_tile_engine.cpp
         runtime/model_execution_service.cpp
         runtime/model_ensemble.cpp
