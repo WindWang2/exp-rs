@@ -383,3 +383,8 @@ data/labs/_tmp/
 !.planning/ds41-performance-observatory/
 .planning/ds41-performance-observatory/*
 !.planning/ds41-performance-observatory/*.md
+# ds41-build-portability (Track D2): cross-platform build, dependency doctor &
+# local gate — track planning notes (markdown only; logs stay local).
+!.planning/ds41-build-portability/
+.planning/ds41-build-portability/*
+!.planning/ds41-build-portability/*.md

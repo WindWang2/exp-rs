@@ -2,7 +2,7 @@
   "version": 3,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 20,
+    "minor": 21,
     "patch": 0
   },
   "configurePresets": [
@@ -14,6 +14,17 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_TESTS": "ON",
+        "ENABLE_LOCAL_BUILD_SHORTCUTS": "ON"
+      }
+    },
+    {
+      "name": "offline-lab",
+      "displayName": "Offline Teaching-Lab Profile",
+      "description": "Teaching-lab profile (cmake/SicnuLabProfile.cmake): no vendored OTB/ITK, no ONNX provider, no vendored GDAL, no embedded Python, no pybind11 fetch, no verification suite. Configures and builds with zero network egress; the shipped operator set is unchanged.",
+      "binaryDir": "${sourceDir}/build-lab",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SICNU_LAB_PROFILE": "ON",
         "ENABLE_LOCAL_BUILD_SHORTCUTS": "ON"
       }
     },
@@ -66,29 +77,43 @@
   "buildPresets": [
     {
       "name": "dev-default",
-      "configurePreset": "dev-default"
+      "configurePreset": "dev-default",
+      "jobs": 1
+    },
+    {
+      "name": "offline-lab",
+      "configurePreset": "offline-lab",
+      "jobs": 1
     },
     {
       "name": "ci-fast",
-      "configurePreset": "ci-fast"
+      "configurePreset": "ci-fast",
+      "jobs": 2
     },
     {
       "name": "ci-full",
-      "configurePreset": "ci-full"
+      "configurePreset": "ci-full",
+      "jobs": 2
     },
     {
       "name": "sanitizer-debug",
-      "configurePreset": "sanitizer-debug"
+      "configurePreset": "sanitizer-debug",
+      "jobs": 1
     },
     {
       "name": "release-package",
-      "configurePreset": "release-package"
+      "configurePreset": "release-package",
+      "jobs": 2
     }
   ],
   "testPresets": [
     {
       "name": "dev-default",
       "configurePreset": "dev-default",
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "CTEST_PARALLEL_LEVEL": "1"
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -96,6 +121,10 @@
     {
       "name": "ci-fast",
       "configurePreset": "ci-fast",
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "CTEST_PARALLEL_LEVEL": "1"
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -103,6 +132,10 @@
     {
       "name": "ci-full",
       "configurePreset": "ci-full",
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "CTEST_PARALLEL_LEVEL": "1"
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -110,6 +143,10 @@
     {
       "name": "sanitizer-debug",
       "configurePreset": "sanitizer-debug",
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen",
+        "CTEST_PARALLEL_LEVEL": "1"
+      },
       "output": {
         "outputOnFailure": true
       }
