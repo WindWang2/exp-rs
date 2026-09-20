@@ -66,7 +66,7 @@ Json::Value runInLocalWorker( const QString &workerProgram,
     std::string badFrame;
     if ( !workerReadFrame( process, deadline, frame, crashed, deadline, softTimedOut, &diagnostics,
                            &badFrame )
-         || frame["op"].asString() != "ready" )
+         || !( frame[ "op" ].isString() && frame[ "op" ].asString() == "ready" ) )
     {
         if ( !badFrame.empty() )
             throw std::runtime_error( "worker protocol: malformed handshake frame: " + badFrame );

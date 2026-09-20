@@ -97,6 +97,15 @@ PrefetchReport prefetchChunks( const VirtualCube &cube, const CubeChunkPlan &pla
 struct AccessWindow
 {
     int x = 0, y = 0, w = 0, h = 0;
+    /// 12.0: the 1-based band to warm (default 1).
+    int band = 1;
+    /// 12.0: the 1-based overview level to warm (0 = native resolution).
+    /// The window is DECLARED in grid/full-res pixel coordinates as usual;
+    /// the warm read pulls that level's blocks, so a viewer trajectory can
+    /// warm coarse zooms cheaply before fine zooms (progressive
+    /// refinement). A level the source does not have is an honest per-read
+    /// skip (skippedNoOverview), never a silent native re-read.
+    int overview = 0;
 };
 
 /// Access-pattern-driven prefetch: the caller declares the window SEQUENCE
@@ -114,6 +123,9 @@ struct PrefetchLocalityReport
     std::uint64_t bytesPulled = 0;
     std::uint64_t warmed = 0, cacheHits = 0, mirrorHits = 0;
     std::uint64_t skippedBudget = 0, skippedCancel = 0, failed = 0;
+    /// 12.0: reads whose declared overview level the source does not have
+    /// (or band <= 0): honestly skipped, never a silent native re-read.
+    std::uint64_t skippedNoOverview = 0;
     bool budgetExhausted = false;
     std::uint64_t outcomesDropped = 0;
 

@@ -3,6 +3,8 @@
 
 #include <cstddef>
 
+#include <vector>
+
 /// Spectral resampling: interpolate spectra from their native wavelength grid
 /// onto a target wavelength grid (e.g. an imaging spectrometer onto Landsat /
 /// Sentinel-2 band positions, or onto a spectral library's grid).
@@ -42,4 +44,37 @@ namespace SpectralResampling
     bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBands,
                                    const float *dstWl, const float *dstFwhm, int dstBands,
                                    float *out );
+
+    /// Per-target-band source-range coverage (Spectral Intelligence 12.0).
+    /// The linear path is center-based: a target is Full inside the source
+    /// range, None outside (the kernel emits NaN exactly there). The Gaussian
+    /// SRF path additionally reports Partial: the target center is inside the
+    /// range but its response reaches past the source edge, so resampled
+    /// values rest on truncated weight mass (missing SRF integral > 1%).
+    enum class BandCoverage
+    {
+        Full,    ///< target fully inside the source response coverage
+        Partial, ///< in-range but edge-truncated SRF (Gaussian path only)
+        None,    ///< outside the source range / unusable target (NaN output)
+    };
+
+    const char *bandCoverageText( BandCoverage coverage );
+
+    struct CoverageReport
+    {
+        std::vector<BandCoverage> bands; ///< per target band
+        int full = 0;
+        int partial = 0;
+        int none = 0;
+    };
+
+    /**
+     * Per-band coverage analysis WITHOUT resampling any data (pure geometry;
+     * cheap enough to run once per library/sensor pair). Same argument
+     * contract as resampleSpectrum: false for null pointers, srcBands < 2,
+     * dstBands < 1, or a non-increasing source grid.
+     */
+    bool analyzeResamplingCoverage( const float *srcWl, int srcBands,
+                                    const float *dstWl, const float *dstFwhm, int dstBands,
+                                    CoverageReport *out );
 } // namespace SpectralResampling

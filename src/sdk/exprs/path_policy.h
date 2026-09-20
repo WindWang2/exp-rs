@@ -31,7 +31,7 @@ enum class PathPolicyRejection
     NotRegularFile,   ///< resolved target exists but is not a regular file
     Missing,          ///< resolved target does not exist
     OutsideRoot,      ///< resolved target escapes the containment root
-    NotCanonical,     ///< root itself could not be canonicalized
+    NotCanonical,     ///< root itself could not be canonicalized, OR the root/candidate text is not representable in the platform encoding
 };
 
 const char *pathPolicyRejectionName( PathPolicyRejection rejection );
@@ -50,6 +50,9 @@ public:
     ///  3. resolves root/candidate with symlinks followed;
     ///  4. requires the resolved target to be a regular file inside the
     ///     canonical root.
+    /// @p resolvedPath (on Accepted) is returned in the platform's own narrow
+    /// encoding — the form std::filesystem consumes — because every in-tree
+    /// caller feeds it straight back into the filesystem layer.
     static PathPolicyRejection checkPayloadInsideRoot( const std::string &root,
                                                        const std::string &candidate,
                                                        std::string &resolvedPath );

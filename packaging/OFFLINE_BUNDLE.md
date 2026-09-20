@@ -44,6 +44,9 @@ sicnu-lab-<version>/
   RUN.cmd                   run lab 1 offline end-to-end (generate → process → report)
   GENERATE_SAMPLES.cmd      regenerate data/samples via bin/sicnu_generate_samples
   GRADE_ALL.cmd             batch-grade a submissions folder into grades.csv (lab --batch)
+  GRADE_ALL.sh              POSIX twin of GRADE_ALL.cmd: same arguments and exit
+                            codes, no pause; SICNU_BATCH_FLAGS passes extra
+                            `lab --batch` flags (since lab platform 12.0)
   VERIFY.cmd / VERIFY.ps1   self-contained integrity check for the target machine
                             (re-hashes every file against manifest.json)
   VERIFY.sh                 Linux/macOS twin of VERIFY.*; runs the shipped
@@ -187,3 +190,15 @@ typed refusals (see `docs/deployment/lab-offline.md`); the bundle scripts always
 - GUI (non-CLI) classroom flows; STAC browser.
 - D1's sample-foundry profiles beyond the default lab set (consumed as-is when D1 lands).
 - Telemetry of any kind — there is none, and the bundle adds none.
+
+## Incremental assembly (12.0)
+
+`build_offline_bundle.sh --incremental` assembles over an existing bundle
+directory instead of deleting it, and reuses `data/samples` when the shipped
+generator's `--verify` confirms the manifest still holds (the seed-42 sample
+set is byte-identical by the ADR 0164 determinism contract, so regeneration
+is wasted I/O). The final manifest verify still covers every regular file:
+a stale file from a previous layout is a verify failure, never silent
+residue — rerun without `--incremental` for a guaranteed-clean assembly.
+The Windows builder (`build_offline_bundle.cmd`) always performs a full
+clean assembly.
