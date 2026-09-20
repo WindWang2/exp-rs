@@ -10,8 +10,9 @@
 #
 # Output: one `set(KEY "VALUE" CACHE STRING "" FORCE)` line per found key.
 param(
-    [Parameter(Mandatory = $true)][string]$BaseCache,
-    [Parameter(Mandatory = $true)][string]$Out
+    [string]$BaseCache,
+    [Parameter(Mandatory = $true)][string]$Out,
+    [string]$Catch2Source
 )
 
 $keys = @(
@@ -32,6 +33,7 @@ $keys = @(
 
 $lines = New-Object System.Collections.Generic.List[string]
 foreach ($k in $keys) {
+    if (-not $BaseCache) { break }
     $m = Select-String -Path $BaseCache -Pattern ('^' + $k + ':[A-Z]*=(.*)$') | Select-Object -Last 1
     if ($m) {
         $v = $m.Matches[0].Groups[1].Value
@@ -41,6 +43,16 @@ foreach ($k in $keys) {
     }
 }
 
+if (-not $BaseCache -and -not $Catch2Source) {
+    Write-Error "seed_toolchain_cache: nothing to do (no BaseCache and no Catch2Source)"
+    exit 1
+}
+if ($Catch2Source) {
+    # Same reasoning as the toolchain keys: a path with spaces must not travel
+    # the command line, so the offline Catch2 source also goes through this
+    # initial-cache script.
+    $lines.Add(('set(FETCHCONTENT_SOURCE_DIR_CATCH2 "' + $Catch2Source + '" CACHE STRING "" FORCE)'))
+}
 if ($lines.Count -eq 0) {
     Write-Error "no toolchain keys found in $BaseCache"
     exit 1

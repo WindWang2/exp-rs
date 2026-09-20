@@ -275,35 +275,35 @@ rem NOTE: this block uses delayed expansion (!VAR!) on purpose - %VAR% inside a
 rem parenthesized block is expanded when the BLOCK is parsed, i.e. before the
 rem set commands inside it have run.
 set "SEED="
+if not "%BASECACHE%"=="" goto :smoke_seed
+if not "%CATCH2SRC%"=="" goto :smoke_seed
+goto :smoke_seed_done
+:smoke_seed
 if not "%BASECACHE%"=="" (
   set "INIT=!BDIR!\seed-toolchain.cmake"
-  powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!seed_toolchain_cache.ps1" -BaseCache "%BASECACHE%" -Out "!INIT!"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!seed_toolchain_cache.ps1" -BaseCache "%BASECACHE%" -Out "!INIT!" -Catch2Source "%CATCH2SRC%"
   if errorlevel 1 (echo build.cmd: smoke: seeding failed 1>&2 & exit /b 1)
   if not exist "!INIT!" (echo build.cmd: smoke: seed script not written 1>&2 & exit /b 1)
   set "SEED=-C "!INIT!""
-  rem quoted: `call :label` splits arguments at '=', an unquoted -DKEY=VALUE
-  rem would arrive at the callee as two arguments.
+  rem quoted: a called batch label splits arguments at '=', so an unquoted
+  rem -DKEY=VALUE would arrive at the callee as two arguments.
   set "SEED=!SEED! "-DVCPKG_MANIFEST_MODE=OFF""
   echo build.cmd: seeded toolchain locations from %BASECACHE% ^(dependencies re-discovered fresh^)
+) else (
+  set "INIT=!BDIR!\seed-offline.cmake"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!seed_toolchain_cache.ps1" -Out "!INIT!" -Catch2Source "%CATCH2SRC%"
+  if errorlevel 1 (echo build.cmd: smoke: seeding failed 1>&2 & exit /b 1)
+  if not exist "!INIT!" (echo build.cmd: smoke: seed script not written 1>&2 & exit /b 1)
+  set "SEED=-C "!INIT!""
+  echo build.cmd: seeded offline Catch2 source ^(no base cache given^)
 )
+:smoke_seed_done
 if not "%CATCH2SRC%"=="" (
-  rem The value travels through a delayed-expansion block and run_logged's
-  rem re-parse, so characters batch cannot carry safely are rejected here
-  rem instead of silently producing a malformed cache entry.
-  set "C2BAD="
-  for %%C in ("!" "^" "&" "(" ")" "%%") do (
-    echo "%CATCH2SRC%" | findstr /c:"%%~C" >nul && set "C2BAD=1"
-  )
-  if defined C2BAD (
-    echo build.cmd: smoke: --catch2-source path contains batch-unsafe characters 1>&2
-    echo   ^(! ^ & ^( ^) ^%%^) - set FETCHCONTENT_SOURCE_DIR_CATCH2 yourself or rename it 1>&2
-    exit /b 2
-  )
   rem Offline escape hatch: the repo's own Catch2 FetchContent (locked tag
-  rem v3.7.1) is the only network step in configure; point it at a prepared
-  rem clone so the gate never needs egress.
-  set "SEED=%SEED% "-DFETCHCONTENT_SOURCE_DIR_CATCH2=%CATCH2SRC%""
-  echo build.cmd: using local Catch2 source %CATCH2SRC%
+  rem v3.7.1) is the only network step in configure. The prepared clone goes
+  rem through the same -C initial-cache script as the toolchain keys, so no
+  rem path with spaces ever travels the command line.
+  echo build.cmd: using local Catch2 source %CATCH2SRC% ^(via the -C script^)
 )
 call :run_logged configure cmake -G Ninja -S "%REPO_ROOT%" -B "%BDIR%" %SEED%
 if errorlevel 1 (echo build.cmd: smoke: clean-tree configure FAILED 1>&2 & exit /b 1)
