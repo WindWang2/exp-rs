@@ -65,12 +65,25 @@ struct RangeCacheConfig
 {
     /// Total byte budget across every cached resource (LRU-evicted).
     std::uint64_t maxCacheBytes = 64ull * 1024 * 1024;
+    /// 12.0 per-resource byte cap (0 = unlimited): one resource can never
+    /// hold more than this much of the global budget, so a single huge COG
+    /// cannot evict every other cached resource. Blocks are evicted from
+    /// the resource's own LRU tail; a cap below one block size means the
+    /// resource's blocks are not retained (reads stay correct, just
+    /// uncached).
+    std::uint64_t maxBytesPerResource = 0;
     /// Upper bound for one coalesced ranged GET (the run of missing blocks
     /// fetched together is clamped to this).
     std::uint64_t maxSingleFetchBytes = 8ull * 1024 * 1024;
     /// Cache block granularity (reads fetch whole blocks).
     std::uint64_t blockSize = 64ull * 1024;
     RangeCacheStalePolicy stalePolicy = RangeCacheStalePolicy::RevalidateOnOpen;
+    /// 12.0 entry TTL (seconds; 0 = off): a cached resource entry expires by
+    /// age regardless of the stale policy (the TTL is a declared trust
+    /// horizon — even TrustForever entries older than it are dropped and
+    /// re-proven on their next open). Age counts from the last successful
+    /// identity proof (probe or creation), not from the last read.
+    int entryTtlSeconds = 0;
     int timeoutSeconds = 15;
     int connectTimeoutSeconds = 5;
     int maxRetries = 1;
@@ -81,6 +94,17 @@ struct RangeCacheConfig
     /// over-cap fetch can be starved by barging new arrivals (documented
     /// caveat, not a guaranteed reservation). 0 = unlimited.
     std::uint64_t maxConcurrentFetchBytes = 64ull * 1024 * 1024;
+    /// 12.0 ranged-fetch retry with bounded exponential backoff: the total
+    /// number of ATTEMPTS of one coalesced ranged GET (1 = a single try —
+    /// the historical behavior). Only transport-shaped failures (network
+    /// errors, timeouts) are retried; refused/unsupported answers are not.
+    /// Clamped to [1, 8].
+    int fetchAttempts = 1;
+    /// Backoff before retry attempt n (n ≥ 2): retryBackoffBaseMs <<
+    /// (n - 2), capped at retryBackoffMaxMs. 0 base keeps retries
+    /// immediate (still bounded by fetchAttempts).
+    int retryBackoffBaseMs = 0;
+    int retryBackoffMaxMs = 2000;
     /// 9.0 M3 — optional disk block layer under the memory cache:
     /// checksummed, content-identity keyed (a resource with no provable
     /// identity is never disk-cached), LRU/byte-capped, atomically published.
@@ -109,6 +133,13 @@ struct RangeCacheTelemetry
     /// 9.0: high-water mark of concurrently in-flight fetch bytes (the
     /// observed peak against maxConcurrentFetchBytes).
     std::uint64_t maxInFlightFetchBytes = 0;
+    /// 12.0: ranged GETs that followed a failed attempt of the same fetch
+    /// (the retry-with-backoff outcome — observability for flaky origins).
+    std::uint64_t retriedFetches = 0;
+    /// 12.0: high-water mark of total cached bytes — the observed peak
+    /// against maxCacheBytes. A gauge of the current population: a full
+    /// drop (clearEntries/uninstall) resets it, counters never reset.
+    std::uint64_t maxCachedBytes = 0;
 
     Json::Value toJson() const;
 };
@@ -133,6 +164,19 @@ class RemoteRangeCache
 
     /// Forces a revalidation of one cached resource on its next use.
     static void invalidateResource( const std::string &url );
+
+    // --- 12.0 fetch cancellation ------------------------------------------
+    /// Cancels the resource's ranged fetches: fetches IN FLIGHT when this is
+    /// called have their results DISCARDED (never cached, never served —
+    /// cancelled bytes must not enter any generation), and readers stop
+    /// STARTING new origin fetches for this resource (they degrade to the
+    /// direct fallback, which stays the correctness gate). Idempotent; the
+    /// resource's already-cached blocks stay valid (this is not an
+    /// invalidation). Thread-safe.
+    static void cancelFetches( const std::string &url );
+    /// Lifts a cancelFetches veto; subsequent reads fetch from the origin
+    /// again. Idempotent; unknown resources are a no-op.
+    static void resumeFetches( const std::string &url );
 
     static Json::Value telemetryJson();
     static RangeCacheConfig currentConfig();

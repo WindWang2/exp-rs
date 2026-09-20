@@ -40,7 +40,7 @@ using sicnu::geo::TileSlice;
 
 constexpr const char *kRasterKinds[] = {
     "zone_stats", "band_layout", "spatial_agreement", "series_separation",
-    "spectral_signature",
+    "spectral_signature", "provenance",
 };
 constexpr const char *kFileKinds[] = { "file_check" };
 
@@ -229,7 +229,11 @@ Json::Value zoneStatJson( const ZoneAcc &acc )
 
 bool isLabRasterKernelKind( const QString &kind )
 {
-    return inList( kind, kRasterKinds, 5 );
+    // Count derived from the array: appending a kind without bumping a
+    // hand-written number here silently leaves it unscheduled (the failure
+    // mode this constant used to hide).
+    return inList( kind, kRasterKinds,
+                   int( sizeof( kRasterKinds ) / sizeof( kRasterKinds[ 0 ] ) ) );
 }
 
 bool isLabFileKernelKind( const QString &kind )
@@ -379,6 +383,41 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
              && !params.isMember( "expected_valid_pixels" ) )
             return fail( QStringLiteral(
               "band_layout requires band_count, min_valid_fraction or expected_valid_pixels" ) );
+        return true;
+    }
+
+    if ( kind == QLatin1String( "provenance" ) )
+    {
+        static const char *const allowed[] = {
+            "generator", "seed", "product", "profile", "version",
+        };
+        bool any = false;
+        for ( const auto &key : params.getMemberNames() )
+        {
+            bool known = false;
+            for ( const char *candidate : allowed )
+                known = known || key == candidate;
+            if ( !known )
+                return fail( QStringLiteral(
+                  "provenance params: unknown key \"%1\" (allowed: generator, seed, "
+                  "product, profile, version)" ).arg( QString::fromStdString( key ) ) );
+            any = true;
+        }
+        if ( !any )
+            return fail( QStringLiteral(
+              "provenance requires at least one of generator, seed, product, "
+              "profile, version" ) );
+        if ( params.isMember( "seed" )
+             && ( !params["seed"].isIntegral() || params["seed"].asInt64() < 0
+                  || params["seed"].asInt64() > 0xFFFFFFFFll ) )
+            return fail( QStringLiteral( "provenance seed must be a uint32" ) );
+        for ( const char *key : { "generator", "product", "profile", "version" } )
+        {
+            if ( params.isMember( key ) && ( !params[key].isString()
+                                             || params[key].asString().empty() ) )
+                return fail( QStringLiteral(
+                  "provenance %1 must be a non-empty string" ).arg( key ) );
+        }
         return true;
     }
 
@@ -2017,6 +2056,96 @@ static bool runFileCheck( const QString &artifactPath, const LabKernelSpec &spec
     return true;
 }
 
+/// provenance — the artifact must carry the foundry's dataset metadata
+/// (SICNU_GENERATOR / _SEED / _PRODUCT / _PROFILE / _GENERATOR_VERSION), so a
+/// submission computed from a different (or tampered) input can be refused by
+/// the rules themselves. Metadata is read from the already-open raster; every
+/// declared expectation must be present and exactly equal (string compare;
+/// seed compares as decimal integer).
+bool runProvenance( const RasterReader &reader, const LabKernelSpec &spec,
+                    LabKernelOutcome &outcome, QString *artifactError, QString &usageError )
+{
+    ( void )artifactError;
+    ( void )usageError;
+    const Json::Value &params = spec.params;
+    const RasterMetadata &meta = reader.metadata();
+    const auto item = [ &meta ]( const char *key ) {
+        const auto it = meta.metadata.find( key );
+        return it == meta.metadata.end() ? QString() : QString::fromStdString( it->second );
+    };
+
+    QString firstFailure;
+    const auto failWith = [ &firstFailure ]( const QString &message )
+    {
+        if ( firstFailure.isEmpty() )
+            firstFailure = message;
+    };
+
+    if ( params.isMember( "generator" ) )
+    {
+        static const QString kKey = QStringLiteral( "SICNU_GENERATOR" );
+        const QString observed = item( "SICNU_GENERATOR" );
+        const QString expected = QString::fromStdString( params["generator"].asString() );
+        if ( observed.isEmpty() )
+            failWith( QStringLiteral( "missing provenance metadata %1" ).arg( kKey ) );
+        else if ( observed != expected )
+            failWith( QStringLiteral( "SICNU_GENERATOR mismatch" ) );
+        outcome.observed[ "generator" ] = observed.toStdString();
+        outcome.expected[ "generator" ] = expected.toStdString();
+    }
+    if ( params.isMember( "seed" ) )
+    {
+        const QString observed = item( "SICNU_SEED" );
+        const QString expected = QString::number( params["seed"].asInt64() );
+        if ( observed.isEmpty() )
+            failWith( QStringLiteral( "missing provenance metadata SICNU_SEED" ) );
+        else if ( observed != expected )
+            failWith( QStringLiteral( "SICNU_SEED mismatch" ) );
+        outcome.observed[ "seed" ] = observed.toStdString();
+        outcome.expected[ "seed" ] = expected.toStdString();
+    }
+    if ( params.isMember( "product" ) )
+    {
+        const QString observed = item( "SICNU_PRODUCT" );
+        const QString expected = QString::fromStdString( params["product"].asString() );
+        if ( observed.isEmpty() )
+            failWith( QStringLiteral( "missing provenance metadata SICNU_PRODUCT" ) );
+        else if ( observed != expected )
+            failWith( QStringLiteral( "SICNU_PRODUCT mismatch" ) );
+        outcome.observed[ "product" ] = observed.toStdString();
+        outcome.expected[ "product" ] = expected.toStdString();
+    }
+    if ( params.isMember( "profile" ) )
+    {
+        const QString observed = item( "SICNU_PROFILE" );
+        const QString expected = QString::fromStdString( params["profile"].asString() );
+        if ( observed.isEmpty() )
+            failWith( QStringLiteral( "missing provenance metadata SICNU_PROFILE" ) );
+        else if ( observed != expected )
+            failWith( QStringLiteral( "SICNU_PROFILE mismatch" ) );
+        outcome.observed[ "profile" ] = observed.toStdString();
+        outcome.expected[ "profile" ] = expected.toStdString();
+    }
+    if ( params.isMember( "version" ) )
+    {
+        // The foundry stamps SICNU_GENERATOR_VERSION (sample_foundry.cpp),
+        // not SICNU_VERSION — the two spellings must not drift.
+        const QString observed = item( "SICNU_GENERATOR_VERSION" );
+        const QString expected = QString::fromStdString( params["version"].asString() );
+        if ( observed.isEmpty() )
+            failWith( QStringLiteral( "missing provenance metadata SICNU_GENERATOR_VERSION" ) );
+        else if ( observed != expected )
+            failWith( QStringLiteral( "SICNU_GENERATOR_VERSION mismatch" ) );
+        outcome.observed[ "version" ] = observed.toStdString();
+        outcome.expected[ "version" ] = expected.toStdString();
+    }
+
+    outcome.passed = firstFailure.isEmpty();
+    if ( !outcome.passed )
+        outcome.message = firstFailure;
+    return true;
+}
+
 bool runLabKernelWalks( const sicnu::geo::RasterReader &reader,
                         const std::vector<LabKernelSpec> &specs, const QString &rulesDir,
                         std::size_t maxBytes, std::map<QString, LabKernelOutcome> &outcomes,
@@ -2040,6 +2169,8 @@ bool runLabKernelWalks( const sicnu::geo::RasterReader &reader,
         else if ( spec.kind == QLatin1String( "spectral_signature" ) )
             ok = runSpectralSignature( reader, spec, rulesDir, maxBytes, outcome, error,
                                        usageError );
+        else if ( spec.kind == QLatin1String( "provenance" ) )
+            ok = runProvenance( reader, spec, outcome, error, usageError );
         else
         {
             *error = QStringLiteral( "Unknown kernel kind \"%1\"" ).arg( spec.kind );

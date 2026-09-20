@@ -58,6 +58,16 @@ namespace SpectralAnomaly
     bool invertCovariance( const std::vector<double> &covariance, int bands,
                            std::vector<double> *inverse );
 
+    /// Deterministic lower bound on the 2-norm condition number of a B×B PSD
+    /// background matrix (covariance or second-moment): λmax·B/tr with λmax
+    /// from a fixed-start power iteration (normalized ones start, early exit
+    /// at 1e-12 relative Rayleigh residual). Since λmin ≤ tr/B for PSD, the
+    /// value never overstates the conditioning; it is a QA diagnostic for
+    /// result JSON (Spectral Intelligence 12.0), not a gate. Returns -1.0
+    /// for structurally invalid input (null, size mismatch, non-positive or
+    /// non-finite trace).
+    double conditionProxy( const std::vector<double> &background, int bands );
+
     /// Per-pixel RX score for one spectrum given precomputed mean + inverse cov.
     /// Equivalent to the per-pixel step of rxDetector. @a spectrum size == bands.
     float rxScore( const float *spectrum, const std::vector<double> &mean,

@@ -80,6 +80,10 @@ struct WorkspaceCatalog::Impl
         const char *schema =
             "PRAGMA journal_mode=WAL;"
             "PRAGMA synchronous=NORMAL;"
+            // Same writer-contention budget as the other stores (issue #752
+            // precedent): a concurrent reader/writer waits 5s instead of
+            // failing the write with SQLITE_BUSY immediately.
+            "PRAGMA busy_timeout=5000;"
             "BEGIN;"
             "CREATE TABLE IF NOT EXISTS catalog_meta("
             "  key TEXT PRIMARY KEY, value TEXT NOT NULL);"

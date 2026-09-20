@@ -77,10 +77,29 @@ Json::Value loadIndex( const std::string &root )
         return Json::Value( Json::nullValue );
     std::stringstream buffer;
     buffer << input.rdbuf();
+    const std::string document = buffer.str();
     Json::Value parsed;
-    Json::Reader reader;
-    if ( !reader.parse( buffer.str(), parsed, false ) || !parsed.isObject() )
+    // Bounded reader: the index is a cache file that anything on the machine
+    // can rewrite, and an unbounded parse of a deeply nested document
+    // stack-overflows the scanning thread instead of being ignored.
+    Json::CharReaderBuilder builder;
+    builder[ "allowComments" ] = true;
+    builder[ "stackLimit" ] = 128;
+    std::string parseError;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    // Guarded: the reader THROWS when the depth bound is exceeded — a rewritten
+    // cache file must be ignored, not crash the scanning thread.
+    try
+    {
+        if ( !reader->parse( document.data(), document.data() + document.size(), &parsed,
+                             &parseError )
+             || !parsed.isObject() )
+            return Json::Value( Json::nullValue );
+    }
+    catch ( const Json::Exception & )
+    {
         return Json::Value( Json::nullValue );
+    }
     return parsed;
 }
 
