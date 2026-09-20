@@ -20,10 +20,6 @@
 #include <QtEndian>
 #include <QThread>
 
-#ifdef Q_OS_WIN
-#include <fcntl.h>
-#include <io.h>
-#endif
 #include <QPointer>
 #include <QUuid>
 
@@ -32,14 +28,14 @@
 #include <functional>
 #include <optional>
 
-#include <fcntl.h>
 #ifdef Q_OS_WIN
-#include <fcntl.h> // _O_WRONLY/_O_BINARY (io.h alone does not define them)
 // _O_WRONLY/_O_BINARY for fsyncFile's Win32 branch live in fcntl.h (MSVC);
 // the POSIX branch below needs the same header for its own flags.
 // Build-unblock for master breakage (see open PR #1009's identical fix).
 #include <fcntl.h>
 #include <io.h>
+#include <share.h>
+#include <sys/stat.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -123,8 +119,9 @@ bool isContainedInDirectory( const QString &artifactPath, const QString &canonic
 bool fsyncFile( const QString &path )
 {
 #ifdef Q_OS_WIN
-    const int fd = _wopen( reinterpret_cast<const wchar_t *>( path.utf16() ), _O_WRONLY | _O_BINARY );
-    if ( fd < 0 )
+    int fd = -1;
+    if ( _wsopen_s( &fd, reinterpret_cast<const wchar_t *>( path.utf16() ),
+                    _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE ) != 0 )
         return false;
     _commit( fd );
     _close( fd );

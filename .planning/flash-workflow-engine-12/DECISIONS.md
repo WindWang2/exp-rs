@@ -81,15 +81,27 @@ conforming compilers (all 4 open workflow-touching PRs carry an independent
 workaround). Fixed by reusing the outer variable. This is the canonical fix
 the parallel PRs will rebase onto.
 
-## D7 — WP1 versioning contract (next iteration)
+## D7 — WP1 versioning contract (implemented)
 
-`WorkflowDocument.version` stays a string; `fromJson` accepts the known set
-`{"2.0","2.1"}`, migrates 2.0→2.1 in-memory (new fields default), and rejects
-anything else with the offending version named — an older build refuses a
-newer document *explicitly* instead of silently dropping its fields. New
-first-class fields (subflow ref, origin path) land under 2.1; extension data
-that must survive older readers stays inside `metadata`/`parameters`, which
-round-trip verbatim already.
+`WorkflowDocument.version` stays a string. `WorkflowIR::supportedSchemaVersions()`
+returns the closed accept-set `{"2.0","2.1"}` and `currentSchemaVersion()`
+returns `"2.1"`. `fromJson` rejects anything outside the set with the
+offending version named — an older build refuses a newer document
+*explicitly* instead of silently dropping its fields.
+
+The claimed version is **preserved verbatim** rather than rewritten on
+parse: a "2.0" document round-trips byte-stably as "2.0" (keeps the 9
+golden fixtures byte-identical, keeps `workflowIr2ContentFingerprint`
+stable for existing docs). Only writers bump the version — `migrateFromV1`
+and new documents claim "2.1". Additive-optional fields are the sanctioned
+intra-family extension mechanism: a 2.0 writer never emits them, a 2.1
+reader tolerates their absence.
+
+"2.1" adds `NodeFact::originNodeId` — composition provenance hook for the
+D8 subflow expansion (the designer-level fragment-instance node an expanded
+node came from). Serialized only when non-empty, so 2.0 documents stay
+byte-identical. Extension data that must survive older readers stays inside
+`metadata`/`parameters`, which round-trip verbatim (now pinned by a test).
 
 ## D8 — WP2 composition sketch (next iterations)
 
@@ -99,10 +111,11 @@ reference; `parameters.bindings` = template substitution map. Expansion
 (`workflow_composer`) flattens fragments into the parent document with
 namespaced ids `subflowNodeId/internalNodeId` — lineage stays deterministic
 because expanded ids are a pure function of the authored graph. Origin
-attribution rides in expanded nodes' `metadata.originNodeId` so failures and
-provenance point back at the designer-level node. Typed-port compatibility
-at fragment boundaries reuses `contract_checker`'s closed mismatch
-vocabulary rather than a second ruleset.
+attribution rides in expanded nodes' `NodeFact::originNodeId` (first-class
+since schema 2.1, D7) so failures and provenance point back at the
+designer-level node. Typed-port compatibility at fragment boundaries reuses
+`contract_checker`'s closed mismatch vocabulary rather than a second
+ruleset.
 
 ## D9 — WP5 provenance sketch
 
