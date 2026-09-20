@@ -220,6 +220,28 @@ bool DatasetStore::open( const QString &dbPath, QString *errorOut )
              "dataset_version_id TEXT NOT NULL PRIMARY KEY,"
              "sample_count INTEGER NOT NULL, max_roword INTEGER NOT NULL,"
              "json TEXT NOT NULL, updated_ms INTEGER NOT NULL)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS version_tags("
+             "dataset_id TEXT NOT NULL, tag TEXT NOT NULL,"
+             "version_id TEXT NOT NULL, created_ms INTEGER NOT NULL,"
+             "PRIMARY KEY(dataset_id, tag))",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_version_tags_version"
+             " ON version_tags(version_id)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS qa_reports("
+             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+             "dataset_version_id TEXT NOT NULL,"
+             "split_manifest_id TEXT NOT NULL DEFAULT '',"
+             "overall TEXT NOT NULL DEFAULT 'unknown',"
+             "json TEXT NOT NULL, created_ms INTEGER NOT NULL)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_qa_reports_version"
+             " ON qa_reports(dataset_version_id, id)",
              errorOut ) )
     {
         close();
@@ -452,7 +474,12 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
         Stmt versions( m_impl->db, QStringLiteral(
             "DELETE FROM dataset_versions WHERE dataset_id=?" ) );
         Stmt header( m_impl->db, QStringLiteral( "DELETE FROM datasets WHERE id=?" ) );
-        if ( !samples || !annotations || !versions || !header )
+        Stmt tags( m_impl->db, QStringLiteral(
+            "DELETE FROM version_tags WHERE dataset_id=?" ) );
+        Stmt qaReports( m_impl->db, QStringLiteral(
+            "DELETE FROM qa_reports WHERE dataset_version_id IN"
+            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
+        if ( !samples || !annotations || !versions || !header || !tags || !qaReports )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
@@ -462,7 +489,10 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
         annotations.bind( 1, datasetId.toString() );
         versions.bind( 1, datasetId.toString() );
         header.bind( 1, datasetId.toString() );
-        if ( !samples.step() || !annotations.step() || !versions.step() || !header.step() )
+        tags.bind( 1, datasetId.toString() );
+        qaReports.bind( 1, datasetId.toString() );
+        if ( !samples.step() || !annotations.step() || !versions.step() || !header.step() ||
+             !tags.step() || !qaReports.step() )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
@@ -1032,6 +1062,210 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDerivedVersion(
     derived.setFingerprint( QString() ); // stamped by the usual commit path
     derived.setCreatedAtUtc( QDateTime::currentDateTimeUtc() ); // fresh birth, not inherited
     return createDraftVersion( derived, note );
+}
+
+// --- version tags (12.0) --------------------------------------------------------
+
+namespace
+{
+
+bool validVersionTag( const QString &tag )
+{
+    if ( tag.isEmpty() || tag != tag.trimmed() || tag.size() > 128 )
+        return false;
+    for ( const QChar ch : tag )
+    {
+        if ( ch.unicode() < 0x20 || ch.unicode() == 0x7F )
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+sicnu::data::Result<void> DatasetStore::addVersionTag( const DatasetId &datasetId,
+                                                       const QString &tag,
+                                                       const DatasetVersionId &versionId )
+{
+    using Result = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    if ( !validVersionTag( tag ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.tag_invalid" ),
+                                           QStringLiteral( "tag must be 1..128 chars without "
+                                                           "whitespace edges or control chars" ) ) );
+
+    // Committed content is immutable, so the eligibility read does not need
+    // the write lock: nothing can demote a committed version between this
+    // check and the insert below.
+    const auto version = versionById( versionId );
+    if ( !version || version->datasetId() != datasetId.toString() )
+        return Result::failure( storeDiag(
+            QStringLiteral( "dataset.not_found" ),
+            QStringLiteral( "version %1 does not exist in dataset %2" )
+                .arg( versionId.toString(), datasetId.toString() ) ) );
+    if ( version->isMutable() )
+        return Result::failure( storeDiag(
+            QStringLiteral( "dataset.not_committed" ),
+            QStringLiteral( "only committed versions can be tagged" ) ) );
+
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
+                                           QStringLiteral( "store is read-only" ) ) );
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        Stmt insert( m_impl->db, QStringLiteral(
+            "INSERT INTO version_tags(dataset_id, tag, version_id, created_ms)"
+            " VALUES(?, ?, ?, ?)" ) );
+        if ( !insert )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               insert.error( m_impl->db ) ) );
+        }
+        insert.bind( 1, datasetId.toString() );
+        insert.bind( 2, tag );
+        insert.bind( 3, versionId.toString() );
+        insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
+        if ( !insert.step() )
+        {
+            // Read the error code AND message BEFORE rolling back: a
+            // successful rollback resets the connection's error state.
+            const int code = sqlite3_errcode( m_impl->db );
+            const QString message = insert.error( m_impl->db );
+            m_impl->rollback();
+            if ( code == SQLITE_CONSTRAINT )
+            {
+                // UNIQUE(dataset_id, tag): the name is already pinned.
+                return Result::failure( storeDiag(
+                    QStringLiteral( "dataset.tag_conflict" ),
+                    QStringLiteral( "tag %1 is already pinned; remove it first to move it" )
+                        .arg( tag ) ) );
+            }
+            return Result::failure(
+                storeDiag( QStringLiteral( "dataset.store_write_failed" ), message ) );
+        }
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
+    return Result::success();
+}
+
+sicnu::data::Result<void> DatasetStore::removeVersionTag( const DatasetId &datasetId,
+                                                          const QString &tag )
+{
+    using Result = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    if ( !validVersionTag( tag ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.tag_invalid" ),
+                                           QStringLiteral( "tag must be 1..128 chars without "
+                                                           "whitespace edges or control chars" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_read_only" ),
+                                           QStringLiteral( "store is read-only" ) ) );
+    if ( !m_impl->begin( nullptr ) )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "cannot begin transaction" ) ) );
+    {
+        Stmt remove( m_impl->db, QStringLiteral(
+            "DELETE FROM version_tags WHERE dataset_id=? AND tag=?" ) );
+        if ( !remove )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               remove.error( m_impl->db ) ) );
+        }
+        remove.bind( 1, datasetId.toString() );
+        remove.bind( 2, tag );
+        if ( !remove.step() )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                               remove.error( m_impl->db ) ) );
+        }
+        if ( remove.changes( m_impl->db ) != 1 )
+        {
+            m_impl->rollback();
+            return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                               QStringLiteral( "tag %1 is not pinned" )
+                                                   .arg( tag ) ) );
+        }
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
+    return Result::success();
+}
+
+std::optional<DatasetVersionId> DatasetStore::versionByTag( const DatasetId &datasetId,
+                                                            const QString &tag ) const
+{
+    if ( !m_impl || !validVersionTag( tag ) )
+        return std::nullopt;
+    QString versionText;
+    {
+        QMutexLocker lock( &m_impl->mutex );
+        Stmt stmt( m_impl->db, QStringLiteral(
+            "SELECT version_id FROM version_tags WHERE dataset_id=? AND tag=?" ) );
+        if ( !stmt )
+            return std::nullopt;
+        stmt.bind( 1, datasetId.toString() );
+        stmt.bind( 2, tag );
+        if ( !stmt.stepRow() )
+            return std::nullopt;
+        versionText = stmt.text( 0 );
+    }
+    const auto versionId = DatasetVersionId::fromString( versionText );
+    if ( !versionId )
+        return std::nullopt;
+    // The pinned version row must still exist; a dangling tag resolves to
+    // nothing rather than fabricating an id.
+    if ( !versionById( *versionId ) )
+        return std::nullopt;
+    return versionId;
+}
+
+QVector<DatasetStore::VersionTag> DatasetStore::versionTags( const DatasetId &datasetId,
+                                                             qint64 limit ) const
+{
+    QVector<VersionTag> tags;
+    if ( !m_impl )
+        return tags;
+    limit = qBound<qint64>( qint64( 1 ), limit, qint64( 1000 ) );
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT tag, version_id, created_ms FROM version_tags"
+        " WHERE dataset_id=? ORDER BY tag ASC LIMIT ?" ) );
+    if ( !stmt )
+        return tags;
+    stmt.bind( 1, datasetId.toString() );
+    stmt.bind( 2, limit );
+    while ( stmt.stepRow() )
+    {
+        VersionTag entry;
+        entry.tag = stmt.text( 0 );
+        const auto versionId = DatasetVersionId::fromString( stmt.text( 1 ) );
+        if ( entry.tag.isEmpty() || !versionId )
+            return {}; // corrupt row: refuse to return a partial tag set
+        entry.versionId = *versionId;
+        entry.createdAtUtc = QDateTime::fromMSecsSinceEpoch( stmt.i64( 2 ) );
+        tags.append( entry );
+    }
+    return tags;
 }
 
 // --- lineage -----------------------------------------------------------------

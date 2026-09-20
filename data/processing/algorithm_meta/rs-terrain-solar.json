@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:terrain_solar",
+  "input" : "raster",
+  "notes" : "Parallel-ray shadow model (exact per sun position; azimuths quantized to 1\u00b0 sectors). Generated tracks use the low-precision solar position (\u00b11\u00b0) from local SOLAR time \u2014 supply civil time only via your own track. Curvature is not applied to shadows (v1).",
+  "output" : "raster",
+  "tags" : 
+  [
+    "terrain",
+    "solar",
+    "shadow"
+  ],
+  "task" : "solar_terrain"
+}

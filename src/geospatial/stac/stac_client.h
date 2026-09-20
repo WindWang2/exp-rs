@@ -74,6 +74,10 @@ struct StacClientOptions
     std::uintmax_t maxResponseBytes = kDefaultHttpMaxResponseBytes;
     /// Hard bound for searchAll() — a paged crawl must never run away.
     int maxItems = 1000;
+    /// 12.0 default worker count for fetchItemsConcurrent (1 = serial —
+    /// the historical behavior; the fetcher itself stays synchronous and
+    /// bounded, concurrency is only the number of in-flight item fetches).
+    int maxConcurrency = 1;
 
     // --- 9.0 M4: bounded client-side response cache (opt-in) --------------
     /// Caches search/collection item-page ANSWERS in memory, keyed by
@@ -199,6 +203,25 @@ class StacClient
 
     /// Bounded response cache accounting (hits/misses/evictions/entries/bytes).
     Json::Value cacheStats() const;
+
+    // --- 12.0 bounded-concurrent item fetch ---------------------------------
+    /// Fetches the given item hrefs with AT MOST  maxConcurrency requests
+    /// in flight (0 = options.maxConcurrency, clamped to [1, 32]). Every
+    /// item is independent: one failed or malformed document is a RECORDED
+    /// failure for its slot — never an abort of the batch, never a wrong
+    /// item at another index. Results keep the input order; each result
+    /// slot is written by exactly one worker (lock-free per slot). The
+    /// caller owns the list size — chunk huge item sets yourself (memory is
+    /// O(input), honestly).
+    struct ItemFetchResult
+    {
+        std::size_t index = 0;
+        bool ok = false;
+        StacItem item;              ///< valid when ok
+        std::string errorText;      ///< typed failure text when !ok
+    };
+    std::vector<ItemFetchResult> fetchItemsConcurrent(
+        const std::vector<std::string> &itemHrefs, int maxConcurrency = 0 ) const;
 
   private:
     Json::Value fetchDocument( const std::string &method, const std::string &url,

@@ -78,15 +78,25 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     return fail( QStringLiteral( "root must be an object" ) );
 
   // --- unknown top-level keys (schema: additionalProperties: false) --------
-  static const QStringList allowedRootKeys = {
+  // Version-strict: spec_version 2 fields in a v1 document are a semantic
+  // drift the author must opt into explicitly, so they are rejected there.
+  static const QStringList v2RootKeys = {
+    QStringLiteral( "objective_zh" ), QStringLiteral( "glossary" ),
+    QStringLiteral( "expected_artifacts" ), QStringLiteral( "param_ranges" ),
+    QStringLiteral( "grading_rules" ), QStringLiteral( "principles" ),
+    QStringLiteral( "prerequisite_knowledge" )
+  };
+  QStringList allowedRootKeys = {
     QStringLiteral( "spec_version" ), QStringLiteral( "id" ), QStringLiteral( "title" ),
     QStringLiteral( "title_zh" ), QStringLiteral( "objective" ), QStringLiteral( "prerequisites" ),
     QStringLiteral( "steps" ), QStringLiteral( "grading_ref" ), QStringLiteral( "thinking_questions" )
   };
+  allowedRootKeys += v2RootKeys;
   for ( const auto &key : root.getMemberNames() )
   {
-    if ( !allowedRootKeys.contains( stdToQString( key ) ) )
-      return fail( QStringLiteral( "unknown top-level key '%1'" ).arg( stdToQString( key ) ) );
+    const QString name = stdToQString( key );
+    if ( !allowedRootKeys.contains( name ) )
+      return fail( QStringLiteral( "unknown top-level key '%1'" ).arg( name ) );
   }
 
   // --- required scalars ----------------------------------------------------
@@ -98,8 +108,20 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     || ( specVersion.isDouble() && specVersion.asDouble() == std::floor( specVersion.asDouble() ) );
   if ( !integral )
     return fail( QStringLiteral( "spec_version must be an integer" ) );
-  if ( specVersion.asInt() != 1 )
-    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1)" ).arg( specVersion.asInt() ) );
+  // LabSpec 2 is a strict superset of v1 (lab platform 12.0): the loader
+  // accepts both, v2-only fields are validated below when the version is 2.
+  const int contractVersion = specVersion.asInt();
+  if ( contractVersion != 1 && contractVersion != 2 )
+    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1 or 2)" )
+                   .arg( contractVersion ) );
+  if ( contractVersion == 1 )
+  {
+    for ( const auto &key : v2RootKeys )
+    {
+      if ( root.isMember( key.toStdString() ) )
+        return fail( QStringLiteral( "top-level key '%1' requires spec_version 2" ).arg( key ) );
+    }
+  }
 
   static const QRegularExpression idPattern( QStringLiteral( "^lab[0-9]{2}_[a-z][a-z0-9_]*$" ) );
   if ( !isNonEmptyString( root[ "id" ] ) )
@@ -181,6 +203,193 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
         return fail( QStringLiteral( "thinking_questions entries must be non-empty strings" ), 0, labId );
       spec.thinkingQuestions << stdToQString( q.asString() );
     }
+  }
+
+  // --- LabSpec 2 fields (validated here; authoring/contract data) ----------
+  // The runtime LabSpec struct intentionally stays at the v1 shape: the v2
+  // fields feed the docs generator, grading tooling and drift tests, which
+  // read the JSON directly. Validation-only keeps every consumer source- and
+  // ABI-compatible.
+  if ( contractVersion == 2 )
+  {
+    if ( root.isMember( "objective_zh" )
+         && !isNonEmptyString( root[ "objective_zh" ] ) )
+      return fail( QStringLiteral( "objective_zh must be a non-empty string" ), 0, labId );
+
+    // prerequisite_knowledge[]: prior labs/concepts (strings), as opposed to
+    // prerequisites[] which stays a data-ref list.
+    if ( root.isMember( "prerequisite_knowledge" ) )
+    {
+      const Json::Value &knowledge = root[ "prerequisite_knowledge" ];
+      if ( !knowledge.isArray() )
+        return fail( QStringLiteral( "prerequisite_knowledge must be an array" ), 0, labId );
+      for ( const auto &item : knowledge )
+      {
+        if ( !isNonEmptyString( item ) )
+          return fail( QStringLiteral( "prerequisite_knowledge entries must be non-empty strings" ), 0, labId );
+      }
+    }
+
+    // glossary[]: {term, term_zh, definition_zh}
+    if ( root.isMember( "glossary" ) )
+    {
+      const Json::Value &glossary = root[ "glossary" ];
+      if ( !glossary.isArray() )
+        return fail( QStringLiteral( "glossary must be an array" ), 0, labId );
+      static const QStringList glossaryKeys = {
+        QStringLiteral( "term" ), QStringLiteral( "term_zh" ), QStringLiteral( "definition_zh" )
+      };
+      for ( const auto &entry : glossary )
+      {
+        if ( !entry.isObject() )
+          return fail( QStringLiteral( "glossary entries must be objects" ), 0, labId );
+        for ( const auto &key : entry.getMemberNames() )
+        {
+          if ( !glossaryKeys.contains( stdToQString( key ) ) )
+            return fail( QStringLiteral( "unknown glossary key '%1'" ).arg( stdToQString( key ) ), 0, labId );
+        }
+        for ( const char *key : { "term", "term_zh", "definition_zh" } )
+        {
+          if ( !isNonEmptyString( entry[ key ] ) )
+            return fail( QStringLiteral( "glossary %1 must be a non-empty string" ).arg( key ), 0, labId );
+        }
+      }
+    }
+
+    // principles[]: {heading, body, formulas?}
+    if ( root.isMember( "principles" ) )
+    {
+      const Json::Value &principles = root[ "principles" ];
+      if ( !principles.isArray() )
+        return fail( QStringLiteral( "principles must be an array" ), 0, labId );
+      static const QStringList principleKeys = {
+        QStringLiteral( "heading" ), QStringLiteral( "body" ), QStringLiteral( "formulas" )
+      };
+      for ( const auto &entry : principles )
+      {
+        if ( !entry.isObject() )
+          return fail( QStringLiteral( "principles entries must be objects" ), 0, labId );
+        for ( const auto &key : entry.getMemberNames() )
+        {
+          if ( !principleKeys.contains( stdToQString( key ) ) )
+            return fail( QStringLiteral( "unknown principles key '%1'" ).arg( stdToQString( key ) ), 0, labId );
+        }
+        for ( const char *key : { "heading", "body" } )
+        {
+          if ( !isNonEmptyString( entry[ key ] ) )
+            return fail( QStringLiteral( "principles %1 must be a non-empty string" ).arg( key ), 0, labId );
+        }
+        if ( entry.isMember( "formulas" )
+             && ( !entry[ "formulas" ].isArray() ) )
+          return fail( QStringLiteral( "principles formulas must be an array" ), 0, labId );
+        if ( entry.isMember( "formulas" ) )
+        {
+          for ( const auto &formula : entry[ "formulas" ] )
+          {
+            if ( !isNonEmptyString( formula ) )
+              return fail( QStringLiteral( "principles formulas entries must be non-empty strings" ), 0, labId );
+          }
+        }
+      }
+    }
+
+    // expected_artifacts[]: {path, kind?, note_zh?}
+    if ( root.isMember( "expected_artifacts" ) )
+    {
+      const Json::Value &artifacts = root[ "expected_artifacts" ];
+      if ( !artifacts.isArray() )
+        return fail( QStringLiteral( "expected_artifacts must be an array" ), 0, labId );
+      static const QStringList artifactKeys = {
+        QStringLiteral( "path" ), QStringLiteral( "kind" ), QStringLiteral( "note_zh" )
+      };
+      for ( const auto &entry : artifacts )
+      {
+        if ( !entry.isObject() )
+          return fail( QStringLiteral( "expected_artifacts entries must be objects" ), 0, labId );
+        for ( const auto &key : entry.getMemberNames() )
+        {
+          if ( !artifactKeys.contains( stdToQString( key ) ) )
+            return fail( QStringLiteral( "unknown expected_artifacts key '%1'" ).arg( stdToQString( key ) ), 0, labId );
+        }
+        if ( !isNonEmptyString( entry[ "path" ] ) )
+          return fail( QStringLiteral( "expected_artifacts path must be a non-empty string" ), 0, labId );
+        if ( entry.isMember( "kind" ) )
+        {
+          // Guard the scalar read: asString() on an array/object raises
+          // Json::LogicError, which would crash instead of failing typed.
+          if ( !entry[ "kind" ].isString() )
+            return fail( QStringLiteral( "expected_artifacts kind must be raster|vector|file" ), 0, labId );
+          const QString kind = stdToQString( entry[ "kind" ].asString() );
+          if ( kind != QLatin1String( "raster" ) && kind != QLatin1String( "vector" )
+               && kind != QLatin1String( "file" ) )
+            return fail( QStringLiteral( "expected_artifacts kind must be raster|vector|file" ), 0, labId );
+        }
+        if ( entry.isMember( "note_zh" ) && !isNonEmptyString( entry[ "note_zh" ] ) )
+          return fail( QStringLiteral( "expected_artifacts note_zh must be a non-empty string" ), 0, labId );
+      }
+    }
+
+    // param_ranges: operator_id -> param -> {min?, max?, values?, note_zh?}
+    if ( root.isMember( "param_ranges" ) )
+    {
+      const Json::Value &ranges = root[ "param_ranges" ];
+      if ( !ranges.isObject() )
+        return fail( QStringLiteral( "param_ranges must be an object" ), 0, labId );
+      static const QRegularExpression operatorIdPattern(
+        QStringLiteral( "^(rs|opencv):[a-z0-9_]+$" ) );
+      static const QStringList rangeKeys = {
+        QStringLiteral( "min" ), QStringLiteral( "max" ), QStringLiteral( "values" ),
+        QStringLiteral( "note_zh" )
+      };
+      for ( const auto &operatorKey : ranges.getMemberNames() )
+      {
+        if ( !operatorIdPattern.match( stdToQString( operatorKey ) ).hasMatch() )
+          return fail( QStringLiteral( "param_ranges key '%1' is not an operator id" )
+                         .arg( stdToQString( operatorKey ) ), 0, labId );
+        const Json::Value &operatorRanges = ranges[ operatorKey ];
+        if ( !operatorRanges.isObject() )
+          return fail( QStringLiteral( "param_ranges[%1] must be an object" ).arg( operatorKey ), 0, labId );
+        for ( const auto &paramKey : operatorRanges.getMemberNames() )
+        {
+          const Json::Value &range = operatorRanges[ paramKey ];
+          if ( !range.isObject() )
+            return fail( QStringLiteral( "param_ranges[%1][%2] must be an object" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          for ( const auto &key : range.getMemberNames() )
+          {
+            if ( !rangeKeys.contains( stdToQString( key ) ) )
+              return fail( QStringLiteral( "unknown param_ranges key '%1'" ).arg( stdToQString( key ) ), 0, labId );
+          }
+          const bool hasMin = range.isMember( "min" );
+          const bool hasMax = range.isMember( "max" );
+          const bool hasValues = range.isMember( "values" );
+          if ( !hasMin && !hasMax && !hasValues )
+            return fail( QStringLiteral( "param_ranges[%1][%2] needs min, max or values" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          if ( hasMin && !range[ "min" ].isNumeric() )
+            return fail( QStringLiteral( "param_ranges[%1][%2].min must be a number" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          if ( hasMax && !range[ "max" ].isNumeric() )
+            return fail( QStringLiteral( "param_ranges[%1][%2].max must be a number" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          if ( hasMin && hasMax && range[ "min" ].asDouble() > range[ "max" ].asDouble() )
+            return fail( QStringLiteral( "param_ranges[%1][%2]: min exceeds max" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          if ( hasValues
+               && ( !range[ "values" ].isArray() || range[ "values" ].empty() ) )
+            return fail( QStringLiteral( "param_ranges[%1][%2].values must be a non-empty array" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+          if ( range.isMember( "note_zh" ) && !isNonEmptyString( range[ "note_zh" ] ) )
+            return fail( QStringLiteral( "param_ranges[%1][%2].note_zh must be a non-empty string" )
+                           .arg( operatorKey, paramKey ), 0, labId );
+        }
+      }
+    }
+
+    // grading_rules: explicit pointer at the auto-grader rules file.
+    if ( root.isMember( "grading_rules" )
+         && !isNonEmptyString( root[ "grading_rules" ] ) )
+      return fail( QStringLiteral( "grading_rules must be a non-empty string" ), 0, labId );
   }
 
   // --- steps ---------------------------------------------------------------

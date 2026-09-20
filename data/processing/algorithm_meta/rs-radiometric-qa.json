@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:radiometric_qa",
+  "input" : "raster",
+  "notes" : "Flag vocabulary (uint16): bit0 saturation, bit1 negative, bit2 over-range, bit3 non-finite, bit4 cloud, bit5 cloud-shadow, bit6 snow, bit7 QA_RADSAT saturation, bit8 invalid angles. Schema id exp_rs_radiometric_qa_flags/1 is stamped on the output.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "optical",
+    "qa",
+    "saturation"
+  ],
+  "task" : "radiometric-normalization"
+}
