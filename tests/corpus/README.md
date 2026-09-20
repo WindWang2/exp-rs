@@ -210,3 +210,46 @@ ctest -R "path policy fuzz" --output-on-failure                # D5
 
 To see a defect re-appear, revert only the corresponding production hunk and
 re-run the lane — every row above is a red/green test, not a narrative claim.
+
+---
+
+## Sanitizer lane (ASan)
+
+The three lanes were compiled with the repository's own sanitizer option
+(`ENABLE_SANITIZERS=ON`, i.e. the `sanitizer-debug` preset's cache variables)
+into a separate build directory and run with `-j1` builds:
+
+```
+cmake --preset dev-default -B build-san -DENABLE_SANITIZERS=ON ...
+ninja -C build-san -j1 test_contract_fuzz_frame test_contract_fuzz_payload \
+                     test_contract_fuzz_paths
+ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE=1 ASAN_OPTIONS=detect_leaks=0 \
+  ./test_contract_fuzz_<lane>.exe
+```
+
+Result: all three lanes pass with **zero AddressSanitizer reports**
+(no heap overflow, no use-after-free, no UB report; leak detection is off per
+the repository's documented policy — QGIS/Qt singleton "leaks" are intentional,
+see CMakeLists.txt around ENABLE_SANITIZERS).
+
+`ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE=1` is required only because the MSVC
+ASan runtime cannot intercept the non-instrumented jsoncpp/Git-Bash host calls;
+it does not disable any check.
+
+## Review disposition (independent reviewer, read-only, `origin/master...HEAD`)
+
+Verdict was SHIP-WITH-FIXES; every finding is dispositioned below.
+
+| Finding | Sev | Disposition |
+|---|---|---|
+| F1 `parseFrame` had the depth bound but no try/catch (jsoncpp throws) | P1 | **FIXED** — same guard as the envelope decoder, plus a new lane case that feeds parseFrame depth bombs and wrong-shaped frames. |
+| F2 `stackLimit=64` could reject legal ui-event values (byte cap allows ~2000 levels) | P1 | **FIXED** — new documented `PluginUiSchemaLimits::maxEventValueDepth = 32` enforced by an iterative walk; transport bound raised to 128 (legal event + wrapper fits with headroom); lane pins a 20-deep event payload decoding. |
+| F3 manifest depth-bomb leg never wrote its fixture | P2 | **FIXED** — both shapes (unknown field, versioned manifest) are now written and loaded. |
+| F4 dead helpers + a size leg that did not exist | P2 | **FIXED** — `jsonAtPath`, `FaultRecorder`, `sizeBomb` removed; case renamed to what it asserts; the real over-cap-payload leg (no partial bytes on the stream) added. |
+| F5 unreachable branch in the truncation oracle | P2 | **FIXED** — removed. |
+| F6 D5's pin was code-page dependent | P2 | **FIXED** — invalid-UTF-8 entries added to the path corpus, so the totality pin is red on every host. |
+| F7 DEDUP claimed a `validateUiEvent` defect that master already guards | P2 | **FIXED** — DEDUP corrected; the test leg is now explicitly a totality assertion. |
+| F8 `NotCanonical` semantics widened undocumented | P2 | **FIXED** — enum/function docs state the un-representable case. |
+| F9 `resolvedPath` encoding undocumented | P2 | **FIXED** — documented as the platform narrow encoding (the form callers feed back into std::filesystem). |
+| F10 legacy `Json::Reader` grammar narrowed (comments) | P2 | **FIXED** — `allowComments` preserved on all three migrated readers. |
+| F11–F14 (unused constant, missing `<fstream>`, OWNERSHIP wording, PR_BODY.md ignore) | NIT | **FIXED** — plus PR_BODY.md stays out of the repository entirely (the PR is created directly with `gh pr create`). |
