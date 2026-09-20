@@ -20,6 +20,7 @@
 #include <QTimer>
 #include <QSet>
 
+#include "internal/catalog_record_store.h"
 #include "internal/source_provider_registry.h"
 #include "internal/network_probe.h"
 #include "providers/gdal_raster_source_provider.h"
@@ -102,35 +103,6 @@ QVector<Diagnostic> leasedRefusalDiagnostics( const QString &codePrefix,
   return diagnostics;
 }
 
-bool isVirtualOrRemotePath( const QString &path )
-{
-  return path.startsWith( QLatin1String( "/vsi" ), Qt::CaseInsensitive ) ||
-         path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
-         path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive );
-}
-
-/// Additive aliases so a raw STAC https href and the provider's /vsicurl/
-/// spelling resolve to the same catalog record. Local files are unchanged.
-QStringList virtualPathAliases( const QString &path )
-{
-  QStringList aliases;
-  aliases.append( path );
-  const QString prefix = QStringLiteral( "/vsicurl/" );
-  if ( path.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
-       path.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
-  {
-    aliases.append( prefix + path );
-  }
-  else if ( path.startsWith( prefix, Qt::CaseInsensitive ) )
-  {
-    const QString rest = path.mid( prefix.size() );
-    if ( rest.startsWith( QLatin1String( "http://" ), Qt::CaseInsensitive ) ||
-         rest.startsWith( QLatin1String( "https://" ), Qt::CaseInsensitive ) )
-      aliases.append( rest );
-  }
-  return aliases;
-}
-
 } // namespace
 
 namespace internal
@@ -153,18 +125,9 @@ struct AssetLeaseControl
 
 struct DataManager::Impl
 {
-  struct AssetRecord
-  {
-    SourceKey sourceKey;
-    AssetSnapshot snapshot;
-    /// Provenance attached by a transactional algorithm-output commit; absent
-    /// for assets that were registered directly.
-    std::optional<DerivationRecord> derivation;
-    /// The recipe a Virtual Raster Asset was created from; absent for
-    /// non-virtual assets. The recipe is the identity; the generated `.vrt`
-    /// at the snapshot's canonicalSource is a disposable artifact.
-    std::optional<VirtualRasterRecipe> virtualRecipe;
-  };
+  /// One catalog record. The definition lives in the record store so the
+  /// immutable shards can own it without the DataManager leaking its internals.
+  using AssetRecord = internal::AssetRecord;
 
   struct LeaseRecord
   {
@@ -201,9 +164,13 @@ struct DataManager::Impl
     AssetId input;
   };
 
+  /// The published catalog state readers observe: an immutable view over the
+  /// record store's shards (structurally shared, never copied per mutation)
+  /// plus the temporal-collection records. `generation` is the mutation
+  /// counter the snapshot was published at.
   struct CatalogSnapshot
   {
-    QVector<AssetRecord> records;
+    internal::CatalogRecordStore::SnapshotView records;
     QVector<TemporalCollectionRecord_> temporalCollections;
     quint64 generation = 0;
   };
@@ -211,15 +178,29 @@ struct DataManager::Impl
   mutable std::mutex snapshotMutex;
   std::shared_ptr<const CatalogSnapshot> currentSnapshot;
 
+  /// Publishes the current live state as one immutable snapshot in O(1): the
+  /// record store view aliases its shards by shared_ptr (two refcount bumps,
+  /// no record is copied) and the temporal-collection vector is implicitly
+  /// shared. The O(N^2)-per-population full-vector copy this replaced is what
+  /// benchmarks/observatory/obs_dataset_register_scaling.json recorded
+  /// (exponent ~2.25); the per-mutation cost is now bounded by the shard
+  /// capacity, which CatalogScaleCounters makes provable.
   void publishSnapshot()
   {
     catalogGeneration++;
     auto snap = std::make_shared<CatalogSnapshot>();
-    snap->records = records;
+    snap->records = records.captureView();
     snap->temporalCollections = temporalCollections;
     snap->generation = catalogGeneration;
-    std::lock_guard<std::mutex> lock( snapshotMutex );
-    currentSnapshot = std::move( snap );
+    {
+      std::lock_guard<std::mutex> lock( snapshotMutex );
+      currentSnapshot = std::move( snap );
+    }
+    // Everything the snapshot now aliases becomes shared: the next mutation
+    // must copy its target shard before writing (owner-thread-only state).
+    records.markSharedWithSnapshot();
+    internal::catalogScaleCounters().snapshotPublications.fetch_add(
+      1, std::memory_order_relaxed );
   }
 
   std::shared_ptr<const CatalogSnapshot> getSnapshot() const
@@ -235,7 +216,9 @@ struct DataManager::Impl
   }
 
   std::unique_ptr<internal::SourceProviderRegistry> providers;
-  QVector<AssetRecord> records;
+  /// Authoritative record container: immutable shards + a live tail, so
+  /// publishing a snapshot is O(1) instead of copying every record (WP1).
+  internal::CatalogRecordStore records;
   QVector<LeaseRecord> leases;
   QVector<CollectionRecord> collections;
   QVector<TemporalCollectionRecord_> temporalCollections;
@@ -246,20 +229,6 @@ struct DataManager::Impl
   std::unique_ptr<QTemporaryDir> vrtScratchDir;
   quint64 catalogGeneration = 0;
   quint64 nextLeaseToken = 1;
-
-  QVector<AssetRecord>::iterator findRecord( AssetId id )
-  {
-    return std::find_if(
-      records.begin(), records.end(),
-      [&]( const AssetRecord &record ) { return record.snapshot.id() == id; } );
-  }
-
-  QVector<AssetRecord>::const_iterator findRecord( AssetId id ) const
-  {
-    return std::find_if(
-      records.begin(), records.end(),
-      [&]( const AssetRecord &record ) { return record.snapshot.id() == id; } );
-  }
 
   QVector<CollectionRecord>::iterator findCollection( CollectionId id )
   {
@@ -499,57 +468,77 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
     normalizedDescriptor.providerKey = source.canonicalProviderKey;
 
   const SourceKey sourceKey = normalizedDescriptor.sourceKey();
-  for ( Impl::AssetRecord &record : m_impl->records )
   {
-    if ( record.sourceKey != sourceKey )
-      continue;
+    // Dedup lookup. The common case (a NEW asset) must not copy any shard, so
+    // the scan goes through the live-side source-identity index; only a hit
+    // resolves the record (and, for the update path, takes mutable access,
+    // which copies that one shard).
+    const std::optional<AssetId> dedupOwner = m_impl->records.sourceKeyOwner( normalizedDescriptor );
 
-    // Dedup hit. The bytes behind the stable path may still have changed:
-    // OutputCommitter's publish-then-swap replaces them, and a source file can
-    // be mutated externally. Reuse silently would leave the snapshot (and any
-    // displayed layer) stale while the content moved under it (#687).
-    const bool structureDiffers = record.snapshot.structure() != source.structure;
-    // #726 revision convergence: a re-publication whose producing execution is
-    // unchanged (same execution fingerprint on the existing derivation) and
-    // whose structure snapshot still matches IS the same artifact — advancing
-    // the revision would fabricate a change that downstream fingerprints then
-    // chase forever. Any real difference (structure changed, fingerprint
-    // different/absent) keeps the #687 update semantics.
-    const bool sameExecutionRepublished =
-      !structureDiffers && !request.executionFingerprint.isEmpty()
-      && record.derivation.has_value()
-      && record.derivation->executionFingerprint == request.executionFingerprint;
-    if ( sameExecutionRepublished || ( !request.notifyUpdateOnReuse && !structureDiffers ) )
+    if ( dedupOwner )
     {
-      watchAssetSource( record.snapshot.source().canonicalSource );
-      return RegisterResult{ record.snapshot.id(), true, {} };
+      const Impl::AssetRecord *dedupRecord = m_impl->records.find( *dedupOwner );
+      if ( dedupRecord )
+      {
+        // Dedup hit. The bytes behind the stable path may still have changed:
+        // OutputCommitter's publish-then-swap replaces them, and a source file
+        // can be mutated externally. Reuse silently would leave the snapshot
+        // (and any displayed layer) stale while the content moved under it
+        // (#687).
+        const AssetId dedupId = dedupRecord->snapshot.id();
+        const bool structureDiffers = dedupRecord->snapshot.structure() != source.structure;
+        // #726 revision convergence: a re-publication whose producing execution
+        // is unchanged (same execution fingerprint on the existing derivation)
+        // and whose structure snapshot still matches IS the same artifact —
+        // advancing the revision would fabricate a change that downstream
+        // fingerprints then chase forever. Any real difference (structure
+        // changed, fingerprint different/absent) keeps the #687 update
+        // semantics.
+        const bool sameExecutionRepublished =
+          !structureDiffers && !request.executionFingerprint.isEmpty()
+          && dedupRecord->derivation.has_value()
+          && dedupRecord->derivation->executionFingerprint == request.executionFingerprint;
+        if ( sameExecutionRepublished ||
+             ( !request.notifyUpdateOnReuse && !structureDiffers ) )
+        {
+          watchAssetSource( dedupRecord->snapshot.source().canonicalSource );
+          return RegisterResult{ dedupId, true, {} };
+        }
+
+        // Treat the asset as updated: refresh the snapshot from the fresh
+        // resolution, advance the revision one step (mirroring relocate), and
+        // emit assetChanged so displays reload. The descriptor is preserved —
+        // the re-registration carries a bare provider/path descriptor and must
+        // not drop the stored dataOptions (which also key the identity).
+        Impl::AssetRecord *record = m_impl->records.findMutable( dedupId );
+        if ( record )
+        {
+          const QString updatedSource = record->snapshot.source().canonicalSource;
+          AssetSnapshot fresh{ dedupId,
+                               record->snapshot.revision().next(),
+                               record->snapshot.source(),
+                               source.kind,
+                               source.state,
+                               record->snapshot.capabilities() | source.capabilities
+                                 | request.additionalCapabilities,
+                               record->snapshot.persistence(),
+                               source.storageKind,
+                               source.displayName,
+                               source.structure,
+                               record->snapshot.acquisitionTime(),
+                               record->snapshot.parentCollectionId() };
+          record->snapshot = std::move( fresh );
+          // The descriptor is preserved, so both identity indexes are
+          // unchanged; no resync is required.
+          m_impl->publishSnapshot();
+          emit assetChanged( dedupId );
+          watchAssetSource( updatedSource );
+          return RegisterResult{ dedupId, true, resolved.diagnostics() };
+        }
+        // A DirectConnection slot re-entered and removed the asset between the
+        // lookup and the update: fall through to a fresh registration.
+      }
     }
-
-    // Treat the asset as updated: refresh the snapshot from the fresh
-    // resolution, advance the revision one step (mirroring relocate), and
-    // emit assetChanged so displays reload. The descriptor is preserved —
-    // the re-registration carries a bare provider/path descriptor and must
-    // not drop the stored dataOptions (which also key the identity).
-    const AssetId existingId = record.snapshot.id();
-    AssetSnapshot updated{ existingId,
-                           record.snapshot.revision().next(),
-                           record.snapshot.source(),
-                           source.kind,
-                           source.state,
-                           record.snapshot.capabilities() | source.capabilities
-                             | request.additionalCapabilities,
-                           record.snapshot.persistence(),
-                           source.storageKind,
-                           source.displayName,
-                           source.structure,
-                           record.snapshot.acquisitionTime(),
-                           record.snapshot.parentCollectionId() };
-    record.snapshot = std::move( updated );
-    m_impl->publishSnapshot();
-
-    emit assetChanged( existingId );
-    watchAssetSource( record.snapshot.source().canonicalSource );
-    return RegisterResult{ existingId, true, resolved.diagnostics() };
   }
 
   const AssetId id = AssetId::generate();
@@ -566,7 +555,7 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
                           source.displayName,
                           source.structure,
                           request.acquisitionTime };
-  m_impl->records.push_back( Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
+  m_impl->records.append( Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
   m_impl->publishSnapshot();
 
   emit assetAdded( id );
@@ -600,8 +589,8 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
     normalizedDescriptor.providerKey = source.canonicalProviderKey;
   const SourceKey sourceKey = normalizedDescriptor.sourceKey();
 
-  const auto existingId = m_impl->findRecord( request.id );
-  if ( existingId != m_impl->records.end() )
+  const Impl::AssetRecord *existingId = m_impl->records.find( request.id );
+  if ( existingId )
   {
     if ( existingId->sourceKey == sourceKey )
       return Result<AssetId>::success( request.id, resolved.diagnostics() );
@@ -611,15 +600,12 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
                   DiagnosticSeverity::Error } );
   }
 
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  if ( m_impl->records.sourceKeyOwner( normalizedDescriptor ) )
   {
-    if ( record.sourceKey == sourceKey )
-    {
-      return Result<AssetId>::failure(
-        Diagnostic{ QStringLiteral( "restore.source_conflict" ),
-                    QStringLiteral( "The persisted source is already bound to another Asset ID" ),
-                    DiagnosticSeverity::Error } );
-    }
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "restore.source_conflict" ),
+                  QStringLiteral( "The persisted source is already bound to another Asset ID" ),
+                  DiagnosticSeverity::Error } );
   }
 
   const AssetRevision revision =
@@ -635,7 +621,7 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
                           source.displayName,
                           source.structure,
                           request.acquisitionTime };
-  m_impl->records.push_back(
+  m_impl->records.append(
     Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
   m_impl->publishSnapshot();
   emit assetAdded( request.id );
@@ -648,8 +634,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   if ( QThread::currentThread() != thread() )
     return Result<RelocateResult>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( request.id );
-  if ( recordIt == m_impl->records.end() )
+  Impl::AssetRecord *recordIt = m_impl->records.findMutable( request.id );
+  if ( !recordIt )
   {
     return Result<RelocateResult>::failure(
       Diagnostic{ QStringLiteral( "relocate.unknown_asset" ),
@@ -697,15 +683,14 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   const SourceKey newSourceKey = normalizedDescriptor.sourceKey();
 
   // The relocated source must not collide with another registered asset.
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  if ( const std::optional<AssetId> owner =
+           m_impl->records.sourceKeyOwner( normalizedDescriptor );
+       owner && *owner != request.id )
   {
-    if ( record.snapshot.id() != request.id && record.sourceKey == newSourceKey )
-    {
-      return Result<RelocateResult>::failure(
-        Diagnostic{ QStringLiteral( "relocate.source_conflict" ),
-                    QStringLiteral( "The replacement source is already bound to another Asset ID" ),
-                    DiagnosticSeverity::Error } );
-    }
+    return Result<RelocateResult>::failure(
+      Diagnostic{ QStringLiteral( "relocate.source_conflict" ),
+                  QStringLiteral( "The replacement source is already bound to another Asset ID" ),
+                  DiagnosticSeverity::Error } );
   }
 
   // Recompute the SourceKey index in place — the same Asset ID is preserved.
@@ -722,11 +707,18 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
                          replacement.structure,
                          current.acquisitionTime(),
                          current.parentCollectionId() };
+  // Swap the source-identity index entry BEFORE the snapshot is replaced: the
+  // store derives the previous identity from the record itself.
+  m_impl->records.reindexSourceKey( request.id, normalizedDescriptor );
+  const QString previousSource = current.source().canonicalSource;
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
+  // The canonical source moved: refresh this record's identity keys so the
+  // path index neither keeps the old spelling nor misses the new one.
+  m_impl->records.resyncKeys( request.id );
   m_impl->publishSnapshot();
-  unwatchAssetSource( current.source().canonicalSource );
-  watchAssetSource( recordIt->snapshot.source().canonicalSource );
+  unwatchAssetSource( previousSource );
+  watchAssetSource( normalizedDescriptor.canonicalSource );
 
   // Regenerate dependent virtual rasters: their recipes reference this asset
   // by AssetId, so a relocation must rewrite the generated VRT against the new
@@ -736,9 +728,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   QVector<Diagnostic> relocateDiagnostics = resolved.diagnostics();
   for ( const AssetId &dependentId : strongDependentsOf( request.id ) )
   {
-    const auto dependentIt = m_impl->findRecord( dependentId );
-    if ( dependentIt == m_impl->records.end() ||
-         !dependentIt->virtualRecipe.has_value() )
+    const Impl::AssetRecord *dependentIt = m_impl->records.find( dependentId );
+    if ( !dependentIt || !dependentIt->virtualRecipe.has_value() )
       continue;
 
     QVector<AssetSnapshot> inputSnapshots;
@@ -789,12 +780,10 @@ std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
-  const auto it = std::find_if(
-    snap->records.begin(), snap->records.end(),
-    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
-  if ( it == snap->records.end() )
+  const Impl::AssetRecord *record = snap->records.find( id );
+  if ( !record )
     return std::nullopt;
-  return it->snapshot;
+  return record->snapshot;
 }
 
 QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
@@ -803,72 +792,38 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
   if ( !snap )
     return {};
   QVector<AssetSnapshot> snapshots;
-  snapshots.reserve( snap->records.size() );
-  for ( const Impl::AssetRecord &record : snap->records )
-  {
+  snapshots.reserve( static_cast<int>( snap->records.size() ) );
+  snap->records.forEach( [&]( const Impl::AssetRecord &record ) {
     if ( query.kind && record.snapshot.kind() != *query.kind )
-      continue;
+      return;
     if ( query.state && record.snapshot.state() != *query.state )
-      continue;
+      return;
     if ( query.persistence && record.snapshot.persistence() != *query.persistence )
-      continue;
+      return;
 
     snapshots.push_back( record.snapshot );
-  }
+  } );
   return snapshots;
 }
 
 std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) const
 {
-  if ( path.trimmed().isEmpty() )
-    return std::nullopt;
-
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
 
-  const QStringList queryAliases = virtualPathAliases( path );
-  const bool queryVirtual = isVirtualOrRemotePath( path );
-
-  const QFileInfo fi( path );
-  // QFileInfo mangles non-local strings (empty canonicalFilePath; absolute
-  // prepends cwd or a drive letter). Remote/VSI identity is string+alias only.
-  const QString absolute = queryVirtual ? QString() : fi.absoluteFilePath();
-  const QString canonicalPath = queryVirtual ? QString() : fi.canonicalFilePath();
-  for ( const Impl::AssetRecord &record : snap->records )
-  {
-    const QString &stored = record.snapshot.source().canonicalSource;
-    const QStringList storedAliases = virtualPathAliases( stored );
-    bool aliasHit = false;
-    for ( const QString &alias : queryAliases )
-    {
-      if ( storedAliases.contains( alias ) )
-      {
-        aliasHit = true;
-        break;
-      }
-    }
-    if ( aliasHit )
-      return record.snapshot;
-
-    if ( queryVirtual || isVirtualOrRemotePath( stored ) )
-      continue;
-
-    if ( stored == canonicalPath && !canonicalPath.isEmpty() )
-      return record.snapshot;
-    const QFileInfo storedFi( stored );
-    const QString storedCanonical = storedFi.canonicalFilePath();
-    if ( !canonicalPath.isEmpty() && !storedCanonical.isEmpty() )
-    {
-      if ( storedCanonical == canonicalPath )
-        return record.snapshot;
-    }
-    else if ( !absolute.isEmpty() && storedFi.absoluteFilePath() == absolute )
-    {
-      return record.snapshot;
-    }
-  }
-  return std::nullopt;
+  // The published snapshot carries the generation-scoped path index: one
+  // lookup resolves the QUERY's identity spellings and probes the shard key
+  // maps. No per-record aliasing, no per-record filesystem canonicalization —
+  // the O(N)-syscall scan this replaced is recorded in
+  // benchmarks/observatory/obs_dataset_find_by_path_hotspot.json. Semantics
+  // (alias/string identity first, then raw/canonical/absolute path tiers for
+  // non-virtual spellings on both sides, first match in insertion order) are
+  // unchanged and pinned by the equivalence oracle in tests/test_data_scale.cpp.
+  const Impl::AssetRecord *record = snap->records.probe( path );
+  if ( !record )
+    return std::nullopt;
+  return record->snapshot;
 }
 
 quint64 DataManager::catalogGeneration() const
@@ -886,12 +841,10 @@ std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return std::nullopt;
-  const auto it = std::find_if(
-    snap->records.begin(), snap->records.end(),
-    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
-  if ( it == snap->records.end() )
+  const Impl::AssetRecord *record = snap->records.find( id );
+  if ( !record )
     return std::nullopt;
-  return it->derivation;
+  return record->derivation;
 }
 
 QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
@@ -900,12 +853,10 @@ QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return result;
-  const auto it = std::find_if(
-    snap->records.begin(), snap->records.end(),
-    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
-  if ( it == snap->records.end() || !it->derivation )
+  const Impl::AssetRecord *record = snap->records.find( id );
+  if ( !record || !record->derivation )
     return result;
-  for ( const DerivationInput &input : it->derivation->inputs )
+  for ( const DerivationInput &input : record->derivation->inputs )
     result.append( input.assetId );
   return result;
 }
@@ -916,10 +867,9 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
   const auto snap = m_impl->getSnapshot();
   if ( !snap )
     return result;
-  for ( const auto &record : snap->records )
-  {
+  snap->records.forEach( [&]( const Impl::AssetRecord &record ) {
     if ( !record.derivation )
-      continue;
+      return;
     for ( const DerivationInput &input : record.derivation->inputs )
     {
       if ( input.assetId == id )
@@ -928,7 +878,7 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
         break;
       }
     }
-  }
+  } );
   return result;
 }
 
@@ -939,14 +889,13 @@ QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) cons
   if ( !snap )
     return result;
   const auto colAssetId = AssetId::fromString( id.toString() );
-  for ( const auto &record : snap->records )
-  {
+  snap->records.forEach( [&]( const Impl::AssetRecord &record ) {
     if ( !record.derivation )
-      continue;
+      return;
     if ( record.derivation->collectionId && *record.derivation->collectionId == id )
     {
       result.append( record.snapshot.id() );
-      continue;
+      return;
     }
     if ( colAssetId )
     {
@@ -959,7 +908,7 @@ QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) cons
         }
       }
     }
-  }
+  } );
   return result;
 }
 
@@ -969,8 +918,8 @@ Result<void> DataManager::attachDerivationRecord( AssetId id,
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto it = m_impl->findRecord( id );
-  if ( it == m_impl->records.end() )
+  Impl::AssetRecord *it = m_impl->records.findMutable( id );
+  if ( !it )
   {
     return Result<void>::failure(
       { QStringLiteral( "data.asset.unknown" ),
@@ -997,8 +946,8 @@ Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &
   if ( QThread::currentThread() != thread() )
     return Result<AssetLease>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( asset.id );
-  if ( recordIt == m_impl->records.end() )
+  const Impl::AssetRecord *recordIt = m_impl->records.find( asset.id );
+  if ( !recordIt )
   {
     return Result<AssetLease>::failure(
       Diagnostic{ QStringLiteral( "asset.unknown" ),
@@ -1054,8 +1003,8 @@ Result<void> DataManager::commitEdit( AssetId id )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
+  Impl::AssetRecord *recordIt = m_impl->records.findMutable( id );
+  if ( !recordIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "asset.unknown" ),
@@ -1107,8 +1056,8 @@ Result<void> DataManager::notifyExternalContentChange( AssetId id )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
+  Impl::AssetRecord *recordIt = m_impl->records.findMutable( id );
+  if ( !recordIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "asset.unknown" ),
@@ -1140,8 +1089,8 @@ Result<void> DataManager::rollbackEdit( AssetId id )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
+  const Impl::AssetRecord *recordIt = m_impl->records.find( id );
+  if ( !recordIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "asset.unknown" ),
@@ -1215,9 +1164,8 @@ UnloadPlan DataManager::planUnload( AssetId id ) const
 {
   checkLeaseReaderAffinity( this );
   AssetRevision revision;
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt != m_impl->records.end() )
-    revision = recordIt->snapshot.revision();
+  if ( const Impl::AssetRecord *record = m_impl->records.find( id ) )
+    revision = record->snapshot.revision();
 
   return UnloadPlan{
     id, revision, m_impl->catalogGeneration, m_impl->leaseImpacts( id ),
@@ -1237,8 +1185,7 @@ Result<void> DataManager::addStrongDependency( AssetId dependent, AssetId input 
                   DiagnosticSeverity::Error } );
   }
 
-  if ( m_impl->findRecord( dependent ) == m_impl->records.end() ||
-       m_impl->findRecord( input ) == m_impl->records.end() )
+  if ( !m_impl->records.find( dependent ) || !m_impl->records.find( input ) )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "dependency.unknown_asset" ),
@@ -1377,8 +1324,8 @@ Result<AssetId> DataManager::createVirtualRaster(
 
   // registerSource emitted assetAdded before returning; a DirectConnection
   // slot may have re-entered and unloaded/reaped the just-registered asset.
-  const auto recordIt = m_impl->findRecord( registered.assetId );
-  if ( recordIt == m_impl->records.end() )
+  Impl::AssetRecord *recordIt = m_impl->records.findMutable( registered.assetId );
+  if ( !recordIt )
   {
     return Result<AssetId>::failure(
       Diagnostic{ QStringLiteral( "virtual_raster.vanished" ),
@@ -1421,10 +1368,10 @@ std::optional<VirtualRasterRecipe> DataManager::virtualRasterRecipe(
   AssetId id ) const
 {
   Q_ASSERT( QThread::currentThread() == thread() );
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
+  const Impl::AssetRecord *record = m_impl->records.find( id );
+  if ( !record )
     return std::nullopt;
-  return recordIt->virtualRecipe;
+  return record->virtualRecipe;
 }
 
 Result<AssetId> DataManager::restoreVirtualRaster(
@@ -1479,8 +1426,8 @@ Result<AssetId> DataManager::restoreVirtualRaster(
 
   // Conflict guards mirror restoreSource: an id already bound to a different
   // source, or this source already bound to a different id, are both refused.
-  const auto existing = m_impl->findRecord( request.id );
-  if ( existing != m_impl->records.end() )
+  const Impl::AssetRecord *existing = m_impl->records.find( request.id );
+  if ( existing )
   {
     if ( existing->sourceKey == sourceKey )
     {
@@ -1496,16 +1443,13 @@ Result<AssetId> DataManager::restoreVirtualRaster(
                                   "another source" ),
                   DiagnosticSeverity::Error } );
   }
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  if ( m_impl->records.sourceKeyOwner( descriptor ) )
   {
-    if ( record.sourceKey == sourceKey )
-    {
-      return Result<AssetId>::failure(
-        Diagnostic{ QStringLiteral( "restore.source_conflict" ),
-                    QStringLiteral( "The persisted source is already bound to "
-                                    "another Asset ID" ),
-                    DiagnosticSeverity::Error } );
-    }
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "restore.source_conflict" ),
+                  QStringLiteral( "The persisted source is already bound to "
+                                  "another Asset ID" ),
+                  DiagnosticSeverity::Error } );
   }
 
   QVector<Diagnostic> diagnostics;
@@ -1541,7 +1485,7 @@ Result<AssetId> DataManager::restoreVirtualRaster(
 
   Impl::AssetRecord record{ sourceKey, std::move( snapshot ) };
   record.virtualRecipe = request.recipe;
-  m_impl->records.push_back( std::move( record ) );
+  m_impl->records.append( std::move( record ) );
   m_impl->publishSnapshot();
   emit assetAdded( request.id );
 
@@ -1561,7 +1505,7 @@ void DataManager::restoreVirtualRasterEdges(
   }
   for ( const AssetId &input : distinctInputs )
   {
-    if ( m_impl->findRecord( input ) == m_impl->records.end() )
+    if ( !m_impl->records.find( input ) )
     {
       // A missing input is not a dropping condition: record a Warning and skip
       // the edge. The recipe still references the (persisted) AssetId, so a
@@ -1596,8 +1540,8 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( confirmedPlan.assetId() );
-  if ( recordIt == m_impl->records.end() )
+  const Impl::AssetRecord *recordIt = m_impl->records.find( confirmedPlan.assetId() );
+  if ( !recordIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "unload.unknown_asset" ),
@@ -1681,13 +1625,13 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
       // Emit before locating: a connected slot may re-enter the manager and
       // mutate the records (mirroring the main-erase revalidation below).
       emit assetAboutToUnload( dependentId );
-      const auto dependentIt = m_impl->findRecord( dependentId );
-      if ( dependentIt == m_impl->records.end() )
+      const Impl::AssetRecord *dependentIt = m_impl->records.find( dependentId );
+      if ( !dependentIt )
         continue;
       for ( const LeaseImpact &impact : m_impl->leaseImpacts( dependentId ) )
         revokeLease( impact.lease );
       unwatchAssetSource( dependentIt->snapshot.source().canonicalSource );
-      m_impl->records.erase( dependentIt );
+      m_impl->records.erase( dependentId );
       pruneChildFromCollections( dependentId );
       pruneDependencyEdgesOf( dependentId );
       m_impl->publishSnapshot();
@@ -1717,9 +1661,9 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
   }
 
   // Re-locate the record: the cascade dependent removals above erased records,
-  // invalidating the earlier iterator.
-  const auto eraseIt = m_impl->findRecord( confirmedPlan.assetId() );
-  if ( eraseIt == m_impl->records.end() )
+  // invalidating the earlier pointer.
+  const Impl::AssetRecord *eraseIt = m_impl->records.find( confirmedPlan.assetId() );
+  if ( !eraseIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "unload.unknown_asset" ),
@@ -1727,7 +1671,7 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
                   DiagnosticSeverity::Error } );
   }
   const QString unloadedSourcePath = eraseIt->snapshot.source().canonicalSource;
-  m_impl->records.erase( eraseIt );
+  m_impl->records.erase( confirmedPlan.assetId() );
   unwatchAssetSource( unloadedSourcePath );
   pruneChildFromCollections( confirmedPlan.assetId() );
   pruneDependencyEdgesOf( confirmedPlan.assetId() );
@@ -1747,8 +1691,8 @@ ReapResult DataManager::reap( const ReapRequest &request )
     return result;
   }
 
-  const auto recordIt = m_impl->findRecord( request.id );
-  if ( recordIt == m_impl->records.end() )
+  const Impl::AssetRecord *recordIt = m_impl->records.find( request.id );
+  if ( !recordIt )
   {
     result.diagnostics.append(
       Diagnostic{ QStringLiteral( "reap.unknown_asset" ),
@@ -1807,8 +1751,8 @@ ReapResult DataManager::reap( const ReapRequest &request )
   // pre-emit snapshot reference (same reentrancy family as DATAPY-7, which
   // unload() already handles). Re-locate the record and re-read everything
   // from the fresh state before erasing.
-  const auto freshIt = m_impl->findRecord( request.id );
-  if ( freshIt == m_impl->records.end() )
+  const Impl::AssetRecord *freshIt = m_impl->records.find( request.id );
+  if ( !freshIt )
   {
     result.diagnostics.append(
       Diagnostic{ QStringLiteral( "reap.unknown_asset" ),
@@ -1827,7 +1771,7 @@ ReapResult DataManager::reap( const ReapRequest &request )
   const bool deletable =
     freshIt->snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
 
-  m_impl->records.erase( freshIt );
+  m_impl->records.erase( request.id );
   unwatchAssetSource( sourcePath );
   pruneChildFromCollections( request.id );
   pruneDependencyEdgesOf( request.id );
@@ -1868,8 +1812,8 @@ Result<void> DataManager::promote( AssetId id )
   if ( QThread::currentThread() != thread() )
     return Result<void>::failure( wrongThreadDiagnostic() );
 
-  const auto recordIt = m_impl->findRecord( id );
-  if ( recordIt == m_impl->records.end() )
+  Impl::AssetRecord *recordIt = m_impl->records.findMutable( id );
+  if ( !recordIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "promote.unknown_asset" ),
@@ -1934,10 +1878,9 @@ TemporaryReapResult DataManager::reapTemporaries( PersistencePolicy policy )
   // refused, so classify it as skipped up front rather than misreporting a
   // dependent-blocked asset as leased.
   QVector<AssetId> idle;
-  for ( const Impl::AssetRecord &record : m_impl->records )
-  {
+  m_impl->records.forEach( [&]( const Impl::AssetRecord &record ) {
     if ( record.snapshot.persistence() != policy )
-      continue;
+      return;
     if ( !m_impl->leaseImpacts( record.snapshot.id() ).isEmpty() ||
          !strongDependentsOf( record.snapshot.id() ).isEmpty() )
     {
@@ -1947,7 +1890,7 @@ TemporaryReapResult DataManager::reapTemporaries( PersistencePolicy policy )
     {
       idle.append( record.snapshot.id() );
     }
-  }
+  } );
 
   for ( const AssetId &id : idle )
   {
@@ -2151,7 +2094,7 @@ std::optional<CollectionSnapshot> DataManager::collection( CollectionId id ) con
   snapshot.metadata = it->metadata;
   for ( const AssetId &childId : it->childAssetIds )
   {
-    if ( m_impl->findRecord( childId ) != m_impl->records.end() )
+    if ( m_impl->records.find( childId ) )
       snapshot.childAssetIds.append( childId );
   }
   return snapshot;
@@ -2345,8 +2288,8 @@ Result<void> DataManager::addChildToCollection( CollectionId collectionId,
                   DiagnosticSeverity::Error } );
   }
 
-  const auto assetIt = m_impl->findRecord( childAssetId );
-  if ( assetIt == m_impl->records.end() )
+  Impl::AssetRecord *assetIt = m_impl->records.findMutable( childAssetId );
+  if ( !assetIt )
   {
     return Result<void>::failure(
       Diagnostic{ QStringLiteral( "collection.child_unknown" ),
@@ -2398,7 +2341,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     // lease-safety rule. Reaped/already-removed children are skipped.
     for ( const AssetId &childId : collectionIt->childAssetIds )
     {
-      if ( m_impl->findRecord( childId ) == m_impl->records.end() )
+      if ( m_impl->records.find( childId ) )
         continue;
       if ( !m_impl->leaseImpacts( childId ).isEmpty() )
       {
@@ -2424,7 +2367,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     QVector<Diagnostic> externalDependentDiagnostics;
     for ( const AssetId &childId : children )
     {
-      if ( m_impl->findRecord( childId ) == m_impl->records.end() )
+      if ( m_impl->records.find( childId ) )
         continue;
       const QVector<AssetId> dependents = strongDependentsOf( childId );
       for ( const AssetId &dependent : dependents )
@@ -2452,14 +2395,14 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     for ( const AssetId &childId : children )
     {
       emit assetAboutToUnload( childId );
-      const auto childIt = m_impl->findRecord( childId );
-      if ( childIt == m_impl->records.end() )
+      const Impl::AssetRecord *childIt = m_impl->records.find( childId );
+      if ( !childIt )
         continue;
       // A slot may have acquired a lease during the emit; revoking the fresh
       // list prevents a dangling LeaseRecord on the erased asset.
       for ( const LeaseImpact &impact : m_impl->leaseImpacts( childId ) )
         revokeLease( impact.lease );
-      m_impl->records.erase( childIt );
+      m_impl->records.erase( childId );
       pruneChildFromCollections( childId );
       pruneDependencyEdgesOf( childId );
       m_impl->publishSnapshot();
@@ -2471,8 +2414,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     // Non-cascade: children become standalone (clear their parent pointer).
     for ( const AssetId &childId : collectionIt->childAssetIds )
     {
-      const auto childIt = m_impl->findRecord( childId );
-      if ( childIt != m_impl->records.end() )
+      if ( Impl::AssetRecord *childIt = m_impl->records.findMutable( childId ) )
         childIt->snapshot.m_parentCollectionId = std::nullopt;
     }
   }

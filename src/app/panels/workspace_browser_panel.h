@@ -60,6 +60,10 @@ class WorkspaceGovernanceModel : public QAbstractTableModel
     sicnu::workspace::WorkspaceQuery m_query;
     QVector<QVariantMap> m_rows;
     qint64 m_total = 0;
+    /// Keyset continuation for the next page (Data Scale 13.0). Empty when the
+    /// walk is exhausted. Replaces offset arithmetic so a deep page is a seek
+    /// instead of a rescan of every row before it.
+    QString m_nextCursor;
 };
 
 /// The dock body: filters + paged table + health summary.
