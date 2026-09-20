@@ -30,6 +30,7 @@ GENERATED_NOTICE = (
 HAND_WRITTEN = {
     "docs/labs/LABSPEC.md",
     "docs/labs/GRADING.md",
+    "docs/labs/DATA_PACKS.md",
     # D3 track docs: hand-authored lab pages in the pre-LabSpec layout (lab8–11
     # single-digit names); the canonical zero-padded set is lab01–lab11.
     "docs/labs/lab8_temporal_analysis.md",
@@ -137,7 +138,21 @@ def render_lab(doc):
     out.append("## 实验目标")
     out.append("")
     out.append(doc["objective"])
+    if doc.get("objective_zh"):
+        out.append("")
+        out.append(doc["objective_zh"])
     out.append("")
+    if doc.get("principles"):
+        out.append("## 基本原理")
+        out.append("")
+        for p in doc["principles"]:
+            out.append(f"### {p['heading']}")
+            out.append("")
+            out.append(p["body"])
+            for formula in p.get("formulas", []):
+                out.append("")
+                out.append(f"- 公式：`{formula}`")
+            out.append("")
     if doc.get("prerequisites"):
         out.append("## 实验数据")
         out.append("")
@@ -146,15 +161,56 @@ def render_lab(doc):
         for ref in doc["prerequisites"]:
             out.append(f"| `{ref['path']}` | {md_cell(ref.get('note', ''))} |")
         out.append("")
+    if doc.get("param_ranges"):
+        out.append("## 参数允许范围")
+        out.append("")
+        out.append("以下为教学建议的参数允许范围（运行时仍以 Processing Registry 的参数 schema 为准）。")
+        out.append("")
+        out.append("| 算子 | 参数 | 允许范围 | 说明 |")
+        out.append("|------|------|----------|------|")
+        for operator_id, params in doc["param_ranges"].items():
+            for param, r in params.items():
+                if "values" in r:
+                    allowed = "枚举：" + "、".join(str(v) for v in r["values"])
+                else:
+                    lo = r.get("min", "−∞")
+                    hi = r.get("max", "+∞")
+                    allowed = f"[{lo}, {hi}]"
+                out.append(f"| `{operator_id}` | `{param}` | {allowed} | {md_cell(r.get('note_zh', ''))} |")
+        out.append("")
     out.append("## 实验步骤")
     out.append("")
     for i, step in enumerate(doc["steps"], start=1):
         out.append(render_step(i, step))
+    if doc.get("expected_artifacts"):
+        out.append("## 预期成果")
+        out.append("")
+        out.append("| 产物 | 类型 | 说明 |")
+        out.append("|------|------|------|")
+        kind_zh = {"raster": "栅格", "vector": "矢量", "file": "文件"}
+        for a in doc["expected_artifacts"]:
+            out.append(
+                f"| `{a['path']}` | {kind_zh[a.get('kind', 'file')]} "
+                f"| {md_cell(a.get('note_zh', ''))} |")
+        out.append("")
     if doc.get("thinking_questions"):
         out.append("## 思考题")
         out.append("")
         for q in doc["thinking_questions"]:
             out.append(f"1. {q}")
+        out.append("")
+    if doc.get("glossary"):
+        out.append("## 术语表")
+        out.append("")
+        out.append("| 术语 | 英文 | 定义 |")
+        out.append("|------|------|------|")
+        for g in doc["glossary"]:
+            out.append(f"| {md_cell(g['term_zh'])} | {md_cell(g['term'])} | {md_cell(g['definition_zh'])} |")
+        out.append("")
+    if doc.get("grading_rules"):
+        out.append("## 判分规则")
+        out.append("")
+        out.append(f"本实验的判分规则：`{doc['grading_rules']}`（`lab --lab <id> --grade` 读取）。")
         out.append("")
     if doc.get("grading_ref"):
         out.append("## 自动判分")
@@ -184,6 +240,16 @@ def render_readme(labs):
         )
     out.append("")
     out.append(SAMPLE_DATA_TABLE)
+    out.append("")
+    out.append("样本数据由确定性生成器 `sicnu_generate_samples` 一键生成（附 SHA-256 清单，可离线分发）：`scripts/gen_samples.sh`，详见 `docs/datasets/lab-samples.md`。")
+    out.append("## 专题实验（自定义流程，非 LabSpec 面板驱动）")
+    out.append("")
+    out.append("| 实验 | 说明 |")
+    out.append("|------|------|")
+    out.append("| [实验8：NDVI 时序与物候](lab8_temporal_analysis.md) | 时序规整化、趋势、物候与突变检测 |")
+    out.append("| [实验9：SAR 处理](lab9_sar_processing.md) | 相干斑抑制与变化检测 |")
+    out.append("| [实验10：高光谱分析](lab10_hyperspectral_analysis.md) | MNF / PPI / SAM-SID / 线性解混 |")
+    out.append("| [实验11：制图输出](lab11_cartographic_mapping.md) | 专题地图设计与导出 |")
     out.append("")
     out.append("## LabSpec 创作指南")
     out.append("")

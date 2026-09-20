@@ -364,3 +364,7 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+# flash-offline-labs-12 (lab platform 12.0): track planning notes.
+!.planning/flash-offline-labs-12/
+.planning/flash-offline-labs-12/*
+!.planning/flash-offline-labs-12/*.md

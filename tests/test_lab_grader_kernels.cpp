@@ -758,3 +758,67 @@ TEST_CASE( "file_check: PNG page geometry and MapSpec validation",
     REQUIRE( geometryFails );
     REQUIRE( !outcomes.at( "f.png" ).passed );
 }
+
+// lab platform 12.0 — provenance kernel: foundry dataset metadata assertions.
+TEST_CASE( "provenance: generator/seed metadata must match the declared foundry scene",
+           "[lab_grader_kernels][provenance]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    std::vector<float> values( static_cast<size_t>( kSize ) * kSize, 0.5f );
+    const QString artifact = dir.filePath( "foundry_stamped.tif" );
+    writeFloatRaster( artifact, { values } );
+
+    // Stamp the artifact with the same dataset metadata the foundry writes.
+    {
+        GDALAllRegister();
+        GDALDataset *ds = static_cast<GDALDataset *>(
+            GDALOpen( artifact.toUtf8().constData(), GA_Update ) );
+        REQUIRE( ds != nullptr );
+        ds->SetMetadataItem( "SICNU_GENERATOR", "sicnu_generate_samples" );
+        ds->SetMetadataItem( "SICNU_GENERATOR_VERSION", "1.0.0" );
+        ds->SetMetadataItem( "SICNU_SEED", "42" );
+        ds->SetMetadataItem( "SICNU_PROFILE", "lab" );
+        ds->SetMetadataItem( "SICNU_PRODUCT", "landsat_sample" );
+        GDALClose( ds );
+    }
+
+    // Matching expectations pass.
+    {
+        Json::Value params;
+        params["generator"] = "sicnu_generate_samples";
+        params["seed"] = Json::UInt64( 42 );
+        params["product"] = "landsat_sample";
+        params["profile"] = "lab";
+        const WalkResult ok = walk(
+            artifact, { LabKernelSpec{ "p.ok", "provenance", params } }, dir.path() );
+        REQUIRE( ok.ok );
+        REQUIRE( ok.outcomes.at( "p.ok" ).passed );
+    }
+
+    // A wrong seed fails with the mismatch named.
+    {
+        Json::Value params;
+        params["seed"] = Json::UInt64( 7 );
+        const WalkResult wrong = walk(
+            artifact, { LabKernelSpec{ "p.seed", "provenance", params } }, dir.path() );
+        REQUIRE( wrong.ok );
+        REQUIRE( !wrong.outcomes.at( "p.seed" ).passed );
+        REQUIRE( wrong.outcomes.at( "p.seed" ).message.contains( QLatin1String( "SICNU_SEED mismatch" ) ) );
+    }
+
+    // An expectation the artifact does not carry at all fails as missing:
+    // probe a plain raster without foundry stamps.
+    {
+        const QString plain = dir.filePath( "plain.tif" );
+        writeFloatRaster( plain, { values } );
+        Json::Value params;
+        params["generator"] = "sicnu_generate_samples";
+        const WalkResult missing = walk(
+            plain, { LabKernelSpec{ "p.missing", "provenance", params } }, dir.path() );
+        REQUIRE( missing.ok );
+        REQUIRE( !missing.outcomes.at( "p.missing" ).passed );
+        REQUIRE( missing.outcomes.at( "p.missing" ).message.contains( QLatin1String( "missing provenance metadata" ) ) );
+    }
+}

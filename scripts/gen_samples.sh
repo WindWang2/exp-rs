@@ -5,11 +5,14 @@
 #   scripts/gen_samples.sh [--profile=lab|stress] [--seed=<n>] [--spec=<path>]
 #                          [--out=<dir>] [--verify]
 #
+# Both the --out=<dir> and the two-token `--out <dir>` spellings are accepted
+# (two-token forms are rejoined before forwarding) so this wrapper and its
+# Windows twin (gen_samples.cmd) accept exactly the same command lines.
 # Locates the sicnu_generate_samples binary in a build tree next to this repo
 # (build/, build-*/ — build*/tools/ included — or $SICNU_GENERATE_SAMPLES).
-# Default output is data/samples; any flags, including --out=<dir> and
-# --verify, are forwarded to the CLI (so a custom --out is honored by the
-# verify pass too). Fully local; never blocks on CI.
+# Default output is data/samples; any flags, including --out and --verify,
+# are forwarded to the CLI (so a custom --out is honored by the verify pass
+# too). Fully local; never blocks on CI.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -40,12 +43,47 @@ fi
 # so the wrapper can never fail a successful no-op invocation.
 out_dir="$repo_root/data/samples"
 run_verify=yes
+
+# Rejoin the two-token spellings of the value flags (--out <dir>, --profile
+# <p>, --seed <n>, --spec <path>) into the canonical --key=value form. The
+# for loop materializes the original argument list up front, so appending via
+# set -- inside the body cannot extend the iteration; the original tokens are
+# then dropped with a shift.
+orig_count=$#
+prev_key=
 for arg in "$@"; do
+  if [ -n "$prev_key" ]; then
+    set -- "$@" "--$prev_key=$arg"
+    if [ "$prev_key" = out ]; then
+      out_dir=$arg
+    fi
+    prev_key=
+    continue
+  fi
   case "$arg" in
-    --out=*) out_dir=${arg#--out=} ;;
-    --verify|--help|-h) run_verify=no ;;
+    --out|--profile|--seed|--spec)
+      prev_key=${arg#--}
+      ;;
+    --out=*)
+      out_dir=${arg#--out=}
+      set -- "$@" "$arg"
+      ;;
+    --verify|--help|-h)
+      run_verify=no
+      set -- "$@" "$arg"
+      ;;
+    *)
+      set -- "$@" "$arg"
+      ;;
   esac
 done
+if [ "$prev_key" != "" ]; then
+  echo "gen_samples: --$prev_key requires a value (use --$prev_key=<value> or --$prev_key <value>)" >&2
+  exit 2
+fi
+if [ "$orig_count" -gt 0 ]; then
+  shift "$orig_count"
+fi
 
 cd "$repo_root"
 "$bin" "$@"
