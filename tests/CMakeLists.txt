@@ -2497,6 +2497,90 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_multimodal_inference)
 
+    # Platform 12.0 model ensemble: manifest contract parsing/validation,
+    # member resolution, weighted_mean / weighted_vote combination against
+    # hand-computed answers, uncertainty bands, atomic failure and the
+    # surface exclusions.
+    add_executable(test_model_ensemble test_model_ensemble.cpp)
+    target_link_libraries(test_model_ensemble PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_ensemble)
+    target_include_directories(test_model_ensemble PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_ensemble)
+
+    # Platform 12.0 provider strategy: ordered fallback chain over the SAME
+    # artifact — registry verdicts, typed all-fail errors and the payload /
+    # provenance reporting that makes a fired fallback observable.
+    add_executable(test_provider_fallback test_provider_fallback.cpp)
+    target_link_libraries(test_provider_fallback PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_fallback)
+    target_include_directories(test_provider_fallback PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_fallback)
+
+    # Platform 12.0 session-pool concurrency stress: device pinning,
+    # eviction-while-held lifetime, ledger conservation under races.
+    add_executable(test_model_runtime_stress test_model_runtime_stress.cpp)
+    target_link_libraries(test_model_runtime_stress PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_stress)
+    target_include_directories(test_model_runtime_stress PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_stress)
+
+    # Platform 12.0 tile geometry Oracle: byte-identical probability stacks
+    # across batch/tile/overlap splits, extreme-integer refusals and the
+    # terminal-OOM atomicity (no output, no sidecar, no residue).
+    add_executable(test_tile_semantic_equivalence test_tile_semantic_equivalence.cpp)
+    target_link_libraries(test_tile_semantic_equivalence PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tile_semantic_equivalence)
+    target_include_directories(test_tile_semantic_equivalence PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tile_semantic_equivalence)
+
     # Model Runtime 8.0: CRS-aware grid authority + provenance, temporal
     # sequence lane (dynamic T, timestamps, quality masks), placement policy
     # and the Labels class remap. Fake providers + synthetic rasters — runs

@@ -401,11 +401,14 @@ TEST_CASE( "manifest-controlled integers carry resource bounds (#1044)", "[model
                  "preprocess.pad 1000000 exceeds the resource bound" );
 
   // Exactly at the documented ceilings the manifest still parses and loads.
+  // (Platform 12.0: the pad ceiling is 1024 — the enforced
+  // kMaxPreprocessPadPx — with which kMaxPreprocessPad now agrees; a
+  // boundary manifest must not parse under one bound and fail the other.)
   const auto okModel = parseOk( R"({
       "name": "m7-maxbounds", "task": "t", "framework": "onnx",
       "inputs": [ { "name": "x", "temporal_length": 1024, "missing_timestep": "zero" } ],
-      "preprocess": { "pad": 4096 } })" );
+      "preprocess": { "pad": 1024 } })" );
   CHECK( okModel.inputs[0].temporalLength == 1024 );
-  CHECK( okModel.preprocess.pad == 4096 );
+  CHECK( okModel.preprocess.pad == 1024 );
   CHECK( okModel.readiness != ModelReadiness::InvalidManifest );
 }
