@@ -16,16 +16,22 @@ set "PATH=%BUILD%;%SICNU_QT_DIR%\bin;%SICNU_QCA_DIR%\bin;%SICNU_KEYCHAIN_DIR%\bi
 cd /d "%SICNU_REPO_ROOT%"
 
 echo === [1/3] sample data ===
-if exist "data\samples\landsat_sample.tif" (
+rem Skip only when the foundry manifest proves the sample set is complete.
+if exist "data\samples\manifest.json" (
   echo     data\samples present - skipping.
-) else (
-  if not exist "%GEN%" ( echo ERROR: %GEN% missing - run setup.cmd first & exit /b 1 )
-  "%GEN%" --out=data\samples || exit /b 1
+  goto :pipeline
 )
+if not exist "%GEN%" ( echo ERROR: %GEN% missing - run setup.cmd first & exit /b 1 )
+"%GEN%" --out=data\samples
+set "RC=%errorlevel%"
+if not "%RC%"=="0" exit /b %RC%
 
+:pipeline
 echo === [2/3] lab 1 pipeline (NDVI, offline) ===
 if not exist "output" mkdir "output"
-"%CLI%" --offline --pipeline "packaging\bundle\labs\lab1\lab1_ndvi.pipeline.json" || exit /b 1
+"%CLI%" --offline --pipeline "packaging\bundle\labs\lab1\lab1_ndvi.pipeline.json"
+set "RC=%errorlevel%"
+if not "%RC%"=="0" exit /b %RC%
 
 echo === [3/3] grading ===
 "%CLI%" --offline lab --lab ndvi_basics --grade "output\lab1_ndvi.tif" --out "output\lab1_report.json"

@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
     "applicability" : 
@@ -24,7 +19,6 @@
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -33,11 +27,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
-    "family" : "spectral",
-    "io" :
-    {
-      "inputs" :
     "failure_modes" : 
     [
       {
@@ -57,7 +46,6 @@
           "required" : true
         }
       ],
-      "outputs" :
       "outputs" : 
       [
         {
@@ -71,7 +59,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -103,11 +90,6 @@
         }
       ]
     },
-    "limitations" :
-    [
-      "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
-    ],
-    "modality" :
     "limitations" : 
     [
       "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
@@ -117,14 +99,11 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" :
     "prerequisites" : 
     [
       "wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not."
     ],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
     "summary" : "\u6309\u7d22\u5f15\u6216\u6ce2\u957f\u8303\u56f4\u9009\u62e9/\u5254\u9664\u6ce2\u6bb5\uff08\u574f\u6ce2\u6bb5\u5254\u9664\u4e0e\u5b50\u96c6\u63d0\u53d6\uff09\u3002",
     "teaching_use" : 
     {
@@ -146,7 +125,6 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "spectral",

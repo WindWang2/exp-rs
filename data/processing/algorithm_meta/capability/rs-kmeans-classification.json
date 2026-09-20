@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u65e0\u8bad\u7ec3\u6570\u636e\u65f6\u7684\u5feb\u901f\u805a\u7c7b",
         "\u7c7b\u5185\u5149\u8c31\u7ed3\u6784\u63a2\u7d22"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -41,9 +41,9 @@
       }
     ],
     "family" : "classification",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -51,7 +51,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -70,11 +70,11 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "kmeans",
-          "enum" :
+          "enum" : 
           [
             "kmeans",
             "isodata"
@@ -114,7 +114,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -124,15 +124,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "K-Means \u975e\u76d1\u7763\u5206\u7c7b\uff1a\u6309\u5149\u8c31\u805a\u7c7b\u81ea\u52a8\u5212\u5206\u5730\u7269\u7c7b\u522b\uff0c\u65e0\u9700\u8bad\u7ec3\u6837\u672c\uff0c\u7ed3\u679c\u53d7\u521d\u59cb\u4e2d\u5fc3\u5f71\u54cd\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u975e\u76d1\u7763\u5206\u7c7b",
         "K-Means",
         "\u805a\u7c7b\u4e2d\u5fc3"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -145,7 +145,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "kmeans",
     "unsupervised",

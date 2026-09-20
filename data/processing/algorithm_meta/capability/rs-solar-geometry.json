@@ -1,0 +1,136 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309 schema \u63d0\u4f9b\u6210\u50cf\u65e5\u671f\u4e0e UTC \u65f6\u95f4\uff08\u5982 Landsat MTL \u7684 DATE_ACQUIRED + SCENE_CENTER_TIME\uff09",
+        "when" : "\u7f3a\u5c11\u5fc5\u9700\u53c2\u6570 date/utc_time\uff0c\u6216 date \u4e0d\u662f\u5408\u6cd5 ISO YYYY-MM-DD\u3001utc_time \u4e0d\u662f HH:mm \u6216 HH:mm:ss"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u63d0\u4f9b\u573a\u666f\u4e2d\u5fc3\u7ecf\u7eac\u5ea6\u5e76\u4fdd\u8bc1\u843d\u5728\u5408\u6cd5\u8303\u56f4\u5185",
+        "when" : "latitude/longitude \u7f3a\u5931\uff0c\u6216\u8d85\u51fa [-90, 90] / [-180, 180] \u5ea6\u8303\u56f4"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u8865\u4e0a\u8981\u5199\u5143\u6570\u636e\u7684 input \u6805\u683c\uff0c\u6216\u5c06 write_metadata \u7f6e\u4e3a false \u53ea\u53d6\u8ba1\u7b97\u7ed3\u679c",
+        "when" : "write_metadata=true \u4f46\u672a\u63d0\u4f9b input \u6805\u683c"
+      },
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u6539\u7528\u53ef\u5199\u526f\u672c\u540e\u91cd\u8bd5\uff0c\u6216\u5c06 write_metadata \u7f6e\u4e3a false",
+        "when" : "\u4ee5 GA_Update \u6253\u5f00 input \u6805\u683c\u5931\u8d25\uff08\u53ea\u8bfb\u6e90\u6216\u65e0\u5199\u6743\u9650\uff09\uff0c\u65e0\u6cd5\u539f\u5730\u5199\u5165 SICNU_SUN_* \u5143\u6570\u636e"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "earth_sun_factor",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "sun_azimuth",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "sun_elevation",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "date",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "latitude",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "longitude",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "name" : "utc_time",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "write_metadata",
+          "required" : false,
+          "type" : "boolean"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Below-horizon suns are still stamped for traceability; downstream operators refuse to calibrate with them (sun_above_horizon=false and elevation <= 0 in the record).",
+      "In-place metadata update requires a writable raster; read-only sources are refused with a typed error."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : 
+    [
+      "Acquisition date and UTC time (e.g. Landsat MTL DATE_ACQUIRED + SCENE_CENTER_TIME) and the scene centre latitude/longitude."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u7531\u6210\u50cf\u65e5\u671f/UTC \u65f6\u95f4\u4e0e\u573a\u666f\u4e2d\u5fc3\u7ecf\u7eac\u5ea6\uff0c\u6309 Spencer 1971 / NOAA \u516c\u5f0f\u8ba1\u7b97\u592a\u9633\u9ad8\u5ea6\u89d2\u3001\u65b9\u4f4d\u89d2\u3001\u8d64\u7eac\u3001\u65e5\u5730\u8ddd\u79bb\u4e0e\u5e73\u65b9\u53cd\u6bd4\u56e0\u5b50\uff0c\u53ef\u9009\u628a SICNU_SUN_* \u5143\u6570\u636e\u5199\u56de\u8f93\u5165\u6805\u683c\u4f9b\u5b9a\u6807/BRDF \u4f7f\u7528\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Compute sun elevation/azimuth, solar declination, earth-sun distance and the inverse-square earth-sun factor from acquisition date/time and scene centre (Spencer 1971 / NOAA closed forms). Optionally writes SICNU_SUN_ZENITH, SICNU_SUN_AZIMUTH, SICNU_SUN_ELEVATION, SICNU_EARTH_SUN_FACTOR and SICNU_EARTH_SUN_DISTANCE_AU dataset metadata onto the input raster.",
+  "display_name" : "Solar Geometry",
+  "gpu" : false,
+  "id" : "rs:solar_geometry",
+  "input" : "raster",
+  "notes" : "Spencer (1971) Fourier series + NOAA general form; ~0.05 deg accuracy, no atmospheric refraction (calibration geometry uses the true position).",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "solar-geometry",
+    "calibration"
+  ],
+  "task" : "radiometric-normalization"
+}

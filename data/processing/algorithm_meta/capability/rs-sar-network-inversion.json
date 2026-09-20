@@ -1,0 +1,151 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NETWORK_INVERSION_RANK_DEFICIENT",
+        "remedy" : "\u6821\u6b63 pairs \u7684 [masterEpoch, slaveEpoch]\uff08\u6ce8\u610f\u5176\u7d22\u5f15\u65b9\u5411\u4e0e rs:sar_pair_network \u8f93\u51fa\u76f8\u53cd\uff09\u5e76\u4fdd\u8bc1\u6743\u91cd > 0",
+        "when" : "pair/epoch \u5951\u7ea6\u65e0\u6548\uff08\u6bcf\u5bf9 master \u7d22\u5f15\u672a\u5927\u4e8e slave\u3001\u8ba1\u6570\u4e0d\u4e00\u81f4\u6216\u6743\u91cd \u2264 0\uff09\uff0c\u6216\u67d0\u7f3a\u5931\u6a21\u5f0f\u7684\u5386\u5143\u65b9\u7a0b\u7ec4\u79e9\u4e8f"
+      },
+      {
+        "code" : "NETWORK_INVERSION_PATTERN_BLOWUP",
+        "remedy" : "\u6539\u7528 maskStrategy=intersect\uff0c\u6216\u5728\u786e\u8ba4\u4ee3\u4ef7\u540e\u8c03\u5927 maxPatterns",
+        "when" : "\u4e92\u5f02\u7f3a\u5931\u6570\u636e\u6a21\u5f0f\u6570\u8d85\u8fc7 maxPatterns \u7f13\u5b58\u4e0a\u9650"
+      },
+      {
+        "code" : "NETWORK_INVERSION_PAIR_LIMIT",
+        "remedy" : "\u62c6\u5206\u7f51\u7edc\u5206\u6279\u53cd\u6f14",
+        "when" : "\u8f93\u5165\u4f4d\u79fb\u6805\u683c\uff08\u6210\u5bf9\u6570\uff09\u8d85\u8fc7 64 \u5bf9\u7684\u6a21\u5f0f\u63a9\u7801\u4e0a\u9650"
+      },
+      {
+        "code" : "NETWORK_INVERSION_EPOCH_LIMIT",
+        "remedy" : "\u51cf\u5c11\u5386\u5143\u6570\uff08\u5408\u5e76\u6216\u88c1\u526a\u573a\u666f\uff09\u540e\u91cd\u8bd5",
+        "when" : "epoch \u6570\u8d85\u8fc7 200 \u4e0a\u9650"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "displacementOutput",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "rmsOutput",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "velocityOutput",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "displacementInputs",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "displacementOutput",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "epochTemporalYears",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "perpixel",
+          "enum" : 
+          [
+            "perpixel",
+            "intersect"
+          ],
+          "name" : "maskStrategy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "128",
+          "name" : "maxPatterns",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "pairWeights",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "pairs",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "rmsOutput",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "velocityOutput",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "LINEAR small-baseline model: atmospheric phase stays in the epoch displacements \u2014 NOT PSI (no PS selection, no APS separation).",
+      "Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Connected pair network (rs:sar_pair_network) and per-pair unwrapped displacement rasters on one grid."
+    ],
+    "schema_version" : 2,
+    "summary" : "InSAR \u7f51\u7edc\u53cd\u6f14\uff1a\u5c0f\u57fa\u7ebf\u7ebf\u6027\u53cd\u6f14\uff0c\u4ece\u8fde\u901a\u6210\u5bf9\u7f51\u7edc\u7684\u9010\u5bf9\u89e3\u7f20\u89c6\u7ebf\u5411\u4f4d\u79fb\u6805\u683c\u6c42\u89e3\u5404\u5386\u5143\u4f4d\u79fb\u4e0e\u7ebf\u6027\u901f\u5ea6\u573a\uff0c\u9644\u62df\u5408 RMS \u4e0e\u7f3a\u5931\u6570\u636e\u8d28\u91cf\u8d26\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Solve per-epoch displacement and linear velocity from a connected pair network of unwrapped LOS displacement rasters (small-baseline linear inversion).",
+  "display_name" : "InSAR Network Inversion",
+  "gpu" : false,
+  "id" : "rs:sar_network_inversion",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

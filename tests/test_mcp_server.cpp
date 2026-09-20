@@ -1175,6 +1175,15 @@ TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every executio
     registerNoopOperator();
     TestMcpServer server;
 
+    // tools/call is refused with -32002 before the handshake, so the sandbox
+    // sections below must drive an initialized server.
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 1;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    initReq[QStringLiteral( "params" )] = QVariantMap();
+    server.testHandleRequest( initReq );
+    REQUIRE( server.lastResponseResult.contains( QStringLiteral( "protocolVersion" ) ) );
+
     // Save/restore the process env so other test cases are unaffected.
     const QString savedWorkspace = qEnvironmentVariable( "SICNU_MCP_WORKSPACE" );
     struct EnvGuard {

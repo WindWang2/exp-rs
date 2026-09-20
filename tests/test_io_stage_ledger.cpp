@@ -39,7 +39,10 @@ std::string scratch( const std::string &name )
   std::error_code ec;
   fs::remove_all( dir, ec );
   fs::create_directories( dir );
-  return dir.string();
+  // Forward slashes everywhere: the sweep constructs paths textually
+  // (directory + "/" + name), so a backslash-separated scratch dir would
+  // never compare equal or appear in ResourceUri::display().
+  return dir.generic_string();
 }
 
 /// Creates a REAL staged-shaped GTiff ("<stem>.<n>.<n>.tmp.tif") with 8x8
@@ -47,7 +50,7 @@ std::string scratch( const std::string &name )
 std::string makeStagedRaster( const std::string &dir, const std::string &stagedName )
 {
   ensureGdal();
-  const std::string path = ( fs::path( dir ) / stagedName ).string();
+  const std::string path = dir + "/" + stagedName;
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   REQUIRE( driver );
   GDALDatasetH dataset = GDALCreate( driver, path.c_str(), 8, 8, 1, GDT_Byte, nullptr );
@@ -66,7 +69,7 @@ StageRecord journal( const std::string &dir, const std::string &finalName, const
   StageRecord record;
   record.runId = "run-" + finalName;
   record.producer = "test-harness";
-  record.finalPath = ( fs::path( dir ) / finalName ).string();
+  record.finalPath = dir + "/" + finalName;
   record.stagedPath = stagedPath;
   record.driver = "GTiff";
   record.width = 8;
@@ -159,7 +162,7 @@ TEST_CASE( "attachExisting fails closed on every crash shape", "[io][ledger][neg
   SECTION( "no journal at all" )
   {
     const std::string dir = scratch( "nojournal" );
-    const AttachCheck check = attachExisting( ( fs::path( dir ) / "out.tif" ).string() );
+    const AttachCheck check = attachExisting( dir + "/out.tif" );
     CHECK( !check.attachable );
     CHECK( issueCodes( check ).find( "ledger_missing" ) != std::string::npos );
   }
@@ -364,7 +367,7 @@ TEST_CASE( "stage ledger foreign JSON types fail typed, never as Json::LogicErro
            "[io][ledger][negative][hostile]" )
 {
   const std::string dir = scratch( "foreign-types" );
-  const std::string finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  const std::string finalPath = dir + "/out.tif";
   // producer is an object and declared_shape is an array: both used to
   // throw Json::LogicError straight through the sweep/discard catch arms.
   {

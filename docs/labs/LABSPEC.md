@@ -60,7 +60,7 @@ LabSpec 是实验的声明式规格：一份 JSON 同时驱动**引导式实验�
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `spec_version` | ✓ | 当前必须为 `1` |
+| `spec_version` | ✓ | 合同版本：`1` 或 `2`（见下节） |
 | `id` | ✓ | `^lab[0-9]{2}_[a-z][a-z0-9_]*$`，等于文件名主干；`labNN` 零填充保证排序稳定 |
 | `title` / `title_zh` | ✓ | 英文 / 中文标题 |
 | `objective` | ✓ | 实验目标，同时作为面板中的描述 |
@@ -81,6 +81,28 @@ LabSpec 是实验的声明式规格：一份 JSON 同时驱动**引导式实验�
 | `completion_hint` | 完成标志 |
 
 三者取其一：算子步骤（`operator_id`）、界面步骤（`action`）、手动步骤（两者皆无）。
+
+## LabSpec 2（spec_version: 2）
+
+LabSpec 2 是 v1 的**严格超集**（lab platform 12.0）：所有 v1 字段原样有效，另新增七个可选
+结构化字段。加载器同时接受 1 和 2，并**拒绝在 v1 文档中出现 v2 专有键**（版本必须显式声明，
+杜绝静默语义漂移）。v2 字段是创作/契约数据：文档生成器、判分工具与 drift 测试直接消费 JSON；
+运行时 `LabSpec` 结构体保持 v1 形状，所有消费方零改动。
+
+| 字段 | 说明 |
+|------|------|
+| `objective_zh` | 中文教学目标（多行）；`objective` 保持原语义 |
+| `prerequisite_knowledge[]` | 先修知识/实验（字符串列表）；`prerequisites[]` 仍专指**数据引用** `{path, note?}` |
+| `principles[]` | `{heading, body, formulas?[]}` 结构化原理块（渲染进生成文档） |
+| `glossary[]` | `{term, term_zh, definition_zh}` 中英术语表 |
+| `expected_artifacts[]` | `{path, kind?: raster\|vector\|file, note_zh?}` 完成实验应产出的成果 |
+| `param_ranges` | `算子id → 参数 → {min?, max?, values?, note_zh?}` 教学参数允许范围（`min<=max` 由加载器校验；运行时权威仍是 Processing Registry 的参数 schema） |
+| `grading_rules` | 判分规则文件路径（`data/labs/grading/<id>.rules.json`），即 `lab --lab <id> --grade` 实际读取的 `sicnu.lab.rules/1` 文件 |
+
+迁移：`python3 scripts/upgrade_labspec.py [--check]` 把 `data/labs/*.lab.json` 提升到
+v2（文本级 `spec_version` 替换，不重排格式）。历史遗留的 D3 单数字命名文件
+（`lab8_temporal_analysis.lab.json` 等）与严格加载器的 `labNN` 契约不兼容，已移入
+`data/labs/legacy/` 存档；对应教学文档（`docs/labs/lab8…11`）保留为手写页面。
 
 ## 路径约定
 

@@ -93,6 +93,26 @@
     "limitations": ["ACE cosine similarity assumes the target signature shares the scene radiometric domain"]
   },
   {
+    "id": "rs:cem_detection",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Target signature must be in the same radiometric domain as the scene", "Refuses scenes with fewer valid background samples than 2B+2 (B+1 when loading > 0)"]
+  },
+  {
+    "id": "rs:spectral_spatial_fuse",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Post-processes a single-band score raster; window smoothing is not an edge-preserving filter"]
+  },
+  {
     "id": "rs:local_rx_anomaly",
     "family": "spectral_transform",
     "extends": "family:spectral_transform",

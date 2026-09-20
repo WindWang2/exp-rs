@@ -644,21 +644,21 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
 
     // Validate node set + count BEFORE mutating m_state so a corrupt
     // checkpoint cannot wedge the coordinator as "already active" (#1078c).
-    const WorkflowDocument resumedDef = parsed.value();
+    const WorkflowDocument resumedDocument = parsed.value();
     const QJsonArray nodes = document.value( QLatin1String( "nodes" ) ).toArray();
     QSet<QString> seenNodeIds;
     for ( const QJsonValue &value : nodes )
     {
         const QString nodeId = value.toObject().value( QLatin1String( "nodeId" ) ).toString();
-        if ( !resumedDef.findNode( nodeId ) )
+        if ( !resumedDocument.findNode( nodeId ) )
             return fail( QStringLiteral( "checkpoint references unknown node '%1'" ).arg( nodeId ) );
         seenNodeIds.insert( nodeId );
     }
-    if ( seenNodeIds.size() != resumedDef.nodes.size() )
+    if ( seenNodeIds.size() != resumedDocument.nodes.size() )
         return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
 
     // Fresh scheduling state over the resumed document.
-    m_state->def = resumedDef;
+    m_state->def = resumedDocument;
     m_state->runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
     m_state->runId = document.value( QLatin1String( "runId" ) ).toString();
     m_state->checkpointPath = checkpointFilePath;
@@ -716,10 +716,11 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // count only parents that still need to RUN this round — CacheHit
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
-    // of the checkpoint array is irrelevant. `resumedDef` (line above) is the
-    // same document already installed into m_state->def — reuse it; a second
-    // same-scope declaration is a hard error (C2373).
-    for ( const NodeFact &node : resumedDef.nodes )
+    // of the checkpoint array is irrelevant.
+    // (Renamed from `resumedDef`: the outer scope already declares it at the
+    // first pass — a conflicting declaration that GCC rejects outright.)
+    const WorkflowDocument &resumedDoc = m_state->def;
+    for ( const NodeFact &node : resumedDoc.nodes )
     {
         int parents = 0;
         for ( const EdgeFact &edge : m_state->def.edges )

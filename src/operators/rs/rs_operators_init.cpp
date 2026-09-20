@@ -55,6 +55,7 @@
 #include "rs_radiometric_qa_operator.h"
 #include "rs_spectral_derivative_operator.h"
 #include "rs_spectral_detection_operators.h"
+#include "rs_spectral_spatial_fuse_operator.h"
 #include "rs_sar_dualpol_operator.h"
 #include "rs_sar_terrain_masks_operator.h"
 #include "rs_sar_geocode_operator.h"
@@ -195,6 +196,8 @@ REGISTER_RS_OPERATOR(RsRadiometricQaOperator, "rs:radiometric_qa")
 REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
 REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
 REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
+REGISTER_RS_OPERATOR(RsCemOperator, "rs:cem_detection")
+REGISTER_RS_OPERATOR(RsSpectralSpatialFuseOperator, "rs:spectral_spatial_fuse")
 REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
 REGISTER_RS_OPERATOR(RsSarGeocodeOperator, "rs:sar_geocode")
@@ -382,6 +385,8 @@ void initBuiltinRsOperators() {
   add( "rs:spectral_derivative", [] { return std::make_unique<RsSpectralDerivativeOperator>(); } );
   add( "rs:matched_filter", [] { return std::make_unique<RsMatchedFilterOperator>(); } );
   add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
+  add( "rs:cem_detection", [] { return std::make_unique<RsCemOperator>(); } );
+  add( "rs:spectral_spatial_fuse", [] { return std::make_unique<RsSpectralSpatialFuseOperator>(); } );
   add( "rs:sar_dualpol_features", [] { return std::make_unique<RsSarDualPolOperator>(); } );
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
   add( "rs:sar_geocode", [] { return std::make_unique<RsSarGeocodeOperator>(); } );

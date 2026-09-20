@@ -90,7 +90,32 @@ class GovernanceStore
     // --- assets -------------------------------------------------------------
     Result<void> upsertAsset( const GovernedAsset &asset );
     Result<void> upsertAssets( const QVector<GovernedAsset> &assets );  // one transaction
-    Result<void> removeAsset( const QString &assetId );
+    /// What still references an asset (12.0): dataset memberships, result
+    /// inputs, run outputs and downstream lineage edges. Bounded by
+    /// @p limit; the evidence `removeAsset` refuses on.
+    struct AssetReference
+    {
+        QString kind;      ///< "dataset_member"|"result_input"|"run_output"|"lineage_downstream"
+        QString entityId;  ///< dataset / result / run / downstream asset id
+        QString detail;    ///< role or edge context for humans
+    };
+    /// Bounded per relationship family (up to 4 × @p limit rows total).
+    QVector<AssetReference> collectAssetReferences( const QString &assetId,
+                                                    qint64 limit = 1000 ) const;
+    /// Removal policy (12.0): an asset still referenced by a dataset
+    /// membership, result input, run output or downstream lineage edge is
+    /// NEVER removed silently. Refuse (the default) fails with
+    /// `store.asset_referenced`; the caller resolves the references first.
+    /// Cascade keeps the legacy single-transaction relationship cleanup for
+    /// the one caller that mirrors an already-decided authority (the
+    /// WorkspaceService slot propagating a DataManager removal).
+    enum class RemoveAssetPolicy
+    {
+        Refuse,
+        Cascade,
+    };
+    Result<void> removeAsset( const QString &assetId,
+                              RemoveAssetPolicy policy = RemoveAssetPolicy::Refuse );
     std::optional<GovernedAsset> assetById( const QString &assetId ) const;
     std::optional<GovernedAsset> assetByPath( const QString &path ) const;  // alias lookup
     /// Assets whose stored fingerprint equals @p digest (relink lookup).

@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u6c34\u4f53",
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u6708\u5ea6/\u5b63\u5ea6\u65e0\u4e91\u5e95\u56fe\u751f\u4ea7",
         "NDVI \u65f6\u5e8f\u9884\u5904\u7406"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes)",
       "grade" : "bit_exact",
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "TIME_ORDER_INVALID",
@@ -44,10 +44,10 @@
       }
     ],
     "family" : "temporal",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "raster",
@@ -66,7 +66,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -81,7 +81,7 @@
           "type" : "integer"
         },
         {
-          "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -102,7 +102,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -113,7 +113,7 @@
         },
         {
           "default" : "best_pixel",
-          "enum" :
+          "enum" : 
           [
             "best_pixel",
             "mean",
@@ -130,7 +130,7 @@
         },
         {
           "default" : "all",
-          "enum" :
+          "enum" : 
           [
             "all",
             "month",
@@ -174,26 +174,26 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "\u6240\u6709\u671f\u6b21\u5f71\u50cf\u987b\u914d\u51c6\u5230\u540c\u4e00\u7f51\u683c\u5e76\u7edf\u4e00\u8f90\u5c04\u91cf\u7eb2\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u5408\u6210\uff1a\u628a\u591a\u671f\u5f71\u50cf\u6309\u6700\u4f18\u50cf\u5143\uff08\u8d28\u91cf\u5206\uff09/\u5747\u503c/\u4e2d\u503c\u5408\u6210\u4e00\u666f\uff0c\u538b\u5236\u4e91\u4e0e\u566a\u58f0\u3002\u9ed8\u8ba4 quality_band=0 \u65f6\u5404\u671f\u5f97\u5206\u76f8\u540c\uff0c\u6309\u76ee\u6807\u65e5\u671f\u5c31\u8fd1\u9009\u53d6\uff1b\u9700\u8981\u7ecf\u5178 MVC \u65f6\u628a\u6307\u6570\u6ce2\u6bb5\u663e\u5f0f\u8bbe\u4e3a quality_band\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5f71\u50cf\u5408\u6210",
         "\u6700\u4f18\u50cf\u5143\u5408\u6210",
         "\u4e2d\u503c\u5408\u6210"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -206,7 +206,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "temporal",
     "composite",

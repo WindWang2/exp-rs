@@ -35,6 +35,7 @@
 #include <QTemporaryDir>
 
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -528,4 +529,199 @@ TEST_CASE( "lab_grading.existing binary verify path still works alongside teachi
     CHECK( verification.ok );
     CHECK( verification.kind == "raster" );
     CHECK( verification.issues.isEmpty() );
+}
+
+// ---------------------------------------------------------------------------
+// lab platform 12.0 — adversarial rules corpus (Oracle O3). Every rule set
+// below is malformed or hostile; the grader must reject it as a TYPED usage
+// error before executing any assertion. A crash, hang or OOB here aborts the
+// whole test binary, so a green run is the no-crash proof.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+Json::Value minimalRules( const char *labId )
+{
+    Json::Value rules;
+    rules["schema_version"] = "sicnu.lab.rules/1";
+    rules["lab_id"] = labId;
+    rules["title"] = "adversarial probe";
+    rules["artifact"]["kind"] = "raster";
+    return rules;
+}
+
+Json::Value rangeAssertion( const char *id )
+{
+    Json::Value a;
+    a["id"] = id;
+    a["kind"] = "range";
+    a["weight"] = 100;
+    a["params"]["band"] = 1;
+    a["params"]["min"] = -1.0;
+    a["params"]["max"] = 1.0;
+    return a;
+}
+
+} // namespace
+
+TEST_CASE( "lab_grading.adversarial rules corpus yields typed usage errors, never crashes",
+           "[lab_grading][rules][adversarial]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string artifact = fixturePath( "ndvi_basics_reference.tif" );
+
+    struct Case
+    {
+        const char *label;
+        std::function<std::string( const QDir &, const std::string & )> write;
+        std::string fragment;
+    };
+
+    const auto writeWithAssertion = [ &dir ]( const std::string &stem, Json::Value assertion ) {
+        Json::Value rules = minimalRules( stem.c_str() );
+        rules["assertions"].append( std::move( assertion ) );
+        return writeRules( QDir( dir.path() ), stem, rules );
+    };
+
+    const std::vector<Case> cases = {
+        { "params is an array (type confusion)",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["params"] = Json::Value( Json::arrayValue );
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "params" },
+        { "negative weight",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["weight"] = -5;
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "weight" },
+        { "weight over 100",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["weight"] = 1e9;
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "weight" },
+        { "duplicate assertion ids",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value rules = minimalRules( stem.c_str() );
+              Json::Value a = rangeAssertion( "x" );
+              a["weight"] = 50;
+              rules["assertions"].append( a );
+              rules["assertions"].append( a );
+              return writeRules( QDir( dir.path() ), stem, rules );
+          },
+          "duplicate" },
+        { "passing_score out of range",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value rules = minimalRules( stem.c_str() );
+              rules["passing_score"] = 1000;
+              rules["assertions"].append( rangeAssertion( "x" ) );
+              return writeRules( QDir( dir.path() ), stem, rules );
+          },
+          "passing_score" },
+        { "empty assertions array",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              return writeRules( QDir( dir.path() ), stem, minimalRules( stem.c_str() ) );
+          },
+          "assertions" },
+        { "provenance seed overflows uint32",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["kind"] = "provenance";
+              a["params"] = Json::objectValue;
+              a["params"]["seed"] = Json::Value( static_cast<Json::Int64>( 4294967296ll ) );
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "uint32" },
+        { "provenance unknown metadata key",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["kind"] = "provenance";
+              a["params"] = Json::objectValue;
+              a["params"]["evil_key"] = "x";
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "unknown key" },
+        { "provenance with no expectation at all",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["kind"] = "provenance";
+              a["params"] = Json::objectValue;
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "requires at least one" },
+        { "histogram_shape with negative bins",
+          [ & ]( const QDir &d, const std::string &stem ) {
+              Json::Value a = rangeAssertion( "x" );
+              a["kind"] = "histogram_shape";
+              a["params"] = Json::objectValue;
+              a["params"]["band"] = 1;
+              a["params"]["bins"] = -3;
+              a["params"]["min"] = 0.0;
+              a["params"]["max"] = 1.0;
+              a["params"]["shape"] = "bimodal";
+              return writeWithAssertion( stem, std::move( a ) );
+          },
+          "bins" },
+    };
+
+    int caseIndex = 0;
+    for ( const auto &item : cases )
+    {
+        INFO( item.label );
+        const std::string stem = "adv_" + std::to_string( caseIndex++ );
+        const auto path = item.write( QDir( dir.path() ), stem );
+        const auto result = gradeFile( path, artifact );
+        CHECK( !result.graded );
+        CHECK( result.errorClass == "usage" );
+        if ( !item.fragment.empty() )
+        {
+            INFO( "error was: " << result.error.toStdString() );
+            CHECK( result.error.toStdString().find( item.fragment ) != std::string::npos );
+        }
+    }
+
+    SECTION( "lab_id does not match the file stem" )
+    {
+        Json::Value rules = minimalRules( "adv_stem" );
+        rules["lab_id"] = "some_other_lab";
+        rules["assertions"].append( rangeAssertion( "x" ) );
+        const auto path = writeRules( QDir( dir.path() ), "adv_stem", rules );
+        const auto result = gradeFile( path, artifact );
+        CHECK( !result.graded );
+        CHECK( result.errorClass == "usage" );
+    }
+}
+
+TEST_CASE( "lab_grading.absurd band indices grade as failures without OOB",
+           "[lab_grading][rules][adversarial]" )
+{
+    // Documented grader policy: out-of-range bands are GRADED failures, not
+    // usage errors (output_verifier.cpp ContentWalk). The adversarial point
+    // of INT_MAX is that resolution must clip cleanly instead of reading OOB.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // ndvi_basics_reference.tif is single-band: 0, 2 and INT_MAX are all
+    // out of range.
+    for ( const int band : { 0, 2, 2147483647 } )
+    {
+        Json::Value a = rangeAssertion( "x" );
+        a["params"]["band"] = band;
+        Json::Value rules = minimalRules( "adv_band" );
+        rules["assertions"].append( a );
+        const auto path = writeRules( QDir( dir.path() ), "adv_band", rules );
+        const auto result = gradeFile(
+            path, fixturePath( "ndvi_basics_reference.tif" ) );
+        INFO( "band " << band << ": " << result.error.toStdString() );
+        REQUIRE( result.graded );
+        REQUIRE( result.verdict == QLatin1String( "fail" ) );
+        REQUIRE( hasDeduction( result, "x" ) );
+    }
 }
