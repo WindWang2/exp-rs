@@ -59,6 +59,15 @@ AnalyticCiResult harmonicTrendCoefficientCi(
     const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
     int harmonics, const std::vector<double> &weights, double ciLevel );
 
+/// Same analytic coefficient CIs on the harmonicFit basis — the no-trend
+/// design [1, sin/cos…] with harmonics clamped to [1, 6] (Temporal Phenology
+/// 12.0: wires CIs into rs:temporal_harmonic_fit, whose model has no trend
+/// column; using the trend design here would silently report CIs for a
+/// different model).
+AnalyticCiResult harmonicCoefficientCi(
+    const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
+    int harmonics, const std::vector<double> &weights, double ciLevel );
+
 struct BootstrapOptions
 {
   int resamples = 199;      ///< bounded (caller clamps; hard cap 999)

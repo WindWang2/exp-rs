@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace sicnu::temporal
@@ -75,6 +76,19 @@ struct SeasonalMetrics
   double amplitude = 0.0;    ///< max - min inside the season
   double base = 0.0;         ///< minimum value inside the season
   double integral = 0.0;     ///< Σ value·Δday over the season (small approx)
+  /// Limb rates (Temporal Phenology 12.0, WP4): the mean slope between the
+  /// 20% and 80% amplitude crossings on each limb, in value/day over the real
+  /// day axis (irregular-cadence safe). NaN when either crossing is absent —
+  /// e.g. the limb is already above a level at the window edge, or a
+  /// duplicate instant makes the crossing time degenerate.
+  double greenUpRate = std::numeric_limits<double>::quiet_NaN();
+  double senescenceRate = std::numeric_limits<double>::quiet_NaN();  ///< positive magnitude, value/day
+  /// Day-of-year of the 50%-amplitude crossing on each limb, interpolated
+  /// between the bracketing samples. -1 when undefined. Year-boundary
+  /// brackets interpolate modulo 365 (leap-year Dec-31 brackets may land one
+  /// day early — documented approximation).
+  double greenUpMidDoy = -1.0;
+  double senescenceMidDoy = -1.0;
   bool valid = false;
 };
 
@@ -222,6 +236,10 @@ struct BreakpointResult
   std::vector<int> breakIndices;   ///< segment start indices of segments 2..k
   std::vector<double> slopes;      ///< per-day slopes per segment
   std::vector<double> intercepts;  ///< at t = 0 (series epoch)
+  /// OLS standard error of each segment slope (WP5 uncertainty surface):
+  /// σ̂² = RSS_seg/(n_seg−2), se = √(σ̂²/Sxx). NaN for segments with
+  /// n_seg ≤ 2 or a degenerate (single-instant) time axis.
+  std::vector<double> slopeStdErrors;
   double rmse = 0.0;               ///< sqrt( RSS / valid observations ); NaN when none
   long validCount = 0;             ///< finite observations across all segments
 };
@@ -264,10 +282,20 @@ struct SenTrendResult
   double pValue = 1.0;     ///< two-sided significance (small = significant trend)
   double variance = 0.0;   ///< tie-corrected var(S), for reference
   int validCount = 0;      ///< finite observations
+  /// Gilbert (1987) order-statistic CI on the slope: ranks
+  /// (K ∓ z_{1−α/2}·√var(S))/2 of the sorted pairwise slopes. Only computed
+  /// when the caller passes ciLevel ∈ (0,1); NaN otherwise. Cheap — the
+  /// pairwise slopes are already materialized for the median.
+  double slopeCiLo = std::numeric_limits<double>::quiet_NaN();
+  double slopeCiHi = std::numeric_limits<double>::quiet_NaN();
+  bool slopeCiValid = false;
 };
 
+/// @a ciLevel in (0,1) additionally computes the slope confidence interval
+/// (default 0.0 = skip; keeps the call bit-exact for existing callers).
 SenTrendResult mannKendallSenSlope( const std::vector<float> &y,
-                                    const std::vector<double> &tDays );
+                                    const std::vector<double> &tDays,
+                                    double ciLevel = 0.0 );
 
 /// Additive decomposition: trend (Whittaker with @a trendLambda), seasonal
 /// (mean of detrended values grouped by day-of-year, circularly smoothed by
