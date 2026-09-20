@@ -10,6 +10,22 @@ namespace {
 constexpr const char *kProvenanceKind = "d17_provenance";
 constexpr const char *kProvenanceVersion = "1.0";
 
+/// Records are generated, not authored — a provenance document carrying more
+/// entries than this is corrupt or hostile and is refused before allocation.
+constexpr int kMaxProvenanceEntries = 1 << 20;
+
+bool isKnownNodeKind( const QString &kind )
+{
+    return kind == QLatin1String( "run" ) || kind == QLatin1String( "nodeExec" )
+           || kind == QLatin1String( "artifact" );
+}
+
+bool isKnownEdgeKind( const QString &kind )
+{
+    return kind == QLatin1String( "consumed" ) || kind == QLatin1String( "produced" )
+           || kind == QLatin1String( "reusedFrom" ) || kind == QLatin1String( "retriedAs" );
+}
+
 QString runNodeId( const QString &runId ) { return QStringLiteral( "run:%1" ).arg( runId ); }
 QString execNodeId( const QString &nodeId ) { return QStringLiteral( "node:%1" ).arg( nodeId ); }
 QString artifactNodeId( const QString &path ) { return QStringLiteral( "artifact:%1" ).arg( path ); }
@@ -118,6 +134,11 @@ Result<ProvenanceGraph> ProvenanceGraph::fromJson( const QJsonObject &doc )
     ProvenanceGraph graph;
     QSet<QString> nodeIds;
     const QJsonArray nodes = doc.value( QLatin1String( "nodes" ) ).toArray();
+    const QJsonArray edges = doc.value( QLatin1String( "edges" ) ).toArray();
+    if ( nodes.size() > kMaxProvenanceEntries || edges.size() > kMaxProvenanceEntries )
+        return Result<ProvenanceGraph>::error(
+            QStringLiteral( "provenance entry count exceeds the %1 cap" ).arg( kMaxProvenanceEntries ) );
+    nodeIds.reserve( nodes.size() );
     for ( const QJsonValue &value : nodes )
     {
         const QJsonObject entry = value.toObject();
@@ -125,13 +146,13 @@ Result<ProvenanceGraph> ProvenanceGraph::fromJson( const QJsonObject &doc )
         node.id = entry.value( QLatin1String( "id" ) ).toString();
         node.kind = entry.value( QLatin1String( "kind" ) ).toString();
         node.attributes = entry.value( QLatin1String( "attributes" ) ).toObject();
-        if ( node.id.isEmpty() || node.kind.isEmpty() || nodeIds.contains( node.id ) )
+        if ( node.id.isEmpty() || !isKnownNodeKind( node.kind ) || nodeIds.contains( node.id ) )
             return Result<ProvenanceGraph>::error(
-                QStringLiteral( "provenance node id missing, kindless or duplicated: '%1'" ).arg( node.id ) );
+                QStringLiteral( "provenance node id missing, kind unknown or duplicated: '%1' (kind '%2')" )
+                    .arg( node.id, node.kind ) );
         nodeIds.insert( node.id );
         graph.addNode( node );
     }
-    const QJsonArray edges = doc.value( QLatin1String( "edges" ) ).toArray();
     for ( const QJsonValue &value : edges )
     {
         const QJsonObject entry = value.toObject();
@@ -139,11 +160,11 @@ Result<ProvenanceGraph> ProvenanceGraph::fromJson( const QJsonObject &doc )
         edge.fromId = entry.value( QLatin1String( "from" ) ).toString();
         edge.toId = entry.value( QLatin1String( "to" ) ).toString();
         edge.kind = entry.value( QLatin1String( "kind" ) ).toString();
-        if ( edge.fromId.isEmpty() || edge.toId.isEmpty() || edge.kind.isEmpty()
+        if ( edge.fromId.isEmpty() || edge.toId.isEmpty() || !isKnownEdgeKind( edge.kind )
              || !nodeIds.contains( edge.fromId ) || !nodeIds.contains( edge.toId ) )
             return Result<ProvenanceGraph>::error(
-                QStringLiteral( "provenance edge dangling or malformed: '%1'->'%2'" )
-                    .arg( edge.fromId, edge.toId ) );
+                QStringLiteral( "provenance edge dangling, kind unknown or malformed: '%1'->'%2' (kind '%3')" )
+                    .arg( edge.fromId, edge.toId, edge.kind ) );
         graph.addEdge( edge );
     }
     return Result<ProvenanceGraph>::ok( graph );
@@ -216,7 +237,10 @@ ProvenanceGraph ProvenanceGraph::fromRunState( const QString &runId,
 
         // Consumed edges: every incoming wire fed this exec the parent's
         // artifact. Absent artifact (parent failed/skipped) -> no edge, the
-        // exec's own state already records why.
+        // exec's own state already records why. Two wires from the same
+        // parent share one artifact node — dedupe so the consumed set is a
+        // set, not a bag.
+        QSet<QString> consumedIds;
         for ( const EdgeFact &edge : def.edges )
         {
             if ( edge.targetNodeId != node.nodeId )
@@ -225,6 +249,9 @@ ProvenanceGraph ProvenanceGraph::fromRunState( const QString &runId,
             if ( parentArtifact.isEmpty() )
                 continue;
             const QString artifactId = artifactNodeId( parentArtifact );
+            if ( consumedIds.contains( artifactId ) )
+                continue;
+            consumedIds.insert( artifactId );
             if ( !artifactIds.contains( artifactId ) )
             {
                 artifactIds.insert( artifactId );

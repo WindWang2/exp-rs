@@ -1,6 +1,8 @@
 // src/workflow/workflow_composer.cpp — subflow fragment expansion
 #include "workflow/workflow_composer.h"
 
+#include "workflow/workflow_dag_analyzer.h"
+
 #include <QJsonArray>
 #include <QSet>
 
@@ -290,6 +292,22 @@ Result<WorkflowDocument> expandSubflowsImpl( const WorkflowDocument &authored, i
                 break;
             }
     }
+
+    // The merged document must stand on its own: rewired boundary edges can
+    // introduce a cycle through the instance, blow an input port's in-degree
+    // (two instance ports mapped to one fragment port), or collide on a
+    // namespaced edgeId. The public composer contract is fail-closed — do
+    // not rely on the sole caller revalidating.
+    QString mergedError;
+    if ( !WorkflowIR::validateSemantics( working, &mergedError ) )
+        return Result<WorkflowDocument>::error(
+            QStringLiteral( "ir2.subflow: expanded document is not semantically valid: %1" )
+                .arg( mergedError ) );
+    const DagAnalysisResult dag = WorkflowDagAnalyzer::analyzeDag( working );
+    if ( !dag.isAcyclic )
+        return Result<WorkflowDocument>::error(
+            QStringLiteral( "ir2.subflow: expanded document is not acyclic: %1" )
+                .arg( dag.errorMessage ) );
     return Result<WorkflowDocument>::ok( working );
 }
 

@@ -331,6 +331,90 @@ TEST_CASE( "Expansion failures are closed and name the instance", "[d17][workflo
     }
 }
 
+TEST_CASE( "Two instances of the same fragment expand to disjoint namespaces", "[d17][workflow][composition]" )
+{
+    WorkflowDocument def;
+    def.version = QStringLiteral( "2.1" );
+    def.nodes = { plainNode( "A", {}, { port( "out" ) } ),
+                  subflowNode( "S1", twoNodeFragment() ),
+                  subflowNode( "S2", twoNodeFragment() ),
+                  plainNode( "B", { port( "in" ) } ) };
+    // A fans out to both instances; B2 joins them via two input ports so the
+    // in-degree invariant holds.
+    NodeFact join = plainNode( "B2", { port( "in" ), port( "aux" ) } );
+    def.nodes.removeLast();
+    def.nodes.append( join );
+    def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "A" ), QStringLiteral( "out" ),
+                            QStringLiteral( "S1" ), QStringLiteral( "in" ) },
+                  EdgeFact{ QStringLiteral( "e2" ), QStringLiteral( "A" ), QStringLiteral( "out" ),
+                            QStringLiteral( "S2" ), QStringLiteral( "in" ) },
+                  EdgeFact{ QStringLiteral( "e3" ), QStringLiteral( "S1" ), QStringLiteral( "out" ),
+                            QStringLiteral( "B2" ), QStringLiteral( "in" ) },
+                  EdgeFact{ QStringLiteral( "e4" ), QStringLiteral( "S2" ), QStringLiteral( "out" ),
+                            QStringLiteral( "B2" ), QStringLiteral( "aux" ) } };
+
+    const auto result = WorkflowComposer::expandSubflows( def );
+    REQUIRE( result.isSuccess() );
+    const WorkflowDocument &flat = result.value();
+
+    // Both fragment copies inlined under their own prefixes, no id sharing.
+    REQUIRE( find( flat, QStringLiteral( "S1__f_in" ) ) != nullptr );
+    REQUIRE( find( flat, QStringLiteral( "S2__f_in" ) ) != nullptr );
+    REQUIRE( find( flat, QStringLiteral( "S1__f_in" ) )->originNodeId == QStringLiteral( "S1" ) );
+    REQUIRE( find( flat, QStringLiteral( "S2__f_in" ) )->originNodeId == QStringLiteral( "S2" ) );
+    REQUIRE( flat.nodes.size() == 6 ); // A + 2x2 inlined + B2
+
+    // Diamond across the boundary rewires correctly; internal edges stay
+    // inside their namespaces (no cross-talk between instances).
+    REQUIRE( WorkflowIR::validateSemantics( flat ) );
+    REQUIRE( WorkflowDagAnalyzer::analyzeDag( flat ).isAcyclic );
+    int e3 = -1, e4 = -1, internal = 0;
+    for ( int i = 0; i < flat.edges.size(); ++i )
+    {
+        const EdgeFact &e = flat.edges[i];
+        if ( e.edgeId == QLatin1String( "e3" ) )
+            e3 = i;
+        if ( e.edgeId == QLatin1String( "e4" ) )
+            e4 = i;
+        if ( e.edgeId.contains( QLatin1String( "__" ) ) )
+            ++internal;
+    }
+    REQUIRE( e3 >= 0 );
+    REQUIRE( e4 >= 0 );
+    REQUIRE( flat.edges[e3].sourceNodeId == QStringLiteral( "S1__f_out" ) );
+    REQUIRE( flat.edges[e3].targetNodeId == QStringLiteral( "B2" ) );
+    REQUIRE( flat.edges[e4].sourceNodeId == QStringLiteral( "S2__f_out" ) );
+    REQUIRE( flat.edges[e4].targetPortName == QStringLiteral( "aux" ) );
+    REQUIRE( internal == 2 ); // S1__e_f and S2__e_f
+}
+
+TEST_CASE( "An interface mapping two ports to one fragment input fails closed", "[d17][workflow][composition]" )
+{
+    // Both instance input ports map onto the SAME fragment port f_in.in ->
+    // the merged doc would blow in-degree. The composer's own merged-document
+    // revalidation must refuse, not defer the failure to the caller.
+    WorkflowDocument def;
+    def.version = QStringLiteral( "2.1" );
+    def.nodes = { plainNode( "A", {}, { port( "out" ) } ),
+                  plainNode( "B", {}, { port( "out" ) } ),
+                  subflowNode( "S", twoNodeFragment() ) };
+    def.nodes[2].inputPorts.append( port( "aux" ) );
+    QJsonObject iface = def.nodes[2].parameters.value( QLatin1String( "interface" ) ).toObject();
+    QJsonObject inputs = iface.value( QLatin1String( "inputs" ) ).toObject();
+    inputs.insert( QStringLiteral( "aux" ),
+                   QJsonObject{ { QStringLiteral( "node" ), QStringLiteral( "f_in" ) },
+                                { QStringLiteral( "port" ), QStringLiteral( "in" ) } } );
+    iface.insert( QStringLiteral( "inputs" ), inputs );
+    def.nodes[2].parameters.insert( QStringLiteral( "interface" ), iface );
+    def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "A" ), QStringLiteral( "out" ),
+                            QStringLiteral( "S" ), QStringLiteral( "in" ) },
+                  EdgeFact{ QStringLiteral( "e2" ), QStringLiteral( "B" ), QStringLiteral( "out" ),
+                            QStringLiteral( "S" ), QStringLiteral( "aux" ) } };
+
+    const auto result = WorkflowComposer::expandSubflows( def );
+    REQUIRE_FALSE( result.isSuccess() );
+}
+
 // ---------------------------------------------------------------------------
 // WP6 deterministic planning: the plan signature is a pure function of
 // topology + parameters — invariant to serialization order and edge labels.

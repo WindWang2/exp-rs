@@ -469,8 +469,8 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
             if ( statuses.size() != 12 )
                 inconsistent = true;
             for ( const NodeStatusSnapshot &snapshot : statuses )
-                if ( executionStateString( snapshot.state ).isEmpty() )
-                    inconsistent = true;
+                if ( executionStateString( snapshot.state ) == QLatin1String( "Unknown" ) )
+                    inconsistent = true; // out-of-range enum == torn snapshot
             reads.fetch_add( 1 );
             if ( completed )
                 break;
@@ -701,6 +701,44 @@ TEST_CASE( "Resume rejects an unknown node state key fail-closed", "[d17][workfl
     QString error;
     REQUIRE_FALSE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
     REQUIRE( error.contains( QStringLiteral( "Teleporting" ) ) );
+
+    // The rejection must not wedge the coordinator: a checkpoint that fails
+    // validation after the replay loop began used to leave m_state->def set
+    // and finished==false, making every later run claim "already active".
+    REQUIRE_FALSE( resumeCoordinator.isRunning() );
+    REQUIRE( resumeCoordinator.startRun( chain( 1 ), scratchDir( QStringLiteral( "badstate-reuse" ) ) ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+}
+
+TEST_CASE( "Resume rejects a checkpoint whose embedded workflow is cyclic", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "cyclic" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Rewire e2's source from node_1 to node_3: edges become
+    // node_3.output -> node_2.input and node_2.output -> node_3.input, a
+    // 2-cycle that parses and validates semantically (all ports exist,
+    // in-degree 1) but fails the same acyclicity gate startRun applies.
+    QJsonObject doc = readJsonObject( checkpoint );
+    QJsonObject workflow = doc.value( QLatin1String( "workflow" ) ).toObject();
+    QJsonArray edges = workflow.value( QLatin1String( "edges" ) ).toArray();
+    REQUIRE( edges.size() == 2 );
+    QJsonObject edge0 = edges.first().toObject(); // e2: node_1 -> node_2
+    edge0.insert( QLatin1String( "sourceNodeId" ), QStringLiteral( "node_3" ) );
+    edges.replace( 0, edge0 );
+    workflow.insert( QLatin1String( "edges" ), edges );
+    doc.insert( QLatin1String( "workflow" ), workflow );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE_FALSE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "cyclic" ), Qt::CaseInsensitive ) );
+    // And the coordinator stays reusable afterwards.
+    REQUIRE_FALSE( resumeCoordinator.isRunning() );
 }
 
 TEST_CASE( "Legacy 1.0 checkpoints resume but conservatively recompute", "[d17][workflow][engine]" )
@@ -1197,6 +1235,10 @@ TEST_CASE( "A resumed run records cache hits as reusedFrom edges", "[d17][workfl
     REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile ) );
     REQUIRE( waitForCompleted( resumeCoordinator ) );
 
+    // The resumed attempt writes a SUFFIXED record — the first attempt's
+    // provenance_<runId>.json is preserved so the lineage an audit needs
+    // (who produced the reused artifacts) is still queryable.
+    REQUIRE( resumeCoordinator.provenancePath().contains( QStringLiteral( "attempt2" ) ) );
     const ProvenanceGraph graph = loadProvenance( resumeCoordinator.provenancePath() );
     for ( int i = 1; i <= 3; ++i )
     {
@@ -1204,11 +1246,19 @@ TEST_CASE( "A resumed run records cache hits as reusedFrom edges", "[d17][workfl
         REQUIRE( graph.producedBy( execId ).isEmpty() ); // nothing re-produced
         REQUIRE( graph.reusedBy( execId ).size() == 1 ); // verified reuse recorded
     }
-    // The consumed artifact's producer is absent in THIS run's record — it
-    // was produced by the previous attempt and lives in that record.
+    // The consumed artifact's producer is absent in THIS attempt's record —
+    // it was produced by the previous attempt and lives in that record,
+    // which the attempt suffix preserved.
     const QStringList consumed2 = graph.consumedBy( QStringLiteral( "node:node_2" ) );
     REQUIRE( consumed2.size() == 1 );
     REQUIRE( graph.producerOf( consumed2.first() ).isEmpty() );
+
+    const QString firstAttemptPath =
+        QString( resumeCoordinator.provenancePath() )
+            .replace( QStringLiteral( ".attempt2.json" ), QStringLiteral( ".json" ) );
+    REQUIRE( QFile::exists( firstAttemptPath ) );
+    const ProvenanceGraph first = loadProvenance( firstAttemptPath );
+    REQUIRE( !first.producerOf( consumed2.first() ).isEmpty() ); // producer resolvable
 }
 
 TEST_CASE( "Provenance records also describe failed runs", "[d17][workflow][provenance]" )
@@ -1285,6 +1335,28 @@ TEST_CASE( "Provenance parse fails closed on bad envelope and dangling edges", "
         QJsonObject doc = good;
         QJsonArray nodes = doc[QStringLiteral( "nodes" )].toArray();
         nodes.append( nodes[0] );
+        doc[QStringLiteral( "nodes" )] = nodes;
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
+    SECTION( "unknown edge kind" )
+    {
+        QJsonObject doc = good;
+        QJsonArray edges = doc[QStringLiteral( "edges" )].toArray();
+        const QString firstId = doc[QStringLiteral( "nodes" )].toArray().first()
+                                    .toObject().value( QLatin1String( "id" ) ).toString();
+        edges.append( QJsonObject{ { QStringLiteral( "from" ), firstId },
+                                   { QStringLiteral( "to" ), firstId },
+                                   { QStringLiteral( "kind" ), QStringLiteral( "invented" ) } } );
+        doc[QStringLiteral( "edges" )] = edges;
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
+    SECTION( "unknown node kind" )
+    {
+        QJsonObject doc = good;
+        QJsonArray nodes = doc[QStringLiteral( "nodes" )].toArray();
+        QJsonObject node = nodes.first().toObject();
+        node[QStringLiteral( "kind" )] = QStringLiteral( "invented" );
+        nodes.replace( 0, node );
         doc[QStringLiteral( "nodes" )] = nodes;
         REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
     }

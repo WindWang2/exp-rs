@@ -46,9 +46,12 @@ New `NodeStatusSnapshot` fields: `artifactSizeBytes`, `artifactLastModifiedMs`,
 
 - Why not whole-file SHA-256: raster products can be GBs; head+tail+size is
   O(2 MiB) deterministic and catches truncation/extension/head-or-tail
-  rewrite. A mid-file-only rewrite of a >2 MiB artifact could evade the
-  digest — mitigated by also pinning size+mtime and by containment; the
-  `sha256fl` scheme tag leaves room for a future `sha256full` mode.
+  rewrite. **Honest limitation**: a mid-file-only rewrite of a >2 MiB
+  artifact that also preserves mtime (trivially forgeable — tests do it via
+  restoreMtime) would evade detection. The fingerprint is an integrity
+  tripwire for the common corruption/replacement cases, not a cryptographic
+  seal; a future `sha256full` mode can close the gap behind the existing
+  `sha256fl:` scheme tag without a format bump.
 - **Write-time containment**: on node success, the canonical artifact path
   must live inside the canonical run directory (symlink-resolved), else the
   node fails `ir2.artifact_outside_run:` — an executor may not launder

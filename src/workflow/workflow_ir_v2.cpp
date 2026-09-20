@@ -141,7 +141,7 @@ PortFact v1Port( const QString &name, const QJsonObject &artifact )
 
 bool WorkflowDocument::isValid() const
 {
-    if ( version != QLatin1String( kVersion20 ) && version != QLatin1String( kVersionCurrent ) )
+    if ( !WorkflowIR::supportedSchemaVersions().contains( version ) )
         return false;
     QSet<QString> ids;
     for ( const NodeFact &node : nodes )
@@ -327,6 +327,13 @@ bool WorkflowIR::validateSemantics( const WorkflowDocument &def, QString *outErr
             *outError = message;
         return false;
     };
+
+    // The claimed schema version is semantic input: a document asserting a
+    // version outside the closed set is not executable — a run built on it
+    // would write checkpoints this build's own reader refuses.
+    if ( !supportedSchemaVersions().contains( def.version ) )
+        return fail( QStringLiteral( "workflow document claims unsupported version '%1' (supported: %2)" )
+                         .arg( def.version, supportedSchemaVersions().join( QLatin1String( ", " ) ) ) );
 
     QSet<QString> nodeIds;
     for ( const NodeFact &node : def.nodes )
