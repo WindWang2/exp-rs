@@ -81,6 +81,72 @@ QJsonObject DatasetQaReport::toJson() const
     return json;
 }
 
+sicnu::data::Result<DatasetQaReport> DatasetQaReport::fromJson( const QJsonObject &json )
+{
+    using Result = sicnu::data::Result<DatasetQaReport>;
+    const int version = json.value( QStringLiteral( "schema_version" ) ).toInt( -1 );
+    if ( version != kDatasetQaReportSerializationVersion )
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.qa_schema" ),
+            QStringLiteral( "QA report schema %1 is not supported" ).arg( version ),
+            DiagnosticSeverity::Error } );
+    const QString versionId =
+        json.value( QStringLiteral( "dataset_version_id" ) ).toString();
+    if ( versionId.isEmpty() )
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.qa_invalid" ),
+            QStringLiteral( "QA report carries no dataset version id" ),
+            DiagnosticSeverity::Error } );
+
+    DatasetQaReport report;
+    report.setDatasetVersionId( versionId );
+    report.setSplitManifestId(
+        json.value( QStringLiteral( "split_manifest_id" ) ).toString() );
+
+    const QJsonArray categories = json.value( QStringLiteral( "categories" ) ).toArray();
+    for ( const QJsonValue &value : categories )
+    {
+        const QJsonObject obj = value.toObject();
+        DatasetQaCategory category;
+        category.name = obj.value( QStringLiteral( "name" ) ).toString();
+        if ( category.name.isEmpty() )
+            return Result::failure( Diagnostic{
+                QStringLiteral( "dataset.qa_invalid" ),
+                QStringLiteral( "QA category without a name" ),
+                DiagnosticSeverity::Error } );
+        const auto verdict =
+            auditVerdictFromString( obj.value( QStringLiteral( "verdict" ) ).toString() );
+        if ( !verdict )
+            return Result::failure( Diagnostic{
+                QStringLiteral( "dataset.qa_invalid" ),
+                QStringLiteral( "QA category %1 carries an unknown verdict" )
+                    .arg( category.name ),
+                DiagnosticSeverity::Error } );
+        category.verdict = *verdict;
+        category.summary = obj.value( QStringLiteral( "summary" ) ).toString();
+        category.evidence = obj.value( QStringLiteral( "evidence" ) ).toObject();
+        for ( const QJsonValue &diagValue :
+              obj.value( QStringLiteral( "diagnostics" ) ).toArray() )
+        {
+            const QJsonObject diagObj = diagValue.toObject();
+            Diagnostic diag;
+            diag.code = diagObj.value( QStringLiteral( "code" ) ).toString();
+            diag.message = diagObj.value( QStringLiteral( "message" ) ).toString();
+            const QString severity =
+                diagObj.value( QStringLiteral( "severity" ) ).toString();
+            if ( severity == QStringLiteral( "error" ) )
+                diag.severity = DiagnosticSeverity::Error;
+            else if ( severity == QStringLiteral( "warning" ) )
+                diag.severity = DiagnosticSeverity::Warning;
+            else
+                diag.severity = DiagnosticSeverity::Info;
+            category.diagnostics.append( diag );
+        }
+        report.categories().append( category );
+    }
+    return Result::success( report );
+}
+
 AuditVerdict verdictFromLeakageReport( const LeakageReport &report )
 {
     if ( report.auditedChecks().isEmpty() && report.findings().isEmpty() )
