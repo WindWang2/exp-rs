@@ -379,6 +379,27 @@ using ModelRuntimePtr = std::shared_ptr<IModelRuntime>;
 using ModelRuntimeFactory =
     std::function<ModelRuntimePtr( const ModelInfo &, const ModelHardwareCapabilities &, std::string * )>;
 
+/// Provider fallback chain trace (provider strategy): one Attempt per
+/// framework the acquisition tried, in declared order. Every skipped or
+/// failed candidate records WHY — a fallback that fires is never silent:
+/// payloads and provenance carry this report, so a consumer always knows
+/// which executor produced a product.
+struct ProviderSelectionReport
+{
+  struct Attempt
+  {
+    std::string framework;        ///< candidate framework id
+    bool providerRegistered = false; ///< a factory is registered in this build
+    bool deviceResolved = false;  ///< the device request resolved for this candidate
+    bool loaded = false;          ///< the provider produced a session
+    std::string detail;           ///< failure reason ("" on success / unused)
+  };
+  std::vector<Attempt> attempts;
+  std::string resolvedFramework;  ///< framework of the returned session ("" when none)
+
+  Json::Value toJson() const;
+};
+
 /**
  * Runtime-layer readiness for a catalog-static-ready model: does a provider
  * exist for the declared framework, and does the host satisfy the GPU/VRAM
@@ -412,6 +433,22 @@ class ModelRuntimeRegistry
     /// RequestedDevice::cpu() or cuda(1). Same session cache.
     ModelRuntimePtr acquire( const ModelInfo &model, const RequestedDevice &request,
                              std::string *errorMessage = nullptr );
+
+    /// Provider strategy: walk the model's provider chain — the primary
+    /// framework first, then `runtime.framework_fallback` in declared order —
+    /// and return the first candidate's session. Every candidate executes the
+    /// SAME artifact (same weights/preprocessing/output contract); only the
+    /// executor changes, and the report names what actually ran. @p
+    /// explicitDevice (when non-null) overrides every candidate's manifest
+    /// device token; otherwise each candidate resolves its own manifest
+    /// contract. The chain cannot silently degrade semantics: an all-candidates
+    /// -failed acquisition is one typed error carrying EVERY attempt's reason.
+    /// Candidates without a registered provider in this build are recorded
+    /// and skipped, never fabricated.
+    ModelRuntimePtr acquireWithFallback( const ModelInfo &model,
+                                         const RequestedDevice *explicitDevice,
+                                         std::string *errorMessage = nullptr,
+                                         ProviderSelectionReport *report = nullptr );
 
     /// Drop all cached sessions (running callers keep their shared_ptrs).
     void releaseAll();

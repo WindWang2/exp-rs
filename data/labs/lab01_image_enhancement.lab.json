@@ -1,5 +1,5 @@
 {
-  "spec_version": 1,
+  "spec_version": 2,
   "id": "lab01_image_enhancement",
   "title": "Image Enhancement and Spatial Filtering",
   "title_zh": "影像增强与空间滤波",

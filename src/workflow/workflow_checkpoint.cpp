@@ -1,6 +1,7 @@
 #include "workflow_checkpoint.h"
 
 #include "runtime/observability/fault_point.h"
+#include "workflow_limits.h"
 #include "workflow_run_lock.h"
 
 #include <QCoreApplication>
@@ -23,11 +24,6 @@
 namespace sicnu::workflow {
 
 namespace {
-
-/// A checkpoint is a small JSON sidecar; a larger file is planted or corrupt
-/// and is refused instead of buffered unbounded (mirrors kMaxLedgerBytes /
-/// kMaxManifestBytes in the geospatial leaf layer).
-constexpr qint64 kMaxCheckpointBytes = 16 * 1024 * 1024;
 
 void fsyncDirectory( const QString &dirPath )
 {
@@ -136,12 +132,12 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
       *error = QStringLiteral( "Failed to open checkpoint file: %1" ).arg( filePath );
     return nullptr;
   }
-  if ( file.size() > kMaxCheckpointBytes )
+  if ( file.size() > kMaxCheckpointDocumentBytes )
   {
     file.close();
     if ( error )
       *error = QStringLiteral( "checkpoint file exceeds the %1 byte size cap: %2" )
-                   .arg( kMaxCheckpointBytes )
+                   .arg( kMaxCheckpointDocumentBytes )
                    .arg( filePath );
     return nullptr;
   }

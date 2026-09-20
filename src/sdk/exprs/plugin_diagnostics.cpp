@@ -77,18 +77,28 @@ Json::Value PluginDiagnostic::toJson() const
 PluginDiagnostic PluginDiagnostic::fromJson( const Json::Value &json )
 {
     PluginDiagnostic diagnostic;
-    diagnostic.code = codeFromString( json.get( "code", "E0000" ).asString() );
-    const std::string severity = json.get( "severity", "error" ).asString();
+    // Every field is read through a type-checked helper: this deserializes
+    // records that arrive over IPC / from files, and jsoncpp's
+    // Value::get()/find() THROW when the value is not an object while
+    // asString() throws on a wrong-typed member (#1038's class). A hostile
+    // record must decode into a default-filled diagnostic, never an exception
+    // out of the reader.
+    const auto readString = [&json]( const char *key, const std::string &fallback ) {
+        const Json::Value &value = json.isObject() ? json[key] : Json::Value::null;
+        return value.isString() ? value.asString() : fallback;
+    };
+    diagnostic.code = codeFromString( readString( "code", "E0000" ) );
+    const std::string severity = readString( "severity", "error" );
     if ( severity == "info" )
         diagnostic.severity = PluginDiagnosticSeverity::Info;
     else if ( severity == "warning" )
         diagnostic.severity = PluginDiagnosticSeverity::Warning;
     else
         diagnostic.severity = PluginDiagnosticSeverity::Error;
-    diagnostic.message = json.get( "message", "" ).asString();
-    diagnostic.pluginId = json.get( "plugin", "" ).asString();
-    diagnostic.field = json.get( "field", "" ).asString();
-    diagnostic.file = json.get( "file", "" ).asString();
+    diagnostic.message = readString( "message", "" );
+    diagnostic.pluginId = readString( "plugin", "" );
+    diagnostic.field = readString( "field", "" );
+    diagnostic.file = readString( "file", "" );
     return diagnostic;
 }
 

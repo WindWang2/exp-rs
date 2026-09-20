@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u6c34\u4f53",
         "\u519c\u7530"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u957f\u671f\u8d8b\u52bf\u4e0e\u5b63\u8282\u52a8\u6001\u5206\u79bb",
         "\u57ce\u90ca\u6269\u5f20\u7684\u65f6\u5e8f\u8bc1\u636e\u5206\u6790"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 T)",
       "grade" : "tolerance",
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "NOT_SUPPORTED",
@@ -39,10 +39,10 @@
       }
     ],
     "family" : "temporal",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -66,7 +66,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -81,7 +81,7 @@
           "type" : "integer"
         },
         {
-          "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -109,7 +109,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -149,7 +149,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
@@ -157,15 +157,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u5206\u89e3\uff1a\u628a\u65f6\u5e8f\u62c6\u4e3a\u8d8b\u52bf/\u5b63\u8282/\u6b8b\u5dee\u5206\u91cf\uff08STL \u601d\u60f3\uff09\uff0c\u652f\u6491\u957f\u671f\u8d8b\u52bf\u4e0e\u5b63\u8282\u52a8\u6001\u5206\u79bb\uff08\u5bb9\u5dee\u7ea7\u7b97\u5b50\uff09\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5b63\u8282-\u8d8b\u52bf\u5206\u89e3\uff08Whittaker+\u6c14\u5019\u6001\uff09",
         "\u5b63\u8282\u5206\u91cf",
         "\u8d8b\u52bf\u5206\u91cf"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790",
         "\u65f6\u95f4\u7edf\u8ba1"
@@ -179,7 +179,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "temporal",
     "decomposition",

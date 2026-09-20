@@ -12,6 +12,8 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include "operators/framework/rs_operator_registry.h"
@@ -263,4 +265,125 @@ TEST_CASE("rs:spectral_resample propagates NoData sentinel instead of interpolat
     std::vector<float> out(1);
     REQUIRE(ds.readBandData(1, out.data(), 1, 1));
     CHECK(std::isnan(out[0]));
+}
+
+TEST_CASE("analyzeResamplingCoverage: closed-form coverage flags", "[resample][coverage]")
+{
+    using namespace SpectralResampling;
+    // Source grid 400/500/600 nm.
+    const float srcWl[3] = {400.0f, 500.0f, 600.0f};
+
+    SECTION("linear path (no FWHM) is binary full/none")
+    {
+        const float dstWl[4] = {450.0f, 550.0f, 650.0f, 300.0f};
+        CoverageReport report;
+        REQUIRE(analyzeResamplingCoverage(srcWl, 3, dstWl, nullptr, 4, &report));
+        REQUIRE(report.bands.size() == 4);
+        CHECK(report.bands[0] == BandCoverage::Full);
+        CHECK(report.bands[1] == BandCoverage::Full);
+        CHECK(report.bands[2] == BandCoverage::None); // 650 > 600: NaN territory
+        CHECK(report.bands[3] == BandCoverage::None); // 300 < 400
+        CHECK(report.full == 2);
+        CHECK(report.partial == 0);
+        CHECK(report.none == 2);
+    }
+
+    SECTION("gaussian path flags edge-truncated SRFs as partial")
+    {
+        // 450 nm with FWHM=10: the whole response (±35 nm at the 3.5-FWHM
+        // cutoff) sits inside [400,600] → Full.
+        // 450 nm with FWHM=100: σ√2 ≈ 60.07, captured mass on [400,600] is
+        // 0.5·(erf(2.497) − erf(−0.832)) ≈ 0.880 < 0.99 → Partial.
+        // 600 nm (edge center) with FWHM=100: half the response is outside →
+        // captured = 0.5 → Partial.
+        // 700 nm is outside the range → None regardless of FWHM.
+        const float dstWl[4] = {450.0f, 450.0f, 600.0f, 700.0f};
+        const float dstFwhm[4] = {10.0f, 100.0f, 100.0f, 100.0f};
+        CoverageReport report;
+        REQUIRE(analyzeResamplingCoverage(srcWl, 3, dstWl, dstFwhm, 4, &report));
+        CHECK(report.bands[0] == BandCoverage::Full);
+        CHECK(report.bands[1] == BandCoverage::Partial);
+        CHECK(report.bands[2] == BandCoverage::Partial);
+        CHECK(report.bands[3] == BandCoverage::None);
+        CHECK(report.full == 1);
+        CHECK(report.partial == 2);
+        CHECK(report.none == 1);
+    }
+
+    SECTION("invalid arguments are refused")
+    {
+        const float dstWl[1] = {450.0f};
+        const float badSrc[3] = {500.0f, 400.0f, 600.0f};
+        CoverageReport report;
+        REQUIRE_FALSE(analyzeResamplingCoverage(nullptr, 3, dstWl, nullptr, 1, &report));
+        REQUIRE_FALSE(analyzeResamplingCoverage(srcWl, 1, dstWl, nullptr, 1, &report));
+        REQUIRE_FALSE(analyzeResamplingCoverage(srcWl, 3, dstWl, nullptr, 0, &report));
+        REQUIRE_FALSE(analyzeResamplingCoverage(badSrc, 3, dstWl, nullptr, 1, &report));
+        REQUIRE_FALSE(analyzeResamplingCoverage(srcWl, 3, nullptr, nullptr, 1, &report));
+        REQUIRE_FALSE(analyzeResamplingCoverage(srcWl, 3, dstWl, nullptr, 1, nullptr));
+    }
+
+    SECTION("non-finite and boundary targets")
+    {
+        const float nanWl = std::numeric_limits<float>::quiet_NaN();
+        const float dstWl[3] = {400.0f, nanWl, 600.0f}; // boundary centers are in-range
+        CoverageReport report;
+        REQUIRE(analyzeResamplingCoverage(srcWl, 3, dstWl, nullptr, 3, &report));
+        CHECK(report.bands[0] == BandCoverage::Full);
+        CHECK(report.bands[1] == BandCoverage::None);
+        CHECK(report.bands[2] == BandCoverage::Full);
+    }
+
+    SECTION("coverage text is stable")
+    {
+        CHECK(std::string(bandCoverageText(BandCoverage::Full)) == "full");
+        CHECK(std::string(bandCoverageText(BandCoverage::Partial)) == "partial");
+        CHECK(std::string(bandCoverageText(BandCoverage::None)) == "none");
+    }
+}
+
+TEST_CASE("rs:spectral_resample reports coverage in the result", "[operators][rs][resample][coverage]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString outputPath = tmp.path() + "/resampled.tif";
+
+    constexpr int W = 1;
+    constexpr int H = 1;
+    std::vector<std::vector<float>> bands = {
+        {0.1f}, {0.3f}, {0.5f},
+    };
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_resample");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    Json::Value sources(Json::arrayValue);
+    sources.append(400.0);
+    sources.append(500.0);
+    sources.append(600.0);
+    params["sourceWavelengths"] = sources;
+    Json::Value targets(Json::arrayValue);
+    targets.append(450.0);  // inside
+    targets.append(650.0);  // outside → NaN output
+    targets.append(550.0);  // inside
+    params["wavelengths"] = targets;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    REQUIRE(result["coverageFull"].asInt() == 2);
+    REQUIRE(result["coverageNone"].asInt() == 1);
+    REQUIRE(result["coveragePartial"].asInt() == 0);
+    REQUIRE(result["coverage"].size() == 3);
+    CHECK(std::string(result["coverage"][0].asCString()) == "full");
+    CHECK(std::string(result["coverage"][1].asCString()) == "none");
+    CHECK(std::string(result["coverage"][2].asCString()) == "full");
 }

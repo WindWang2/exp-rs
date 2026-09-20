@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u533a\u57df\u5e95\u56fe\u751f\u4ea7",
         "\u5206\u5e45\u6210\u679c\u62fc\u63a5"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "CRS_MISMATCH",
@@ -41,10 +41,10 @@
       }
     ],
     "family" : "raster_spatial",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -68,7 +68,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "inputs",
@@ -82,12 +82,12 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "\u4ec5\u5904\u7406\u5404\u8f93\u5165\u7684\u7b2c 1 \u6ce2\u6bb5\uff1b\u591a\u6ce2\u6bb5\u6570\u636e\u9700\u5148\u6309\u6ce2\u6bb5\u62c6\u5206\u6216\u6539\u7528\u652f\u6301\u591a\u6ce2\u6bb5\u7684\u6d41\u7a0b\u3002",
       "\u8981\u6c42\u6240\u6709\u8f93\u5165 CRS \u4e00\u81f4\u3002"
     ],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -98,14 +98,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5f71\u50cf\u9576\u5d4c\uff1a\u628a\u591a\u5e45\u76f8\u90bb\u5f71\u50cf\u62fc\u63a5\u4e3a\u4e00\u5e45\uff0c\u91cd\u53e0\u533a\u6309\u8f93\u5165\u987a\u5e8f\u5408\u5e76\uff0c\u65e0\u7fbd\u5316/\u63a5\u7f1d\u7ebf\u5904\u7406\uff1b\u8f93\u51fa\u5927\u533a\u57df\u5e95\u56fe\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u9576\u5d4c",
         "\u91cd\u53e0\u533a\u5408\u5e76"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -118,7 +118,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "mosaic",
     "merge",

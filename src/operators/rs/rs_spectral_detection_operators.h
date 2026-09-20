@@ -1,5 +1,5 @@
 /***************************************************************************
- * rs_spectral_detection_operators.h — matched filter + ACE detectors
+ * rs_spectral_detection_operators.h — matched filter + ACE + CEM detectors
  ***************************************************************************/
 #pragma once
 
@@ -51,6 +51,38 @@ public:
     std::string description() const override {
         return "Adaptive coherence estimator: squared whitened cosine between a "
                "target spectrum and each pixel, in [0, 1].";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::MultiPassStreaming;
+    }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
+};
+
+/**
+ * rs:cem_detection — Constrained Energy Minimization target detector
+ * (Spectral Intelligence 12.0): w = R⁻¹t/(tᵀR⁻¹t) against the streamed
+ * scene CORRELATION matrix (second moments, not mean-centered), score
+ * wᵀx per pixel; the target itself scores exactly 1.
+ *
+ * Extra parameters over the shared contract:
+ *   loading (number, optional, >= 0, default 0)
+ *       Scaled diagonal loading alpha in R + alpha·(tr(R)/B)·I.
+ * Fail-closed: scenes with fewer valid background samples than
+ * SpectralCem::minSamplesRequired(bands, loading > 0) are refused
+ * (2B+2 without loading, B+1 with).
+ */
+class RsCemOperator : public RSOperator {
+public:
+    std::string name() const override { return "rs:cem_detection"; }
+    std::string displayName() const override { return "CEM Detector"; }
+    std::string group() const override { return "spectral"; }
+    std::string description() const override {
+        return "Constrained energy minimization target detection against the "
+               "scene correlation background: the target scores exactly 1.";
     }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {

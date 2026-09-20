@@ -1,25 +1,25 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u5c71\u5730\uff08SAR\uff09"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u5c71\u533a SAR \u5b9a\u91cf\u5206\u6790",
         "SAR \u4e0e\u5149\u5b66\u8054\u5408\u5236\u56fe"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : true
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -36,9 +36,9 @@
       }
     ],
     "family" : "sar",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -54,7 +54,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -87,7 +87,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "1",
@@ -97,7 +97,7 @@
         },
         {
           "default" : "meters",
-          "enum" :
+          "enum" : 
           [
             "meters",
             "feet",
@@ -139,7 +139,7 @@
         },
         {
           "default" : "right",
-          "enum" :
+          "enum" : 
           [
             "right",
             "left"
@@ -165,33 +165,33 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "Plane-fit RTC model, NOT range-Doppler terrain correction.",
       "The DEM must be co-registered with the input in radar geometry; no resampling is performed.",
       "Facets with a local incidence angle >= 85\u00b0 are masked as layover/shadow.",
       "The output includes the layover/shadow validity mask and the local incidence angle band (both optional via flagMask/flagIncidence)."
     ],
-    "modality" :
+    "modality" : 
     [
       "sar"
     ],
     "operator_group" : "sar",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "sigma0 raster (linear power) and a DEM on the exact same grid (radar geometry for GRD products), plus the scene incidence angle and platform heading.",
       "\u9700\u8981 DEM\uff1b\u5efa\u8bae\u5728 rs:sar_geocode \u4e4b\u540e\u6267\u884c\u3002"
     ],
     "schema_version" : 2,
     "summary" : "SAR \u5730\u5f62\u6821\u6b63\uff1a\u6d88\u9664\u5761\u5ea6\u5761\u5411\u5bf9\u540e\u5411\u6563\u5c04\u7684\u51e0\u4f55\u7578\u53d8\uff08\u53e0\u63a9/\u9634\u5f71/\u900f\u89c6\u6536\u7f29\u7684\u8f90\u5c04\u5f71\u54cd\uff09\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5730\u5f62\u8f90\u5c04\u6821\u6b63",
         "\u5c40\u90e8\u5165\u5c04\u89d2"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u5fae\u6ce2\u9065\u611f"
       ],
@@ -204,7 +204,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "sar",
     "terrain",

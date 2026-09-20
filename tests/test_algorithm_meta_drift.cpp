@@ -20,6 +20,21 @@
 #include <QTemporaryDir>
 #include <set>
 
+namespace {
+
+std::string lfOnly( std::string text )
+{
+  std::string out;
+  out.reserve( text.size() );
+  for ( char c : text )
+    if ( c != '
+' )
+      out.push_back( c );
+  return out;
+}
+
+} // namespace
+
 TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors (#707, #729)",
            "[agent][spatial][meta][drift]" )
 {
@@ -52,8 +67,16 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
     // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
     // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
-    REQUIRE( expectedCatalog.size() == 43 );
-    REQUIRE( expectedCatalog.size() == 43 ); // 39 at the a5b11b7f baseline + 4 Advanced InSAR 11.0
+    // Spectral Intelligence 12.0 added rs:cem_detection and
+    // rs:spectral_spatial_fuse (target-detection), and reconciles drift that
+    // had accumulated on master (the gate was red at adf8f989: pin 43 vs live
+    // catalog 53): rs:brdf_normalization / rs:solar_geometry /
+    // rs:radiometric_qa (Radiometric Physics 11.0), rs:terrain_landform /
+    // rs:terrain_solar / rs:terrain_viewshed (F16) had no shipped sidecars,
+    // and four rs:temporal_* sidecars whose operators no longer declare task
+    // families were still on disk (the D16 removal never landed on disk).
+    REQUIRE( expectedCatalog.size() == 55 );
+    REQUIRE( expectedCatalog.size() == 55 ); // 51 master-sidecar set at adf8f989 + 6 missing exports + 4 stale removals + 2 Spectral Intelligence 12.0
     // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
 
     const QString metaDir =
@@ -88,7 +111,10 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
 
             INFO( "Sidecar content on disk drifted from in-code descriptor generation." );
             INFO( "Regenerate with: sicnu_geo_rs_cli --export-catalog data/processing/algorithm_meta" );
-            CHECK( diskContent == expectedContent );
+            // Line-ending-insensitive on both sides: Windows checkouts with
+            // core.autocrlf materialize CRLF while the generator emits LF; the
+            // gate is byte-for-byte content equality, not checkout normalization.
+            CHECK( lfOnly( diskContent ) == lfOnly( expectedContent ) );
         }
     }
 
@@ -131,7 +157,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 43 );
+        REQUIRE( written == 55 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

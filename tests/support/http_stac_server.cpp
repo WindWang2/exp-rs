@@ -9,7 +9,9 @@
 
 #include "http_range_server.h"
 
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 // Windows spells the both-directions shutdown "SD_BOTH"; POSIX "SHUT_RDWR"
@@ -121,8 +123,35 @@ HttpStacServer::~HttpStacServer()
       ( void ) connected;
     }
   }
+  {
+    std::set<SocketHandle> inFlight;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      inFlight = mInFlightSockets;
+    }
+    for ( const SocketHandle client : inFlight )
+      ::shutdown( client, SD_BOTH );
+  }
   if ( mThread.joinable() )
     mThread.join();
+  // Concurrent-mode handlers touch fixture state — join them before the
+  // members they reference disappear (same discipline as the range server;
+  // join OUTSIDE the mutex — a handler's completion path locks it).
+  {
+    std::vector<std::thread> toJoin;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      toJoin = std::move( mHandlers );
+      mHandlers.clear();
+    }
+    for ( std::thread &handler : toJoin )
+      if ( handler.joinable() )
+        handler.join();
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlightSockets.clear();
+    }
+  }
 }
 
 std::string HttpStacServer::url() const
@@ -142,6 +171,26 @@ std::vector<StacRequestRecord> HttpStacServer::requests() const
   return mRequests;
 }
 
+void HttpStacServer::setConcurrency( unsigned maxConnections )
+{
+  if ( maxConnections > 1 )
+    mMaxConnections = maxConnections > 8 ? 8 : maxConnections;
+}
+
+void HttpStacServer::beginInFlight()
+{
+  const int inFlight = mInFlight.fetch_add( 1 ) + 1;
+  int peak = mMaxInFlight.load();
+  while ( inFlight > peak && !mMaxInFlight.compare_exchange_weak( peak, inFlight ) )
+  {
+  }
+}
+
+void HttpStacServer::endInFlight()
+{
+  mInFlight.fetch_sub( 1 );
+}
+
 void HttpStacServer::serveLoop()
 {
   while ( !mStop.load() )
@@ -156,7 +205,38 @@ void HttpStacServer::serveLoop()
     // A client that connects and stays silent must not pin the server
     // thread: bound the request-head receive window (see http_range_server).
     boundSocketWait( client );
+    if ( mMaxConnections.load() > 1 && mLiveHandlers.load() < mMaxConnections.load() )
+    {
+      // 12.0 concurrent mode: a bounded side thread per connection so
+      // several client workers can be in flight at once (the gauge then
+      // measures the client's true overlap).
+      mLiveHandlers.fetch_add( 1 );
+      {
+        std::lock_guard<std::mutex> lock( mHandlerMutex );
+        mInFlightSockets.insert( client );
+      }
+      std::thread handler( [this, client] {
+        beginInFlight();
+        handleConnection( client );
+        endInFlight();
+        {
+          std::lock_guard<std::mutex> lock( mHandlerMutex );
+          mInFlightSockets.erase( client );
+        }
+        shutdownSocket( client );
+        mLiveHandlers.fetch_sub( 1 );
+      } );
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mHandlers.push_back( std::move( handler ) );
+      continue;
+    }
+    beginInFlight();
     handleConnection( client );
+    endInFlight();
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlightSockets.erase( client );
+    }
     shutdownSocket( client );
   }
 }
@@ -212,6 +292,8 @@ void HttpStacServer::handleConnection( SocketHandle client )
     sendAll( client, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" );
     return;
   }
+  if ( route.delayMs > 0 )
+    std::this_thread::sleep_for( std::chrono::milliseconds( route.delayMs ) );
 
   std::string response = "HTTP/1.1 " + std::to_string( route.status ) + " OK\r\n";
   if ( route.status >= 400 )

@@ -89,7 +89,7 @@ struct ActiveWorkflowRef
 {
     QString workflowId;
     QString name;
-    QString schemaVersion; ///< "1.0" (IR1) | "2.0" (IR2) | "engine2" | empty
+    QString schemaVersion; ///< "1.0" (IR1) | "2.0"/"2.1" (IR2) | "engine2" | empty
     QString fingerprint;   ///< content hash when known
     QString runner; ///< "workflow_run_coordinator" | "pipeline_run_coordinator" | ""
 

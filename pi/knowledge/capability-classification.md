@@ -6,19 +6,32 @@
 
 ## rs:change
 
+双时相变化检测：按位置（A→inputs[0]，B→inputs[1]）喂入两个已配准时相执行变化模型推理，发布变化概率栅格（波段语义来自清单输出类）；首个 feed 为网格权威，未配准输入直接拒绝，不隐式扭曲。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar、multimodal
 - 输入：inputA（raster）、inputB（raster）
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bandsA（integer）、bandsB（integer）、batchCap（integer）、device（string）、model（string）、output（string）
+- 失败模式：
+  - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
+  - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 change_detection。处置：改用 task 为 change_detection 的模型（siamese/change manifest）
+  - `GRID_MISMATCH` — 两个时相输入的网格或 CRS 不一致（未配准）。处置：先执行 rs:align 或提供已配准输入；运行时拒绝扭曲对齐，不隐式重采样
+  - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 inputA/inputB/model/output 必填项。处置：按 schema 提供必填参数
 
 ## rs:classify
+
+场景/切片分类：用分类模型对单景窗口执行一次前向推理（chip 输入上限 2048x2048 像素，类别平面按空间均值池化），发布带预测类别与概率分布的 typed 分类 JSON 产物（exp-rs-classification/1）。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
 - 输入：input（raster）
 - 输出：backend（string）、device（string）、model（string）、output（string）、predicted_class（string）、predicted_index（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
+- 失败模式：
+  - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
+  - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 classification，或多输入/检测类请求走了单输入路径。处置：改用 task 为 classification 的模型；本算子只处理单景单次前向
+  - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 input/model/output 必填项。处置：按 schema 提供必填参数
 
 ## rs:detect
 
@@ -157,11 +170,17 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 
 ## rs:regress
 
+连续值回归：对栅格执行回归模型，输出每个清单输出通道一条连续值波段（无 argmax、无类别堆栈）；值语义遵循模型契约，NoData 像素保持 NoData。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
 - 输入：input（raster）
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
+- 失败模式：
+  - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
+  - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 regression。处置：改用 task 为 regression 的模型
+  - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 input/model/output 必填项。处置：按 schema 提供必填参数
 
 ## rs:sam_classify
 
@@ -189,8 +208,8 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar、multimodal
 - 输入：input（raster）、training（vector）
-- 输出：classes（integer）、imbalanceWarnings（string）、kappa（numeric）、meanConfidence（numeric）、mode（string）、output（raster）、overallAccuracy（numeric）、perClassMetrics（string）、trainSamples（integer）、trainSamplesByClass（string）
-- 参数：bands（integer）、classField（string）、maxSamplesPerClass（integer）、method（enum）、modelIn（string）、modelOut（string）、output（string）、probabilityOutput（string）、scale（boolean）、seed（integer）、testSplit（numeric）
+- 输出：classes（integer）、imbalanceWarnings（string）、kappa（numeric）、meanConfidence（numeric）、mode（string）、output（raster）、overallAccuracy（numeric）、perClassMetrics（string）、trainSamples（integer）、trainSamplesByClass（string）、uncertaintyOutput（string）
+- 参数：bands（integer）、classField（string）、maxSamplesPerClass（integer）、method（enum）、modelIn（string）、modelOut（string）、output（string）、probabilityOutput（string）、rejectThreshold（numeric）、scale（boolean）、seed（integer）、testSplit（numeric）、uncertaintyMeasure（enum）、uncertaintyOutput（string）
 - 前置条件：Train mode: training polygons must overlap the raster；Predict-only: modelIn must match method and band set；需要标注训练数据；输入特征建议先统一网格与量纲。
 - 适用地物：农田、森林、城市、水体
 - 适用场景：土地覆盖/利用制图、作物分布制图

@@ -1,0 +1,122 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "COREGISTRATION_FAILED",
+        "remedy" : "\u7528 rs:register_images \u8865\u9f50\u6210\u5bf9 tx/ty \u89c2\u6d4b\uff0c\u6216\u62c6\u5206\u573a\u666f\u96c6\u540e\u91cd\u8bd5",
+        "when" : "\u6210\u5bf9\u89c2\u6d4b\u7ea6\u675f\u4e0d\u8db3\uff0c\u5e73\u5dee\u89e3\u7b97\u88ab\u62d2\uff08\u89c2\u6d4b\u4e3a\u7a7a\u3001\u63a7\u5236\u51e0\u4f55\u9000\u5316\u6216\u8d85\u51fa\u573a\u666f\u4e0a\u9650\uff09"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4f20\u5165\u573a\u666f id \u6570\u7ec4\u4e0e\u6210\u5bf9\u89c2\u6d4b\u6570\u7ec4",
+        "when" : "\u7f3a\u5c11\u5fc5\u9700\u53c2\u6570 scenes \u6216 observations"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u68c0\u67e5\u62a5\u544a\u8def\u5f84\u53ef\u5199\u540e\u91cd\u8bd5",
+        "when" : "\u89e3\u7b97\u62a5\u544a sidecar\uff08reportPath\uff09\u539f\u5b50\u5199\u5165\u5931\u8d25"
+      }
+    ],
+    "family" : "io",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "disconnectedScenes",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "maxEdgeResidualPx",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "reference",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "rmsEdgeResidualPx",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "status",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "[]",
+          "name" : "observations",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "reference",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "reportPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "[]",
+          "name" : "scenes",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "geometric",
+    "prerequisites" : 
+    [
+      "Pairwise translations measured by rs:register_images (or the agent tool)"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u591a\u666f\u5f71\u50cf\u5806\u6808\u914d\u51c6\uff1a\u5bf9\u6210\u5bf9\u5e73\u79fb\u89c2\u6d4b\u505a\u5168\u5c40\u5e73\u79fb\u6700\u5c0f\u4e8c\u4e58\u5e73\u5dee\uff0c\u8f93\u51fa\u5404\u666f\u504f\u79fb\u4e0e\u56de\u8def\u95ed\u5408\u6f02\u79fb\u6307\u6807\uff08\u6700\u5927/RMS \u8fb9\u6b8b\u5dee\uff09\uff0c\u65ad\u5f00\u666f\u88ab\u62a5\u544a\u800c\u975e\u9759\u9ed8\u4e22\u5f03\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Multi-scene stack registration: global translation least squares over pairwise observations with loop-closure drift metrics.",
+  "display_name" : "Stack Registration",
+  "id" : "rs:stack_register",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "registration",
+    "stack",
+    "block-adjustment"
+  ]
+}

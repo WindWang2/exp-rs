@@ -2,6 +2,10 @@
 rem RUN.cmd - offline lab 1, end to end (goal D7). Must stay network-free.
 rem Run from the bundle root (or double-click in Explorer; it relocates itself).
 rem ASCII-only text: classroom consoles are not guaranteed to be UTF-8.
+rem
+rem Unattended runs: set SICNU_NO_PAUSE=1 (or run under a scheduler) to skip
+rem the interactive pauses. The real child exit codes are always preserved -
+rem this wrapper never coalesces a failure to a generic 1.
 setlocal
 set "BUNDLE=%~dp0"
 for %%I in ("%BUNDLE:~0,-1%") do set "BUNDLE=%%~fI"
@@ -20,34 +24,39 @@ rem Runtime DLLs live next to the CLI (windeployqt + QGIS runtime in bin\).
 set "PATH=%BUNDLE%\bin;%PATH%"
 
 echo === [1/3] sample data ===
-if exist "data\samples\landsat_sample.tif" (
+rem Skip only when the foundry manifest proves the sample set is complete; a
+rem lone .tif from an interrupted run must not skip regeneration.
+if exist "data\samples\manifest.json" (
   echo     data\samples already present - skipping generation.
-) else (
-  if not exist "bin\sicnu_generate_samples.exe" (
-    echo ERROR: bin\sicnu_generate_samples.exe missing - bundle incomplete.
-    pause
-    exit /b 1
-  )
-  bin\sicnu_generate_samples.exe --out=data\samples
-  if errorlevel 1 (
-    echo ERROR: sample generation failed.
-    pause
-    exit /b 1
-  )
+  goto :pipeline
+)
+if not exist "bin\sicnu_generate_samples.exe" (
+  echo ERROR: bin\sicnu_generate_samples.exe missing - bundle incomplete.
+  call :Pause
+  exit /b 1
+)
+bin\sicnu_generate_samples.exe --out=data\samples
+set "RC=%errorlevel%"
+if not "%RC%"=="0" (
+  echo ERROR: sample generation failed ^(exit %RC%^).
+  call :Pause
+  exit /b %RC%
 )
 
+:pipeline
 echo === [2/3] lab 1 pipeline ^(NDVI, offline^) ===
 if not exist "bin\sicnu_geo_rs_cli.exe" (
   echo ERROR: bin\sicnu_geo_rs_cli.exe missing - bundle incomplete.
-  pause
+  call :Pause
   exit /b 1
 )
 if not exist "output" mkdir "output"
 bin\sicnu_geo_rs_cli.exe --offline --pipeline "labs\lab1\lab1_ndvi.pipeline.json"
-if errorlevel 1 (
-  echo ERROR: pipeline failed - see messages above.
-  pause
-  exit /b 1
+set "RC=%errorlevel%"
+if not "%RC%"=="0" (
+  echo ERROR: pipeline failed ^(exit %RC%^) - see messages above.
+  call :Pause
+  exit /b %RC%
 )
 
 echo === [3/3] grading lab 1 ===
@@ -61,5 +70,9 @@ if "%RC%"=="0" (
 ) else (
   echo RESULT: lab 1 could not be graded ^(exit %RC%^). See messages above.
 )
-pause
+call :Pause
 exit /b %RC%
+
+:Pause
+if not defined SICNU_NO_PAUSE pause
+exit /b

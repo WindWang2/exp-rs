@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" : {},
-    "band_roles" : {},
-    "crs" :
   "capability" : 
   {
     "applicability" : 
@@ -24,7 +19,6 @@
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -33,12 +27,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
-    "family" : "spectral",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "failure_modes" : 
     [
       {
@@ -65,7 +53,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -108,11 +95,6 @@
         }
       ]
     },
-    "limitations" :
-    [
-      "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
-    ],
-    "modality" :
     "limitations" : 
     [
       "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
@@ -122,14 +104,11 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" :
     "prerequisites" : 
     [
       "The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids."
     ],
     "schema_version" : 2,
-    "summary" : "",
-    "teaching_use" : {}
     "summary" : "\u5149\u8c31\u5e93\u68c0\u7d22\u4e0e\u5b50\u96c6\uff1a\u6309\u6750\u6599\u6216\u6ce2\u957f\u7a97\u53e3\u7b5b\u9009\u7ecf\u9a8c\u5e93\u6761\u76ee\uff0c\u53ef\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u7f51\u683c\u3002",
     "teaching_use" : 
     {
@@ -151,7 +130,6 @@
   "input" : "",
   "output" : "",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "spectral",

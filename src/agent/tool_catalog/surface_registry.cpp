@@ -171,6 +171,7 @@ bool surfaceIdAllowed( const QString &id, bool *isCustomTools )
         QStringLiteral( "result:" ),      // governed result records (Platform 3.0)
         QStringLiteral( "run:" ),         // workflow run comparison (Platform 3.0)
         QStringLiteral( "harness:" ),     // Harness 4.0: taxonomy/manifest/preflight/plan/verify/recipe
+        QStringLiteral( "mission:" ),     // mission context/timeline/advance (Workbench 12.0)
     };
     for ( const QString &prefix : kAllowed )
     {
