@@ -10160,6 +10160,43 @@ target_include_directories(test_mission_e2e_scaffolding PRIVATE
 set_target_properties(test_mission_e2e_scaffolding PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_mission_e2e_scaffolding)
 
+# ---------------------------------------------------------------------------
+# Unified Mission Workbench 12.0 — mission task space gates.
+#
+# These four targets deliberately link Qt Core (+Xml) ONLY: the task space
+# (state machine, projection, paged model, sidecar store) must stay free of
+# QGIS / Qt Widgets dependencies so the stage, parity, scale and end-to-end
+# gates stay cheap to build and run. The desktop wiring and the MCP tool
+# provider live in the sicnu_geo_rs / sicnu_agent targets instead.
+# ---------------------------------------------------------------------------
+set(SICNU_MISSION_TASK_SPACE_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+)
+
+function(sicnu_add_mission_test NAME)
+  add_executable(${NAME} ${NAME}.cpp ${SICNU_MISSION_TASK_SPACE_SOURCES})
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # The parity gate parses the real Pi bridge and MCP allow-list from the
+  # source tree, so a forgotten surface wiring fails the test.
+  target_compile_definitions(${NAME} PRIVATE
+    SICNU_MISSION_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_mission_test(test_mission_stage)
+sicnu_add_mission_test(test_mission_surface_parity)
+sicnu_add_mission_test(test_mission_scale_benchmark)
+
 
 add_executable(test_agent_workbench_context
   test_agent_workbench_context.cpp
