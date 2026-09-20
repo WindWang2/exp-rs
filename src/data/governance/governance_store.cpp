@@ -263,6 +263,7 @@ struct GovernanceStore::Impl
             "  asset_id TEXT NOT NULL,"
             "  position INTEGER NOT NULL DEFAULT 0,"
             "  PRIMARY KEY(dataset_id, asset_id));"
+            "CREATE INDEX IF NOT EXISTS idx_members_asset ON dataset_members(asset_id);"
             // Results + lifecycle.
             "CREATE TABLE IF NOT EXISTS results("
             "  result_id TEXT PRIMARY KEY,"
@@ -315,6 +316,7 @@ struct GovernanceStore::Impl
             "  run_id TEXT NOT NULL,"
             "  asset_id TEXT NOT NULL,"
             "  PRIMARY KEY(run_id, asset_id));"
+            "CREATE INDEX IF NOT EXISTS idx_run_outputs_asset ON run_outputs(asset_id);"
             // Experiments.
             "CREATE TABLE IF NOT EXISTS experiments("
             "  experiment_id TEXT PRIMARY KEY,"
@@ -834,7 +836,51 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
     return Result<void>::success( diagnostics );
 }
 
-Result<void> GovernanceStore::removeAsset( const QString &assetId )
+QVector<GovernanceStore::AssetReference> GovernanceStore::collectAssetReferences(
+    const QString &assetId, qint64 limit ) const
+{
+    // Evidence for the removeAsset guard (12.0): every row that would be
+    // silently unlinked by a cascade removal, one bounded query per
+    // relationship family. Read-only, so the store mutex is the only
+    // serialization needed.
+    QVector<AssetReference> references;
+    if ( !m_impl || assetId.isEmpty() || limit <= 0 )
+        return references;
+    std::lock_guard<std::mutex> lock( m_impl->mutex );
+    const qint64 capped = qMin<qint64>( limit, 10000 );
+    auto collect = [ & ]( const char *sql, const QString &kind, bool detailFromThirdColumn )
+    {
+        Stmt stmt( m_impl->db, sql );
+        if ( !stmt )
+            return;
+        stmt.bind( 1, assetId );
+        stmt.bind( 2, capped );
+        while ( stmt.stepRow() )
+        {
+            AssetReference reference;
+            reference.kind = kind;
+            reference.entityId = stmt.text( 0 );
+            reference.detail = detailFromThirdColumn ? stmt.text( 2 ) : QString();
+            if ( qint64( references.size() ) < capped )
+                references.append( reference );
+        }
+    };
+    collect( "SELECT dataset_id, asset_id, '' FROM dataset_members WHERE asset_id=? LIMIT ?",
+             QStringLiteral( "dataset_member" ), false );
+    collect( "SELECT result_id, asset_id, role FROM result_inputs WHERE asset_id=? LIMIT ?",
+             QStringLiteral( "result_input" ), true );
+    collect( "SELECT run_id, asset_id, '' FROM run_outputs WHERE asset_id=? LIMIT ?",
+             QStringLiteral( "run_output" ), false );
+    // Incoming lineage edges belong to SURVIVING downstream consumers (the
+    // direction-aware rule, issue #758-6): removing the asset would leave
+    // their provenance dangling, so they are references too.
+    collect( "SELECT output_asset_id, input_asset_id, operator_id FROM lineage_edges"
+             " WHERE input_asset_id=? LIMIT ?",
+             QStringLiteral( "lineage_downstream" ), true );
+    return references;
+}
+
+Result<void> GovernanceStore::removeAsset( const QString &assetId, RemoveAssetPolicy policy )
 {
     if ( !m_impl )
         return Result<void>::failure( govDiag( QStringLiteral( "store.closed" ), QStringLiteral( "governance store not open" ) ) );
@@ -844,6 +890,43 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId )
     if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
         return Result<void>::failure( govDiag( QStringLiteral( "store.begin" ), m_impl->lastError ) );
     {
+        // Reference guard (12.0): checked INSIDE the write transaction so a
+        // reference created between plan and execute still stops the removal.
+        // An asset still feeding a dataset membership, a result input, a run
+        // output or a downstream consumer is never silently unlinked —
+        // callers resolve the references first (or choose Cascade
+        // explicitly, e.g. the slot mirroring an already-decided authority).
+        if ( policy == RemoveAssetPolicy::Refuse )
+        {
+            const char *guards[] = {
+                "SELECT 1 FROM dataset_members WHERE asset_id=? LIMIT 1",
+                "SELECT 1 FROM result_inputs WHERE asset_id=? LIMIT 1",
+                "SELECT 1 FROM run_outputs WHERE asset_id=? LIMIT 1",
+                "SELECT 1 FROM lineage_edges WHERE input_asset_id=? LIMIT 1",
+            };
+            const char *kinds[] = { "dataset_member", "result_input", "run_output",
+                                    "lineage_downstream" };
+            for ( int i = 0; i < 4; ++i )
+            {
+                Stmt guard( m_impl->db, guards[i] );
+                if ( !guard )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ),
+                                                           QStringLiteral( "reference guard prepare failed" ) ) );
+                }
+                guard.bind( 1, assetId );
+                if ( guard.stepRow() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( govDiag(
+                        QStringLiteral( "store.asset_referenced" ),
+                        QStringLiteral( "asset %1 is still referenced (%2); resolve the"
+                                        " references or pass the cascade policy explicitly" )
+                            .arg( assetId, QLatin1String( kinds[i] ) ) ) );
+                }
+            }
+        }
         Stmt a( m_impl->db, "DELETE FROM assets WHERE asset_id=?" );
         Stmt al( m_impl->db, "DELETE FROM aliases WHERE asset_id=?" );
         Stmt t( m_impl->db, "DELETE FROM tags WHERE entity_kind='asset' AND entity_id=?" );
