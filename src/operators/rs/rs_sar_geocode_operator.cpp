@@ -607,11 +607,17 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOCODE_BANDS" ),
                          QLatin1String( "backscatter,gamma0,incidence,local_incidence,layover_shadow" ) );
     out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOCODE_BAND_STATES" ),
-                         QLatin1String( "sigma0,gamma0,incidence_deg,incidence_deg,mask_class" ) );
+                         QLatin1String( "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class" ) );
     out.setMetadataItem( QLatin1String( sicnu::sar::kCalibrationKey ), QLatin1String( "sigma0" ) );
     out.setMetadataItem( QLatin1String( sicnu::sar::kDomainKey ),
                          QLatin1String( "linear_power" ) );
     out.setMetadataItem( QLatin1String( sicnu::sar::kRadiometricStateKey ), QLatin1String( "sigma0" ) );
+    // When the input declared nothing, the sigma0 assumption is persisted as
+    // machine-readable provenance so downstream guards can see it (a log line
+    // does not travel with the artifact).
+    if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
+        out.setMetadataItem( QLatin1String( "SICNU_SAR_STATE_ASSUMED" ),
+                             QLatin1String( "sigma0_legacy_undeclared" ) );
 
     QString closeError;
     if ( !out.closeWithError( &closeError ) )
@@ -625,7 +631,7 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     result["height"] = height;
     result["bands"] = kProductCount;
     result["bandOrder"] = "backscatter,gamma0,incidence,local_incidence,layover_shadow";
-    result["bandStates"] = "sigma0,gamma0,incidence_deg,incidence_deg,mask_class";
+    result["bandStates"] = "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class";
     result["calibration"] = "sigma0";
     result["sampledPixels"] = Json::Value::UInt64( sampled );
     result["perPixelFallbackPixels"] = Json::Value::UInt64( perPixelFallback );

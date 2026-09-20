@@ -7,7 +7,7 @@
 #include <gdal.h>
 
 #include <QFile>
-#include <QList>
+#include <QTextStream>
 
 #include <cmath>
 
@@ -184,7 +184,8 @@ SarStateCheck checkDeclaredState( const GdalDatasetWrapper &ds, const QString &r
                       .arg( read.token, required );
       else
         *reason = QStringLiteral(
-                      "input declares unrecognized SICNU_SAR_CALIBRATION='%1'; refusing to "
+                      "input declares the unrecognized radiometric state token '%1' "
+                      "(SICNU_SAR_CALIBRATION / SICNU_RADIOMETRIC_STATE); refusing to "
                       "guess the radiometric state" )
                       .arg( read.token );
     }
@@ -219,24 +220,52 @@ bool parseCalibrationLut( const QString &path, int expectedRows, std::vector<dou
       *error = QStringLiteral( "cannot open calibration LUT '%1'" ).arg( path );
     return false;
   }
-  const QByteArray bytes = file.readAll();
-  QList<QByteArray> lines = bytes.split( '\n' );
-  // Drop exactly one trailing empty element produced by the final newline;
-  // interior blank lines stay and are refused below.
-  if ( !lines.isEmpty() && lines.last().trimmed().isEmpty() )
-    lines.removeLast();
-
-  values->clear();
-  values->reserve( static_cast<size_t>( lines.size() ) );
-  for ( const QByteArray &raw : lines )
+  // The sidecar is data-controlled (declared metadata), so bound the work
+  // before reading anything: one value per row, and a generous per-value
+  // budget. A file that cannot possibly be a row-exact LUT is refused on its
+  // size, never materialized.
+  const qint64 maxBytes = static_cast<qint64>( expectedRows ) * 64 + 4096;
+  if ( file.size() > maxBytes )
   {
-    const QByteArray line = raw.trimmed();
+    if ( error )
+      *error = QStringLiteral(
+                   "calibration LUT '%1' is %2 bytes, far larger than the %3-row budget; one "
+                   "value per input row is required" )
+                   .arg( path )
+                   .arg( file.size() )
+                   .arg( expectedRows );
+    return false;
+  }
+
+  // Streamed line-by-line with an early exit: the count must match exactly,
+  // so a surplus row is knowable before the whole file is parsed.
+  values->clear();
+  values->reserve( static_cast<size_t>( expectedRows ) );
+  QTextStream stream( &file );
+  int lineNumber = 0;
+  while ( stream.atEnd() == false )
+  {
+    const QString line = stream.readLine().trimmed();
+    ++lineNumber;
+    if ( values->size() >= static_cast<size_t>( expectedRows ) )
+    {
+      if ( error )
+        *error = QStringLiteral(
+                     "calibration LUT '%1' declares more than %2 values; one value per input "
+                     "row is required (no interpolation is applied)" )
+                     .arg( path )
+                     .arg( expectedRows );
+      return false;
+    }
     if ( line.isEmpty() )
     {
+      // A trailing newline is the only tolerated blank.
+      if ( lineNumber == 1 && stream.atEnd() )
+        break;
       if ( error )
         *error = QStringLiteral( "calibration LUT '%1' has an empty line at row %2" )
                      .arg( path )
-                     .arg( static_cast<int>( values->size() ) + 1 );
+                     .arg( lineNumber );
       return false;
     }
     bool ok = false;
@@ -246,8 +275,8 @@ bool parseCalibrationLut( const QString &path, int expectedRows, std::vector<dou
       if ( error )
         *error = QStringLiteral( "calibration LUT '%1' row %2 is not a finite positive number: '%3'" )
                      .arg( path )
-                     .arg( static_cast<int>( values->size() ) + 1 )
-                     .arg( QString::fromUtf8( line ) );
+                     .arg( lineNumber )
+                     .arg( line );
       return false;
     }
     values->push_back( value );

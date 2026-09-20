@@ -237,14 +237,20 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
     const QString stateTokenB = sicnu::sar::recognizedSarState( srcB );
     if ( stateTokenA != stateTokenB )
     {
-        const QString labelA =
-            stateTokenA.isEmpty() ? QStringLiteral( "undeclared" ) : stateTokenA;
-        const QString labelB =
-            stateTokenB.isEmpty() ? QStringLiteral( "undeclared" ) : stateTokenB;
+        // An unrecognized token is named as such — "undeclared" and
+        // "unreadable" are different failures with different remedies.
+        auto label = []( const sicnu::sar::SarStateRead &read, const QString &token ) {
+            if ( !token.isEmpty() )
+                return token;
+            if ( read.token.isEmpty() )
+                return QStringLiteral( "undeclared" );
+            return QStringLiteral( "unrecognized:'%1'" ).arg( read.token );
+        };
         throw RSOperatorError(
             ErrorCode::InvalidParameter,
-            "inputs declare different radiometric states ('" + labelA.toStdString() +
-                "' vs '" + labelB.toStdString() +
+            "inputs declare different radiometric states ('" +
+                label( stateA, stateTokenA ).toStdString() + "' vs '" +
+                label( stateB, stateTokenB ).toStdString() +
                 "'); a pair metric over different quantities is not physically meaningful" );
     }
     if ( sicnu::sar::isSarDerivedState( stateTokenA ) )

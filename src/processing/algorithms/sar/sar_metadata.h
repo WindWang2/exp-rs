@@ -108,6 +108,10 @@ QString declaredCalibrationToken( const GdalDatasetWrapper &ds );
 /// @a token is the effective declared token (SICNU_SAR_CALIBRATION, falling
 /// back to SICNU_RADIOMETRIC_STATE); @a conflict is true when both keys are
 /// present and disagree — a conflicted declaration is never interpreted.
+/// NOTE: the shared SICNU_RADIOMETRIC_STATE key also carries the optical
+/// vocabulary (exp_radiometric::RadiometricState, uppercase). SAR products
+/// never mix the two; the conflict rule assumes a SAR-only vocabulary on both
+/// keys and refuses anything that disagrees.
 struct SarStateRead
 {
     QString calibration; ///< raw SICNU_SAR_CALIBRATION token (trimmed/lowered)

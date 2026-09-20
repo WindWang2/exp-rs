@@ -85,6 +85,11 @@
           "type" : "numeric"
         },
         {
+          "name" : "calibrationLut",
+          "required" : false,
+          "type" : "string"
+        },
+        {
           "default" : "0",
           "name" : "incidenceDeg",
           "required" : false,

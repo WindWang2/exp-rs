@@ -265,8 +265,13 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError,
                               "SAR terrain correction failed while streaming");
     }
-    // Radiometric state in the shared vocabulary.
+    // Radiometric state in the shared vocabulary. When the input declared
+    // nothing, the sigma0 assumption is persisted as machine-readable
+    // provenance so downstream guards can see it (a log line does not travel
+    // with the artifact).
     dst.setMetadataItem("SICNU_RADIOMETRIC_STATE", "gamma0");
+    if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
+        dst.setMetadataItem("SICNU_SAR_STATE_ASSUMED", "sigma0_legacy_undeclared");
     dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
                         QString::number(lookAzimuthDeg, 'g', 10));
 
