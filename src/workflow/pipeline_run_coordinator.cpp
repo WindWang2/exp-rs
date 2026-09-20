@@ -717,8 +717,8 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    const WorkflowDocument &resumedDef = m_state->def;
-    for ( const NodeFact &node : resumedDef.nodes )
+    const WorkflowDocument &liveDef = m_state->def;
+    for ( const NodeFact &node : liveDef.nodes )
     {
         int parents = 0;
         for ( const EdgeFact &edge : m_state->def.edges )
