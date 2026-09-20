@@ -328,6 +328,7 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
                                              PluginDiagnosticLog &log )
 {
     std::shared_ptr<PluginHostProcessSession> session;
+    PluginHostSessionEntryPtr entry;
     {
         std::lock_guard<std::mutex> lock( mMutex );
         auto iterator = mSessions.find( pluginId );
@@ -335,8 +336,15 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
             return true; // nothing hosted (failed load) — nothing to tear down
         // respawn() publishes entry->session under entry.mutex; read it under
         // the SAME mutex (a concurrent shared_ptr copy vs store is UB).
-        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
-        session = iterator->second->session;
+        entry = iterator->second;
+        {
+            std::lock_guard<std::mutex> entryLock( entry->mutex );
+            session = entry->session;
+        }
+        // Erase WITHOUT holding entry->mutex: the node owns that mutex, and
+        // destroying a locked std::mutex aborts the Debug CRT
+        // ("mutex destroyed while busy") — the regression that kept the
+        // host-process teardown from completing.
         mSessions.erase( iterator );
     }
     const bool shutdownOk = session->shutdown( 10000, log );
