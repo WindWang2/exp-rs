@@ -63,7 +63,7 @@ std::string IpcChannel::Outcome::statusCode() const
     return "E6002";
 }
 
-void IpcChannel::close()
+void IpcChannel::close() noexcept
 {
     {
         std::lock_guard<std::mutex> lock( mMutex );
@@ -72,8 +72,30 @@ void IpcChannel::close()
     // Reap the reader outside the state lock: it may be waiting for mMutex
     // on its way out, and joining under the lock would deadlock. The reader
     // never calls close() itself, so this cannot self-join.
-    if ( mReader.joinable() && mReader.get_id() != std::this_thread::get_id() )
-        mReader.join();
+    // The joinable()/join() pair runs under mJoinMutex: two concurrent
+    // closers (e.g. the kill ladder racing confirm-death on a crashed
+    // worker) must not both pass joinable() and double-join — the second
+    // join() throws std::system_error(errc::no_such_process), which is how
+    // an untyped "no such process" escaped killProcess during the
+    // timeout+crash+cancel stress. Serializing also preserves the contract
+    // for EVERY caller: when close() returns, the reader has been reaped.
+    try
+    {
+        std::lock_guard<std::mutex> joinLock( mJoinMutex );
+        if ( mReader.joinable() && mReader.get_id() != std::this_thread::get_id() )
+            mReader.join();
+    }
+    catch ( ... )
+    {
+        // noexcept boundary: a teardown path must never throw (the
+        // destructor calls this; killProcess runs inside request paths that
+        // report typed outcomes). Unreachable under mJoinMutex in practice,
+        // but if a join ever did fail the reader must not stay joinable —
+        // ~thread() on a joinable thread is std::terminate. Detach: the
+        // reader exits on its own once the stream is closed.
+        if ( mReader.joinable() )
+            mReader.detach();
+    }
 }
 
 void IpcChannel::closeLocked()

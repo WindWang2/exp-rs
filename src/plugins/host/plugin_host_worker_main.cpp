@@ -269,8 +269,14 @@ public:
     /// Stops accepting new tasks and waits (bounded) until everything
     /// queued has run. Returns false when tasks were still running at the
     /// deadline (the worker exits anyway; the launcher ladder backstops).
+    /// Serialized on mDrainMutex: a concurrent drain (shutdown path racing
+    /// the destructor) must not iterate mThreads while another drainer is
+    /// inside join()/detach() — the second join() on a std::thread throws
+    /// std::system_error(errc::no_such_process), the same untyped throw the
+    /// host-side channel close had (track 13.0 WP4).
     bool drain( int timeoutMs )
     {
+        std::lock_guard<std::mutex> drainLock( mDrainMutex );
         {
             std::lock_guard<std::mutex> lock( mMutex );
             if ( !mStarted )
@@ -370,6 +376,7 @@ private:
     }
 
     mutable std::mutex mMutex;
+    std::mutex mDrainMutex;
     std::condition_variable mCv;
     std::deque<Task> mTasks;
     std::vector<std::thread> mThreads;

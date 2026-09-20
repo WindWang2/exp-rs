@@ -1,0 +1,653 @@
+/***************************************************************************
+ * exprs/plugin_snapshot.cpp
+ ***************************************************************************/
+#include "exprs/plugin_snapshot.h"
+
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+#include <json/json.h>
+
+#ifndef _WIN32
+#include <signal.h>
+#include <sys/types.h>
+#include <unistd.h>
+#else
+#include <windows.h>
+#endif
+
+namespace exprs {
+
+long snapshotOwnerPid()
+{
+#ifdef _WIN32
+    return static_cast<long>( ::GetCurrentProcessId() );
+#else
+    return static_cast<long>( ::getpid() );
+#endif
+}
+
+namespace {
+
+/// Best-effort "is this pid a live process" probe: the sweep must not
+/// reclaim same-named residue while its OWNING process (a concurrent app
+/// or CLI instance sharing the temp dir) is still running — only a dead
+/// pid's artifacts are crash residue. Conservative on failure (treated as
+/// alive → residue kept).
+bool pidAlive( long pid )
+{
+    if ( pid <= 0 )
+        return false;
+#ifdef _WIN32
+    HANDLE handle = ::OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                   static_cast<DWORD>( pid ) );
+    if ( !handle )
+        return false;
+    ::CloseHandle( handle );
+    return true;
+#else
+    if ( ::kill( static_cast<pid_t>( pid ), 0 ) == 0 )
+        return true;
+    return errno == EPERM; // exists but owned by another user
+#endif
+}
+
+} // namespace
+
+namespace {
+
+namespace fs = std::filesystem;
+
+uint64_t envUint64( const char *name, uint64_t fallback, uint64_t floor )
+{
+    const char *raw = std::getenv( name );
+    if ( !raw || !*raw )
+        return fallback;
+    const unsigned long long parsed = std::strtoull( raw, nullptr, 10 );
+    if ( parsed == 0 )
+        return fallback;
+    return std::max<uint64_t>( parsed, floor );
+}
+
+/// Names that may appear inside the snapshot root, decomposed for the
+/// sweep. Anything else is foreign and never touched.
+enum class EntryKind
+{
+    Foreign,
+    Staging,       ///< <anything>.staging-<pid>
+    ParkedOld,     ///< <anything>.old-<pid>
+    Upgrade,       ///< upgrade-<id>-<pid>
+    LastGood,      ///< last-good-<id>
+};
+
+bool allSafeNameChars( const std::string &name )
+{
+    return !name.empty()
+           && std::all_of( name.begin(), name.end(), []( char c ) {
+                  return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' )
+                         || ( c >= '0' && c <= '9' ) || c == '.' || c == '_' || c == '-';
+              } );
+}
+
+/// Splits "<base><marker><digits...>" names (".staging-123-4" and
+/// ".old-123" both match: the tail is digits/dashes only). Used for the
+/// publish-ladder residue classes; anything else is Foreign.
+bool splitSuffix( const std::string &name, const char *marker,
+                  std::string &base )
+{
+    const std::string needle = marker;
+    const size_t at = name.rfind( needle );
+    if ( at == std::string::npos || at == 0 )
+        return false;
+    const std::string tail = name.substr( at + needle.size() );
+    if ( tail.empty()
+         || !std::all_of( tail.begin(), tail.end(), []( char c ) {
+                return ( c >= '0' && c <= '9' ) || c == '-';
+            } ) )
+        return false;
+    base = name.substr( 0, at );
+    return true;
+}
+
+/// Leading digits of a residue tail = the owning process id
+/// ("123-4" -> 123, "123" -> 123). -1 when malformed.
+long tailOwnerPid( const std::string &name, const char *marker )
+{
+    const size_t at = name.rfind( marker );
+    if ( at == std::string::npos )
+        return -1;
+    const std::string tail = name.substr( at + std::string( marker ).size() );
+    size_t digits = 0;
+    while ( digits < tail.size() && tail[digits] >= '0' && tail[digits] <= '9' )
+        ++digits;
+    if ( digits == 0 )
+        return -1;
+    return std::strtol( tail.substr( 0, digits ).c_str(), nullptr, 10 );
+}
+
+/// Digits after the LAST '-' ("upgrade-org.foo-4242" -> 4242). -1 when the
+/// tail is not all digits or no '-' exists.
+long trailingPid( const std::string &name )
+{
+    const size_t dash = name.rfind( '-' );
+    if ( dash == std::string::npos || dash + 1 >= name.size() )
+        return -1;
+    const std::string tail = name.substr( dash + 1 );
+    if ( !std::all_of( tail.begin(), tail.end(), []( char c ) {
+             return c >= '0' && c <= '9';
+         } ) )
+        return -1;
+    return std::strtol( tail.c_str(), nullptr, 10 );
+}
+
+/// Monotonic instance tag so two captures into the SAME dest (an async job
+/// superseded mid-flight by a newer one) never share a staging or park dir.
+std::atomic<long> gCaptureSeq{ 0 };
+
+/// One mutex per snapshot destination: captures into the same dest run
+/// strictly serially (walk AND publish), so a superseded job that was
+/// mid-publish can never land stale bytes after the newer capture's swap.
+/// The lock map is keyed by the literal dest string — callers always pass
+/// the deterministic last-good-/upgrade- paths, so keys stay canonical.
+std::mutex gDestLocksMutex;
+std::map<std::string, std::shared_ptr<std::mutex>> gDestLocks;
+
+std::shared_ptr<std::mutex> destLockFor( const std::string &destDir )
+{
+    std::lock_guard<std::mutex> lock( gDestLocksMutex );
+    auto &slot = gDestLocks[ destDir ];
+    if ( !slot )
+        slot = std::make_shared<std::mutex>();
+    return slot;
+}
+
+} // namespace
+
+PluginSnapshotBudget PluginSnapshotBudget::fromEnvironment()
+{
+    PluginSnapshotBudget budget;
+    budget.maxBytes =
+        envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", budget.maxBytes, 4096 );
+    budget.maxFileBytes = envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_FILE_BYTES",
+                                     budget.maxFileBytes, 1024 );
+    budget.maxFiles = static_cast<uint32_t>( std::min<uint64_t>(
+        envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_FILES", budget.maxFiles, 8 ),
+        1u << 22 ) );
+    return budget;
+}
+
+std::string pluginSnapshotRoot( const std::string &tempDirectory )
+{
+    std::string base = tempDirectory;
+    if ( base.empty() )
+    {
+        std::error_code ec;
+        base = fs::temp_directory_path( ec ).generic_string();
+        if ( ec || base.empty() )
+            base = "/tmp";
+    }
+    return base + "/sicnu-plugin-snapshots";
+}
+
+PluginSnapshotResult capturePluginSnapshot(
+    const std::string &sourceDir, const std::string &destDir,
+    const std::string &pluginId, const PluginSnapshotBudget &budget,
+    const std::function<bool()> &cancel )
+{
+    namespace fsn = std::filesystem;
+    PluginSnapshotResult result;
+    const fs::path source( sourceDir );
+    const fs::path dest( destDir );
+    const std::string instanceSuffix =
+        std::to_string( snapshotOwnerPid() ) + "-"
+        + std::to_string( gCaptureSeq.fetch_add( 1 ) );
+    const std::string stagingDir = destDir + ".staging-" + instanceSuffix;
+    const std::string parkedDir = destDir + ".old-" + instanceSuffix;
+
+    // Serialize captures into the same dest end-to-end: a superseded
+    // in-flight capture can never race this one's publish ladder. The wait
+    // is bounded — the holder's per-file cancel check exits promptly when
+    // its job is cancelled, and the walker is budget-capped otherwise.
+    const std::shared_ptr<std::mutex> destLock = destLockFor( destDir );
+    std::lock_guard<std::mutex> destGuard( *destLock );
+
+    const auto fail = [&]( PluginSnapshotStatus status, const std::string &why ) {
+        result.status = status;
+        result.message = why;
+        std::error_code ec;
+        fsn::remove_all( fs::path( stagingDir ), ec );
+        return result;
+    };
+
+    std::error_code ec;
+    if ( !fsn::is_directory( source, ec ) || ec )
+        return fail( PluginSnapshotStatus::IoError,
+                     "snapshot source is not a readable directory" );
+
+    // Fresh staging: a leftover from a crashed attempt is dropped, never
+    // merged (a stale file set would lie about completeness).
+    fsn::remove_all( fs::path( stagingDir ), ec );
+    fsn::create_directories( fs::path( stagingDir ), ec );
+    if ( ec )
+        return fail( PluginSnapshotStatus::IoError,
+                     "cannot create snapshot staging: " + ec.message() );
+
+    uint64_t bytes = 0;
+    uint32_t files = 0;
+    bool cancelled = false;
+    for ( fsn::recursive_directory_iterator it(
+              source, fsn::directory_options::skip_permission_denied, ec ),
+          end;
+          !ec && it != end; it.increment( ec ) )
+    {
+        if ( cancel && cancel() )
+        {
+            cancelled = true;
+            break;
+        }
+        const fs::path &entry = it->path();
+        const fs::path relative = fsn::relative( entry, source, ec );
+        if ( ec )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot relativize snapshot entry: " + ec.message() );
+        std::error_code statusError;
+        const fs::file_status status = fsn::symlink_status( entry, statusError );
+        if ( statusError )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot inspect snapshot entry: " + statusError.message() );
+        if ( status.type() == fs::file_type::symlink )
+            return fail( PluginSnapshotStatus::Unsafe,
+                         "symlink '" + entry.generic_string()
+                             + "' refused in snapshot (never followed)" );
+        if ( status.type() == fs::file_type::directory )
+        {
+            fsn::create_directories( fs::path( stagingDir ) / relative, ec );
+            if ( ec )
+                return fail( PluginSnapshotStatus::IoError,
+                             "cannot create snapshot subdirectory: " + ec.message() );
+            continue;
+        }
+        if ( status.type() != fs::file_type::regular )
+            return fail( PluginSnapshotStatus::Unsafe,
+                         "non-regular entry '" + entry.generic_string()
+                             + "' refused in snapshot" );
+        const uint64_t size = fsn::file_size( entry, ec );
+        if ( ec )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot size snapshot entry: " + ec.message() );
+        if ( files + 1 > budget.maxFiles )
+            return fail( PluginSnapshotStatus::BudgetExceeded,
+                         "file-count budget exceeded (" + std::to_string( files + 1 )
+                             + " > " + std::to_string( budget.maxFiles ) + ")" );
+        if ( size > budget.maxFileBytes )
+            return fail( PluginSnapshotStatus::BudgetExceeded,
+                         "file '" + entry.generic_string() + "' exceeds the per-file "
+                             "budget (" + std::to_string( size ) + " > "
+                             + std::to_string( budget.maxFileBytes ) + ")" );
+        if ( bytes + size > budget.maxBytes )
+            return fail( PluginSnapshotStatus::BudgetExceeded,
+                         "byte budget exceeded (" + std::to_string( bytes + size )
+                             + " > " + std::to_string( budget.maxBytes ) + ")" );
+        const fs::path destination = fs::path( stagingDir ) / relative;
+        fsn::create_directories( destination.parent_path(), ec );
+        if ( ec )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot create snapshot parent: " + ec.message() );
+        fsn::copy_file( entry, destination, fsn::copy_options::overwrite_existing, ec );
+        if ( ec )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot copy '" + entry.generic_string()
+                             + "' into snapshot: " + ec.message() );
+        bytes += size;
+        ++files;
+    }
+    if ( cancelled )
+        return fail( PluginSnapshotStatus::Cancelled, "snapshot capture cancelled" );
+    if ( ec )
+        return fail( PluginSnapshotStatus::IoError,
+                     "cannot walk the plugin directory: " + ec.message() );
+
+    // Marker LAST: its presence is the completeness proof — a partial copy
+    // never carries it.
+    {
+        Json::Value marker( Json::objectValue );
+        marker["schema"] = 1;
+        marker["pluginId"] = pluginId;
+        marker["files"] = static_cast<Json::UInt64>( files );
+        marker["bytes"] = static_cast<Json::UInt64>( bytes );
+        const std::string markerPath = stagingDir + "/" + kPluginSnapshotMarker;
+        std::ofstream out( markerPath, std::ios::trunc );
+        if ( !out )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot write the snapshot marker" );
+        Json::StreamWriterBuilder writer;
+        out << Json::writeString( writer, marker );
+        out.flush();
+        if ( !out )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot write the snapshot marker" );
+    }
+
+    result.bytes = bytes;
+    result.files = files;
+
+    // Publish: park the previous dest, swap staging in, drop the park. A
+    // crash inside the ladder leaves either the old dest (pre-swap) or
+    // parked residue the sweep restores — never a half-written dest.
+    std::error_code removeError;
+    fsn::remove_all( fs::path( parkedDir ), removeError );
+    if ( fsn::exists( dest, ec ) && !ec )
+    {
+        fsn::rename( dest, fs::path( parkedDir ), ec );
+        if ( ec )
+            return fail( PluginSnapshotStatus::IoError,
+                         "cannot park the previous snapshot: " + ec.message() );
+    }
+    fsn::rename( fs::path( stagingDir ), dest, ec );
+    if ( ec )
+    {
+        // Restore the parked dest if there was one; either way report.
+        std::error_code restoreError;
+        fsn::rename( fs::path( parkedDir ), dest, restoreError );
+        return fail( PluginSnapshotStatus::IoError,
+                     "cannot publish the snapshot: " + ec.message() );
+    }
+    fsn::remove_all( fs::path( parkedDir ), removeError );
+    result.status = PluginSnapshotStatus::Ok;
+    result.message.clear();
+    return result;
+}
+
+bool verifyPluginSnapshot( const std::string &snapshotDir,
+                           const std::string &pluginId, std::string &error )
+{
+    namespace fsn = std::filesystem;
+    std::error_code ec;
+    if ( !fsn::is_directory( fs::path( snapshotDir ), ec ) || ec )
+    {
+        error = "snapshot directory is missing";
+        return false;
+    }
+    const std::string markerPath = snapshotDir + "/" + kPluginSnapshotMarker;
+    if ( !fsn::is_regular_file( fs::path( markerPath ), ec ) || ec )
+    {
+        error = "snapshot has no completion marker (partial or legacy copy)";
+        return false;
+    }
+    std::ifstream input( markerPath );
+    if ( !input )
+    {
+        error = "snapshot marker is unreadable";
+        return false;
+    }
+    Json::Value marker;
+    Json::CharReaderBuilder builder;
+    builder["stackLimit"] = 32;
+    std::string parseError;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    try
+    {
+        std::stringstream buffer;
+        buffer << input.rdbuf();
+        const std::string doc = buffer.str();
+        if ( !reader->parse( doc.data(), doc.data() + doc.size(), &marker, &parseError )
+             || !marker.isObject() )
+        {
+            error = "snapshot marker does not parse";
+            return false;
+        }
+    }
+    catch ( ... )
+    {
+        error = "snapshot marker does not parse";
+        return false;
+    }
+    if ( !marker["pluginId"].isString() || marker["pluginId"].asString() != pluginId )
+    {
+        error = "snapshot marker names a different plugin";
+        return false;
+    }
+    if ( !marker["files"].isUInt64() || !marker["bytes"].isUInt64() )
+    {
+        error = "snapshot marker has malformed counts";
+        return false;
+    }
+    const uint64_t declaredFiles = marker["files"].asUInt64();
+    const uint64_t declaredBytes = marker["bytes"].asUInt64();
+
+    // Bounded re-walk: recount payload files (marker excluded) and compare.
+    const fs::path rootNorm = fs::path( snapshotDir ).lexically_normal();
+    uint64_t files = 0;
+    uint64_t bytes = 0;
+    for ( fsn::recursive_directory_iterator it(
+              fs::path( snapshotDir ), fsn::directory_options::skip_permission_denied, ec ),
+          end;
+          !ec && it != end; it.increment( ec ) )
+    {
+        const fs::path &entry = it->path();
+        // Only the ROOT-level marker is metadata; a payload file that merely
+        // shares the name still counts. lexically_normal both sides: a
+        // trailing-slash snapshotDir would otherwise defeat the exclusion.
+        if ( entry.filename() == kPluginSnapshotMarker
+             && entry.parent_path().lexically_normal() == rootNorm )
+            continue;
+        if ( !fsn::is_regular_file( entry, ec ) || ec )
+        {
+            if ( ec )
+                break;
+            continue;
+        }
+        bytes += fsn::file_size( entry, ec );
+        if ( ec )
+            break;
+        ++files;
+        if ( files > declaredFiles || bytes > declaredBytes )
+        {
+            error = "snapshot payload exceeds its marker (tampered or partial)";
+            return false;
+        }
+    }
+    if ( ec )
+    {
+        error = "cannot re-walk the snapshot: " + ec.message();
+        return false;
+    }
+    if ( files != declaredFiles || bytes != declaredBytes )
+    {
+        error = "snapshot payload does not match its marker (" +
+                std::to_string( files ) + "/" + std::to_string( bytes )
+                + " vs declared " + std::to_string( declaredFiles ) + "/"
+                + std::to_string( declaredBytes ) + ")";
+        return false;
+    }
+    return true;
+}
+
+int sweepPluginSnapshots( const std::string &tempDirectory,
+                          const std::vector<std::string> &liveIds,
+                          const std::string &logContext )
+{
+    (void)logContext;
+    namespace fsn = std::filesystem;
+    const std::string root = pluginSnapshotRoot( tempDirectory );
+    std::error_code ec;
+    const fs::path rootPath( root );
+    // Fail closed: a symlinked root is never traversed (remove_all on a
+    // symlink only drops the link, but iterating one would look inside a
+    // foreign tree — skip the sweep entirely instead).
+    if ( fsn::is_symlink( rootPath, ec ) )
+        return 0;
+    if ( !fsn::is_directory( rootPath, ec ) || ec )
+        return 0;
+
+    int removed = 0;
+    const long ownPid = snapshotOwnerPid();
+    for ( fsn::directory_iterator it( rootPath, ec ), end; !ec && it != end;
+          it.increment( ec ) )
+    {
+        const fs::path entry = it->path();
+        const std::string name = entry.filename().generic_string();
+        if ( !allSafeNameChars( name ) )
+            continue;
+        std::string base;
+        bool remove = false;
+        if ( splitSuffix( name, ".staging-", base ) )
+        {
+            // In-flight capture staging is collectible only when its owning
+            // process is DEAD. A same-pid dir is this process's live capture
+            // (every capture exit path removes or renames its own staging),
+            // and a live foreign-pid dir is a concurrent instance mid-copy —
+            // deleting either would pull files from under a running walker.
+            const long owner = tailOwnerPid( name, ".staging-" );
+            remove = owner <= 0 || ( owner != ownPid && !pidAlive( owner ) );
+        }
+        else if ( splitSuffix( name, ".old-", base ) )
+        {
+            // Parked dest from an interrupted publish ladder. A live owner
+            // (this process or a concurrent one mid-swap) cleans its own
+            // park — never touch it. A dead owner's park is crash residue:
+            // if the real dest vanished, restore it (crash between the two
+            // renames); if the dest exists, the park is pure residue.
+            const long owner = tailOwnerPid( name, ".old-" );
+            if ( owner == ownPid || ( owner > 0 && pidAlive( owner ) ) )
+                continue;
+            const fs::path dest = rootPath / base;
+            std::error_code destError;
+            if ( !fsn::exists( dest, destError ) && !destError )
+            {
+                std::error_code renameError;
+                fsn::rename( entry, dest, renameError );
+                if ( renameError )
+                    remove = true; // unrestorable residue — drop it
+            }
+            else
+            {
+                remove = true;
+            }
+        }
+        else if ( name.rfind( "upgrade-", 0 ) == 0 )
+        {
+            // upgrade-<id>-<pid>: collectible when its owner is dead (crash
+            // residue) or the name is malformed. Same-pid is this process's
+            // live upgrade or a deliberately kept failed-rollback artifact;
+            // a live foreign pid is a concurrent instance's in-flight
+            // upgrade whose rollback source must not be pulled.
+            const long owner = trailingPid( name );
+            remove = owner <= 0 || ( owner != ownPid && !pidAlive( owner ) );
+        }
+        else if ( name.rfind( "last-good-", 0 ) == 0 )
+        {
+            const std::string id = name.substr( std::string( "last-good-" ).size() );
+            remove = std::find( liveIds.begin(), liveIds.end(), id ) == liveIds.end();
+        }
+        if ( remove )
+        {
+            std::error_code removeError;
+            fsn::remove_all( entry, removeError );
+            if ( !removeError )
+                ++removed;
+        }
+    }
+
+    // Legacy 12.0 residue: dev snapshots used to live directly in the temp
+    // root as plugin-last-good-<id> (pre snapshot-root layout). Apply the
+    // same liveness rule — an id with no live record is orphaned either
+    // way. Same-pid protection is not needed here (the legacy path is
+    // write-once at the old code path, long dead).
+    const fs::path tempPath( tempDirectory.empty()
+                                 ? fsn::temp_directory_path( ec )
+                                 : fs::path( tempDirectory ) );
+    if ( fsn::is_directory( tempPath, ec ) && !ec )
+    {
+        for ( fsn::directory_iterator it( tempPath, ec ), end; !ec && it != end;
+              it.increment( ec ) )
+        {
+            const std::string name = it->path().filename().generic_string();
+            const std::string legacyPrefix = "plugin-last-good-";
+            if ( name.rfind( legacyPrefix, 0 ) != 0 || !allSafeNameChars( name ) )
+                continue;
+            const std::string id = name.substr( legacyPrefix.size() );
+            if ( std::find( liveIds.begin(), liveIds.end(), id ) != liveIds.end() )
+                continue;
+            std::error_code removeError;
+            fsn::remove_all( it->path(), removeError );
+            if ( !removeError )
+                ++removed;
+        }
+    }
+    return removed;
+}
+
+// ---- PluginSnapshotJob ------------------------------------------------------
+
+std::shared_ptr<PluginSnapshotJob> PluginSnapshotJob::start(
+    const std::string &sourceDir, const std::string &destDir,
+    const std::string &pluginId, const PluginSnapshotBudget &budget )
+{
+    auto job = std::shared_ptr<PluginSnapshotJob>( new PluginSnapshotJob() );
+    // The worker captures the RAW pointer, not the shared_ptr: a job that
+    // owned a reference to itself could have its destructor run INSIDE the
+    // worker thread when the last external ref dropped mid-capture, and
+    // join() on the current thread throws std::system_error — the same
+    // untyped-throw class the channel close race produced (WP4). The
+    // lifetime contract is instead the destructor's cancel+join: whoever
+    // drops the last ref blocks (bounded by one file's copy time, since
+    // cancel is checked per entry) until the worker has exited.
+    PluginSnapshotJob *raw = job.get();
+    job->mWorker = std::thread( [raw, sourceDir, destDir, pluginId, budget] {
+        raw->run( sourceDir, destDir, pluginId, budget );
+    } );
+    return job;
+}
+
+PluginSnapshotJob::~PluginSnapshotJob()
+{
+    // cancel() first so the worker exits at its next file boundary; join()
+    // then bounds the wait to at most one in-flight file copy.
+    cancel();
+    if ( mWorker.joinable() )
+        mWorker.join();
+}
+
+void PluginSnapshotJob::cancel()
+{
+    mCancel.store( true );
+}
+
+bool PluginSnapshotJob::finished() const
+{
+    return mFinished.load();
+}
+
+bool PluginSnapshotJob::wait( int timeoutMs )
+{
+    std::unique_lock<std::mutex> lock( mMutex );
+    return mCv.wait_for( lock, std::chrono::milliseconds( timeoutMs ),
+                         [this] { return mFinished.load(); } );
+}
+
+PluginSnapshotResult PluginSnapshotJob::result()
+{
+    std::unique_lock<std::mutex> lock( mMutex );
+    mCv.wait( lock, [this] { return mFinished.load(); } );
+    return mResult;
+}
+
+void PluginSnapshotJob::run( std::string sourceDir, std::string destDir,
+                             std::string pluginId, PluginSnapshotBudget budget )
+{
+    mResult = capturePluginSnapshot( sourceDir, destDir, pluginId, budget,
+                                     [this] { return mCancel.load(); } );
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        mFinished.store( true );
+    }
+    mCv.notify_all();
+}
+
+} // namespace exprs

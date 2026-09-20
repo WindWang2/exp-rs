@@ -109,10 +109,13 @@ public:
     /// clamped to the quota ceiling, a concurrency slot is acquired (FIFO,
     /// bounded wait = the effective deadline; otherwise typed E6007
     /// refusal), and on timeout the cancel/escalation policy runs.
+    /// Never throws: any internal failure is converted to a typed E6005
+    /// ChannelClosed outcome (track 13.0 — an untyped std::system_error
+    /// from a racing channel close once escaped this boundary).
     exprs::IpcChannel::Outcome request( const std::string &method, const Json::Value &params,
                                         int deadlineMs,
                                         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
-                                        const exprs::IpcChannel::ProgressSink &progressSink = {} );
+                                        const exprs::IpcChannel::ProgressSink &progressSink = {} ) noexcept;
 
     /// Internal CONTROL-PLANE request path (plugin.load during
     /// spawn/recovery, plugin.shutdown). Contract: it deliberately BYPASSES
@@ -120,11 +123,12 @@ public:
     /// quota clamp and the concurrency gate do not apply. Lifecycle traffic
     /// must never wait behind data-plane slots, and a cold first LoadLibrary
     /// legitimately exceeds the user-request quota. Never use it for
-    /// data-plane traffic.
+    /// data-plane traffic. Never throws (same typed-boundary contract as
+    /// request()).
     exprs::IpcChannel::Outcome requestControlRaw(
         const std::string &method, const Json::Value &params, int deadlineMs,
         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
-        const exprs::IpcChannel::ProgressSink &progressSink = {} );
+        const exprs::IpcChannel::ProgressSink &progressSink = {} ) noexcept;
 
     /// True while the worker process is alive. A dead session fails
     /// requests typed; the RUNTIME's respawn() applies the restart policy
@@ -180,8 +184,10 @@ public:
     void applyQuotaFrameCaps();
 
     /// Graceful shutdown request + bounded wait, then kill ladder. Always
-    /// ends with the process dead.
-    bool shutdown( int timeoutMs, exprs::PluginDiagnosticLog &diagnostics );
+    /// ends with the process dead. Never throws (same typed-boundary
+    /// contract as request()): internal failures report false + a
+    /// diagnostic, they do not escape through unload().
+    bool shutdown( int timeoutMs, exprs::PluginDiagnosticLog &diagnostics ) noexcept;
 
     const exprs::PluginQuota &quota() const { return mOptions.quota; }
     /// Handshake copy (the hello event arrives on the reader thread).
@@ -196,6 +202,8 @@ private:
 
     bool spawnWorkerProcess( exprs::PluginDiagnosticLog &diagnostics );
     bool awaitHandshake( exprs::PluginDiagnosticLog &diagnostics );
+    /// Body behind the noexcept public shutdown path.
+    bool shutdownImpl( int timeoutMs, exprs::PluginDiagnosticLog &diagnostics );
     void killProcess( const char *reason );
     /// Shared Channel-EOF handler for request/requestControlRaw: probes the process
     /// (waitpid / WaitForSingleObject 0) and, when death is confirmed,
@@ -212,6 +220,15 @@ private:
     /// worker (E6005, retryable) — one definition so every request path
     /// reports the identical failure.
     static exprs::IpcChannel::Outcome channelClosedOutcome();
+    /// Bodies behind the noexcept public request paths.
+    exprs::IpcChannel::Outcome requestImpl( const std::string &method, const Json::Value &params,
+                                          int deadlineMs,
+                                          const exprs::IpcChannel::CancelPredicate &cancelPredicate,
+                                          const exprs::IpcChannel::ProgressSink &progressSink );
+    exprs::IpcChannel::Outcome requestControlRawImpl(
+        const std::string &method, const Json::Value &params, int deadlineMs,
+        const exprs::IpcChannel::CancelPredicate &cancelPredicate,
+        const exprs::IpcChannel::ProgressSink &progressSink );
 
     SpawnOptions mOptions;
     Json::Value mHello;

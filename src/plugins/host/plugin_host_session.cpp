@@ -799,6 +799,36 @@ IpcChannel::Outcome PluginHostProcessSession::channelClosedOutcome()
 
 IpcChannel::Outcome PluginHostProcessSession::request(
     const std::string &method, const Json::Value &params, int deadlineMs,
+    const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink ) noexcept
+{
+    // Typed boundary (track 13.0 WP4): every externally visible result of a
+    // request is a typed Outcome. An exception escaping the session body
+    // (historically: a std::system_error "no such process" from a racing
+    // channel close inside killProcess) must surface as E6005, never as an
+    // untyped throw through runOperator -> future::get().
+    try
+    {
+        return requestImpl( method, params, deadlineMs, cancelPredicate, progressSink );
+    }
+    catch ( const std::exception &exception )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message =
+            std::string( "session failure (E6005): " ) + exception.what();
+        recordLastFailure( outcome );
+        return outcome;
+    }
+    catch ( ... )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message = "session failure (E6005): unknown exception";
+        recordLastFailure( outcome );
+        return outcome;
+    }
+}
+
+IpcChannel::Outcome PluginHostProcessSession::requestImpl(
+    const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
 {
     // Quota authority: the ceiling applies regardless of the caller's ask.
@@ -895,6 +925,32 @@ IpcChannel::Outcome PluginHostProcessSession::request(
 
 IpcChannel::Outcome PluginHostProcessSession::requestControlRaw(
     const std::string &method, const Json::Value &params, int deadlineMs,
+    const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink ) noexcept
+{
+    try
+    {
+        return requestControlRawImpl( method, params, deadlineMs, cancelPredicate,
+                                      progressSink );
+    }
+    catch ( const std::exception &exception )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message =
+            std::string( "session failure (E6005): " ) + exception.what();
+        recordLastFailure( outcome );
+        return outcome;
+    }
+    catch ( ... )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message = "session failure (E6005): unknown exception";
+        recordLastFailure( outcome );
+        return outcome;
+    }
+}
+
+IpcChannel::Outcome PluginHostProcessSession::requestControlRawImpl(
+    const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
 {
     if ( !mChannel || !mProcessAlive )
@@ -933,7 +989,39 @@ IpcChannel::Outcome PluginHostProcessSession::requestControlRaw(
     return outcome;
 }
 
-bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &diagnostics )
+bool PluginHostProcessSession::shutdown( int timeoutMs,
+                                         PluginDiagnosticLog &diagnostics ) noexcept
+{
+    // Same typed-boundary contract as request()/requestControlRaw(): the
+    // channel request below and the kill ladder can surface
+    // std::system_error (historically the racing close() double-join);
+    // unloadPlugin callers must see a typed false + diagnostic, never an
+    // untyped exception escaping through PluginRegistry::unload().
+    try
+    {
+        return shutdownImpl( timeoutMs, diagnostics );
+    }
+    catch ( const std::exception &exception )
+    {
+        diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                         PluginDiagnosticSeverity::Warning,
+                         std::string( "session shutdown failed internally: " )
+                             + exception.what(),
+                         mOptions.pluginId );
+        return false;
+    }
+    catch ( ... )
+    {
+        diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                         PluginDiagnosticSeverity::Warning,
+                         "session shutdown failed internally",
+                         mOptions.pluginId );
+        return false;
+    }
+}
+
+bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
+                                             PluginDiagnosticLog &diagnostics )
 {
     if ( !mChannel || !mProcessAlive )
     {
