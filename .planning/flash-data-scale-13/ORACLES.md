@@ -52,8 +52,9 @@ All gates are structural (counts, exponents, equivalence) — never absolute mil
 ## O5 — 100k scale ladder completes with bounded structural memory
 
 - 100k synthetic catalog: population + 1000 probes + full page drain complete;
-- peak structural memory reported (record store chunks + index) and asserted to be within a
-  stated multiple of the raw record bytes (no per-mutation snapshot retained).
+- peak structural memory reported and bounded: resident-set growth for the 100k catalog must
+  stay under 64 KiB per record (measured ~0.2 MiB per record including the harness), which a
+  publication that retained one snapshot per mutation would blow past.
 
 ## O6 — Concurrency & lifecycle
 

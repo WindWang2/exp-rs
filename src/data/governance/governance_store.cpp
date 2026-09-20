@@ -2677,17 +2677,19 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
         // B-tree sort per page, and the OR spelling of the same predicate
         // degrades to a multi-index scan.
         //
-        // NUMERIC sorts: EXPLAIN QUERY PLAN on the store's own DB reports
-        //   SEARCH a USING COVERING INDEX idx_gov_assets_updated
+        // NUMERIC sorts: EXPLAIN QUERY PLAN on the store's own DB (the paged
+        // SELECT's 15 columns over the 2-column index, so NOT covering) reports
+        //   SEARCH a USING INDEX idx_gov_assets_updated
         //     ((updated_ms,asset_id)<(?,?))
-        // with no sorter, so a page costs one index range scan. The composite
-        // (sort key, pk) indexes are what make that possible.
+        // with no sorter, so a page costs one index range scan plus its row
+        // lookups. The composite (sort key, pk) indexes are what make that
+        // possible; tests/test_data_scale.cpp asserts this exact plan.
         //
         // TEXT (name) sort: COLLATE NOCASE is kept inside the row value so the
         // seek orders exactly like the ORDER BY (case-variant names tiebreak
-        // by id), but SQLite will not turn that comparison into an index RANGE
-        // — the plan is an ordered index scan with a filter, i.e. O(position)
-        // per page. Acceptable because no production caller pages deeply by
+        // by id), but SQLite will not turn that comparison into an index range
+        // — the plan is an ordered index scan with the predicate applied as a
+        // filter, i.e. O(position) per page. Acceptable because no production caller pages deeply by
         // name (the workspace browser uses the default sort; project:search is
         // single-page); tests/test_data_scale.cpp pins the walk's correctness.
         const QString seek = sortKeyNumeric

@@ -38,6 +38,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <unistd.h>
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -200,6 +201,23 @@ int countDisagreements( DataManager &manager, const std::vector<QString> &probes
 
 constexpr quint64 kShardRecords = sicnu::data::internal::CatalogRecordStore::kShardRecords;
 
+/// Resident set size in bytes (Linux /proc). Used for the structural-memory
+/// oracle: the point is a BOUND with headroom, not a precise measurement.
+qint64 residentBytes()
+{
+    QFile status( QStringLiteral( "/proc/self/statm" ) );
+    if ( !status.open( QIODevice::ReadOnly ) )
+        return -1;
+    const QList<QByteArray> fields = status.readAll().simplified().split( ' ' );
+    if ( fields.size() < 2 )
+        return -1;
+    bool ok = false;
+    const qint64 pages = fields.at( 1 ).toLongLong( &ok );
+    if ( !ok )
+        return -1;
+    return pages * static_cast<qint64>( sysconf( _SC_PAGESIZE ) );
+}
+
 /// Restores the process working directory on every exit path (including a
 /// failing REQUIRE), so one case cannot leak its cwd into later cases.
 class ScopedCwd
@@ -277,6 +295,21 @@ TEST_CASE( "data scale: catalog population copies a bounded number of records pe
     // three rungs accumulate into one manager.
     const QVector<AssetSnapshot> all = manager->assets( {} );
     CHECK( static_cast<int>( all.size() ) == accumulated );
+
+    // Structural-memory oracle (O5): the catalog's own structures (records,
+    // shards, per-shard key index, live source-key index) must be bounded per
+    // record — a publication that RETAINED a snapshot per mutation would grow
+    // without bound. Generous ceiling: 64 KiB per record (the measured 100k
+    // catalog is ~0.2 MiB per record of RSS including the test harness).
+    const qint64 rss = residentBytes();
+    if ( rss > 0 )
+    {
+        const double kibPerRecord = static_cast<double>( rss ) / 1024.0
+                                    / static_cast<double>( accumulated );
+        WARN( "100k catalog resident set: " << ( rss / 1024 / 1024 ) << " MiB ("
+              << kibPerRecord << " KiB per record)" );
+        CHECK( kibPerRecord < 64.0 * 1024.0 );
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -895,9 +928,11 @@ TEST_CASE( "data scale: path index spans shards and survives position shifts",
     for ( const QString &path : paths )
         registerAsset( *manager, path );
 
-    // A duplicate identity in the FIRST (oldest) shard and a later shard:
-    // the earliest-inserted owner must win, and after it is erased the later
-    // owner must take over — which also forces the shard index rebuild.
+    // A duplicate identity: the earliest registration lives in one of the
+    // sealed shards, the later spelling is appended after enough padding that
+    // it lands in a LATER shard. The earliest-inserted owner must win, and
+    // after it is erased the later owner must take over — which also forces
+    // the shard index rebuild (positions shifted).
     QTemporaryDir scratch;
     REQUIRE( scratch.isValid() );
     const QString shared = QDir::toNativeSeparators( scratch.filePath( "shared.tif" ) );

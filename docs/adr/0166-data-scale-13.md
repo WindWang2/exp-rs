@@ -62,9 +62,10 @@ sides, first match in insertion order).
    conflict scans consult a `QHash<QString, AssetId>` keyed by an *injective*
    serialization of the `SourceKey` fields of the record's descriptor (each
    field percent-escapes the framing separators, so serialized equality implies
-   `SourceKey` equality — an unescaped encoding would let
-   `{"k\x1e":"v"}` and `{"k":"v\x1e"}` collide and silently hijack an asset
-   identity on the dedup path). Those scans were O(N) per insert — on their own
+   `SourceKey` equality — an unescaped encoding would let a raw separator
+   inside any field shift the field boundaries, e.g. canonicalSource `c\x1fs`
+   versus {`c`, subdataset `s`}, and silently hijack an asset identity on the
+   dedup path). Those scans were O(N) per insert — on their own
    enough to make a 100k population pay ~5e9 key comparisons — and they are the
    reason the measured exponent was 2.25 rather than exactly 2. The index is
    live-side only (every consumer is an owner-affine mutation path), so it needs

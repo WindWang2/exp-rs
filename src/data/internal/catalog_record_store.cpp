@@ -301,10 +301,11 @@ namespace
 {
 
 /// Percent-escapes the framing separators (and the escape itself) inside one
-/// serialized field. Without it the serialization is not injective: the
-/// dataOptions entry {"k\x1e" : "v"} and {"k" : "v\x1e"} would collide even
-/// though the QMap equality of the SourceKey distinguishes them, and a
-/// collision silently hijacks an asset identity on the dedup path.
+/// serialized field. Without it the serialization is not injective: a raw
+/// separator inside any field shifts the field boundaries, e.g. canonicalSource
+/// "c\x1fs" and {canonicalSource "c", subdataset "s"} serialize identically
+/// even though the SourceKey equality distinguishes them, and a collision
+/// silently hijacks an asset identity on the dedup path.
 QString escapeIdentityField( const QString &field )
 {
     QString escaped;
