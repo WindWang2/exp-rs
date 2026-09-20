@@ -23,8 +23,11 @@ inline constexpr int kMaxModelTemporalFrames = 1024;
 
 /// Symmetric tile-padding ceiling in px (manifest `preprocess.pad`). The fed
 /// window side is `tile_size + 2·halo + 2·pad`; this bound keeps the window and
-/// the int arithmetic sizing it finite.
-inline constexpr int kMaxPreprocessPad = 4096;
+/// the int arithmetic sizing it finite. Unified (Platform 12.0) with the
+/// enforced `kMaxPreprocessPadPx` in bounded_math.h — the two ceilings used
+/// to disagree (4096 declared, 1024 enforced) and a boundary manifest parsed
+/// under one and failed the other.
+inline constexpr int kMaxPreprocessPad = 1024;
 
 // --- Platform 10.0: EO task vocabulary ---------------------------------------
 
@@ -365,12 +368,69 @@ struct ModelRuntimeContract
   /// Platform 7.0 external provider connection (framework "http"/"python");
   /// ignored by in-process providers. Validated per framework at parse.
   ModelProviderContract provider;
+  /// Ordered provider FALLBACK chain (manifest `runtime.framework_fallback`).
+  /// When the PRIMARY framework cannot provide a session (provider absent in
+  /// this build, or its load fails), the registry walks this list in order —
+  /// each entry must be a REGISTERED provider that executes the SAME
+  /// artifact. The chain never changes the model's semantics: weights,
+  /// preprocessing and output contracts are untouched; what changes is only
+  /// the executor, and every payload/provenance record names what actually
+  /// ran. Parse rules: 1..4 entries, no duplicates, no entry equal to the
+  /// primary framework. Empty = single-provider (historical) behavior.
+  std::vector<std::string> frameworkFallback;
   /// RUNTIME-FILLED (never parsed from a manifest): the CUDA index the
   /// registry's device resolution picked for this acquisition. Providers
   /// supporting multi-device execution bind execution to exactly this index;
   /// 0 when the resolved device is cpu. Keeping it here means the factory
   /// sees the same resolved decision the cache key was built from.
   int resolvedCudaIndex = 0;
+};
+
+/// One ensemble member reference (manifest `ensemble.members[]`). The model
+/// reference resolves through the SAME catalog surface as an operator's
+/// model parameter (stable id, or "id@version"); the weight participates in
+/// every combination the ensemble contract defines.
+struct ModelEnsembleMemberContract
+{
+  std::string model;      ///< Catalog stable id ("id" or "id@version")
+  double weight = 1.0;    ///< Combination weight, finite and >= 0
+};
+
+/// Model ensemble contract (manifest `ensemble` section). A manifest that
+/// declares it IS an ensemble model: it has no weights of its own — the
+/// members' manifests carry the artifacts — and execution runs every member
+/// through the same tile inference engine, then combines their probability
+/// stacks into ONE product (raster tasks; detection/scene-classification
+/// ensembles are typed refusals, never silent misreads).
+///
+/// Combination vocabulary:
+///  - "weighted_mean" (default): out_c = Σ w·p_c / Σ w — requires every
+///    member to declare the same output channel count.
+///  - "weighted_vote": per pixel, every member votes its argmax class with
+///    its weight; the winner is the class with the highest accumulated vote
+///    (ties resolve to the LOWEST class index — deterministic). Publishes a
+///    label raster (Byte ≤255 classes, else UInt16), not a probability stack.
+///  - "mean": equal-weight alias of "weighted_mean".
+///
+/// Uncertainty vocabulary (the extra band appended to the product):
+///  - "auto" (default): "variance" under weighted_mean (weighted per-class
+///    variance of the members around the combined mean) or "agreement" under
+///    weighted_vote (the winning class' accumulated vote share in [0,1]).
+///  - "none": no extra band.
+///  - "variance" / "agreement": explicit; a token that contradicts the
+///    combination is a manifest error.
+struct ModelEnsembleContract
+{
+  bool declared = false;  ///< true when the manifest carries an `ensemble` section
+  std::vector<ModelEnsembleMemberContract> members;
+  std::string combination;     ///< "" = "weighted_mean"
+  std::string uncertainty;     ///< "" = "auto"
+
+  /// Vocabulary + range validation (empty string = ok). Does NOT resolve
+  /// member references — those are checked against the loaded catalog.
+  std::string validate() const;
+  /// Effective combination token ("" → "weighted_mean").
+  std::string effectiveCombination() const;
 };
 
 /**
@@ -439,6 +499,9 @@ struct ModelInfo {
   ModelOutputContract output;
   ModelPostprocessContract postprocess;
   ModelRuntimeContract runtime;
+  /// Model ensemble contract (manifest `ensemble`). Declared = this entry is
+  /// an ENSEMBLE model: artifact-less, executes through its members.
+  ModelEnsembleContract ensemble;
   // --- Platform 9.0 (M7): package identity -----------------------------------
   /// Declared `package.aux_files[]` entries. Empty = not declared (historical
   /// single-artifact manifests behave identically). When declared, EVERY entry
@@ -594,6 +657,11 @@ class ModelCatalog {
   private:
     ModelCatalog() = default;
     void ensureLoadedLocked() const;
+    /// Post-scan ensemble member validation (scanned entries only; the
+    /// execution path re-resolves members against the full registry).
+    /// Touches only mutable state — legal from the const ensureLoadedLocked.
+    /// Caller holds the catalog mutex.
+    void validateEnsembleMembersLocked() const;
     /// find() helper over registered-then-scanned entries honoring
     /// unregister(). Caller holds the catalog mutex.
     std::optional<ModelInfo> findLocked( const std::string &idOrName ) const;
