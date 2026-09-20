@@ -201,7 +201,7 @@ struct AlgorithmTaskInfo {
     std::chrono::steady_clock::time_point enqueueSteadyStamp;
     /// Effective heap priority after aging (equals the base priority until
     /// promoted). Observability mirror of the value the ready heap carries.
-    int effectivePriority = 1;
+    int effectivePriority = static_cast<int>( TaskPriority::Normal );
     /// 12.0: workload lane resolved at enqueue from the submission source.
     /// Feeds ResourceRequest.latencyClass so the interactive-reserve weight
     /// gate protects UI/agent work from batch saturation. Not a preemption
@@ -277,6 +277,10 @@ public:
 
     static TaskCenter& instance();
 
+    /// @a latencyClassOverride (12.0 D2): an explicit workload lane wins over
+    /// the `source`→lane map — callers that cannot express their class via a
+    /// source tag (or intentionally run interactive-class work from a
+    /// background-tagged entry) force it here. Unset → `source` mapping.
     long enqueueTask(const QString& algorithmId,
                      const QVariantMap& params,
                      bool autoLoad = true,
@@ -284,7 +288,8 @@ public:
                      const QList<long>& parentTaskIds = QList<long>(),
                      bool autoDispatch = false,
                      unsigned int resourceEstimateOverrideMb = 0,
-                     const QString& source = QString());
+                     const QString& source = QString(),
+                     std::optional<LatencyClass> latencyClassOverride = std::nullopt);
 
     /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
     long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
@@ -647,13 +652,26 @@ private:
         unsigned int diskWriteWeight = 0;
         unsigned int networkWeight = 0;
         bool ioHeavy = false;
+        /// Copy the six declared dimensions into a budget2 request shell —
+        /// latencyClass / priority / submitStamp stay caller-owned (the
+        /// admission pass fills task state, the snapshot fills the lane).
+        sicnu::ResourceRequest toResourceRequest() const;
     };
     mutable QMap<long, AdmissionDims> m_admissionDimsCache;
     /// Descriptor-backed admission dimensions for @a task (cached; a
     /// descriptor failure yields all-zero dims = no gating).
     AdmissionDims admissionDimsLocked( const AlgorithmTaskInfo &task ) const;
-    /// 12.0: shared descriptor agentMetadata.execution parser for the
-    /// lock-free warm paths (enqueueTask / submitPipeline / snapshot).
+    /// 12.0: lock-free descriptor warm — adapter lookup + execution dims +
+    /// ioHeavy (+ optional display name) for the warm paths (enqueueTask /
+    /// submitPipeline / snapshot). All-zero dims on any failure.
+    static AdmissionDims descriptorDimsForAlgorithm( const QString &algorithmId,
+                                                     QString *displayNameOut = nullptr );
+    /// Resolver + conservative class fallback, mirroring
+    /// TaskResourceBudget::resolve without touching m_resourceBudget
+    /// unlocked (residual #1097). 0 on failure/unknown.
+    static unsigned int estimateMbForAlgorithm( const TaskEstimateResolver &resolver,
+                                                const QString &algorithmId );
+    /// Shared descriptor agentMetadata.execution parser for the warm paths.
     static AdmissionDims parseAdmissionDims( const Json::Value &execution );
     /// Per-algorithm cached RAM estimate for paths with NO per-task id
     /// (admissionSnapshot's candidate, resolveEstimateMb): the registry-backed

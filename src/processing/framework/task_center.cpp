@@ -122,6 +122,57 @@ TaskCenter::AdmissionDims TaskCenter::parseAdmissionDims( const Json::Value &exe
     return dims;
 }
 
+sicnu::ResourceRequest TaskCenter::AdmissionDims::toResourceRequest() const
+{
+    sicnu::ResourceRequest request;
+    request.tempDiskMb = tempDiskMb;
+    request.vramMb = vramMb;
+    request.cpuThreads = cpuThreads;
+    request.diskReadWeight = diskReadWeight;
+    request.diskWriteWeight = diskWriteWeight;
+    request.networkWeight = networkWeight;
+    return request;
+}
+
+TaskCenter::AdmissionDims TaskCenter::descriptorDimsForAlgorithm(
+    const QString &algorithmId, QString *displayNameOut )
+{
+    AdmissionDims dims;
+    try
+    {
+        auto adapter =
+            processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
+        if ( adapter )
+        {
+            const auto desc = adapter->descriptor();
+            if ( displayNameOut )
+                *displayNameOut = QString::fromStdString( desc.displayName );
+            dims = parseAdmissionDims( desc.agentMetadata.execution );
+            dims.ioHeavy = desc.agentMetadata.ioHeavy;
+        }
+    }
+    catch ( ... )
+    {
+        dims = AdmissionDims{};
+    }
+    return dims;
+}
+
+unsigned int TaskCenter::estimateMbForAlgorithm( const TaskEstimateResolver &resolver,
+                                                 const QString &algorithmId )
+{
+    try
+    {
+        const TaskResourceEstimate est =
+            resolver ? resolver( algorithmId.toStdString() ) : TaskResourceEstimate{};
+        return est.ramMb > 0 ? est.ramMb : defaultEstimateMbForClass( est.memoryClass );
+    }
+    catch ( ... )
+    {
+        return 0;
+    }
+}
+
 static QString findOutputPathInParams( const QVariantMap &params )
 {
     // Prefer exact "output"/"OUTPUT" keys before alphabetical scan so modelOut
@@ -390,7 +441,7 @@ void TaskCenter::shutdownForTests()
         QMutexLocker locker( &m_mutex );
         m_isShuttingDown.store( false );
         m_tasks.clear();
-    m_fusedChains.clear();
+        m_fusedChains.clear();
         m_pipelines.clear();
         m_pendingLaunches.clear();
         m_pendingTaskAdded.clear();
@@ -988,23 +1039,8 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     // when they ran inside it.
     const ProviderResourceProfile profile = resolveResourceProfile( algorithmId );
     const bool isolateRoute = processing::shouldRunIsolated( algorithmId );
-    AdmissionDims candidateDims;
+    const AdmissionDims candidateDims = descriptorDimsForAlgorithm( algorithmId );
     unsigned int resolvedMb = resourceEstimateOverrideMb;
-    try
-    {
-        auto adapter =
-            processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
-        if ( adapter )
-        {
-            const auto desc = adapter->descriptor();
-            candidateDims = parseAdmissionDims( desc.agentMetadata.execution );
-            candidateDims.ioHeavy = desc.agentMetadata.ioHeavy;
-        }
-    }
-    catch ( ... )
-    {
-        candidateDims = AdmissionDims{};
-    }
     if ( resolvedMb == 0 )
     {
         TaskEstimateResolver resolverCopy;
@@ -1012,18 +1048,7 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
             QMutexLocker copyLock( &m_mutex );
             resolverCopy = m_resourceBudget.estimateResolver();
         }
-        try
-        {
-            const TaskResourceEstimate est =
-                resolverCopy ? resolverCopy( algorithmId.toStdString() )
-                             : TaskResourceEstimate{};
-            resolvedMb = est.ramMb > 0 ? est.ramMb
-                                       : defaultEstimateMbForClass( est.memoryClass );
-        }
-        catch ( ... )
-        {
-            resolvedMb = 0;
-        }
+        resolvedMb = estimateMbForAlgorithm( resolverCopy, algorithmId );
     }
 
     TaskAdmissionSnapshot snap;
@@ -1107,22 +1132,19 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     // 12.0: the multi-dimension weight gates the real pass consults. The
     // candidate reports its declared lane; a preflight caller has no queue
     // stamp, so the reserve check evaluates the declared class only.
-    if ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0
-         || candidateDims.cpuThreads > 0 || candidateDims.diskReadWeight > 0
-         || candidateDims.diskWriteWeight > 0 || candidateDims.networkWeight > 0 )
+    // Never-starve mirrors the pass (O7/D6 fidelity): with nothing active a
+    // declared estimate never blocks the only candidate.
+    if ( m_active.total > 0
+         && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0
+              || candidateDims.cpuThreads > 0 || candidateDims.diskReadWeight > 0
+              || candidateDims.diskWriteWeight > 0 || candidateDims.networkWeight > 0 ) )
     {
-        sicnu::ResourceRequest candidateRequest;
-        candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
-        candidateRequest.vramMb = candidateDims.vramMb;
-        candidateRequest.cpuThreads = candidateDims.cpuThreads;
-        candidateRequest.diskReadWeight = candidateDims.diskReadWeight;
-        candidateRequest.diskWriteWeight = candidateDims.diskWriteWeight;
-        candidateRequest.networkWeight = candidateDims.networkWeight;
+        sicnu::ResourceRequest candidateRequest = candidateDims.toResourceRequest();
         // Evaluate the lane the caller actually declares — an interactive
         // preflight must report the reserve verdict it would get at enqueue.
         candidateRequest.latencyClass = latencyClassForSource( source );
         candidateRequest.submitStamp = std::chrono::steady_clock::now();
-        candidateRequest.priority = 1;
+        candidateRequest.priority = static_cast<int>( TaskPriority::Normal );
         if ( !m_budget2.canLaunch( m_active.usage2, candidateRequest,
                                    std::chrono::steady_clock::now() ) )
         {
@@ -1525,7 +1547,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                               const QList<long> &parentTaskIds,
                               bool autoDispatch,
                               unsigned int resourceEstimateOverrideMb,
-                              const QString &source )
+                              const QString &source,
+                              std::optional<LatencyClass> latencyClassOverride )
 {
     if ( m_isShuttingDown.load() )
         return -1; // no new work after shutdown (#684)
@@ -1548,39 +1571,11 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     // progress / cancel. Resolve the adapter + admission dims + resource
     // profile + RAM estimate HERE, lock-free.
     QString warmedAlgorithmName = algorithmId;
-    AdmissionDims warmedDims;
+    const AdmissionDims warmedDims =
+        descriptorDimsForAlgorithm( algorithmId, &warmedAlgorithmName );
     const ProviderResourceProfile warmedProfile = resolveResourceProfile( algorithmId );
-    unsigned int warmedEstimateMb = 0;
-    try
-    {
-        auto adapter =
-            processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
-        if ( adapter )
-        {
-            const auto desc = adapter->descriptor();
-            warmedAlgorithmName = QString::fromStdString( desc.displayName );
-            warmedDims = parseAdmissionDims( desc.agentMetadata.execution );
-            warmedDims.ioHeavy = desc.agentMetadata.ioHeavy;
-        }
-    }
-    catch ( ... )
-    {
-        warmedDims = AdmissionDims{};
-    }
-    try
-    {
-        // Mirrors TaskResourceBudget::resolve (resolver + conservative
-        // class fallback) without touching m_resourceBudget unlocked.
-        const TaskResourceEstimate est =
-            estimateResolverCopy ? estimateResolverCopy( algorithmId.toStdString() )
-                                 : TaskResourceEstimate{};
-        warmedEstimateMb = est.ramMb > 0 ? est.ramMb
-                                         : defaultEstimateMbForClass( est.memoryClass );
-    }
-    catch ( ... )
-    {
-        warmedEstimateMb = 0;
-    }
+    const unsigned int warmedEstimateMb =
+        estimateMbForAlgorithm( estimateResolverCopy, algorithmId );
     long id = -1;
     std::optional<PendingSubmissionFingerprint> pendingFingerprint;
     {
@@ -1616,7 +1611,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.source = source;
         info.enqueueSteadyStamp = std::chrono::steady_clock::now();
         info.effectivePriority = static_cast<int>( priority );
-        info.latencyClass = latencyClassForSource( source );
+        // 12.0 D2: an explicit lane wins over the source→lane map.
+        info.latencyClass = latencyClassOverride.value_or( latencyClassForSource( source ) );
         if ( warmedEstimateMb > 0 )
         {
             info.resolvedEstimateMb = warmedEstimateMb;
@@ -2443,6 +2439,13 @@ void TaskCenter::processNextQueuedTasks()
     const bool rssPressureHigh = m_resourceMonitor.memoryPressureHigh();
     const bool transientCapacityAtPassStart =
         m_active.transientChildren < kMaxTransientChildren;
+    // 12.0 D7: one RSS sample per pass that actually examines candidates —
+    // scheduler-decision observability without spamming on empty passes.
+    if ( !m_readyHeap.empty() )
+        sicnu::runtime::observability::ExecutionTelemetry::instance().recordSimple(
+            sicnu::runtime::observability::EventKind::RssSample, -1,
+            static_cast<int64_t>( m_resourceMonitor.currentRssMb() ),
+            "admission_pass" );
     while ( !m_readyHeap.empty() && scanned < scanBudget )
     {
         ReadyEntry entry = m_readyHeap.top();
@@ -2578,13 +2581,7 @@ void TaskCenter::processNextQueuedTasks()
                   || candidateDims.cpuThreads > 0 || candidateDims.diskReadWeight > 0
                   || candidateDims.diskWriteWeight > 0 || candidateDims.networkWeight > 0 ) )
         {
-            sicnu::ResourceRequest candidateRequest;
-            candidateRequest.tempDiskMb = candidateDims.tempDiskMb;
-            candidateRequest.vramMb = candidateDims.vramMb;
-            candidateRequest.cpuThreads = candidateDims.cpuThreads;
-            candidateRequest.diskReadWeight = candidateDims.diskReadWeight;
-            candidateRequest.diskWriteWeight = candidateDims.diskWriteWeight;
-            candidateRequest.networkWeight = candidateDims.networkWeight;
+            sicnu::ResourceRequest candidateRequest = candidateDims.toResourceRequest();
             candidateRequest.latencyClass = task.latencyClass;
             // effectivePriority is already heap-aged at the configured
             // interval; stamp now() so canLaunch's internal agedPriority
@@ -3916,22 +3913,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     auto warmDimsFor = [&warmedDimsByAlgo]( const QString &algoId ) -> AdmissionDims {
         if ( warmedDimsByAlgo.contains( algoId ) )
             return warmedDimsByAlgo.value( algoId );
-        AdmissionDims dims;
-        try
-        {
-            auto adapter =
-                processing::AtomicAlgorithmRegistry::instance().findAdapter( algoId.toStdString() );
-            if ( adapter )
-            {
-                const auto desc = adapter->descriptor();
-                dims = parseAdmissionDims( desc.agentMetadata.execution );
-                dims.ioHeavy = desc.agentMetadata.ioHeavy;
-            }
-        }
-        catch ( ... )
-        {
-            dims = AdmissionDims{};
-        }
+        const AdmissionDims dims = descriptorDimsForAlgorithm( algoId );
         warmedDimsByAlgo.insert( algoId, dims );
         return dims;
     };
@@ -3944,24 +3926,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             if ( !warmedProfileByAlgo.contains( algoId ) )
                 warmedProfileByAlgo.insert( algoId, resolveResourceProfile( algoId ) );
             if ( !warmedEstimateByAlgo.contains( algoId ) )
-            {
-                unsigned int mb = 0;
-                try
-                {
-                    // Mirrors TaskResourceBudget::resolve without touching
-                    // m_resourceBudget unlocked (residual #1097).
-                    const TaskResourceEstimate est =
-                        estimateResolverCopy ? estimateResolverCopy( algoId.toStdString() )
-                                             : TaskResourceEstimate{};
-                    mb = est.ramMb > 0 ? est.ramMb
-                                       : defaultEstimateMbForClass( est.memoryClass );
-                }
-                catch ( ... )
-                {
-                    mb = 0;
-                }
-                warmedEstimateByAlgo.insert( algoId, mb );
-            }
+                warmedEstimateByAlgo.insert(
+                    algoId, estimateMbForAlgorithm( estimateResolverCopy, algoId ) );
         }
     }
 

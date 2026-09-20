@@ -87,7 +87,8 @@ ExecutionHandle ExecutionPlane::submit( const ExecutionRequest &request )
   auto &center = sicnu::TaskCenter::instance();
   const long taskId = center.enqueueTask( request.algorithmId, request.params, request.autoLoad,
                                           request.priority, request.parentTaskIds, request.autoDispatch,
-                                          request.resourceEstimateMb, request.source );
+                                          request.resourceEstimateMb, request.source,
+                                          request.latencyClass );
 
   auto shared = std::make_shared<ExecutionHandle::Shared>();
   shared->taskId = taskId;

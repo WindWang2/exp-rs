@@ -40,6 +40,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "framework/task_center.h"
 
@@ -80,6 +81,10 @@ struct ExecutionRequest
   /// feeds; see ExecutionPlane::estimateFromPreflight.
   unsigned int resourceEstimateMb = 0;
   QList<long> parentTaskIds;        ///< DAG gating (workflow pipelines)
+  /// 12.0 D2: explicit workload lane for the interactive-reserve weight
+  /// gate. Unset → the `source` tag maps to a lane (ui/mcp/agent →
+  /// Interactive, prefetch/batch → Batch, else Background).
+  std::optional<sicnu::LatencyClass> latencyClass;
   std::chrono::milliseconds timeout{ 0 }; ///< enforced by await/awaitResult
   bool cancelOnTimeout = true;      ///< request TaskCenter cancel when the deadline hits
 };

@@ -22,6 +22,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/task_center.h"
+#include "processing/framework/execution_plane.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
@@ -169,7 +170,7 @@ class Tc12DimsAdapter : public sicnu::processing::AtomicAlgorithmAdapter
 /// must stay registered for the duration of the test (unregister at scope end).
 void registerDimsAdapter( sicnu::processing::AtomicAlgorithmRegistry &registry,
                           const std::string &id, unsigned diskReadW, unsigned diskWriteW,
-                          unsigned networkW )
+                          unsigned networkW, unsigned cpuThreads = 0 )
 {
     sicnu::processing::AlgorithmDescriptor desc;
     desc.id = id;
@@ -181,6 +182,8 @@ void registerDimsAdapter( sicnu::processing::AtomicAlgorithmRegistry &registry,
         desc.agentMetadata.execution["diskWriteWeight"] = diskWriteW;
     if ( networkW > 0 )
         desc.agentMetadata.execution["networkWeight"] = networkW;
+    if ( cpuThreads > 0 )
+        desc.agentMetadata.execution["cpuThreads"] = cpuThreads;
     registry.registerAdapter( std::make_shared<Tc12DimsAdapter>( id, desc ) );
 }
 
@@ -488,6 +491,13 @@ TEST_CASE( "Telemetry reports queue wait, run time, cancel latency and counters"
     REQUIRE( hasEvent( EventKind::ExecutionStart ) );
     REQUIRE( hasEvent( EventKind::ExecutionEnd ) );
 
+    // 12.0 D7: pass-level RSS sample — emitted once per admission pass that
+    // examines candidates (taskId -1: it is a scheduler observation, not a
+    // task-scoped record).
+    REQUIRE( std::any_of( events.begin(), events.end(), []( const auto &e ) {
+        return e.kind == EventKind::RssSample;
+    } ) );
+
     // Queue wait recorded a non-negative duration for this task.
     const auto qw = std::find_if( events.begin(), events.end(), [&]( const auto &e ) {
         return e.kind == EventKind::QueueWait && e.taskId == okTask;
@@ -590,5 +600,183 @@ TEST_CASE( "admissionSnapshot reports the pending bound and all gate families",
     REQUIRE( snap.wouldAdmit );
 
     center.resetResourceProfileLimits();
+    engine.shutdownForTests();
+}
+
+TEST_CASE( "Explicit latency-class override wins over the source lane map",
+           "[tc12][latency]" )
+{
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setGlobalConcurrencyLimit( 3 );
+    center.setIoWeightLimits( 100, 0, 0 ); // disk-read cap only
+    center.setInteractiveReservePercent( 25 );
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    auto &plane = sicnu::processing::ExecutionPlane::instance();
+
+    std::atomic<bool> release{ false };
+    engine.clearExecutors();
+    engine.registerExecutor( "l12:", [&release]( const JobRequest &,
+                                                 sicnu::operators::RSOperatorContext & ) {
+        while ( !release.load( std::memory_order_relaxed ) )
+            QThread::msleep( 5 );
+        return Json::Value();
+    } );
+
+    registerDimsAdapter( registry, "l12:heavy", 70, 0, 0 );
+    registerDimsAdapter( registry, "l12:plain", 30, 0, 0 );
+    registerDimsAdapter( registry, "l12:forced", 30, 0, 0 );
+
+    const long heavy = center.submitJob( tc12Request( "l12:heavy" ), nullptr, {}, true,
+                                         TaskPriority::Normal, {} );
+    REQUIRE( heavy > 0 );
+    REQUIRE( waitForStatus( heavy, { TaskStatus::Running, TaskStatus::Dispatching }, 5000 ) );
+
+    // Same "batch" source tag on both candidates — only the explicit lane
+    // differs. Unset → Batch mapping: 70 + 30 > 100·(1-0.25) = 75 → held.
+    sicnu::processing::ExecutionRequest plainReq;
+    plainReq.algorithmId = QStringLiteral( "l12:plain" );
+    plainReq.source = QStringLiteral( "batch" );
+    const auto plainHandle = plane.submit( plainReq );
+    REQUIRE( plainHandle.valid() );
+    REQUIRE( plainHandle.taskId() > 0 );
+    REQUIRE( center.getTaskInfo( plainHandle.taskId() ).latencyClass ==
+             sicnu::LatencyClass::Batch );
+
+    // Explicit Interactive override: admits against the full cap —
+    // 70 + 30 <= 100 → dispatches even though its source says "batch".
+    sicnu::processing::ExecutionRequest forcedReq;
+    forcedReq.algorithmId = QStringLiteral( "l12:forced" );
+    forcedReq.source = QStringLiteral( "batch" );
+    forcedReq.latencyClass = sicnu::LatencyClass::Interactive;
+    const auto forcedHandle = plane.submit( forcedReq );
+    REQUIRE( forcedHandle.valid() );
+    REQUIRE( forcedHandle.taskId() > 0 );
+    REQUIRE( center.getTaskInfo( forcedHandle.taskId() ).latencyClass ==
+             sicnu::LatencyClass::Interactive );
+
+    REQUIRE( waitForStatus( forcedHandle.taskId(),
+                            { TaskStatus::Running, TaskStatus::Dispatching,
+                              TaskStatus::Completed }, 5000 ) );
+    // The source-mapped sibling must still be held at the reserve.
+    const auto held = center.getTaskInfo( plainHandle.taskId() );
+    REQUIRE( ( held.status == TaskStatus::Queued || held.status == TaskStatus::WaitingResource ) );
+
+    release.store( true );
+    REQUIRE( waitForStatus( heavy, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+    REQUIRE( waitForStatus( forcedHandle.taskId(), { TaskStatus::Completed, TaskStatus::Failed },
+                            15000 ) );
+    REQUIRE( waitForStatus( plainHandle.taskId(), { TaskStatus::Completed, TaskStatus::Failed },
+                            15000 ) );
+
+    registry.unregisterAdapter( "l12:heavy" );
+    registry.unregisterAdapter( "l12:plain" );
+    registry.unregisterAdapter( "l12:forced" );
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    center.setIoWeightLimits( 100, 100, 100 );
+    engine.shutdownForTests();
+}
+
+TEST_CASE( "CPU-thread admission cap holds a saturating candidate", "[tc12][cpu]" )
+{
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setGlobalConcurrencyLimit( 3 );
+    center.setCpuThreadLimit( 4 );
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+
+    std::atomic<bool> release{ false };
+    engine.clearExecutors();
+    engine.registerExecutor( "c12:", [&release]( const JobRequest &,
+                                                 sicnu::operators::RSOperatorContext & ) {
+        while ( !release.load( std::memory_order_relaxed ) )
+            QThread::msleep( 5 );
+        return Json::Value();
+    } );
+
+    // cpuThreads is an absolute dimension — no interactive reserve applies.
+    registerDimsAdapter( registry, "c12:wide", 0, 0, 0, 3 );
+
+    const long first = center.submitJob( tc12Request( "c12:wide" ), nullptr, {}, true,
+                                         TaskPriority::Normal, {} );
+    REQUIRE( first > 0 );
+    REQUIRE( waitForStatus( first, { TaskStatus::Running, TaskStatus::Dispatching }, 5000 ) );
+
+    // 3 + 3 = 6 > 4 → the second candidate must be held.
+    const long second = center.submitJob( tc12Request( "c12:wide" ), nullptr, {}, true,
+                                          TaskPriority::Normal, {} );
+    REQUIRE( second > 0 );
+    QThread::msleep( 100 ); // let an admission pass evaluate the candidate
+    const auto held = center.getTaskInfo( second );
+    REQUIRE( ( held.status == TaskStatus::Queued || held.status == TaskStatus::WaitingResource ) );
+
+    release.store( true );
+    REQUIRE( waitForStatus( first, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+    // Never-starve: once the first drains, the held candidate launches.
+    REQUIRE( waitForStatus( second, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+
+    registry.unregisterAdapter( "c12:wide" );
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    engine.shutdownForTests();
+}
+
+TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snapshot]" )
+{
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setIoWeightLimits( 100, 0, 0 );
+    center.setInteractiveReservePercent( 25 );
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+
+    std::atomic<bool> release{ false };
+    engine.clearExecutors();
+    engine.registerExecutor( "s12:", [&release]( const JobRequest &,
+                                                 sicnu::operators::RSOperatorContext & ) {
+        while ( !release.load( std::memory_order_relaxed ) )
+            QThread::msleep( 5 );
+        return Json::Value();
+    } );
+
+    // Declared weight exceeds even the FULL cap — admittable only via the
+    // idle never-starve rule (m_active.total == 0 skips the weight gate).
+    registerDimsAdapter( registry, "s12:huge", 200, 0, 0 );
+    registerDimsAdapter( registry, "s12:holder", 10, 0, 0 );
+
+    // Idle system: the live pass would admit the only candidate, so the
+    // snapshot must agree (O7/D6 fidelity — regression: the snapshot used to
+    // apply the cap unconditionally and report wouldAdmit=false here).
+    const auto idleSnap = center.admissionSnapshot( QStringLiteral( "s12:huge" ) );
+    REQUIRE( idleSnap.wouldAdmit );
+
+    const long holder = center.submitJob( tc12Request( "s12:holder" ), nullptr, {}, true,
+                                          TaskPriority::Normal, {} );
+    REQUIRE( holder > 0 );
+    REQUIRE( waitForStatus( holder, { TaskStatus::Running, TaskStatus::Dispatching }, 5000 ) );
+
+    // With the holder occupying 10 of the non-interactive cap (75), the
+    // 200-weight candidate genuinely cannot launch → snapshot must refuse.
+    const auto busySnap = center.admissionSnapshot( QStringLiteral( "s12:huge" ) );
+    REQUIRE( !busySnap.wouldAdmit );
+    REQUIRE( !busySnap.reason.isEmpty() );
+
+    release.store( true );
+    REQUIRE( waitForStatus( holder, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+
+    registry.unregisterAdapter( "s12:huge" );
+    registry.unregisterAdapter( "s12:holder" );
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    center.setIoWeightLimits( 100, 100, 100 );
     engine.shutdownForTests();
 }
