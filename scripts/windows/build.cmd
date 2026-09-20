@@ -26,6 +26,7 @@ setlocal enabledelayedexpansion
 rem Capture the script path BEFORE any shift: after shift, %0 becomes the
 rem subcommand name, so %~f0 would resolve to a nonexistent file.
 set "SELF=%~f0"
+for %%I in ("%SELF%") do set "SELF_DIR=%%~dpI"
 
 set "SICNU_BUILD_CAP=2"
 if not "%SICNU_BUILD_JOBS_CAP%"=="" set "SICNU_BUILD_CAP=%SICNU_BUILD_JOBS_CAP%"
@@ -254,25 +255,34 @@ mkdir "%BDIR%" || (echo build.cmd: smoke: cannot create %BDIR% 1>&2 & exit /b 1)
 rem Seed only toolchain LOCATION variables from an existing configured tree -
 rem every dependency is re-discovered fresh, and the vcpkg installed tree is
 rem reused read-only so the gate stays offline (same discipline as build.sh).
+rem Seed toolchain locations through a CMake initial-cache script (-C) instead
+rem of -D command-line arguments: values here routinely contain spaces
+rem (C:/Program Files/...), and a nested for/f + quoted-token chain through
+rem run_logged mangles them. A script file has no quoting problem, and every
+rem dependency is still re-discovered fresh (only locations are seeded; the
+rem vcpkg installed tree is reused read-only so the gate stays offline).
+rem NOTE: this block uses delayed expansion (!VAR!) on purpose - %VAR% inside a
+rem parenthesized block is expanded when the BLOCK is parsed, i.e. before the
+rem set commands inside it have run.
 set "SEED="
 if not "%BASECACHE%"=="" (
-  for %%K in (CMAKE_GENERATOR CMAKE_MAKE_PROGRAM CMAKE_CXX_COMPILER CMAKE_C_COMPILER CMAKE_TOOLCHAIN_FILE CMAKE_PREFIX_PATH VCPKG_INSTALLED_DIR VCPKG_TARGET_TRIPLET Qt6_DIR Qt6Keychain_DIR QCA_INCLUDE_DIR QCA_LIBRARY BISON_EXECUTABLE FLEX_EXECUTABLE) do call :seed_arg "%%K" "%BASECACHE%"
-  set "SEED=%SEED% -DVCPKG_MANIFEST_MODE=OFF"
+  set "INIT=!BDIR!\seed-toolchain.cmake"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "!SELF_DIR!seed_toolchain_cache.ps1" -BaseCache "%BASECACHE%" -Out "!INIT!"
+  if errorlevel 1 (echo build.cmd: smoke: seeding failed 1>&2 & exit /b 1)
+  if not exist "!INIT!" (echo build.cmd: smoke: seed script not written 1>&2 & exit /b 1)
+  set "SEED=-C "!INIT!""
+  rem quoted: `call :label` splits arguments at '=', an unquoted -DKEY=VALUE
+  rem would arrive at the callee as two arguments.
+  set "SEED=!SEED! "-DVCPKG_MANIFEST_MODE=OFF""
   echo build.cmd: seeded toolchain locations from %BASECACHE% ^(dependencies re-discovered fresh^)
 )
-call :run_logged configure cmake -S "%REPO_ROOT%" -B "%BDIR%" %SEED%
+call :run_logged configure cmake -G Ninja -S "%REPO_ROOT%" -B "%BDIR%" %SEED%
 if errorlevel 1 (echo build.cmd: smoke: clean-tree configure FAILED 1>&2 & exit /b 1)
 echo build.cmd: smoke: clean-tree configure OK
 echo   build dir: %BDIR% ^(started empty; no stale cache reused^)
 echo   configure log: %LOG_ROOT%\configure\run.log
 exit /b 0
 
-:seed_arg
-rem Each seeded value is quoted as a whole (-D"KEY=value with spaces") because
-rem run_logged re-splits the command line: an unquoted path containing spaces
-rem (C:/Program Files/...) would be torn into several arguments.
-for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$m=Select-String -Path '%~2' -Pattern '^%~1:[A-Z]*=(.*)$' | Select-Object -Last 1; if($m){$m.Matches[0].Groups[1].Value}"`) do set "SEED=%SEED% -D"%~1=%%V""
-exit /b 0
 
 rem ---------------------------------------------------------------------------
 :main
