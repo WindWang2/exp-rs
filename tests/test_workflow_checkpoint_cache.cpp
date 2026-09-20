@@ -2083,3 +2083,68 @@ TEST_CASE( "An idle requestCancel does not poison a later resume", "[d17][workfl
     for ( const NodeStatusSnapshot &snapshot : coordinator.getAllStatuses() )
         REQUIRE( snapshot.isCacheHit );
 }
+
+TEST_CASE( "A cancel during resume verification aborts the resume before dispatch",
+           "[d17][workflow][recovery][cancel]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "cancel-resume-verify" ) );
+    constexpr qint64 kBigBytes = 512 * 1024 * 1024;
+
+    // A checkpoint whose node_1 artifact is recorded under sha256full: the
+    // resume verification then hashes the whole 512 MiB on the affinity
+    // thread, which is the window a cancel must be able to abort.
+    QString checkpoint;
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( bigArtifactExecutor( kBigBytes ) );
+        REQUIRE( coordinator.startRun( chain( 1 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator, 120000 ) );
+        checkpoint = coordinator.checkpointPath();
+    }
+    const QJsonObject entry = nodeEntry( readJsonObject( checkpoint ), QStringLiteral( "node_1" ) );
+    REQUIRE( entry.value( QLatin1String( "artifactFingerprint" ) ).toString()
+             .startsWith( QStringLiteral( "sha256full:" ) ) );
+
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+
+    // The resume itself runs on the affinity thread (marshalled from the
+    // worker); the canceller trips the lock-free flag from a third thread
+    // while that verification is in flight.
+    std::atomic<bool> resumeDone{ false };
+    bool resumeOk = false;
+    QString resumeError;
+    QThread *resumer = QThread::create( [&]() {
+        resumeOk = coordinator.resumeFromCheckpoint( checkpoint, &resumeError );
+        resumeDone.store( true );
+    } );
+    QThread *canceller = QThread::create( [&coordinator]() {
+        QThread::msleep( 100 ); // let the whole-file hash get going
+        coordinator.requestCancel();
+    } );
+    resumer->start();
+    canceller->start();
+    REQUIRE( waitForThread( resumer, 120000 ) );
+    REQUIRE( waitForThread( canceller, 60000 ) );
+    delete resumer;
+    delete canceller;
+
+    // The resume aborted before dispatch — nothing was committed, so the
+    // coordinator is neither wedged nor left with a half-loaded run.
+    REQUIRE_FALSE( resumeOk );
+    REQUIRE( resumeError.contains( QStringLiteral( "cancelled" ) ) );
+    REQUIRE( coordinator.getAllStatuses().isEmpty() );
+    REQUIRE_FALSE( coordinator.hasCompleted() );
+
+    // The stale flag from the aborted resume must not poison the next one
+    // (the stale-flag clear runs on every resume entry).
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator retry;
+    retry.setExecutor( countingExecutor( &executed ) );
+    QString retryError;
+    REQUIRE( retry.resumeFromCheckpoint( checkpoint, &retryError ) );
+    REQUIRE( waitForCompleted( retry, 120000 ) );
+    REQUIRE( executed.load() == 0 );
+    REQUIRE( retry.getAllStatuses().value( QStringLiteral( "node_1" ) ).isCacheHit );
+}
