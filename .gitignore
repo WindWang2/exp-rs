@@ -405,3 +405,9 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+
+# flash-data-scale-13 (Track C): Data Scale & Catalog Performance 13.0 — track
+# planning notes (markdown only; logs stay local).
+!.planning/flash-data-scale-13/
+.planning/flash-data-scale-13/*
+!.planning/flash-data-scale-13/*.md
