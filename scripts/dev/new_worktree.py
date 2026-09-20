@@ -88,6 +88,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cwd = Path.cwd()
     try:
+        return _run(args, cwd)
+    except ToolError as exc:
+        print(f"new-worktree failed: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+
+def _run(args: argparse.Namespace, cwd: Path) -> int:
+    try:
         root_proc = run_git(cwd, ["rev-parse", "--show-toplevel"])
     except FileNotFoundError:
         print("git executable not found", file=sys.stderr)

@@ -150,6 +150,26 @@ def classify(entry: dict, behind_threshold: int) -> tuple[str, str]:
     return (verdict, "; ".join(facts) + f" — {action} (branch {branch_name})")
 
 
+def _classify_branch(repo: Path, name: str, trunk: str, merged_lookback: int) -> dict:
+    """Collect and classify one branch; raises ToolError if git cannot read it."""
+    ahead = int(git_ok(repo, ["rev-list", "--count", f"{trunk}..{name}"]).strip() or 0)
+    behind = int(git_ok(repo, ["rev-list", "--count", f"{name}..{trunk}"]).strip() or 0)
+    files = _branch_files(repo, name, trunk)
+    equiv, not_equiv = _cherry(repo, name, trunk)
+    return {
+        "branch": name,
+        "ahead_vs_master": ahead,
+        "behind_master": behind,
+        "touched_files": files,
+        "patch_equivalent_upstream": equiv,
+        "patch_not_upstream": not_equiv,
+        "unmerged_files": _unmerged_files(repo, name, trunk),
+        "merged_prs_touching": _merged_prs_touching(repo, files,
+                                                    merged_lookback,
+                                                    name.split("/", 1)[-1]),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -176,22 +196,14 @@ def main(argv: list[str] | None = None) -> int:
 
     report = []
     for name in names:
-        ahead = int(git_ok(repo, ["rev-list", "--count", f"{trunk}..{name}"]).strip() or 0)
-        behind = int(git_ok(repo, ["rev-list", "--count", f"{name}..{trunk}"]).strip() or 0)
-        files = _branch_files(repo, name, trunk)
-        equiv, not_equiv = _cherry(repo, name, trunk)
-        entry = {
-            "branch": name,
-            "ahead_vs_master": ahead,
-            "behind_master": behind,
-            "touched_files": files,
-            "patch_equivalent_upstream": equiv,
-            "patch_not_upstream": not_equiv,
-            "unmerged_files": _unmerged_files(repo, name, trunk),
-            "merged_prs_touching": _merged_prs_touching(repo, files,
-                                                        args.merged_lookback,
-                                                        name.split("/", 1)[-1]),
-        }
+        try:
+            entry = _classify_branch(repo, name, trunk, args.merged_lookback)
+        except ToolError as exc:
+            # one unreadable branch must not abort the whole census: record
+            # the failure and continue with the rest
+            report.append({"branch": name, "classification": "read-failed",
+                           "recommendation": f"{exc} — inspect manually"})
+            continue
         verdict, recommendation = classify(entry, args.behind_threshold)
         entry["classification"] = verdict
         entry["recommendation"] = recommendation
@@ -212,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
              ""]
     for entry in report:
         lines.append(f"{entry['branch']}: {entry['classification']}")
+        if entry["classification"] == "read-failed":
+            lines.append(f"    {entry['recommendation']}")
+            continue
         lines.append(f"    ahead {entry['ahead_vs_master']}, behind "
                      f"{entry['behind_master']}; patch-equivalent upstream "
                      f"{entry['patch_equivalent_upstream']}, not-equivalent "
