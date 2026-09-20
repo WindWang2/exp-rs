@@ -96,7 +96,7 @@ std::string canonicalJson( const QVariant &value )
 
 struct Bootstrap
 {
-    AlgorithmMetaStore &store;
+    processing::AlgorithmMetaStore &store;
     agent::harness::CapabilityCatalog &catalog;
     std::vector<std::string> registryRs;          ///< every rs: operator name
     std::vector<std::string> taskDeclaring;       ///< descriptors declaring a task family
@@ -255,6 +255,8 @@ std::set<std::string> idSet( const std::vector<std::string> &ids )
     return { ids.begin(), ids.end() };
 }
 
+} // namespace
+
 namespace {
 
 /// Normalized parameter fact set: name -> "type|default|enum" signature under
@@ -270,10 +272,10 @@ std::map<std::string, std::string> paramSignatures( const QVariant &schema )
         QString sig = p.value( QStringLiteral( "type" ) ).toString();
         const QVariant def = p.value( QStringLiteral( "default" ) );
         if ( def.isValid() )
-          sig += QStringLiteral( "|default=" ) + canonicalJson( def );
+          sig += QStringLiteral( "|default=" ) + QString::fromStdString( canonicalJson( def ) );
         const QVariant en = p.value( QStringLiteral( "enum" ) );
         if ( en.isValid() )
-          sig += QStringLiteral( "|enum=" ) + canonicalJson( en );
+          sig += QStringLiteral( "|enum=" ) + QString::fromStdString( canonicalJson( en ) );
         out[ it.key().toStdString() ] = sig.toStdString();
     }
     return out;
@@ -329,7 +331,8 @@ TEST_CASE( "Capability chain: registry, sidecars, help and MCP present one rs: u
     CapabilityProbeServer &server = mcp();
     REQUIRE( server.callTool( QStringLiteral( "list_algorithms" ),
                               QVariantMap{ { QStringLiteral( "limit" ), 2000 } } ) );
-    const QVariantMap listed = server.toolOutput();
+    const QVariant listedVariant = server.toolOutput();
+    const QVariantMap listed = listedVariant.toMap();
     const QVariantList entries = listed.value( QStringLiteral( "algorithms" ) ).toList();
     REQUIRE_FALSE( entries.isEmpty() );
 
@@ -422,7 +425,8 @@ TEST_CASE( "get_algorithm_schema matches the descriptor and the CLI raw schema o
         REQUIRE( server.callTool( QStringLiteral( "get_algorithm_schema" ),
                                   QVariantMap{ { QStringLiteral( "algorithm_id" ),
                                                  QString::fromStdString( id ) } } ) );
-        const QVariantMap schemaOut = server.toolOutput();
+        const QVariant schemaOutVariant = server.toolOutput();
+        const QVariantMap schemaOut = schemaOutVariant.toMap();
         const QVariant inputSchema = schemaOut.value( QStringLiteral( "input_schema" ) );
         REQUIRE( inputSchema.isValid() );
         const auto descriptorParams = paramSignatures( adapter->descriptor().toInputSchema() );
