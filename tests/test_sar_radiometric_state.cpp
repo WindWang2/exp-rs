@@ -578,6 +578,23 @@ TEST_CASE( "terrain operators accept a legacy undeclared input with a warning",
     params["incidenceDeg"] = 35.0;
     runOp( "rs:sar_terrain_flatten", params );
     REQUIRE( metaItem( out, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
+    // The sigma0 assumption is persisted as machine-readable provenance so
+    // downstream guards can see it (a log line does not travel with the file).
+    REQUIRE( metaItem( out, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
+
+    // A declared sigma0 input carries no assumed-state key.
+    const QString declaredIn = tmp.filePath( "declared_in.tif" );
+    const QString declaredOut = tmp.filePath( "declared_out.tif" );
+    const QString declaredDem = tmp.filePath( "declared_dem.tif" );
+    REQUIRE( writeRasterEx( declaredIn, std::vector<float>( 16, 0.4f ), 4, 4,
+                            { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
+    REQUIRE( writeRasterEx( declaredDem, std::vector<float>( 16, 100.0f ), 4, 4, {} ) );
+    Json::Value declaredParams = baseParams( declaredIn, declaredOut );
+    declaredParams["dem"] = declaredDem.toStdString();
+    declaredParams["incidenceDeg"] = 35.0;
+    runOp( "rs:sar_terrain_flatten", declaredParams );
+    REQUIRE( metaItem( declaredOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
+    REQUIRE( metaItem( declaredOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
 }
 
 // ---------------------------------------------------------------------------
