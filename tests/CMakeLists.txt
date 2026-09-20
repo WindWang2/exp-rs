@@ -1486,6 +1486,79 @@ target_include_directories(test_spectral_detection PRIVATE
 )
 sicnu_discover_tests(test_spectral_detection)
 
+# Spectral Intelligence 12.0 work package A: CEM target detector kernel —
+# closed forms, streaming correlation accumulation, scaled loading,
+# condition proxy, fail-closed refusals.
+add_executable(test_spectral_cem test_spectral_cem.cpp)
+target_link_libraries(test_spectral_cem PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_cem)
+target_include_directories(test_spectral_cem PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_cem)
+
+# Spectral Intelligence 12.0 work package G: detector tile-vs-whole-scene
+# streaming equivalence (MF/ACE/CEM), including declared-NoData QA honesty.
+add_executable(test_spectral_detection_streaming test_spectral_detection_streaming.cpp)
+target_link_libraries(test_spectral_detection_streaming PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection_streaming)
+target_include_directories(test_spectral_detection_streaming PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_detection_streaming)
+
+# Spectral Intelligence 12.0 work package B: spatial consistency fusion —
+# closed forms, NoData leak-proofness, tile-halo equivalence, operator E2E.
+add_executable(test_spectral_spatial_fusion test_spectral_spatial_fusion.cpp)
+target_link_libraries(test_spectral_spatial_fusion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_spatial_fusion)
+target_include_directories(test_spectral_spatial_fusion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_spatial_fusion)
+
+# Spectral Intelligence 12.0 work package C: library-scale matching —
+# brute-force equivalence, grid-bucket resample cache, prescreened top-K,
+# machine-independent scale evidence.
+add_executable(test_spectral_library_scale test_spectral_library_scale.cpp)
+target_link_libraries(test_spectral_library_scale PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_library_scale)
+target_include_directories(test_spectral_library_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_library_scale)
+
 # SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
 # geometry closed forms, operator E2E, geometry refusals.
 add_executable(test_sar_orbit test_sar_orbit.cpp)
@@ -11235,3 +11308,4 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
