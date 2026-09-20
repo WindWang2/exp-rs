@@ -46,6 +46,11 @@ inline bool actionShortcutIsWindowSafe( const QAction *action )
 {
     if ( !action || action->shortcuts().isEmpty() )
         return false;
+    // A widget-scoped action is not the window's to host: its context belongs
+    // to the widget that owns it, and window-hosting would widen it to global.
+    if ( action->shortcutContext() == Qt::WidgetShortcut
+         || action->shortcutContext() == Qt::WidgetWithChildrenShortcut )
+        return false;
     for ( const QKeySequence &seq : action->shortcuts() )
     {
         if ( seq.isEmpty() || seq.count() == 0 )
