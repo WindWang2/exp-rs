@@ -13,6 +13,8 @@
 
 #include <QString>
 
+#include <vector>
+
 class GdalDatasetWrapper;
 class GdalStreamingOutput;
 
@@ -38,7 +40,27 @@ inline const char *kLookAzimuthKey = "SICNU_SAR_LOOK_AZIMUTH_DEG";
 /// satellite_products.h); stored in the shared SICNU_RADIOMETRIC_STATE key.
 inline const char *kRadiometricStateKey = "SICNU_RADIOMETRIC_STATE";
 
+/// Declared per-row calibration LUT sidecar (Radiometric State 13.0): a
+/// plain-text file with exactly one finite, positive calibration constant per
+/// input row, resolved relative to the declaring raster. Consumed by
+/// rs:sar_calibrate; no interpolation is applied.
+inline const char *kCalibrationLutKey = "SICNU_SAR_CALIBRATION_LUT";
+
+/// Derived (non-backscatter) SAR product states. They are written like every
+/// other SAR state token so the fail-closed guards reject them, but they are
+/// NOT calibration states: normalizeCalibration() maps them to "".
+/// rs:sar_ratio writes kDerivedPairMetricState, rs:sar_texture writes
+/// kDerivedTextureState — derived products never claim a backscatter
+/// calibration.
+inline const char *kDerivedPairMetricState = "sar_pair_metric";
+inline const char *kDerivedTextureState = "sar_texture";
+
 bool isSarRadiometricState( const QString &state );
+
+/// True for the derived SAR product states (pair metric / texture). Derived
+/// states are declared outputs of derived-product operators; they are never
+/// lawful inputs to calibration or backscatter conversion.
+bool isSarDerivedState( const QString &state );
 
 /// Reads a dataset-level metadata item (default domain, empty when absent).
 QString datasetMeta( const GdalDatasetWrapper &ds, const char *key );
@@ -81,5 +103,44 @@ QString readDomain( const GdalDatasetWrapper &ds );
 /// verbatim so operator seams can fail closed on them instead of silently
 /// treating an unreadable declared contract as DN.
 QString declaredCalibrationToken( const GdalDatasetWrapper &ds );
+
+/// Declared SAR state read with conflict detection (Radiometric State 13.0).
+/// @a token is the effective declared token (SICNU_SAR_CALIBRATION, falling
+/// back to SICNU_RADIOMETRIC_STATE); @a conflict is true when both keys are
+/// present and disagree — a conflicted declaration is never interpreted.
+struct SarStateRead
+{
+    QString calibration; ///< raw SICNU_SAR_CALIBRATION token (trimmed/lowered)
+    QString state;       ///< raw SICNU_RADIOMETRIC_STATE token (trimmed/lowered)
+    QString token;       ///< effective declared token; "" when undeclared
+    bool conflict = false;
+};
+SarStateRead readDeclaredSarState( const GdalDatasetWrapper &ds );
+
+/// The declared token when it is a recognized SAR state — a canonical
+/// calibration token (normalized) or a derived state; "" for undeclared,
+/// conflicting or unrecognized declarations.
+QString recognizedSarState( const GdalDatasetWrapper &ds );
+
+/// Outcome of checkDeclaredState().
+enum class SarStateCheck
+{
+    Ok,            ///< declared (and normalized to) the required state
+    OkUndeclared,  ///< nothing declared: legacy path, caller warns
+    Refused        ///< declared conflicting/derived/unknown/wrong: @a reason set
+};
+
+/// Validates that a dataset declares @p required (or nothing) before an
+/// algorithm that is only lawful for that state runs. Conflicting, derived,
+/// unrecognized and mismatched declarations are refusals with a reason.
+SarStateCheck checkDeclaredState( const GdalDatasetWrapper &ds, const QString &required,
+                                  QString *reason );
+
+/// Parses a per-row calibration LUT sidecar: one finite, positive ASCII
+/// number per line; @a expectedRows must equal the line count exactly (no
+/// interpolation, no resampling — a mismatch is an error, not a guess).
+/// Returns false with @a error set on any violation.
+bool parseCalibrationLut( const QString &path, int expectedRows,
+                          std::vector<double> *values, QString *error );
 
 } // namespace sicnu::sar
