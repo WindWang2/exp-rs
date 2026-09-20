@@ -6,6 +6,7 @@
 // (import → calibrate → speckle → terrain → geocode → derived).
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -568,33 +569,37 @@ TEST_CASE( "terrain operators accept a legacy undeclared input with a warning",
     const AppInit app;
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
-    const QString in = tmp.filePath( "undeclared_in.tif" );
-    const QString out = tmp.filePath( "undeclared_out.tif" );
     const QString dem = tmp.filePath( "undeclared_dem.tif" );
-    REQUIRE( writeRasterEx( in, std::vector<float>( 16, 0.4f ), 4, 4, {} ) );
     REQUIRE( writeRasterEx( dem, std::vector<float>( 16, 100.0f ), 4, 4, {} ) );
-    Json::Value params = baseParams( in, out );
-    params["dem"] = dem.toStdString();
-    params["incidenceDeg"] = 35.0;
-    runOp( "rs:sar_terrain_flatten", params );
-    REQUIRE( metaItem( out, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
-    // The sigma0 assumption is persisted as machine-readable provenance so
-    // downstream guards can see it (a log line does not travel with the file).
-    REQUIRE( metaItem( out, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
 
-    // A declared sigma0 input carries no assumed-state key.
-    const QString declaredIn = tmp.filePath( "declared_in.tif" );
-    const QString declaredOut = tmp.filePath( "declared_out.tif" );
-    const QString declaredDem = tmp.filePath( "declared_dem.tif" );
-    REQUIRE( writeRasterEx( declaredIn, std::vector<float>( 16, 0.4f ), 4, 4,
-                            { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
-    REQUIRE( writeRasterEx( declaredDem, std::vector<float>( 16, 100.0f ), 4, 4, {} ) );
-    Json::Value declaredParams = baseParams( declaredIn, declaredOut );
-    declaredParams["dem"] = declaredDem.toStdString();
-    declaredParams["incidenceDeg"] = 35.0;
-    runOp( "rs:sar_terrain_flatten", declaredParams );
-    REQUIRE( metaItem( declaredOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
-    REQUIRE( metaItem( declaredOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
+    for ( const char *id : { "rs:sar_terrain_flatten", "rs:sar_terrain_correction" } )
+    {
+        const QString tag = QString::fromLatin1( id ).mid( 8 );
+        const QString in = tmp.filePath( tag + "_undeclared_in.tif" );
+        const QString out = tmp.filePath( tag + "_undeclared_out.tif" );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 0.4f ), 4, 4, {} ) );
+        Json::Value params = baseParams( in, out );
+        params["dem"] = dem.toStdString();
+        params["incidenceDeg"] = 35.0;
+        runOp( id, params );
+        REQUIRE( metaItem( out, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
+        // The sigma0 assumption is persisted as machine-readable provenance so
+        // downstream guards can see it (a log line does not travel with the
+        // file).
+        REQUIRE( metaItem( out, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
+
+        // A declared sigma0 input carries no assumed-state key.
+        const QString declaredIn = tmp.filePath( tag + "_declared_in.tif" );
+        const QString declaredOut = tmp.filePath( tag + "_declared_out.tif" );
+        REQUIRE( writeRasterEx( declaredIn, std::vector<float>( 16, 0.4f ), 4, 4,
+                                { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
+        Json::Value declaredParams = baseParams( declaredIn, declaredOut );
+        declaredParams["dem"] = dem.toStdString();
+        declaredParams["incidenceDeg"] = 35.0;
+        runOp( id, declaredParams );
+        REQUIRE( metaItem( declaredOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
+        REQUIRE( metaItem( declaredOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +648,21 @@ TEST_CASE( "geocode refuses declared states other than sigma0 and conflicting me
         REQUIRE( !QFileInfo::exists( out ) );
     }
 
+    // The legacy undeclared path still geocodes, and persists the sigma0
+    // assumption as machine-readable provenance.
+    {
+        const QString in = tmp.filePath( "geo_undeclared_in.tif" );
+        const QString out = tmp.filePath( "geo_undeclared_out.tif" );
+        REQUIRE( writeSarScene( in, std::vector<float>( 64, 0.4f ), {} ) );
+        Json::Value params( Json::objectValue );
+        params["input"] = in.toStdString();
+        params["dem"] = dem.toStdString();
+        params["output"] = out.toStdString();
+        runOp( "rs:sar_geocode", params );
+        REQUIRE( metaItem( out, sicnu::sar::kRadiometricStateKey ) == "sigma0" );
+        REQUIRE( metaItem( out, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
+    }
+
     // A declared dB scene is linear-power-only territory for these products.
     {
         const QString in = tmp.filePath( "db_in.tif" );
@@ -684,7 +704,10 @@ TEST_CASE( "derived ratio/texture products are refused by calibrate and backscat
         const QString outCal = tmp.filePath( QFileInfo( in ).fileName() + ".cal.tif" );
         Json::Value calParams = baseParams( in, outCal );
         calParams["calibrationA"] = 2.0;
-        REQUIRE_THROWS_AS( runOp( "rs:sar_calibrate", calParams ), RSOperatorError );
+        // The refusal must name the derived-product class, not the generic
+        // "unrecognized token" text (message quality is part of the contract).
+        REQUIRE_THROWS_WITH( runOp( "rs:sar_calibrate", calParams ),
+                             Catch::Matchers::ContainsSubstring( "derived SAR product" ) );
         REQUIRE( !QFileInfo::exists( outCal ) );
 
         const QString outBs = tmp.filePath( QFileInfo( in ).fileName() + ".bs.tif" );
@@ -725,7 +748,9 @@ TEST_CASE( "ratio refuses conflicting and derived input declarations",
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
 
-    // Conflicting declarations on one input: unreadable contract, refuse.
+    // Conflicting declarations on BOTH inputs: both effective tokens are
+    // unreadable (""), so only the explicit conflict check can refuse — the
+    // mismatch check alone would see "" == "" and pass.
     {
         const QString a = tmp.filePath( "conf_a.tif" );
         const QString b = tmp.filePath( "conf_b.tif" );
@@ -734,7 +759,8 @@ TEST_CASE( "ratio refuses conflicting and derived input declarations",
                                 { { sicnu::sar::kCalibrationKey, "sigma0" },
                                   { sicnu::sar::kRadiometricStateKey, "gamma0" } } ) );
         REQUIRE( writeRasterEx( b, std::vector<float>( 16, 0.2f ), 4, 4,
-                                { { sicnu::sar::kCalibrationKey, "sigma0" } } ) );
+                                { { sicnu::sar::kCalibrationKey, "sigma0" },
+                                  { sicnu::sar::kRadiometricStateKey, "beta0" } } ) );
         Json::Value params( Json::objectValue );
         params["inputA"] = a.toStdString();
         params["inputB"] = b.toStdString();
@@ -795,6 +821,7 @@ TEST_CASE( "calibrate applies a per-row LUT with hand-computed pixel values",
     // 4 rows; DN = 10·(row+1). LUT A = [2, 4, 5, 10].
     // sigma0 = DN²/A²  →  row0 100/4 = 25, row1 400/16 = 25,
     //                      row2 900/25 = 36, row3 1600/100 = 16.
+    const float expected[4] = { 25.0f, 25.0f, 36.0f, 16.0f };
     std::vector<float> dn( 16 );
     for ( int row = 0; row < 4; ++row )
         for ( int col = 0; col < 4; ++col )
@@ -810,9 +837,22 @@ TEST_CASE( "calibrate applies a per-row LUT with hand-computed pixel values",
     params["calibrationLut"] = lut.toStdString();
     runOp( "rs:sar_calibrate", params );
 
+    // The same LUT without a trailing newline must parse identically.
+    const QString lutNoEol = tmp.filePath( "lut_no_eol.txt" );
+    const QString outNoEol = tmp.filePath( "lut_no_eol_out.tif" );
+    REQUIRE( writeTextFile( lutNoEol, QStringLiteral( "2\n4\n5\n10" ) ) );
+    Json::Value noEolParams = baseParams( in, outNoEol );
+    noEolParams["calibrationLut"] = lutNoEol.toStdString();
+    runOp( "rs:sar_calibrate", noEolParams );
+    const std::vector<float> sigma0NoEol = readBand( outNoEol );
+    REQUIRE( sigma0NoEol.size() == 16 );
+    for ( int row = 0; row < 4; ++row )
+        for ( int col = 0; col < 4; ++col )
+            REQUIRE( sigma0NoEol[static_cast<size_t>( row ) * 4 + col]
+                     == Approx( expected[row] ).margin( 1e-5 ) );
+
     const std::vector<float> sigma0 = readBand( out );
     REQUIRE( sigma0.size() == 16 );
-    const float expected[4] = { 25.0f, 25.0f, 36.0f, 16.0f };
     for ( int row = 0; row < 4; ++row )
         for ( int col = 0; col < 4; ++col )
             REQUIRE( sigma0[static_cast<size_t>( row ) * 4 + col] == Approx( expected[row] ).margin( 1e-5 ) );
@@ -943,9 +983,15 @@ TEST_CASE( "calibrate LUT resolution: precedence, containment and count directio
     }
 
     // Declared path escaping the raster's directory is refused (traversal).
+    // The raster lives in a subdirectory and the outside LUT EXISTS with a
+    // valid row-exact content, so without the containment check the run would
+    // succeed — the refusal can only come from the containment rule.
     {
-        const QString in = tmp.filePath( "escape_in.tif" );
-        const QString out = tmp.filePath( "escape_out.tif" );
+        REQUIRE( QDir( tmp.path() ).mkdir( "product" ) );
+        const QString outsideLut = tmp.filePath( "outside_lut.txt" );
+        REQUIRE( writeTextFile( outsideLut, QStringLiteral( "2\n2\n2\n2\n" ) ) );
+        const QString in = tmp.filePath( "product/escape_in.tif" );
+        const QString out = tmp.filePath( "product/escape_out.tif" );
         REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4,
                                 { { "SICNU_SAR_CALIBRATION_LUT",
                                     "../outside_lut.txt" } } ) );

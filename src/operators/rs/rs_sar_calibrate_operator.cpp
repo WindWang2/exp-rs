@@ -203,13 +203,24 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
             {
                 // Declared metadata is data-controlled: resolve relative to
                 // the declaring raster and refuse anything that escapes the
-                // raster's directory (no traversal, no absolute detours).
+                // raster's directory (no traversal, no absolute detours). The
+                // comparison uses canonical paths where they resolve (symlinks
+                // included) and falls back to the lexical form otherwise; a
+                // raster at the filesystem root has no containing subtree and
+                // is refused rather than special-cased.
                 const QString baseDir =
                     QFileInfo( QString::fromStdString( inputPath ) ).absolutePath();
                 lutPath = QFileInfo( declaredLut ).isAbsolute()
                               ? QDir::cleanPath( declaredLut )
                               : QDir::cleanPath( QDir( baseDir ).filePath( declaredLut ) );
-                if ( !lutPath.startsWith( baseDir + QLatin1Char( '/' ) ) )
+                const QString canonicalBase = QDir( baseDir ).canonicalPath();
+                const QString canonicalLut = QFileInfo( lutPath ).canonicalFilePath();
+                const bool contained = baseDir != QDir::rootPath()
+                                       && ( ( !canonicalBase.isEmpty()
+                                              && !canonicalLut.isEmpty()
+                                              && canonicalLut.startsWith( canonicalBase + QLatin1Char( '/' ) ) )
+                                            || lutPath.startsWith( baseDir + QLatin1Char( '/' ) ) );
+                if ( !contained )
                 {
                     throw RSOperatorError(
                         ErrorCode::InvalidParameter,

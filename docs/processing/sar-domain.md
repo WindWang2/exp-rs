@@ -525,9 +525,13 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    refused). The explicit `calibrationLut` parameter overrides the declared
    sidecar and is used verbatim (CWD-relative or absolute). Per pixel/row r: `sigma0 = (DN² − noiseLinear)/A(r)²`, with the
    same NoData and nonpositive-power policies as the constant path.
-   Interpolation is defined as *none* — a row-count mismatch, an unreadable
-   file, a non-numeric or non-positive entry is a typed refusal; the constant
-   A is never substituted for an unreadable calibration contract.
+   Interpolation is defined as *none* — a row-count mismatch (in either
+   direction), an unreadable file, a non-numeric or non-positive entry, a
+   mid-stream I/O error, or a sidecar beyond the per-row byte budget is a
+   typed refusal; the constant A is never substituted for an unreadable
+   calibration contract. Containment compares canonical paths where they
+   resolve (symlinks included) with a lexical fallback; a raster at the
+   filesystem root has no containing subtree and is refused.
    Annotation-XML LUTs (Sentinel-1 style) are not parsed and are documented as
    unsupported; the GF-3 adapter likewise invents no constants (ADR 0159).
 6. **E2E provenance.** `tests/test_sar_radiometric_state.cpp` runs

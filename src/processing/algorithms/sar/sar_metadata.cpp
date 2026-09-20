@@ -224,13 +224,12 @@ bool parseCalibrationLut( const QString &path, int expectedRows, std::vector<dou
   // before reading anything: one value per row, and a generous per-value
   // budget. A file that cannot possibly be a row-exact LUT is refused on its
   // size, never materialized.
-  const qint64 maxBytes = static_cast<qint64>( expectedRows ) * 64 + 4096;
+  const qint64 maxBytes = static_cast<qint64>( expectedRows ) * 256 + 4096;
   if ( file.size() > maxBytes )
   {
     if ( error )
       *error = QStringLiteral(
-                   "calibration LUT '%1' is %2 bytes, far larger than the %3-row budget; one "
-                   "value per input row is required" )
+                   "calibration LUT '%1' is %2 bytes, beyond the %3-row per-row byte budget" )
                    .arg( path )
                    .arg( file.size() )
                    .arg( expectedRows );
@@ -280,6 +279,14 @@ bool parseCalibrationLut( const QString &path, int expectedRows, std::vector<dou
       return false;
     }
     values->push_back( value );
+  }
+  if ( stream.status() != QTextStream::Ok )
+  {
+    if ( error )
+      *error = QStringLiteral( "calibration LUT '%1' could not be read (I/O error at row %2)" )
+                   .arg( path )
+                   .arg( lineNumber );
+    return false;
   }
   if ( static_cast<int>( values->size() ) != expectedRows )
   {
