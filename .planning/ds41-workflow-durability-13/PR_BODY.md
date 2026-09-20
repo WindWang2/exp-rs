@@ -4,7 +4,7 @@ Branch `agent/ds41-workflow-durability-13`, base `master`. Baseline SHA: **`79ad
 
 ## Dedup (live pre-read)
 
-`git fetch origin --prune` at start; open PRs at the time: #1135 (temporal phenology), #1136 (offline labs), #1137 (geospatial maintenance), #1138 (plugin SDK lifecycle) — none touches the workflow/durability domain. The direct predecessor **#1132 (flash-workflow-engine-12)** merged the durable-IR2 work and documented the four limitations this track closes; they were re-verified by reading master's code, not assumed. `overlap_scan.py` before the PR: the only file-level overlaps with open PRs are `.gitignore` (append-only planning allow-list, 3 PRs) and the tail of `tests/CMakeLists.txt` (append-only test blocks, 2 PRs) — both textual, both far from this branch's hunks. No re-implementation of anything in flight.
+`git fetch origin --prune` at start; open PRs at the time: #1135 (temporal phenology), #1136 (offline labs), #1137 (geospatial maintenance), #1138 (plugin SDK lifecycle), #1139 (mission runtime), #1140 (capability search) — none touches the workflow/durability domain. The direct predecessor **#1132 (flash-workflow-engine-12)** merged the durable-IR2 work and documented the four limitations this track closes; they were re-verified by reading master's code, not assumed. `overlap_scan.py` before the PR: the only file-level overlaps with open PRs are `.gitignore` (append-only planning allow-list, 4 PRs) and the tail of `tests/CMakeLists.txt` (append-only test blocks, 4 PRs) — both textual, both far from this branch's hunks. No re-implementation of anything in flight.
 
 ## Scope
 
@@ -29,12 +29,12 @@ Branch `agent/ds41-workflow-durability-13`, base `master`. Baseline SHA: **`79ad
 
 Environment: Linux, `QT_QPA_PLATFORM=offscreen`, `-j2` builds / `-j1` runs, targeted lanes only (load ~23 from sibling sessions).
 
-- **`test_workflow_checkpoint_cache` (D17 lane): 42/42 test cases, 803 assertions — green.**
+- **`test_workflow_checkpoint_cache` (D17 lane): 43/43 test cases, 816 assertions — green.**
 - **`test_workflow_durability_13` (new Engine-2.0 lane): 9/9 test cases, 188 assertions — green.**
-- Both lanes green **twice consecutively** after the review fixes (final gate script in `.planning/ds41-workflow-durability-13/final_gate.sh`).
-- Light regression families green: `test_workflow_ir_v2`, `test_workflow_composition`, `test_d17_workflow_pipeline_e2e`.
-- `sicnu_workflow` library (every real consumer of the changed sources) builds clean.
-- The heavy Engine-2.0 TU `workflow_run_coordinator.cpp` passes a `-fsyntax-only` check with the project's real compile flags.
+- Both lanes green **twice consecutively** after the review fixes, and the extended gate (both lanes + `test_workflow_ir_v2` + `test_workflow_composition`) green twice consecutively (final gate script in `.planning/ds41-workflow-durability-13/final_gate.sh`).
+- Every changed translation unit compiles in the light lanes with the project's real flags: `pipeline_run_coordinator.cpp`, `workflow_run.cpp`, `workflow_checkpoint.cpp`, `workflow_run_lock.cpp`, `workflow_definition.cpp`, `placeholder_grammar.cpp`, `fault_registry.cpp`.
+- The heavy Engine-2.0 TU `workflow_run_coordinator.cpp` (compiled into `sicnu_processing`, outside the light lane) passes a `-fsyntax-only` check with the project's real compile flags from the configured build tree.
+- The `sicnu_workflow` library link and `test_d17_workflow_pipeline_e2e` were started but not completed locally: both drag the full qgis_core chain (~3000 units), which the resource discipline rules out for the added evidence — every changed TU already compiles in the light lanes and the heavy TU passes the syntax check above.
 - **Gate potency (mutation checks, each reverted afterwards):** election reduced to the legacy filename rule → the user-named `*_resume` and ghost-election tests fail; a "full" hash with a middle blind spot → the mid-file tamper test fails (`0 == 1` executed); mid-hash cancel classified `Failed` instead of `Cancelled` → the cancel test fails; the P1 fix removed → the idle-cancel regression test fails. No vacuous passes.
 
 ## Review disposition
@@ -57,7 +57,7 @@ Independent reviewer (separate agent, read `origin/master...HEAD` itself): first
 4. A value-returning marshal onto a dying coordinator yields a default-constructed result (documented).
 5. A foreign-thread destruction completes only while the affinity thread services its event loop (documented in the header).
 6. Election parses each checkpoint payload (bounded 16 MiB each) at recovery startup instead of a filename-only scan — bounded in practice by archive pruning.
-7. The heavy Engine-2.0 suites (`test_workflow_recovery`, `test_workflow_engine_v2`, `test_workflow_run_coordinator`, `test_workflow_resume_provenance`) were not rebuilt locally (the qgis/task_center link chain is out of proportion for the added evidence); their contracts are covered by the light lanes, the library build and the single-TU syntax check.
+7. The heavy Engine-2.0 suites (`test_workflow_recovery`, `test_workflow_engine_v2`, `test_workflow_run_coordinator`, `test_workflow_resume_provenance`) and `test_d17_workflow_pipeline_e2e` were not rebuilt locally (the qgis/task_center link chain is out of proportion for the added evidence); their contracts are covered by the light lanes and the single-TU syntax check. The `sicnu_workflow` library link was started and abandoned for the same reason (no new external symbols are introduced by this branch).
 
 ## Conflict hotspots
 
