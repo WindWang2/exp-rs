@@ -469,3 +469,65 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    fromCalibration mismatch refusal, matching-state conversion, speckle
    state propagation incl. multitemporal reference-scene semantics,
    inert sameState domain conversion).
+
+## 16. Radiometric State 13.0: census, derived products, LUT calibration (Track E)
+
+1. **Census.** Every operator registered under the `rs:sar_` prefix carries a
+   machine-readable state rule or an explicit exemption in
+   `tests/test_sar_radiometric_state.cpp` (`sarCensus()`): the test enumerates
+   `RSOperatorRegistry::instance().operatorNames()` and fails on an
+   unclassified operator or a stale table row. Eight operators are the
+   first-class radiometric family (`calibrate`, `backscatter`, `speckle`,
+   `terrain_flatten`, `terrain_correction`, `geocode`, `ratio`, `texture`); the
+   remaining fifteen are exempt with the reason recorded in the table
+   (complex/phase products, geometry/displacement fields, polarimetric and
+   dual-pol feature cubes, masks, temporal aggregates).
+2. **Derived products.** `rs:sar_ratio` writes `SICNU_RADIOMETRIC_STATE` and
+   `SICNU_SAR_CALIBRATION` = `sar_pair_metric`; `rs:sar_texture` writes
+   `sar_texture`. These tokens are *not* calibration states:
+   `normalizeCalibration()` maps them to `""`, so `rs:sar_calibrate` and
+   `rs:sar_backscatter` refuse them with a derived-product message (a pair
+   metric or GLCM measure is never a backscatter calibration), and
+   `rs:sar_speckle` propagates them so filtering a derived product does not
+   silently drop its state.
+3. **Terrain family input contract.** `rs:sar_terrain_flatten` and
+   `rs:sar_terrain_correction` apply `sigma0·cosθ0/cosθi`, which is only
+   lawful for sigma0 input. A declared `gamma0`/`beta0`/`dn`, a derived token,
+   a conflicting declaration (`SICNU_SAR_CALIBRATION` vs
+   `SICNU_RADIOMETRIC_STATE` disagreeing) or an unrecognized token is a typed
+   refusal before any output is created. A legacy scene that declares nothing
+   is accepted with a logged warning under the documented sigma0 assumption.
+   Layover/shadow masks do not change the radiometric state: they mark
+   validity per pixel, the surviving pixels stay gamma0.
+4. **Geocode state block.** `rs:sar_geocode` requires the same declared sigma0
+   contract (its gamma0 band applies `sin(θL)/sin(θ0)`, Ulander 1996 / Small
+   2011 eq. 5) and, like the terrain family, refuses a declared
+   `SICNU_SAR_DOMAIN=db` scene (the products are linear power). The output now
+   writes the full state block — `SICNU_MODALITY`,
+   `SICNU_SAR_CALIBRATION=sigma0`, `SICNU_SAR_DOMAIN=linear_power`,
+   `SICNU_RADIOMETRIC_STATE=sigma0` — plus the additive per-band map
+   `SICNU_SAR_GEOCODE_BAND_STATES = sigma0,gamma0,incidence_deg,
+   incidence_deg,mask_class` (the product is inherently mixed; one dataset
+   token cannot describe five bands). `result.bandStates` mirrors the key.
+5. **DN LUT calibration.** `rs:sar_calibrate` accepts a per-row calibration
+   LUT: a plain-text sidecar with exactly one finite, positive calibration
+   constant per input row, referenced by the `calibrationLut` parameter or the
+   declared `SICNU_SAR_CALIBRATION_LUT` metadata (resolved relative to the
+   raster). Per pixel/row r: `sigma0 = (DN² − noiseLinear)/A(r)²`, with the
+   same NoData and nonpositive-power policies as the constant path.
+   Interpolation is defined as *none* — a row-count mismatch, an unreadable
+   file, a non-numeric or non-positive entry is a typed refusal; the constant
+   A is never substituted for an unreadable calibration contract.
+   Annotation-XML LUTs (Sentinel-1 style) are not parsed and are documented as
+   unsupported; the GF-3 adapter likewise invents no constants (ADR 0159).
+6. **E2E provenance.** `tests/test_sar_radiometric_state.cpp` runs
+   `import (DN) → calibrate → speckle → terrain_flatten (→ gamma0) → ratio`
+   plus a `geocode` branch, asserts the declared state after every step,
+   refuses double calibration, geocoding of a gamma0 product, a ratio of
+   derived products, mixed-state ratio inputs, and missing/malformed LUTs
+   (each with no partial output), and reopens every chain output to confirm
+   the metadata survives.
+7. Evidence: `tests/test_sar_radiometric_state.cpp` (census completeness,
+   behavioral state gate, terrain refusals + legacy warning, geocode state
+   block + conflict refusal, derived-token refusals, LUT hand-computed pixel
+   oracle + refusal matrix, E2E chain).
