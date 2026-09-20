@@ -83,3 +83,73 @@ The in-repo CMake targets for `sicnu_geo_rs` / `sicnu_agent` cannot be built in 
 environment; the two new workbench sources and the new test targets are registered in
 `src/app/CMakeLists.txt` and `tests/CMakeLists.txt` (append-only) so the real build
 compiles exactly the verified files, and the out-of-tree harness proves their behaviour.
+
+## Review dispositions (independent review, first pass BLOCK)
+
+Review of `origin/master...HEAD` by an independent read-only agent. Findings
+F1–F16; all P0/P1 fixed and re-verified, P2 fixed, P3 fixed or documented.
+
+- **F1 (P0)** `command_defs.cpp` used `ContextRules::missionTaskRetryable` /
+  `missionTaskResumable` without a header declaration → the desktop target
+  would not compile. FIXED (declared in `selection_context.h`), and a new
+  compile-substitute gate (`test_mission_runtime_parity.cpp`: "shell hunks
+  reference only declared ContextRules predicates") parses the real sources
+  so this failure class cannot recur silently; re-injection verified red.
+- **F2 (P1)** `onProjectWrite` persisted the window's stale timeline cache
+  over an agent commit made between saves. FIXED: the save path reloads the
+  authority first and takes only the timeline; the live context stays owned
+  by the window; a mission-id mismatch is logged, never merged.
+- **F3 (P1)** the poison guard was bypassed because a failed load discarded
+  the poisoned state. FIXED: the failed-load state is propagated to
+  `m_missionRuntime`, and `onProjectWrite` refuses the mission block while
+  `authorityCorrupt` is set (the project itself still saves).
+- **F4 (P2)** `refreshMissionRuntime()` overwrote the live mission context.
+  FIXED: a refresh takes the timeline from the authority and leaves the live
+  context alone (adopting the disk document only on first load or a mission
+  switch).
+- **F5 (P2)** out-of-range integers escaped as an untyped jsoncpp exception.
+  FIXED: bounded readers (`optionalBoundedInt`, `optionalCursor`) answer
+  `INVALID_PARAMETER`; gates added.
+- **F6 (P2)** `error_message` / `note` were unbounded and persisted verbatim.
+  FIXED: clamped at the door (2000 / 500 chars) and gate-added.
+- **F7 (P2)** the timeline projection returned the whole event log.
+  FIXED: events are capped by `max_items` and truncation is declared
+  (`events_total` / `events_truncated`).
+- **F8 (P2)** the reconcile-persist failure in `refreshMissionRuntime` was
+  silent. FIXED: reported, and the display stays on the last durably
+  persisted state.
+- **F9 (P2)** terminal transitions were unverified assertions. DOCUMENTED as
+  the mission-ledger contract in the tool description, the surface registry
+  (kept identical by the parity gate) and ADR 0166.
+- **F10/F12/F13 (P3, pre-existing 12.0 behaviour)** `tasks()` returns by
+  value; `applyEvents` scans all rows; `bindRunReference` bumps the revision
+  without an event. NOT changed (shared 12.0 code, out of this track's
+  surgical scope); documented as known limitations. The scale gate bounds
+  only what it measures.
+- **F11 (P3)** the panel copied the task vector per selection change. FIXED:
+  it now uses the model's `projectionAt` / `rowOfTask`.
+- **F14 (P3)** a short/tampered `last_event_seq` could mint duplicate seqs.
+  FIXED: the cursor is backfilled from the log (`qMax`); gate added.
+- **F15 (P3)** header documented pre-commit rotation while the code rotates
+  after commit. FIXED (doc).
+- **F16 (P3)** dead code in `readRuntime`; `sicnu_agent` needed `Qt6::Xml`
+  (QDomDocument in the authority interface); `nameChanged` was watched only
+  for layers added after setup; the panel signal needed a metatype;
+  `layersRemoved` could reconcile a previous project's sidecar during
+  teardown; the Pi category gate was satisfiable by a comment; the
+  fingerprint gate was near-vacuous; the panel's incremental path was dead;
+  the Windows duplicate-symbol hazard (mission sources in both the exe and
+  the DLL). ALL FIXED: Qt6::Xml linked; the exe no longer compiles the three
+  Qt-Core mission sources (they come from `sicnu_agent`); existing layers are
+  watched at setup; `Q_DECLARE_METATYPE` at global scope; a projectRef guard;
+  the Pi gate now requires the exact category literal; the fingerprint gate
+  gained discrimination assertions; the panel's `applyEvents` is driven by
+  `refreshMissionRuntime`; the `mutateRuntime` re-entrancy constraint is
+  documented.
+
+Known limitations carried into the PR body: shell hunks are not compiled in
+this environment (mitigated by the compile-substitute gate); the project-XML
+channel is written by `onProjectWrite` (the sidecar stays the authority
+between saves); the 12.0 legacy sidecar is never deleted; mission tool calls
+perform blocking file I/O on the calling thread; the persisted event log is
+unbounded (projections are bounded).

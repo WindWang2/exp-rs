@@ -672,8 +672,11 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
         intFromJson( obj.value( QStringLiteral( "revision" ) ) ) );
     decoded.mSeq = static_cast<quint64>(
         intFromJson( obj.value( QStringLiteral( "last_event_seq" ) ) ) );
-    if ( decoded.mSeq == 0 && !decoded.mEvents.isEmpty() )
-        decoded.mSeq = decoded.mEvents.last().seq;
+    // Backfill from the log itself: a short or tampered last_event_seq must
+    // never make the next mutation mint a DUPLICATE seq — that would break
+    // eventsSince() for every incremental consumer (GUI model, agent cursor).
+    if ( !decoded.mEvents.isEmpty() )
+        decoded.mSeq = qMax( decoded.mSeq, decoded.mEvents.last().seq );
 
     *this = std::move( decoded );
     return true;

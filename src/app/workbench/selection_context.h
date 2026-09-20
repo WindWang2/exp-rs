@@ -157,6 +157,12 @@ bool experimentSelected( const SelectionContextSnapshot &s );
 bool datasetSelected( const SelectionContextSnapshot &s );
 bool modelSelected( const SelectionContextSnapshot &s );
 bool workflowRunSelected( const SelectionContextSnapshot &s );
+/// Mission Runtime 13.0: the mission timeline's selected task (id only).
+bool missionTaskSelected( const SelectionContextSnapshot &s );
+/// The selected mission task can be retried (failed / canceled).
+bool missionTaskRetryable( const SelectionContextSnapshot &s );
+/// The selected mission task can be resumed (stale / canceled).
+bool missionTaskResumable( const SelectionContextSnapshot &s );
 /// Stable wire ids of the currently selected/active layers (QgsMapLayer::id),
 /// selection order with the active layer first. Bounded by the selection.
 QStringList selectedLayerIds( const SelectionContextSnapshot &s );

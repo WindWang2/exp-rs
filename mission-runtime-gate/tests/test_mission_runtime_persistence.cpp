@@ -33,6 +33,7 @@
 #include <QCryptographicHash>
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <cstdio>
 
 #include <catch2/catch_test_macros.hpp>
@@ -499,6 +500,68 @@ TEST_CASE( "embedding the timeline does not change the mission fingerprint",
     const QString before = missionContentFingerprint( state.context );
     embedMissionTimeline( state.context, state.timeline );
     CHECK( missionContentFingerprint( state.context ) == before );
+
+    // Discrimination: the exclusion above must be about METADATA, not a
+    // fingerprint that never moves. A real scientific change still moves it.
+    MissionRuntimeState other = makeRuntime( QStringLiteral( "mission-fp" ) );
+    other.context.missionName = QStringLiteral( "Renamed mission" );
+    CHECK( missionContentFingerprint( other.context ) != before );
+    MissionRuntimeState extra = makeRuntime( QStringLiteral( "mission-fp" ) );
+    extra.context.assets.append( WorkbenchObjectRef{ ObjectKind::Asset,
+                                                     QStringLiteral( "asset-9" ),
+                                                     QStringLiteral( "Asset 9" ) } );
+    CHECK( missionContentFingerprint( extra.context ) != before );
+}
+
+// ── F14: a short/tampered event cursor must never mint duplicate seqs ────
+
+TEST_CASE( "a tampered last_event_seq cannot mint duplicate event seqs",
+           "[mission][persistence]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( uniqueStem() + QStringLiteral( ".qgz" ) );
+
+    MissionRuntimeState state = makeRuntime( QStringLiteral( "mission-seq" ) );
+    QDomDocument doc;
+    QString err;
+    REQUIRE( saveMissionRuntime( project, doc, state, &err ) );
+
+    // Rewrite the authority with a SHORTER last_event_seq than the log holds
+    // (a torn or hand-edited document).
+    QJsonObject authority = sidecarDoc( project );
+    QJsonObject metadata = authority.value( QStringLiteral( "metadata" ) ).toObject();
+    QJsonObject embedded = metadata.value( QLatin1String( kMissionTimelineMetadataKey ) ).toObject();
+    const int realLastSeq = static_cast<int>(
+        embedded.value( QStringLiteral( "last_event_seq" ) ).toInteger() );
+    REQUIRE( realLastSeq > 3 );
+    embedded.insert( QStringLiteral( "last_event_seq" ), 3 );
+    metadata.insert( QLatin1String( kMissionTimelineMetadataKey ), embedded );
+    authority.insert( QStringLiteral( "metadata" ), metadata );
+    writeAll( missionSidecarPathForProject( project ),
+              QJsonDocument( authority ).toJson( QJsonDocument::Indented ) );
+
+    MissionRuntimeState loaded;
+    REQUIRE( loadMissionRuntime( project, QDomDocument(), loaded, &err ) );
+    // The cursor is backfilled from the log: the next mutation continues the
+    // sequence instead of re-minting seq 4 (which would break eventsSince()
+    // for every incremental consumer).
+    CHECK( loaded.timeline.lastEventSeq()
+           == static_cast<quint64>( realLastSeq ) );
+    const MissionOutcome outcome =
+        loaded.timeline.transition( QStringLiteral( "import-1" ),
+                                    MissionTaskStatus::Stale,
+                                    QStringLiteral( "2026-09-21T06:00:00Z" ) );
+    REQUIRE( outcome.applied );
+    CHECK( loaded.timeline.events().last().seq
+           == static_cast<quint64>( realLastSeq + 1 ) );
+    // Every seq in the log is unique (no duplicates were minted).
+    QVector<quint64> seqs;
+    for ( const MissionEvent &ev : loaded.timeline.events() )
+        seqs.push_back( ev.seq );
+    std::sort( seqs.begin(), seqs.end() );
+    CHECK( std::adjacent_find( seqs.begin(), seqs.end() ) == seqs.end() );
+    CHECK( seqs.size() == loaded.timeline.events().size() );
 }
 
 // ── O8: no fake Running after crash/reopen ───────────────────────────────

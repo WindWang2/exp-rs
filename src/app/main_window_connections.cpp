@@ -116,12 +116,17 @@ void QgisDesktopWindow::setupConnections()
         // tasks become Stale instead of pointing at nothing.
         reconcileMissionRuntimeAfterLayerChange();
     } );
-    connect( QgsProject::instance(), &QgsProject::layerWasAdded, this,
-             [this]( QgsMapLayer *layer ) {
-                 if ( layer )
-                     connect( layer, &QgsMapLayer::nameChanged, this,
-                              [this]() { syncMissionLayerDisplayNames(); } );
-             } );
+    const auto watchLayerName = [this]( QgsMapLayer *layer ) {
+        if ( layer )
+            connect( layer, &QgsMapLayer::nameChanged, this,
+                     [this]() { syncMissionLayerDisplayNames(); } );
+    };
+    connect( QgsProject::instance(), &QgsProject::layerWasAdded, this, watchLayerName );
+    // Layers already in the project when the shell wired up: watch them too,
+    // otherwise a rename of a pre-existing layer never syncs.
+    if ( QgsProject::instance() )
+        for ( QgsMapLayer *layer : QgsProject::instance()->mapLayers() )
+            watchLayerName( layer );
 
     // Project signals
     connect(QgsProject::instance(), &QgsProject::readProject,
@@ -315,6 +320,12 @@ void QgisDesktopWindow::reconcileMissionRuntimeAfterLayerChange()
     const QString projectPath = QgsProject::instance()->fileName();
     if ( projectPath.isEmpty() || m_missionRuntime.timeline.tasks().isEmpty() )
         return;
+    // The runtime must belong to the project being edited: layersRemoved also
+    // fires while a project is cleared/closed, and reconciling the previous
+    // project's sidecar mid-teardown would be wrong.
+    if ( !m_missionRuntime.context.projectRef.isEmpty()
+         && m_missionRuntime.context.projectRef != projectPath )
+        return;
     sicnu::app::MissionRuntimeState state;
     QString err;
     if ( !sicnu::app::loadMissionRuntime( projectPath, QDomDocument(), state, &err ) )
@@ -484,6 +495,10 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
         }
         else
         {
+            // F3: keep the poisoned state so the next save cannot publish an
+            // empty mission over the artifact the guard exists to protect.
+            m_missionRuntime = runtime;
+            m_mission = sicnu::app::MissionContext();
             statusBar()->showMessage(
                 tr( "Project loaded · mission runtime unavailable: %1" ).arg( missionErr ), 8000 );
             qWarning( "mission runtime restore: %s", qPrintable( missionErr ) );
@@ -515,21 +530,75 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
     // DataProjectSerializer (governance v3 downgrade risk) — see D-M5.
     {
         const QString projectPath = QgsProject::instance()->fileName();
-        if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
-            m_mission.projectRef = projectPath;
-        sicnu::app::ensureMissionId( m_mission );
-        m_missionRuntime.context = m_mission;
-        QString missionErr;
-        if ( !sicnu::app::saveMissionRuntime( projectPath, doc, m_missionRuntime, &missionErr ) )
+        if ( m_missionRuntime.authorityCorrupt )
         {
+            // The authority could not be decoded at open: publishing anything
+            // now would destroy the last known usable artifact. The project
+            // itself still saves; only the mission block is refused.
             QMessageBox::warning(
                 this, tr( "Mission Context" ),
-                tr( "Project saved, but mission runtime persistence failed:\n%1" )
-                    .arg( missionErr ) );
+                tr( "Project saved, but the mission runtime was NOT persisted: its "
+                   "authority document could not be read (corrupt or unsupported "
+                   "version). Fix or remove the mission sidecar next to the project "
+                   "file, then save again." ) );
         }
         else
         {
-            m_mission = m_missionRuntime.context;
+            // F2: the agent surface commits to the SAME authority between
+            // project saves. Reload the timeline here so a save can never
+            // revert an agent-committed transition with this window's stale
+            // cache. The live context (studio publishes) stays owned here.
+            sicnu::app::MissionRuntimeState disk;
+            QString reloadErr;
+            if ( sicnu::app::loadMissionRuntime( projectPath, doc, disk, &reloadErr ) )
+            {
+                if ( disk.authorityCorrupt )
+                {
+                    QMessageBox::warning(
+                        this, tr( "Mission Context" ),
+                        tr( "Project saved, but the mission runtime was NOT persisted: "
+                           "its authority document could not be read:\n%1" )
+                            .arg( reloadErr ) );
+                }
+                else
+                {
+                    if ( !disk.timeline.missionId().isEmpty()
+                         && !m_mission.missionId.isEmpty()
+                         && disk.timeline.missionId() != m_mission.missionId )
+                    {
+                        // Different mission on disk (project switched under us):
+                        // keep this window's live mission, do not mix them.
+                        qWarning( "mission save: disk mission %s != live mission %s",
+                                  qPrintable( disk.timeline.missionId() ),
+                                  qPrintable( m_mission.missionId ) );
+                    }
+                    else
+                    {
+                        m_missionRuntime.timeline = disk.timeline;
+                    }
+                }
+            }
+            else
+            {
+                qWarning( "mission save reload: %s", qPrintable( reloadErr ) );
+            }
+
+            if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
+                m_mission.projectRef = projectPath;
+            sicnu::app::ensureMissionId( m_mission );
+            m_missionRuntime.context = m_mission;
+            QString missionErr;
+            if ( !sicnu::app::saveMissionRuntime( projectPath, doc, m_missionRuntime, &missionErr ) )
+            {
+                QMessageBox::warning(
+                    this, tr( "Mission Context" ),
+                    tr( "Project saved, but mission runtime persistence failed:\n%1" )
+                        .arg( missionErr ) );
+            }
+            else
+            {
+                m_mission = m_missionRuntime.context;
+            }
         }
     }
     statusBar()->showMessage(tr("Project saved"), 2000);

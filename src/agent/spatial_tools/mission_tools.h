@@ -100,7 +100,10 @@ public:
     /// Serialized load → mutate → commit. `mutate` returns false for a domain
     /// rejection (nothing is committed, `reason` carries the machine code).
     /// The caller's `state` is refreshed from disk and left holding the
-    /// committed value on success.
+    /// committed value on success. The runtime mutex is NON-recursive and is
+    /// held across `mutate`: a mutation must never re-enter this host (e.g.
+    /// call applyMissionAction from inside another mutation) — that would
+    /// self-deadlock.
     using Mutation =
         std::function<bool( sicnu::app::MissionRuntimeState &state, QString &reason )>;
     bool mutateRuntime( sicnu::app::MissionRuntimeState &state, const Mutation &mutate,

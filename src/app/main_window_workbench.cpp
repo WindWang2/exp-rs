@@ -969,7 +969,9 @@ void QgisDesktopWindow::refreshMissionRuntime()
     if ( !sicnu::app::loadMissionRuntime( projectPath, QDomDocument(), state, &err ) )
     {
         // Fail closed and explain: a corrupt authority must never be
-        // silently replaced by an empty task space.
+        // silently replaced by an empty task space. Keep the poisoned state
+        // so a later project save refuses to publish over the artifact.
+        m_missionRuntime = state;
         statusBar()->showMessage( tr( "Mission runtime unavailable: %1" ).arg( err ), 8000 );
         if ( m_missionPanel )
         {
@@ -990,28 +992,59 @@ void QgisDesktopWindow::refreshMissionRuntime()
     }
 
     // A reopened project must not report a task as Running whose execution
-    // no longer exists (crash residue) — reconcile before any surface reads.
+    // no longer exists (crash residue) — reconcile against the live
+    // execution authorities before any surface reads the timeline. F8: a
+    // failed persist is reported, and the display stays on the last
+    // durably-persisted state rather than claiming a truth it does not have.
     const sicnu::app::MissionRunReconciliation runReport = sicnu::app::reconcileRunAuthority(
         state.timeline, sicnu::app::resolveMissionRunStatus,
         QDateTime::currentDateTimeUtc().toString( Qt::ISODate ) );
     if ( runReport.staleFromRun > 0 || runReport.succeededFromRun > 0 || runReport.failedFromRun > 0
          || runReport.canceledFromRun > 0 )
     {
-        // Persist the reconciled truth so every surface (and the next open)
-        // agrees.
         sicnu::app::MissionRuntimeState persisted = state;
         QString saveErr;
         QDomDocument doc;
-        sicnu::app::saveMissionRuntime( projectPath, doc, persisted, &saveErr );
-        state = persisted;
+        if ( sicnu::app::saveMissionRuntime( projectPath, doc, persisted, &saveErr ) )
+        {
+            state = persisted;
+        }
+        else
+        {
+            qWarning( "mission runtime reconcile persist: %s", qPrintable( saveErr ) );
+            statusBar()->showMessage(
+                tr( "Mission run authority reconciled in memory but NOT persisted: %1" )
+                    .arg( saveErr ),
+                8000 );
+        }
     }
 
-    m_missionRuntime = state;
-    m_mission = state.context;
+    // F4: m_mission is the live context this window owns (studio publishes
+    // write into it) — a refresh takes the TIMELINE from the authority and
+    // leaves that document alone, unless the disk document belongs to a
+    // different mission (project switched under us) or we have none yet.
+    const sicnu::app::MissionTimeline previous = m_missionRuntime.timeline;
+    const bool adoptContext = m_mission.missionId.isEmpty()
+                              || ( !state.context.missionId.isEmpty()
+                                   && state.context.missionId != m_mission.missionId );
+    if ( adoptContext )
+        m_mission = state.context;
+    m_missionRuntime.timeline = state.timeline;
+    m_missionRuntime.context = m_mission;
+
     if ( m_missionPanel )
     {
-        m_missionPanel->setTimeline( state.timeline );
-        m_missionPanel->setMissionHeader( state.context.missionId, state.timeline.currentStage(),
+        // Incremental when the mission is unchanged and no tasks appeared:
+        // the panel then applies only the events after the cursor instead of
+        // resetting the view.
+        const bool incremental = !previous.missionId().isEmpty()
+                                 && previous.missionId() == state.timeline.missionId()
+                                 && previous.tasks().size() == state.timeline.tasks().size();
+        if ( incremental )
+            m_missionPanel->applyEvents( state.timeline, previous.lastEventSeq() );
+        else
+            m_missionPanel->setTimeline( state.timeline );
+        m_missionPanel->setMissionHeader( m_mission.missionId, state.timeline.currentStage(),
                                           state.timeline.revision(),
                                           state.timeline.lastEventSeq() );
     }

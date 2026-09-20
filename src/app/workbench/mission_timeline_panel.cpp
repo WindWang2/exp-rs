@@ -89,10 +89,10 @@ QString MissionTimelinePanel::selectedTaskId() const
     const QModelIndexList rows = m_table->selectionModel()->selectedRows();
     if ( rows.isEmpty() )
         return {};
-    const int row = rows.first().row();
-    if ( row < 0 || row >= m_model->timeline().tasks().size() )
-        return {};
-    return m_model->timeline().tasks().at( row ).id;
+    // The model's own row projection — no task-vector copy per selection
+    // change (a 4000-task mission would copy the whole vector twice).
+    const QJsonObject projection = m_model->projectionAt( rows.first().row() );
+    return projection.value( QStringLiteral( "id" ) ).toString();
 }
 
 void MissionTimelinePanel::onSelectionChanged()
@@ -104,8 +104,7 @@ void MissionTimelinePanel::onSelectionChanged()
         updateActionStates();
         return;
     }
-    const MissionTask *task = m_model->timeline().task( taskId );
-    emit taskSelected( taskId, task ? task->status : MissionTaskStatus::Pending );
+    emit taskSelected( taskId, selectedTaskStatus( taskId ) );
     updateActionStates();
 }
 
@@ -128,19 +127,26 @@ void MissionTimelinePanel::onResumeClicked()
         emit resumeRequested( taskId );
 }
 
+MissionTaskStatus MissionTimelinePanel::selectedTaskStatus( const QString &taskId ) const
+{
+    if ( taskId.isEmpty() )
+        return MissionTaskStatus::Pending;
+    const int row = m_model->rowOfTask( taskId );
+    if ( row < 0 )
+        return MissionTaskStatus::Pending;
+    const std::optional<MissionTaskStatus> status = missionTaskStatusFromKey(
+        m_model->projectionAt( row ).value( QStringLiteral( "status" ) ).toString() );
+    return status.value_or( MissionTaskStatus::Pending );
+}
+
 void MissionTimelinePanel::updateActionStates()
 {
-    const MissionTask *task = nullptr;
-    const QString taskId = selectedTaskId();
-    if ( !taskId.isEmpty() )
-        task = m_model->timeline().task( taskId );
-
-    m_retryButton->setEnabled( task && missionTaskStatusIsRetryable( task->status ) );
+    const MissionTaskStatus status = selectedTaskStatus( selectedTaskId() );
+    m_retryButton->setEnabled( missionTaskStatusIsRetryable( status ) );
     // Resume applies to stale work (references must be re-bound) and to a
     // canceled task; a failed task retries.
-    m_resumeButton->setEnabled(
-        task && ( task->status == MissionTaskStatus::Stale
-                  || task->status == MissionTaskStatus::Canceled ) );
+    m_resumeButton->setEnabled( status == MissionTaskStatus::Stale
+                                || status == MissionTaskStatus::Canceled );
 }
 
 } // namespace sicnu::app

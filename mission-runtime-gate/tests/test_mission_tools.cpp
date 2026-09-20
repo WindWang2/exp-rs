@@ -138,7 +138,8 @@ sicnu::agent::spatial_tools::MissionAdvanceTool advanceTool()
 
 Json::Value advanceInput( const QString &taskId, const QString &action,
                           const QString &runKind = {}, const QString &runId = {},
-                          const QString &errorCode = {}, const QString &errorMessage = {} )
+                          const QString &errorCode = {}, const QString &errorMessage = {},
+                          const QString &note = {} )
 {
     Json::Value input( Json::objectValue );
     input[ "task_id" ] = taskId.toStdString();
@@ -151,6 +152,8 @@ Json::Value advanceInput( const QString &taskId, const QString &action,
         input[ "error_code" ] = errorCode.toStdString();
     if ( !errorMessage.isEmpty() )
         input[ "error_message" ] = errorMessage.toStdString();
+    if ( !note.isEmpty() )
+        input[ "note" ] = note.toStdString();
     return input;
 }
 
@@ -507,6 +510,102 @@ TEST_CASE( "mission:advance reconciles references and run authority", "[mission]
     REQUIRE( refused.success );
     CHECK( toQJsonObject( parseToolOutput( refused ) ).value( QStringLiteral( "reason" ) ).toString()
            == QLatin1String( "ref_resolver_unavailable" ) );
+    clearHost();
+}
+
+// ── malformed input: bounded parsing, clamped free text ──────────────────
+
+TEST_CASE( "mission tools reject out-of-range integers instead of throwing",
+           "[mission][tools]" )
+{
+    Fixture fx( QStringLiteral( "mission-tools-range" ) );
+    installHost( fx.project );
+
+    sicnu::agent::spatial_tools::MissionTimelineTool timelineTool;
+    sicnu::agent::spatial_tools::MissionContextTool contextTool;
+
+    // jsoncpp's asInt()/asInt64() THROW above the platform range; the tools
+    // must answer with INVALID_PARAMETER, not an untyped exception.
+    Json::Value huge( Json::objectValue );
+    huge[ "max_items" ] = Json::Value( static_cast<Json::UInt64>( 18446744073709551615ULL ) );
+    const auto overflow = timelineTool.execute( huge );
+    CHECK_FALSE( overflow.success );
+    CHECK( overflow.errorCode == "INVALID_PARAMETER" );
+
+    Json::Value negative( Json::objectValue );
+    negative[ "max_items" ] = -5;
+    const auto below = timelineTool.execute( negative );
+    CHECK_FALSE( below.success );
+    CHECK( below.errorCode == "INVALID_PARAMETER" );
+
+    Json::Value bigCursor( Json::objectValue );
+    bigCursor[ "since_seq" ] = Json::Value( static_cast<Json::UInt64>( 18446744073709551615ULL ) );
+    const auto cursor = timelineTool.execute( bigCursor );
+    CHECK_FALSE( cursor.success );
+    CHECK( cursor.errorCode == "INVALID_PARAMETER" );
+
+    Json::Value negativeCursor( Json::objectValue );
+    negativeCursor[ "since_seq" ] = -1;
+    const auto negCursor = timelineTool.execute( negativeCursor );
+    CHECK_FALSE( negCursor.success );
+    CHECK( negCursor.errorCode == "INVALID_PARAMETER" );
+
+    // Within-range values still work.
+    Json::Value ok( Json::objectValue );
+    ok[ "max_items" ] = 4;
+    CHECK( timelineTool.execute( ok ).success );
+    CHECK( contextTool.execute( ok ).success );
+
+    // The event projection declares its truncation instead of silently
+    // trimming (the registry's output meter would otherwise hide it).
+    MissionRuntimeState state;
+    QString err;
+    REQUIRE( loadMissionRuntime( fx.project, QDomDocument(), state, &err ) );
+    Json::Value capped( Json::objectValue );
+    capped[ "max_items" ] = 1;
+    const auto small = timelineTool.execute( capped );
+    REQUIRE( small.success );
+    const QJsonObject payload = toQJsonObject( small.output );
+    CHECK( payload.value( QStringLiteral( "tasks" ) ).toArray().size() == 1 );
+    CHECK( payload.value( QStringLiteral( "events_total" ) ).toInt()
+           == static_cast<int>( state.timeline.events().size() ) );
+    CHECK( payload.value( QStringLiteral( "events_truncated" ) ).toBool() );
+    CHECK( payload.value( QStringLiteral( "events" ) ).toArray().size() == 1 );
+    clearHost();
+}
+
+TEST_CASE( "mission tools clamp unbounded free text before persisting",
+           "[mission][tools]" )
+{
+    Fixture fx( QStringLiteral( "mission-tools-clamp" ) );
+    installHost( fx.project );
+
+    sicnu::agent::spatial_tools::MissionAdvanceTool tool;
+    const QString hugeMessage = QString( 50000, QLatin1Char( 'x' ) );
+    const QString hugeNote = QString( 5000, QLatin1Char( 'n' ) );
+    const auto started = tool.execute( advanceInput( QStringLiteral( "ana-1" ),
+                                                     QStringLiteral( "start" ),
+                                                     QStringLiteral( "task_center" ),
+                                                     QStringLiteral( "7100" ) ) );
+    REQUIRE( started.success );
+    const auto failed = tool.execute( advanceInput( QStringLiteral( "ana-1" ),
+                                                    QStringLiteral( "fail" ), {}, {},
+                                                    QStringLiteral( "E" ), hugeMessage,
+                                                    hugeNote ) );
+    REQUIRE( failed.success );
+    const QJsonObject task =
+        toQJsonObject( parseToolOutput( failed ) ).value( QStringLiteral( "task" ) ).toObject();
+    CHECK( task.value( QStringLiteral( "error_message" ) ).toString().size() == 2000 );
+    CHECK( task.value( QStringLiteral( "error_code" ) ).toString()
+           == QLatin1String( "E" ) );
+
+    // The persisted authority carries the clamped value, not the 50 KB input.
+    MissionRuntimeState state;
+    QString err;
+    REQUIRE( loadMissionRuntime( fx.project, QDomDocument(), state, &err ) );
+    CHECK( state.timeline.task( QStringLiteral( "ana-1" ) )->errorMessage.size() == 2000 );
+    const MissionEvent last = state.timeline.events().last();
+    CHECK( last.note.size() <= 500 );
     clearHost();
 }
 

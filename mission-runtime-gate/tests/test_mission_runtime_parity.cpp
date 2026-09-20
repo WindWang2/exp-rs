@@ -190,9 +190,11 @@ TEST_CASE( "the mission family is wired into every surface", "[mission][parity]"
     CHECK( fileContains( QStringLiteral( "src/agent/spatial_tools/spatial_tool.cpp" ),
                          QStringLiteral( "registerMissionTools();" ) ) );
 
-    // 5. Pi bridges the category.
+    // 5. Pi bridges the category — the exact default category list literal
+    // (a bare "mission" would be satisfiable by a comment).
     CHECK( fileContains( QStringLiteral( "pi/exp-rs-spatial.ts" ),
-                         QStringLiteral( "mission" ) ) );
+                         QStringLiteral( "\"meta,spatial,data,temporal,cartography,symbology,"
+                                         "workflow,workspace,layout,harness,mission\"" ) ) );
 
     // 6. The new sources are registered in the real build.
     CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
@@ -219,6 +221,67 @@ TEST_CASE( "the mission family is wired into every surface", "[mission][parity]"
                          QStringLiteral( "test_mission_runtime_parity" ) ) );
     CHECK( fileContains( QStringLiteral( "tests/CMakeLists.txt" ),
                          QStringLiteral( "test_mission_runtime_scale" ) ) );
+}
+
+// ── compile-substitute: shell symbols the harness cannot compile ─────────
+
+TEST_CASE( "shell hunks reference only declared ContextRules predicates", "[mission][parity]" )
+{
+    // command_defs.cpp cannot be compiled in this environment (it pulls the
+    // whole QGIS/GUI closure), so this gate substitutes for the compiler on
+    // exactly the failure class an undeclared predicate causes: every
+    // ContextRules::<name> the shell references must be DECLARED in
+    // selection_context.h (and defined in selection_context.cpp).
+    const QString defs = readRepoFile( QStringLiteral( "src/app/workbench/command_defs.cpp" ) );
+    const QString header = readRepoFile( QStringLiteral( "src/app/workbench/selection_context.h" ) );
+    const QString impl = readRepoFile( QStringLiteral( "src/app/workbench/selection_context.cpp" ) );
+    REQUIRE_FALSE( defs.isEmpty() );
+    REQUIRE_FALSE( header.isEmpty() );
+
+    const QRegularExpression useRe( QStringLiteral( "ContextRules::([A-Za-z_]+)" ) );
+    QSet<QString> used;
+    auto it = useRe.globalMatch( defs );
+    while ( it.hasNext() )
+        used.insert( it.next().captured( 1 ) );
+    CHECK( used.size() >= 8 ); // the shell uses a healthy number of rules (not vacuous)
+
+    // Declaration shape: "<type> NAME( const SelectionContextSnapshot" — the
+    // return type differs (bool predicates vs the QString reason helper).
+    const auto declaredIn = []( const QString &source, const QString &name ) {
+        const QRegularExpression re(
+            QStringLiteral( "\\b%1\\s*\\(\\s*const SelectionContextSnapshot" ).arg( name ) );
+        return re.match( source ).hasMatch();
+    };
+    for ( const QString &name : used )
+    {
+        INFO( "ContextRules::" + name.toStdString() + " must be declared in selection_context.h" );
+        CHECK( declaredIn( header, name ) );
+        // …and defined in the implementation TU.
+        INFO( "ContextRules::" + name.toStdString() + " must be defined in selection_context.cpp" );
+        CHECK( declaredIn( impl, name ) );
+    }
+
+    // The mission commands the registry declares must exist as handlers on
+    // the window (main_window.h declares the slots the handlers call).
+    const QString window = readRepoFile( QStringLiteral( "src/app/main_window.h" ) );
+    for ( const QString &slot : { QStringLiteral( "showMissionTimelinePanel" ),
+                                  QStringLiteral( "retrySelectedMissionTask" ),
+                                  QStringLiteral( "resumeSelectedMissionTask" ),
+                                  QStringLiteral( "refreshMissionRuntime" ) } )
+    {
+        INFO( "main_window.h must declare " + slot.toStdString() );
+        CHECK( window.contains( slot ) );
+    }
+    // …and the shell file must define them.
+    const QString shell = readRepoFile( QStringLiteral( "src/app/main_window_workbench.cpp" ) );
+    for ( const QString &slot : { QStringLiteral( "void QgisDesktopWindow::showMissionTimelinePanel" ),
+                                  QStringLiteral( "void QgisDesktopWindow::retrySelectedMissionTask" ),
+                                  QStringLiteral( "void QgisDesktopWindow::resumeSelectedMissionTask" ),
+                                  QStringLiteral( "void QgisDesktopWindow::refreshMissionRuntime" ) } )
+    {
+        INFO( "main_window_workbench.cpp must define " + slot.toStdString() );
+        CHECK( shell.contains( slot ) );
+    }
 }
 
 // ── stub parity: the harness stubs match the real QGIS-bound sources ─────

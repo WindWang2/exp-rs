@@ -44,20 +44,83 @@ bool jsonValueFromQJson( const QJsonObject &obj, Json::Value &out, std::string *
     return reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &out, &errs );
 }
 
-int optionalInt( const Json::Value &input, const char *key, int fallback, bool *present )
+/// Upper bound for any caller-supplied count: the tool output budget is
+/// 512 KiB, so no legitimate request wants more rows than this.
+constexpr int kMaxRequestedItems = 10000;
+
+/// Bounded integer read. jsoncpp's asInt()/asInt64() THROW on out-of-range
+/// values, so a {"max_items": 18446744073709551615} request would escape as
+/// an untyped exception instead of a structured INVALID_PARAMETER. Returns
+/// false with @p error when the value is present but not representable or
+/// outside [0, cap].
+bool optionalBoundedInt( const Json::Value &input, const char *key, int fallback, int cap,
+                         int &out, std::string &error )
 {
-    if ( present )
-        *present = false;
+    out = fallback;
     if ( !input.isObject() || !input.isMember( key ) )
-        return fallback;
+        return true;
     const Json::Value &v = input[ key ];
-    if ( v.isIntegral() )
+    if ( !v.isIntegral() )
+        return true; // wrong type: the required-gate / schema owns that check
+    Json::Int64 wide = 0;
+    if ( v.isInt() )
+        wide = v.asInt();
+    else if ( v.isUInt() )
+        wide = static_cast<Json::Int64>( v.asUInt() );
+    else
     {
-        if ( present )
-            *present = true;
-        return v.asInt();
+        try
+        {
+            wide = v.asInt64();
+        }
+        catch ( const std::exception & )
+        {
+            error = std::string( "parameter '" ) + key + "' is out of range";
+            return false;
+        }
     }
-    return fallback;
+    if ( wide < 0 || wide > static_cast<Json::Int64>( cap ) )
+    {
+        error = std::string( "parameter '" ) + key + "' must be within [0, "
+                + std::to_string( cap ) + "]";
+        return false;
+    }
+    out = static_cast<int>( wide );
+    return true;
+}
+
+/// Event-log cursor read (quint64 filter). Same range discipline as
+/// optionalBoundedInt: no exception may escape the tool boundary.
+bool optionalCursor( const Json::Value &input, quint64 &out, std::string &error )
+{
+    out = 0;
+    if ( !input.isObject() || !input.isMember( "since_seq" ) )
+        return true;
+    const Json::Value &v = input[ "since_seq" ];
+    if ( !v.isIntegral() )
+        return true;
+    if ( v.isUInt() )
+    {
+        out = v.asUInt();
+        return true;
+    }
+    Json::Int64 wide = 0;
+    try
+    {
+        wide = v.asInt64();
+    }
+    catch ( const std::exception & )
+    {
+        error = "parameter 'since_seq' is out of range";
+        return false;
+    }
+    if ( wide < 0 )
+    {
+        error = "parameter 'since_seq' must not be negative";
+        return false;
+    }
+    out = static_cast<quint64>( wide );
+    return true;
 }
 
 QString optionalString( const Json::Value &input, const char *key )
@@ -190,11 +253,7 @@ bool MissionToolHost::readRuntime( sicnu::app::MissionRuntimeState &state, QStri
         errorMessage = QStringLiteral( "no mission authority is installed" );
         return false;
     }
-    QString err;
-    if ( !authority->load( projectPath, document, state, errorCode, errorMessage ) )
-        return false;
-    Q_UNUSED( err )
-    return true;
+    return authority->load( projectPath, document, state, errorCode, errorMessage );
 }
 
 bool MissionToolHost::commitRuntime( sicnu::app::MissionRuntimeState &state, QString &errorCode,
@@ -293,15 +352,17 @@ Json::Value MissionContextTool::outputSchema() const
 SpatialToolResult MissionContextTool::execute( const Json::Value &input )
 {
     int maxItems = 32;
-    maxItems = optionalInt( input, "max_items", maxItems, nullptr );
+    std::string rangeError;
+    if ( !optionalBoundedInt( input, "max_items", maxItems, kMaxRequestedItems, maxItems,
+                              rangeError ) )
+        return SpatialToolResult::failure( rangeError, "INVALID_PARAMETER", "validation", false );
     const int cap = std::max( 1, maxItems );
 
     sicnu::app::MissionRuntimeState state;
     QString code;
     QString message;
     if ( !MissionToolHost::instance().readRuntime( state, code, message ) )
-        return SpatialToolResult::failure( message.toStdString(), code.toStdString(),
-                                           code == QStringLiteral( "commit_failed" ) ? "io" : "runtime",
+        return SpatialToolResult::failure( message.toStdString(), code.toStdString(), "runtime",
                                            false );
 
     const sicnu::app::MissionContext &ctx = state.context;
@@ -411,17 +472,19 @@ Json::Value MissionTimelineTool::outputSchema() const
 SpatialToolResult MissionTimelineTool::execute( const Json::Value &input )
 {
     quint64 sinceSeq = 0;
-    if ( input.isObject() && input.isMember( "since_seq" ) && input[ "since_seq" ].isIntegral() )
-        sinceSeq = static_cast<quint64>( std::max<Json::Int64>( 0, input[ "since_seq" ].asInt64() ) );
+    std::string rangeError;
+    if ( !optionalCursor( input, sinceSeq, rangeError ) )
+        return SpatialToolResult::failure( rangeError, "INVALID_PARAMETER", "validation", false );
     int maxItems = 32;
-    maxItems = optionalInt( input, "max_items", maxItems, nullptr );
+    if ( !optionalBoundedInt( input, "max_items", maxItems, kMaxRequestedItems, maxItems,
+                              rangeError ) )
+        return SpatialToolResult::failure( rangeError, "INVALID_PARAMETER", "validation", false );
 
     sicnu::app::MissionRuntimeState state;
     QString code;
     QString message;
     if ( !MissionToolHost::instance().readRuntime( state, code, message ) )
-        return SpatialToolResult::failure( message.toStdString(), code.toStdString(),
-                                           code == QStringLiteral( "commit_failed" ) ? "io" : "runtime",
+        return SpatialToolResult::failure( message.toStdString(), code.toStdString(), "runtime",
                                            false );
 
     QJsonObject out = sicnu::app::missionTimelineProjectionJson( state.timeline, maxItems, sinceSeq );
@@ -455,7 +518,10 @@ std::string MissionAdvanceTool::description() const
 {
     return "Request a mission task transition (start/succeed/fail/cancel/retry), bind or unbind "
            "its run authority, or reconcile references. Rejects illegal transitions without "
-           "mutating; start requires a verifiable run authority (no fake Running).";
+           "mutating; start requires a verifiable run authority (no fake Running). succeed/fail/"
+           "cancel are assertions on the mission ledger (the caller states the outcome); only "
+           "start is verified against the execution authority, and reconciliation maps terminal "
+           "execution states onto tasks left Running.";
 }
 
 std::vector<std::string> MissionAdvanceTool::tags() const
@@ -515,6 +581,11 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
                                         const QString &note )
 {
     MissionActionResult result;
+    // F6: free-text fields are persisted verbatim into the authority and
+    // re-emitted in every projection afterwards — bound them at the door.
+    const QString safeNote = note.left( 500 );
+    const QString safeErrorCode = errorCode.left( 200 );
+    const QString safeErrorMessage = errorMessage.left( 2000 );
     const QString iso = nowIso();
     MissionToolHost &host = MissionToolHost::instance();
     // Adapter: the host reports "no resolver" as Unknown, which is exactly
@@ -587,7 +658,7 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
                     run.id = runId;
                 }
                 const sicnu::app::MissionOutcome outcome =
-                    timeline.bindRunReference( taskId, run, iso, note );
+                    timeline.bindRunReference( taskId, run, iso, safeNote );
                 if ( !outcome.applied )
                 {
                     rejectReason = outcome.reason;
@@ -605,7 +676,7 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
                     run.id = runId;
                 }
                 const sicnu::app::MissionOutcome outcome =
-                    timeline.retry( taskId, iso, run, note );
+                    timeline.retry( taskId, iso, run, safeNote );
                 if ( !outcome.applied )
                 {
                     rejectReason = outcome.reason;
@@ -624,7 +695,7 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
                     run.kind = runKind;
                     run.id = runId;
                     const sicnu::app::MissionOutcome bound =
-                        timeline.bindRunReference( taskId, run, iso, note );
+                        timeline.bindRunReference( taskId, run, iso, safeNote );
                     if ( !bound.applied )
                     {
                         rejectReason = bound.reason;
@@ -663,8 +734,8 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
                     return false;
                 }
 
-                const sicnu::app::MissionOutcome outcome =
-                    timeline.transition( taskId, sicnu::app::MissionTaskStatus::Running, iso, note );
+                const sicnu::app::MissionOutcome outcome = timeline.transition(
+                    taskId, sicnu::app::MissionTaskStatus::Running, iso, safeNote );
                 if ( !outcome.applied )
                 {
                     rejectReason = outcome.reason;
@@ -680,8 +751,8 @@ MissionActionResult applyMissionAction( const QString &taskId, const QString &ac
             else if ( action == QLatin1String( "cancel" ) )
                 target = sicnu::app::MissionTaskStatus::Canceled;
 
-            const sicnu::app::MissionOutcome outcome =
-                timeline.transition( taskId, target, iso, note, errorCode, errorMessage );
+            const sicnu::app::MissionOutcome outcome = timeline.transition(
+                taskId, target, iso, safeNote, safeErrorCode, safeErrorMessage );
             if ( !outcome.applied )
             {
                 rejectReason = outcome.reason;

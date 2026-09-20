@@ -328,3 +328,8 @@ int applyRenames( MissionTimeline &timeline,
                   const QString &iso );
 
 } // namespace sicnu::app
+
+// The desktop panel emits the selected task's status in a signal; the
+// metatype must be declared at global scope (Q_DECLARE_METATYPE specializes
+// QMetaTypeId there) so that connection may become queued.
+Q_DECLARE_METATYPE( sicnu::app::MissionTaskStatus )

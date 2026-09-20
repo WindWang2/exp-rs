@@ -141,8 +141,9 @@ add_library(sicnu_agent SHARED
   spatial_tools/spatial_tool_registry.cpp
   # Mission Runtime 13.0 — the real mission:* tool objects plus the Qt-Core
   # mission value model they project. The QGIS-dependent persistence chain
-  # stays in the app layer behind the MissionAuthority interface, so this
-  # shared library links no app sources.
+  # (mission_context*, mission_runtime_store) stays in the app layer behind
+  # the MissionAuthority interface, so only these QGIS-free value-model
+  # sources are compiled here; the executable links them through this library.
   spatial_tools/mission_tools.cpp
   ../app/workbench/mission_stage.cpp
   ../app/workbench/mission_projection.cpp
@@ -230,6 +231,9 @@ target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core
   Qt6::Network
   Qt6::Widgets
+  # mission_tools.h takes/returns QDomDocument across the MissionAuthority
+  # interface — that type lives in Qt Xml, not Qt Core.
+  Qt6::Xml
   qgis_core
   qgis_gui
   sicnu_data

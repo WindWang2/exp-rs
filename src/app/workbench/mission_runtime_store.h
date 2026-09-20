@@ -13,9 +13,11 @@
  *                IMPORT-ONLY: read when the authority has no embedded
  *                timeline (migration), never written, never allowed to
  *                override a present authority document.
- *   last-good  = `<stem>.mission.json.last-good`, rotated on every
- *                successful save before the write commits, so a corrupt
- *                authority can never cost the last known usable state.
+ *   last-good  = `<stem>.mission.json.last-good`, snapshotted from the
+ *                authority sidecar right AFTER every successful commit, so a
+ *                later corruption costs nothing. A sidecar that no longer
+ *                decodes is never snapshotted (the older good copy wins); a
+ *                save that only reached the XML channel skips rotation.
  *
  * Fail-closed rules:
  *   - unknown/future embedded timeline schema_version → load refused;

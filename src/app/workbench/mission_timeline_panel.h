@@ -63,6 +63,7 @@ class MissionTimelinePanel : public QgsDockWidget
 
   private:
     QString selectedTaskId() const;
+    MissionTaskStatus selectedTaskStatus( const QString &taskId ) const;
     void updateActionStates();
 
     MissionTimelineModel *m_model = nullptr;
