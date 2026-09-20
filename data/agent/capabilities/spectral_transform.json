@@ -103,6 +103,26 @@
     "limitations": ["Target signature must be in the same radiometric domain as the scene", "Refuses scenes with fewer valid background samples than 2B+2 (B+1 when loading > 0)"]
   },
   {
+    "id": "rs:tcimf_detection",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Target signature must be in the same radiometric domain as the scene", "Refuses scenes with fewer valid background samples than 2B+2 (B+1 when loading > 0)", "Requires interference signatures that are linearly independent under the background metric; a target inside the interference span is refused"]
+  },
+  {
+    "id": "rs:osp_detection",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": ["Target signature must be in the same radiometric domain as the scene", "Consumes no background statistics — the undesired subspace comes from the interference signatures", "Scores are signed and scale with the target magnitude (not brightness-invariant)", "Refuses interference signatures that are linearly dependent, and a target that lies inside the undesired subspace"]
+  },
+  {
     "id": "rs:spectral_spatial_fuse",
     "family": "spectral_transform",
     "extends": "family:spectral_transform",
@@ -110,7 +130,7 @@
       "expected_kind": "raster",
       "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
     },
-    "limitations": ["Post-processes a single-band score raster; window smoothing is not an edge-preserving filter"]
+    "limitations": ["Post-processes a single-band score raster; method='mean' smooths across score edges, method='bilateral' preserves them at the cost of a range-sigma parameter"]
   },
   {
     "id": "rs:local_rx_anomaly",

@@ -330,7 +330,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         {
             // Matched filter / ACE write ONE continuous detection-score band
             // (Float32, NaN NoData) — a probability-like surface, not classes.
-            for ( const char *id : { "rs:matched_filter", "rs:ace", "rs:cem_detection" } )
+            for ( const char *id : { "rs:matched_filter", "rs:ace", "rs:cem_detection",
+                                     "rs:tcimf_detection", "rs:osp_detection" } )
             {
                 ScientificContract c = baseRecord();
                 c.operatorId = id;
