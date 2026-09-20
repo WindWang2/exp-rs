@@ -719,11 +719,20 @@ sicnu_feature_probe(SICNU_HAVE_STD_STACKTRACE
   "C++23 <stacktrace> current() (GCC 12+, MSVC 19.30+)"
   INCLUDES "#include <stacktrace>"
   CODE "std::stacktrace st = std::stacktrace::current()")
+# Qt's include dirs read from the imported target (Qt6Core_INCLUDE_DIRS is not
+# reliably populated on every Qt config).
+get_target_property(SICNU_QT6CORE_INCLUDES Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
+# MSVC needs /Zc:__cplusplus or Qt's headers refuse to compile in a
+# try-compile (qt_standard_project_setup adds it to the main project only).
+if(MSVC)
+    set(SICNU_QT_TYPES_PROBE_FLAGS "/Zc:__cplusplus")
+endif()
 sicnu_feature_probe(SICNU_HAVE_QT6_QTYPES
   "Qt6 QtTypes header (Qt 6.5+, project minimum 6.8)"
   INCLUDES "#include <QtTypes>"
   CODE "return QT_VERSION_MAJOR >= 6 ? 0 : 1"
-  REQUIRED_INCLUDES "${Qt6Core_INCLUDE_DIRS}"
+  REQUIRED_FLAGS "${SICNU_QT_TYPES_PROBE_FLAGS}"
+  REQUIRED_INCLUDES "${SICNU_QT6CORE_INCLUDES}"
   DEPENDS Qt6::Core)
 sicnu_feature_probes_report()
 sicnu_write_feature_probes_header("${CMAKE_BINARY_DIR}/sicnu_feature_probes.h")

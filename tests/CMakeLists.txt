@@ -11087,6 +11087,11 @@ sicnu_add_io_test(test_env_doctor)
 target_compile_definitions(test_env_doctor PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+# ds41-build-portability: configure-time feature-probe contract (compile-check
+# results in ${CMAKE_BINARY_DIR}/sicnu_feature_probes.h, every macro defined
+# 0/1, GDAL quieting / std::format cross-checked at runtime). Does not compile
+# without cmake/SicnuFeatureProbes.cmake — that is the intended potency.
+sicnu_add_io_test(test_feature_probes)
 # Verification Platform 11.0 (F09 determinism truth): cross-family replay
 # corpus — identical input twice must be byte-identical; corpus claims must
 # be triple-published (class scan / schema stamp / sidecar), never
