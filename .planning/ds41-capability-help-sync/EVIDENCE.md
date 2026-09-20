@@ -191,3 +191,13 @@ md5(data/processing/algorithm_meta + pi/knowledge) before == after; git status: 
 - **P2-7（Layer-A 重复 id 隐蔽性）**：`AlgorithmMetaStore::loadFromDirectory` 按 id emplace，重复 id 文件对 parity 测试不可见；由 drift 测试的文件数断言兜底——两个 gate 必须同时保留（已注明）。
 
 Reviewer 独立复核确认：四个 gate 在其环境同样全绿、断言计数一致、沙袋证据可复现、窃用 CLAIM 全部实证。
+
+## O-eol：Windows autocrlf 签出鲁棒性（rebase 后暴露并修复）
+
+rebase 重建历史时整树重新签出（core.autocrlf=true，`.gitattributes` 未 pin `*.md`/`data/**`），
+磁盘文件变 CRLF 而 generator/渲染器输出 LF：`test_capability_knowledge` 的 page-diff 用例与
+`test_algorithm_meta_drift` 的字节比对在**正确的树**上误红。
+
+修复（`62e115b5c`）：两处比对前统一归一 CRLF——契约（与 generator 的字节级内容相等）不变，
+只是签出行尾归一化不再影响判定。实证：把 data/pi 全 corpus 转成 CRLF（59 个文件）后四 gate
+仍全绿；恢复 LF 后 `gen-meta`+`gen-pages --check` 与提交态 md5 一致。
