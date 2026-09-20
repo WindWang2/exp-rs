@@ -259,9 +259,19 @@ set "BDIR=%REPO_ROOT%\%BDIR%"
 :smoke_bdir_done
 if exist "%BDIR%" (
   echo build.cmd: removing stale build dir %BDIR% ^(clean-tree gate^)
-  rmdir /s /q "%BDIR%"
+  rmdir /s /q "%BDIR%" 2>nul
+  rem Windows indexers/AV scanners routinely hold a handle for a second after
+  rem a configure; retry once so the gate is not flaky for that reason alone.
+  if exist "%BDIR%" (
+    timeout /t 3 /nobreak >nul 2>&1
+    rmdir /s /q "%BDIR%" 2>nul
+  )
 )
-mkdir "%BDIR%" || (echo build.cmd: smoke: cannot create %BDIR% 1>&2 & exit /b 1)
+mkdir "%BDIR%" 2>nul
+if exist "%BDIR%\CMakeCache.txt" (
+  echo build.cmd: smoke: cannot clean %BDIR% ^(another process holds it?^) 1>&2
+  exit /b 1
+)
 rem Seed only toolchain LOCATION variables from an existing configured tree -
 rem every dependency is re-discovered fresh, and the vcpkg installed tree is
 rem reused read-only so the gate stays offline (same discipline as build.sh).
