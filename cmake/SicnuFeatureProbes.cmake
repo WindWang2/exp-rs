@@ -34,6 +34,14 @@ set(SICNU_FEATURE_PROBES "" CACHE INTERNAL "feature probe records" FORCE)
 # Macro (scope discipline: see SicnuDepDoctor.cmake — the compile-check cache
 # variables must survive in the caller's directory scope).
 macro(sicnu_feature_probe macro_name description)
+    # The record format is "name|verdict|description" inside a CMake LIST: a
+    # ';' or '|' inside either free-form field would silently corrupt the
+    # report and the generated header, so reject them loudly at the entry.
+    if("${description}" MATCHES "[;|]" OR "${macro_name}" MATCHES "[;|]")
+        message(FATAL_ERROR
+            "sicnu_feature_probe(${macro_name}): description and macro name must not "
+            "contain ';' or '|' (the record format is name|verdict|description).")
+    endif()
     # Manual keyword parse (cmake_parse_arguments cannot hold semicolon-bearing
     # LIST values such as REQUIRED_INCLUDES from a multi-directory Qt install:
     # the list splits into separate arguments and the tail is dropped). Values
@@ -91,6 +99,11 @@ macro(sicnu_feature_probe macro_name description)
                 "(values containing ';' cannot be passed; use comma expressions in CODE)")
         endif()
     endforeach()
+    if(NOT _sfp_mode STREQUAL "")
+        message(FATAL_ERROR
+            "sicnu_feature_probe(${macro_name}): keyword ${_sfp_mode} has no value "
+            "(a value equal to a keyword string is consumed as the keyword)")
+    endif()
     set(_sfp_ok TRUE)
     foreach(_sfp_dep ${_sfp_deps})
         if(NOT TARGET ${_sfp_dep})
@@ -104,14 +117,17 @@ macro(sicnu_feature_probe macro_name description)
         return()
     endif()
     set(_sfp_src "${_sfp_inc}\nint main() { { ${_sfp_code}; } return 0; }\n")
+    set(_sfp_saved_quiet "${CMAKE_REQUIRED_QUIET}")
     set(CMAKE_REQUIRED_QUIET TRUE)
     set(CMAKE_REQUIRED_FLAGS "${_sfp_flags}")
     set(CMAKE_REQUIRED_INCLUDES "${_sfp_ri}")
     set(CMAKE_REQUIRED_LIBRARIES "${_sfp_rl}")
     check_cxx_source_compiles("${_sfp_src}" ${macro_name})
+    set(CMAKE_REQUIRED_QUIET "${_sfp_saved_quiet}")
     set(CMAKE_REQUIRED_FLAGS "")
     set(CMAKE_REQUIRED_INCLUDES "")
     set(CMAKE_REQUIRED_LIBRARIES "")
+    unset(_sfp_saved_quiet)
     if(${macro_name})
         message(STATUS "feature probe ${macro_name}: available — ${description}")
         _sfp_record(${macro_name} "${description}" "yes")

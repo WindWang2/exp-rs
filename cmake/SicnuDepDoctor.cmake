@@ -6,7 +6,7 @@
 #
 # Two facilities:
 #
-#   sicnu_require_dependency(<name> [REQUIRED] [args...] [VERSION <x[.y]>])
+#   sicnu_require_dependency(<name> [MINIMUM_VERSION <x[.y]>] [CONFIG|MODULE] <find_package args...>)
 #     Wraps find_package for hard dependencies. On failure the configure stops
 #     with an actionable message: the package, what was searched, and the exact
 #     install command per platform (apt / pacman / dnf / brew / vcpkg) — never
@@ -117,8 +117,38 @@ endfunction()
 # Records one row for the end-of-configure summary (last row per name wins,
 # so re-configures never duplicate a package). Output: none.
 function(sicnu_dep_note name)
-    cmake_parse_arguments(A "" "FOUND_VERSION;MODE;PATH" "" ${ARGN})
-    set(_row "${name}|${A_FOUND_VERSION}|${A_MODE}|${A_PATH}")
+    # Manual one-value parse: cmake_parse_arguments keeps only the FIRST element
+    # of a list value (PATH is often a list, e.g. two Qt include dirs), so the
+    # multi-value fields are re-joined here.
+    set(_sfp_mode "")
+    set(_ver "")
+    set(_mode "")
+    set(_path "")
+    foreach(_a ${ARGN})
+        if(_a STREQUAL "FOUND_VERSION")
+            set(_sfp_mode "ver")
+        elseif(_a STREQUAL "MODE")
+            set(_sfp_mode "mode")
+        elseif(_a STREQUAL "PATH")
+            set(_sfp_mode "path")
+        elseif(_sfp_mode STREQUAL "ver")
+            set(_ver "${_a}")
+            set(_sfp_mode "")
+        elseif(_sfp_mode STREQUAL "mode")
+            set(_mode "${_a}")
+            set(_sfp_mode "")
+        elseif(_sfp_mode STREQUAL "path")
+            if(_path STREQUAL "")
+                set(_path "${_a}")
+            else()
+                set(_path "${_path};${_a}")
+            endif()
+        endif()
+    endforeach()
+    # The records live in a CMake LIST (';'-separated), so a list-valued PATH
+    # must not carry raw semicolons into the row - display it comma-separated.
+    string(REPLACE ";" ", " _path_disp "${_path}")
+    set(_row "${name}|${_ver}|${_mode}|${_path_disp}")
     set(_kept "")
     foreach(_r ${SICNU_DEP_DOCTOR_RECORDS})
         if(_r STREQUAL "")

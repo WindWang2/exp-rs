@@ -26,10 +26,10 @@ If this fails, the wrapper itself is broken — fix that before anything else.
 ### Windows (vcpkg, the supported Windows path)
 
 Install [vcpkg](https://github.com/microsoft/vcpkg) and integrate it, then
-configure with the toolchain file. The manifest `vcpkg.json` (windows-scoped)
-supplies: gdal, proj, geos, protobuf, libzip, expat, sqlite3, zstd, jsoncpp,
-curl, pcre2, qca, qtkeychain… plus whatever your Qt kit does not provide.
-Outside vcpkg you still need:
+configure with the toolchain file. The manifest `vcpkg.json` (windows-scoped
+dependencies: gdal, proj, geos, protobuf, libzip, expat, sqlite3, pcre2, gsl,
+curl, zstd, jsoncpp, opencv — read the file for the authoritative list)
+supplies those. Outside vcpkg you still need:
 
 * **Qt 6.8+** kit (the code uses QtTypes, 6.5+; minimum is 6.8),
 * **winflexbison** (`win_bison.exe`, `win_flex.exe`),

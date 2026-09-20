@@ -34,7 +34,14 @@ repo_root=$(cd -- "$script_dir/.." && pwd)
 # Resource policy — single source of truth for this wrapper.
 # ---------------------------------------------------------------------------
 JOBS_DEFAULT=1
-JOBS_CAP=${SICNU_BUILD_JOBS_CAP:-2}
+# The cap itself is validated: an unvalidated override would silently break the
+# advertised discipline (SICNU_BUILD_JOBS_CAP=99 --jobs 8 must not succeed) and
+# a non-numeric one would make the arithmetic below fatal.
+case "${SICNU_BUILD_JOBS_CAP:-}" in
+    ''|*[!0-9]*) JOBS_CAP=2 ;;
+    0) JOBS_CAP=1 ;;
+    *) JOBS_CAP=${SICNU_BUILD_JOBS_CAP} ;;
+esac
 
 log_dir() { printf '%s\n' "${SICNU_BUILD_LOG_DIR:-$repo_root/build-logs}"; }
 
@@ -51,6 +58,7 @@ resolve_jobs() {
     local req=${SICNU_BUILD_JOBS:-${1:-}}
     case "$req" in
         ''|*[!0-9]*) req=$JOBS_DEFAULT ;;
+        0*) req=$JOBS_DEFAULT ;;  # leading zero: octal-looking input is not a job count
         0) req=$JOBS_DEFAULT ;;
     esac
     if (( req > JOBS_CAP )); then
@@ -77,9 +85,19 @@ resolve_jobs() {
 _clamp_env() {
     local v=$1
     case "$v" in
-        ''|*[!0-9]*) echo "$JOBS_DEFAULT" ;;
+        ''|*[!0-9]*|0*) echo "$JOBS_DEFAULT" ;;
         *) if (( v > JOBS_CAP )); then echo "$JOBS_CAP"; else echo "$v"; fi ;;
     esac
+}
+
+# Clamp the inherited parallelism environment IN THE CURRENT SHELL and export
+# it. Must not run inside a command substitution: an export made in a subshell
+# dies with that subshell, and every tool that reads the variable (not just
+# cmake --build) would see the unclamped value.
+clamp_env_exports() {
+    CMAKE_BUILD_PARALLEL_LEVEL=$(_clamp_env "${CMAKE_BUILD_PARALLEL_LEVEL:-}")
+    CTEST_PARALLEL_LEVEL=$(_clamp_env "${CTEST_PARALLEL_LEVEL:-}")
+    export CMAKE_BUILD_PARALLEL_LEVEL CTEST_PARALLEL_LEVEL
 }
 
 # quote_probe <arg>...: prints each argument on its own line, bracketed. Used by
@@ -366,10 +384,12 @@ cmd_smoke() {
     echo "smoke: clean-tree configure OK"
     echo "  build dir: $build_dir (started empty; no stale cache reused)"
     echo "  configure log: $log"
-    if grep -q "SICNU dependency summary" "$log"; then
+    if grep -q "=== SICNU dependency summary ===" "$log"; then
         echo "  dependency summary: present"
     else
-        echo "  dependency summary: NOT printed yet (WP1 in progress)"
+        echo "smoke: FAILED — the configure log has no '=== SICNU dependency summary ===' block" >&2
+        echo "  (cmake/SicnuDepDoctor.cmake wiring missing? see $log)" >&2
+        return 1
     fi
     return 0
 }
@@ -396,6 +416,8 @@ usage() {
 # ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
+clamp_env_exports
+
 case "${1:-}" in
     --print-jobs)
         # Hermetic diagnostic: prints the resolved job count (selftest hooks this).

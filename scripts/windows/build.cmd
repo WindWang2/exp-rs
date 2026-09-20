@@ -18,6 +18,11 @@ rem   scripts\windows\build.cmd build [--build-dir D] [--jobs N] [target ...]
 rem   scripts\windows\build.cmd test  [--build-dir D] [-R regex]
 rem   scripts\windows\build.cmd smoke [--build-dir D] [--base-cache CACHE]
 rem
+rem The hermetic selftest builds its Unicode fixture path through PowerShell
+rem (batch files cannot carry non-ASCII literals safely across console code
+rem pages), so selftest requires powershell on PATH - present on Windows
+rem 10/11 and Windows Server, absent on WinPE/Server Core images.
+rem
 rem _env.cmd (called below) pins CMAKE_BUILD_PARALLEL_LEVEL=2 and
 rem CTEST_PARALLEL_LEVEL=1 for this lane; an explicit --jobs above the cap is
 rem still refused.
@@ -48,7 +53,6 @@ rem ---------------------------------------------------------------------------
 :resolve_jobs
 set "REQ=%~1"
 if "%REQ%"=="" set "REQ=%SICNU_BUILD_JOBS%"
-if "%REQ%"=="" set "REQ=%CMAKE_BUILD_PARALLEL_LEVEL%"
 if "%REQ%"=="" set "REQ=1"
 echo %REQ%| findstr /r "^[0-9][0-9]*$" >nul || set "REQ=1"
 if "%REQ%"=="0" set "REQ=1"
@@ -84,13 +88,11 @@ shift
 set "ST_FAILED=0"
 echo build.cmd selftest: resource caps + path/space quoting
 
-rem On this lane _env.cmd pins CMAKE_BUILD_PARALLEL_LEVEL=2 (ADR 0147), so the
-rem "default" is the inherited value when one is set, else 1 - always within cap.
-set "EXPJOBS=1"
-if not "%CMAKE_BUILD_PARALLEL_LEVEL%"=="" set "EXPJOBS=%CMAKE_BUILD_PARALLEL_LEVEL%"
-if %EXPJOBS% GTR %SICNU_BUILD_CAP% set "EXPJOBS=%SICNU_BUILD_CAP%"
+rem The default is 1 on EVERY lane; an inherited CMAKE_BUILD_PARALLEL_LEVEL
+rem (scripts/windows/_env.cmd pins 2 per ADR 0147) only clamps, it never sets
+rem the request - same rule as scripts/build.sh.
 call :resolve_jobs ""
-if not "%JOBS%"=="%EXPJOBS%" (echo selftest FAIL: default jobs expected %EXPJOBS%, got %JOBS% 1>&2 & set "ST_FAILED=1") else echo   ok: default jobs = %JOBS% ^(lane default^)
+if not "%JOBS%"=="1" (echo selftest FAIL: default jobs expected 1, got %JOBS% 1>&2 & set "ST_FAILED=1") else echo   ok: default jobs = 1
 call :resolve_jobs "1"
 if not "%JOBS%"=="1" (echo selftest FAIL: jobs 1 1>&2 & set "ST_FAILED=1") else echo   ok: jobs 1
 call :resolve_jobs "2"
@@ -285,6 +287,18 @@ if not "%BASECACHE%"=="" (
   echo build.cmd: seeded toolchain locations from %BASECACHE% ^(dependencies re-discovered fresh^)
 )
 if not "%CATCH2SRC%"=="" (
+  rem The value travels through a delayed-expansion block and run_logged's
+  rem re-parse, so characters batch cannot carry safely are rejected here
+  rem instead of silently producing a malformed cache entry.
+  set "C2BAD="
+  for %%C in ("!" "^" "&" "(" ")" "%%") do (
+    echo "%CATCH2SRC%" | findstr /c:"%%~C" >nul && set "C2BAD=1"
+  )
+  if defined C2BAD (
+    echo build.cmd: smoke: --catch2-source path contains batch-unsafe characters 1>&2
+    echo   ^(! ^ & ^( ^) ^%%^) - set FETCHCONTENT_SOURCE_DIR_CATCH2 yourself or rename it 1>&2
+    exit /b 2
+  )
   rem Offline escape hatch: the repo's own Catch2 FetchContent (locked tag
   rem v3.7.1) is the only network step in configure; point it at a prepared
   rem clone so the gate never needs egress.
@@ -293,9 +307,16 @@ if not "%CATCH2SRC%"=="" (
 )
 call :run_logged configure cmake -G Ninja -S "%REPO_ROOT%" -B "%BDIR%" %SEED%
 if errorlevel 1 (echo build.cmd: smoke: clean-tree configure FAILED 1>&2 & exit /b 1)
+findstr /c:"=== SICNU dependency summary ===" "%LOG_ROOT%\configure\run.log" >nul
+if errorlevel 1 (
+  echo build.cmd: smoke: FAILED - the configure log has no dependency summary block 1>&2
+  echo   ^(cmake\SicnuDepDoctor.cmake wiring missing? see %LOG_ROOT%\configure\run.log^) 1>&2
+  exit /b 1
+)
 echo build.cmd: smoke: clean-tree configure OK
 echo   build dir: %BDIR% ^(started empty; no stale cache reused^)
 echo   configure log: %LOG_ROOT%\configure\run.log
+echo   dependency summary: present
 exit /b 0
 
 
