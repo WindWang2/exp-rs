@@ -261,10 +261,19 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         const int backgroundTotalTiles = backgroundStream.tileCount();
         const double backgroundPerTile =
             backgroundTotalTiles > 0 ? 1.0 / backgroundTotalTiles : 0.0;
-        const float *bgNoData = hasBackground ? backgroundNoDataPerBand.data()
-                                              : noDataPerBand.data();
-        const uint8_t *bgHasNoData = hasBackground ? backgroundHasNoDataPerBand.data()
-                                                   : hasNoDataPerBand.data();
+        // When the background is resampled, the tile buffer is pre-validated
+        // (invalid pixels are NaN-filled by resampleTile), so the accumulators
+        // must not re-apply the background NoData sentinel: a resampled value
+        // could coincidentally equal the sentinel and be excluded wrongly.
+        const bool bgPreValidated = hasBackground && backgroundResampled;
+        const float *bgNoData =
+            bgPreValidated ? nullptr
+                           : ( hasBackground ? backgroundNoDataPerBand.data()
+                                             : noDataPerBand.data() );
+        const uint8_t *bgHasNoData =
+            bgPreValidated ? nullptr
+                           : ( hasBackground ? backgroundHasNoDataPerBand.data()
+                                             : hasNoDataPerBand.data() );
         // Resampled-tile scratch (only touched when the grids differ).
         std::vector<float> resampledTile;
         const float kNaNf = std::numeric_limits<float>::quiet_NaN();
@@ -286,8 +295,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 for ( int b = 0; b < bandCount; ++b )
                 {
                     const float v = x[b];
-                    const bool checkNd = bgHasNoData && bgHasNoData[static_cast<size_t>( b )];
-                    if ( !std::isfinite( v ) || ( checkNd && v == bgNoData[static_cast<size_t>( b )] ) )
+                    const bool checkNd =
+                        backgroundHasNoDataPerBand[static_cast<size_t>( b )] != 0;
+                    if ( !std::isfinite( v ) ||
+                         ( checkNd &&
+                           v == backgroundNoDataPerBand[static_cast<size_t>( b )] ) )
                     {
                         pixelValid = false;
                         break;

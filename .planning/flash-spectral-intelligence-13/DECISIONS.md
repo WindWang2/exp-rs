@@ -120,3 +120,56 @@ candidates, the trade-off, and the adopted default.
   part of the bilateral work, so the operator-level tile oracle exists for both
   methods; if the conversion proves unstable under review, revert to FullRaster and
   keep kernel-level halo equivalence only (still satisfies O4.5 at kernel level).
+
+## D3 (revised) — Interference input surface
+
+The shared reference seam (`resolveSpectralReference`) already supports inline
+array-of-arrays, spectral-table artifacts and library JSON paths with
+wavelength reconciliation, so interference uses `interference` (inline) /
+`interferenceRef` (table or library path). `libraryPath` stays reserved for
+the target (the seam hardcodes it), so a library-sourced target cannot
+silently double as the interference matrix; the driver refuses when neither
+interference source is given, and refuses `background` on OSP instead of
+ignoring it. Material filtering (`libraryMaterials`) remains target-only —
+recorded as a known limitation.
+
+## D8 (final) — Dialog write path
+
+Adopted minimal fix: the dialog fills the v2 provenance fields the strict
+loader requires — id slug `profile-<n>`, license `"unspecified"`, citation
+naming the measurement panel, synthetic = false — so a saved entry
+round-trips through `loadValidated`. The license is deliberately *not*
+claimed on the user's behalf (no CC0 assertion on measured data of unknown
+license); `material` stays "Untitled" because neither `validateLibrary` nor
+any operator enforces the 12-class taxonomy on user files (the taxonomy is
+enforced only over the shipped `data/spectral/library.json`).
+
+## D13 — D13 test section disposition
+
+The deleted retriever's test section is *re-expressed* on the authority, not
+dropped: analytical SAM ground truth from orthogonal geometry (45°, 0°),
+undefined-angle (zero-norm) ordering semantics, exact ordering with a
+band-count skip, and constant-spectrum Gaussian-SRF invariance via
+`resampleTo`. Two D13 cases (JSON round-trip losslessness, malformed-JSON
+rejection) were dropped as exact duplicates of the authority's own tests in
+the same file ("round-trips through JSON", "rejects malformed input"); the
+maxAngle gating and topK truncation semantics were A-specific API surface
+with no authority counterpart (callers truncate) and are not re-added.
+The D13 e2e rubrics (Lab02 library top-1) are rewired onto
+`SpectralLibrary::matchSpectrum`.
+
+## D14 — Background-raster NoData on the resampled path
+
+When the background grid differs from the scene grid, the tile buffer is
+pre-validated (invalid pixels NaN-filled before resampling) and the
+accumulators receive null NoData arrays — re-applying the background
+sentinel after resampling could exclude pixels whose *resampled* value
+coincidentally equals the sentinel.
+
+## D15 — Build parallelism
+
+Initial library build at -j1 (two sibling worktrees already building); after
+verifying load ≈ 15/40 cores and RSS ≈ 35%, the build was restarted at the
+repository's sanctioned cap -j2 (never -j3+). An intermediate pkill matched
+sibling worktrees' `cmake --build` processes as well; their agents own
+restarting those builds — recorded here for transparency.
