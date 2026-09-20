@@ -381,9 +381,16 @@ public:
     /// weight gate evaluates that lane's latency class so a preflight for a
     /// "gui"/"mcp" candidate reports the interactive-reserve verdict it
     /// would actually get (review P2; empty = Background, pre-12.0 behavior).
+    /// @a latencyClassOverride mirrors the enqueueTask override (D2): set it
+    /// when the eventual submission would carry an explicit lane.
+    /// Known limits vs the live pass: the candidate is modeled at
+    /// TaskPriority::Normal with no queue stamp (aging is not simulated) and
+    /// the worker-originated transient-child bypass does not apply — both
+    /// are conservative (snapshot may under-report admission, never over-).
     TaskAdmissionSnapshot admissionSnapshot(const QString& algorithmId,
                                             unsigned int resourceEstimateOverrideMb = 0,
-                                            const QString& source = QString()) const;
+                                            const QString& source = QString(),
+                                            std::optional<LatencyClass> latencyClassOverride = std::nullopt) const;
 
     /// Wait for task to reach a terminal status or timeout.
     AlgorithmTaskInfo waitForTask( long taskId,
@@ -555,7 +562,8 @@ private:
                        CancelHook onCancel,
                        bool autoLoad,
                        TaskPriority priority,
-                       const QList<long>& parentTaskIds);
+                       const QList<long>& parentTaskIds,
+                       std::optional<LatencyClass> latencyClassOverride = std::nullopt);
     /// Shutdown finalization (#684): cancel every non-terminal task (engine
     /// flags armed, queued jobs cancelled), then — after the engine joined —
     /// force any task still in Dispatching/Running/Cancelling to Canceled so
@@ -811,8 +819,10 @@ private:
     /// 12.0 D4 watchdog thread. Lock discipline: watchdogMain alternates
     /// m_watchdogMutex (cv wait) and m_mutex (enforce) — never holds one while
     /// acquiring the other, and scheduler code never touches m_watchdogMutex,
-    /// so the two lock domains cannot deadlock. stopWatchdog joins it without
-    /// holding m_mutex.
+    /// so the two lock domains cannot deadlock. stopWatchdog takes the thread
+    /// object under m_mutex (atomic against ensureWatchdogStartedLocked's
+    /// check+spawn) and joins it WITHOUT m_mutex (the thread needs it to
+    /// finish its enforce pass).
     std::thread m_watchdogThread;
     std::atomic<bool> m_watchdogStop{ false };
     std::mutex m_watchdogMutex;

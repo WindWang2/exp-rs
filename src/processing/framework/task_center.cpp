@@ -1030,7 +1030,8 @@ void TaskCenter::fireTaskCompletionCallbacks( long taskId )
 
 TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
                                                      unsigned int resourceEstimateOverrideMb,
-                                                     const QString &source ) const
+                                                     const QString &source,
+                                                     std::optional<LatencyClass> latencyClassOverride ) const
 {
     // 12.0 (residual #1097): resolve the registry-dependent inputs — profile,
     // admission dims, isolated-route predicate, RAM estimate — OUTSIDE
@@ -1142,7 +1143,8 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
         sicnu::ResourceRequest candidateRequest = candidateDims.toResourceRequest();
         // Evaluate the lane the caller actually declares — an interactive
         // preflight must report the reserve verdict it would get at enqueue.
-        candidateRequest.latencyClass = latencyClassForSource( source );
+        candidateRequest.latencyClass =
+            latencyClassOverride.value_or( latencyClassForSource( source ) );
         candidateRequest.submitStamp = std::chrono::steady_clock::now();
         candidateRequest.priority = static_cast<int>( TaskPriority::Normal );
         if ( !m_budget2.canLaunch( m_active.usage2, candidateRequest,
@@ -1747,7 +1749,8 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 CancelHook onCancel,
                                 bool autoLoad,
                                 TaskPriority priority,
-                                const QList<long> &parentTaskIds )
+                                const QList<long> &parentTaskIds,
+                                std::optional<LatencyClass> latencyClassOverride )
 {
     ensureJobListener();
 
@@ -1766,7 +1769,8 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
     // only flipped inside the same critical section.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
                                      priority, parentTaskIds, false, 0,
-                                     QString::fromStdString( request.source ) );
+                                     QString::fromStdString( request.source ),
+                                     latencyClassOverride );
     if ( taskId < 0 )
         return -1;
 
@@ -2441,8 +2445,12 @@ void TaskCenter::processNextQueuedTasks()
         m_active.transientChildren < kMaxTransientChildren;
     // 12.0 D7: one RSS sample per pass that actually examines candidates —
     // scheduler-decision observability without spamming on empty passes.
-    if ( !m_readyHeap.empty() )
-        sicnu::runtime::observability::ExecutionTelemetry::instance().recordSimple(
+    // Gated on isEnabled: currentRssMb() parses /proc (B-P2-1 rule — no
+    // eager sampler calls on the hot path when observability is off).
+    auto &telemetryForPass =
+        sicnu::runtime::observability::ExecutionTelemetry::instance();
+    if ( !m_readyHeap.empty() && telemetryForPass.isEnabled() )
+        telemetryForPass.recordSimple(
             sicnu::runtime::observability::EventKind::RssSample, -1,
             static_cast<int64_t>( m_resourceMonitor.currentRssMb() ),
             "admission_pass" );
@@ -3256,15 +3264,26 @@ void TaskCenter::ensureWatchdogStartedLocked()
 
 void TaskCenter::stopWatchdog()
 {
-    // No m_mutex held: the watchdog needs it to finish its current enforce
-    // pass and observe the stop flag before joining.
-    m_watchdogStop.store( true );
+    // The stop flag and the thread-object handoff run under m_mutex so a
+    // concurrent ensureWatchdogStartedLocked cannot interleave: its
+    // check+spawn is one m_mutex critical section, and whichever runs second
+    // decides deterministically — a spawn that already committed gets its
+    // thread moved out and joined here (the stop flag is set BEFORE the
+    // move so the moved thread cannot keep ticking), a later spawn sees
+    // m_isShuttingDown and refuses. The JOIN itself runs with no scheduler
+    // lock: the watchdog needs m_mutex to finish its current enforce pass.
+    std::thread thread;
+    {
+        QMutexLocker locker( &m_mutex );
+        m_watchdogStop.store( true );
+        thread = std::move( m_watchdogThread );
+    }
     {
         std::lock_guard<std::mutex> lock( m_watchdogMutex );
         m_watchdogCv.notify_all();
     }
-    if ( m_watchdogThread.joinable() )
-        m_watchdogThread.join();
+    if ( thread.joinable() )
+        thread.join();
 }
 
 void TaskCenter::watchdogMain()
@@ -3736,14 +3755,16 @@ long TaskCenter::retryTask( long taskId )
         // unsatisfiable terminal ones — running ahead of a live parent would
         // execute with unresolved placeholder paths (review P1). The staged
         // admission path enforces parent gating at scheduling time.
-        newTaskId = submitJob( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer,
-                               oldInfo.priority, retryParents );
+        newTaskId = submitJobImpl( oldInfo.jobRequest, oldInfo.jobExecutor, {}, oldInfo.autoLoadLayer,
+                                   oldInfo.priority, retryParents, oldInfo.latencyClass );
     }
     else
     {
+        // 12.0 D2: carry the RESOLVED lane — a lane that came from an
+        // explicit override must not silently revert to source mapping.
         newTaskId = enqueueTask( oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer,
                                  oldInfo.priority, retryParents, true, oldInfo.resourceEstimateOverrideMb,
-                                 oldInfo.source );
+                                 oldInfo.source, oldInfo.latencyClass );
     }
     if ( newTaskId <= 0 )
         return 0;

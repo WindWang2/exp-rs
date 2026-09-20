@@ -288,8 +288,14 @@ class ExecutionPlane
     static unsigned int estimateFromPreflight( const std::string &algorithmId, const Json::Value &params );
 
     /// Point-in-time admission snapshot passthrough (see TaskCenter).
-    sicnu::TaskAdmissionSnapshot admissionSnapshot( const QString &algorithmId,
-                                                    unsigned int resourceEstimateMb = 0 ) const;
+    /// @a source / @a latencyClassOverride let a preflight probe the lane the
+    /// real submission would occupy (12.0 D2 — e.g. an explicit
+    /// ExecutionRequest.latencyClass).
+    sicnu::TaskAdmissionSnapshot admissionSnapshot(
+        const QString &algorithmId,
+        unsigned int resourceEstimateMb = 0,
+        const QString &source = QString(),
+        std::optional<sicnu::LatencyClass> latencyClassOverride = std::nullopt ) const;
 
   private:
     ExecutionPlane() = default;

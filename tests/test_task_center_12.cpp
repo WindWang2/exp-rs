@@ -678,6 +678,7 @@ TEST_CASE( "Explicit latency-class override wins over the source lane map",
     engine.clearExecutors();
     center.resetResourceProfileLimits();
     center.setIoWeightLimits( 100, 100, 100 );
+    center.shutdownForTests();
     engine.shutdownForTests();
 }
 
@@ -725,6 +726,7 @@ TEST_CASE( "CPU-thread admission cap holds a saturating candidate", "[tc12][cpu]
     registry.unregisterAdapter( "c12:wide" );
     engine.clearExecutors();
     center.resetResourceProfileLimits();
+    center.shutdownForTests();
     engine.shutdownForTests();
 }
 
@@ -748,8 +750,10 @@ TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snaps
         return Json::Value();
     } );
 
-    // Declared weight exceeds even the FULL cap — admittable only via the
-    // idle never-starve rule (m_active.total == 0 skips the weight gate).
+    // Declared weight clamps to the 0..100 scale's max (parseAdmissionDims
+    // clamps >100 → 100) — at the cap, any positive running usage pushes it
+    // past the non-interactive limit, so it is admittable only via the idle
+    // never-starve rule (m_active.total == 0 skips the weight gate).
     registerDimsAdapter( registry, "s12:huge", 200, 0, 0 );
     registerDimsAdapter( registry, "s12:holder", 10, 0, 0 );
 
@@ -778,5 +782,6 @@ TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snaps
     engine.clearExecutors();
     center.resetResourceProfileLimits();
     center.setIoWeightLimits( 100, 100, 100 );
+    center.shutdownForTests();
     engine.shutdownForTests();
 }

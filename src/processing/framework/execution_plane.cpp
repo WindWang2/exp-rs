@@ -416,10 +416,14 @@ unsigned int ExecutionPlane::estimateFromPreflight( const std::string &algorithm
   return 0;
 }
 
-sicnu::TaskAdmissionSnapshot ExecutionPlane::admissionSnapshot( const QString &algorithmId,
-                                                                unsigned int resourceEstimateMb ) const
+sicnu::TaskAdmissionSnapshot ExecutionPlane::admissionSnapshot(
+    const QString &algorithmId,
+    unsigned int resourceEstimateMb,
+    const QString &source,
+    std::optional<sicnu::LatencyClass> latencyClassOverride ) const
 {
-  return sicnu::TaskCenter::instance().admissionSnapshot( algorithmId, resourceEstimateMb );
+  return sicnu::TaskCenter::instance().admissionSnapshot(
+      algorithmId, resourceEstimateMb, source, latencyClassOverride );
 }
 
 // ---------------------------------------------------------------------------
