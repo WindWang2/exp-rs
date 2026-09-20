@@ -65,6 +65,20 @@ std::string readFile( const std::string &path )
   return QString::fromUtf8( file.readAll() ).toStdString();
 }
 
+/// Line-ending-insensitive comparison: on Windows checkouts with
+/// core.autocrlf the working-tree .md files carry CRLF while the renderer
+/// emits LF; the gate is about CONTENT drift from the sidecars, not about the
+/// checkout's line-ending normalization.
+std::string lfOnly( std::string text )
+{
+  std::string out;
+  out.reserve( text.size() );
+  for ( char c : text )
+    if ( c != '' )
+      out.push_back( c );
+  return out;
+}
+
 struct Bootstrap
 {
     CapabilityCatalog &catalog;
@@ -426,8 +440,8 @@ TEST_CASE( "D8 knowledge pages regenerate with zero diff", "[capability][d8][pag
     for ( const KnowledgePage &page : renderCapabilityKnowledgePages() )
     {
         const std::string committed =
-          readFile( std::string( kSourceDir ) + "/" + page.relativePath );
-        if ( committed != page.content )
+          lfOnly( readFile( std::string( kSourceDir ) + "/" + page.relativePath ) );
+        if ( committed != lfOnly( page.content ) )
         {
           FAIL( "page drifted: " + page.relativePath +
                 " — regenerate with: capability_knowledge_tool gen-pages" );
