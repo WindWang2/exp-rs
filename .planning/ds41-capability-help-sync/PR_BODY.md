@@ -1,4 +1,4 @@
-# PR BODY (draft — finalize after double-run evidence)
+# PR BODY
 
 ## Summary
 
@@ -80,7 +80,7 @@ equality-checked so new gaps fail deliberately.
 
 ## Test commands & results
 
-(two consecutive runs of:)
+(two consecutive runs, identical results; plus a four-way tamper cycle: T1 derived-field drift / T2 authored emptiness / T3 Layer-A byte drift / T4 deleted sidecar each fail the corresponding gate, restoring passes all four):
 ```
 test_algorithm_meta_drift, test_capability_knowledge,
 test_capability_completeness, test_capability_surface_parity
@@ -108,9 +108,18 @@ twice mid-run (recovered via dangling commits). The work branch is therefore
 - CLI `--list`/`algorithms list` full-engine superset includes non-rs
   families; the gate pins the rs: slice exactly and requires every CLI rs: id
   to resolve live (superset relation, documented in the test).
-- Units/NoData: no structured contract exists; census WARN only.
+- Units/NoData: no structured contract exists (`rs_schema.h` has no unit field); the completeness gate reports a WARN census (15/152 sidecars mention NoData semantics) instead of fabricating content.
+- Regenerated Layer-B sidecars carry the jsoncpp writer's `"key" : ` trailing space; the drift gate's byte-equality IS that writer's contract, and the regeneration normalizes master's previously mixed corpus (some files hand-stripped) to one deterministic form. `git diff --check` therefore reports trailing-whitespace warnings on generated files only — accepted, documented, and re-verified idempotent.
+- Layer-C (`data/agent/capabilities`) was repaired to its last valid content only; in-flight branch lines carry additional Layer-C entries (rs:radiometric_qa / rs:solar_geometry / rs:brdf_normalization / rs:quality_mosaic, …) that the Layer-C owner should re-land.
+- `AlgorithmMetaStore::loadFromDirectory` keys entries by id, so a duplicate-id Layer-A file would be invisible to the parity gate; the drift test's file-count assertion is the backstop — keep both gates together.
 - `search_algorithms` tag/purpose filter documentation gap (pre-existing,
   production surface) — not touched here.
 - Layer-C (`data/agent/capabilities`) was repaired only to its last valid
   content; its owning track should re-land any intended enrichment through the
   normal review path.
+
+
+## Review disposition
+
+- Pass 1 (data-repair correctness, read-only): 7/7 PASS; findings R1/R2 (commit-message corrections: 7 duplicated ids, "emptied" not "truncated") and R3 (repeated INVALID_PARAMETER code across distinct causes in 3 sidecars — accepted; `errorCatalog()` aggregates by code and `manifestPage` surfaces both `when` conditions) recorded in `.planning/ds41-capability-help-sync/EVIDENCE.md`.
+- Pass 2 (final diff incl. the two new test files, read-only; reviewer independently re-ran the four gates): **P0 = 0**. P1-1 (exemption reason text was wrong for ~31/39 rows — fixed to the verified common cause) and P1-2 (schema parity ignored `items.type` and the `required` set — signatures extended; both fixed with the gates re-verified green) are resolved in `2b5709386`. P2 items recorded in EVIDENCE.md.
