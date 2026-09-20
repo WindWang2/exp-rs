@@ -173,10 +173,13 @@ bool analyzeResamplingCoverage( const float *srcWl, int srcBands,
     out->partial = 0;
     out->none = 0;
 
-    // FWHM → sigma, identical constant to resampleSpectrumGaussian. Spelled
-    // as a literal rather than 1/(2*sqrt(2*log(2))): std::log/std::sqrt are
-    // not constexpr on every standard library, and the expression made this
-    // TU fail to compile on MSVC (C2131).
+    // FWHM → sigma, identical constant to resampleSpectrumGaussian: sigma =
+    // FWHM / 2.3548200450309493. Spelled as a literal rather than
+    // 1/(2*sqrt(2*log(2))): std::log/std::sqrt are not constexpr on every
+    // standard library, and the expression made this TU fail to compile on
+    // MSVC (C2131). The DIVISION is load-bearing: multiplying here (as an
+    // earlier revision did) inflates sigma by 2.3548² and reports Partial for
+    // targets whose response is in fact fully captured.
     constexpr double kFwhmToSigma = 2.3548200450309493;
 
     for ( int t = 0; t < dstBands; ++t )
@@ -197,7 +200,7 @@ bool analyzeResamplingCoverage( const float *srcWl, int srcBands,
                     // means the resampled value rests on a visibly truncated
                     // SRF — report Partial.
                     const double sigmaSqrt2 =
-                        static_cast<double>( fwhm ) * kFwhmToSigma * std::sqrt( 2.0 );
+                        static_cast<double>( fwhm ) / kFwhmToSigma * std::sqrt( 2.0 );
                     const double zLo = ( static_cast<double>( srcMin ) - wl ) / sigmaSqrt2;
                     const double zHi = ( static_cast<double>( srcMax ) - wl ) / sigmaSqrt2;
                     const double captured = 0.5 * ( std::erf( zHi ) - std::erf( zLo ) );

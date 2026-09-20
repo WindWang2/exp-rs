@@ -29,17 +29,13 @@ bool invertDenseMatrixInPlace( std::vector<double> &m, int n );
 
     /// Condition number λmax/λmin of a symmetric positive-semi-definite n×n
     /// row-major matrix, for diagnostics on small Gram matrices (the
-    /// interference matrices of the TCIMF/OSP detectors). Deterministic power
-    /// iteration (normalized ones start, early exit at a 1e-12 relative
-    /// Rayleigh residual, hard-capped iterations); λmin comes from power
-    /// iteration on the inverse. Returns -1 when the matrix is not computable
-    /// (size mismatch, non-finite, singular, or a non-converging iteration) —
-    /// "unknown" is reported honestly rather than guessed. KNOWN LIMITATION:
-    /// power iteration from the normalized-ones start can under-report when
-    /// that start is (near-)orthogonal to the dominant eigenvector (e.g. the
-    /// Gram of an equiangular pair reports 1 instead of 3); the value is a
-    /// deterministic lower bound on the true condition number, never an
-    /// overstatement.
+    /// interference matrices of the TCIMF/OSP detectors). Computed from the
+    /// eigenvalues of a deterministic cyclic-Jacobi diagonalization (exact to
+    /// machine precision — a fixed-start power iteration is structurally blind
+    /// for the equiangular Gram matrices this diagnostic exists to measure).
+    /// Returns -1 when the matrix is not computable (size mismatch,
+    /// non-finite, or a non-positive smallest eigenvalue) — "unknown" is
+    /// reported honestly rather than guessed.
     double conditionNumber( const std::vector<double> &m, int n );
 
 } // namespace sicnu::primitives

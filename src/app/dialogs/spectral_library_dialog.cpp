@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -146,11 +147,13 @@ void SpectralLibraryDialog::setupUi()
 
 void SpectralLibraryDialog::setSpectrum( const QVector<double> &values,
                                          const QVector<double> &wavelengths,
-                                         const QVector<QString> &labels )
+                                         const QVector<QString> &labels,
+                                         const QVector<double> &fwhm )
 {
   m_values = values;
   m_wavelengths = wavelengths;
   m_labels = labels;
+  m_fwhm = fwhm;
   updateSpectrumSummary();
 }
 
@@ -296,6 +299,27 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
     m_libraryPathEdit->setProperty( "loadedPath", path );
   }
 
+  // A v2 library entry requires BOTH a wavelength grid and an FWHM grid (the
+  // schema of record lists them as required, and validateLibrary enforces
+  // grid/spectrum size equality). Saving an incomplete profile would write an
+  // entry the strict loader rejects — refuse instead of producing a
+  // schema-invalid library.
+  const bool hasWavelengths = m_wavelengths.size() == m_values.size() &&
+                              !m_values.isEmpty();
+  const bool hasFwhm = m_fwhm.size() == m_values.size() && !m_values.isEmpty();
+  if ( !hasWavelengths || !hasFwhm )
+  {
+    QStringList missing;
+    if ( !hasWavelengths )
+      missing.append( tr( "wavelength grid" ) );
+    if ( !hasFwhm )
+      missing.append( tr( "FWHM grid" ) );
+    m_statusLabel->setText(
+        tr( "Cannot save: the profile lacks the %1 (a library entry requires one "
+            "value per band)." ).arg( missing.join( QLatin1String( " and " ) ) ) );
+    return;
+  }
+
   SpectralLibrary::Entry entry;
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
   entry.material = tr( "Untitled" );
@@ -326,12 +350,12 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   entry.spectrum.reserve( m_values.size() );
   for ( double v : m_values )
     entry.spectrum.push_back( static_cast<float>( v ) );
-  if ( m_wavelengths.size() == m_values.size() )
-  {
-    entry.wavelengths.reserve( m_wavelengths.size() );
-    for ( double w : m_wavelengths )
-      entry.wavelengths.push_back( static_cast<float>( w ) );
-  }
+  entry.wavelengths.reserve( m_wavelengths.size() );
+  for ( double w : m_wavelengths )
+    entry.wavelengths.push_back( static_cast<float>( w ) );
+  entry.fwhm.reserve( m_fwhm.size() );
+  for ( double f : m_fwhm )
+    entry.fwhm.push_back( static_cast<float>( f ) );
 
   m_library.entries.append( entry );
   QString errorMessage;

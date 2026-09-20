@@ -99,7 +99,8 @@ Json::Value targetParam( const std::vector<float> &t )
 // single-band score plane plus the result JSON.
 std::vector<float> runDetector( const char *opName, const QString &input, const QString &output,
                                 const Json::Value &target,
-                                const std::string &background, Json::Value *result )
+                                const std::string &background, Json::Value *result,
+                                const Json::Value &interference = Json::Value() )
 {
     auto op = RSOperatorRegistry::instance().create( opName );
     REQUIRE( op != nullptr );
@@ -109,11 +110,23 @@ std::vector<float> runDetector( const char *opName, const QString &input, const 
     params["target"] = target;
     if ( !background.empty() )
         params["background"] = background;
+    if ( !interference.isNull() )
+        params["interference"] = interference;
     RSOperatorContext ctx;
     Json::Value runResult = op->run( params, ctx );
     if ( result )
         *result = runResult;
     return readBand( output );
+}
+
+Json::Value interferenceParam()
+{
+    Json::Value rows( Json::arrayValue );
+    Json::Value row( Json::arrayValue );
+    for ( float x : { 10.0f, 40.0f, 20.0f } )
+        row.append( static_cast<double>( x ) );
+    rows.append( row );
+    return rows;
 }
 
 ErrorCode codeOf( const std::function<void()> &fn )
@@ -144,8 +157,12 @@ QString writeScene( QTemporaryDir &dir, const char *name, int W, int H,
     for ( int y = 0; y < H; ++y )
         for ( int x = 0; x < W; ++x )
             for ( int b = 0; b < kB; ++b )
+                // Independent per-band ramps: the pixel cloud spans R^B, so the
+                // correlation matrix is full rank (a single shared ramp would
+                // make it rank-1 and CEM/TCIMF would correctly refuse).
                 builder.withPixel( b + 1, x, y,
-                                   10.0f + 2.0f * b + static_cast<float>( ( x * 5 + y * 3 ) % 7 ) );
+                                   10.0f + 2.0f * b +
+                                       static_cast<float>( ( x * ( 5 + b ) + y * ( 3 + 2 * b ) ) % 7 ) );
     const std::vector<float> target{ 30.0f, 40.0f, 50.0f };
     const int tx = 2, ty = 3;
     for ( int b = 0; b < kB; ++b )
@@ -187,11 +204,15 @@ TEST_CASE( "background raster equal to the scene gives bit-identical scores",
             Json::Value sceneResult;
             const std::vector<float> sceneScores =
                 runDetector( opName, scene, dir.filePath( "scene_out.tif" ),
-                             paramsExtra["target"], std::string(), &sceneResult );
+                             paramsExtra["target"], std::string(), &sceneResult,
+                             std::string( opName ) == "rs:tcimf_detection" ? interferenceParam()
+                                                                          : Json::Value() );
             Json::Value bgResult;
             const std::vector<float> bgScores =
                 runDetector( opName, scene, dir.filePath( "bg_out.tif" ),
-                             paramsExtra["target"], scene.toStdString(), &bgResult );
+                             paramsExtra["target"], scene.toStdString(), &bgResult,
+                             std::string( opName ) == "rs:tcimf_detection" ? interferenceParam()
+                                                                          : Json::Value() );
 
             REQUIRE( sceneResult["backgroundSource"].asString() == "scene" );
             REQUIRE( bgResult["backgroundSource"].asString() == scene.toStdString() );
@@ -253,11 +274,15 @@ TEST_CASE( "background raster with the same pixels in a different layout gives t
             Json::Value sceneResult;
             const std::vector<float> sceneScores =
                 runDetector( opName, scene, dir.filePath( "s_out.tif" ), extra["target"],
-                             std::string(), &sceneResult );
+                             std::string(), &sceneResult,
+                             std::string( opName ) == "rs:tcimf_detection" ? interferenceParam()
+                                                                          : Json::Value() );
             Json::Value bgResult;
-            const std::vector<float> bgScores = runDetector( opName, scene, dir.filePath( "t_out.tif" ),
-                                                             extra["target"], bgPath.toStdString(),
-                                                             &bgResult );
+            const std::vector<float> bgScores =
+                runDetector( opName, scene, dir.filePath( "t_out.tif" ), extra["target"],
+                             bgPath.toStdString(), &bgResult,
+                             std::string( opName ) == "rs:tcimf_detection" ? interferenceParam()
+                                                                          : Json::Value() );
 
             REQUIRE( bgResult["backgroundSamples"].asUInt64() ==
                      sceneResult["backgroundSamples"].asUInt64() );
@@ -278,7 +303,11 @@ TEST_CASE( "background raster really drives the filter (different statistics, "
     int targetIndex = 0;
     const QString scene = writeScene( dir, "scene3.tif", 8, 8, &target, &targetIndex );
 
-    // A background raster with a clearly different mean: 100x the scene scale.
+    // A background raster whose band structure is INVERTED relative to the
+    // scene (band 0 bright, band 2 dark) and far brighter: a pure uniform
+    // rescaling would leave CEM's filter unchanged (w = R⁻¹t/(tᵀR⁻¹t) is
+    // scale-invariant), so the structural difference is what proves the
+    // background statistics are genuinely consumed.
     constexpr int kB = 3;
     RsSyntheticRasterBuilder bg( 6, 6, kB );
     bg.withCrs( "EPSG:32650" );
@@ -286,8 +315,9 @@ TEST_CASE( "background raster really drives the filter (different statistics, "
         for ( int x = 0; x < 6; ++x )
             for ( int b = 0; b < kB; ++b )
                 bg.withPixel( b + 1, x, y,
-                              500.0f + 30.0f * b + static_cast<float>( ( x * 3 + y * 5 ) % 5 ) );
-    const QString bgPath = bg.writeToDisk( dir.filePath( "bg_scaled.tif" ) );
+                              500.0f + 30.0f * ( kB - 1 - b ) +
+                                  static_cast<float>( ( x * ( b + 2 ) + y * ( b + 3 ) ) % 5 ) );
+    const QString bgPath = bg.writeToDisk( dir.filePath( "bg_inverted.tif" ) );
     REQUIRE( !bgPath.isEmpty() );
 
     const std::vector<float> sceneScores =
@@ -302,7 +332,11 @@ TEST_CASE( "background raster really drives the filter (different statistics, "
         if ( !std::isnan( sceneScores[p] ) )
             maxDiff = std::max( maxDiff,
                                 std::fabs( static_cast<double>( sceneScores[p] - bgScores[p] ) ) );
-    REQUIRE( maxDiff > 1.0 ); // the background is genuinely consumed
+    // Potency comes from the alternative, not the magnitude: if the operator
+    // ignored 'background' the difference would be EXACTLY 0. The observed
+    // material difference (CEM's filter is invariant to a uniform background
+    // rescaling, so this is a structural effect) proves consumption.
+    REQUIRE( maxDiff > 1e-3 );
     // The planted target still scores exactly 1 (the constraint is background-free).
     CHECK( bgScores[static_cast<size_t>( targetIndex )] == Catch::Approx( 1.0 ).margin( 1e-5 ) );
 }
@@ -517,9 +551,10 @@ TEST_CASE( "background NoData pixels are excluded from the statistics",
             for ( int b = 0; b < kB; ++b )
             {
                 const bool invalid = ( x < 4 ); // half the background is NoData
-                bg.withPixel( b + 1, x, y, invalid ? -9999.0f
-                                                   : 20.0f + 3.0f * b +
-                                                         static_cast<float>( ( x + y ) % 5 ) );
+                bg.withPixel( b + 1, x, y,
+                              invalid ? -9999.0f
+                                      : 20.0f + 3.0f * b +
+                                            static_cast<float>( ( x * ( b + 1 ) + y * ( b + 2 ) ) % 5 ) );
             }
     const QString bgPath = bg.writeToDisk( dir.filePath( "bg_nd.tif" ) );
     REQUIRE( !bgPath.isEmpty() );
@@ -542,7 +577,7 @@ TEST_CASE( "background NoData pixels are excluded from the statistics",
                     plain.withPixel( b + 1, x, y,
                                      ( x < 4 ) ? -9999.0f
                                                : 20.0f + 3.0f * b +
-                                                     static_cast<float>( ( x + y ) % 5 ) );
+                                                     static_cast<float>( ( x * ( b + 1 ) + y * ( b + 2 ) ) % 5 ) );
         REQUIRE( !plain.writeToDisk( bgPlainPath ).isEmpty() );
     }
     Json::Value plainResult;
@@ -595,8 +630,11 @@ TEST_CASE( "background raster refuses when the scene has no wavelength grid and 
     // one side declares a grid).
     RsSyntheticRasterBuilder bg( 4, 4, 3 );
     bg.withCrs( "EPSG:32650" );
-    for ( int band = 1; band <= 3; ++band )
-        bg.withConstantValue( band, 0.1f * band );
+    for ( int y = 0; y < 4; ++y )
+        for ( int x = 0; x < 4; ++x )
+            for ( int band = 1; band <= 3; ++band )
+                bg.withPixel( band, x, y,
+                              0.1f * band + static_cast<float>( ( x * ( band + 1 ) + y * band ) % 4 ) );
     const QString bgGridded = bg.writeToDisk( dir.filePath( "bg_gridded.tif" ) );
     REQUIRE( !bgGridded.isEmpty() );
     stampWavelengths( bgGridded, { 400.0, 500.0, 600.0 } );
@@ -619,8 +657,11 @@ TEST_CASE( "background raster refuses when the scene has no wavelength grid and 
     {
         RsSyntheticRasterBuilder b( 6, 6, 3 );
         b.withCrs( "EPSG:32650" );
-        for ( int band = 1; band <= 3; ++band )
-            b.withConstantValue( band, 0.2f * band );
+        for ( int y = 0; y < 6; ++y )
+            for ( int x = 0; x < 6; ++x )
+                for ( int band = 1; band <= 3; ++band )
+                    b.withPixel( band, x, y,
+                                 0.2f * band + static_cast<float>( ( x * band + y * ( band + 1 ) ) % 5 ) );
         REQUIRE( !b.writeToDisk( sceneGridded ).isEmpty() );
     }
     stampWavelengths( sceneGridded, { 400.0, 500.0, 600.0 } );

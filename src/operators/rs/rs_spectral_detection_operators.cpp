@@ -160,6 +160,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     bool backgroundResampled = false;
     bool backgroundPartial = false;
     bool backgroundGaussian = false;
+    int backgroundBands = bandCount; ///< background raster band count (may differ)
     std::vector<float> backgroundCenters; ///< background grid centers (nm) when resampling
     GdalDatasetWrapper backgroundDs;
     std::vector<float> backgroundNoDataPerBand( static_cast<size_t>( bandCount ), 0.0f );
@@ -172,47 +173,49 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         if ( !backgroundDs.open( QString::fromStdString( backgroundPath ) ) )
             throw RSOperatorError( ErrorCode::GdalError,
                                    "Failed to open background raster: " + backgroundPath );
-        if ( backgroundDs.bandCount() != bandCount )
-            throw RSOperatorError(
-                ErrorCode::InvalidInputData,
-                "background raster has " + std::to_string( backgroundDs.bandCount() ) +
-                    " bands, the scene has " + std::to_string( bandCount ) +
-                    "; spectral background statistics require matching band counts" );
+        backgroundBands = backgroundDs.bandCount();
+        std::vector<int> backgroundAllBands( static_cast<size_t>( backgroundBands ) );
+        for ( int b = 0; b < backgroundBands; ++b )
+            backgroundAllBands[static_cast<size_t>( b )] = b + 1;
         QString backgroundGridError;
         const RasterWavelengthGrid backgroundGrid =
-            RasterWavelengthGrid::read( backgroundDs, allBands, &backgroundGridError );
+            RasterWavelengthGrid::read( backgroundDs, backgroundAllBands, &backgroundGridError );
         if ( !backgroundGridError.isEmpty() )
             throw RSOperatorError( ErrorCode::InvalidInputData,
                                    backgroundGridError.toStdString() );
-        if ( backgroundGrid.present && inputGrid.present &&
-             backgroundGrid.grid.centersNm != inputGrid.grid.centersNm )
+
+        if ( backgroundGrid.present && inputGrid.present )
         {
-            // Both sides carry grids and they differ: reconcile the background
-            // spectra onto the scene grid with the shared kernels (Gaussian SRF
-            // when both sides carry FWHM, linear otherwise — same rule as the
-            // reference seam).
-            const float *dstFwhm =
-                inputGrid.grid.hasFwhm() ? inputGrid.grid.fwhmNm.data() : nullptr;
-            SpectralResampling::CoverageReport coverage;
-            if ( !SpectralResampling::analyzeResamplingCoverage(
-                     backgroundGrid.grid.centersNm.data(), bandCount,
-                     inputGrid.grid.centersNm.data(), dstFwhm, bandCount, &coverage ) )
-                throw RSOperatorError( ErrorCode::InvalidInputData,
-                                       "background wavelength grid is not strictly increasing" );
-            if ( coverage.none > 0 )
-                throw RSOperatorError(
-                    ErrorCode::InvalidInputData,
-                    "background raster wavelength coverage does not reach " +
-                        std::to_string( coverage.none ) + " scene band(s): " +
-                        std::to_string( inputGrid.grid.centersNm.front() ) + "-" +
-                        std::to_string( inputGrid.grid.centersNm.back() ) +
-                        " nm scene grid vs background " +
-                        std::to_string( backgroundGrid.grid.centersNm.front() ) + "-" +
-                        std::to_string( backgroundGrid.grid.centersNm.back() ) + " nm" );
-            backgroundResampled = true;
-            backgroundPartial = coverage.partial > 0;
-            backgroundGaussian = inputGrid.grid.hasFwhm() && backgroundGrid.grid.hasFwhm();
-            backgroundCenters = backgroundGrid.grid.centersNm;
+            // Both sides carry wavelength grids: the background spectra are
+            // reconciled onto the scene grid, so the band counts may DIFFER
+            // freely (a finer or coarser background spectral sampling is the
+            // normal case). Gaussian SRF when both sides carry FWHM, linear
+            // otherwise — the same rule as the reference seam.
+            if ( backgroundGrid.grid.centersNm != inputGrid.grid.centersNm )
+            {
+                const float *dstFwhm =
+                    inputGrid.grid.hasFwhm() ? inputGrid.grid.fwhmNm.data() : nullptr;
+                SpectralResampling::CoverageReport coverage;
+                if ( !SpectralResampling::analyzeResamplingCoverage(
+                         backgroundGrid.grid.centersNm.data(), backgroundBands,
+                         inputGrid.grid.centersNm.data(), dstFwhm, bandCount, &coverage ) )
+                    throw RSOperatorError( ErrorCode::InvalidInputData,
+                                           "background wavelength grid is not strictly increasing" );
+                if ( coverage.none > 0 )
+                    throw RSOperatorError(
+                        ErrorCode::InvalidInputData,
+                        "background raster wavelength coverage does not reach " +
+                            std::to_string( coverage.none ) + " scene band(s): " +
+                            std::to_string( inputGrid.grid.centersNm.front() ) + "-" +
+                            std::to_string( inputGrid.grid.centersNm.back() ) +
+                            " nm scene grid vs background " +
+                            std::to_string( backgroundGrid.grid.centersNm.front() ) + "-" +
+                            std::to_string( backgroundGrid.grid.centersNm.back() ) + " nm" );
+                backgroundResampled = true;
+                backgroundPartial = coverage.partial > 0;
+                backgroundGaussian = inputGrid.grid.hasFwhm() && backgroundGrid.grid.hasFwhm();
+                backgroundCenters = backgroundGrid.grid.centersNm;
+            }
         }
         else if ( backgroundGrid.present && !inputGrid.present )
         {
@@ -222,7 +225,21 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 "but the scene does not; either stamp the scene grid or drop the "
                 "background grid so band-order interpretation applies" );
         }
-        for ( int b = 0; b < bandCount; ++b )
+        else if ( backgroundBands != bandCount )
+        {
+            // No reconciliation possible (at least one side lacks a grid):
+            // band-order interpretation requires matching band counts.
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "background raster has " + std::to_string( backgroundBands ) +
+                    " bands, the scene has " + std::to_string( bandCount ) +
+                    "; without wavelength metadata on both sides the background is "
+                    "interpreted in band order, which requires matching band counts" );
+        }
+
+        backgroundNoDataPerBand.assign( static_cast<size_t>( backgroundBands ), 0.0f );
+        backgroundHasNoDataPerBand.assign( static_cast<size_t>( backgroundBands ), 0 );
+        for ( int b = 0; b < backgroundBands; ++b )
         {
             bool hasNoData = false;
             const double nd = backgroundDs.bandNoDataValue( b + 1, &hasNoData );
@@ -256,7 +273,8 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         // Background statistics source: the independent background raster when
         // given, otherwise the scene itself. The pass order and accumulators
         // are identical on both paths — only the pixels differ.
-        GdalMultibandBlockStream backgroundStream( hasBackground ? backgroundDs : ds, bandCount,
+        GdalMultibandBlockStream backgroundStream( hasBackground ? backgroundDs : ds,
+                                                   hasBackground ? backgroundBands : bandCount,
                                                    kTile, kTile );
         const int backgroundTotalTiles = backgroundStream.tileCount();
         const double backgroundPerTile =
@@ -290,9 +308,9 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             resampledTile.assign( pixels * bandCount, kNaNf );
             for ( size_t p = 0; p < pixels; ++p )
             {
-                const float *x = bip + p * bandCount;
+                const float *x = bip + p * backgroundBands;
                 bool pixelValid = true;
-                for ( int b = 0; b < bandCount; ++b )
+                for ( int b = 0; b < backgroundBands; ++b )
                 {
                     const float v = x[b];
                     const bool checkNd =
@@ -311,11 +329,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 const bool ok =
                     backgroundGaussian
                         ? SpectralResampling::resampleSpectrumGaussian(
-                              x, backgroundCenters.data(), bandCount,
+                              x, backgroundCenters.data(), backgroundBands,
                               inputGrid.grid.centersNm.data(),
                               inputGrid.grid.fwhmNm.data(), bandCount, dst )
                         : SpectralResampling::resampleSpectrum(
-                              x, backgroundCenters.data(), bandCount,
+                              x, backgroundCenters.data(), backgroundBands,
                               inputGrid.grid.centersNm.data(), bandCount, dst );
                 if ( !ok )
                     continue; // stays NaN → excluded by the predicate

@@ -294,7 +294,10 @@ TEST_CASE( "MatchIndex scales to a 10k-entry library without per-query full "
     // 10k entries on three grids (9000/750/250): the consolidation must not
     // degrade the scale path — one query resamples per DISTINCT grid (2 here),
     // never per entry, and the ranking stays bit-identical to brute force.
-    std::vector<float> gridA( 48 );
+    // Grid A spans 400–715 nm so grids B (to 710) and C (to 600) are fully
+    // inside the query range (an out-of-range grid would be legitimately
+    // skipped as incomparable, which is not what this case measures).
+    std::vector<float> gridA( 64 );
     for ( size_t i = 0; i < gridA.size(); ++i )
         gridA[i] = 400.0f + 5.0f * static_cast<float>( i );
     std::vector<float> gridB{ 420.0f, 470.0f, 520.0f, 570.0f, 620.0f, 650.0f, 690.0f };
@@ -305,14 +308,14 @@ TEST_CASE( "MatchIndex scales to a 10k-entry library without per-query full "
     Library library;
     Lcg lcg;
     for ( int i = 0; i < 9000; ++i )
-        library.entries.append( makeEntry( i, 48, lcg, gridA ) );
+        library.entries.append( makeEntry( i, 64, lcg, gridA ) );
     for ( int i = 0; i < 750; ++i )
         library.entries.append( makeEntry( 9000 + i, 7, lcg, gridB ) );
     for ( int i = 0; i < 250; ++i )
         library.entries.append( makeEntry( 9750 + i, 16, lcg, gridC ) );
 
     Lcg lcgQuery;
-    std::vector<float> query( 48 );
+    std::vector<float> query( 64 );
     for ( size_t b = 0; b < query.size(); ++b )
         query[b] = lcgQuery.next( 0.02f, 0.85f );
 

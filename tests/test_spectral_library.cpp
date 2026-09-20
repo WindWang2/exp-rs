@@ -313,7 +313,9 @@ TEST_CASE( "Consolidated SAM ordering and band-count skip",
     const auto all = SpectralLibrary::matchSpectrum( query, lib );
     REQUIRE( all.size() == 3 ); // "wide" skipped
     REQUIRE( all[0].name == QStringLiteral( "same" ) );
-    REQUIRE( all[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-9 ) );
+    // Zero angle up to the norm-product round-off: acos(1-2e-16) ≈ 2e-8 rad
+    // ≈ 1.2e-6 degrees, so 1e-9 degrees is below achievable precision.
+    REQUIRE( all[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-5 ) );
     REQUIRE( all[1].name == QStringLiteral( "diag" ) );
     REQUIRE( all[1].angleDegrees == Catch::Approx( 45.0 ).margin( 1e-9 ) );
     REQUIRE( all[2].name == QStringLiteral( "ortho" ) );

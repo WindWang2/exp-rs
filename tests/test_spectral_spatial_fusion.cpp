@@ -452,10 +452,12 @@ TEST_CASE( "Bilateral fusion tile-halo equivalence: interior matches whole-plane
     Result whole;
     REQUIRE( fuseScores( scores.data(), nullptr, kW, kH, config, &whole ) );
 
-    // 4×4 sub-tile at offset (2,3) plus a 2-pixel halo.
-    constexpr int kTW = 4;
-    constexpr int kTH = 4;
-    constexpr int kOx = 2;
+    // 3×3 sub-tile at offset (3,3) plus a 2-pixel halo: the halo'd window is
+    // [1,8)×[1,8), fully inside the 8×8 plane (an offset that pushed the halo
+    // past the raster would be a fixture bug, not a kernel case).
+    constexpr int kTW = 3;
+    constexpr int kTH = 3;
+    constexpr int kOx = 3;
     constexpr int kOy = 3;
     constexpr int kR = 2;
     std::vector<float> haloed( static_cast<size_t>( kTW + 2 * kR ) *
@@ -619,10 +621,14 @@ TEST_CASE( "rs:spectral_spatial_fuse E2E: bilateral method, streaming and method
     badSigma["output"] = dir.filePath( "bad_sigma.tif" ).toStdString();
     REQUIRE_THROWS_AS( op->run( badSigma, context ), RSOperatorError );
 
-    // Default (no method) stays the mean and reports it.
+    // Default (no method) stays the mean and reports it. The geometry must
+    // match the oracle below (radius 2, beta 0.5) — the DEFAULTS are radius 1
+    // and beta 0.5.
     Json::Value defaultParams( Json::objectValue );
     defaultParams["input"] = inputPath.toStdString();
     defaultParams["output"] = dir.filePath( "default.tif" ).toStdString();
+    defaultParams["radius"] = 2;
+    defaultParams["beta"] = 0.5;
     Json::Value defaultResult;
     REQUIRE_NOTHROW( defaultResult = op->run( defaultParams, context ) );
     REQUIRE( defaultResult["method"].asString() == "mean" );

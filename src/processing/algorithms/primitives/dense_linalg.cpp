@@ -1,6 +1,7 @@
 // dense_linalg.cpp — see dense_linalg.h
 #include "dense_linalg.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace sicnu::primitives
@@ -81,61 +82,96 @@ bool invertDenseMatrix( const std::vector<double> &m, int n, std::vector<double>
 namespace
 {
 
-/// Dominant eigenvalue of a symmetric matrix via power iteration (same
-/// deterministic recipe as SpectralAnomaly::conditionProxy: normalized ones
-/// start, 1e-12 relative Rayleigh residual early exit, hard iteration cap).
-/// Returns -1 when the iteration cannot produce a finite positive value.
-double dominantEigenvalue( const std::vector<double> &m, int n )
+// Cyclic Jacobi rotations for a symmetric n×n row-major matrix: each sweep
+// annihilates every off-diagonal pair with the closed-form 2×2 rotation
+// (tau = (aqq−app)/(2apq), t = sign(tau)/(|tau|+sqrt(tau²+1))), so the
+// diagonal converges to the eigenvalues. Deterministic (fixed sweep order,
+// no randomness) and exact to machine precision — deliberately NOT power
+// iteration: a fixed start vector is structurally blind for the equiangular
+// Gram matrices this diagnostic exists to measure ((1,…,1) is an exact
+// eigenvector of [[1,c],…,[c,1]], so inverse iteration would report λmin as
+// λmax(A⁻¹) and under-report the condition number).
+std::vector<double> symmetricEigenvalues( std::vector<double> a, int n )
 {
-    if ( n <= 0 || m.size() != static_cast<size_t>( n ) * n )
-        return -1.0;
-    std::vector<double> v( static_cast<size_t>( n ),
-                           1.0 / std::sqrt( static_cast<double>( n ) ) );
-    double lambda = -1.0;
-    for ( int it = 0; it < 128; ++it )
+    if ( n <= 0 || a.size() != static_cast<size_t>( n ) * n )
+        return {};
+    for ( const double v : a )
     {
-        std::vector<double> w( static_cast<size_t>( n ), 0.0 );
-        double vw = 0.0;
-        double norm2 = 0.0;
+        if ( !std::isfinite( v ) )
+            return {};
+    }
+
+    constexpr int kMaxSweeps = 64;
+    for ( int sweep = 0; sweep < kMaxSweeps; ++sweep )
+    {
+        for ( int p = 0; p < n; ++p )
+        {
+            for ( int q = p + 1; q < n; ++q )
+            {
+                const double apq = a[static_cast<size_t>( p ) * n + q];
+                if ( apq == 0.0 )
+                    continue;
+                const double app = a[static_cast<size_t>( p ) * n + p];
+                const double aqq = a[static_cast<size_t>( q ) * n + q];
+                const double theta = ( aqq - app ) / ( 2.0 * apq );
+                const double sign = theta >= 0.0 ? 1.0 : -1.0;
+                const double t = sign / ( std::fabs( theta ) + std::sqrt( theta * theta + 1.0 ) );
+                const double c = 1.0 / std::sqrt( t * t + 1.0 );
+                const double s = t * c;
+                for ( int k = 0; k < n; ++k )
+                {
+                    if ( k == p || k == q )
+                        continue;
+                    const double akp = a[static_cast<size_t>( k ) * n + p];
+                    const double akq = a[static_cast<size_t>( k ) * n + q];
+                    const double nkp = c * akp - s * akq;
+                    const double nkq = s * akp + c * akq;
+                    a[static_cast<size_t>( k ) * n + p] = nkp;
+                    a[static_cast<size_t>( p ) * n + k] = nkp;
+                    a[static_cast<size_t>( k ) * n + q] = nkq;
+                    a[static_cast<size_t>( q ) * n + k] = nkq;
+                }
+                a[static_cast<size_t>( p ) * n + p] = app - t * apq;
+                a[static_cast<size_t>( q ) * n + q] = aqq + t * apq;
+                a[static_cast<size_t>( p ) * n + q] = 0.0;
+                a[static_cast<size_t>( q ) * n + p] = 0.0;
+            }
+        }
+        double offNorm2 = 0.0;
+        double diagNorm2 = 0.0;
         for ( int i = 0; i < n; ++i )
         {
-            const size_t rowOffset = static_cast<size_t>( i ) * n;
-            double row = 0.0;
-            for ( int j = 0; j < n; ++j )
-                row += m[rowOffset + j] * v[static_cast<size_t>( j )];
-            w[static_cast<size_t>( i )] = row;
-            vw += v[static_cast<size_t>( i )] * row;
-            norm2 += row * row;
+            const double dii = a[static_cast<size_t>( i ) * n + i];
+            diagNorm2 += dii * dii;
+            for ( int j = i + 1; j < n; ++j )
+            {
+                const double dij = a[static_cast<size_t>( i ) * n + j];
+                offNorm2 += dij * dij;
+            }
         }
-        if ( !std::isfinite( norm2 ) || !( norm2 > 0.0 ) || !std::isfinite( vw ) )
-            return -1.0;
-        lambda = vw;
-        const double norm = std::sqrt( norm2 );
-        if ( std::fabs( norm - lambda ) <= 1e-12 * std::max( 1.0, norm ) )
+        if ( offNorm2 <= 1e-30 * std::max( 1.0, diagNorm2 ) )
             break;
-        for ( int i = 0; i < n; ++i )
-            v[static_cast<size_t>( i )] = w[static_cast<size_t>( i )] / norm;
     }
-    if ( !std::isfinite( lambda ) || !( lambda > 0.0 ) )
-        return -1.0;
-    return lambda;
+
+    std::vector<double> eigenvalues( static_cast<size_t>( n ) );
+    for ( int i = 0; i < n; ++i )
+        eigenvalues[static_cast<size_t>( i )] = a[static_cast<size_t>( i ) * n + i];
+    std::sort( eigenvalues.begin(), eigenvalues.end() );
+    return eigenvalues;
 }
 
 } // namespace
 
 double conditionNumber( const std::vector<double> &m, int n )
 {
-    const double lambdaMax = dominantEigenvalue( m, n );
-    if ( !( lambdaMax > 0.0 ) )
+    const std::vector<double> eigenvalues = symmetricEigenvalues( m, n );
+    if ( eigenvalues.empty() )
         return -1.0;
-    std::vector<double> inverse;
-    if ( !invertDenseMatrix( m, n, &inverse ) )
+    const double lambdaMin = eigenvalues.front();
+    const double lambdaMax = eigenvalues.back();
+    if ( !( lambdaMin > 0.0 ) || !std::isfinite( lambdaMax ) )
         return -1.0;
-    // λmax(A⁻¹) = 1/λmin(A) for a symmetric positive-definite A.
-    const double lambdaMaxInverse = dominantEigenvalue( inverse, n );
-    if ( !( lambdaMaxInverse > 0.0 ) )
-        return -1.0;
-    const double cond = lambdaMax * lambdaMaxInverse;
+    const double cond = lambdaMax / lambdaMin;
     if ( !std::isfinite( cond ) || !( cond >= 1.0 ) )
         return -1.0;
     return cond;

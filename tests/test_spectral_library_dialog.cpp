@@ -57,7 +57,8 @@ TEST_CASE( "SpectralLibraryDialog matches the profile against the library", "[sp
   REQUIRE( library.save( libraryPath, &err ) );
 
   SpectralLibraryDialog dialog;
-  dialog.setSpectrum( { 0.1, 0.2, 0.3, 0.4 } );
+  dialog.setSpectrum( { 0.1, 0.2, 0.3, 0.4 }, { 450.0, 550.0, 650.0, 750.0 }, {},
+                      { 20.0, 20.0, 20.0, 20.0 } );
 
   SECTION( "match rows are ranked by ascending SAM angle" )
   {
@@ -104,16 +105,41 @@ TEST_CASE( "SpectralLibraryDialog matches the profile against the library", "[sp
     CHECK( reloaded.entries.last().spectrum[3] == Catch::Approx( 0.4f ) );
 
     // The write path and the strict read path agree on the schema: the saved
-    // entry carries the v2 provenance fields (id slug, license, citation) and
-    // the whole file loads through loadValidated (Spectral Intelligence 13.0
-    // library consolidation — before, the dialog wrote entries the strict
-    // loader rejected).
-    SpectralLibrary::Library validated;
-    QString validateError;
-    REQUIRE( SpectralLibrary::Library::loadValidated( libraryPath, &validated, &validateError ) );
-    CHECK( validated.entries.last().id == QStringLiteral( "profile-3" ) );
-    CHECK( validated.entries.last().license == QStringLiteral( "unspecified" ) );
-    CHECK( !validated.entries.last().citation.isEmpty() );
+    // entry carries the v2 provenance fields (id slug, license, citation,
+    // wavelength grid) and passes validateLibrary on its own (Spectral
+    // Intelligence 13.0 library consolidation — before, the dialog wrote
+    // entries the strict loader rejected). The fixture's hand-made entries
+    // are intentionally incomplete, so the check is per-entry.
+    const SpectralLibrary::Entry &saved = reloaded.entries.last();
+    CHECK( saved.id == QStringLiteral( "profile-3" ) );
+    CHECK( saved.license == QStringLiteral( "unspecified" ) );
+    CHECK( !saved.citation.isEmpty() );
+    CHECK( saved.wavelengths.size() == saved.spectrum.size() );
+    SpectralLibrary::Library savedOnly;
+    savedOnly.entries.append( saved );
+    QStringList entryErrors;
+    REQUIRE( SpectralLibrary::validateLibrary( savedOnly, &entryErrors ) );
+  }
+
+  SECTION( "a profile without a wavelength grid is refused, not written invalid" )
+  {
+    QString loadError;
+    REQUIRE( dialog.loadAndMatch( libraryPath, &loadError ) );
+
+    auto *pathEdit = dialog.findChild<QLineEdit *>( QStringLiteral( "spectralLibPathEdit" ) );
+    REQUIRE( pathEdit != nullptr );
+    auto *saveButton = dialog.findChild<QPushButton *>( QStringLiteral( "spectralSaveBtn" ) );
+    REQUIRE( saveButton != nullptr );
+
+    // A profile without the FWHM grid cannot become a valid v2 entry (the
+    // schema of record requires both grids): the save is refused and the
+    // library on disk is untouched (Spectral Intelligence 13.0).
+    dialog.setSpectrum( { 0.5, 0.6 }, { 450.0, 550.0 } );
+    saveButton->click();
+
+    SpectralLibrary::Library after;
+    REQUIRE( SpectralLibrary::Library::load( libraryPath, &after, &loadError ) );
+    CHECK( after.entries.size() == 2 );
   }
 
   SECTION( "switching library path reloads the new library on match (#340)" )

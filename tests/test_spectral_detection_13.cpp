@@ -83,13 +83,18 @@ Json::Value targetParam( const Scene &s )
     return t;
 }
 
-Json::Value interferenceParam( const Scene &s )
+Json::Value interferenceRow( const Scene &s )
 {
-    Json::Value rows( Json::arrayValue );
     Json::Value row( Json::arrayValue );
     for ( int b = 0; b < kB; ++b )
         row.append( static_cast<double>( s.interference[static_cast<size_t>( b )] ) );
-    rows.append( row );
+    return row;
+}
+
+Json::Value interferenceParam( const Scene &s )
+{
+    Json::Value rows( Json::arrayValue );
+    rows.append( interferenceRow( s ) );
     return rows;
 }
 
@@ -223,8 +228,8 @@ TEST_CASE( "rs:tcimf_detection: missing or degenerate interference refuses",
     // Duplicate interference spectra → linearly dependent under the background
     // metric.
     Json::Value dup( Json::arrayValue );
-    dup.append( interferenceParam( s ) );
-    dup.append( interferenceParam( s ) );
+    dup.append( interferenceRow( s ) );
+    dup.append( interferenceRow( s ) );
     extra["interference"] = dup;
     REQUIRE( codeOf( [&] {
         runAndRead( "rs:tcimf_detection", s.path, dir.filePath( "dup.tif" ), extra, nullptr );
@@ -248,10 +253,12 @@ TEST_CASE( "rs:tcimf_detection: missing or degenerate interference refuses",
     Json::Value badWidth( Json::objectValue );
     badWidth["target"] = targetParam( s );
     badWidth["interference"] = narrow;
+    // Wrong-width interference is refused by the shared reference seam
+    // (InvalidParameter) before the kernel ever sees the matrix.
     REQUIRE( codeOf( [&] {
         runAndRead( "rs:tcimf_detection", s.path, dir.filePath( "width.tif" ), badWidth,
                     nullptr );
-    } ) == ErrorCode::InvalidInputData );
+    } ) == ErrorCode::InvalidParameter );
 }
 
 TEST_CASE( "rs:osp_detection: planted target scores wᵀt, planted interference exactly 0",
@@ -305,8 +312,8 @@ TEST_CASE( "rs:osp_detection: missing, degenerate or in-span interference refuse
     } ) == ErrorCode::InvalidParameter );
 
     Json::Value dup( Json::arrayValue );
-    dup.append( interferenceParam( s ) );
-    dup.append( interferenceParam( s ) );
+    dup.append( interferenceRow( s ) );
+    dup.append( interferenceRow( s ) );
     extra["interference"] = dup;
     REQUIRE( codeOf( [&] {
         runAndRead( "rs:osp_detection", s.path, dir.filePath( "dup.tif" ), extra, nullptr );
