@@ -277,7 +277,11 @@ TEST_CASE( "WBF fuses an overlapping same-class pair into the weighted box",
   CHECK( fused.boxesPooled == 2 );
   CHECK( fused.clusters == 1 );
   CHECK( fused.memberSurviving[0] == 1 );
-  CHECK( fused.memberAbsorbed[0] == 1 );
+  // The 0.9 box is visited first and OPENS the cluster; the 0.8 box joins it.
+  CHECK( fused.memberMerged[0] == 0 );
+  CHECK( fused.memberMerged[1] == 1 );
+  CHECK( fused.boxesMerged == 1 );
+  CHECK( fused.boxesClustered == 2 );
 }
 
 TEST_CASE( "WBF weights coordinates and the count-aware score by member weight",
@@ -294,6 +298,27 @@ TEST_CASE( "WBF weights coordinates and the count-aware score by member weight",
   CHECK( fused.boxes[0].x == Catch::Approx( 10.457143f ).margin( 1e-5f ) );
   // mean effective = 1.75; × min(2,2)/Σw(4) = 0.875.
   CHECK( fused.boxes[0].confidence == Catch::Approx( 0.875f ).margin( 1e-6f ) );
+}
+
+TEST_CASE( "WBF merge statistics are informative", "[models][ensemble][detection][wbf]" )
+{
+  const DetectionFusionContract contract;
+  // Member A contributes two boxes; one fuses with B's box, one stays alone.
+  std::vector<DetectionMemberBoxes> members;
+  members.push_back( DetectionMemberBoxes{ 1.0, { box( 10, 10, 20, 20, 0, 0.9f ),
+                                                  box( 100, 100, 10, 10, 1, 0.5f ) } } );
+  members.push_back( DetectionMemberBoxes{ 1.0, { box( 11, 11, 20, 20, 0, 0.8f ) } } );
+
+  const DetectionFusionResult fused = fuseDetectionsWbf( members, contract );
+  CHECK( fused.boxesPooled == 3 );
+  CHECK( fused.boxesGated == 0 );
+  CHECK( fused.boxesClustered == 3 );
+  // Visit order: A's 0.9 box opens a cluster, B's 0.8 box merges into it,
+  // A's 0.5 box opens its own — exactly one merge, and it belongs to B.
+  CHECK( fused.boxesMerged == 1 );
+  CHECK( fused.memberMerged[0] == 0 );
+  CHECK( fused.memberMerged[1] == 1 );
+  CHECK( fused.clusters == 2 );          // the fused pair + A's lone box
 }
 
 TEST_CASE( "WBF keeps disjoint boxes and classes separate", "[models][ensemble][detection][wbf]" )

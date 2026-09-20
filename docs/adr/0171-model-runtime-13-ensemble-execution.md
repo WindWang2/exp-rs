@@ -38,10 +38,12 @@ unit-testable):
 
 1. **Gate.** A box enters the fusion only when its RAW confidence ≥
    `ensemble.detection.skip_box_threshold` (default 0), its geometry is
-   finite and positive-area, and its member weight is positive. DEVIATION
-   from the reference (documented): the reference gates the
-   member-weight-scaled score; we gate the raw confidence so a heavy member
-   weight cannot smuggle a low-confidence box past the gate.
+   finite and positive-area, and its member weight is positive. The gate
+   reads the raw confidence, exactly like the reference's `prefilter_boxes`
+   (the member weight is folded into the effective score only afterwards);
+   the one ADDITION beyond the reference is that non-finite geometry and
+   non-finite confidence are gated out here (the reference would carry a NaN
+   score into the cluster).
 2. **Order.** Effective score = confidence × member weight. Pooled boxes are
    visited in a deterministic total order (effective desc, then classId, x,
    y, w, h asc) — never input order or addresses.

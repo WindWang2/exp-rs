@@ -17,6 +17,8 @@
 #include "operators/runtime/model_runtime.h"
 #include "synthetic_raster_builder.h"
 
+#include "runtime/observability/fault_registry.h"
+
 #include <gdal_priv.h>
 
 #include <QDir>
@@ -191,13 +193,15 @@ struct RegistryReset
 };
 
 void registerMember( const std::string &name, const std::string &framework,
-                     const QTemporaryDir &dir )
+                     const QTemporaryDir &dir, int tileSize = 0 )
 {
   Json::Value json( Json::objectValue );
   json["name"] = name;
   json["task"] = "segmentation";
   json["framework"] = framework;
   json["artifact"]["path"] = identityModelPath().toStdString();
+  if ( tileSize > 0 )
+    json["tiling"]["tile_size"] = tileSize;
   std::string error;
   const bool ok = ModelCatalog::instance().registerManifestJson(
     Json::writeString( Json::StreamWriterBuilder(), json ),
@@ -211,7 +215,8 @@ void registerMember( const std::string &name, const std::string &framework,
 /// weights (member i gets scale (i+1) so each member's product differs).
 void registerEnsemble( const QTemporaryDir &dir, const std::string &ensembleName,
                        int memberCount, int maxConcurrentMembers,
-                       const std::string &uncertainty = std::string() )
+                       const std::string &uncertainty = std::string(),
+                       const std::vector<double> &weights = {} )
 {
   Json::Value json( Json::objectValue );
   json["name"] = ensembleName;
@@ -223,7 +228,8 @@ void registerEnsemble( const QTemporaryDir &dir, const std::string &ensembleName
   {
     Json::Value entry( Json::objectValue );
     entry["model"] = "member-" + std::string( 1, static_cast<char>( 'a' + i ) );
-    entry["weight"] = 1.0;
+    entry["weight"] = i < static_cast<int>( weights.size() ) ? weights[static_cast<std::size_t>( i )]
+                                                            : 1.0;
     members.append( entry );
   }
   ensemble["members"] = members;
@@ -267,6 +273,17 @@ std::vector<float> readAllPixels( const QString &path, int bands, int width, int
   }
   GDALClose( ds );
   return values;
+}
+
+float readPixel( const QString &path, int band, int x, int y )
+{
+  GDALDataset *ds = GDALDataset::Open( path.toUtf8().constData(), GA_ReadOnly );
+  if ( !ds )
+    return 0.0f;
+  float value = 0.0f;
+  ds->GetRasterBand( band )->RasterIO( GF_Read, x, y, 1, 1, &value, 1, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  return value;
 }
 
 bool sameValues( const std::vector<float> &a, const std::vector<float> &b )
@@ -495,18 +512,23 @@ TEST_CASE( "one member failure stops the run with zero residue",
            "[models][ensemble][parallel][failure]" )
 {
   RegistryReset reset;
-  const ScaleProviderGuard guardA( "failfw-a", 2.0, false );
-  // Member B throws on its forward pass — the ensemble must surface that
-  // failure (not a sibling's abort) and publish nothing.
+  // Member B waits until member A has COMPLETED its forward pass, then
+  // throws: the sibling's staged artifacts therefore certainly existed, so
+  // the zero-residue assertion proves cleanup (not "never created").
+  std::atomic<int> aForwards{ 0 };
   ModelRuntimeRegistry::instance().registerProvider(
     "failfw-b",
-    []( const ModelInfo &model, const ModelHardwareCapabilities &, std::string * ) -> ModelRuntimePtr {
+    [ &aForwards ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+                    std::string * ) -> ModelRuntimePtr {
       const std::string artifact = model.resolvedArtifactPath;
       struct Throwing final : IModelRuntime
       {
-        Throwing( std::string artifact ) : m_artifact( std::move( artifact ) ) {}
+        Throwing( std::string artifact, std::atomic<int> *aForwards )
+            : m_artifact( std::move( artifact ) ), m_aForwards( aForwards ) {}
         cv::Mat infer( const cv::Mat & ) override
         {
+          while ( m_aForwards->load() == 0 )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
           throw std::runtime_error( "injected member failure (out of memory)" );
         }
         std::string framework() const override { return "failfw-b"; }
@@ -514,8 +536,40 @@ TEST_CASE( "one member failure stops the run with zero residue",
         std::string deviceName() const override { return "cpu"; }
         std::string artifactPath() const override { return m_artifact; }
         std::string m_artifact;
+        std::atomic<int> *m_aForwards;
       };
-      return std::make_shared<Throwing>( artifact );
+      return std::make_shared<Throwing>( artifact, &aForwards );
+    } );
+  // Member A counts its forward passes so the test can prove it ran.
+  ModelRuntimeRegistry::instance().registerProvider(
+    "failfw-a",
+    [ &aForwards ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+                    std::string *error ) -> ModelRuntimePtr {
+      if ( model.resolvedArtifactPath.empty() )
+      {
+        if ( error )
+          *error = "no resolved artifact";
+        return nullptr;
+      }
+      struct Counting final : IModelRuntime
+      {
+        Counting( std::string artifact, std::atomic<int> *aForwards )
+            : m_artifact( std::move( artifact ) ), m_aForwards( aForwards ) {}
+        cv::Mat infer( const cv::Mat &blob ) override
+        {
+          m_aForwards->fetch_add( 1 );
+          cv::Mat out = blob.clone();
+          out.convertTo( out, CV_32F, 2.0 );
+          return out;
+        }
+        std::string framework() const override { return "failfw-a"; }
+        std::string backendName() const override { return "scale_backend"; }
+        std::string deviceName() const override { return "cpu"; }
+        std::string artifactPath() const override { return m_artifact; }
+        std::string m_artifact;
+        std::atomic<int> *m_aForwards;
+      };
+      return std::make_shared<Counting>( model.resolvedArtifactPath, &aForwards );
     } );
   QTemporaryDir dir;
   registerMember( "member-a", "failfw-a", dir );
@@ -531,6 +585,8 @@ TEST_CASE( "one member failure stops the run with zero residue",
   RSOperatorContext context;
   REQUIRE_THROWS_WITH( sicnu::operators::runtime::runModelInference( request, context ),
                        Catch::Matchers::ContainsSubstring( "injected member failure" ) );
+  // The sibling really ran (so its stack + sidecar existed) …
+  CHECK( aForwards.load() >= 1 );
 
   CHECK_FALSE( QFile::exists( output ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
@@ -541,6 +597,7 @@ TEST_CASE( "one member failure stops the run with zero residue",
       dir.filePath( QStringLiteral( ".fail.tif.ensemble-member%1.tmp~" ).arg( member ) );
     CHECK_FALSE( QFile::exists( stack ) );
     CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".prov.json" ) ) );
+    CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".tmp~" ) ) );
   }
 }
 
@@ -548,15 +605,46 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
            "[models][ensemble][parallel][cancel]" )
 {
   RegistryReset reset;
-  const ScaleProviderGuard guardA( "cancfw-a", 2.0, false );
+  // 64x64 with 16px tiles: 16 tiles per member. Member A signals on its FIRST
+  // forward pass; the main thread then cancels — so the abort provably lands
+  // INSIDE a running member (its next tile boundary), not at worker entry.
+  std::atomic<int> forwards{ 0 };
+  ModelRuntimeRegistry::instance().registerProvider(
+    "cancfw-a",
+    [ &forwards ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+                   std::string *error ) -> ModelRuntimePtr {
+      if ( model.resolvedArtifactPath.empty() )
+      {
+        if ( error )
+          *error = "no resolved artifact";
+        return nullptr;
+      }
+      struct Counting final : IModelRuntime
+      {
+        Counting( std::string artifact, std::atomic<int> *forwards )
+            : m_artifact( std::move( artifact ) ), m_forwards( forwards ) {}
+        cv::Mat infer( const cv::Mat &blob ) override
+        {
+          m_forwards->fetch_add( 1 );
+          cv::Mat out = blob.clone();
+          out.convertTo( out, CV_32F, 2.0 );
+          return out;
+        }
+        std::string framework() const override { return "cancfw-a"; }
+        std::string backendName() const override { return "scale_backend"; }
+        std::string deviceName() const override { return "cpu"; }
+        std::string artifactPath() const override { return m_artifact; }
+        std::string m_artifact;
+        std::atomic<int> *m_forwards;
+      };
+      return std::make_shared<Counting>( model.resolvedArtifactPath, &forwards );
+    } );
   const ScaleProviderGuard guardB( "cancfw-b", 0.5, false );
   QTemporaryDir dir;
-  registerMember( "member-a", "cancfw-a", dir );
-  registerMember( "member-b", "cancfw-b", dir );
+  registerMember( "member-a", "cancfw-a", dir, 16 ); // 16 tiles over 64x64
+  registerMember( "member-b", "cancfw-b", dir, 16 );
   registerEnsemble( dir, "ens-cancel", 2, 2, "none" );
 
-  // 64x64 with 16px tiles: 16 tiles, so the cancel flag (set before the run
-  // and polled per tile) lands mid-member.
   const QString input = writeConstantRaster( dir, "input.tif", 64, 2, 10.0f );
   const QString output = dir.filePath( QStringLiteral( "cancel.tif" ) );
   ModelExecutionRequest request;
@@ -564,10 +652,29 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
   request.outputPath = output.toStdString();
   request.modelReference = "ens-cancel";
   RSOperatorContext context;
-  std::atomic<bool> cancelFlag{ true };
+  std::atomic<bool> cancelFlag{ false };
   context.setCancelFlag( &cancelFlag );
-  REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference( request, context ),
-                     RSOperatorError );
+
+  // Cancel from a watchdog once the first forward pass has happened.
+  std::thread watchdog( [ & ]() {
+    while ( forwards.load() == 0 )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    cancelFlag.store( true );
+  } );
+  bool cancelled = false;
+  try
+  {
+    sicnu::operators::runtime::runModelInference( request, context );
+  }
+  catch ( const RSOperatorError &error )
+  {
+    cancelled = error.code() == sicnu::operators::ErrorCode::Cancelled;
+    if ( !cancelled )
+      WARN( "unexpected error: " + error.message() );
+  }
+  watchdog.join();
+  CHECK( cancelled );
+  CHECK( forwards.load() >= 1 ); // the abort was mid-member, not pre-run
 
   CHECK_FALSE( QFile::exists( output ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
@@ -578,5 +685,74 @@ TEST_CASE( "mid-run cancellation leaves zero residue",
       dir.filePath( QStringLiteral( ".cancel.tif.ensemble-member%1.tmp~" ).arg( member ) );
     CHECK_FALSE( QFile::exists( stack ) );
     CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".prov.json" ) ) );
+    CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".tmp~" ) ) );
   }
+}
+
+TEST_CASE( "a sidecar failure restores the previous product instead of destroying it",
+           "[models][ensemble][parallel][publish]" )
+{
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "rollfw-a", 2.0, false );
+  const ScaleProviderGuard guardB( "rollfw-b", 0.5, false );
+  QTemporaryDir dir;
+  registerMember( "member-a", "rollfw-a", dir );
+  registerMember( "member-b", "rollfw-b", dir );
+  registerEnsemble( dir, "ens-roll-a", 2, 2, "none", { 1.0, 1.0 } );
+  // Weights 3:1 would produce (20·3 + 5)/4 = 16.25 — a DIFFERENT product, so a
+  // successful second run is distinguishable from the rolled-back first one.
+  registerEnsemble( dir, "ens-roll-b", 2, 2, "none", { 3.0, 1.0 } );
+
+  const QString input = writeConstantRaster( dir, "input.tif", 16, 1, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "roll.tif" ) );
+  RSOperatorContext context;
+
+  // First run publishes the product + sidecar (mean of 20 and 5 = 12.5).
+  ModelExecutionRequest first;
+  first.inputPath = input.toStdString();
+  first.outputPath = output.toStdString();
+  first.modelReference = "ens-roll-a";
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( first, context ) );
+  REQUIRE( QFile::exists( output ) );
+  REQUIRE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+  const float firstValue = readPixel( output, 1, 4, 4 );
+  CHECK( firstValue == Catch::Approx( 12.5f ).margin( 1e-4f ) );
+
+  // Second run with the sidecar publish faulted: the new product is rolled
+  // back and the PREVIOUS product survives (12.5, not the new 16.25 the
+  // weights would have produced — the same manifest, different weights).
+  {
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "ensemble.publish_sidecar", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    ModelExecutionRequest second;
+    second.inputPath = input.toStdString();
+    second.outputPath = output.toStdString();
+    second.modelReference = "ens-roll-b";
+    REQUIRE_THROWS( sicnu::operators::runtime::runModelInference( second, context ) );
+
+    // The previous product is intact …
+    CHECK( QFile::exists( output ) );
+    CHECK( readPixel( output, 1, 4, 4 ) == firstValue );
+    // … its sidecar is detectably absent (never stale) …
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+    // … and nothing else leaked.
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+    for ( int member = 0; member < 2; ++member )
+    {
+      const QString stack =
+        dir.filePath( QStringLiteral( ".roll.tif.ensemble-member%1.tmp~" ).arg( member ) );
+      CHECK_FALSE( QFile::exists( stack ) );
+      CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".prov.json" ) ) );
+      CHECK_FALSE( QFile::exists( stack + QStringLiteral( ".tmp~" ) ) );
+    }
+  }
+
+  // Disarmed: a third run succeeds and republishes both product and sidecar.
+  ModelExecutionRequest third;
+  third.inputPath = input.toStdString();
+  third.outputPath = output.toStdString();
+  third.modelReference = "ens-roll-a";
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( third, context ) );
+  CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
 }

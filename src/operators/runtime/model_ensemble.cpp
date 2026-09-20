@@ -2,6 +2,8 @@
 #include "operators/runtime/model_ensemble.h"
 
 #include "operators/framework/rs_operator_error.h"
+#include "runtime/observability/fault_point.h"
+
 #include "operators/runtime/detection_fusion.h"
 #include "operators/runtime/detection_tile_engine.h"
 #include "operators/runtime/model_runtime.h"
@@ -23,6 +25,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <semaphore>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -86,6 +89,14 @@ class StagedFileGuard
 /// only ever leave a DETECTABLE absence).
 bool publishSidecar( const QString &finalPath, const Json::Value &provenance, std::string *error )
 {
+  // Test-only fault injection (Verification Platform 8.0 pattern): routes
+  // through the REAL failure branch so the publish rollback is provable.
+  if ( SICNU_FAULT_POINT( "ensemble.publish_sidecar" ) )
+  {
+    if ( error )
+      *error = "failed to publish the provenance sidecar: fault-injected failure";
+    return false;
+  }
   const QString sidecarPath = finalPath + QStringLiteral( ".prov.json" );
   const QString stagePath = sidecarPath + QStringLiteral( ".stage~" );
   QFile stage( stagePath );
@@ -134,6 +145,7 @@ struct MemberRun
   QString stagedPath;                ///< raster path stack (empty otherwise)
   ProviderSelectionReport selection; ///< provider chain trace for this member
   std::exception_ptr failure;        ///< worker failure (lowest index wins)
+  bool failureAfterStop = false;     ///< failure raised after a sibling already failed
   bool aborted = false;              ///< worker stopped by fail-fast
 };
 
@@ -147,7 +159,8 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
                                      const std::string &combination,
                                      const std::string &uncertaintyNote,
                                      int memberConcurrency,
-                                     bool stagingCompressed )
+                                     bool stagingCompressed,
+                                     bool detectionPath )
 {
   Json::Value prov( Json::objectValue );
   prov["schema"] = "exp-rs-prov/1";
@@ -200,10 +213,23 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
     if ( run.selection.attempts.size() > 1 )
       member["provider_selection"] = run.selection.toJson();
     Json::Value execution( Json::objectValue );
-    execution["tiles_processed"] = run.stats.tilesProcessed;
-    execution["tiles_skipped_nodata"] = run.stats.tilesSkippedNoData;
-    if ( run.stats.batchReductions > 0 )
-      execution["batch_reductions"] = run.stats.batchReductions;
+    // The stats struct that THIS path filled (a detection member never runs
+    // the raster engine — reporting raster zeros would make the sidecar lie).
+    if ( detectionPath )
+    {
+      execution["tiles_processed"] = run.detectionStats.tilesProcessed;
+      execution["tiles_planned"] = run.detectionStats.tilesPlanned;
+      execution["detections_kept"] = run.detectionStats.detectionsKept;
+      if ( run.detectionStats.batchReductions > 0 )
+        execution["batch_reductions"] = run.detectionStats.batchReductions;
+    }
+    else
+    {
+      execution["tiles_processed"] = run.stats.tilesProcessed;
+      execution["tiles_skipped_nodata"] = run.stats.tilesSkippedNoData;
+      if ( run.stats.batchReductions > 0 )
+        execution["batch_reductions"] = run.stats.batchReductions;
+    }
     member["execution"] = execution;
     membersJson.append( member );
   }
@@ -399,14 +425,15 @@ void runMembersBounded( std::vector<MemberRun> &runs, int budget,
   std::atomic<bool> stopWorkers{ false };
 
   auto worker = [ & ]( std::size_t index ) {
-    // RAII admission release: every exit path (abort, failure, success)
-    // returns its slot.
+    // Bounded admission: the slot is taken FIRST, then guarded — a throwing
+    // acquire must not release a slot it never held. Every exit path (abort,
+    // failure, success) returns the slot through the guard.
+    admission.acquire();
     struct AdmissionRelease
     {
       std::counting_semaphore<kMaxMemberConcurrency> &semaphore;
       ~AdmissionRelease() { semaphore.release(); }
     } release{ admission };
-    admission.acquire();
 
     MemberRun &run = runs[index];
     if ( stopWorkers.load( std::memory_order_acquire ) || parent.isCancelled() )
@@ -437,32 +464,63 @@ void runMembersBounded( std::vector<MemberRun> &runs, int budget,
            && stopWorkers.load( std::memory_order_acquire ) )
       {
         run.aborted = true;
+        return;
       }
-      else
-      {
-        run.failure = std::current_exception();
-        stopWorkers.store( true, std::memory_order_release );
-      }
+      // Any other error is this member's failure. When the stop flag was
+      // ALREADY set, the error is (or may be) a consequence of a sibling's
+      // failure unwinding through this worker — recorded, but flagged so the
+      // surfaced error stays the deterministic lowest-index REAL failure
+      // (a failure recorded before any sibling failed).
+      run.failure = std::current_exception();
+      run.failureAfterStop = stopWorkers.load( std::memory_order_acquire );
+      stopWorkers.store( true, std::memory_order_release );
     }
     catch ( ... )
     {
       run.failure = std::current_exception();
+      run.failureAfterStop = stopWorkers.load( std::memory_order_acquire );
       stopWorkers.store( true, std::memory_order_release );
     }
   };
 
   std::vector<std::thread> workers;
   workers.reserve( runs.size() );
-  for ( std::size_t i = 0; i < runs.size(); ++i )
-    workers.emplace_back( worker, i );
+  try
+  {
+    for ( std::size_t i = 0; i < runs.size(); ++i )
+      workers.emplace_back( worker, i );
+  }
+  catch ( const std::system_error & )
+  {
+    // Thread creation failed (RLIMIT_NPROC / address space): stop the workers
+    // already running and join them — a joinable std::thread destroyed by the
+    // vector would terminate the process.
+    stopWorkers.store( true, std::memory_order_release );
+    for ( std::thread &thread : workers )
+      thread.join();
+    throw;
+  }
   for ( std::thread &thread : workers )
     thread.join();
 
+  // Deterministic surfaced error: the lowest-index REAL failure (recorded
+  // before any sibling failed). When every failure is a consequence of an
+  // abort, the lowest-index one is surfaced — still deterministic.
+  const MemberRun *surfaced = nullptr;
   for ( const MemberRun &run : runs )
   {
-    if ( run.failure )
-      std::rethrow_exception( run.failure ); // lowest index first
+    if ( !run.failure )
+      continue;
+    if ( !run.failureAfterStop )
+    {
+      surfaced = &run;
+      break; // lowest-index real failure
+    }
+    if ( !surfaced )
+      surfaced = &run; // first consequence-only failure (fallback)
   }
+  if ( surfaced )
+    std::rethrow_exception( surfaced->failure );
 }
 
 /// Member bodies ------------------------------------------------------------
@@ -657,6 +715,23 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     if ( !input.open( QString::fromStdString( request.inputPath ) ) )
       throw RSOperatorError( ErrorCode::GdalError,
                              "failed to open input raster: " + request.inputPath );
+    // Back up any previous product (main + shapefile sidecars + sidecar)
+    // BEFORE publishing: the vector writer's internal backup only covers its
+    // own rename, and a sidecar failure must still be able to restore the
+    // previous product (the single-model engine's documented invariant).
+    const QString detectionFinal = QString::fromStdString( request.outputPath );
+    const QString detectionBackup = detectionFinal + QStringLiteral( ".prev~" );
+    const bool detectionHadExisting = QFile::exists( detectionFinal );
+    if ( detectionHadExisting )
+    {
+      QFile::remove( detectionBackup );
+      if ( !QFile::rename( detectionFinal, detectionBackup ) )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "detection ensemble could not back up the previous product: "
+                                 + request.outputPath );
+      QFile::rename( detectionFinal + QStringLiteral( ".prov.json" ),
+                     detectionBackup + QStringLiteral( ".prov.json" ) );
+    }
     writeDetectionVector( fused.boxes, vocabulary, input.geoTransform(), input.projection(),
                           request.outputPath );
 
@@ -671,22 +746,39 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     }
     Json::Value provenance =
       buildEnsembleProvenance( ensembleModel, runs, combined, combination, std::string(), budget,
-                               ensembleModel.ensemble.stagingCompressed() );
+                               ensembleModel.ensemble.stagingCompressed(), true );
     Json::Value fusionJson( Json::objectValue );
     fusionJson["algorithm"] = "wbf";
     fusionJson["iou_threshold"] = fusion.iouThreshold;
     fusionJson["skip_box_threshold"] = fusion.skipBoxThreshold;
     fusionJson["boxes_pooled"] = static_cast<Json::UInt64>( fused.boxesPooled );
     fusionJson["boxes_gated"] = static_cast<Json::UInt64>( fused.boxesGated );
-    fusionJson["boxes_fused"] = static_cast<Json::UInt64>( fused.boxesFused );
+    fusionJson["boxes_clustered"] = static_cast<Json::UInt64>( fused.boxesClustered );
+    fusionJson["boxes_merged"] = static_cast<Json::UInt64>( fused.boxesMerged );
     fusionJson["detections"] = static_cast<Json::UInt64>( fused.clusters );
     provenance["fusion"] = fusionJson;
     // A vector product: the output block describes features, not a grid.
     provenance["output"]["format"] = "vector";
     provenance["output"]["features"] = static_cast<Json::UInt64>( fused.clusters );
     std::string sidecarError;
-    if ( !publishSidecar( QString::fromStdString( request.outputPath ), provenance, &sidecarError ) )
+    if ( !publishSidecar( detectionFinal, provenance, &sidecarError ) )
+    {
+      // Restore the previous product instead of leaving the new one without
+      // provenance and the old one destroyed.
+      QFile::remove( detectionFinal );
+      if ( detectionHadExisting )
+      {
+        QFile::rename( detectionBackup, detectionFinal );
+        QFile::rename( detectionBackup + QStringLiteral( ".prov.json" ),
+                       detectionFinal + QStringLiteral( ".prov.json" ) );
+      }
       throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
+    }
+    if ( detectionHadExisting )
+    {
+      QFile::remove( detectionBackup );
+      QFile::remove( detectionBackup + QStringLiteral( ".prov.json" ) );
+    }
 
     ModelExecutionResult result;
     result.identityTag = ensembleModel.identityTag();
@@ -867,6 +959,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     Json::Value modelJson( Json::objectValue );
     modelJson["name"] = ensembleModel.name;
     modelJson["identity_tag"] = ensembleModel.identityTag();
+    modelJson["task"] = ensembleModel.task;
     doc["model"] = modelJson;
     // The ensemble block: members, weights, execution identity and the
     // per-member score semantics (the combined vector's meaning depends on
@@ -881,7 +974,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       member["identity_tag"] = run.model.identityTag();
       if ( !run.model.contentDigest.empty() )
         member["content_digest"] = run.model.contentDigest;
-      member["framework"] = run.model.framework;
+      member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                    : run.selection.resolvedFramework;
       member["weight"] = run.weight;
       member["score_semantics"] = run.scene.scoreSemantics;
       if ( run.session )
@@ -998,6 +1092,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   {
     stagedGuard.addPath( run.stagedPath );
     stagedGuard.addPath( run.stagedPath + QStringLiteral( ".prov.json" ) );
+    // The member engine's own streaming stage (its writer closes and renames
+    // it, but a cancelled member can leave it behind).
+    stagedGuard.addPath( run.stagedPath + QStringLiteral( ".tmp~" ) );
   }
 
   const std::vector<int> bands = request.bands;
@@ -1171,14 +1268,10 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   int labelDomain = 0;
   if ( mode == RasterOutputMode::Labels && !vote )
   {
-    const std::size_t declared =
-      static_cast<std::size_t>( runs.front().model.output.classes.size() );
-    // The writable domain is the PRODUCT class count; a declared vocabulary
-    // is used only when it matches the combined channel count (otherwise the
-    // model classes are the domain and no names metadata is published).
-    labelDomain = declared == static_cast<std::size_t>( channels )
-                    ? static_cast<int>( declared )
-                    : channels;
+    // The writable domain is the combined class (channel) count; a declared
+    // vocabulary is used for the NAMES metadata only when it matches that
+    // count (checked below) — never to renumber the domain.
+    labelDomain = channels;
     if ( labelDomain > 65535 )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "ensemble product declares a label domain of "
@@ -1269,6 +1362,12 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     memberBuffers[i].assign( planeSize * static_cast<std::size_t>( channels ), 0.0f );
   std::vector<float> productPlane( planeSize * static_cast<std::size_t>( channels ), 0.0f );
   std::vector<float> uncertaintyPlane( planeSize, 0.0f );
+  // Row-loop scratch, allocated once (not per block).
+  std::vector<float> collapsedScratch( planeSize, 0.0f );
+  std::vector<float> scaledScratch( planeSize, 0.0f );
+  std::vector<double> voteScratch( static_cast<std::size_t>( channels ), 0.0 );
+  std::vector<float> labelScratch( planeSize, 0.0f );
+  std::vector<float> agreementScratch( planeSize, 0.0f );
   // Derived-mode product tally (parity with the single-model payload).
   std::vector<long long> classPixelCounts;
   if ( mode == RasterOutputMode::Labels )
@@ -1388,7 +1487,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
         const float maskThreshold = ensembleModel.postprocess.maskThreshold >= 0.0
                                       ? static_cast<float>( ensembleModel.postprocess.maskThreshold )
                                       : 0.5f;
-        std::vector<float> collapsed( blockPlane, static_cast<float>( writeNoData ) );
+        std::vector<float> &collapsed = collapsedScratch;
+        std::fill( collapsed.begin(), collapsed.begin() + static_cast<std::ptrdiff_t>( blockPlane ),
+                   static_cast<float>( writeNoData ) );
         for ( std::size_t p = 0; p < blockPlane; ++p )
         {
           bool valid = true;
@@ -1446,9 +1547,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       // its weight; winner = highest accumulated vote, ties → LOWEST class
       // index (deterministic). agreement = winning vote share, quantized to
       // the label dtype (encoding recorded in the payload/sidecar).
-      std::vector<double> votes( static_cast<std::size_t>( channels ), 0.0 );
-      std::vector<float> labels( blockPlane );
-      std::vector<float> agreement( blockPlane );
+      std::vector<double> &votes = voteScratch;
+      std::vector<float> &labels = labelScratch;
+      std::vector<float> &agreement = agreementScratch;
       for ( std::size_t p = 0; p < blockPlane; ++p )
       {
         labels[p] = static_cast<float>( writeNoData );
@@ -1494,7 +1595,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
         fail( "ensemble combine pass failed to write the label band" );
       if ( withUncertainty )
       {
-        std::vector<float> scaled( blockPlane );
+        std::vector<float> &scaled = scaledScratch;
         for ( std::size_t p = 0; p < blockPlane; ++p )
           scaled[p] = std::isnan( agreement[p] )
                         ? static_cast<float>( writeNoData )
@@ -1545,8 +1646,6 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                            "ensemble combine pass could not publish the product: "
                              + finalPath.toStdString() );
   }
-  if ( hadExisting )
-    QFile::remove( backupPath );
   QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
   const Json::Value provenance =
     buildEnsembleProvenance( ensembleModel, runs, combined, combination,
@@ -1555,10 +1654,20 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                      + ( vote && !agreementEncoding.empty()
                                            ? " (" + agreementEncoding + ")" : std::string() ) )
                                : std::string(),
-                             budget, stagingCompressed );
+                             budget, stagingCompressed, false );
   std::string sidecarError;
   if ( !publishSidecar( finalPath, provenance, &sidecarError ) )
+  {
+    // The previous product's backup is kept until the new sidecar is in: a
+    // sidecar failure restores the previous product instead of destroying it
+    // (same invariant as the single-model engine's writer).
+    QFile::remove( finalPath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath );
     throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
+  }
+  if ( hadExisting )
+    QFile::remove( backupPath );
 
   // Success: release the member stacks and their sidecars explicitly (the
   // staged guard stays as a safety net until the very end — its paths no

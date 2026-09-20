@@ -153,6 +153,16 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
     removeVectorFiles( workPath );
     throw RSOperatorError( ErrorCode::GdalError, "failed to create detections layer" );
   }
+  // classId indexes the vocabulary; an empty vocabulary is a contract error,
+  // never an out-of-bounds read (this writer is shared with the ensemble).
+  if ( classes.empty() )
+  {
+    GDALClose( outDs );
+    removeVectorFiles( workPath );
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "detection output requires a class vocabulary "
+                             "(output.detection.classes)" );
+  }
   const char *fieldNames[] = { "class", "confidence", "tile_x", "tile_y" };
   const OGRFieldType fieldTypes[] = { OFTString, OFTReal, OFTInteger, OFTInteger };
   for ( int i = 0; i < 4; ++i )

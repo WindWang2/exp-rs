@@ -103,11 +103,13 @@ DetectionFusionResult fuseDetectionsWbf( const std::vector<DetectionMemberBoxes>
 {
   DetectionFusionResult result;
   result.memberSurviving.assign( members.size(), 0 );
-  result.memberAbsorbed.assign( members.size(), 0 );
+  result.memberMerged.assign( members.size(), 0 );
 
   // --- Gate + pool ---------------------------------------------------------
-  // A box enters the fusion only when its RAW confidence clears the gate, its
-  // geometry is finite and its member weight is positive (effective score
+  // A box enters the fusion only when its RAW confidence clears the gate (the
+  // reference gates the raw score the same way), its geometry is finite and
+  // positive-area (an addition over the reference, which would carry a NaN
+  // into the cluster), and its member weight is positive (effective score
   // confidence×weight > 0 — a zero-weight member cannot contribute to a
   // weighted average, and a zero-confidence box has no score to contribute).
   struct PooledBox
@@ -198,9 +200,10 @@ DetectionFusionResult fuseDetectionsWbf( const std::vector<DetectionMemberBoxes>
       cluster.representative.y = static_cast<float>( cluster.sumY / cluster.sumEffective );
       cluster.representative.w = static_cast<float>( cluster.sumW / cluster.sumEffective );
       cluster.representative.h = static_cast<float>( cluster.sumH / cluster.sumEffective );
+      ++result.memberMerged[entry.member];
+      ++result.boxesMerged;
     }
-    ++result.memberAbsorbed[entry.member];
-    ++result.boxesFused;
+    ++result.boxesClustered;
   }
 
   // --- Fused product ---------------------------------------------------------

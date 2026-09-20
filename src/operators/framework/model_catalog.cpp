@@ -888,8 +888,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
         markInvalid( "ensemble.members must be an array" );
       }
       // Platform 13.0: detection fusion contract (combination "wbf" only).
-      if ( const QJsonValue detectionVal = ensembleObj.value( QStringLiteral( "detection" ) );
-           detectionVal.isObject() )
+      const QJsonValue detectionVal = ensembleObj.value( QStringLiteral( "detection" ) );
+      if ( !detectionVal.isUndefined() && !detectionVal.isObject() )
+        markInvalid( "ensemble.detection must be an object" );
+      if ( detectionVal.isObject() )
       {
         const QJsonObject detectionObj = detectionVal.toObject();
         if ( const QJsonValue iouVal = detectionObj.value( QStringLiteral( "iou_threshold" ) );
@@ -904,16 +906,27 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
         else if ( !skipVal.isUndefined() )
           markInvalid( "ensemble.detection.skip_box_threshold must be a number" );
       }
-      // Platform 13.0: bounded member-execution budget (0 = auto).
-      if ( const QJsonValue budgetVal =
-             ensembleObj.value( QStringLiteral( "max_concurrent_members" ) );
-           budgetVal.isDouble() )
-        info.ensemble.maxConcurrentMembers = budgetVal.toInt();
+      // Platform 13.0: bounded member-execution budget (0 = auto). A
+      // non-integral number is refused — silently truncating 3.7 to 3 would
+      // change the admission budget the manifest asked for.
+      const QJsonValue budgetVal = ensembleObj.value( QStringLiteral( "max_concurrent_members" ) );
+      if ( budgetVal.isDouble() )
+      {
+        const double budgetNumber = budgetVal.toDouble();
+        if ( budgetNumber != std::floor( budgetNumber ) )
+          markInvalid( "ensemble.max_concurrent_members must be a whole number" );
+        else
+          info.ensemble.maxConcurrentMembers = static_cast<int>( budgetNumber );
+      }
       else if ( !budgetVal.isUndefined() )
         markInvalid( "ensemble.max_concurrent_members must be a number" );
-      // Platform 13.0: combine-stage compression ("none" | "deflate").
-      info.ensemble.stagingCompression =
-        ensembleObj.value( QStringLiteral( "staging_compression" ) ).toString().toStdString();
+      // Platform 13.0: combine-stage compression ("none" | "deflate"); a
+      // non-string value is a contract error, never a silent default.
+      const QJsonValue stagingVal = ensembleObj.value( QStringLiteral( "staging_compression" ) );
+      if ( stagingVal.isString() )
+        info.ensemble.stagingCompression = stagingVal.toString().toStdString();
+      else if ( !stagingVal.isUndefined() )
+        markInvalid( "ensemble.staging_compression must be a string" );
       if ( const std::string issue = info.ensemble.validate(); !issue.empty() )
         markInvalid( issue );
       if ( info.ensemble.declared && !info.artifact.path.empty() )

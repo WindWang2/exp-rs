@@ -34,10 +34,9 @@ struct DetectionFusionContract
   /// greater than this threshold (same class only). Must be in (0, 1].
   double iouThreshold = 0.55;
   /// Raw-confidence gate applied BEFORE fusion: a box whose own confidence is
-  /// below this threshold never enters a cluster. Unlike the reference
-  /// implementation the gate reads the RAW confidence, not the
-  /// member-weight-scaled score — a heavy member weight must not smuggle a
-  /// low-confidence box past the gate. Must be in [0, 1).
+  /// below this threshold never enters a cluster (same gate the reference's
+  /// prefilter_boxes applies to the raw score; the member weight is folded
+  /// into the effective score only afterwards). Must be in [0, 1).
   double skipBoxThreshold = 0.0;
 
   /// Vocabulary + range validation (empty = ok).
@@ -60,13 +59,14 @@ struct DetectionFusionResult
   std::vector<DetectionBox> boxes;          ///< fused product, deterministic order
   std::size_t boxesPooled = 0;              ///< boxes handed in across all members
   std::size_t boxesGated = 0;               ///< dropped by the confidence gate / non-finite
-  std::size_t boxesFused = 0;               ///< boxes absorbed into fused clusters
+  std::size_t boxesClustered = 0;           ///< boxes that entered a cluster (pooled - gated)
+  std::size_t boxesMerged = 0;              ///< boxes that joined an EXISTING cluster
   std::size_t clusters = 0;                 ///< fused boxes in the product
   /// Per-member counts, index-aligned with the input members:
   /// how many of the member's boxes survived the gate, and how many of those
-  /// were absorbed into a fused cluster.
+  /// joined an existing (other box's) cluster.
   std::vector<std::size_t> memberSurviving;
-  std::vector<std::size_t> memberAbsorbed;
+  std::vector<std::size_t> memberMerged;
 };
 
 /// Fuses every member's box set into ONE product (WBF). An empty result is a

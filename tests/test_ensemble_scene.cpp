@@ -490,7 +490,7 @@ TEST_CASE( "ensemble derived output modes collapse the combined mean",
   builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
   RSOperatorContext context;
 
-  SECTION( "labels: argmax of the combined mean, ties to the lowest class" )
+  SECTION( "labels: argmax of the combined mean" )
   {
     registerEnsemble( "der-labels", std::string() );
     const QString output = dir.filePath( QStringLiteral( "labels.tif" ) );
@@ -502,9 +502,33 @@ TEST_CASE( "ensemble derived output modes collapse the combined mean",
     ModelExecutionResult result;
     REQUIRE_NOTHROW( result = sicnu::operators::runtime::runModelInference( request, context ) );
     CHECK( result.rasterStats.outBands == 1 );
-    // argmax([1.25, 3.75]) = class 1.
+    // argmax([1.25, 3.75]) = class 1 (a STRICT maximum).
     CHECK( readPixel( output, 1, 4, 4 ) == 1.0f );
     CHECK( rasterBandCount( output ) == 1 );
+    // The per-class tally covers the whole raster.
+    REQUIRE( result.payload["classPixelCounts"].size() == 2 );
+    CHECK( result.payload["classPixelCounts"][0].asInt64() == 0 );
+    CHECK( result.payload["classPixelCounts"][1].asInt64() == 16 * 16 );
+  }
+
+  SECTION( "labels: an exact tie resolves to the lowest class" )
+  {
+    registerEnsemble( "der-labels-tie", std::string() );
+    // A tie raster: both channels carry 1, so the combined mean is [1.25, 1.25]
+    // (members scale by 2 and 0.5) — argmax must resolve to class 0.
+    const QString tieInput = dir.filePath( QStringLiteral( "tie_input.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder tieBuilder( 16, 16, 2, GDT_Float32 );
+    tieBuilder.withConstantValue( 1, 1.0f ).withConstantValue( 2, 1.0f );
+    tieBuilder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( tieInput );
+    const QString output = dir.filePath( QStringLiteral( "labels_tie.tif" ) );
+    ModelExecutionRequest request;
+    request.inputPath = tieInput.toStdString();
+    request.outputPath = output.toStdString();
+    request.modelReference = "der-labels-tie";
+    request.outputMode = RasterOutputMode::Labels;
+    REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+    CHECK( readPixel( output, 1, 4, 4 ) == 0.0f );
+    CHECK( readPixel( output, 1, 0, 0 ) == 0.0f );
   }
 
   SECTION( "confidence: top-1 combined probability" )
@@ -520,7 +544,7 @@ TEST_CASE( "ensemble derived output modes collapse the combined mean",
     CHECK( readPixel( output, 1, 4, 4 ) == Catch::Approx( 3.75f ).margin( 1e-5f ) );
   }
 
-  SECTION( "mask: threshold from the ensemble manifest" )
+  SECTION( "mask: multi-channel threshold is the argmax!=background rule" )
   {
     registerEnsemble( "der-mask", "2.0" );
     const QString output = dir.filePath( QStringLiteral( "mask.tif" ) );
@@ -532,6 +556,31 @@ TEST_CASE( "ensemble derived output modes collapse the combined mean",
     REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
     // argmax class 1 != 0 → 1.
     CHECK( readPixel( output, 1, 4, 4 ) == 1.0f );
+  }
+
+  SECTION( "mask: single-channel threshold gates the combined mean" )
+  {
+    // One channel: the mask IS the threshold comparison of the combined mean.
+    // Members scale the constant 1.0 by 2 and 0.5 → mean 1.25.
+    const QString singleInput = dir.filePath( QStringLiteral( "single_input.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder singleBuilder( 16, 16, 1, GDT_Float32 );
+    singleBuilder.withConstantValue( 1, 1.0f );
+    singleBuilder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( singleInput );
+    RSOperatorContext maskContext;
+    auto runMask = [ & ]( const std::string &threshold, const QString &out ) {
+      registerEnsemble( "der-mask-" + threshold, threshold );
+      ModelExecutionRequest request;
+      request.inputPath = singleInput.toStdString();
+      request.outputPath = out.toStdString();
+      request.modelReference = "der-mask-" + threshold;
+      request.outputMode = RasterOutputMode::Mask;
+      REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, maskContext ) );
+    };
+    // 1.25 >= 1.0 → 1; 1.25 < 1.5 → 0.
+    runMask( "1.0", dir.filePath( QStringLiteral( "mask_low.tif" ) ) );
+    runMask( "1.5", dir.filePath( QStringLiteral( "mask_high.tif" ) ) );
+    CHECK( readPixel( dir.filePath( QStringLiteral( "mask_low.tif" ) ), 1, 4, 4 ) == 1.0f );
+    CHECK( readPixel( dir.filePath( QStringLiteral( "mask_high.tif" ) ), 1, 4, 4 ) == 0.0f );
   }
 
   SECTION( "vote + mask/confidence is a typed refusal" )
@@ -738,6 +787,33 @@ TEST_CASE( "ensemble manifest vocabulary covers the 13.0 contract",
     const std::vector<std::string> issues = issuesFor( json );
     REQUIRE_FALSE( issues.empty() );
     CHECK( issues.front().find( "staging_compression" ) != std::string::npos );
+  }
+
+  SECTION( "a non-integral member budget is refused" )
+  {
+    Json::Value json = baseEnsemble();
+    json["ensemble"]["max_concurrent_members"] = 3.7;
+    const std::vector<std::string> issues = issuesFor( json );
+    REQUIRE_FALSE( issues.empty() );
+    CHECK( issues.front().find( "whole number" ) != std::string::npos );
+  }
+
+  SECTION( "a non-string staging compression is refused" )
+  {
+    Json::Value json = baseEnsemble();
+    json["ensemble"]["staging_compression"] = 5;
+    const std::vector<std::string> issues = issuesFor( json );
+    REQUIRE_FALSE( issues.empty() );
+    CHECK( issues.front().find( "staging_compression must be a string" ) != std::string::npos );
+  }
+
+  SECTION( "a non-object detection fusion block is refused" )
+  {
+    Json::Value json = baseEnsemble();
+    json["ensemble"]["detection"] = "wbf";
+    const std::vector<std::string> issues = issuesFor( json );
+    REQUIRE_FALSE( issues.empty() );
+    CHECK( issues.front().find( "ensemble.detection must be an object" ) != std::string::npos );
   }
 
   SECTION( "an unknown ensemble key is still refused (closed vocabulary)" )
