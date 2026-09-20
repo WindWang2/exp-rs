@@ -368,3 +368,9 @@ data/labs/_tmp/
 !.planning/flash-offline-labs-12/
 .planning/flash-offline-labs-12/*
 !.planning/flash-offline-labs-12/*.md
+
+# ds41-fuzz-boundaries (parser/IPC/path/checkpoint boundary fuzz track):
+# track planning notes (markdown only; logs stay local).
+!.planning/ds41-fuzz-boundaries/
+.planning/ds41-fuzz-boundaries/*
+!.planning/ds41-fuzz-boundaries/*.md
