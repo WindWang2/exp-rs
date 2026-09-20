@@ -166,6 +166,7 @@ add_library(sicnu_processing SHARED
     framework/atomic_algorithm_adapter.cpp
     framework/provider_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
+    framework/algorithm_search.cpp
     framework/json_params_converter.h
     framework/tool_call_dispatcher.cpp
     framework/python_algorithm_adapter.cpp

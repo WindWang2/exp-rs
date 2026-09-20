@@ -2354,6 +2354,43 @@ sicnu_discover_tests(test_capability_surface_parity)
 sicnu_add_test(test_capability_completeness)
 sicnu_link_jsoncpp(test_capability_completeness)
 
+# Track I (ds41-capability-search-13): authoritative algorithm-search
+# contract — golden corpus over injected + live descriptor universes,
+# mutation potency, bounds/typed refusal, deterministic ordering, and
+# CLI<->MCP cross-surface parity (mcp_server.cpp compiled in-process so the
+# tools/call path shares one registry with the engine assertions; the CLI
+# runs as a real subprocess).
+add_executable(test_algorithm_search test_algorithm_search.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_algorithm_search PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_algorithm_search PRIVATE sicnu_operators)
+endif()
+sicnu_link_jsoncpp(test_algorithm_search)
+target_include_directories(test_algorithm_search PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_algorithm_search PRIVATE
+  SICNU_TEST_SEARCH_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+add_dependencies(test_algorithm_search sicnu_geo_rs_cli)
+sicnu_discover_tests(test_algorithm_search)
+
 # Surface-11 protocol suite: progress relay, artifact_read, redaction,
 # initialize negatives. Same in-process mcp_server.cpp pattern.
 add_executable(test_surface_protocol test_surface_protocol.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)

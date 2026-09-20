@@ -70,6 +70,7 @@
 #else
 #include <unistd.h>
 #endif
+#include "processing/framework/algorithm_search.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_checkpoint.h"
@@ -135,9 +136,17 @@ bool takeFlag( QStringList &args, const QString &name )
 QString takeValue( QStringList &args, const QString &name, bool &present )
 {
     const int index = args.indexOf( name );
-    if ( index < 0 || index + 1 >= args.size() )
+    if ( index < 0 )
     {
         present = false;
+        return {};
+    }
+    // Never eat another flag as this flag's value: `--group --tag x` leaves
+    // `--tag` for its own parse, and callers see an empty value for --group.
+    if ( index + 1 >= args.size() || args[index + 1].startsWith( QStringLiteral( "--" ) ) )
+    {
+        args.removeAt( index );
+        present = true;
         return {};
     }
     const QString value = args[index + 1];
@@ -170,24 +179,164 @@ GlobalFlags extractGlobalFlags( QStringList &args )
 // ---------------------------------------------------------------------------
 // algorithms
 // ---------------------------------------------------------------------------
+
+/// `algorithms search` — authoritative search over the descriptor universe
+/// via processing::searchAlgorithms: the same engine and contract MCP's
+/// search_algorithms drives, so both surfaces return identical ids/order.
+/// Flags: --group g --tag a,b --purpose p --task f --modality m[,m2]
+///        --input-type T --output-type T --large-raster-safe --limit n --cursor n
+int commandAlgorithmsSearch( QStringList args,
+                             const std::vector<processing::AlgorithmDescriptor> &descriptors,
+                             const CliIO &io )
+{
+    processing::AlgorithmSearchQuery query;
+
+    // A value-flag followed by another flag (or by nothing) is a usage error
+    // — e.g. `--group --tag sar` — not an empty filter value.
+    QString missingValueFlag;
+    const auto value = [&args, &missingValueFlag]( const QString &name ) {
+        bool present = false;
+        const QString v = takeValue( args, name, present );
+        if ( present && v.isEmpty() && missingValueFlag.isEmpty() )
+            missingValueFlag = name;
+        return v.toStdString();
+    };
+    query.group = value( QStringLiteral( "--group" ) );
+    if ( args.contains( QStringLiteral( "--tag" ) ) )
+        query.tags = processing::splitSearchList( value( QStringLiteral( "--tag" ) ) );
+    query.purpose = value( QStringLiteral( "--purpose" ) );
+    query.taskFamily = value( QStringLiteral( "--task" ) );
+    if ( args.contains( QStringLiteral( "--modality" ) ) )
+        query.modalities = processing::splitSearchList( value( QStringLiteral( "--modality" ) ) );
+    query.inputType = value( QStringLiteral( "--input-type" ) );
+    query.outputType = value( QStringLiteral( "--output-type" ) );
+    query.largeRasterSafeOnly = takeFlag( args, QStringLiteral( "--large-raster-safe" ) );
+
+    if ( !missingValueFlag.isEmpty() )
+        return io.finish( false, "algorithms", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "algorithms search: " + missingValueFlag.toStdString()
+                              + " requires a value" );
+
+    bool badNumber = false;
+    const auto intValue = [&args, &badNumber]( const QString &name, int fallback ) {
+        bool flag = false;
+        const QString raw = takeValue( args, name, flag );
+        if ( !flag )
+            return fallback;
+        bool ok = false;
+        const int v = raw.toInt( &ok );
+        if ( !ok )
+            badNumber = true;
+        return ok ? v : fallback;
+    };
+    query.limit = intValue( QStringLiteral( "--limit" ), 0 );
+    query.cursor = intValue( QStringLiteral( "--cursor" ), 0 );
+    if ( badNumber )
+        return io.finish( false, "algorithms", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "--limit/--cursor expect integers" );
+
+    for ( const QString &leftover : args )
+        if ( leftover.startsWith( QStringLiteral( "--" ) ) )
+            return io.finish( false, "algorithms", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                              "unknown flag: " + leftover.toStdString() );
+
+    // Remaining positional args join as free text (space-separated).
+    QStringList positional;
+    for ( const QString &a : args )
+        positional.push_back( a );
+    query.text = positional.join( ' ' ).toStdString();
+
+    const bool hasFilter = !query.group.empty() || !query.tags.empty()
+                           || !query.purpose.empty() || !query.taskFamily.empty()
+                           || !query.modalities.empty() || !query.inputType.empty()
+                           || !query.outputType.empty() || query.largeRasterSafeOnly;
+    if ( query.text.empty() && !hasFilter )
+        return io.finish( false, "algorithms", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "usage: algorithms search [text] [--group g] [--tag a,b] [--purpose p] "
+                          "[--task f] [--modality m] [--input-type T] [--output-type T] "
+                          "[--large-raster-safe] [--limit n] [--cursor n]" );
+
+    const auto result = processing::searchAlgorithms( descriptors, query );
+    if ( result.error.has_value() )
+        return io.finish( false, "algorithms", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "search_algorithms: " + *result.error );
+
+    Json::Value entries( Json::arrayValue );
+    for ( const auto &hit : result.hits )
+    {
+        const auto &descriptor = descriptors[hit.index];
+        Json::Value entry( Json::objectValue );
+        entry["id"] = descriptor.id;
+        entry["display_name"] = descriptor.displayName;
+        entry["group"] = descriptor.group;
+        entry["description"] = descriptor.description;
+        Json::Value tags( Json::arrayValue );
+        for ( const auto &t : descriptor.agentMetadata.tags )
+            tags.append( t );
+        entry["tags"] = tags;
+        entry["source"] = sicnu::plugins::PluginRuntimeHost::instance().isPluginOperator( descriptor.id )
+                              ? "plugin"
+                              : "builtin";
+        entries.append( entry );
+    }
+
+    // Same object shape as MCP search_algorithms (ids/order identical by
+    // construction): {algorithms, count, total, limit, cursor, next_cursor,
+    // hints?}.
+    Json::Value data( Json::objectValue );
+    data["algorithms"] = entries;
+    data["count"] = static_cast<int>( entries.size() );
+    data["total"] = result.total;
+    data["limit"] = result.limit;
+    data["cursor"] = result.cursor;
+    data["next_cursor"] = result.nextCursor;
+
+    if ( result.total == 0 )
+    {
+        const auto toJson = []( const std::vector<std::string> &values ) {
+            Json::Value list( Json::arrayValue );
+            for ( const auto &v : values )
+                list.append( v );
+            return list;
+        };
+        Json::Value vocabulary( Json::objectValue );
+        vocabulary["groups"] = toJson( result.vocabulary.groups );
+        vocabulary["tags"] = toJson( result.vocabulary.tags );
+        vocabulary["task_families"] = toJson( result.vocabulary.taskFamilies );
+        vocabulary["modalities"] = toJson( result.vocabulary.modalities );
+        vocabulary["data_types"] = toJson( result.vocabulary.dataTypes );
+        Json::Value hints( Json::objectValue );
+        hints["vocabulary"] = vocabulary;
+        hints["suggestions"] = toJson( result.suggestions );
+        data["hints"] = hints;
+    }
+    return io.finish( true, "algorithms", data, 0 );
+}
+
 int commandAlgorithms( QStringList args, const CliIO &io )
 {
     extractGlobalFlags( args );
     QString sub = args.isEmpty() ? "list" : args.takeFirst();
     QString needle;
-    if ( sub == "search" || sub == "schema" )
+    if ( sub == "schema" )
     {
         if ( args.isEmpty() )
         {
-            std::cerr << "algorithms " << sub.toStdString() << " requires an argument\n";
+            std::cerr << "algorithms schema requires an argument\n";
             return io.finish( false, "algorithms", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                              "missing search/schema argument" );
+                              "missing schema argument" );
         }
         needle = args.takeFirst();
     }
 
     const auto &registry = processing::AtomicAlgorithmRegistry::instance();
     const auto descriptors = registry.listDescriptors();
+
+    if ( sub == "search" )
+        return commandAlgorithmsSearch( args, descriptors, io );
 
     if ( sub == "schema" )
     {
@@ -214,20 +363,10 @@ int commandAlgorithms( QStringList args, const CliIO &io )
         return io.finish( true, "algorithms", data, 0 );
     }
 
-    // list / search
-    const std::string needleText = needle.toStdString();
+    // list
     Json::Value data( Json::arrayValue );
     for ( const auto &descriptor : descriptors )
     {
-        if ( !needleText.empty() )
-        {
-            const bool match = descriptor.id.find( needleText ) != std::string::npos
-                               || descriptor.displayName.find( needleText ) != std::string::npos
-                               || descriptor.description.find( needleText ) != std::string::npos
-                               || descriptor.group.find( needleText ) != std::string::npos;
-            if ( !match )
-                continue;
-        }
         Json::Value entry( Json::objectValue );
         entry["id"] = descriptor.id;
         entry["display_name"] = descriptor.displayName;
