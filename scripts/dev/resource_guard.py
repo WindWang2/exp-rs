@@ -34,6 +34,7 @@ acquired), 2 usage refusal, 1 internal error.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import socket
@@ -101,6 +102,7 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
     """
     deadline = time.monotonic() + max(wait, 0.0)
     waited = 0.0
+    tried_mkdir = False
     while True:
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
@@ -130,6 +132,17 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
             waited += 0.5
             continue
         except OSError as exc:
+            if exc.errno == errno.ENOENT and not tried_mkdir:
+                # The build directory's parent does not exist yet (the build
+                # tree was never configured): create it once. A missing
+                # directory is not a lock conflict, so it must never surface
+                # as "busy".
+                tried_mkdir = True
+                try:
+                    lock_path.parent.mkdir(parents=True, exist_ok=True)
+                    continue
+                except OSError:
+                    pass
             return False, {"reason": f"cannot create lock file: {exc}"}
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(_write_holder(lock_path, payload), indent=2))
