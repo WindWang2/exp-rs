@@ -5,8 +5,8 @@
  * Layout under the snapshot root (registry temp dir, deterministic subdir):
  *   <temp>/sicnu-plugin-snapshots/last-good-<id>      dev-mode hot reload
  *   <temp>/sicnu-plugin-snapshots/upgrade-<id>-<pid>  in-flight upgrade backup
- *   <temp>/sicnu-plugin-snapshots/<name>.staging-*    in-flight capture
- *   <temp>/sicnu-plugin-snapshots/<name>.old-*        dest parked during swap
+ *   <temp>/sicnu-plugin-snapshots/<name>~staging-*    in-flight capture
+ *   <temp>/sicnu-plugin-snapshots/<name>~old-*        dest parked during swap
  *
  * A snapshot is only ever published whole: capture writes into a staging
  * sibling, writes snapshot.marker.json LAST (schema, pluginId, file count,
@@ -66,7 +66,7 @@ struct PluginSnapshotResult
 inline constexpr const char *kPluginSnapshotMarker = "snapshot.marker.json";
 
 /// Captures @p sourceDir into @p destDir atomically: bounded walk (regular
-/// files only, symlinks refused) into "<destDir>.staging-<pid>-<seq>",
+/// files only, symlinks refused) into "<destDir>~staging-<pid>-<seq>",
 /// marker written last, then dest swapped in. A crash mid-publish leaves
 /// staging / .old residue the snapshot sweep reclaims — dest is never
 /// half-written. Captures into the SAME dest serialize on a per-dest lock,
@@ -83,26 +83,37 @@ PluginSnapshotResult capturePluginSnapshot(
 bool verifyPluginSnapshot( const std::string &snapshotDir,
                            const std::string &pluginId, std::string &error );
 
+/// Restores @p snapshotDir over @p pluginDir so the on-disk bytes are
+/// exactly the captured version: verifies the completeness marker FIRST
+/// (an unverified snapshot is never trusted as a rollback source), removes
+/// payload files absent from the snapshot, copies the snapshot tree back
+/// (marker excluded — it is metadata, not payload), then deletes the
+/// snapshot itself. False with @p error on any failure; on a mid-restore
+/// failure the snapshot is left in place as the recovery copy.
+bool restorePluginSnapshot( const std::string &snapshotDir,
+                            const std::string &pluginDir,
+                            const std::string &pluginId, std::string &error );
+
 /// Deterministic snapshot root inside the registry temp directory.
 std::string pluginSnapshotRoot( const std::string &tempDirectory );
 
-/// Owning process id used in residue names (staging-.old-/upgrade-
+/// Owning process id used in residue names (~staging-/~old-/upgrade-
 /// suffixes) so the sweep can tell a dead process's residue from a live
 /// own capture. Exposed for callers that compose the same names.
 long snapshotOwnerPid();
 
 /// Bounded GC over the snapshot root (WP3). Reclaims in-flight residue
-/// (*.staging-*, upgrade-*, *.old-*) whose OWNING pid is dead — artifacts
+/// (*~staging-*, upgrade-*, *~old-*) whose OWNING pid is dead — artifacts
 /// of a live process (this one or a concurrent instance) are never
-/// touched — restores a .old-* backup when its dest went missing mid-swap,
+/// touched — restores a ~old-* backup when its dest went missing mid-swap,
 /// drops last-good-<id> directories whose id is not in @p liveIds
 /// (abandoned dev trees, externally uninstalled plugins), and cleans the
 /// legacy <temp>/plugin-last-good-<id> layout left by 12.0 builds.
 /// Fails closed: a symlinked root is skipped, a non-directory root is
-/// untouched. Returns the number of directories removed.
+/// untouched, a symlinked ENTRY is never promoted — it is residue and
+/// removed. Returns the number of directories removed.
 int sweepPluginSnapshots( const std::string &tempDirectory,
-                          const std::vector<std::string> &liveIds,
-                          const std::string &logContext = {} );
+                          const std::vector<std::string> &liveIds );
 
 /// One asynchronous capture. Owns its worker thread: cancel() + join in the
 /// destructor means a dropped job (registry teardown, a newer capture
@@ -122,8 +133,6 @@ public:
 
     /// Cooperative cancel: the worker checks between files. Always joins.
     void cancel();
-    /// True when the worker has finished (call result()).
-    bool finished() const;
     /// Blocks until the worker finishes or @p timeoutMs elapses. True =
     /// finished. On timeout the job keeps running; the caller may cancel()
     /// or simply drop the shared_ptr (dtor cancels + joins).

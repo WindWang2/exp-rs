@@ -881,6 +881,32 @@ IpcChannel::Outcome PluginHostProcessSession::requestImpl(
             mPeakInFlight = mInFlight;
     }
 
+    // The gate slot and the in-flight count return on EVERY exit path —
+    // an exception escaping mChannel->request / escalateTimeout / the
+    // death-confirm below must never leak a concurrency slot (permanent
+    // slot loss = eventual E6007 saturation for every later request).
+    struct RequestSlotGuard
+    {
+        PluginHostProcessSession *self;
+        ~RequestSlotGuard()
+        {
+            bool killDrained = false;
+            {
+                std::lock_guard<std::mutex> stateLock( self->mStateMutex );
+                --self->mInFlight;
+                if ( self->mInFlight == 0 && self->mPoisoned && self->mProcessAlive )
+                {
+                    self->mPoisoned = false;
+                    killDrained = true;
+                }
+            }
+            if ( killDrained )
+                self->killProcess( "poisoned worker drained" );
+            self->mGate.release();
+        }
+    };
+    const RequestSlotGuard slotGuard{ this };
+
     IpcChannel::Outcome outcome;
     outcome = mChannel->request( method, params, effectiveDeadline, cancelPredicate, progressSink );
     recordLastFailure( outcome );
@@ -891,22 +917,6 @@ IpcChannel::Outcome PluginHostProcessSession::requestImpl(
         // window and then kills (sole request) or poisons (peers in flight).
         escalateTimeout( 0 );
         outcome.error.message += "; the request was cancelled (worker killed or scheduled for kill)";
-    }
-
-    {
-        bool killDrained = false;
-        {
-            std::lock_guard<std::mutex> stateLock( mStateMutex );
-            --mInFlight;
-            if ( mInFlight == 0 && mPoisoned && mProcessAlive )
-            {
-                mPoisoned = false;
-                killDrained = true;
-            }
-        }
-        if ( killDrained )
-            killProcess( "poisoned worker drained" );
-        mGate.release();
     }
 
     if ( outcome.status == IpcChannel::Outcome::Status::Timeout )

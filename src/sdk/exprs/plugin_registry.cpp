@@ -58,150 +58,6 @@ int snapshotWaitMs()
                : 30000;
 }
 
-/// WP4 snapshot helper: copies every regular file under @p pluginDir into
-/// @p snapshotDir, preserving the relative layout. Symlinks are REFUSED
-/// (never followed), mirroring PluginPackage::install's containment rules —
-/// a dev-mode reload must not chase a link outside the package. Every
-/// filesystem call is error_code-based; failures return false with a
-/// message instead of throwing out of the reload path.
-bool snapshotPluginFiles( const std::string &pluginDir, const std::string &snapshotDir,
-                          std::string &error )
-{
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path source( pluginDir );
-    const fs::path target( snapshotDir );
-    if ( !fs::is_directory( source, ec ) || ec )
-    {
-        error = "plugin directory is not readable";
-        return false;
-    }
-    fs::create_directories( target, ec );
-    if ( ec )
-    {
-        error = "cannot create the reload snapshot directory: " + ec.message();
-        return false;
-    }
-    for ( fs::recursive_directory_iterator iterator( source, fs::directory_options::skip_permission_denied, ec ), end; !ec && iterator != end; iterator.increment( ec ) )
-    {
-        const fs::path &entry = iterator->path();
-        const fs::path relative = fs::relative( entry, source, ec );
-        if ( ec )
-        {
-            error = "cannot relativize snapshot entry: " + ec.message();
-            return false;
-        }
-        const fs::path destination = target / relative;
-        if ( fs::is_symlink( entry, ec ) )
-        {
-            error = "symlink '" + entry.generic_string() + "' refused in the reload snapshot";
-            return false;
-        }
-        if ( ec )
-        {
-            error = "cannot inspect snapshot entry: " + ec.message();
-            return false;
-        }
-        if ( fs::is_directory( entry, ec ) )
-        {
-            if ( ec )
-            {
-                error = "cannot inspect snapshot entry: " + ec.message();
-                return false;
-            }
-            fs::create_directories( destination, ec );
-            if ( ec )
-            {
-                error = "cannot create snapshot subdirectory: " + ec.message();
-                return false;
-            }
-            continue;
-        }
-        fs::create_directories( destination.parent_path(), ec );
-        if ( ec )
-        {
-            error = "cannot create snapshot parent directory: " + ec.message();
-            return false;
-        }
-        fs::copy_file( entry, destination, fs::copy_options::overwrite_existing, ec );
-        if ( ec )
-        {
-            error = "cannot copy '" + entry.generic_string() + "' into the snapshot: "
-                    + ec.message();
-            return false;
-        }
-    }
-    if ( ec )
-    {
-        error = "cannot walk the plugin directory: " + ec.message();
-        return false;
-    }
-    return true;
-}
-
-/// WP4 rollback helper: restores @p snapshotDir over @p pluginDir so the
-/// on-disk bytes are exactly the version that last loaded. Files present in
-/// the target but absent from the snapshot are REMOVED (the new version may
-/// have added files), and the snapshot copy itself is deleted afterwards.
-bool restorePluginFromSnapshot( const std::string &snapshotDir, const std::string &pluginDir,
-                                std::string &error )
-{
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path source( snapshotDir );
-    const fs::path target( pluginDir );
-    // Replace the payload: remove the target's files/subdirs, copy back.
-    for ( fs::directory_iterator iterator( target, ec ), end; !ec && iterator != end; )
-    {
-        const fs::path entry = iterator->path();
-        iterator.increment( ec );
-        if ( ec )
-            break;
-        fs::remove_all( entry, ec );
-        if ( ec )
-        {
-            error = "cannot clear the plugin directory for rollback: " + ec.message();
-            return false;
-        }
-    }
-    if ( ec )
-    {
-        error = "cannot walk the plugin directory for rollback: " + ec.message();
-        return false;
-    }
-    if ( !snapshotPluginFiles( snapshotDir, pluginDir, error ) )
-        return false;
-    // snapshot.marker.json is snapshot metadata, not plugin payload — the
-    // plain copy above carried it over; drop it from the restored tree so
-    // the plugin dir only ever holds real package bytes.
-    {
-        std::error_code markerEc;
-        fs::remove( target / exprs::kPluginSnapshotMarker, markerEc );
-    }
-    // The manifest index cache (plugin_discovery) is keyed by mtime, and a
-    // file copy PRESERVES the source timestamps — so a byte-identical restore
-    // would keep the failed version's cache entry alive and the rollback
-    // would rescan the very manifest it just replaced. Stamping the restored
-    // files with the current time is both honest (this IS new content on
-    // disk) and what makes the cache re-parse.
-    for ( fs::recursive_directory_iterator iterator( target, fs::directory_options::skip_permission_denied, ec ), end; !ec && iterator != end; iterator.increment( ec ) )
-    {
-        if ( fs::is_regular_file( iterator->path(), ec ) && !ec )
-            fs::last_write_time( iterator->path(), fs::file_time_type::clock::now(), ec );
-    }
-    if ( ec )
-    {
-        error = "cannot stamp the restored files: " + ec.message();
-        return false;
-    }
-    fs::remove_all( source, ec );
-    if ( ec )
-    {
-        error = "cannot remove the reload snapshot: " + ec.message();
-        return false;
-    }
-    return true;
-}
 } // namespace
 
 namespace exprs {
@@ -247,6 +103,10 @@ PluginRegistry::~PluginRegistry()
 
 void PluginRegistry::configure( const PluginRegistryOptions &options )
 {
+    // Reconfiguration may redirect the snapshot root: captures in flight
+    // against the OLD root must not publish there after the switch.
+    // Cancel+join runs before the lock below (WP2 shutdown safety).
+    cancelSnapshotJobs();
     std::string tempDirectory;
     std::vector<std::string> liveIds;
     {
@@ -285,7 +145,12 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
     // bounded tree delete never holds the registry mutex. Same-pid
     // artifacts (a live capture/upgrade of this process) are never
     // touched — sweepPluginSnapshots owns that distinction.
-    sweepPluginSnapshots( tempDirectory, liveIds, "configure" );
+    sweepPluginSnapshots( tempDirectory, liveIds );
+    // Same reconcile for the PACKAGE staging root (<userRoot>/.staging): a
+    // crashed swap that left the install dir missing is restored from its
+    // parked .old backup here at startup rather than waiting for the next
+    // install (which might never come).
+    PluginPackage::reconcileStaging( PluginDiscovery::userPluginRoot() );
 }
 
 void PluginRegistry::refresh()
@@ -533,11 +398,10 @@ std::string PluginRegistry::snapshotRoot() const
 {
     // mOptions is shared state: read it under the registry mutex (callers of
     // this const helper are reload/upgrade paths that do not hold it).
+    // pluginSnapshotRoot owns the temp-dir resolution — the error_code
+    // overload + /tmp fallback, never the throwing one.
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    const std::string base = mOptions.tempDirectory.empty()
-                                 ? std::filesystem::temp_directory_path().generic_string()
-                                 : mOptions.tempDirectory;
-    return base + "/sicnu-plugin-snapshots";
+    return pluginSnapshotRoot( mOptions.tempDirectory );
 }
 
 std::string PluginRegistry::lastGoodSnapshotPath( const std::string &pluginId ) const
@@ -596,7 +460,21 @@ bool PluginRegistry::waitForSnapshotJob( const std::string &pluginId, int timeou
         job = it->second;
     }
     if ( !job->wait( timeoutMs ) )
+    {
+        // A straggler past its deadline must not publish stale bytes
+        // later: cancel it (the worker exits at its next file boundary and
+        // the shared_ptr dtor joins). The slot is released only when it
+        // still points at THIS job — a newer capture may have superseded
+        // it while we waited, and that one is not ours to cancel.
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            const auto it = mSnapshotJobs.find( pluginId );
+            if ( it != mSnapshotJobs.end() && it->second == job )
+                mSnapshotJobs.erase( it );
+        }
+        job->cancel();
         return false;
+    }
     const PluginSnapshotResult outcome = job->result();
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
@@ -626,6 +504,20 @@ PluginRegistry::LifecycleOwnerGuard::~LifecycleOwnerGuard()
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
     registry->mReloading.erase( pluginId );
+}
+
+std::shared_ptr<PluginSnapshotJob> PluginRegistry::takePendingSnapshotJob(
+    const std::string &pluginId )
+{
+    std::shared_ptr<PluginSnapshotJob> pending;
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    const auto it = mSnapshotJobs.find( pluginId );
+    if ( it != mSnapshotJobs.end() )
+    {
+        pending = std::move( it->second );
+        mSnapshotJobs.erase( it );
+    }
+    return pending;
 }
 
 void PluginRegistry::cancelSnapshotJobs()
@@ -1107,6 +999,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     std::string pluginDir;
     bool loaded = false;
     bool hostedOop = false;
+    PluginManifest loadedManifest;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         const PluginRecord *entry = record( pluginId );
@@ -1117,6 +1010,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
             return false;
         }
         pluginDir = entry->directory;
+        loadedManifest = entry->manifest;
         loaded = std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
                      return e.pluginId == pluginId;
                  } ) != mLoaded.end();
@@ -1210,7 +1104,32 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
         }
         else
         {
-            haveSnapshot = true;
+            // Track 13.0: the capture runs ASYNC against the live plugin
+            // dir, so a dev edit that landed while the worker was still
+            // walking would be packaged as a COMPLETE, marker-valid
+            // snapshot — of the WRONG bytes. Identity gate: the snapshot's
+            // manifest must still be the one this registry loaded; a
+            // mismatch means a torn capture, never last-known-good.
+            // (A non-manifest file edited mid-capture can still slip
+            // through — the restore's own load() re-validates it.)
+            PluginManifest snapManifest;
+            PluginDiagnostic snapParse;
+            if ( !loadManifestFromFile( snapshotDir + "/plugin.json", snapManifest,
+                                        snapParse )
+                 || snapManifest.id != loadedManifest.id
+                 || snapManifest.version != loadedManifest.version
+                 || snapManifest.entrypoint != loadedManifest.entrypoint )
+            {
+                addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                               PluginDiagnosticSeverity::Warning,
+                               "hot reload's last-known-good snapshot does not match "
+                                   "the loaded version (captured during an edit?); "
+                                   "no rollback is possible" );
+            }
+            else
+            {
+                haveSnapshot = true;
+            }
         }
     }
 
@@ -1281,7 +1200,7 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     if ( haveSnapshot )
     {
         std::string restoreError;
-        if ( restorePluginFromSnapshot( snapshotDir, pluginDir, restoreError ) )
+        if ( restorePluginSnapshot( snapshotDir, pluginDir, pluginId, restoreError ) )
         {
             refresh();
             preserveEvidence();
@@ -1422,31 +1341,10 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         loadManifestFromFile( target + "/plugin.json", previous, previousError )
         && previous.id == fresh.id;
 
-    if ( !hadPrevious )
-    {
-        // Fresh install — the staged/atomic package install needs no
-        // lifecycle coordination for a plugin that does not exist yet. A
-        // target directory hosting a different id (or unparseable bytes)
-        // is the installer's own typed refusal.
-        PluginDiagnosticLog installLog;
-        std::string installedDir;
-        const bool installed =
-            PluginPackage::install( sourceDir, installedDir, installLog );
-        mergeLog( installLog );
-        if ( !installed )
-        {
-            result.status = PluginUpgradeStatus::Refused;
-            return result;
-        }
-        refresh();
-        result.status = PluginUpgradeStatus::Installed;
-        result.installedDir = installedDir;
-        return result;
-    }
-
     // Step 4: one lifecycle operation per plugin at a time (the same guard
     // reload() takes — a concurrent reload/upgrade could otherwise publish
-    // the wrong generation).
+    // the wrong generation). Covers the fresh-install branch too: a foreign
+    // load() must not publish a different-root copy while the install lands.
     const std::string &id = fresh.id;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
@@ -1463,6 +1361,68 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         mReloading.emplace( id, std::this_thread::get_id() );
     }
     LifecycleOwnerGuard lifecycleGuard{ this, id };
+
+    // A load() that passed the owner check before this op armed is still
+    // in flight (state Loading, not yet in mLoaded): isLoaded() is false
+    // for it, so without this fence the swap/delete below would run under
+    // an in-flight dlopen that then publishes the OLD generation. Refuse
+    // typed; the caller retries once the load settles.
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( id );
+        if ( entry && entry->state == PluginState::Loading )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "install/upgrade refused: a load is in flight for "
+                              "this plugin; retry once it settles",
+                              id );
+            result.status = PluginUpgradeStatus::Refused;
+            return result;
+        }
+    }
+
+    if ( !hadPrevious )
+    {
+        // Fresh install — but a plugin with this id LOADED from a different
+        // root (a dev tree shadows the user root by root order) would leave
+        // the running generation stale and produce duplicate-id records.
+        // Refuse typed rather than silently shadowing.
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            const PluginRecord *entry = record( id );
+            if ( entry && entry->state == PluginState::Loaded
+                 && entry->directory != target )
+            {
+                mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                                  PluginDiagnosticSeverity::Error,
+                                  "install refused: '" + id + "' is loaded from "
+                                      + entry->directory
+                                      + " outside the user plugin root; unload "
+                                        "it before installing",
+                                  id );
+                result.status = PluginUpgradeStatus::Refused;
+                return result;
+            }
+        }
+        PluginDiagnosticLog installLog;
+        std::string installedDir;
+        const bool installed =
+            PluginPackage::install( sourceDir, installedDir, installLog );
+        if ( installed )
+            refresh();
+        // Merge AFTER refresh(): refreshUnlocked() clears mDiagnostics —
+        // merging earlier would erase the install evidence either way.
+        mergeLog( installLog );
+        if ( !installed )
+        {
+            result.status = PluginUpgradeStatus::Refused;
+            return result;
+        }
+        result.status = PluginUpgradeStatus::Installed;
+        result.installedDir = installedDir;
+        return result;
+    }
 
     const bool wasLoaded = isLoaded( id );
 
@@ -1510,20 +1470,9 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
 
     // A pending async last-good capture of THIS plugin would read the tree
     // mid-swap — drop it; a successful (re)load recreates it.
-    {
-        std::shared_ptr<PluginSnapshotJob> pending;
-        {
-            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            auto it = mSnapshotJobs.find( id );
-            if ( it != mSnapshotJobs.end() )
-            {
-                pending = std::move( it->second );
-                mSnapshotJobs.erase( it );
-            }
-        }
-        if ( pending )
-            pending->cancel();
-    }
+    if ( const std::shared_ptr<PluginSnapshotJob> pending =
+             takePendingSnapshotJob( id ) )
+        pending->cancel();
 
     // Step 7: drain the old generation (barrier-protected; a busy plugin
     // refuses the upgrade and keeps running — PluginInUse diagnostic comes
@@ -1541,14 +1490,71 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         return result;
     }
 
+    // Two shared tails for every rollback leg below:
+    // - oldGenerationOk(): is the OLD generation usable after whatever the
+    //   disk now holds — re-load iff it was loaded, publishable-state
+    //   otherwise (the same bad-state set as the step-9 publish check).
+    const auto oldGenerationOk = [&]() -> bool {
+        if ( wasLoaded )
+            return load( id );
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( id );
+        return entry && entry->state != PluginState::Broken
+               && entry->state != PluginState::Incompatible
+               && entry->state != PluginState::Blocked
+               && entry->state != PluginState::Failed;
+    };
+    // - reportUnrecoverable(): the old generation does not come back. A
+    //   restore that consumed upgradeDir may have left NO recovery copy —
+    //   recapture the on-disk bytes (best effort, bounded) before claiming
+    //   a kept snapshot so the diagnostic never names a missing path.
+    const auto reportUnrecoverable = [&]() {
+        std::error_code residueEc;
+        if ( !fs::exists( fs::path( upgradeDir ), residueEc ) )
+            capturePluginSnapshot( target, upgradeDir, id,
+                                   PluginSnapshotBudget::fromEnvironment() );
+        const bool snapshotKept =
+            fs::exists( fs::path( upgradeDir ), residueEc ) && !residueEc;
+        addDiagnostic( PluginDiagnosticCode::PluginUpgradeFailed,
+                       PluginDiagnosticSeverity::Error,
+                       std::string( "install/upgrade failed and the rollback "
+                                    "did not restore a working version" )
+                           + ( snapshotKept
+                                   ? "; the recovery snapshot is kept at "
+                                         + upgradeDir
+                                   : " (no usable recovery snapshot remains)" ),
+                       id );
+        result.status = PluginUpgradeStatus::Failed;
+    };
+
     // Step 8: the atomic swap — the package installer re-validates,
     // checksum-verifies, stages on the same filesystem and renames with
-    // its own internal rollback, so a failure here left the previous
-    // bytes in place.
+    // its own internal rollback.
     PluginDiagnosticLog installLog;
     std::string installedDir;
-    const bool installed =
+    bool installed =
         PluginPackage::install( sourceDir, installedDir, installLog );
+    if ( installed )
+    {
+        // TOCTOU: the installer re-read the SOURCE at install time — the
+        // gated manifest and the landed bytes can diverge if the source
+        // was swapped mid-transaction. A mismatch means untrusted bytes
+        // are on disk: take the install-failure path, not Upgraded.
+        PluginManifest landed;
+        PluginDiagnostic landedError;
+        if ( !loadManifestFromFile( installedDir + "/plugin.json", landed,
+                                    landedError )
+             || landed.id != fresh.id || landed.version != fresh.version )
+        {
+            installed = false;
+            addDiagnostic( PluginDiagnosticCode::TrustRejected,
+                           PluginDiagnosticSeverity::Error,
+                           "install/upgrade refused: the landed bytes do not "
+                           "match the gated manifest (source changed "
+                           "mid-transaction)",
+                           id );
+        }
+    }
     if ( !installed )
     {
         refresh();
@@ -1556,17 +1562,41 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
         // merging earlier would erase the very evidence for why the install
         // refused (checksum, staging, swap failure).
         mergeLog( installLog );
-        if ( wasLoaded )
-            load( id );
-        dropUpgradeSnapshot();
-        addDiagnostic( PluginDiagnosticCode::PluginUpgradeRolledBack,
-                       PluginDiagnosticSeverity::Warning,
-                       "install/upgrade rolled back: the package install "
-                       "failed before commit; the previous version is "
-                       "restored and running",
-                       id );
-        result.status = PluginUpgradeStatus::RolledBack;
-        result.installedDir = target;
+        // The installer's internal rollback is best-effort (a failed
+        // promote restores the .old park, but THAT rename can fail too):
+        // check whether the PREVIOUS install's bytes actually survive on
+        // disk before claiming anything is "restored".
+        PluginManifest after;
+        PluginDiagnostic afterError;
+        const bool intact =
+            loadManifestFromFile( target + "/plugin.json", after, afterError )
+            && after.id == previous.id && after.version == previous.version;
+        if ( !intact )
+        {
+            std::string restoreError;
+            if ( !restorePluginSnapshot( upgradeDir, target, id, restoreError ) )
+                addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                               PluginDiagnosticSeverity::Error,
+                               "install/upgrade rollback could not restore "
+                               "the snapshot: " + restoreError,
+                               id );
+            refresh();
+        }
+        if ( oldGenerationOk() )
+        {
+            dropUpgradeSnapshot();
+            addDiagnostic( PluginDiagnosticCode::PluginUpgradeRolledBack,
+                           PluginDiagnosticSeverity::Warning,
+                           "install/upgrade rolled back: the package install "
+                           "failed before commit; the previous version is "
+                           "restored"
+                               + std::string( wasLoaded ? " and running" : "" ),
+                           id );
+            result.status = PluginUpgradeStatus::RolledBack;
+            result.installedDir = target;
+            return result;
+        }
+        reportUnrecoverable();
         return result;
     }
     result.installedDir = installedDir;
@@ -1632,27 +1662,12 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
                    "rolling back to the previous install",
                    id );
     std::string restoreError;
-    if ( restorePluginFromSnapshot( upgradeDir, target, restoreError ) )
+    if ( restorePluginSnapshot( upgradeDir, target, id, restoreError ) )
     {
-        // restorePluginFromSnapshot consumed the snapshot dir on success.
+        // restorePluginSnapshot consumed the snapshot dir on success.
         refresh();
         preserveEvidence();
-        bool oldOk = true;
-        if ( wasLoaded )
-        {
-            oldOk = load( id );
-        }
-        else
-        {
-            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            const PluginRecord *entry = record( id );
-            // Same bad-state set as the step-9 publish check.
-            oldOk = entry && entry->state != PluginState::Broken
-                    && entry->state != PluginState::Incompatible
-                    && entry->state != PluginState::Blocked
-                    && entry->state != PluginState::Failed;
-        }
-        if ( oldOk )
+        if ( oldGenerationOk() )
         {
             addDiagnostic( PluginDiagnosticCode::PluginUpgradeRolledBack,
                            PluginDiagnosticSeverity::Warning,
@@ -1662,11 +1677,6 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
             result.status = PluginUpgradeStatus::RolledBack;
             return result;
         }
-        // The restore consumed upgradeDir but the OLD version itself no
-        // longer comes up — recapture the restored bytes (best effort,
-        // bounded) so the kept-artifact guarantee below stays honest.
-        capturePluginSnapshot( target, upgradeDir, id,
-                               PluginSnapshotBudget::fromEnvironment() );
     }
     else
     {
@@ -1676,19 +1686,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
                        "snapshot: " + restoreError,
                        id );
     }
-    std::error_code residueEc;
-    const bool snapshotKept =
-        fs::exists( fs::path( upgradeDir ), residueEc ) && !residueEc;
-    addDiagnostic( PluginDiagnosticCode::PluginUpgradeFailed,
-                   PluginDiagnosticSeverity::Error,
-                   std::string( "install/upgrade failed and the rollback did "
-                                "not restore a working version" )
-                       + ( snapshotKept
-                               ? "; the pre-upgrade snapshot is kept at "
-                                     + upgradeDir
-                               : " (no usable recovery snapshot remains)" ),
-                   id );
-    result.status = PluginUpgradeStatus::Failed;
+    reportUnrecoverable();
     return result;
 }
 
@@ -1696,13 +1694,12 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
 {
     // Lifecycle ownership (track 13.0): between the drain below and the
     // package removal, a foreign load() could otherwise re-publish the very
-    // generation being deleted. Refuse while another thread owns the
-    // plugin's lifecycle op, and hold ownership ourselves for the window.
+    // generation being deleted. One lifecycle op per plugin at a time —
+    // the same rule reload()/installOrUpgrade() enforce (the guard's
+    // unconditional erase cannot support nested same-thread ownership).
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-        const auto ownerIt = mReloading.find( pluginId );
-        if ( ownerIt != mReloading.end()
-             && ownerIt->second != std::this_thread::get_id() )
+        if ( mReloading.count( pluginId ) != 0 )
         {
             mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
                               PluginDiagnosticSeverity::Error,
@@ -1715,6 +1712,22 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     }
     LifecycleOwnerGuard ownerGuard{ this, pluginId };
 
+    // Same in-flight fence as installOrUpgrade: a load() mid-Loading is
+    // invisible to isLoaded() but would publish into the deleted package.
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( pluginId );
+        if ( entry && entry->state == PluginState::Loading )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "uninstall refused: a load is in flight for this "
+                              "plugin; retry once it settles",
+                              pluginId );
+            return false;
+        }
+    }
+
     // Drain-gated removal (WP3 uninstall leg): a loaded plugin unloads
     // first; a refused drain leaves the plugin loaded AND installed.
     if ( isLoaded( pluginId ) && !unload( pluginId, timeoutMs ) )
@@ -1722,20 +1735,9 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     // Cancel this plugin's in-flight last-good capture BEFORE removing the
     // tree: otherwise its publish could land after the remove and recreate
     // an orphaned snapshot for a plugin that no longer exists.
-    {
-        std::shared_ptr<PluginSnapshotJob> pending;
-        {
-            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-            auto it = mSnapshotJobs.find( pluginId );
-            if ( it != mSnapshotJobs.end() )
-            {
-                pending = std::move( it->second );
-                mSnapshotJobs.erase( it );
-            }
-        }
-        if ( pending )
-            pending->cancel();
-    }
+    if ( const std::shared_ptr<PluginSnapshotJob> pending =
+             takePendingSnapshotJob( pluginId ) )
+        pending->cancel();
     PluginDiagnosticLog log;
     const bool ok = PluginPackage::uninstall( pluginId, log );
     std::string snapshotDir;
@@ -1760,6 +1762,26 @@ void PluginRegistry::unloadAll()
     // must never outlive the teardown that follows (WP2 shutdown safety).
     // Cancel is cooperative — the worker exits at its next file boundary.
     cancelSnapshotJobs();
+    // Lifecycle ops in flight (install/upgrade/uninstall/reload) hold
+    // mReloading entries — tearing records down under a mid-transaction
+    // upgrade would yank state the transaction still writes. Wait bounded
+    // for owners to finish; unload()/load() refuse foreign-owned ids, so a
+    // still-running op only shrinks what we may drain — never corrupts it.
+    {
+        const auto lifecycleDeadline = std::chrono::steady_clock::now()
+                                       + std::chrono::milliseconds( unloadTimeoutMs() );
+        for ( ;; )
+        {
+            {
+                std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+                if ( mReloading.empty() )
+                    break;
+            }
+            if ( std::chrono::steady_clock::now() >= lifecycleDeadline )
+                break;
+            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        }
+    }
     // Shutdown path: drain every loaded plugin first (so a worker running
     // plugin code finishes against mapped code), then unload the drained
     // ones. A plugin that does not drain within the budget is left loaded —

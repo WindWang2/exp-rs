@@ -9,12 +9,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <sstream>
 
 #include <json/json.h>
 
 #ifndef _WIN32
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #else
@@ -47,13 +50,30 @@ bool pidAlive( long pid )
     HANDLE handle = ::OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
                                    static_cast<DWORD>( pid ) );
     if ( !handle )
-        return false;
+        // Access denied = the process EXISTS but belongs to a higher
+        // privilege level — it is alive, not collectible residue.
+        return ::GetLastError() == ERROR_ACCESS_DENIED;
     ::CloseHandle( handle );
     return true;
 #else
     if ( ::kill( static_cast<pid_t>( pid ), 0 ) == 0 )
         return true;
     return errno == EPERM; // exists but owned by another user
+#endif
+}
+
+/// The snapshot root is a per-user trust boundary: on a shared temp dir a
+/// root pre-created by another user must never receive our bytes, be
+/// trusted as a restore source, or be swept by us. Windows relies on the
+/// per-user %TEMP% layout, where this class does not apply.
+bool dirOwnedByUs( const std::filesystem::path &dir )
+{
+#ifdef _WIN32
+    ( void )dir;
+    return true;
+#else
+    struct stat st {};
+    return ::lstat( dir.c_str(), &st ) == 0 && st.st_uid == ::geteuid();
 #endif
 }
 
@@ -68,6 +88,10 @@ uint64_t envUint64( const char *name, uint64_t fallback, uint64_t floor )
     const char *raw = std::getenv( name );
     if ( !raw || !*raw )
         return fallback;
+    // strtoull silently wraps a leading '-' into a huge value — an env set
+    // to "-1" would otherwise MAX OUT the byte budget instead of failing.
+    if ( raw[0] == '-' || raw[0] == '+' )
+        return fallback;
     const unsigned long long parsed = std::strtoull( raw, nullptr, 10 );
     if ( parsed == 0 )
         return fallback;
@@ -79,8 +103,8 @@ uint64_t envUint64( const char *name, uint64_t fallback, uint64_t floor )
 enum class EntryKind
 {
     Foreign,
-    Staging,       ///< <anything>.staging-<pid>
-    ParkedOld,     ///< <anything>.old-<pid>
+    Staging,       ///< <anything>~staging-<pid>-<seq>
+    ParkedOld,     ///< <anything>~old-<pid>-<seq>
     Upgrade,       ///< upgrade-<id>-<pid>
     LastGood,      ///< last-good-<id>
 };
@@ -90,12 +114,12 @@ bool allSafeNameChars( const std::string &name )
     return !name.empty()
            && std::all_of( name.begin(), name.end(), []( char c ) {
                   return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' )
-                         || ( c >= '0' && c <= '9' ) || c == '.' || c == '_' || c == '-';
+                         || ( c >= '0' && c <= '9' ) || c == '.' || c == '_' || c == '-' || c == '~';
               } );
 }
 
-/// Splits "<base><marker><digits...>" names (".staging-123-4" and
-/// ".old-123" both match: the tail is digits/dashes only). Used for the
+/// Splits "<base><marker><digits...>" names ("~staging-123-4" and
+/// "~old-123" both match: the tail is digits/dashes only). Used for the
 /// publish-ladder residue classes; anything else is Foreign.
 bool splitSuffix( const std::string &name, const char *marker,
                   std::string &base )
@@ -155,26 +179,41 @@ std::atomic<long> gCaptureSeq{ 0 };
 /// The lock map is keyed by the literal dest string — callers always pass
 /// the deterministic last-good-/upgrade- paths, so keys stay canonical.
 std::mutex gDestLocksMutex;
-std::map<std::string, std::shared_ptr<std::mutex>> gDestLocks;
+// Weak pointers: a finished capture drops the last strong ref and the
+// mutex frees itself — the map cannot grow past destinations that have a
+// live or queued capture. Expired entries are pruned on every lookup.
+std::map<std::string, std::weak_ptr<std::mutex>> gDestLocks;
 
 std::shared_ptr<std::mutex> destLockFor( const std::string &destDir )
 {
     std::lock_guard<std::mutex> lock( gDestLocksMutex );
-    auto &slot = gDestLocks[ destDir ];
-    if ( !slot )
-        slot = std::make_shared<std::mutex>();
-    return slot;
+    for ( auto it = gDestLocks.begin(); it != gDestLocks.end(); )
+        it = it->second.expired() ? gDestLocks.erase( it ) : std::next( it );
+    std::shared_ptr<std::mutex> mutex = gDestLocks[ destDir ].lock();
+    if ( !mutex )
+    {
+        mutex = std::make_shared<std::mutex>();
+        gDestLocks[ destDir ] = mutex;
+    }
+    return mutex;
 }
 
 } // namespace
 
 PluginSnapshotBudget PluginSnapshotBudget::fromEnvironment()
 {
+    // Byte budgets get a ceiling too: a hostile/absurd env must not turn
+    // the bound into an effective no-snapshot. 16 GiB is far past any
+    // legitimate plugin tree while still a finite bound.
+    constexpr uint64_t kByteCeiling = 16ull * 1024ull * 1024ull * 1024ull;
     PluginSnapshotBudget budget;
-    budget.maxBytes =
-        envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", budget.maxBytes, 4096 );
-    budget.maxFileBytes = envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_FILE_BYTES",
-                                     budget.maxFileBytes, 1024 );
+    budget.maxBytes = std::min<uint64_t>(
+        envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_BYTES", budget.maxBytes, 4096 ),
+        kByteCeiling );
+    budget.maxFileBytes = std::min<uint64_t>(
+        envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_FILE_BYTES",
+                   budget.maxFileBytes, 1024 ),
+        kByteCeiling );
     budget.maxFiles = static_cast<uint32_t>( std::min<uint64_t>(
         envUint64( "SICNU_PLUGIN_SNAPSHOT_MAX_FILES", budget.maxFiles, 8 ),
         1u << 22 ) );
@@ -206,15 +245,26 @@ PluginSnapshotResult capturePluginSnapshot(
     const std::string instanceSuffix =
         std::to_string( snapshotOwnerPid() ) + "-"
         + std::to_string( gCaptureSeq.fetch_add( 1 ) );
-    const std::string stagingDir = destDir + ".staging-" + instanceSuffix;
-    const std::string parkedDir = destDir + ".old-" + instanceSuffix;
+    const std::string stagingDir = destDir + "~staging-" + instanceSuffix;
+    const std::string parkedDir = destDir + "~old-" + instanceSuffix;
 
     // Serialize captures into the same dest end-to-end: a superseded
     // in-flight capture can never race this one's publish ladder. The wait
-    // is bounded — the holder's per-file cancel check exits promptly when
-    // its job is cancelled, and the walker is budget-capped otherwise.
+    // is cancel-aware — a cancelled job must not sit behind a long
+    // same-dest capture; its destructor's join would block for a whole
+    // bounded walk otherwise.
     const std::shared_ptr<std::mutex> destLock = destLockFor( destDir );
-    std::lock_guard<std::mutex> destGuard( *destLock );
+    while ( !destLock->try_lock() )
+    {
+        if ( cancel && cancel() )
+        {
+            result.status = PluginSnapshotStatus::Cancelled;
+            result.message = "cancelled while waiting for the destination lock";
+            return result;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    const std::lock_guard<std::mutex> destGuard( *destLock, std::adopt_lock );
 
     const auto fail = [&]( PluginSnapshotStatus status, const std::string &why ) {
         result.status = status;
@@ -229,6 +279,29 @@ PluginSnapshotResult capturePluginSnapshot(
         return fail( PluginSnapshotStatus::IoError,
                      "snapshot source is not a readable directory" );
 
+    // A payload entry named like the completeness marker would be dropped
+    // by restore (the root-level marker is excluded as metadata) — refuse
+    // it at capture time instead of silently losing a plugin file.
+    if ( fsn::exists( source / kPluginSnapshotMarker, ec ) )
+        return fail( PluginSnapshotStatus::Unsafe,
+                     std::string( "snapshot source contains reserved name '" )
+                         + kPluginSnapshotMarker + "'" );
+    if ( ec )
+        return fail( PluginSnapshotStatus::IoError,
+                     "cannot inspect the snapshot source: " + ec.message() );
+
+    // The snapshot root is a per-user trust boundary on shared temp dirs:
+    // a foreign-owned pre-created root must never receive our bytes.
+    const fs::path destParent = dest.parent_path();
+    fsn::create_directories( destParent, ec );
+    if ( ec )
+        return fail( PluginSnapshotStatus::IoError,
+                     "cannot create the snapshot root: " + ec.message() );
+    if ( !dirOwnedByUs( destParent ) )
+        return fail( PluginSnapshotStatus::Unsafe,
+                     "snapshot root '" + destParent.generic_string()
+                         + "' is not owned by this user (shared-temp hijack refused)" );
+
     // Fresh staging: a leftover from a crashed attempt is dropped, never
     // merged (a stale file set would lie about completeness).
     fsn::remove_all( fs::path( stagingDir ), ec );
@@ -240,8 +313,10 @@ PluginSnapshotResult capturePluginSnapshot(
     uint64_t bytes = 0;
     uint32_t files = 0;
     bool cancelled = false;
+    // Fail closed on unreadable entries: skipping one would produce an
+    // incomplete yet marker-valid snapshot that a later rollback trusts.
     for ( fsn::recursive_directory_iterator it(
-              source, fsn::directory_options::skip_permission_denied, ec ),
+              source, fsn::directory_options::none, ec ),
           end;
           !ec && it != end; it.increment( ec ) )
     {
@@ -373,6 +448,11 @@ bool verifyPluginSnapshot( const std::string &snapshotDir,
         error = "snapshot directory is missing";
         return false;
     }
+    if ( !dirOwnedByUs( fs::path( snapshotDir ) ) )
+    {
+        error = "snapshot directory is not owned by this user (untrusted)";
+        return false;
+    }
     const std::string markerPath = snapshotDir + "/" + kPluginSnapshotMarker;
     if ( !fsn::is_regular_file( fs::path( markerPath ), ec ) || ec )
     {
@@ -468,11 +548,126 @@ bool verifyPluginSnapshot( const std::string &snapshotDir,
     return true;
 }
 
-int sweepPluginSnapshots( const std::string &tempDirectory,
-                          const std::vector<std::string> &liveIds,
-                          const std::string &logContext )
+bool restorePluginSnapshot( const std::string &snapshotDir,
+                            const std::string &pluginDir,
+                            const std::string &pluginId, std::string &error )
 {
-    (void)logContext;
+    namespace fsn = std::filesystem;
+    // A restore is only ever fed by a VERIFIED snapshot: the marker gate is
+    // folded in here so no caller can accidentally trust a partial tree.
+    if ( !verifyPluginSnapshot( snapshotDir, pluginId, error ) )
+        return false;
+    std::error_code ec;
+    const fs::path source( snapshotDir );
+    const fs::path target( pluginDir );
+    // Replace the payload: remove the target's entries, copy back. Files
+    // present in the target but absent from the snapshot are REMOVED (the
+    // new version may have added files).
+    for ( fsn::directory_iterator iterator( target, ec ), end; !ec && iterator != end; )
+    {
+        const fs::path entry = iterator->path();
+        iterator.increment( ec );
+        if ( ec )
+            break;
+        fsn::remove_all( entry, ec );
+        if ( ec )
+        {
+            error = "cannot clear the plugin directory for rollback: " + ec.message();
+            return false;
+        }
+    }
+    if ( ec )
+    {
+        error = "cannot walk the plugin directory for rollback: " + ec.message();
+        return false;
+    }
+    // Copy the snapshot tree back — symlinks refused exactly like capture
+    // (a verified snapshot contains none, but a hand-built one could).
+    for ( fsn::recursive_directory_iterator iterator( source, fsn::directory_options::skip_permission_denied, ec ), end;
+          !ec && iterator != end; iterator.increment( ec ) )
+    {
+        const fs::path &entry = iterator->path();
+        const fs::path relative = fsn::relative( entry, source, ec );
+        if ( ec )
+        {
+            error = "cannot relativize snapshot entry: " + ec.message();
+            return false;
+        }
+        const fs::path destination = target / relative;
+        if ( fsn::is_symlink( entry, ec ) )
+        {
+            error = "symlink '" + entry.generic_string()
+                    + "' refused in the snapshot payload";
+            return false;
+        }
+        if ( ec )
+        {
+            error = "cannot inspect snapshot entry: " + ec.message();
+            return false;
+        }
+        if ( fsn::is_directory( entry, ec ) )
+        {
+            fsn::create_directories( destination, ec );
+            if ( ec )
+            {
+                error = "cannot create restored subdirectory: " + ec.message();
+                return false;
+            }
+            continue;
+        }
+        fsn::create_directories( destination.parent_path(), ec );
+        if ( ec )
+        {
+            error = "cannot create restored parent directory: " + ec.message();
+            return false;
+        }
+        fsn::copy_file( entry, destination, fsn::copy_options::overwrite_existing, ec );
+        if ( ec )
+        {
+            error = "cannot restore '" + entry.generic_string() + "': " + ec.message();
+            return false;
+        }
+    }
+    if ( ec )
+    {
+        error = "cannot walk the snapshot for restore: " + ec.message();
+        return false;
+    }
+    // snapshot.marker.json is snapshot metadata, not plugin payload — the
+    // plain copy above carried it over; drop it from the restored tree so
+    // the plugin dir only ever holds real package bytes.
+    {
+        std::error_code markerEc;
+        fsn::remove( target / kPluginSnapshotMarker, markerEc );
+    }
+    // The manifest index cache (plugin_discovery) is keyed by mtime, and a
+    // file copy PRESERVES the source timestamps — so a byte-identical restore
+    // would keep the failed version's cache entry alive and the rollback
+    // would rescan the very manifest it just replaced. Stamping the restored
+    // files with the current time is both honest (this IS new content on
+    // disk) and what makes the cache re-parse.
+    for ( fsn::recursive_directory_iterator iterator( target, fsn::directory_options::skip_permission_denied, ec ), end; !ec && iterator != end; iterator.increment( ec ) )
+    {
+        if ( fsn::is_regular_file( iterator->path(), ec ) && !ec )
+            fsn::last_write_time( iterator->path(), fs::file_time_type::clock::now(), ec );
+    }
+    if ( ec )
+    {
+        error = "cannot stamp the restored files: " + ec.message();
+        return false;
+    }
+    fsn::remove_all( source, ec );
+    if ( ec )
+    {
+        error = "cannot remove the consumed snapshot: " + ec.message();
+        return false;
+    }
+    return true;
+}
+
+int sweepPluginSnapshots( const std::string &tempDirectory,
+                          const std::vector<std::string> &liveIds )
+{
     namespace fsn = std::filesystem;
     const std::string root = pluginSnapshotRoot( tempDirectory );
     std::error_code ec;
@@ -483,6 +678,10 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
     if ( fsn::is_symlink( rootPath, ec ) )
         return 0;
     if ( !fsn::is_directory( rootPath, ec ) || ec )
+        return 0;
+    // A foreign-owned root is outside our trust boundary — reconciling
+    // names inside it would let us delete another user's files.
+    if ( !dirOwnedByUs( rootPath ) )
         return 0;
 
     int removed = 0;
@@ -496,24 +695,35 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
             continue;
         std::string base;
         bool remove = false;
-        if ( splitSuffix( name, ".staging-", base ) )
+        // Fail closed: no artifact this process or a sibling instance
+        // publishes is ever a symlink — a link in a collectible name slot
+        // is forged residue, never something to promote or inspect.
+        // remove_all on a symlink drops only the link, never the target.
+        if ( fsn::is_symlink( entry, ec ) )
+        {
+            std::error_code linkError;
+            if ( fsn::remove( entry, linkError ) )
+                ++removed;
+            continue;
+        }
+        if ( splitSuffix( name, "~staging-", base ) )
         {
             // In-flight capture staging is collectible only when its owning
             // process is DEAD. A same-pid dir is this process's live capture
             // (every capture exit path removes or renames its own staging),
             // and a live foreign-pid dir is a concurrent instance mid-copy —
             // deleting either would pull files from under a running walker.
-            const long owner = tailOwnerPid( name, ".staging-" );
+            const long owner = tailOwnerPid( name, "~staging-" );
             remove = owner <= 0 || ( owner != ownPid && !pidAlive( owner ) );
         }
-        else if ( splitSuffix( name, ".old-", base ) )
+        else if ( splitSuffix( name, "~old-", base ) )
         {
             // Parked dest from an interrupted publish ladder. A live owner
             // (this process or a concurrent one mid-swap) cleans its own
             // park — never touch it. A dead owner's park is crash residue:
             // if the real dest vanished, restore it (crash between the two
             // renames); if the dest exists, the park is pure residue.
-            const long owner = tailOwnerPid( name, ".old-" );
+            const long owner = tailOwnerPid( name, "~old-" );
             if ( owner == ownPid || ( owner > 0 && pidAlive( owner ) ) )
                 continue;
             const fs::path dest = rootPath / base;
@@ -617,11 +827,6 @@ PluginSnapshotJob::~PluginSnapshotJob()
 void PluginSnapshotJob::cancel()
 {
     mCancel.store( true );
-}
-
-bool PluginSnapshotJob::finished() const
-{
-    return mFinished.load();
 }
 
 bool PluginSnapshotJob::wait( int timeoutMs )

@@ -156,3 +156,84 @@ touching the tree.
 effective no-snapshot. `SICNU_PLUGIN_SNAPSHOT_WAIT_MS` (30 s, clamped
 1 s–10 min) — how long reload() waits for an in-flight capture before
 declaring "no usable snapshot".
+
+## Review-fix dispositions (post-implementation review, three axes)
+
+### Residue-name grammar — `~` separator (P1 fix)
+Residue names must be unambiguous against LEGAL plugin ids (ids are
+dot-joined `[a-z0-9-]` labels, so `x.staging-N`/`x.old.N` are valid ids).
+Snapshot residue uses `<dest>~staging-<pid>-<seq>` / `<dest>~old-<pid>-<seq>`;
+package staging parks use `<id>~old.<pid>`. `~` can never appear in a plugin
+id, so residue grammar cannot collide with legal names. `.old.`-format park
+names degrade to the age rule (that format never shipped).
+
+### Dead-owner `upgrade-*` snapshots are deleted, not restored (disagree)
+The reviewer suggested restoring dead-owner upgrade snapshots. Disposition:
+delete is correct. The upgrade snapshot is a rollback SOURCE only; the
+atomic byte swap lives inside PluginPackage::install (self-recovering via
+`~old.` park reconcile). A dead owner means either (a) crash before commit —
+target untouched, snapshot is residue; or (b) crash after commit — target
+holds a VALID new install and restoring the snapshot would revert it.
+Mid-swap-ladder windows are covered by the parked-old restore and the
+package `~old.` reconcile, not by upgrade-* restoration.
+
+### refresh() + lifecycle ownership (disposition)
+installOrUpgrade calls refresh() mid-transaction BY DESIGN (rescan after
+swap); it cannot refuse itself. Evidence preservation is handled by merging
+install logs AFTER refresh (refreshUnlocked clears mDiagnostics). unloadAll
+now drains mReloading with a bounded wait before teardown.
+
+### Additional hardening from the deep pass
+- `RequestSlotGuard` in requestImpl: gate slot + mInFlight return on every
+  exit path (a throw from channel->request previously leaked a slot →
+  eventual E6007 saturation).
+- `IpcChannel::request` keeps sendEnvelope's typed codes: dead channel →
+  ChannelClosed/E6005 (restartable), frame-cap → E6003, else E6002.
+- `waitForSnapshotJob` timeout now cancels the straggler (conditional slot
+  erase — a superseding newer job is not ours to cancel).
+- `configure()` cancels in-flight captures (root may redirect).
+- `dirOwnedByUs` (POSIX lstat uid==euid) gates capture/verify/sweep — a
+  foreign-owned root on a shared temp dir is never written, trusted, or
+  reconciled. Windows relies on per-user %TEMP%.
+- `pidAlive` Windows: ERROR_ACCESS_DENIED → alive (exists, not queryable).
+- `envUint64` rejects signed input (strtoull wraps "-1" → budget max-out).
+- Capture fails closed on: unreadable entries (no skip_permission_denied),
+  a payload file named snapshot.marker.json, non-regular entries, symlinks.
+- destLock wait is cancel-aware (try_lock poll); gDestLocks holds weak_ptrs
+  with prune-on-lookup (no unbounded growth).
+- Landed-manifest TOCTOU check: installed bytes must match the gated
+  manifest's id+version, else take the install-failure path.
+
+## Test-run findings (post-build verification)
+
+### Async last-good capture can package post-load edits — manifest-identity gate (fixed)
+`refreshLastGoodSnapshot` walks the LIVE plugin dir on a worker; a dev edit
+that lands while the capture is still starting/running is packaged as a
+COMPLETE, marker-valid snapshot of the wrong bytes — verify passes and
+rollback would silently restore them (observed: restored dir failed load
+identically to the version being rolled back). Fix: reload() now gates the
+snapshot on manifest identity — its plugin.json must match the loaded
+record's id+version+entrypoint — before treating it as a rollback source.
+A torn capture is honestly reported as "no usable snapshot". Residual:
+a non-manifest file edited mid-capture can still slip through; the
+restored tree is re-validated by load() itself, so the outcome stays
+honest. Upgrade-path snapshots are synchronous (capturePluginSnapshot
+inside the transaction) and don't carry this window.
+
+### Shared mDiagnostics is last-refresh-wins under concurrency (disposition)
+A refused concurrent lifecycle op records its refusal diagnostic, but the
+owner's subsequent refresh() legitimately clears and republishes the log —
+the loser's evidence is lost. Disposition: accepted. The durable typed
+contract is the operation's return status (PluginUpgradeStatus::Refused /
+bool false); diagnostics() documents the registry's LAST refresh state by
+design. The O1.11 test asserts the status, not a log entry whose lifetime
+races the transaction.
+
+### Test environment prerequisites (documented)
+- LD_LIBRARY_PATH must include /home/kevin/pwb-sdks/root/usr/lib for the
+  qgis-chain binaries (libodbc.so.2 lives there, not in the system paths).
+- Fixture MODULE targets are dlopen'd, not linked: hello_plugin and
+  isolation_plugin must be built explicitly — cmake cannot see the dep.
+  Missing .so → every manifest lands Broken ("plugin is not loadable").
+- Registered CTest names are Catch2 titles, not binary names; the oracle's
+  -R regex is aspirational — run the four binaries directly.

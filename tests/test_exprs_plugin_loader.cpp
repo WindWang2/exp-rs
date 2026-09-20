@@ -571,6 +571,22 @@ TEST_CASE( "hot reload rolls back to the snapshot when the new code cannot load"
     ReloadFixture fixture;
     PluginRegistry &registry = fixture.registry;
 
+    // The dev-mode last-good capture is ASYNC (13.0): let the worker finish
+    // before the "dev's next edit" lands, mirroring real usage where the
+    // capture completes during the editing gap. A capture that still races
+    // an edit is caught by the manifest-identity gate and honestly refused.
+    {
+        const std::string marker =
+            std::filesystem::temp_directory_path().generic_string()
+            + "/sicnu-plugin-snapshots/last-good-" + fixture.id
+            + "/snapshot.marker.json";
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+        while ( !std::filesystem::exists( marker )
+                && std::chrono::steady_clock::now() < deadline )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        REQUIRE( std::filesystem::exists( marker ) );
+    }
+
     // The new manifest passes validation (the entrypoint exists as a regular
     // file) but the payload is not a loadable library — this is the path that
     // reaches dlopen failure and must roll back to the working bytes.
@@ -1301,12 +1317,17 @@ TEST_CASE( "snapshot sweep reclaims residue but keeps live and own-pid artifacts
     seed( "last-good-org.orphan" );
     seed( "upgrade-org.a-" + std::to_string( otherPid ) );  // foreign crash residue
     seed( "upgrade-org.b-" + std::to_string( pid ) );        // own live upgrade
-    seed( "last-good-x.staging-" + std::to_string( otherPid ) );
-    seed( "last-good-y.old-" + std::to_string( otherPid ) ); // dest missing -> restored
-    seed( "unrelated-dir" );                                 // foreign name: untouched
+    // In-flight residue grammar: <dest>~staging-<pid>-<seq> and
+    // <dest>~old-<pid>-<seq>. '~' cannot appear in a plugin id, so a real
+    // snapshot named last-good-x.staging-N (id "x.staging-N" is legal) is
+    // never conflated with residue — the misclassification class 12.x had.
+    seed( "last-good-x~staging-" + std::to_string( otherPid ) + "-0" );
+    seed( "last-good-y~old-" + std::to_string( otherPid ) + "-0" ); // dest missing -> restored
+    seed( "last-good-x.staging-" + std::to_string( otherPid ) );    // VALID id, kept
+    seed( "unrelated-dir" );                                        // foreign name: untouched
 
-    const int removed =
-        sweepPluginSnapshots( root, { "org.live", "org.b" }, "test" );
+    const int removed = sweepPluginSnapshots(
+        root, { "org.live", "org.b", "x.staging-" + std::to_string( otherPid ) } );
     REQUIRE( removed >= 3 );
     REQUIRE( fs::exists( snapRoot + "/last-good-org.live", ec ) );
     REQUIRE_FALSE( fs::exists( snapRoot + "/last-good-org.orphan", ec ) );
@@ -1314,9 +1335,230 @@ TEST_CASE( "snapshot sweep reclaims residue but keeps live and own-pid artifacts
         fs::exists( snapRoot + "/upgrade-org.a-" + std::to_string( otherPid ), ec ) );
     REQUIRE( fs::exists( snapRoot + "/upgrade-org.b-" + std::to_string( pid ), ec ) );
     REQUIRE_FALSE( fs::exists(
+        snapRoot + "/last-good-x~staging-" + std::to_string( otherPid ) + "-0", ec ) );
+    // A real snapshot whose plugin id contains ".staging-<digits>" is NOT
+    // residue — kept (the '~-separator makes the two classes disjoint).
+    REQUIRE( fs::exists(
         snapRoot + "/last-good-x.staging-" + std::to_string( otherPid ), ec ) );
     // The parked dest was restored (crash between the two renames).
     REQUIRE( fs::exists( snapRoot + "/last-good-y", ec ) );
     REQUIRE( fs::exists( snapRoot + "/unrelated-dir", ec ) );
     fs::remove_all( root, ec );
+}
+
+TEST_CASE( "installOrUpgrade refuses a policy-gated manifest before draining v1",
+           "[plugin][upgrade][p13]" )
+{
+    // O1.4: the host policy gate runs BEFORE the old generation drains —
+    // an enforce-mode permission gap refuses the upgrade with v1 untouched.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+    REQUIRE( registry.load( fixture.id ) );
+
+    // Re-gate under Enforce: v1 still passes (it declares both permissions
+    // external_tools implies); v2 drops filesystem_read — validated, but
+    // policy-blocked before the drain.
+    {
+        PluginRegistryOptions options;
+        options.roots = { fixture.userRoot };
+        options.tempDirectory = fixture.root;
+        options.policy.allowThirdPartyNative = true;
+        options.policy.mode = PluginPolicyMode::Enforce;
+        registry.configure( options );
+    }
+    REQUIRE( registry.isLoaded( fixture.id ) );
+
+    const std::string dir = fixture.root + "/src-v2";
+    std::error_code ec;
+    std::filesystem::create_directories( dir, ec );
+    {
+        std::ofstream manifest( dir + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": ")" + fixture.id + R"(",
+            "name": "Upgrade Fixture",
+            "version": "2.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": )" << pluginAbiVersion() << R"(,
+            "entrypoint_kind": "manifest",
+            "capabilities": ["operator", "external_tools"],
+            "permissions": ["external_process"],
+            "operators": []
+        })";
+    }
+
+    const PluginRegistry::PluginUpgradeResult refused =
+        registry.installOrUpgrade( dir );
+    REQUIRE( refused.status == PluginRegistry::PluginUpgradeStatus::Refused );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::TrustRejected ) );
+    REQUIRE( registry.isLoaded( fixture.id ) ); // never drained
+    REQUIRE( fixture.installedVersion() == "1.0.0" );
+    REQUIRE( fixture.snapshotRootEntries().empty() );
+}
+
+TEST_CASE( "concurrent installOrUpgrade on the same id refuses the second",
+           "[plugin][upgrade][p13]" )
+{
+    // O1.11: one lifecycle operation per plugin — a second upgrade racing
+    // the owner's transaction is refused typed, never interleaved.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+    fixture.writePackage( "src-v2", "2.0.0", true );
+    fixture.writePackage( "src-v3", "3.0.0", true );
+
+    // The winner parks inside its migrateState hook — lifecycle ownership
+    // is held across it — so the loser provably overlaps the transaction.
+    std::atomic<bool> inMigration{ false };
+    std::atomic<bool> releaseMigration{ false };
+    PluginRegistry::PluginUpgradeOptions slow;
+    slow.migrateState = [&]( const std::string & ) {
+        inMigration.store( true );
+        while ( !releaseMigration.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        return true;
+    };
+
+    PluginRegistry::PluginUpgradeResult winner;
+    std::thread first( [&] {
+        winner = registry.installOrUpgrade( fixture.root + "/src-v2", slow );
+    } );
+    const auto waitStart = std::chrono::steady_clock::now();
+    while ( !inMigration.load()
+            && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds( 5 ) )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    if ( !inMigration.load() )
+    {
+        // Never leave a joinable thread parked when the test aborts —
+        // ~thread() on a live joinable thread is std::terminate.
+        releaseMigration.store( true );
+        first.join();
+        FAIL( "the winner never reached the migration hook" );
+    }
+
+    const PluginRegistry::PluginUpgradeStatus loserStatus =
+        registry.installOrUpgrade( fixture.root + "/src-v3" ).status;
+    // Capture outcomes first; only assert once no thread can be left
+    // joinable-and-blocked behind a failed REQUIRE.
+    releaseMigration.store( true );
+    first.join();
+    REQUIRE( loserStatus == PluginRegistry::PluginUpgradeStatus::Refused );
+    // NOTE: no sawCode() assertion for the loser's diagnostic — the shared
+    // mDiagnostics log is last-refresh-wins, and the winner's refresh()
+    // legitimately overwrites a refusal recorded mid-transaction. The
+    // durable typed contract is the Refused status itself.
+    REQUIRE( winner.status == PluginRegistry::PluginUpgradeStatus::Upgraded );
+    REQUIRE( fixture.installedVersion() == "2.0.0" );
+}
+
+TEST_CASE( "registry teardown joins an in-flight snapshot capture",
+           "[plugin][snapshot][p13]" )
+{
+    // O2.5: unloadAll() must cancel+join a capture worker — no leak, no
+    // hang, no publish racing teardown. A dev-mode load() is what arms the
+    // async last-good capture in production code.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    {
+        PluginRegistryOptions options;
+        options.roots = { fixture.userRoot };
+        options.tempDirectory = fixture.root;
+        options.policy.allowThirdPartyNative = true;
+        options.policy.devMode = true;
+        registry.configure( options );
+    }
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+
+    // Make the capture span several file-boundary cancel checks so the
+    // job is realistically still in flight when teardown lands.
+    for ( int i = 0; i < 64; ++i )
+    {
+        std::ofstream f( fixture.targetDir() + "/payload_" + std::to_string( i )
+                             + ".bin",
+                         std::ios::binary );
+        f << std::string( 8192, 'x' );
+    }
+    REQUIRE( registry.load( fixture.id ) ); // starts the async capture
+    registry.unloadAll();                   // must return: cancel + join
+
+    // Whatever raced, no in-flight staging dir may remain afterwards.
+    for ( const std::string &name : fixture.snapshotRootEntries() )
+        REQUIRE( name.find( "~staging-" ) == std::string::npos );
+
+    // The same contract at the job level: dropping the last reference
+    // cancels and joins instead of leaking a worker.
+    const std::string big = fixture.root + "/big-src";
+    std::filesystem::create_directories( big );
+    for ( int i = 0; i < 64; ++i )
+    {
+        std::ofstream f( big + "/f" + std::to_string( i ) + ".bin",
+                         std::ios::binary );
+        f << std::string( 8192, 'y' );
+    }
+    {
+        auto job = PluginSnapshotJob::start(
+            big, fixture.snapshotRoot + "/last-good-teardown", "teardown",
+            PluginSnapshotBudget() );
+        job->cancel();
+    } // shared_ptr drop -> dtor cancels + joins; reaching this line is the proof
+    REQUIRE( true );
+}
+
+TEST_CASE( "configure sweeps orphaned last-good snapshots and refuses symlinks",
+           "[plugin][snapshot][p13]" )
+{
+    // O3.3 + O3.5: a last-good tree whose plugin is no longer discovered is
+    // collected on (re)configure; a symlink planted in a collectible name
+    // slot is unlinked without ever traversing its target.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+
+    const std::string lastGood = fixture.snapshotRoot + "/last-good-" + fixture.id;
+    {
+        const PluginSnapshotResult snap = capturePluginSnapshot(
+            fixture.targetDir(), lastGood, fixture.id, PluginSnapshotBudget() );
+        REQUIRE( snap.ok() );
+    }
+    REQUIRE( std::filesystem::exists( lastGood ) );
+
+    // Orphan it: the package vanishes, so the id is no longer discovered.
+    std::error_code ec;
+    std::filesystem::remove_all( fixture.targetDir(), ec );
+    REQUIRE( !ec );
+
+    PluginRegistryOptions options;
+    options.roots = { fixture.userRoot };
+    options.tempDirectory = fixture.root;
+    options.policy.allowThirdPartyNative = true;
+    registry.configure( options );
+    REQUIRE( !std::filesystem::exists( lastGood ) ); // swept
+
+#ifndef _WIN32
+    // A forged link in a collectible slot: the sweep drops the LINK only —
+    // the outside tree it points at is never entered (fail closed).
+    const std::filesystem::path outside =
+        std::filesystem::path( fixture.root ) / "outside-target";
+    std::filesystem::create_directories( outside );
+    {
+        std::ofstream f( ( outside / "keep.txt" ).string(), std::ios::trunc );
+        f << "must survive";
+    }
+    std::filesystem::create_symlink(
+        outside, std::filesystem::path( fixture.snapshotRoot )
+                     / "last-good-org.forged" );
+    registry.configure( options );
+    REQUIRE( std::filesystem::exists( outside / "keep.txt" ) );
+    REQUIRE( !std::filesystem::exists(
+        std::filesystem::path( fixture.snapshotRoot ) / "last-good-org.forged" ) );
+#endif
 }

@@ -258,6 +258,10 @@ private:
     /// Waits (bounded) for an in-flight snapshot capture of @p pluginId and
     /// reaps the finished job. True = nothing left in flight.
     bool waitForSnapshotJob( const std::string &pluginId, int timeoutMs );
+    /// Detaches @p pluginId's in-flight job from the map, if any; the
+    /// caller cancels + joins the returned job outside the registry lock.
+    std::shared_ptr<PluginSnapshotJob> takePendingSnapshotJob(
+        const std::string &pluginId );
     /// Cancels + joins every in-flight snapshot job (teardown/unloadAll).
     void cancelSnapshotJobs();
     /// RAII release of this thread's lifecycle ownership of one plugin

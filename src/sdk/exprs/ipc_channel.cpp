@@ -212,8 +212,19 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
     {
         std::lock_guard<std::mutex> lock( mMutex );
         mPending.erase( id );
-        outcome.status = Outcome::Status::ProtocolError;
-        outcome.error.code = writeCode == "E6003" ? "E6003" : "E6002";
+        // Keep the typed distinction the frame layer reported: a dead peer
+        // is ChannelClosed/E6005 (restartable), a frame-cap refusal is a
+        // protocol violation/E6003, anything else stays generic E6002.
+        if ( writeCode == "E6005" )
+        {
+            outcome.status = Outcome::Status::ChannelClosed;
+            outcome.error.code = "E6005";
+        }
+        else
+        {
+            outcome.status = Outcome::Status::ProtocolError;
+            outcome.error.code = writeCode == "E6003" ? "E6003" : "E6002";
+        }
         outcome.error.message = writeError;
         return outcome;
     }
