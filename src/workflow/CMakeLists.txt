@@ -28,6 +28,7 @@ set(SICNU_WORKFLOW_CORE_SOURCES
   workflow_ir_v2.cpp
   workflow_composer.cpp
   workflow_dag_analyzer.cpp
+  workflow_provenance.cpp
   contract_checker.cpp
   workflow_repair_engine.cpp
   plan_optimizer.cpp

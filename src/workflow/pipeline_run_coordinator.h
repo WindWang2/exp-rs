@@ -137,6 +137,12 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
     /// The checkpoint file this run persists to (empty when idle).
     QString checkpointPath() const;
 
+    /// The provenance graph written when the run reached a terminal state
+    /// (`provenance_<runId>.json` beside the checkpoint; empty when the run
+    /// has not finalized or the write failed — provenance is audit output,
+    /// it must never fail the run it describes).
+    QString provenancePath() const;
+
     signals:
     void nodeStatusChanged( const QString &nodeId, sicnu::workflow::ExecutionState state, float progress );
     void nodeFinished( const QString &nodeId, bool success, const QString &artifactPath );

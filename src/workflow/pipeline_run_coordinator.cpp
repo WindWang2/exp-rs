@@ -5,6 +5,7 @@
 #include "workflow/workflow_composer.h"
 #include "workflow/workflow_dag_analyzer.h"
 #include "workflow/workflow_limits.h"
+#include "workflow/workflow_provenance.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -274,6 +275,7 @@ struct PipelineRunCoordinator::RunState
     NodeExecutor executor;
     QThreadPool pool;
     int maxParallelism = 2;
+    QString provenancePath;
 
     QHash<QString, NodeStatusSnapshot> statuses;
     QHash<QString, int> remainingParents; // nodeId -> unfinished parent count
@@ -308,6 +310,11 @@ void PipelineRunCoordinator::setMaxParallelism( int workers )
 QString PipelineRunCoordinator::checkpointPath() const
 {
     return m_state->checkpointPath;
+}
+
+QString PipelineRunCoordinator::provenancePath() const
+{
+    return m_state->provenancePath;
 }
 
 bool PipelineRunCoordinator::isRunning() const
@@ -387,6 +394,7 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
     m_state->cancelRequested = false;
     m_state->statuses.clear();
     m_state->remainingParents.clear();
+    m_state->provenancePath.clear();
 
     const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( runDef );
     for ( const NodeFact &node : runDef.nodes )
@@ -675,6 +683,23 @@ void PipelineRunCoordinator::finalizeIfDone()
     }
     m_state->success = success;
     persistCheckpoint();
+
+    // Provenance (WP5/D9): one queryable lineage record per terminal run,
+    // emitted for successes AND failures — audits need the failure paths
+    // most. A write failure never fails the run it describes.
+    if ( !m_state->def.nodes.isEmpty() )
+    {
+        const ProvenanceGraph graph = ProvenanceGraph::fromRunState(
+            m_state->runId, m_state->def, m_state->statuses,
+            WorkflowPlanOptimizer::computePlanSignature( m_state->def ) );
+        const QString path = atomicWriteJson(
+            QDir( m_state->runDirectory )
+                .filePath( QStringLiteral( "provenance_%1.json" ).arg( m_state->runId ) ),
+            graph.toJson() );
+        if ( !path.isEmpty() )
+            m_state->provenancePath = path;
+    }
+
     emit pipelineCompleted(
         success,
         QStringLiteral( "%1 succeeded, %2 skipped, %3 failed, %4 cancelled" )
@@ -801,6 +826,7 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     m_state->cancelRequested = false;
     m_state->statuses.clear();
     m_state->remainingParents.clear();
+    m_state->provenancePath.clear();
 
     // Replay statuses. A node becomes CacheHit iff ALL of:
     //   recorded state Succeeded, lineage signature still matches, and the

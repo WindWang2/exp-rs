@@ -130,14 +130,25 @@ only ever see the flat document, so composition adds zero new run-state
 semantics. Boundary contract checking falls out for free: rewired edges
 are inspected by `inspectContracts` on the expanded document.
 
-## D9 — WP5 provenance sketch
+## D9 — WP5 provenance (implemented)
 
 Per-run `provenance_<runId>.json` in the run directory with the same
-envelope discipline (`kind`, closed `version` set): nodes = run / nodeExec /
-inputArtifact / outputArtifact / cacheHit / retryAttempt; edges = consumed /
-produced / reusedFrom / retriedAs. Query API answers artifact→producer and
-node→inputs without re-parsing checkpoints. Built on checkpoint data + run
-record, emitted at finalize — no second truth.
+envelope discipline as checkpoints (`kind="d17_provenance"`, closed
+`version` set, strict parse, dangling-edge refusal). `ProvenanceGraph`
+nodes: `run:` (workflowId + planSignature + schemaVersion), `nodeExec:`
+(state, lineage signature, elapsedMs, isCacheHit, originNodeId), and
+`artifact:` (path, fingerprint, size) keyed by path so producers and
+consumers share one vertex. Edges: `consumed` (exec←parent artifact),
+`produced` (exec wrote it this run), `reusedFrom` (cache hit: verified and
+served but NOT produced — the honest distinction). Lineage is transitive
+through artifact nodes; serialization sorts nodes/edges so identical run
+state yields a byte-identical record.
+
+Emitted in `finalizeIfDone` for successes AND failures (audits need the
+failure paths most); a provenance write failure never fails the run.
+Query API: `producerOf`, `consumedBy`, `producedBy`, `reusedBy`. A
+`retriedAs` edge kind is reserved for when the run model gains retries —
+not emitted today (single-attempt executions).
 
 ## D10 — WP6 determinism (implemented)
 

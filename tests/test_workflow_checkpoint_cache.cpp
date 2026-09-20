@@ -25,6 +25,7 @@
 #include <functional>
 
 #include "workflow/pipeline_run_coordinator.h"
+#include "workflow/workflow_provenance.h"
 #include "workflow/workflow_dag_analyzer.h"
 
 using namespace sicnu::workflow;
@@ -1086,4 +1087,204 @@ TEST_CASE( "startRun refuses an unexpandable subflow and names the instance", "[
     REQUIRE_FALSE( coordinator.startRun( def, scratchDir( QStringLiteral( "subflow-bad" ) ), &error ) );
     REQUIRE( error.contains( QStringLiteral( "'S'" ) ) );
     REQUIRE( error.contains( QStringLiteral( "f_out" ) ) );
+}
+
+
+// ---------------------------------------------------------------------------
+// WP5 provenance: one queryable lineage record per terminal run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+ProvenanceGraph loadProvenance( const QString &path )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return {};
+    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+    auto parsed = ProvenanceGraph::fromJson( doc.object() );
+    return parsed.isSuccess() ? parsed.value() : ProvenanceGraph{};
+}
+
+const ProvenanceNode *findProvNode( const ProvenanceGraph &graph, const QString &id )
+{
+    for ( const ProvenanceNode &node : graph.nodes() )
+        if ( node.id == id )
+            return &node;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE( "A finished run emits a queryable, round-trip-stable provenance record", "[d17][workflow][provenance]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "provenance" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const QString provenanceFile = coordinator.provenancePath();
+    REQUIRE( !provenanceFile.isEmpty() );
+    REQUIRE( QFile::exists( provenanceFile ) );
+    REQUIRE( provenanceFile.contains( QStringLiteral( "provenance_" ) ) );
+
+    const ProvenanceGraph graph = loadProvenance( provenanceFile );
+    REQUIRE( !graph.nodes().isEmpty() );
+
+    // One run node carrying the deterministic plan signature.
+    const ProvenanceNode *run = nullptr;
+    int runCount = 0;
+    for ( const ProvenanceNode &node : graph.nodes() )
+        if ( node.kind == QLatin1String( "run" ) )
+        {
+            run = &node;
+            ++runCount;
+        }
+    REQUIRE( runCount == 1 );
+    REQUIRE( run->attributes.value( QLatin1String( "planSignature" ) ).toString().size() == 64 );
+    REQUIRE( run->attributes.value( QLatin1String( "workflowId" ) ).toString()
+             == QStringLiteral( "wf-chain-3" ) );
+
+    // nodeExec per graph node + produced artifact per exec.
+    for ( int i = 1; i <= 3; ++i )
+    {
+        const QString execId = QStringLiteral( "node:node_%1" ).arg( i );
+        const ProvenanceNode *exec = findProvNode( graph, execId );
+        REQUIRE( exec != nullptr );
+        REQUIRE( exec->attributes.value( QLatin1String( "state" ) ).toString()
+                 == QStringLiteral( "Succeeded" ) );
+        REQUIRE( exec->attributes.value( QLatin1String( "lineageSignature" ) ).toString().size() == 64 );
+
+        const QStringList produced = graph.producedBy( execId );
+        REQUIRE( produced.size() == 1 );
+        // Transitive lineage: the artifact's producer resolves back.
+        REQUIRE( graph.producerOf( produced.first() ) == execId );
+    }
+
+    // node_2 consumed node_1's artifact; node_1 consumed nothing.
+    REQUIRE( graph.consumedBy( QStringLiteral( "node:node_1" ) ).isEmpty() );
+    const QStringList consumed2 = graph.consumedBy( QStringLiteral( "node:node_2" ) );
+    REQUIRE( consumed2.size() == 1 );
+    REQUIRE( graph.producerOf( consumed2.first() ) == QStringLiteral( "node:node_1" ) );
+
+    // Stable serialization: serialize -> parse -> serialize is identical.
+    QFile raw( provenanceFile );
+    REQUIRE( raw.open( QIODevice::ReadOnly ) );
+    const QJsonObject disk = QJsonDocument::fromJson( raw.readAll() ).object();
+    const auto reparsed = ProvenanceGraph::fromJson( disk );
+    REQUIRE( reparsed.isSuccess() );
+    REQUIRE( QJsonDocument( reparsed.value().toJson() ).toJson( QJsonDocument::Compact )
+             == QJsonDocument( disk ).toJson( QJsonDocument::Compact ) );
+}
+
+TEST_CASE( "A resumed run records cache hits as reusedFrom edges", "[d17][workflow][provenance]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "provenance-resume" ) );
+    QString checkpointFile;
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( makeSyntheticNodeExecutor() );
+        REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpointFile = coordinator.checkpointPath();
+    }
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const ProvenanceGraph graph = loadProvenance( resumeCoordinator.provenancePath() );
+    for ( int i = 1; i <= 3; ++i )
+    {
+        const QString execId = QStringLiteral( "node:node_%1" ).arg( i );
+        REQUIRE( graph.producedBy( execId ).isEmpty() ); // nothing re-produced
+        REQUIRE( graph.reusedBy( execId ).size() == 1 ); // verified reuse recorded
+    }
+    // The consumed artifact's producer is absent in THIS run's record — it
+    // was produced by the previous attempt and lives in that record.
+    const QStringList consumed2 = graph.consumedBy( QStringLiteral( "node:node_2" ) );
+    REQUIRE( consumed2.size() == 1 );
+    REQUIRE( graph.producerOf( consumed2.first() ).isEmpty() );
+}
+
+TEST_CASE( "Provenance records also describe failed runs", "[d17][workflow][provenance]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "provenance-fail" ) );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &,
+                                 const QString &runDirectory ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        if ( node.nodeId == QLatin1String( "node_2" ) )
+        {
+            result.errorMessage = QStringLiteral( "boom" );
+            return result;
+        }
+        const QString artifact = QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".out" ) );
+        QFile file( artifact );
+        if ( file.open( QIODevice::WriteOnly ) )
+        {
+            file.write( "x" );
+            file.close();
+            result.success = true;
+            result.artifactPath = artifact;
+        }
+        return result;
+    } );
+    REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const ProvenanceGraph graph = loadProvenance( coordinator.provenancePath() );
+    const ProvenanceNode *failed = findProvNode( graph, QStringLiteral( "node:node_2" ) );
+    REQUIRE( failed != nullptr );
+    REQUIRE( failed->attributes.value( QLatin1String( "state" ) ).toString()
+             == QStringLiteral( "Failed" ) );
+    REQUIRE( failed->attributes.value( QLatin1String( "errorMessage" ) ).toString()
+             == QStringLiteral( "boom" ) );
+    REQUIRE( findProvNode( graph, QStringLiteral( "node:node_3" ) )
+                 ->attributes.value( QLatin1String( "state" ) )
+                 .toString()
+             == QStringLiteral( "Skipped" ) );
+}
+
+TEST_CASE( "Provenance parse fails closed on bad envelope and dangling edges", "[d17][workflow][provenance]" )
+{
+    const QJsonObject good =
+        ProvenanceGraph::fromRunState( QStringLiteral( "r1" ), chain( 1 ),
+                                       QHash<QString, NodeStatusSnapshot>{}, QString() )
+            .toJson();
+
+    SECTION( "wrong kind" )
+    {
+        QJsonObject doc = good;
+        doc[QStringLiteral( "kind" )] = QStringLiteral( "other" );
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
+    SECTION( "unknown version" )
+    {
+        QJsonObject doc = good;
+        doc[QStringLiteral( "version" )] = QStringLiteral( "9.9" );
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
+    SECTION( "dangling edge endpoint" )
+    {
+        QJsonObject doc = good;
+        QJsonArray edges = doc[QStringLiteral( "edges" )].toArray();
+        edges.append( QJsonObject{ { QStringLiteral( "from" ), QStringLiteral( "node:ghost" ) },
+                                   { QStringLiteral( "to" ), QStringLiteral( "node:also_ghost" ) },
+                                   { QStringLiteral( "kind" ), QStringLiteral( "consumed" ) } } );
+        doc[QStringLiteral( "edges" )] = edges;
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
+    SECTION( "duplicate node id" )
+    {
+        QJsonObject doc = good;
+        QJsonArray nodes = doc[QStringLiteral( "nodes" )].toArray();
+        nodes.append( nodes[0] );
+        doc[QStringLiteral( "nodes" )] = nodes;
+        REQUIRE_FALSE( ProvenanceGraph::fromJson( doc ).isSuccess() );
+    }
 }
