@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:temporal_sar_fusion",
+  "input" : "raster",
+  "notes" : "Feature-level fusion of already-coregistered optical and SAR temporal feature stacks. Verifies the shared-grid signature (width/height/geotransform/CRS) and refuses mismatches as a typed error — never resamples or realigns. Emits opt_*/sar_* band names plus SICNU_FUSION_* provenance metadata.",
+  "output" : "raster",
+  "tags" :
+  [
+    "temporal",
+    "sar",
+    "fusion"
+  ],
+  "task" : "temporal-fusion"
+}

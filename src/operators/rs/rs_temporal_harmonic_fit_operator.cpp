@@ -9,6 +9,7 @@
 #include "operators/rs/rs_temporal_output.h"
 #include "processing/algorithms/temporal/temporal_fit.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
+#include "processing/algorithms/temporal/temporal_uncertainty.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -93,6 +94,16 @@ Json::Value RsTemporalHarmonicFitOperator::schema() const
                                                  "Append coefficient bands "
                                                  "(coef_intercept, coef_sin1, coef_cos1, ...)",
                                                  false );
+  props["compute_ci"] = makeBooleanParam(
+      "compute_ci",
+      "Append per-coefficient confidence-interval bands (coef_lo_*/coef_hi_*) "
+      "from the analytic weighted-LS interval on the SAME no-trend harmonic "
+      "design (Temporal Phenology 12.0); requires writeCoefficients",
+      false );
+  Json::Value ciLevelParam = makeNumberParam( "ci_level",
+                                              "Confidence level for compute_ci (0.01–0.999)", 0.95 );
+  setRange( ciLevelParam, 0.01, 0.999 );
+  props["ci_level"] = ciLevelParam;
   props["output"] = makeOutputParam( "output",
                                      "Harmonic-fit GeoTIFF (bands: fitted per date, rmse, r2"
                                      "[, coefficients])",
@@ -162,9 +173,10 @@ Json::Value RsTemporalHarmonicFitOperator::estimateExecution( const Json::Value 
   int scenes = params["scenes"].isArray() ? params["scenes"].size() : kTypicalSceneCount;
   scenes = std::max( scenes, 1 );
   const int coefBands = writeCoefficients ? ( 1 + 2 * harmonics ) : 0;
-  // series + fitted per scene, RMSE/R² tile buffers, coefficient rows,
+  const int ciBands = getBool( params, "compute_ci", false ) ? 2 * coefBands : 0;
+  // series + fitted per scene, RMSE/R² tile buffers, coefficient + CI rows,
   // per-pixel series gather + read tile.
-  const int buffers = 2 * scenes + coefBands + 3;
+  const int buffers = 2 * scenes + coefBands + ciBands + 3;
   return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, buffers, 0, 2 * 1024 * 1024 );
 }
 
@@ -179,6 +191,13 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
   const bool robust = getBool( params, "robust", false );
   const int minObservations = std::max( getInt( params, "minObservations", 6 ), 1 );
   const bool writeCoefficients = getBool( params, "writeCoefficients", false );
+  const bool computeCi = getBool( params, "compute_ci", false );
+  const double ciLevel = std::clamp( getDouble( params, "ci_level", 0.95 ), 0.01, 0.999 );
+  if ( computeCi && !writeCoefficients )
+    throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "compute_ci requires writeCoefficients (interval bands are emitted "
+        "alongside the coefficients they bound)" );
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -240,7 +259,8 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
   }
 
   const int coefBands = writeCoefficients ? ( 1 + 2 * harmonics ) : 0;
-  const int bandCount = sceneCount + 2 + coefBands;
+  const int ciBands = computeCi ? 2 * coefBands : 0;
+  const int bandCount = sceneCount + 2 + coefBands + ciBands;
   const int width = reader.width();
   const int height = reader.height();
 
@@ -269,6 +289,19 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
     {
       bandNames.push_back( QStringLiteral( "coef_sin%1" ).arg( k ) );
       bandNames.push_back( QStringLiteral( "coef_cos%1" ).arg( k ) );
+    }
+    if ( computeCi )
+    {
+      // lo bands then hi bands, same coefficient order as coef_*.
+      for ( const char *side : { "lo", "hi" } )
+      {
+        bandNames.push_back( QStringLiteral( "coef_%1_intercept" ).arg( side ) );
+        for ( int k = 1; k <= harmonics; ++k )
+        {
+          bandNames.push_back( QStringLiteral( "coef_%1_sin%2" ).arg( side ).arg( k ) );
+          bandNames.push_back( QStringLiteral( "coef_%1_cos%2" ).arg( side ).arg( k ) );
+        }
+      }
     }
   }
   for ( int b = 1; b <= bandCount; ++b )
@@ -303,6 +336,7 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
   std::vector<float> rmseBuf( tilePixels );
   std::vector<float> r2Buf( tilePixels );
   std::vector<float> coefBufs( static_cast<size_t>( coefBands ) * tilePixels );
+  std::vector<float> ciBufs( static_cast<size_t>( ciBands ) * tilePixels );
   std::vector<float> pixSeries( sceneCount );
   std::uint64_t fittedPixels = 0;
   int tileDone = 0;
@@ -353,6 +387,25 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
         for ( int c = 0; c < coefBands; ++c )
           coefBufs[static_cast<size_t>( c ) * tilePixels + i] =
             static_cast<float>( fit.coefficients[c] );
+        if ( computeCi )
+        {
+          // Same no-trend harmonic design as harmonicFit; empty weights =
+          // unweighted. Refusal/singular pixels keep NaN bounds.
+          const sicnu::temporal::AnalyticCiResult ci =
+            sicnu::temporal::harmonicCoefficientCi( pixSeries, tDays, 0,
+                                                    sceneCount, harmonics, {},
+                                                    ciLevel );
+          for ( int c = 0; c < coefBands; ++c )
+          {
+            const bool cv = ci.valid &&
+                            c < static_cast<int>( ci.coefficients.size() ) &&
+                            ci.coefficients[static_cast<size_t>( c )].valid;
+            ciBufs[static_cast<size_t>( c ) * tilePixels + i] =
+              cv ? static_cast<float>( ci.coefficients[static_cast<size_t>( c )].lower ) : kNan;
+            ciBufs[static_cast<size_t>( coefBands + c ) * tilePixels + i] =
+              cv ? static_cast<float>( ci.coefficients[static_cast<size_t>( c )].upper ) : kNan;
+          }
+        }
         ++fittedPixels;
       }
       else
@@ -363,6 +416,8 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
         r2Buf[i] = kNan;
         for ( int c = 0; c < coefBands; ++c )
           coefBufs[static_cast<size_t>( c ) * tilePixels + i] = kNan;
+        for ( int c = 0; c < ciBands; ++c )
+          ciBufs[static_cast<size_t>( c ) * tilePixels + i] = kNan;
       }
     }
     context.throwIfCancelled();
@@ -377,6 +432,9 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
     writeBand( sceneCount + 2, r2Buf.data() );
     for ( int c = 0; c < coefBands; ++c )
       writeBand( sceneCount + 3 + c, coefBufs.data() + static_cast<size_t>( c ) * tilePixels );
+    for ( int c = 0; c < ciBands; ++c )
+      writeBand( sceneCount + 3 + coefBands + c,
+                 ciBufs.data() + static_cast<size_t>( c ) * tilePixels );
 
     ++tileDone;
     context.reportProgress( 0.05 + 0.93 * ( static_cast<double>( tileDone ) / tiles ),
