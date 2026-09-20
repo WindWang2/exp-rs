@@ -110,6 +110,11 @@ PluginPolicy PluginPolicy::fromEnvironment()
     policy.blockedPluginIds = splitIds( std::getenv( "SICNU_PLUGIN_BLOCK" ) );
     policy.allowedPluginIds = splitIds( std::getenv( "SICNU_PLUGIN_ALLOW" ) );
     policy.allowThirdPartyNative = !envFlag( "SICNU_PLUGIN_DISABLE_NATIVE_THIRD_PARTY" );
+    // WP4 (plugin-platform 12.0): the one dev-mode switch. Off by default;
+    // production never sets it, so hot reload is unreachable there even
+    // through a caller that passes devMode=true — the caller's flag can
+    // only NARROW access (see PluginRegistry::reload).
+    policy.devMode = envFlag( "SICNU_PLUGIN_DEV" );
     return policy;
 }
 
@@ -126,6 +131,7 @@ Json::Value PluginPolicy::toJson() const
         allowed.append( id );
     json["allowed"] = allowed;
     json["allow_third_party_native"] = allowThirdPartyNative;
+    json["dev_mode"] = devMode;
     return json;
 }
 

@@ -25,6 +25,7 @@
 
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -121,6 +122,39 @@ public:
     bool ensureLoaded( const std::string &pluginId );
     bool isLoaded( const std::string &pluginId ) const;
 
+    // -- hot reload (plugin-platform 12.0, dev mode only) ----------------------
+    /// Options for reload(). Everything defaults to the safest answer.
+    struct ReloadOptions
+    {
+        /// Must be true for reload() to run any step. The GUI shell sets it
+        /// only in dev builds/flag combos (SICNU_PLUGIN_DEV=1 also enables
+        /// it through PluginPolicy); production never flips this.
+        bool devMode = false;
+        /// Optional state-migration seam (WP4). Invoked AFTER the new
+        /// manifest validated but BEFORE the new code loads, with the
+        /// plugin directory, so a host that persists plugin state can
+        /// transform it (old schema -> new schema). Returning false aborts
+        /// the reload with the OLD version still loaded. Default: identity
+        /// (nothing to migrate) — v1 ships the seam, not a migration engine.
+        std::function<bool( const std::string &pluginDir )> migrateState;
+    };
+
+    /// Development-mode hot reload of one loaded plugin:
+    ///   1. re-validate the package directory (manifest gate) WITHOUT
+    ///      touching the mapped code — a broken new manifest refuses the
+    ///      reload and the old version stays loaded;
+    ///   2. snapshot the plugin directory (files only, symlink-free) so a
+    ///      failed new load can roll back to the exact bytes that worked;
+    ///   3. drain + unload (existing barrier; a busy plugin is refused and
+    ///      stays loaded);
+    ///   4. run the optional state migration and load the new code;
+    ///   5. on a load failure: restore the snapshot over the plugin
+    ///      directory and load THAT instead (true rollback), or leave the
+    ///      record Failed with diagnostics when even the rollback fails.
+    /// Refused typed (dev mode off / not loaded / busy / broken manifest)
+    /// — every refusal keeps the old version usable.
+    bool reload( const std::string &pluginId, const ReloadOptions &options );
+
     // -- user enable/disable -------------------------------------------------
     /// Persists enable/disable in the user plugin index. Returns false when
     /// the plugin is unknown.
@@ -138,6 +172,20 @@ private:
     ~PluginRegistry();
 
     void applyPolicyAndIndex();
+    /// WP2 (plugin-platform 12.0): records one Info audit event per declared
+    /// permission on the registry diagnostics when a plugin ends up Loaded,
+    /// so the granted path carries the same structured evidence as the
+    /// denied one (E5001). No declared permissions = no events.
+    void auditGrantedPermissions( const std::string &pluginId );
+    /// WP4 (plugin-platform 12.0): directory holding the last-known-good
+    /// copy of @p pluginId's package (empty when the host keeps none). Dev
+    /// mode refreshes it after every successful load; reload() rolls back to
+    /// it when the new bytes fail to load.
+    std::string lastGoodSnapshotPath( const std::string &pluginId ) const;
+    /// Replaces the last-known-good snapshot for @p pluginId with the bytes
+    /// currently in @p pluginDir. No-op outside dev mode (production keeps no
+    /// copies).
+    void refreshLastGoodSnapshot( const std::string &pluginId, const std::string &pluginDir );
     /// Scan+validate+policy pass; caller must hold the registry mutex.
     void refreshUnlocked();
     std::string userIndexPath() const;
@@ -154,6 +202,10 @@ private:
     std::vector<LoadedPlugin> mLoaded; // parallel to nothing; lookup by pluginId
     std::unique_ptr<HostServicesV1> mServices;
     std::vector<std::string> mDisabledIds; // persisted user index
+    /// WP4 (plugin-platform 12.0): pluginIds with a reload() in flight.
+    /// Guards the unload/load window against a concurrent reload of the same
+    /// plugin publishing the wrong generation. Guarded by gRegistryMutex.
+    std::set<std::string> mReloading;
 };
 
 } // namespace exprs

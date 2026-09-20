@@ -40,6 +40,144 @@ int unloadTimeoutMs()
     const long parsed = std::strtol( raw, nullptr, 10 );
     return parsed > 0 ? static_cast<int>( std::min<long>( parsed, 600000 ) ) : 30000;
 }
+
+/// WP4 snapshot helper: copies every regular file under @p pluginDir into
+/// @p snapshotDir, preserving the relative layout. Symlinks are REFUSED
+/// (never followed), mirroring PluginPackage::install's containment rules —
+/// a dev-mode reload must not chase a link outside the package. Every
+/// filesystem call is error_code-based; failures return false with a
+/// message instead of throwing out of the reload path.
+bool snapshotPluginFiles( const std::string &pluginDir, const std::string &snapshotDir,
+                          std::string &error )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path source( pluginDir );
+    const fs::path target( snapshotDir );
+    if ( !fs::is_directory( source, ec ) || ec )
+    {
+        error = "plugin directory is not readable";
+        return false;
+    }
+    fs::create_directories( target, ec );
+    if ( ec )
+    {
+        error = "cannot create the reload snapshot directory: " + ec.message();
+        return false;
+    }
+    for ( fs::recursive_directory_iterator iterator( source, fs::directory_options::skip_permission_denied, ec ), end; !ec && iterator != end; iterator.increment( ec ) )
+    {
+        const fs::path &entry = iterator->path();
+        const fs::path relative = fs::relative( entry, source, ec );
+        if ( ec )
+        {
+            error = "cannot relativize snapshot entry: " + ec.message();
+            return false;
+        }
+        const fs::path destination = target / relative;
+        if ( fs::is_symlink( entry, ec ) )
+        {
+            error = "symlink '" + entry.generic_string() + "' refused in the reload snapshot";
+            return false;
+        }
+        if ( ec )
+        {
+            error = "cannot inspect snapshot entry: " + ec.message();
+            return false;
+        }
+        if ( fs::is_directory( entry, ec ) )
+        {
+            if ( ec )
+            {
+                error = "cannot inspect snapshot entry: " + ec.message();
+                return false;
+            }
+            fs::create_directories( destination, ec );
+            if ( ec )
+            {
+                error = "cannot create snapshot subdirectory: " + ec.message();
+                return false;
+            }
+            continue;
+        }
+        fs::create_directories( destination.parent_path(), ec );
+        if ( ec )
+        {
+            error = "cannot create snapshot parent directory: " + ec.message();
+            return false;
+        }
+        fs::copy_file( entry, destination, fs::copy_options::overwrite_existing, ec );
+        if ( ec )
+        {
+            error = "cannot copy '" + entry.generic_string() + "' into the snapshot: "
+                    + ec.message();
+            return false;
+        }
+    }
+    if ( ec )
+    {
+        error = "cannot walk the plugin directory: " + ec.message();
+        return false;
+    }
+    return true;
+}
+
+/// WP4 rollback helper: restores @p snapshotDir over @p pluginDir so the
+/// on-disk bytes are exactly the version that last loaded. Files present in
+/// the target but absent from the snapshot are REMOVED (the new version may
+/// have added files), and the snapshot copy itself is deleted afterwards.
+bool restorePluginFromSnapshot( const std::string &snapshotDir, const std::string &pluginDir,
+                                std::string &error )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path source( snapshotDir );
+    const fs::path target( pluginDir );
+    // Replace the payload: remove the target's files/subdirs, copy back.
+    for ( fs::directory_iterator iterator( target, ec ), end; !ec && iterator != end; )
+    {
+        const fs::path entry = iterator->path();
+        iterator.increment( ec );
+        if ( ec )
+            break;
+        fs::remove_all( entry, ec );
+        if ( ec )
+        {
+            error = "cannot clear the plugin directory for rollback: " + ec.message();
+            return false;
+        }
+    }
+    if ( ec )
+    {
+        error = "cannot walk the plugin directory for rollback: " + ec.message();
+        return false;
+    }
+    if ( !snapshotPluginFiles( snapshotDir, pluginDir, error ) )
+        return false;
+    // The manifest index cache (plugin_discovery) is keyed by mtime, and a
+    // file copy PRESERVES the source timestamps — so a byte-identical restore
+    // would keep the failed version's cache entry alive and the rollback
+    // would rescan the very manifest it just replaced. Stamping the restored
+    // files with the current time is both honest (this IS new content on
+    // disk) and what makes the cache re-parse.
+    for ( fs::recursive_directory_iterator iterator( target, fs::directory_options::skip_permission_denied, ec ), end; !ec && iterator != end; iterator.increment( ec ) )
+    {
+        if ( fs::is_regular_file( iterator->path(), ec ) && !ec )
+            fs::last_write_time( iterator->path(), fs::file_time_type::clock::now(), ec );
+    }
+    if ( ec )
+    {
+        error = "cannot stamp the restored files: " + ec.message();
+        return false;
+    }
+    fs::remove_all( source, ec );
+    if ( ec )
+    {
+        error = "cannot remove the reload snapshot: " + ec.message();
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 namespace exprs {
@@ -313,6 +451,58 @@ void PluginRegistry::applyPolicyAndIndex()
     }
 }
 
+void PluginRegistry::auditGrantedPermissions( const std::string &pluginId )
+{
+    // One Info audit event per declared permission, recorded when the plugin
+    // ends up Loaded. The whole body runs under the registry mutex: it reads
+    // mOptions.policy and appends to mDiagnostics, both shared with every
+    // other load/unload/refresh path (PluginDiagnosticLog::add is an
+    // unsynchronized push_back). copyRecord() is re-entrant under this
+    // recursive mutex, and the caller must NOT hold the lock across the
+    // contribution-sink callbacks that follow it.
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    PluginRecord snapshot;
+    if ( !copyRecord( pluginId, snapshot ) )
+        return;
+    const char *mode = mOptions.policy.mode == PluginPolicyMode::Enforce ? "enforce" : "audit";
+    for ( PluginPermission permission : snapshot.manifest.permissions )
+    {
+        mDiagnostics.add( PluginDiagnosticCode::PermissionGranted,
+                          PluginDiagnosticSeverity::Info,
+                          std::string( "permission '" ) + pluginPermissionName( permission )
+                              + "' granted under policy mode '" + mode + "'",
+                          pluginId, "permissions" );
+    }
+}
+
+std::string PluginRegistry::lastGoodSnapshotPath( const std::string &pluginId ) const
+{
+    // mOptions is shared state: read it under the registry mutex (callers of
+    // this const helper are reload paths that do not hold it).
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    if ( !mOptions.policy.devMode )
+        return {};
+    const std::string base = mOptions.tempDirectory.empty()
+                                 ? std::filesystem::temp_directory_path().generic_string()
+                                 : mOptions.tempDirectory;
+    return base + "/plugin-last-good-" + pluginId;
+}
+
+void PluginRegistry::refreshLastGoodSnapshot( const std::string &pluginId,
+                                              const std::string &pluginDir )
+{
+    // Dev mode only: production hosts keep no second copy of any plugin.
+    if ( !mOptions.policy.devMode )
+        return;
+    const std::string snapshotDir = lastGoodSnapshotPath( pluginId );
+    if ( snapshotDir.empty() )
+        return;
+    std::error_code ec;
+    std::filesystem::remove_all( snapshotDir, ec );
+    std::string error;
+    snapshotPluginFiles( pluginDir, snapshotDir, error );
+}
+
 bool PluginRegistry::load( const std::string &pluginId )
 {
     // Lock-drop protocol (issue #928), mirroring unload(): mark Loading,
@@ -432,6 +622,8 @@ bool PluginRegistry::load( const std::string &pluginId )
 
     if ( kind == Kind::Manifest )
     {
+        auditGrantedPermissions( pluginId );
+        refreshLastGoodSnapshot( pluginId, pluginDirectoryFor( pluginId ) );
         if ( sink )
             sink->pluginLoaded( pluginId );
         return true;
@@ -476,6 +668,8 @@ bool PluginRegistry::load( const std::string &pluginId )
 
     if ( publish )
     {
+        auditGrantedPermissions( pluginId );
+        refreshLastGoodSnapshot( pluginId, pluginDirectoryFor( pluginId ) );
         if ( sink )
             sink->pluginLoaded( pluginId );
         // Unload may have won between publish and pluginLoaded: drop any
@@ -682,6 +876,277 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
     if ( PluginRecord *entry = record( pluginId ) )
         entry->state = PluginState::Unloaded;
     return true;
+}
+
+bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &options )
+{
+    // Every diagnostic this function records goes through addDiagnostic():
+    // PluginDiagnosticLog::add is an unsynchronized push_back, and the rest
+    // of the registry mutates mDiagnostics under gRegistryMutex, so an
+    // unlocked append here would race with a concurrent load/unload/refresh
+    // (dev-mode reloads run on the GUI thread by design).
+    const auto addDiagnostic = [this, &pluginId]( PluginDiagnosticCode code,
+                                                  PluginDiagnosticSeverity severity,
+                                                  const std::string &message,
+                                                  const std::string &field = std::string() ) {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        mDiagnostics.add( code, severity, message, pluginId, field );
+    };
+
+    // WP4 gate (dev mode only): the caller's flag can only LOWER authority,
+    // never raise it - both the request and the host policy must allow it, so
+    // production (devMode=false everywhere) can never reach the reload path
+    // even through a hostile caller that hardcodes devMode=true.
+    bool devMode = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        devMode = options.devMode && mOptions.policy.devMode;
+    }
+    if ( !devMode )
+    {
+        bool callerAsked = options.devMode;
+        bool policyAllows = false;
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            policyAllows = mOptions.policy.devMode;
+        }
+        addDiagnostic( PluginDiagnosticCode::TrustRejected, PluginDiagnosticSeverity::Error,
+                       "hot reload refused: dev mode is off (caller devMode="
+                           + std::string( callerAsked ? "true" : "false" )
+                           + ", host policy devMode="
+                           + std::string( policyAllows ? "true" : "false" )
+                           + "; SICNU_PLUGIN_DEV=1 enables it)" );
+        return false;
+    }
+
+    // One reload per plugin at a time: a second concurrent reload would race
+    // the first's unload/load window and could publish the WRONG generation.
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        if ( mReloading.count( pluginId ) != 0 )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "hot reload refused: another reload of this plugin is in progress",
+                              pluginId );
+            return false;
+        }
+        mReloading.insert( pluginId );
+    }
+    // Scope guard so every early return below clears the in-flight marker.
+    struct ReloadGuard
+    {
+        PluginRegistry *registry;
+        std::string id;
+        ~ReloadGuard()
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            registry->mReloading.erase( id );
+        }
+    } reloadGuard{ this, pluginId };
+
+    std::string pluginDir;
+    bool loaded = false;
+    bool hostedOop = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( pluginId );
+        if ( !entry )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
+                              PluginDiagnosticSeverity::Error, "unknown plugin", pluginId );
+            return false;
+        }
+        pluginDir = entry->directory;
+        loaded = std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &e ) {
+                     return e.pluginId == pluginId;
+                 } ) != mLoaded.end();
+        hostedOop = std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
+                    != mHostProcessLoaded.end();
+        if ( !loaded && !hostedOop )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected,
+                              PluginDiagnosticSeverity::Error,
+                              "hot reload refused: plugin is not loaded "
+                                  "(state "
+                                  + std::string( pluginStateName( entry->state ) ) + ")",
+                              pluginId );
+            return false;
+        }
+    }
+
+    // Step 1: validate the package on disk WITHOUT touching mapped code. A
+    // broken new manifest refuses the reload and the old version stays loaded.
+    {
+        PluginManifest fresh;
+        PluginDiagnostic parseError;
+        if ( !loadManifestFromFile( pluginDir + "/plugin.json", fresh, parseError )
+             || fresh.id != pluginId )
+        {
+            if ( parseError.code != PluginDiagnosticCode::None )
+                addDiagnostic( parseError.code, PluginDiagnosticSeverity::Error,
+                               "hot reload refused: " + parseError.message, parseError.field );
+            else
+                addDiagnostic( PluginDiagnosticCode::ManifestInvalidField,
+                               PluginDiagnosticSeverity::Error,
+                               "hot reload refused: manifest id no longer matches '" + pluginId
+                                   + "'",
+                               "id" );
+            return false;
+        }
+        PluginValidationRequest request;
+        request.pluginDir = pluginDir;
+        request.tempDirectory = mOptions.tempDirectory;
+        PluginDiagnosticLog freshLog;
+        if ( !PluginManifestValidator::validate( fresh, request, freshLog )
+             || freshLog.hasErrorsFor( pluginId ) )
+        {
+            {
+                std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+                mDiagnostics.merge( freshLog );
+            }
+            addDiagnostic( PluginDiagnosticCode::TrustRejected, PluginDiagnosticSeverity::Error,
+                           "hot reload refused: the new manifest does not validate; "
+                               "the running version stays loaded",
+                           "plugin.json" );
+            return false;
+        }
+    }
+
+    // Step 2: the rollback source is the LAST-KNOWN-GOOD snapshot - the
+    // bytes as they were when this plugin last loaded successfully (dev mode
+    // keeps one per plugin). A snapshot taken HERE would capture the dev's
+    // in-place edit, i.e. the version that is about to fail, and could never
+    // restore anything useful. No snapshot (never loaded under dev mode)
+    // means no rollback, reported honestly.
+    const std::string snapshotDir = lastGoodSnapshotPath( pluginId );
+    bool haveSnapshot = false;
+    if ( snapshotDir.empty() || !std::filesystem::exists( snapshotDir ) )
+    {
+        addDiagnostic( PluginDiagnosticCode::ResourceMissing, PluginDiagnosticSeverity::Warning,
+                       "hot reload has no last-known-good snapshot; a failed reload "
+                           "will leave the plugin unloaded instead of rolled back" );
+    }
+    else
+    {
+        // Trust a snapshot only when it is COMPLETE: a partial copy (disk
+        // full mid-snapshot, unreadable subdirectory) would restore a broken
+        // package and destroy the working bytes it is supposed to protect.
+        std::error_code ec;
+        const bool hasManifest =
+            std::filesystem::exists( snapshotDir + "/plugin.json", ec ) && !ec;
+        std::size_t entries = 0;
+        for ( const std::filesystem::directory_entry &ignored :
+              std::filesystem::directory_iterator( snapshotDir, ec ) )
+        {
+            (void)ignored;
+            ++entries;
+        }
+        if ( ec || !hasManifest || entries < 2 )
+        {
+            addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                           PluginDiagnosticSeverity::Warning,
+                           "hot reload found an incomplete last-known-good snapshot "
+                               "(missing plugin.json or payload); no rollback is possible" );
+        }
+        else
+        {
+            haveSnapshot = true;
+        }
+    }
+
+    // Step 3: state migration runs while the OLD code is still loaded, so a
+    // failed migration aborts the reload with nothing changed.
+    if ( options.migrateState && !options.migrateState( pluginDir ) )
+    {
+        addDiagnostic( PluginDiagnosticCode::InitializationFailed,
+                       PluginDiagnosticSeverity::Error,
+                       "hot reload refused: state migration failed; "
+                           "the running version stays loaded" );
+        return false;
+    }
+
+    // Step 4: drain + unload (barrier-protected; a busy plugin is refused and
+    // stays loaded), then load the new bytes. A refused unload is reported:
+    // silently returning false here would leave the caller with no reason.
+    if ( !unload( pluginId ) )
+    {
+        addDiagnostic( PluginDiagnosticCode::PluginInUse, PluginDiagnosticSeverity::Error,
+                       "hot reload aborted: the plugin could not be unloaded "
+                           "(still executing?); the running version stays loaded" );
+        return false;
+    }
+    refresh();
+    bool ok = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        const PluginRecord *entry = record( pluginId );
+        ok = entry
+             && ( entry->state == PluginState::Validated || entry->state == PluginState::Unloaded
+                  || entry->state == PluginState::Loaded );
+    }
+    if ( ok )
+        ok = load( pluginId );
+    if ( ok )
+        return true;
+
+    // refreshUnlocked() clears the diagnostic log, which would erase the
+    // evidence for WHY the new version failed (E4002 from load() above).
+    // Capture it HERE - after the failure - and re-add it across every
+    // refresh the rollback performs, so a reload that reports false still
+    // explains itself in diagnostics(). Only THIS plugin's records are kept:
+    // the pre-reload log may hold stale entries from earlier passes.
+    std::vector<PluginDiagnostic> reloadEvidence;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        for ( const PluginDiagnostic &item : mDiagnostics.items() )
+        {
+            if ( item.pluginId == pluginId )
+                reloadEvidence.push_back( item );
+        }
+    }
+    const auto preserveEvidence = [this, &reloadEvidence]() {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        for ( const PluginDiagnostic &item : reloadEvidence )
+            mDiagnostics.add( item );
+    };
+
+    // Step 5: the new version failed to load - restore the last-known-good
+    // bytes and load those instead. The reload itself still reports false:
+    // success means the NEW version is running, never a silent downgrade.
+    // Without a usable snapshot the plugin simply stays unloaded (typed),
+    // which is the honest outcome for a dev edit that cannot be recovered.
+    addDiagnostic( PluginDiagnosticCode::RegistrationFailed,
+                   PluginDiagnosticSeverity::Warning,
+                   "hot reload failed to load the new version" );
+    if ( haveSnapshot )
+    {
+        std::string restoreError;
+        if ( restorePluginFromSnapshot( snapshotDir, pluginDir, restoreError ) )
+        {
+            refresh();
+            preserveEvidence();
+            if ( load( pluginId ) )
+            {
+                addDiagnostic( PluginDiagnosticCode::PluginReloadRolledBack,
+                               PluginDiagnosticSeverity::Warning,
+                               "hot reload rolled back to the previous version (E4006); "
+                                   "fix the plugin and reload again" );
+                return false;
+            }
+        }
+        else
+        {
+            addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                           PluginDiagnosticSeverity::Error,
+                           "hot reload rollback could not restore the snapshot: "
+                               + restoreError );
+        }
+    }
+    addDiagnostic( PluginDiagnosticCode::InitializationFailed, PluginDiagnosticSeverity::Error,
+                   "hot reload failed and the rollback did not restore a working version; "
+                       "the plugin stays failed until it is fixed" );
+    return false;
 }
 
 void PluginRegistry::unloadAll()

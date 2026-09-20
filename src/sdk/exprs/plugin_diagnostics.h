@@ -56,6 +56,11 @@ enum class PluginDiagnosticCode
     InitializationFailed = 4003,
     RegistrationFailed = 4004,
     PluginInUse = 4005,
+    /// WP4 (plugin-platform 12.0): a dev-mode hot reload failed to load the
+    /// new version and rolled back to the snapshot bytes that last worked.
+    /// The reload itself still reports false — a downgrade is recovery, never
+    /// a silent success.
+    PluginReloadRolledBack = 4006,
 
     // E5xxx — policy
     PermissionDenied = 5001,
@@ -63,6 +68,11 @@ enum class PluginDiagnosticCode
     PluginDisabled = 5003,
     PolicyBlocklisted = 5004,
     WorkspaceEscape = 5005,
+    /// Audit-trail counterpart of PermissionDenied (plugin-platform 12.0):
+    /// a declared permission was GRANTED for a load under the active policy
+    /// mode. Info severity — never a gate, always recorded, so the allowed
+    /// path carries the same evidence the denied path does.
+    PermissionGranted = 5006,
 
     // E6xxx — isolation (host-process runtime & IPC, appended in 5.0)
     /// Worker/host protocol majors differ, or worker minor > host minor.
