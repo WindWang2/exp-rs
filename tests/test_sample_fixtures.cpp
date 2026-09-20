@@ -131,6 +131,15 @@ int runCli( const std::vector<std::string> &args )
     std::string cmd = shellQuote( SICNU_GENERATE_SAMPLES_BIN );
     for ( const std::string &arg : args )
         cmd += " " + shellQuote( arg );
+#ifdef _WIN32
+    // MSVC's std::system() runs `cmd.exe /c <string>`. With /c and a string
+    // that opens with a quote, cmd strips the outermost quoting pair and
+    // hands the REST back to itself as one command word — so a plain
+    // `"exe" "arg"` becomes the literal token `exe" "--out`. Wrapping the
+    // whole command in one extra quoting pair is the documented CRT contract
+    // (see cmd.exe /?): `cmd /c ""exe" "arg""` runs correctly.
+    cmd = std::string( "\"" ) + cmd + "\"";
+#endif
     const int status = std::system( cmd.c_str() );
 #ifdef _WIN32
     return status; // std::system via cmd.exe returns the exit code directly
@@ -1009,4 +1018,231 @@ TEST_CASE( "stress profile emits the 2048x2048 grid with closed-form DEM",
     slopeAspectDegrees( gx, gy, gridForProfile( Profile::Stress ), &s, &a );
     CHECK( readFloatPixel( slope, 1024, 1024 ) == static_cast<float>( s ) );
     GDALClose( slope );
+}
+
+// ---------------------------------------------------------------------------
+// lab platform 12.0 — catalog usability, fail-closed stale pruning, atomic
+// manifest publish and the cross-run determinism matrix (O2/O5 evidence).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "generate and verify tolerate spaces and Unicode in the output dir",
+           "[foundry][cli][paths]" )
+{
+    GDALAllRegister();
+    TempDir parent;
+    const std::string spaced = ( parent.path / "class 材 料 2026" ).string();
+    Options options;
+    options.out_dir = spaced;
+    options.products = { Product::DemSample };
+    GenerateResult result;
+    REQUIRE( generate( options, &result ).ok );
+    CHECK( result.files.size() == 1 );
+    REQUIRE( fs::exists( fs::path( spaced ) / "manifest.json" ) );
+
+    // The CLI receives the same path as one argv element (no shell escaping
+    // involved): generate + verify round-trip through a spaced/Unicode dir.
+    const int gen_rc = runCli( { "--out=" + spaced, "--products=dem_sample" } );
+    CHECK( gen_rc == 0 );
+    const int verify_rc = runCli( { "--verify", "--out=" + spaced } );
+    CHECK( verify_rc == 0 );
+}
+
+TEST_CASE( "no temp residue after the atomic manifest publish",
+           "[foundry][e2e][manifest]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    GenerateResult result;
+    REQUIRE( generate( options, &result ).ok );
+    bool saw_tmp = false;
+    for ( const auto &entry : fs::directory_iterator( dir.path ) )
+        saw_tmp = saw_tmp || entry.path().extension() == ".tmp";
+    CHECK_FALSE( saw_tmp );
+    CHECK( fs::exists( dir.path / "manifest.json" ) );
+}
+
+TEST_CASE( "stale pruning fails closed when an owned name is not a regular file",
+           "[foundry][e2e][stale]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options full;
+    full.out_dir = dir.str();
+    GenerateResult first;
+    REQUIRE( generate( full, &first ).ok );
+
+    // Impersonate a stale catalog file with a directory: it cannot be pruned
+    // and no regeneration can clear it, so generate must refuse (typed io)
+    // instead of silently leaving a future --verify landmine.
+    std::error_code ec;
+    fs::remove( dir.path / "dem_sample.tif", ec );
+    REQUIRE( fs::create_directory( dir.path / "dem_sample.tif", ec ) );
+
+    Options subset;
+    subset.out_dir = dir.str();
+    subset.products = { Product::LandsatSample };
+    GenerateResult second;
+    const Outcome outcome = generate( subset, &second );
+    CHECK_FALSE( outcome.ok );
+    CHECK( outcome.error.category == "io" );
+    CHECK( outcome.error.message.find( "not regular" ) != std::string::npos );
+    // Refusal is pre-emission: the directory is exactly as it was, nothing
+    // pruned, nothing overwritten.
+    CHECK( fs::exists( dir.path / "landsat_sample.tif" ) );
+    CHECK( fs::exists( dir.path / "change_before.tif" ) );
+}
+
+TEST_CASE( "cli --products selects a subset with typed refusals",
+           "[foundry][cli][products]" )
+{
+    TempDir dir;
+
+    // Unknown product and empty ids are usage errors echoing the input.
+    CHECK( runCli( { "--out=" + dir.str(), "--products=nope_sample" } ) == 2 );
+    CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample,,change_before" } ) == 2 );
+    CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample," } ) == 2 );
+    CHECK( runCli( { "--out=" + dir.str(), "--products=" } ) == 2 );
+
+    // Two selection spellings at once, or selection plus verify: usage.
+    CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample",
+                     "--spec=whatever.json" } ) == 2 );
+    // Duplicates inside the list are refused (the CLI never silently
+    // de-duplicates a mistyped selection).
+    CHECK( runCli( { "--out=" + dir.str(),
+                     "--products=dem_sample,dem_sample" } ) == 2 );
+    CHECK( runCli( { "--out=" + dir.str(), "--products=dem_sample", "--verify" } ) == 2 );
+
+    // Happy path: a comma list generates exactly the named products.
+    const int rc = runCli( { "--out=" + dir.str(),
+                             "--products=dem_sample,change_before" } );
+    CHECK( rc == 0 );
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+    CHECK( report.files_checked == 2 );
+    CHECK( fs::exists( dir.path / "dem_sample.tif" ) );
+    CHECK( fs::exists( dir.path / "change_before.tif" ) );
+    CHECK_FALSE( fs::exists( dir.path / "landsat_sample.tif" ) );
+
+    // Subset onto the same dir prunes the unselected product (full<->subset
+    // leaves no stale owned files either direction).
+    const int rc2 = runCli( { "--out=" + dir.str(), "--products=landsat_sample" } );
+    CHECK( rc2 == 0 );
+    VerifyReport report2;
+    REQUIRE( verifyDirectory( dir.str(), &report2 ).ok );
+    CHECK( report2.files_checked == 1 );
+    CHECK_FALSE( fs::exists( dir.path / "dem_sample.tif" ) );
+}
+
+TEST_CASE( "cli --list-products prints the catalog and refuses combinations",
+           "[foundry][cli][products]" )
+{
+    TempDir dir;
+    CHECK( runCli( { "--list-products" } ) == 0 );
+    // The printed catalog is exactly productByName's vocabulary.
+    {
+        std::string cmd = shellQuote( SICNU_GENERATE_SAMPLES_BIN );
+        cmd += " --list-products > " + shellQuote( ( dir.path / "list.txt" ).string() );
+        REQUIRE( std::system( cmd.c_str() ) == 0 );
+        std::ifstream in( dir.path / "list.txt" );
+        std::vector<std::string> lines;
+        for ( std::string line; std::getline( in, line ); )
+            if ( !line.empty() )
+                lines.push_back( line );
+        REQUIRE( lines.size() == productCatalog().size() );
+        for ( std::size_t i = 0; i < lines.size(); ++i )
+            CHECK( lines[i] == productName( productCatalog()[ i ] ) );
+    }
+    CHECK( runCli( { "--list-products", "--seed=7" } ) == 2 );
+    CHECK( runCli( { "--list-products", "--out=" + dir.str() } ) == 2 );
+    CHECK( runCli( { "--list-products", "--verify" } ) == 2 );
+}
+
+TEST_CASE( "determinism matrix: same seed twice is byte-identical across "
+           "seeds, profiles and subsets",
+           "[foundry][e2e][determinism]" )
+{
+    GDALAllRegister();
+    struct Case
+    {
+        uint32_t seed;
+        Profile profile;
+        std::vector<Product> products;
+        const char *label;
+    };
+    const std::vector<Case> cases = {
+        { 42, Profile::Lab, {}, "full/lab/seed42" },
+        { 7, Profile::Lab, { Product::DemSample, Product::ChangeBefore,
+                             Product::ChangeAfter },
+          "subset/lab/seed7" },
+        { 42, Profile::Lab, { Product::LandsatSample, Product::LandsatTruth },
+          "optical+truth/lab/seed42" },
+        { 123456789u, Profile::Lab, { Product::TrainingSamples },
+          "shapefile/lab/seed123456789" },
+    };
+
+    for ( const Case &item : cases )
+    {
+        CAPTURE( item.label );
+        TempDir first_dir;
+        TempDir second_dir;
+        Options options;
+        options.out_dir = first_dir.str();
+        options.seed = item.seed;
+        options.profile = item.profile;
+        options.products = item.products;
+        GenerateResult first;
+        REQUIRE( generate( options, &first ).ok );
+
+        Options again = options;
+        again.out_dir = second_dir.str();
+        GenerateResult second;
+        REQUIRE( generate( again, &second ).ok );
+
+        REQUIRE( first.files.size() == second.files.size() );
+        REQUIRE( first.manifest_bytes == second.manifest_bytes );
+        for ( std::size_t i = 0; i < first.files.size(); ++i )
+        {
+            REQUIRE( first.files[i].name == second.files[i].name );
+            REQUIRE( first.files[i].sha256 == second.files[i].sha256 );
+            CHECK( readBinary( first_dir.path / first.files[i].name ) ==
+                   readBinary( second_dir.path / second.files[i].name ) );
+        }
+
+        // Both directories verify clean independently.
+        for ( const TempDir *dir : { &first_dir, &second_dir } )
+        {
+            VerifyReport report;
+            REQUIRE( verifyDirectory( dir->str(), &report ).ok );
+            CHECK( report.problems.empty() );
+            CHECK( report.files_checked == first.files.size() );
+        }
+    }
+}
+
+TEST_CASE( "cli two-pass matrix: same seed command twice is byte-identical",
+           "[foundry][cli][determinism]" )
+{
+    TempDir first_dir;
+    TempDir second_dir;
+    const auto run = []( const std::string &out ) {
+        return runCli( { "--out=" + out, "--seed=7",
+                         "--products=dem_sample,change_before,change_after" } );
+    };
+    REQUIRE( run( first_dir.str() ) == 0 );
+    REQUIRE( run( second_dir.str() ) == 0 );
+
+    const std::string manifest_a = readBinary( first_dir.path / "manifest.json" );
+    const std::string manifest_b = readBinary( second_dir.path / "manifest.json" );
+    // manifest.json embeds no path or timestamp; two runs on one host must
+    // agree byte for byte.
+    CHECK( manifest_a == manifest_b );
+    CHECK( readBinary( first_dir.path / "dem_sample.tif" ) ==
+           readBinary( second_dir.path / "dem_sample.tif" ) );
+    CHECK( readBinary( first_dir.path / "change_before.tif" ) ==
+           readBinary( second_dir.path / "change_before.tif" ) );
+    CHECK( readBinary( first_dir.path / "change_after.tif" ) ==
+           readBinary( second_dir.path / "change_after.tif" ) );
 }

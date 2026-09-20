@@ -1,26 +1,26 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u519c\u7530"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u53bb\u4e91\u540e\u7684 NDVI \u65f6\u5e8f\u4fee\u590d",
         "\u7269\u5019\u5206\u6790\u524d\u7684\u65f6\u95f4\u8fde\u7eed\u5316"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 T)",
       "grade" : "bit_exact",
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -43,10 +43,10 @@
       }
     ],
     "family" : "temporal",
-    "io" :
+    "io" : 
     {
       "inputs" : [],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -85,7 +85,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -100,7 +100,7 @@
           "type" : "integer"
         },
         {
-          "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -123,7 +123,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -140,7 +140,7 @@
         },
         {
           "default" : "linear",
-          "enum" :
+          "enum" : 
           [
             "linear",
             "nearest"
@@ -168,7 +168,7 @@
       ]
     },
     "limitations" : [],
-    "modality" :
+    "modality" : 
     [
       "optical"
     ],
@@ -176,14 +176,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u63d2\u503c\u8865\u6d1e\uff1a\u5bf9\u542b\u7f3a\u5931\uff08\u4e91/\u9634\u5f71\uff09\u7684\u65f6\u5e8f\u6309\u65f6\u95f4\u7ef4\u5ea6\u63d2\u503c\uff08\u7ebf\u6027/\u6700\u8fd1\u90bb\uff09\uff0c\u6062\u590d\u8fde\u7eed\u65f6\u5e8f\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u65f6\u95f4\u63d2\u503c",
         "\u7f3a\u5931\u503c"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -196,7 +196,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "temporal",
     "gap-filling",

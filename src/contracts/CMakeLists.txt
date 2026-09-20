@@ -14,6 +14,11 @@ add_library( sicnu_contracts STATIC
     graph_assembly.cpp
     scientific_contract.cpp
     determinism_census.cpp
+    # Platform 12.0 (Track 02): readable drift reports for byte-gated
+    # snapshots. A byte comparison cannot distinguish "content moved" from
+    # "the graph no longer holds together" (see EVIDENCE.md E-13), so the
+    # gate needs a report that says which elements differ.
+    snapshot_diff.cpp
 )
 
 target_include_directories( sicnu_contracts PUBLIC ${CMAKE_SOURCE_DIR}/src )

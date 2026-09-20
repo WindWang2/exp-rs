@@ -432,6 +432,18 @@ endif()
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
 target_include_directories(test_io_fabric_scale PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — offline mirror maintenance (verify/repair/prune) over plain local
+# fixtures (no network, no Qt).
+sicnu_add_io_test(test_io_mirror_maintenance)
+target_include_directories(test_io_mirror_maintenance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — out-of-core microbench: real loopback HTTP, bytes/requests/peak
+# asserted as correctness gates (latencies reported, never asserted).
+sicnu_add_io_test(test_io_microbench)
+target_sources(test_io_microbench PRIVATE support/http_range_server.cpp)
+target_include_directories(test_io_microbench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_microbench PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
@@ -1474,6 +1486,79 @@ target_include_directories(test_spectral_detection PRIVATE
 )
 sicnu_discover_tests(test_spectral_detection)
 
+# Spectral Intelligence 12.0 work package A: CEM target detector kernel —
+# closed forms, streaming correlation accumulation, scaled loading,
+# condition proxy, fail-closed refusals.
+add_executable(test_spectral_cem test_spectral_cem.cpp)
+target_link_libraries(test_spectral_cem PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_cem)
+target_include_directories(test_spectral_cem PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_cem)
+
+# Spectral Intelligence 12.0 work package G: detector tile-vs-whole-scene
+# streaming equivalence (MF/ACE/CEM), including declared-NoData QA honesty.
+add_executable(test_spectral_detection_streaming test_spectral_detection_streaming.cpp)
+target_link_libraries(test_spectral_detection_streaming PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection_streaming)
+target_include_directories(test_spectral_detection_streaming PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_detection_streaming)
+
+# Spectral Intelligence 12.0 work package B: spatial consistency fusion —
+# closed forms, NoData leak-proofness, tile-halo equivalence, operator E2E.
+add_executable(test_spectral_spatial_fusion test_spectral_spatial_fusion.cpp)
+target_link_libraries(test_spectral_spatial_fusion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_spatial_fusion)
+target_include_directories(test_spectral_spatial_fusion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_spatial_fusion)
+
+# Spectral Intelligence 12.0 work package C: library-scale matching —
+# brute-force equivalence, grid-bucket resample cache, prescreened top-K,
+# machine-independent scale evidence.
+add_executable(test_spectral_library_scale test_spectral_library_scale.cpp)
+target_link_libraries(test_spectral_library_scale PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_library_scale)
+target_include_directories(test_spectral_library_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_library_scale)
+
 # SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
 # geometry closed forms, operator E2E, geometry refusals.
 add_executable(test_sar_orbit test_sar_orbit.cpp)
@@ -2225,6 +2310,50 @@ target_compile_definitions(test_surface_parity PRIVATE
 )
 sicnu_discover_tests(test_surface_parity)
 
+# Track D1 (ds41-capability-help-sync): capability surface parity gate.
+# registry descriptors <-> sidecar A <-> sidecar B <-> help operator topics
+# <-> MCP list_algorithms/get_algorithm_schema <-> CLI algorithms list/--schema.
+# Compiles mcp_server.cpp in-process (same pattern as test_surface_parity) so
+# the MCP handlers share one registry state with the assertions.
+add_executable(test_capability_surface_parity test_capability_surface_parity.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_capability_surface_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_capability_surface_parity PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_capability_surface_parity PRIVATE jsoncpp)
+endif()
+target_include_directories(test_capability_surface_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_capability_surface_parity PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_capability_surface_parity PRIVATE
+  SICNU_TEST_CAPABILITY_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+add_dependencies(test_capability_surface_parity sicnu_geo_rs_cli)
+sicnu_discover_tests(test_capability_surface_parity)
+
+# Track D1: capability completeness gate (summary / failure_modes / io
+# contracts, with the enumerated collection-style io.inputs exemptions).
+sicnu_add_test(test_capability_completeness)
+sicnu_link_jsoncpp(test_capability_completeness)
+
 # Surface-11 protocol suite: progress relay, artifact_read, redaction,
 # initialize negatives. Same in-process mcp_server.cpp pattern.
 add_executable(test_surface_protocol test_surface_protocol.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
@@ -2484,6 +2613,90 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_multimodal_inference)
+
+    # Platform 12.0 model ensemble: manifest contract parsing/validation,
+    # member resolution, weighted_mean / weighted_vote combination against
+    # hand-computed answers, uncertainty bands, atomic failure and the
+    # surface exclusions.
+    add_executable(test_model_ensemble test_model_ensemble.cpp)
+    target_link_libraries(test_model_ensemble PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_ensemble)
+    target_include_directories(test_model_ensemble PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_ensemble)
+
+    # Platform 12.0 provider strategy: ordered fallback chain over the SAME
+    # artifact — registry verdicts, typed all-fail errors and the payload /
+    # provenance reporting that makes a fired fallback observable.
+    add_executable(test_provider_fallback test_provider_fallback.cpp)
+    target_link_libraries(test_provider_fallback PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_fallback)
+    target_include_directories(test_provider_fallback PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_fallback)
+
+    # Platform 12.0 session-pool concurrency stress: device pinning,
+    # eviction-while-held lifetime, ledger conservation under races.
+    add_executable(test_model_runtime_stress test_model_runtime_stress.cpp)
+    target_link_libraries(test_model_runtime_stress PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_stress)
+    target_include_directories(test_model_runtime_stress PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_stress)
+
+    # Platform 12.0 tile geometry Oracle: byte-identical probability stacks
+    # across batch/tile/overlap splits, extreme-integer refusals and the
+    # terminal-OOM atomicity (no output, no sidecar, no residue).
+    add_executable(test_tile_semantic_equivalence test_tile_semantic_equivalence.cpp)
+    target_link_libraries(test_tile_semantic_equivalence PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tile_semantic_equivalence)
+    target_include_directories(test_tile_semantic_equivalence PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tile_semantic_equivalence)
 
     # Model Runtime 8.0: CRS-aware grid authority + provenance, temporal
     # sequence lane (dynamic T, timestamps, quality masks), placement policy
@@ -2983,6 +3196,27 @@ sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
 target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
 
+# 12.0 data-foundation scale Oracle (O1): 100k-sample catalog + 10k-run
+# experiment store — batch ingest, keyset-cursor paging, indexed identity
+# lookup, with a structured JSON perf report emitted to
+# SICNU_PERF_EVIDENCE_DIR. RUN_SERIAL: the benchmark should not compete for
+# memory.
+sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE
+  ENVIRONMENT "SICNU_PERF_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/test-artifacts")
+target_link_libraries(test_data_foundation_scale PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+set_property(TARGET test_data_foundation_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation fault Oracle (O3): deterministic mid-transaction
+# failures, corrupt rows and batch-commit faults leave no partial rows or
+# phantom references.
+sicnu_add_test(test_store_fault_injection TIMEOUT 300)
+target_link_libraries(test_store_fault_injection PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3 sicnu_runtime)
+
+# 12.0 GC/retention Oracle (O4): governance graph fixture proves dry-run ==
+# execution and reachability; experiment run prune plan/execute equivalence.
+sicnu_add_test(test_gc_retention_plan TIMEOUT 300)
+target_link_libraries(test_gc_retention_plan PRIVATE Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+
 # Foundation 5.0 end-to-end examples (goal §54): optical classification,
 # SAR pair, multimodal temporal, segmentation — small data, whole chain.
 sicnu_add_test(test_dataset_e2e_examples TIMEOUT 180)
@@ -3137,6 +3371,12 @@ target_compile_definitions(test_execution_plane_8 PRIVATE
 # other heavy suites (no cross-case singleton sharing — each Catch2 case is
 # its own process via catch_discover_tests).
 sicnu_add_test(test_execution_plane_9 TIMEOUT 2400 RUN_SERIAL TRUE)
+
+# Track 12 TaskCenter runtime — aging fairness, bounded pending queue,
+# cancel watchdog, weight admission, execution telemetry. RUN_SERIAL:
+# shares the TaskCenter/JobEngine singletons and asserts wall-clock
+# ordering (aged promotion) that must not race neighboring suites.
+sicnu_add_test(test_task_center_12 TIMEOUT 300 RUN_SERIAL TRUE)
 
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
@@ -9970,6 +10210,43 @@ target_include_directories(test_mission_e2e_scaffolding PRIVATE
 set_target_properties(test_mission_e2e_scaffolding PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_mission_e2e_scaffolding)
 
+# ---------------------------------------------------------------------------
+# Unified Mission Workbench 12.0 — mission task space gates.
+#
+# These four targets deliberately link Qt Core (+Xml) ONLY: the task space
+# (state machine, projection, paged model, sidecar store) must stay free of
+# QGIS / Qt Widgets dependencies so the stage, parity, scale and end-to-end
+# gates stay cheap to build and run. The desktop wiring and the MCP tool
+# provider live in the sicnu_geo_rs / sicnu_agent targets instead.
+# ---------------------------------------------------------------------------
+set(SICNU_MISSION_TASK_SPACE_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+)
+
+function(sicnu_add_mission_test NAME)
+  add_executable(${NAME} ${NAME}.cpp ${SICNU_MISSION_TASK_SPACE_SOURCES})
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # The parity gate parses the real Pi bridge and MCP allow-list from the
+  # source tree, so a forgotten surface wiring fails the test.
+  target_compile_definitions(${NAME} PRIVATE
+    SICNU_MISSION_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_mission_test(test_mission_stage)
+sicnu_add_mission_test(test_mission_surface_parity)
+sicnu_add_mission_test(test_mission_scale_benchmark)
+
 
 add_executable(test_agent_workbench_context
   test_agent_workbench_context.cpp
@@ -11095,12 +11372,59 @@ if(Python_EXECUTABLE)
             "--script" "${CMAKE_SOURCE_DIR}/scripts/verify_bundle_manifest.py")
 endif()
 
+# lab platform 12.0: classroom batch driver conformance. Python-only on
+# purpose: scripts/run_classroom_batch.py is a standalone artifact, and the
+# stub grader covers every isolation path (timeout kill, signal crash,
+# corrupt artifact, usage errors, submission cap, concurrency cap,
+# Unicode/space paths, byte-identical reruns). When the real CLI target
+# exists one corrupt-artifact lane additionally runs through the genuine
+# grading seam (typed exit-3 row).
+if(Python_EXECUTABLE)
+  if(TARGET sicnu_geo_rs_cli)
+    add_test(NAME classroom_batch_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/classroom_batch/conformance.py"
+              "--real-cli" "$<TARGET_FILE:sicnu_geo_rs_cli>")
+  else()
+    add_test(NAME classroom_batch_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/classroom_batch/conformance.py")
+  endif()
+  set_tests_properties(classroom_batch_conformance PROPERTIES TIMEOUT 300)
+endif()
+
+# lab platform 12.0: launcher parity fixtures. Executes the POSIX launchers
+# and locks the cross-platform contract (argument spellings, exit-code
+# propagation, offline env wiring). The real foundry binary lane runs when
+# the target exists; the Windows .cmd twins hold the same contract by
+# construction and are reviewed statically (no Windows host here).
+if(Python_EXECUTABLE)
+  if(TARGET sicnu_generate_samples)
+    add_test(NAME launcher_parity_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/launcher_parity/conformance.py"
+              "--gen-bin" "$<TARGET_FILE:sicnu_generate_samples>"
+              "--repo" "${CMAKE_SOURCE_DIR}")
+  else()
+    add_test(NAME launcher_parity_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/launcher_parity/conformance.py"
+              "--repo" "${CMAKE_SOURCE_DIR}")
+  endif()
+  set_tests_properties(launcher_parity_conformance PROPERTIES TIMEOUT 600)
+endif()
+
 # Deployment 11.0 (F19): environment self-check suite. Qt-free (geospatial
 # doctor layer + offline gate) — the io-test link set, not the fat one.
 sicnu_add_io_test(test_env_doctor)
 target_compile_definitions(test_env_doctor PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+# ds41-build-portability: configure-time feature-probe contract (compile-check
+# results in ${CMAKE_BINARY_DIR}/sicnu_feature_probes.h, every macro defined
+# 0/1, GDAL quieting / std::format cross-checked at runtime). Does not compile
+# without cmake/SicnuFeatureProbes.cmake — that is the intended potency.
+sicnu_add_io_test(test_feature_probes)
 # Verification Platform 11.0 (F09 determinism truth): cross-family replay
 # corpus — identical input twice must be byte-identical; corpus claims must
 # be triple-published (class scan / schema stamp / sidecar), never
@@ -11132,3 +11456,121 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
+
+# ── Platform 12.0 · Scientific Verification 12 ────────────────────────────
+# Append-only block (track glm53-scientific-verification-12). Do not reorder
+# the blocks above; add new lanes at the end.
+#
+# These lanes close the loop on ERROR LISTS the platform already produces but
+# never asserted were empty. The defects they gate were all live on master:
+#   E-5   data/agent/capabilities/preprocess.json unparseable since #1024;
+#         CapabilityKnowledge::loadProblems() had zero consumers.
+#   E-8a  data/help/diagnostics.json duplicated two ids, one with an invalid
+#         retry enum that caused the whole page to be dropped.
+#   E-8b  the `env` diagnostic family is declared by env_doctor.h and emitted
+#         by env_doctor.cpp but absent from DiagnosticFamily (out-of-scope fix;
+#         the gate still reports it).
+#   E-0   an unprovisioned PROJ_DATA made 5 healthy suites report RED with
+#         product-defect-shaped exceptions.
+sicnu_add_test(test_platform_integrity_12)
+target_link_libraries(test_platform_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_platform_integrity_12)
+
+sicnu_add_test(test_verification_env_12)
+target_link_libraries(test_verification_env_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_env_12)
+
+sicnu_add_test(test_help_integrity_12)
+target_link_libraries(test_help_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_help_integrity_12)
+
+# E-13: a byte comparison cannot tell "content moved" from "the graph no longer
+# holds together". This lane asserts the STRUCTURAL invariant (no dangling edge
+# endpoint) on both the committed snapshot and a fresh live assembly, so a
+# regeneration can never silently bless broken references into the baseline.
+sicnu_add_test(test_snapshot_drift_12)
+target_link_libraries(test_snapshot_drift_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_snapshot_drift_12)
+
+# E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
+# two EVIL MERGES (43dcf19cd truncated-capability-block x19, 4713528ef
+# zero-byte x4). E-15 was the same defect in one file; E-16 is the census.
+# Existing gates each miss it for a structural reason -- one inspects a
+# different directory (test_capability_drift.cpp:63), one reads a failure list
+# nothing asserts empty, one compares a snapshot against itself. This lane
+# asserts the property every consumer assumes: every shipped data file parses.
+sicnu_add_test(test_data_parse_integrity_12)
+target_link_libraries(test_data_parse_integrity_12 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_data_parse_integrity_12)
+
+# =============================================================================
+# Track ds41-fuzz-boundaries — boundary fuzz/property lanes (append-only).
+#
+# Follows the 7.0/8.0 "bounded contract fuzz" convention: deterministic seeds,
+# hard input caps (≤512 B, ≤300 iterations/seed), CI-safe total-function
+# oracles. Mutators, the ddmin minimizer and the optional corpus recorder live
+# in support/fuzz_corpus.h (this track adds them; support/bounded_fuzz.h stays
+# untouched because it is shared with other tracks).
+#
+#   test_contract_fuzz_frame   — exprs::IpcFrame framing + exprs::Ipc envelope
+#                                (known-answer legs: test_exprs_ipc.cpp)
+#   test_contract_fuzz_payload — workflow schema, plugin UI schema + ui events,
+#                                manifest ports, diagnostics, dependency version
+#                                ranges, plugin index pins
+#                                (known-answer legs: test_exprs_workflow_schema,
+#                                test_plugin_ui_schema, test_exprs_plugin_system)
+#   test_contract_fuzz_paths   — exprs::PathPolicy lexical/containment cage,
+#                                asserted against an INDEPENDENT resolution
+#
+# All three link only Catch2 + sicnu_sdk (jsoncpp-only static library) — no Qt,
+# no QGIS, no GDAL — so they build in seconds and run in well under a minute.
+# The path lane creates its fixtures under std::filesystem::temp_directory_path.
+sicnu_add_sdk_test(test_contract_fuzz_frame)
+sicnu_link_jsoncpp(test_contract_fuzz_frame)
+target_include_directories(test_contract_fuzz_frame PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+sicnu_add_sdk_test(test_contract_fuzz_payload)
+sicnu_link_jsoncpp(test_contract_fuzz_payload)
+target_include_directories(test_contract_fuzz_payload PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+sicnu_add_sdk_test(test_contract_fuzz_paths)
+sicnu_link_jsoncpp(test_contract_fuzz_paths)
+target_include_directories(test_contract_fuzz_paths PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# ds41-performance-observatory: cross-module performance & memory observatory
+# (append-only block). Two targets sharing tests/perf/perf_observatory.h:
+#   * test_perf_io_observatory — Qt-free raster I/O + atomic-writer workloads
+#     (links only Sicnu::Geospatial, matching the io test family).
+#   * test_perf_observatory    — dataset catalog scaling, governance-store
+#     paging, TaskCenter dispatch/DAG, temporal tile streaming, tiled
+#     inference (execution-plane link set plus the workspace-browser panel
+#     translation unit for the paging model).
+# SICNU_OBS_SCALE=small|mid|scale selects the fixture ladder; ctest runs small.
+# Records land in SICNU_OBS_OUT or a private temp directory, never the repo.
+# All gates are structural (counts, complexity exponents, memory bounds,
+# semantic equivalence) — no absolute millisecond budgets, so the suite stays
+# low-flake on shared CI.
+sicnu_add_io_test(test_perf_io_observatory)
+target_include_directories(test_perf_io_observatory PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+
+sicnu_add_test(test_perf_observatory TIMEOUT 900 RUN_SERIAL TRUE)
+target_sources(test_perf_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/app/panels/workspace_browser_panel.cpp
+)
+target_include_directories(test_perf_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_link_jsoncpp(test_perf_observatory)
+if(TARGET Sicnu::session_map)
+  target_link_libraries(test_perf_observatory PRIVATE Sicnu::session_map)
+endif()
+
+# Link-set note, recorded because it was measured rather than assumed: the
+# observatory uses no agent API, but sicnu_data / sicnu_task_center /
+# sicnu_operators all PUBLIC-reference sicnu_agent, and sicnu_agent links
+# qgis_gui. Dropping qgis_gui from THIS target's own link list therefore does
+# not remove it from the link (verified in build-obs/build.ninja), so the
+# standard sicnu_add_test registration is kept and the vendored gui is built
+# anyway. Anyone who wants to make the observatory gui-free has to break that
+# transitive edge in production CMake, not here.

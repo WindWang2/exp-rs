@@ -16,6 +16,10 @@
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/remote/range_cache.h"
+// ADR 0159 dry-run declaration for `data plan` (sicnu::operators::rs::
+// dryRunCnProductImport); the call below referenced it without this
+// declaration, so master HEAD failed to compile (C3083/C2039/C3861).
+#include "operators/rs/rs_product_import_plan.h"
 #include "geospatial/stac/stac_mapper.h"
 // Cloud-Native Data Fabric / Data Cube 10.0 (additive surfaces).
 #include "geospatial/fabric/catalog_service.h"
@@ -59,6 +63,7 @@
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/algorithm_meta_store.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/rs/rs_product_import_plan.h"
 #include <csignal>
 #ifdef _WIN32
 #include <windows.h>
@@ -2459,7 +2464,7 @@ bool isCliCommand( const QString &firstArg )
                                            // D4 teaching auto-grader (ADR 0150).
                                            "lab",
                                            // Deployment 11.0 (F19): first-run env self-check.
-                                           "env-doctor" };
+                                           "env-doctor",
                                            // Surface-11: union discovery + batch manifests.
                                            "tools", "batch" };
     return kCommands.contains( firstArg );

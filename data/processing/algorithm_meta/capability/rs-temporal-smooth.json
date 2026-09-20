@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" :
-    {
-      "land_cover" :
   "capability" : 
   {
     "applicability" : 
@@ -13,7 +8,6 @@
         "\u690d\u88ab",
         "\u519c\u7530"
       ],
-      "scenes" :
       "scenes" : 
       [
         "\u7269\u5019\u66f2\u7ebf\u6574\u5f62",
@@ -21,13 +15,11 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 window\u00b2)",
@@ -37,7 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
     "failure_modes" : 
     [
       {
@@ -47,10 +38,6 @@
       }
     ],
     "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "io" : 
     {
       "inputs" : [],
@@ -93,7 +80,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -109,7 +95,6 @@
           "type" : "integer"
         },
         {
-          "enum" :
           "enum" : 
           [
             "blue",
@@ -139,7 +124,6 @@
         },
         {
           "default" : "keep_all",
-          "enum" :
           "enum" : 
           [
             "keep_all",
@@ -157,7 +141,6 @@
         },
         {
           "default" : "savitzky_golay",
-          "enum" :
           "enum" : 
           [
             "savitzky_golay",
@@ -206,7 +189,6 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
@@ -215,9 +197,6 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u5e73\u6ed1\uff1aSavitzky-Golay \u7b49\u65b9\u6cd5\u538b\u5236\u65f6\u5e8f\u6b8b\u4f59\u566a\u58f0\uff0c\u6062\u590d\u7269\u5019\u66f2\u7ebf\u5f62\u6001\uff08\u5bb9\u5dee\u7ea7\u7b97\u5b50\uff09\u3002",
-    "teaching_use" :
-    {
-      "concepts" :
     "teaching_use" : 
     {
       "concepts" : 
@@ -225,7 +204,6 @@
         "Savitzky-Golay",
         "\u65f6\u5e8f\u5e73\u6ed1"
       ],
-      "courses" :
       "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
@@ -239,7 +217,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

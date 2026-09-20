@@ -344,6 +344,8 @@ static const char *const kKnownKinds[] =
   // grader 2.0 (teaching-lab-platform-11): zone/position/temporal/spectral/file
   "zone_stats", "band_layout", "spatial_agreement", "series_separation",
   "spectral_signature", "file_check",
+  // lab platform 12.0: foundry provenance metadata assertions
+  "provenance",
 };
 
 struct LabAssertion

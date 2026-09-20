@@ -3,7 +3,6 @@
 # 时序分析（temporal）
 
 共 21 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
-共 18 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:temporal_anomaly
 
@@ -247,17 +246,12 @@
 
 ## rs:temporal_region_features
 
-## rs:temporal_region_features
-
 区域级时序特征表：质量、分布、Sen/OLS 趋势、异常与多物候特征，带版本化 schema sidecar。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：featureCount（integer）、output（table）、regionCount（integer）、sceneCount（integer）、schema（string）、sidecar（string）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、change_harmonics（integer）、collection（string）、cycles（integer）、direction（enum）、duplicate_policy（enum）、max_regions（integer）、output（string）、regions（string）、regions_file（string）、scenes（string）、seasonEndDoy（integer）、seasonStartDoy（integer）、sidecar_path（string）、trend_method（enum）
-
-## rs:temporal_regularize
-
 - 适用地物：耕地、林地、水体
 - 适用场景：样本特征生成、监督学习前处理
 - 失败模式：
@@ -274,6 +268,13 @@
 - 模态：optical
 - 输出：bands（integer）、cadenceDays（numeric）、calendarEnd（string）、calendarPoints（integer）、calendarStart（string）、filledFraction（numeric）、memory（json）、output（raster）、sceneCount（integer）
 - 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、cadence（string）、collection（string）、duplicate_policy（enum）、lambda（numeric）、max_gap_nodes（integer）、max_window_days（numeric）、method（enum）、output（string）、scenes（string）、tile_size（integer）
+- 适用地物：耕地、林地
+- 适用场景：规则时序构建、多源时相对齐
+- 失败模式：
+  - `INVALID_PARAMETER` — calendar 非法或外推请求。处置：使用 16d/monthly 等受支持日历；不外推
+- 教学概念：规则日历、重采样、插值
+- 适用课程：遥感时序分析
+- 典型练习：将不规则获取重排到 16 天日历并检查 filled_count。
 
 ## rs:temporal_seasonal_breaks
 
@@ -292,13 +293,6 @@
 - 教学概念：季节分量突变、嵌套 F 检验、归因（趋势 vs 季节）、bootstrap 置信区间
 - 适用课程：植物遥感、时间序列分析
 - 典型练习：对 2019-2024 NDVI 时序运行本算子，区分灌溉启用（季节突变）与采伐（趋势突变）空间分布。
-- 适用地物：耕地、林地
-- 适用场景：规则时序构建、多源时相对齐
-- 失败模式：
-  - `INVALID_PARAMETER` — calendar 非法或外推请求。处置：使用 16d/monthly 等受支持日历；不外推
-- 教学概念：规则日历、重采样、插值
-- 适用课程：遥感时序分析
-- 典型练习：将不规则获取重排到 16 天日历并检查 filled_count。
 
 ## rs:temporal_sen_trend
 

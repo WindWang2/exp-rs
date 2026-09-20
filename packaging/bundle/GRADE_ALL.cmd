@@ -13,6 +13,7 @@ rem
 rem The run streams one submission at a time: a corrupt or unreadable file is
 rem recorded in the CSV and does NOT abort the remaining submissions.
 rem ASCII-only text: classroom consoles are not guaranteed to be UTF-8.
+rem Unattended runs: set SICNU_NO_PAUSE=1 to skip the interactive pause.
 setlocal
 set "BUNDLE=%~dp0"
 for %%I in ("%BUNDLE:~0,-1%") do set "BUNDLE=%%~fI"
@@ -27,7 +28,7 @@ set "PATH=%BUNDLE%\bin;%PATH%"
 if "%~1"=="" (
   echo usage: GRADE_ALL.cmd ^<submissions_dir^> [lab_id] [out.csv]
   echo   example: GRADE_ALL.cmd D:\lab1_submissions ndvi_basics grades.csv
-  pause
+  call :Pause
   exit /b 2
 )
 set "SUBS=%~f1"
@@ -38,12 +39,12 @@ if "%CSV%"=="" set "CSV=%SUBS%\grades.csv"
 
 if not exist "%SUBS%\" (
   echo ERROR: submissions folder not found: %SUBS%
-  pause
+  call :Pause
   exit /b 2
 )
 if not exist "bin\sicnu_geo_rs_cli.exe" (
   echo ERROR: bin\sicnu_geo_rs_cli.exe missing - bundle incomplete.
-  pause
+  call :Pause
   exit /b 1
 )
 
@@ -56,5 +57,9 @@ if "%RC%"=="0" (
 ) else (
   echo Finished with isolated error rows ^(exit %RC%^) - they are kept in the CSV.
 )
-pause
+call :Pause
 exit /b %RC%
+
+:Pause
+if not defined SICNU_NO_PAUSE pause
+exit /b

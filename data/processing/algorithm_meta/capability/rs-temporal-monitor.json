@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" :
-    {
-      "land_cover" :
   "capability" : 
   {
     "applicability" : 
@@ -14,7 +9,6 @@
         "\u6c34\u4f53",
         "\u519c\u7530"
       ],
-      "scenes" :
       "scenes" : 
       [
         "\u8015\u5730\u6482\u8352\u9884\u8b66",
@@ -22,13 +16,11 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -37,7 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
     "failure_modes" : 
     [
       {
@@ -47,10 +38,6 @@
       }
     ],
     "family" : "temporal",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "io" : 
     {
       "inputs" : [],
@@ -72,7 +59,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -117,7 +103,6 @@
         },
         {
           "default" : "cusum",
-          "enum" :
           "enum" : 
           [
             "cusum",
@@ -152,28 +137,22 @@
         }
       ]
     },
-    "limitations" :
     "limitations" : 
     [
       "seasonal_mk is O(sum n_m^2) pairs per pixel; the max_pairwork guard refuses unbounded collections instead of degrading.",
       "argmax bands are 0-based scene indices; scene dates travel in the collection metadata."
     ],
-    "modality" :
     "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" :
     "prerequisites" : 
     [
       "Common grid, acquisition times, consistent radiometric state (temporal preflight)."
     ],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u76d1\u6d4b\u4efb\u52a1\u7b97\u5b50\uff1a\u4ee5\u6ed1\u52a8\u7a97\u53e3\u5bf9\u6700\u65b0\u89c2\u6d4b\u505a\u72b6\u6001\u8bc4\u4f30\uff08\u7ee7\u7eed/\u8b66\u6212/\u544a\u8b66\uff09\uff0c\u9762\u5411\u4e1a\u52a1\u5316\u6301\u7eed\u76d1\u6d4b\u573a\u666f\u3002",
-    "teaching_use" :
-    {
-      "concepts" :
     "teaching_use" : 
     {
       "concepts" : 
@@ -182,7 +161,6 @@
         "\u72b6\u6001\u76d1\u6d4b",
         "\u9608\u503c\u544a\u8b66"
       ],
-      "courses" :
       "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
@@ -198,7 +176,6 @@
   "notes" : "CUSUM/EWMA standardize against the full-series per-pixel statistics (retrospective monitoring). Seasonal MK uses calendar-month seasons with the tie-corrected variance.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "temporal",

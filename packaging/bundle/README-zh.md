@@ -15,7 +15,8 @@ Python、不需要注册任何账号。整个过程零网络访问。
 | `labs\lab1\` | 实验 1 材料（NDVI）+ 中文说明 |
 | `RUN.cmd` | 一键运行实验 1（生成→处理→批改→报告） |
 | `GENERATE_SAMPLES.cmd` | 重新生成示例数据 |
-| `GRADE_ALL.cmd` | 一键批量批改全班作业 |
+| `GRADE_ALL.cmd` | 一键批量批改全班作业（Windows 双击/命令行） |
+| `GRADE_ALL.sh` | Linux/macOS 批量批改（参数与退出码与 GRADE_ALL.cmd 一致） |
 | `VERIFY.cmd` / `VERIFY.ps1` | 完整性自检（拷贝到新机器 / U 盘后先跑一次） |
 | `manifest.json` | 完整性清单（SHA-256） |
 

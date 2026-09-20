@@ -38,16 +38,17 @@ One JSON file per algorithm, named after the algorithm id (`:` → `-`):
 Files whose `id` does not match a registered algorithm are ignored by
 discovery but still loaded (they document intent for upcoming operators).
 
-## Capability knowledge layer (D8, ADR 0146) — `capability/`
+## Capability knowledge layer (D8, ADR 0154) — `capability/`
 
 The subdirectory `capability/` holds the full per-operator capability catalog
-(one sidecar per `rs:` operator, 111/111) plus the relation graph
+(one sidecar per registered `rs:` operator — the guard test pins the set to
+the live registry, not to a fixed count) plus the relation graph
 (`capability_relations.json`). It is deliberately a subdirectory:
 `tests/test_algorithm_meta_drift.cpp` pins THIS directory to the exact set of
 sparse v1 sidecars above.
 
 - Schema, query API, budgets: `src/agent/harness/capability_catalog.h` and
-  `docs/adr/0146-capability-relation-graph.md`.
+  `docs/adr/0154-capability-relation-graph.md`.
 - Derived fields (io, parameters, determinism grade, memory policy,
   prerequisites/limitations declared by operators) are **generated** from the
   live descriptors — regenerate with the `capability_knowledge_tool` target:
@@ -62,5 +63,9 @@ sparse v1 sidecars above.
   `teaching_use`, extra prerequisites) lives in the sidecars and survives
   regeneration; apply it with `scripts/capability_enrichment.py` (or edit the
   authored keys directly — never the derived ones).
-- `tests/test_capability_knowledge.cpp` guards coverage (111/111), drift,
-  graph invariants, budgets, page regeneration, and chain composition.
+- `tests/test_capability_knowledge.cpp` guards coverage (registry set ==
+  catalog set), drift, graph invariants, budgets, page regeneration, and
+  chain composition. The algorithm/capability-surface parity across
+  CLI/MCP/help is gated by `tests/test_capability_surface_parity.cpp`; the
+  authored-content completeness contract by
+  `tests/test_capability_completeness.cpp`.

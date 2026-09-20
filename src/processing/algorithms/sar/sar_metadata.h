@@ -24,6 +24,9 @@ inline const char *kModalityKey = "SICNU_MODALITY";
 inline const char *kSensorKey = "SICNU_SENSOR";
 inline const char *kPolarizationsKey = "SICNU_POLARIZATIONS";
 inline const char *kCalibrationKey = "SICNU_SAR_CALIBRATION"; // sigma0|gamma0|beta0|dn
+// Accepted input spellings (normalizeCalibration also maps sigma_naught/sigma,
+// gamma, beta, digital_number onto the canonical tokens above); only the
+// canonical tokens are written.
 inline const char *kDomainKey = "SICNU_SAR_DOMAIN";           // linear_power|db
 inline const char *kIncidenceKey = "SICNU_SAR_INCIDENCE_DEG"; // constant incidence angle
 inline const char *kHeadingKey = "SICNU_SAR_HEADING_DEG";     // platform flight heading
@@ -72,5 +75,11 @@ void writeSarOutputMetadata( GdalStreamingOutput &output,
 /// to "" when undeclared.
 QString readCalibration( const GdalDatasetWrapper &ds );
 QString readDomain( const GdalDatasetWrapper &ds );
+
+/// Raw declared SICNU_SAR_CALIBRATION token (trimmed, lowercased); "" when
+/// undeclared. Unlike readCalibration(), unrecognized tokens are returned
+/// verbatim so operator seams can fail closed on them instead of silently
+/// treating an unreadable declared contract as DN.
+QString declaredCalibrationToken( const GdalDatasetWrapper &ds );
 
 } // namespace sicnu::sar

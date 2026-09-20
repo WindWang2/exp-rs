@@ -1,0 +1,164 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u786e\u8ba4 input \u8def\u5f84\u5b58\u5728\u4e14\u4e3a\u53ef\u8bfb\u6805\u683c",
+        "when" : "\u8f93\u5165\u591a\u6ce2\u6bb5\u6805\u683c\u6587\u4ef6\u4e0d\u5b58\u5728\u6216\u65e0\u6cd5\u7528 GDAL \u6253\u5f00"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u7ea6\u675f\u8bbe\u7f6e\u7a97\u53e3\u4e0e\u534f\u65b9\u5dee\u53c2\u6570\uff08outer \u4e3a >=3 \u7684\u5947\u6570\uff0cinner \u4e3a\u5c0f\u4e8e outer \u7684\u5947\u6570\uff09",
+        "when" : "outerWindow \u975e\u5947\u6570\u6216\u5c0f\u4e8e 3\u3001innerWindow \u975e\u5947\u6570/\u5c0f\u4e8e 1/\u4e0d\u5c0f\u4e8e outerWindow\u3001covariance \u53d6\u503c\u4e0d\u5728 full/diagonal \u4e4b\u5185\u3001loading \u4e3a\u8d1f\u6216\u975e\u6709\u9650"
+      },
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u63d0\u4f9b\u81f3\u5c11 2 \u4e2a\u6ce2\u6bb5\uff1b\u9ad8\u5149\u8c31\u573a\u666f\u6539\u7528 covariance=diagonal",
+        "when" : "\u8f93\u5165\u6805\u683c\u6ce2\u6bb5\u6570\u5c11\u4e8e 2\uff08\u65e0\u6cd5\u4f30\u8ba1\u5c40\u90e8\u534f\u65b9\u5dee\uff09\uff0c\u6216 full \u534f\u65b9\u5dee\u6a21\u5f0f\u4e0b\u6ce2\u6bb5\u6570\u8d85\u8fc7 8192"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u68c0\u67e5\u8f93\u51fa\u8def\u5f84\u53ef\u5199\u4e0e\u78c1\u76d8\u7a7a\u95f4\uff0c\u7f29\u5c0f AOI \u540e\u91cd\u8bd5",
+        "when" : "\u74e6\u7247 halo \u8bfb\u53d6\u3001\u5206\u6570/\u8d28\u91cf\u6805\u683c\u5199\u51fa\u6216\u6805\u683c finalize \u5931\u8d25\uff0c\u6216 RX \u5185\u6838\u8ba1\u7b97\u8fd4\u56de\u9519\u8bef"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "covariance",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "max",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "mean",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "scoredPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "unscoredPixels",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "full",
+          "enum" : 
+          [
+            "full",
+            "diagonal"
+          ],
+          "name" : "covariance",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "innerWindow",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.001000",
+          "name" : "loading",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "minSamples",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "outerWindow",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "qualityOut",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.",
+      "Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5c40\u90e8\uff08\u53cc\u7a97\u53e3\uff09RX \u5f02\u5e38\u68c0\u6d4b\uff1a\u4ee5\u5185\u7a97\u53e3\u4f5c\u4fdd\u62a4\u5e26\uff0c\u8ba1\u7b97\u5404\u50cf\u5143\u5bf9\u5c40\u90e8\u80cc\u666f\u7684\u9a6c\u6c0f\u8ddd\u79bb\uff0c\u6355\u6349\u5168\u5c40 RX \u4f1a\u5e73\u5747\u6389\u7684\u5c40\u90e8\u5f02\u5e38\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Reed-Xiaoli distance to the local background (dual window with guard), with scaled diagonal loading and per-pixel quality counts.",
+  "display_name" : "Local (Dual-Window) RX Anomaly Detection",
+  "id" : "rs:local_rx_anomaly",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "rx",
+    "anomaly",
+    "hyperspectral",
+    "local"
+  ],
+  "task" : "anomaly-detection"
+}

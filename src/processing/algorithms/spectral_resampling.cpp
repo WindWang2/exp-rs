@@ -139,4 +139,85 @@ bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBand
     return true;
 }
 
+const char *bandCoverageText( BandCoverage coverage )
+{
+    switch ( coverage )
+    {
+        case BandCoverage::Full:
+            return "full";
+        case BandCoverage::Partial:
+            return "partial";
+        case BandCoverage::None:
+            break;
+    }
+    return "none";
+}
+
+bool analyzeResamplingCoverage( const float *srcWl, int srcBands,
+                                const float *dstWl, const float *dstFwhm, int dstBands,
+                                CoverageReport *out )
+{
+    if ( !srcWl || !dstWl || !out || srcBands < 2 || dstBands < 1 )
+        return false;
+    for ( int i = 1; i < srcBands; ++i )
+    {
+        if ( srcWl[i] <= srcWl[i - 1] )
+            return false; // same strictly-increasing contract as the kernels
+    }
+
+    const float srcMin = srcWl[0];
+    const float srcMax = srcWl[srcBands - 1];
+
+    out->bands.assign( static_cast<size_t>( dstBands ), BandCoverage::None );
+    out->full = 0;
+    out->partial = 0;
+    out->none = 0;
+
+    // FWHM → sigma, identical constant to resampleSpectrumGaussian.
+    constexpr double kFwhmToSigma = 1.0 / ( 2.0 * std::sqrt( 2.0 * std::log( 2.0 ) ) );
+
+    for ( int t = 0; t < dstBands; ++t )
+    {
+        const float wl = dstWl[t];
+        BandCoverage coverage = BandCoverage::None;
+        if ( std::isfinite( wl ) && wl >= srcMin && wl <= srcMax )
+        {
+            coverage = BandCoverage::Full;
+            if ( dstFwhm )
+            {
+                const float fwhm = dstFwhm[t];
+                if ( std::isfinite( fwhm ) && fwhm > 0.0f )
+                {
+                    // Fraction of the target band's Gaussian response captured
+                    // by the source range, via the closed-form erf integral
+                    // (z in units of sqrt(2)*sigma). Missing mass beyond ~1%
+                    // means the resampled value rests on a visibly truncated
+                    // SRF — report Partial.
+                    const double sigmaSqrt2 =
+                        static_cast<double>( fwhm ) * kFwhmToSigma * std::sqrt( 2.0 );
+                    const double zLo = ( static_cast<double>( srcMin ) - wl ) / sigmaSqrt2;
+                    const double zHi = ( static_cast<double>( srcMax ) - wl ) / sigmaSqrt2;
+                    const double captured = 0.5 * ( std::erf( zHi ) - std::erf( zLo ) );
+                    if ( !( captured >= 0.99 ) )
+                        coverage = BandCoverage::Partial;
+                }
+            }
+        }
+        out->bands[static_cast<size_t>( t )] = coverage;
+        switch ( coverage )
+        {
+            case BandCoverage::Full:
+                ++out->full;
+                break;
+            case BandCoverage::Partial:
+                ++out->partial;
+                break;
+            case BandCoverage::None:
+                ++out->none;
+                break;
+        }
+    }
+    return true;
+}
+
 } // namespace SpectralResampling

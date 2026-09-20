@@ -186,6 +186,101 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
 /// mirror directory does not exist — never a guessed inventory).
 Json::Value mirrorStatsJson( const std::string &mirrorDirectory );
 
+// --- 12.0 mirror maintenance (verify / repair / prune) ----------------------
+//
+// A mirror that a later process must PROVE is the same bytes needs
+// maintenance surfaces to keep that proof true over time:
+//   * verifyMirror — read-only integrity audit (works OFFLINE: pure local).
+//   * repairMirror — re-materialize entries that fail verification from the
+//     source (offline refusals are recorded per chunk, never guessed).
+//   * pruneMirror  — garbage-collect orphan chunk files, dead entries and
+//     (optionally) aged/over-quota entries. Refuses to act against an
+//     unreadable manifest (fail-closed — never GC what it cannot prove).
+
+struct MirrorVerifyReport
+{
+    std::uint64_t entriesChecked = 0;     ///< chunk entries inspected
+    std::uint64_t ok = 0;                 ///< present with matching size+sha256
+    std::uint64_t missingFiles = 0;       ///< entry's file does not exist
+    std::uint64_t sizeMismatches = 0;     ///< declared bytes ≠ file size
+    std::uint64_t checksumMismatches = 0; ///< sha256 mismatch (tampered/torn)
+    std::uint64_t badEntries = 0;         ///< wrong-typed / unsafe entries
+    std::uint64_t unreferencedFiles = 0;  ///< files in chunks/ the manifest
+                                          ///< never names (orphans)
+    std::uint64_t unreferencedBytes = 0;  ///< orphan file bytes
+    std::uint64_t bytesChecked = 0;       ///< payload bytes hashed
+    bool manifestUnreadable = false;      ///< verify REFUSES to conclude
+                                          ///< (maintenance must not act)
+
+    Json::Value toJson() const;
+};
+
+/// Audits every manifest chunk entry (file presence, declared size, sha256
+/// proof when the manifest carries one) and the chunk directory for orphan
+/// files. Read-only and OFFLINE-safe: no source access, no network. A
+/// corrupt manifest reports manifestUnreadable (the caller must not
+/// repair/prune against it).
+MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory );
+
+struct MirrorPruneOptions
+{
+    /// Expire chunk entries materialized longer than this ago (0 = no
+    /// age-based pruning). The age basis is the entry's 12.0
+    /// materialization stamp; entries without one never age-expire
+    /// (absence is not evidence of staleness).
+    std::uint64_t maxAgeSeconds = 0;
+    /// Keep the mirror's referenced chunk bytes within this budget by
+    /// dropping the OLDEST-stamped entries first (0 = no quota pruning;
+    /// unstamped entries are un-evictable by quota).
+    std::uint64_t maxBytes = 0;
+};
+
+struct MirrorPruneReport
+{
+    bool manifestUnreadable = false;    ///< prune REFUSED to act
+    std::uint64_t orphanFilesRemoved = 0;   ///< files the manifest never named
+    std::uint64_t deadEntriesRemoved = 0;   ///< entries whose file was gone
+    std::uint64_t expiredEntriesRemoved = 0;///< entries past maxAgeSeconds
+    std::uint64_t quotaEntriesRemoved = 0;  ///< entries dropped for the budget
+    std::uint64_t keptEntries = 0;
+    std::uint64_t bytesRemoved = 0;         ///< total payload bytes unlinked
+
+    Json::Value toJson() const;
+};
+
+/// Garbage-collects a mirror: orphan chunk files (the manifest never named
+/// them), dead entries (file already gone), entries expired by
+/// maxAgeSeconds, and — when maxBytes is set — the oldest-stamped entries
+/// until the referenced bytes fit the budget. OFFLINE-safe (pure local);
+/// a corrupt manifest REFUSES the prune (never GC what cannot be proven).
+MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
+                               const MirrorPruneOptions &options = {} );
+
+struct MirrorRepairReport
+{
+    MirrorVerifyReport before;          ///< the audit that drove the repair
+    std::uint64_t removedBadEntries = 0; ///< manifest entries dropped (their
+                                         ///< file unlinked when provably
+                                         ///< theirs and present)
+    MirrorReport remirror;              ///< the re-materialization pass
+    bool manifestUnreadable = false;    ///< repair REFUSED to act
+
+    Json::Value toJson() const;
+};
+
+/// Repairs a mirror against its SOURCE: entries that fail verification
+/// (missing/corrupt) are dropped — the file unlinked when the manifest
+/// provably names it — and the chunk walk re-materializes them. Good
+/// entries are never re-read (already-present skips them) and orphans are
+/// prune's responsibility, not repair's. Offline, the re-materialization
+/// records per-chunk failures (the offline gate) instead of guessing; the
+/// cleanup phase stays local. A corrupt manifest REFUSES the repair.
+MirrorRepairReport repairMirror( const FabricPlan &plan, const MirrorOptions &options = {},
+                                 const CancelToken &cancel = {} );
+MirrorRepairReport repairMirror( const VirtualCube &cube, const CubeChunkPlan &plan,
+                                 const MirrorOptions &options = {},
+                                 const CancelToken &cancel = {} );
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_FABRIC_MIRROR_H

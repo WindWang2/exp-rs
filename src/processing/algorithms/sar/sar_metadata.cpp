@@ -112,6 +112,11 @@ QString readCalibration( const GdalDatasetWrapper &ds )
   return normalizeCalibration( datasetMeta( ds, kCalibrationKey ) );
 }
 
+QString declaredCalibrationToken( const GdalDatasetWrapper &ds )
+{
+  return datasetMeta( ds, kCalibrationKey ).trimmed().toLower();
+}
+
 QString readDomain( const GdalDatasetWrapper &ds )
 {
   const QString d = datasetMeta( ds, kDomainKey ).toLower();

@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u884c\u653f\u533a",
         "\u6d41\u57df",
         "\u5730\u5757"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u884c\u653f\u533a\u6307\u6807\u7edf\u8ba1",
         "\u5730\u5757\u4ea7\u91cf\u8bc4\u4ef7"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "CRS_MISMATCH",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "raster_spatial",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -58,7 +58,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "table",
@@ -67,7 +67,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -97,13 +97,13 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "Overlapping zones: last feature wins (input order), matching rs:rasterize.",
       "Median is budgeted (shared 16M-value collection); zones beyond it are flagged while their other statistics stay exact.",
       "stddev is the population statistic (divided by N)."
     ],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -111,7 +111,7 @@
       "dem"
     ],
     "operator_group" : "raster-vector",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Value raster carries a CRS and a north-up geotransform.",
       "Zone features carry geometry; a declared zoneField must exist on every feature.",
@@ -119,14 +119,14 @@
     ],
     "schema_version" : 2,
     "summary" : "\u5206\u533a\u7edf\u8ba1\uff1a\u6309\u77e2\u91cf/\u6805\u683c\u5206\u533a\u8ba1\u7b97\u5185\u90e8\u50cf\u5143\u7684\u5747\u503c/\u603b\u548c/\u5206\u4f4d\u6570\u7b49\uff0c\u8f93\u51fa\u533a\u57df\u5c5e\u6027\u8868\uff0c\u662f\u62a5\u8868\u4e0e\u8bc4\u4ef7\u7684\u6838\u5fc3\u7b97\u5b50\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u5206\u533a\u7edf\u8ba1",
         "\u533a\u57df\u5747\u503c"
       ],
-      "courses" :
+      "courses" : 
       [
         "GIS \u539f\u7406"
       ],
@@ -140,7 +140,7 @@
   "input" : "raster",
   "output" : "",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "raster-vector",
     "zonal",
