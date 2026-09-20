@@ -93,7 +93,7 @@ sicnu::app::ActiveWorkflowRef Ir2PipelineDesignerDock::activeWorkflowRef() const
     sicnu::app::ActiveWorkflowRef ref;
     ref.workflowId = m_document.workflowId;
     ref.name = m_document.name;
-    ref.schemaVersion = QStringLiteral( "2.0" );
+    ref.schemaVersion = m_document.version;
     ref.fingerprint = workflowIr2ContentFingerprint( m_document );
     ref.runner = QStringLiteral( "pipeline_run_coordinator" );
     return ref;
@@ -112,7 +112,7 @@ void Ir2PipelineDesignerDock::loadDocument( const sicnu::workflow::WorkflowDocum
 void Ir2PipelineDesignerDock::newEmptyDocument( const QString &name )
 {
     sicnu::workflow::WorkflowDocument def;
-    def.version = QStringLiteral( "2.0" );
+    def.version = sicnu::workflow::WorkflowIR::currentSchemaVersion();
     def.workflowId = QUuid::createUuid().toString( QUuid::WithoutBraces );
     def.name = name;
     loadDocument( def );

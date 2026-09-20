@@ -10648,6 +10648,14 @@ sicnu_add_d17_test(test_workflow_dag_analysis
   SOURCES ${D17_ENGINE_SOURCES}
 )
 
+# --- Package B2: subflow composition (WP2)
+sicnu_add_d17_test(test_workflow_composition
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+)
+
 # --- Package C: contract checker + repair engine
 sicnu_add_d17_test(test_workflow_repair_rules
   SOURCES ${D17_ENGINE_SOURCES}
@@ -10667,6 +10675,8 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
@@ -10678,6 +10688,8 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
   LIBS Qt6::Widgets Qt6::Test
 )
@@ -10713,6 +10725,8 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp

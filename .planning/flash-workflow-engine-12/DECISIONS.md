@@ -1,0 +1,166 @@
+# DECISIONS — flash-workflow-engine-12
+
+Baseline: `adf8f98952422fe9c386c56d64d5fb6a4a6642f1` (origin/master at worktree creation).
+
+## D1 — Kernel of record: the D17/IR2 stack
+
+The repo carries two workflow stacks:
+
+- **Engine 2.0** (`workflow_run_coordinator`, `workflow_checkpoint`, `workflow_run`, jsoncpp) —
+  production TaskCenter bridge: run locks, crash recovery, GC. Touch only at its
+  documented seams.
+- **D17/IR2** (`workflow_ir_v2`, `pipeline_run_coordinator`, `plan_optimizer`,
+  `workflow_dag_analyzer`, `contract_checker`, Qt/JSON) — typed ports, lineage
+  signatures, frontier scheduler, checkpoint/resume. **This is the kernel the
+  track evolves**: every Oracle (typed composition, lineage-stable resume,
+  artifact contract, provenance, deterministic planning) maps onto it.
+
+Rationale: Engine 2.0 is a singleton bridge into TaskCenter scheduling
+(explicitly out of scope); IR2 is where versioned documents and signatures
+already live. Engine 2.0's stronger checkpoint hygiene (bounded reads,
+version checks, artifact identity) is used as the *model* for hardening D17,
+not merged into it.
+
+## D2 — Checkpoint envelope: strict `kind` + closed version set
+
+`persistCheckpoint` writes `kind="d17_pipeline_checkpoint"`, `version`. The
+reader now validates both, fail-closed:
+
+- wrong/missing `kind` → reject (`d17.checkpoint_kind`);
+- `version` not in `{1.0, 1.1}` → reject (`d17.checkpoint_version`);
+- `1.0` is *accepted* but its nodes carry no artifact identity → every node
+  degrades to recompute (safe, correct, just slower). `1.1` adds
+  `artifactSize`, `artifactMtimeMs`, `artifactFingerprint` per node.
+
+Two-tier failure policy: **structural corruption is fatal** (bad envelope,
+unknown node ids, unknown state keys, missing statuses) while **artifact-level
+anomalies are per-node cache misses** (tampered/moved/foreign file → that node
+recomputes). A corrupt document must never wedge or silently reinterpret;
+a suspicious file must never be *served*.
+
+## D3 — Artifact identity: size + mtime + bounded digest, both directions
+
+New `NodeStatusSnapshot` fields: `artifactSizeBytes`, `artifactLastModifiedMs`,
+`artifactFingerprint` (`"sha256fl:<hex>"` = SHA-256 over
+`[8B LE size][first ≤1MiB][last ≤1MiB]`).
+
+- Why not whole-file SHA-256: raster products can be GBs; head+tail+size is
+  O(2 MiB) deterministic and catches truncation/extension/head-or-tail
+  rewrite. **Honest limitation**: a mid-file-only rewrite of a >2 MiB
+  artifact that also preserves mtime (trivially forgeable — tests do it via
+  restoreMtime) would evade detection. The fingerprint is an integrity
+  tripwire for the common corruption/replacement cases, not a cryptographic
+  seal; a future `sha256full` mode can close the gap behind the existing
+  `sha256fl:` scheme tag without a format bump.
+- **Write-time containment**: on node success, the canonical artifact path
+  must live inside the canonical run directory (symlink-resolved), else the
+  node fails `ir2.artifact_outside_run:` — an executor may not launder
+  foreign paths into the run record.
+- **Resume-time verification**: CacheHit requires recorded Succeeded +
+  signature match + artifact exists + contained + size/mtime/fingerprint
+  equal. Any mismatch → Pending → recompute. `1.0` checkpoints lack identity
+  → all nodes recompute (no stale trust).
+- Executor contract unchanged: the coordinator fingerprints the file itself;
+  executor-reported metadata would weaken the guarantee.
+
+## D4 — Strict state vocabulary
+
+`stateFromKey` mapped unknown state strings to `Pending` — silent corruption.
+It now returns `std::optional<ExecutionState>`; unknown keys reject the load
+with the offending key named. New states require a checkpoint version bump —
+the closed vocabulary is part of the format contract.
+
+## D5 — Shared bounded read
+
+`workflow_checkpoint.cpp`'s file-local `kMaxCheckpointBytes` (16 MiB) is
+extracted to `workflow_limits.h` as `kMaxCheckpointDocumentBytes` and reused
+by the D17 reader (which previously did an unbounded `readAll`).
+
+## D6 — `resumedDef` redeclaration (master build break)
+
+`resumeFromCheckpoint` declared `const WorkflowDocument resumedDef` at the
+validation pass and re-declared it at the parent-count pass — a hard error on
+conforming compilers (all 4 open workflow-touching PRs carry an independent
+workaround). Fixed by reusing the outer variable. This is the canonical fix
+the parallel PRs will rebase onto.
+
+## D7 — WP1 versioning contract (implemented)
+
+`WorkflowDocument.version` stays a string. `WorkflowIR::supportedSchemaVersions()`
+returns the closed accept-set `{"2.0","2.1"}` and `currentSchemaVersion()`
+returns `"2.1"`. `fromJson` rejects anything outside the set with the
+offending version named — an older build refuses a newer document
+*explicitly* instead of silently dropping its fields.
+
+The claimed version is **preserved verbatim** rather than rewritten on
+parse: a "2.0" document round-trips byte-stably as "2.0" (keeps the 9
+golden fixtures byte-identical, keeps `workflowIr2ContentFingerprint`
+stable for existing docs). Only writers bump the version — `migrateFromV1`
+and new documents claim "2.1". Additive-optional fields are the sanctioned
+intra-family extension mechanism: a 2.0 writer never emits them, a 2.1
+reader tolerates their absence.
+
+"2.1" adds `NodeFact::originNodeId` — composition provenance hook for the
+D8 subflow expansion (the designer-level fragment-instance node an expanded
+node came from). Serialized only when non-empty, so 2.0 documents stay
+byte-identical. Extension data that must survive older readers stays inside
+`metadata`/`parameters`, which round-trip verbatim (now pinned by a test).
+
+## D8 — WP2 composition (implemented)
+
+`operatorId == "workflow:subflow"` marks a fragment instance;
+`parameters.fragment` = embedded WorkflowDocument (hermetic only — file/path
+references are refused fail-closed because they would make the expanded
+graph depend on non-document state); `parameters.interface` maps instance
+ports to fragment internals
+(`{"inputs": {"<instancePort>": {"node","port"}}, "outputs": {...}}`);
+`parameters.bindings` = `{"<fragNodeId>": {"<param>": value}}` merged into
+fragment node parameters before inlining.
+
+`WorkflowComposer::expandSubflows` flattens fragments into the parent
+document with namespaced ids `subflowNodeId__internalNodeId` — the
+separator is `__`, not `/`, because the registry executor's `isSafeNodeId`
+(#1032) rejects path separators in node ids. Lineage stays deterministic
+because expanded ids are a pure function of the authored graph. Origin
+attribution rides in expanded nodes' `NodeFact::originNodeId` (first-class
+since schema 2.1, D7). Nested subflows expand recursively (depth cap 8);
+expanded-id collisions, unmapped interface ports, unknown binding targets
+and invalid fragments all fail closed naming the instance node.
+
+Integration: `PipelineRunCoordinator::startRun` expands after authored-doc
+validation and before DAG analysis — executors, checkpoints and signatures
+only ever see the flat document, so composition adds zero new run-state
+semantics. Boundary contract checking falls out for free: rewired edges
+are inspected by `inspectContracts` on the expanded document.
+
+## D9 — WP5 provenance (implemented)
+
+Per-run `provenance_<runId>.json` in the run directory with the same
+envelope discipline as checkpoints (`kind="d17_provenance"`, closed
+`version` set, strict parse, dangling-edge refusal). `ProvenanceGraph`
+nodes: `run:` (workflowId + planSignature + schemaVersion), `nodeExec:`
+(state, lineage signature, elapsedMs, isCacheHit, originNodeId), and
+`artifact:` (path, fingerprint, size) keyed by path so producers and
+consumers share one vertex. Edges: `consumed` (exec←parent artifact),
+`produced` (exec wrote it this run), `reusedFrom` (cache hit: verified and
+served but NOT produced — the honest distinction). Lineage is transitive
+through artifact nodes; serialization sorts nodes/edges so identical run
+state yields a byte-identical record.
+
+Emitted in `finalizeIfDone` for successes AND failures (audits need the
+failure paths most); a provenance write failure never fails the run.
+Query API: `producerOf`, `consumedBy`, `producedBy`, `reusedBy`. A
+`retriedAs` edge kind is reserved for when the run model gains retries —
+not emitted today (single-attempt executions).
+
+## D10 — WP6 determinism (implemented)
+
+`computeLineageSignatures` is already order-insensitive in doc order and
+port-sensitive. `computePlanSignature(def)` is now the whole-plan topology
+signature: SHA-256 over the sorted multiset of `nodeId=nodeSignature`
+pairs plus the sorted canonical edge set
+(`src.srcPort->dst.dstPort`). Edge ids are excluded — they are bookkeeping
+labels, not topology — so reordering nodes/edges or renaming edge ids is
+provably identical, while parameter, port or wiring changes (including a
+port rename, which re-keys the node signatures) change the digest. This is
+the stable identity a plan/provenance record can cite.

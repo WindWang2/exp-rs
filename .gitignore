@@ -397,3 +397,7 @@ data/labs/_tmp/
 !.planning/flash-taskcenter-runtime-12/
 .planning/flash-taskcenter-runtime-12/*
 !.planning/flash-taskcenter-runtime-12/*.md
+# flash-workflow-engine-12 (Track 05): track planning notes (markdown only; logs stay local).
+!.planning/flash-workflow-engine-12/
+.planning/flash-workflow-engine-12/*
+!.planning/flash-workflow-engine-12/*.md

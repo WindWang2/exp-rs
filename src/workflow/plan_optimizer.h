@@ -64,6 +64,15 @@ class WorkflowPlanOptimizer
     /// value is the node's signature; input is the accumulated map).
     static QMap<QString, QString> computeLineageSignatures( const WorkflowDocument &def );
 
+    /// Whole-plan topology signature: SHA-256 over the sorted multiset of
+    /// (nodeId, nodeSignature) pairs plus the sorted canonical edge set
+    /// (sourceNode.sourcePort -> targetNode.targetPort). Invariant to node
+    /// and edge enumeration order and to edge ids — so two serializations
+    /// of the same plan produce identical signatures, while any parameter,
+    /// port or wiring change (including a port rename, which re-keys the
+    /// node signatures) changes it. 64 lowercase hex characters.
+    static QString computePlanSignature( const WorkflowDocument &def );
+
     /// DNE + CSE. @p targetSinkNodeIds must resolve to existing nodes.
     /// @p cachedSignatures (optional, e.g. from a previous run's checkpoint)
     /// marks nodes whose artifact can be reused; they are kept and annotated
