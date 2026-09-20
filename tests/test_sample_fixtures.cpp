@@ -131,6 +131,15 @@ int runCli( const std::vector<std::string> &args )
     std::string cmd = shellQuote( SICNU_GENERATE_SAMPLES_BIN );
     for ( const std::string &arg : args )
         cmd += " " + shellQuote( arg );
+#ifdef _WIN32
+    // MSVC's std::system() runs `cmd.exe /c <string>`. With /c and a string
+    // that opens with a quote, cmd strips the outermost quoting pair and
+    // hands the REST back to itself as one command word — so a plain
+    // `"exe" "arg"` becomes the literal token `exe" "--out`. Wrapping the
+    // whole command in one extra quoting pair is the documented CRT contract
+    // (see cmd.exe /?): `cmd /c ""exe" "arg""` runs correctly.
+    cmd = std::string( "\"" ) + cmd + "\"";
+#endif
     const int status = std::system( cmd.c_str() );
 #ifdef _WIN32
     return status; // std::system via cmd.exe returns the exit code directly
