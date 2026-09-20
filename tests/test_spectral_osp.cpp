@@ -221,4 +221,13 @@ TEST_CASE( "OSP conditioning diagnostic separates healthy and near-collinear set
                               static_cast<float>( std::sin( eps ) ) } },
                           &ill, nullptr, &illCond ) );
     REQUIRE( illCond > 1.0e6 );
+
+    // The suppression residual scales with the conditioning: at round-off for
+    // the orthogonal set, bounded by ~1e-12·cond for the near-collinear one.
+    std::vector<double> scratch( 3, 0.0 );
+    const float s1[3] = { 1.0f, 0.0f, 0.0f };
+    const float s2[3] = { static_cast<float>( std::cos( eps ) ), 0.0f,
+                          static_cast<float>( std::sin( eps ) ) };
+    REQUIRE( std::fabs( ospScore( s1, healthy, 3, &scratch ) ) <= 1e-12 );
+    REQUIRE( std::fabs( ospScore( s2, ill, 3, &scratch ) ) <= 1e-12 * illCond );
 }

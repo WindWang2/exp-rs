@@ -42,10 +42,11 @@ bool fuseScores( const float *scores, const uint8_t *valid, int width, int heigh
 
     const int r = config.radius;
     const bool bilateral = ( config.method == Method::Bilateral );
-    // Spatial sigma tied to the radius so the parameter surface stays small;
-    // radius 0 degenerates to a single-member window where any positive sigma
-    // yields the identity (the only member carries weight 1).
-    const double sigmaSpatial2 = r > 0 ? 0.5 * r * r : 1.0; // (r/2)²
+    // Spatial sigma tied to the radius so the parameter surface stays small:
+    // sigma_s = r/2 (documented in the header and ADR 0167). Radius 0
+    // degenerates to a single-member window where any positive sigma yields
+    // the identity (the only member carries weight 1).
+    const double sigmaSpatial2 = r > 0 ? 0.25 * r * r : 1.0; // (r/2)²
     const double sigmaRange2 = config.sigmaRange * config.sigmaRange;
 
     for ( int y = 0; y < height; ++y )

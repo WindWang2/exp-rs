@@ -76,7 +76,7 @@ Json::Value RsSpectralSpatialFuseOperator::schema() const
 
     Json::Value sigmaRange( Json::objectValue );
     sigmaRange["type"] = "number";
-    sigmaRange["minimum"] = 0.0;
+    sigmaRange["exclusiveMinimum"] = 0.0;
     sigmaRange["default"] = 1.0;
     sigmaRange["description"] =
         "Range Gaussian sigma (score units) for method 'bilateral': neighbors whose score "
@@ -122,8 +122,9 @@ Json::Value RsSpectralSpatialFuseOperator::metadata() const
 Json::Value RsSpectralSpatialFuseOperator::executionEstimate() const
 {
     Json::Value est( Json::objectValue );
-    // Streaming with an r-pixel halo: tile plane + halo + fused + validity +
-    // neighbor count ≈ 13 bytes/px at the nominal 256×256 tile, rounded up.
+    // Streaming with an r-pixel halo: the footprint scales with (256+2r)² —
+    // 13 bytes/px at the nominal 256×256 tile with r = 1, rounded up. The
+    // worst case (r = 128) is ~3.5x this nominal figure.
     est["tileWidth"] = 256;
     est["tileHeight"] = 256;
     est["estimatedRamBytes"] = Json::Value::UInt64( 16ULL * 256ULL * 256ULL );
@@ -140,6 +141,9 @@ Json::Value RsSpectralSpatialFuseOperator::run( const Json::Value &params,
 
     const int radius = getInt( params, "radius", 1 );
     const double beta = getDouble( params, "beta", 0.5 );
+    if ( !std::isfinite( beta ) || beta < 0.0 || beta > 1.0 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "'beta' must be within [0, 1], got " + std::to_string( beta ) );
     const SpectralSpatialFusion::Method method = parseMethod( getString( params, "method", "mean" ) );
     double sigmaRange = 1.0;
     if ( params.isMember( "sigmaRange" ) )
@@ -207,6 +211,7 @@ Json::Value RsSpectralSpatialFuseOperator::run( const Json::Value &params,
     std::vector<float> padded;
     std::vector<uint8_t> valid;
     std::vector<float> interior;
+    SpectralSpatialFusion::Result result; // reused across tiles (no per-tile growth)
     size_t fusedCount = 0;
     int tilesSeen = 0;
     for ( int ty = 0; ty < tilesY; ++ty )
@@ -239,7 +244,6 @@ Json::Value RsSpectralSpatialFuseOperator::run( const Json::Value &params,
                     valid[p] = 0;
             }
 
-            SpectralSpatialFusion::Result result;
             QString kernelError;
             if ( !SpectralSpatialFusion::fuseScores( padded.data(), valid.data(), pw, ph,
                                                      config, &result, &kernelError ) )

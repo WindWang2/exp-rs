@@ -20,9 +20,14 @@
 // valid-pixel predicate. With an empty interference matrix the closed form
 // degenerates to the CEM filter w = R⁻¹t/(tᵀR⁻¹t) exactly.
 //
-// Constraints (both exact by construction, asserted in the kernel tests):
+// Constraints (exact by construction, asserted in the kernel tests):
 //   wᵀt  = 1            (distortionless: the target scores exactly 1)
 //   Sᵀw  = 0            (every interference spectrum scores exactly 0)
+// Exact in exact arithmetic: the REALIZED null-constraint residual scales
+// with the conditioning of the Gram matrix SᵀR'⁻¹S (reported as
+// interferenceCondition) — for a set with condition number c, residuals up
+// to ~1e-12·c are expected from the cancellation in t − S z. The kernel
+// tests assert that bound explicitly.
 //
 // Typed refusals (buildFilter returns false with a named reason, never a
 // plausible-looking filter):

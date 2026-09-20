@@ -21,6 +21,7 @@
 
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
+#include "processing/algorithms/spectral_resampling.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -579,4 +580,162 @@ TEST_CASE( "OSP refuses a background raster (it consumes no background statistic
     params["background"] = paramsExtra["background"];
     RSOperatorContext ctx;
     REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+}
+
+TEST_CASE( "background raster refuses when the scene has no wavelength grid and "
+           "malformed background metadata",
+           "[spectral][detection][background]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // A 3-band background WITH a stamped grid, and a 3-band scene WITHOUT one:
+    // the background carries WAVELENGTH metadata the scene cannot reconcile
+    // against → typed refusal (band-order interpretation is not assumed when
+    // one side declares a grid).
+    RsSyntheticRasterBuilder bg( 4, 4, 3 );
+    bg.withCrs( "EPSG:32650" );
+    for ( int band = 1; band <= 3; ++band )
+        bg.withConstantValue( band, 0.1f * band );
+    const QString bgGridded = bg.writeToDisk( dir.filePath( "bg_gridded.tif" ) );
+    REQUIRE( !bgGridded.isEmpty() );
+    stampWavelengths( bgGridded, { 400.0, 500.0, 600.0 } );
+
+    RsSyntheticRasterBuilder scene( 6, 6, 3 );
+    scene.withCrs( "EPSG:32650" );
+    for ( int band = 1; band <= 3; ++band )
+        scene.withConstantValue( band, 0.2f * band );
+    const QString sceneBare = scene.writeToDisk( dir.filePath( "scene_bare.tif" ) );
+    REQUIRE( !sceneBare.isEmpty() );
+
+    REQUIRE( codeOf( [&] {
+        runDetector( "rs:cem_detection", sceneBare, dir.filePath( "nogrid.tif" ),
+                     targetParam( { 0.2f, 0.4f, 0.6f } ), bgGridded.toStdString(), nullptr );
+    } ) == ErrorCode::InvalidInputData );
+
+    // The same scene with a grid is accepted (band-order/equal-grid path) —
+    // the refusal above is the grid asymmetry, not the raster itself.
+    const QString sceneGridded = dir.filePath( "scene_gridded.tif" );
+    {
+        RsSyntheticRasterBuilder b( 6, 6, 3 );
+        b.withCrs( "EPSG:32650" );
+        for ( int band = 1; band <= 3; ++band )
+            b.withConstantValue( band, 0.2f * band );
+        REQUIRE( !b.writeToDisk( sceneGridded ).isEmpty() );
+    }
+    stampWavelengths( sceneGridded, { 400.0, 500.0, 600.0 } );
+    Json::Value okResult;
+    REQUIRE_NOTHROW( runDetector( "rs:cem_detection", sceneGridded,
+                                  dir.filePath( "grid_ok.tif" ),
+                                  targetParam( { 0.2f, 0.4f, 0.6f } ),
+                                  bgGridded.toStdString(), &okResult ) );
+    REQUIRE( okResult["backgroundSource"].asString() == bgGridded.toStdString() );
+    // Identical grids → no resampling, no coverage key.
+    REQUIRE( !okResult.isMember( "backgroundResampled" ) );
+
+    // Malformed background WAVELENGTH metadata is a typed refusal.
+    const QString bgBadMeta = dir.filePath( "bg_badmeta.tif" );
+    {
+        RsSyntheticRasterBuilder b( 4, 4, 3 );
+        b.withCrs( "EPSG:32650" );
+        for ( int band = 1; band <= 3; ++band )
+            b.withConstantValue( band, 0.1f * band );
+        REQUIRE( !b.writeToDisk( bgBadMeta ).isEmpty() );
+    }
+    {
+        GDALDatasetH ds = GDALOpen( bgBadMeta.toUtf8().constData(), GA_Update );
+        REQUIRE( ds != nullptr );
+        GDALSetMetadataItem( GDALGetRasterBand( ds, 1 ), "WAVELENGTH", "not-a-number",
+                             nullptr );
+        GDALClose( ds );
+    }
+    REQUIRE( codeOf( [&] {
+        runDetector( "rs:cem_detection", sceneGridded, dir.filePath( "badmeta.tif" ),
+                     targetParam( { 0.2f, 0.4f, 0.6f } ), bgBadMeta.toStdString(), nullptr );
+    } ) == ErrorCode::InvalidInputData );
+}
+
+TEST_CASE( "background raster reports partial SRF coverage without refusing",
+           "[spectral][detection][background][resample]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // Scene bands at 900/950 nm with a wide FWHM (400): the Gaussian response
+    // reaches past the background's 1000 nm edge, so coverage is Partial
+    // (in-range but edge-truncated) — reported, not refused.
+    constexpr int kW = 4;
+    constexpr int kH = 4;
+    RsSyntheticRasterBuilder scene( kW, kH, 2 );
+    scene.withCrs( "EPSG:32650" );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            for ( int b = 0; b < 2; ++b )
+                scene.withPixel( b + 1, x, y, 5.0f + b );
+    scene.withPixel( 1, 0, 0, 1.0f );
+    scene.withPixel( 2, 0, 0, 2.0f ); // planted target
+    const QString scenePath = scene.writeToDisk( dir.filePath( "p_scene.tif" ) );
+    REQUIRE( !scenePath.isEmpty() );
+    stampWavelengths( scenePath, { 900.0, 950.0 }, { 400.0, 400.0 } );
+
+    RsSyntheticRasterBuilder bg( kW, kH, 2 );
+    bg.withCrs( "EPSG:32650" );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+        {
+            const bool typeA = ( ( x + y ) % 2 ) == 0;
+            bg.withPixel( 1, x, y, typeA ? 0.5f : 0.2f );
+            bg.withPixel( 2, x, y, typeA ? 0.2f : 0.5f );
+        }
+    const QString bgPath = bg.writeToDisk( dir.filePath( "p_bg.tif" ) );
+    REQUIRE( !bgPath.isEmpty() );
+    stampWavelengths( bgPath, { 400.0, 1000.0 }, { 50.0, 50.0 } );
+
+    Json::Value result;
+    const std::vector<float> scores =
+        runDetector( "rs:cem_detection", scenePath, dir.filePath( "p_out.tif" ),
+                     targetParam( { 1.0f, 2.0f } ), bgPath.toStdString(), &result );
+
+    REQUIRE( result["backgroundResampled"].asBool() );
+    REQUIRE( result["backgroundCoverage"].asString() == "partial" );
+    REQUIRE( result["backgroundSamples"].asUInt64() == 16 );
+
+    // In-process plumbing oracle: resample the same background pixels with the
+    // shared kernel, accumulate, build the CEM filter and score the planted
+    // target — the operator must reproduce it (the kernel itself is
+    // unit-tested elsewhere).
+    std::vector<double> correlation( 4, 0.0 );
+    size_t samples = 0;
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+        {
+            const bool typeA = ( ( x + y ) % 2 ) == 0;
+            const float pixel[2] = { typeA ? 0.5f : 0.2f, typeA ? 0.2f : 0.5f };
+            const float srcWl[2] = { 400.0f, 1000.0f };
+            const float srcFwhm[2] = { 50.0f, 50.0f };
+            const float dstWl[2] = { 900.0f, 950.0f };
+            const float dstFwhm[2] = { 400.0f, 400.0f };
+            float resampled[2] = { 0.0f, 0.0f };
+            REQUIRE( SpectralResampling::resampleSpectrumGaussian( pixel, srcWl, 2, dstWl,
+                                                                   dstFwhm, 2, resampled ) );
+            for ( int i = 0; i < 2; ++i )
+                for ( int j = 0; j < 2; ++j )
+                    correlation[static_cast<size_t>( i ) * 2 + j] +=
+                        static_cast<double>( resampled[i] ) * resampled[j];
+            ++samples;
+        }
+    REQUIRE( samples == 16 );
+    // finalizeCorrelation() divides the accumulated raw sum by count.
+    SpectralCem::CorrelationStats stats;
+    stats.bands = 2;
+    stats.count = samples;
+    stats.correlation = correlation;
+    SpectralCem::finalizeCorrelation( &stats );
+    const float target[2] = { 1.0f, 2.0f };
+    SpectralCem::Filter filter;
+    REQUIRE( SpectralCem::buildFilter( target, 2, stats.correlation, 0.0, &filter ) );
+    std::vector<double> scratch( 2, 0.0 );
+    const float expectedTarget = SpectralCem::cemScore( target, filter, 2, &scratch );
+    REQUIRE( scores[0] == Catch::Approx( expectedTarget ).margin( 1e-5 ) );
+    REQUIRE( scores[0] == Catch::Approx( 1.0 ).margin( 1e-5 ) ); // distortionless
 }

@@ -305,7 +305,21 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   // "unspecified" license rather than claiming one on the user's behalf.
   // Without these the saved file fails loadValidated() — the write path and
   // the read path would disagree on the schema.
-  entry.id = QStringLiteral( "profile-%1" ).arg( m_library.entries.size() + 1 );
+  // Stable slug that cannot collide with an existing entry id: the count is
+  // only a starting guess, advanced until the slug is free.
+  int slugIndex = m_library.entries.size() + 1;
+  auto idTaken = [this]( const QString &candidate ) {
+    for ( const SpectralLibrary::Entry &existing : m_library.entries )
+    {
+      if ( existing.id == candidate )
+        return true;
+    }
+    return false;
+  };
+  QString slug = QStringLiteral( "profile-%1" ).arg( slugIndex );
+  while ( idTaken( slug ) )
+    slug = QStringLiteral( "profile-%1" ).arg( ++slugIndex );
+  entry.id = slug;
   entry.license = tr( "unspecified" );
   entry.citation = tr( "Measured in the Spectral Profile Panel; license unspecified." );
   entry.synthetic = false;

@@ -309,19 +309,24 @@ TEST_CASE( "Bilateral fusion preserves a step edge that the mean smears",
     REQUIRE( meanResult.fused[static_cast<size_t>( 1 ) * kW + 1] ==
              Catch::Approx( 0.0f ).margin( 1e-6 ) );
 
-    // Pixel (3,1) sits left of the edge: mean over {0,0,0,0,0,100,100,100,100}
-    // = 400/9 ≈ 44.44; bilateral excludes the 100-neighbors (weight 0) → 0.
+    // Pixel (3,1) sits left of the edge: its r=1 window spans x ∈ [2,4], so it
+    // holds six 0-valued members (x = 2,3 over y = 0,1,2) and three
+    // 100-valued members (x = 4) → mean 300/9 ≈ 33.33; with beta = 0.5 the
+    // fused value is 0.5·0 + 0.5·300/9 = 150/9 ≈ 16.67. The bilateral method
+    // excludes the 100-neighbors (range weight exp(-100²/2) = 0) → 0.
     const size_t edgePixel = static_cast<size_t>( 1 ) * kW + 3;
-    REQUIRE( meanResult.fused[edgePixel] == Catch::Approx( 400.0 / 9.0 ).margin( 1e-4 ) );
+    REQUIRE( meanResult.fused[edgePixel] == Catch::Approx( 150.0 / 9.0 ).margin( 1e-4 ) );
     REQUIRE( bilateralResult.fused[edgePixel] == Catch::Approx( 0.0f ).margin( 1e-6 ) );
     // The edge is preserved, not smeared: the two methods differ by more than
     // the whole step height times beta.
     REQUIRE( std::fabs( bilateralResult.fused[edgePixel] - meanResult.fused[edgePixel] ) > 10.0 );
 
-    // Symmetrically on the right side of the edge: pixel (4,1) → bilateral 100.
+    // Symmetrically on the right side of the edge: pixel (4,1) spans x ∈ [3,5]
+    // → three 0-valued and six 100-valued members → mean 600/9; fused
+    // 0.5·100 + 0.5·600/9 = 50 + 300/9 ≈ 83.33. Bilateral → exactly 100.
     const size_t edgePixelRight = static_cast<size_t>( 1 ) * kW + 4;
     REQUIRE( meanResult.fused[edgePixelRight] ==
-             Catch::Approx( 500.0 / 9.0 ).margin( 1e-4 ) );
+             Catch::Approx( 50.0 + 300.0 / 9.0 ).margin( 1e-4 ) );
     REQUIRE( bilateralResult.fused[edgePixelRight] ==
              Catch::Approx( 100.0f ).margin( 1e-6 ) );
 
@@ -387,9 +392,43 @@ TEST_CASE( "Bilateral fusion: constant plane, identities and sigma extremes",
         wide.beta = 1.0;
         wide.sigmaRange = 1e6;
         REQUIRE( fuseScores( scores.data(), nullptr, 3, 1, wide, &result ) );
-        REQUIRE( result.fused[1] == Catch::Approx( 6.0f ).margin( 1e-4 ) );
-        REQUIRE( result.fused[2] == Catch::Approx( 6.0f ).margin( 1e-4 ) );
+        // The range weight vanishes (≈1) but the SPATIAL Gaussian remains:
+        // with sigma_s = r/2 the distance-1 weight is exp(-2), so the
+        // aggregate of {5 (self), 7 (distance 1)} is (5 + e^{-2}·7)/(1+e^{-2}).
+        const double e2 = std::exp( -2.0 );
+        REQUIRE( result.fused[1] ==
+                 Catch::Approx( ( 5.0 + e2 * 7.0 ) / ( 1.0 + e2 ) ).margin( 1e-5 ) );
+        REQUIRE( result.fused[2] ==
+                 Catch::Approx( ( 7.0 + e2 * 5.0 ) / ( 1.0 + e2 ) ).margin( 1e-5 ) );
     }
+}
+
+TEST_CASE( "Bilateral fusion pins the spatial kernel shape (hand-computed)",
+           "[spectral][fusion][bilateral]" )
+{
+    // 1×3 plane {0, 1, 4}, r = 1, sigmaRange huge (range weights ≈ 1), beta =
+    // 1. sigma_s = r/2 → the distance-1 spatial weight is exp(-2). The
+    // aggregate is therefore the spatial-weighted mean, entrywise:
+    //   pixel 0: (1·0 + e^{-2}·1)/(1 + e^{-2})
+    //   pixel 1: (1·1 + e^{-2}·0 + e^{-2}·4)/(1 + 2e^{-2})
+    //   pixel 2: (1·4 + e^{-2}·1)/(1 + e^{-2})
+    // This pins the spatial kernel (a constant G_s, or a swapped G_s/G_r,
+    // produces different values).
+    const std::vector<float> scores{ 0.0f, 1.0f, 4.0f };
+    Config config;
+    config.method = Method::Bilateral;
+    config.beta = 1.0;
+    config.sigmaRange = 1e9;
+    Result result;
+    REQUIRE( fuseScores( scores.data(), nullptr, 3, 1, config, &result ) );
+
+    const double e2 = std::exp( -2.0 );
+    REQUIRE( result.fused[0] ==
+             Catch::Approx( e2 / ( 1.0 + e2 ) ).margin( 1e-6 ) );
+    REQUIRE( result.fused[1] ==
+             Catch::Approx( ( 1.0 + 4.0 * e2 ) / ( 1.0 + 2.0 * e2 ) ).margin( 1e-6 ) );
+    REQUIRE( result.fused[2] ==
+             Catch::Approx( ( 4.0 + e2 ) / ( 1.0 + e2 ) ).margin( 1e-6 ) );
 }
 
 TEST_CASE( "Bilateral fusion tile-halo equivalence: interior matches whole-plane "
@@ -588,4 +627,33 @@ TEST_CASE( "rs:spectral_spatial_fuse E2E: bilateral method, streaming and method
     REQUIRE_NOTHROW( defaultResult = op->run( defaultParams, context ) );
     REQUIRE( defaultResult["method"].asString() == "mean" );
     REQUIRE( !defaultResult.isMember( "sigmaRange" ) );
+
+    // The MEAN method also streams correctly across tiles (the 12.0 E2E is
+    // single-tile only): run it over the same 300×300 edge fixture and
+    // compare against the whole-frame kernel oracle bit-exactly.
+    GdalDatasetWrapper meanDs;
+    REQUIRE( meanDs.open( dir.filePath( "default.tif" ) ) );
+    std::vector<float> meanFused( static_cast<size_t>( kW ) * kH );
+    REQUIRE( meanDs.readBandData( 1, meanFused.data(), kW, kH ) );
+    Config meanConfig;
+    meanConfig.radius = 2;
+    meanConfig.beta = 0.5;
+    Result meanOracle;
+    REQUIRE( fuseScores( plane.data(), valid.data(), kW, kH, meanConfig, &meanOracle ) );
+    size_t meanMismatches = 0;
+    for ( size_t p = 0; p < plane.size(); ++p )
+    {
+        const bool oracleNaN = std::isnan( meanOracle.fused[p] );
+        if ( oracleNaN != std::isnan( meanFused[p] ) ||
+             ( !oracleNaN && meanFused[p] != meanOracle.fused[p] ) )
+            ++meanMismatches;
+    }
+    REQUIRE( meanMismatches == 0 );
+
+    // Hand-computed mean value on the edge: pixel (150,148) has a 5×5 window
+    // spanning x ∈ [146,150] → twenty 0-valued and five 100-valued members →
+    // mean 20; fused = 0.5·0 + 0.5·20 = 10 (the mean smears the edge; the
+    // bilateral run above kept it at 0).
+    CHECK( meanFused[static_cast<size_t>( 150 ) * kW + 148] ==
+           Catch::Approx( 10.0f ).margin( 1e-4 ) );
 }

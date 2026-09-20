@@ -270,6 +270,17 @@ TEST_CASE( "TCIMF conditioning diagnostic separates healthy and near-collinear s
                           corr, 0.0, &ill, nullptr, &illCond ) );
     REQUIRE( illCond > 1.0e6 );
 
+    // The null constraints are exact in exact arithmetic; the REALIZED
+    // residual scales with the conditioning (cancellation in t − S z). For a
+    // well-conditioned set it is at round-off; for the near-collinear set it
+    // is bounded by the documented ~1e-12·cond degradation.
+    std::vector<double> scratch( 2, 0.0 );
+    const float healthyS[2] = { 1.0f, -1.0f }; // the healthy filter's interference
+    const float illS2[2] = { static_cast<float>( std::cos( eps ) ),
+                             static_cast<float>( std::sin( eps ) ) };
+    REQUIRE( std::fabs( tcimfScore( healthyS, healthy, 2, &scratch ) ) <= 1e-12 );
+    REQUIRE( std::fabs( tcimfScore( illS2, ill, 2, &scratch ) ) <= 1e-12 * illCond );
+
     // No interference → the diagnostic is "unknown" (-1), not a fake 1.
     Filter none;
     double noneCond = 0.0;

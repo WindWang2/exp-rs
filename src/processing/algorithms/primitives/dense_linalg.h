@@ -34,7 +34,12 @@ bool invertDenseMatrixInPlace( std::vector<double> &m, int n );
     /// Rayleigh residual, hard-capped iterations); λmin comes from power
     /// iteration on the inverse. Returns -1 when the matrix is not computable
     /// (size mismatch, non-finite, singular, or a non-converging iteration) —
-    /// "unknown" is reported honestly rather than guessed.
+    /// "unknown" is reported honestly rather than guessed. KNOWN LIMITATION:
+    /// power iteration from the normalized-ones start can under-report when
+    /// that start is (near-)orthogonal to the dominant eigenvector (e.g. the
+    /// Gram of an equiangular pair reports 1 instead of 3); the value is a
+    /// deterministic lower bound on the true condition number, never an
+    /// overstatement.
     double conditionNumber( const std::vector<double> &m, int n );
 
 } // namespace sicnu::primitives

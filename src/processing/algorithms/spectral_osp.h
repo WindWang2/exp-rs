@@ -15,6 +15,10 @@
 //   - the projector is idempotent:                  P² = P
 //   - the score is signed and scales with |d|: OSP is NOT brightness-invariant
 //     (unlike ACE/CEM) — documented, asserted, and intentional.
+// Exact in exact arithmetic: the REALIZED suppression residual scales with
+// the conditioning of UᵀU (reported as interferenceCondition) — for a set
+// with condition number c, residuals up to ~1e-12·c are expected. The
+// kernel tests assert that bound explicitly.
 //
 // Unlike MF/ACE/CEM/TCIMF, OSP consumes NO background statistics: the
 // undesired subspace is an input, so the detector needs one scoring pass and
@@ -31,8 +35,9 @@
 //     subspace, so the detector is meaningless — refused instead of emitting
 //     an amplifying noise filter.
 // The conditioning of UᵀU is reported as a diagnostic
-// (interferenceCondition, same λmax·k/tr proxy as the RX family) so
-// near-collinear signature sets are visible before they bite.
+// (interferenceCondition, the true λmax/λmin condition number via
+// sicnu::primitives::conditionNumber) so near-collinear signature sets are
+// visible before they bite.
 #pragma once
 
 #include <QString>
