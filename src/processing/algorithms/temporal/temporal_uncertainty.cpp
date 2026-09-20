@@ -20,7 +20,84 @@ using detail::kMaxHarmonicTerms;
 using detail::harmonicDesignRow;
 using detail::harmonicTrendDesignRow;
 
-using detail::normalQuantile;
+/// Continued fraction for the incomplete beta function (Numerical Recipes
+/// betacf) — building block for the Student-t CDF below.
+double betacf( double a, double b, double x )
+{
+  const double qab = a + b, qap = a + 1.0, qam = a - 1.0;
+  double c = 1.0;
+  double d = 1.0 - qab * x / qap;
+  if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+  d = 1.0 / d;
+  double h = d;
+  for ( int m = 1; m <= 300; ++m )
+  {
+    const int m2 = 2 * m;
+    double aa = m * ( b - m ) * x / ( ( qam + m2 ) * ( a + m2 ) );
+    d = 1.0 + aa * d;
+    if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+    c = 1.0 + aa / c;
+    if ( std::fabs( c ) < 1e-300 ) c = 1e-300;
+    d = 1.0 / d;
+    h *= d * c;
+    aa = -( a + m ) * ( qab + m ) * x / ( ( a + m2 ) * ( qap + m2 ) );
+    d = 1.0 + aa * d;
+    if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+    c = 1.0 + aa / c;
+    if ( std::fabs( c ) < 1e-300 ) c = 1e-300;
+    d = 1.0 / d;
+    const double del = d * c;
+    h *= del;
+    if ( std::fabs( del - 1.0 ) < 3e-14 )
+      break;
+  }
+  return h;
+}
+
+/// Regularized incomplete beta I_x(a, b) — 0/1-clamped at the ends.
+double incompleteBeta( double a, double b, double x )
+{
+  if ( x <= 0.0 ) return 0.0;
+  if ( x >= 1.0 ) return 1.0;
+  const double bt = std::exp( std::lgamma( a + b ) - std::lgamma( a ) -
+                              std::lgamma( b ) + a * std::log( x ) +
+                              b * std::log( 1.0 - x ) );
+  if ( x < ( a + 1.0 ) / ( a + b + 2.0 ) )
+    return bt * betacf( a, b, x ) / a;
+  return 1.0 - bt * betacf( b, a, 1.0 - x ) / b;
+}
+
+/// Two-sided Student-t quantile: returns t ≥ 0 with P(T ≤ t) = p for
+/// T ~ t(df). The regression-coefficient intervals are t-distributed
+/// exactly under Gaussian noise — at df = 1 the 95% quantile is 12.7, not
+/// the normal 1.96, so small-sample intervals stay honest instead of
+/// anticonservative. Solved by bisection on the exact CDF
+/// P(T > t) = ½·I_{df/(df+t²)}(df/2, ½).
+double studentTQuantile( double p, double df )
+{
+  if ( !( df >= 1.0 ) || !( p > 0.5 && p < 1.0 ) )
+    return kNanD;
+  const double target = 2.0 * ( 1.0 - p ); // = I_x value at the quantile
+  const auto tail = [&]( double t ) {
+    return incompleteBeta( df / 2.0, 0.5, df / ( df + t * t ) );
+  };
+  double lo = 0.0, hi = 1.0;
+  while ( tail( hi ) > target )
+  {
+    hi *= 2.0;
+    if ( hi > 1e12 )  // numerically unreachable for df ≥ 1, p < 0.999
+      return hi;
+  }
+  for ( int i = 0; i < 80; ++i )
+  {
+    const double mid = 0.5 * ( lo + hi );
+    if ( tail( mid ) > target )
+      lo = mid;
+    else
+      hi = mid;
+  }
+  return 0.5 * ( lo + hi );
+}
 } // namespace
 
 namespace
@@ -147,7 +224,7 @@ AnalyticCiResult analyticCoefficientCiImpl(
   result.df = df;
   result.valid = true;
 
-  const double z = normalQuantile( 0.5 + level / 2.0 );
+  const double z = studentTQuantile( 0.5 + level / 2.0, static_cast<double>( df ) );
   result.coefficients.resize( static_cast<size_t>( terms ) );
   for ( int j = 0; j < terms; ++j )
   {

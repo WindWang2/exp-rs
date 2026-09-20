@@ -159,10 +159,15 @@ Json::Value RsTemporalGapFillOperator::estimateExecution( const Json::Value &par
   int scenes = kTypicalSceneEstimate;
   if ( params.isMember( "scenes" ) && params["scenes"].isArray() )
     scenes = std::max<int>( 1, static_cast<int>( params["scenes"].size() ) );
-  // 1 read tile + one series tile per scene date + filled_count tile.
-  return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4,
-                                                   2 + static_cast<std::uint64_t>( scenes ), 0,
-                                                   2 * 1024 * 1024 );
+  // 1 read tile + one series tile per scene date + filled_count tile; the
+  // optional provenance raster doubles the per-scene output tiles.
+  const bool withProvenance =
+    params.isMember( "provenance_output" ) && params["provenance_output"].isString() &&
+    !params["provenance_output"].asString().empty();
+  return sicnu::processing::makeStreamingEstimate(
+      tileSize, tileSize, 1, 4,
+      2 + static_cast<std::uint64_t>( scenes ) * ( withProvenance ? 2 : 1 ), 0,
+      2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -418,11 +423,6 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
     GDALSetMetadataItem( static_cast<GDALDatasetH>( out.dataset() ), "SICNU_RADIOMETRIC_STATE",
                          prepared.preflight.commonRadiometricState.toUtf8().constData(), nullptr );
 
-  QString closeErr;
-  if ( !out.closeWithError( &closeErr ) )
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "output flush failed (disk full?): " + closeErr.toStdString() );
-  guard.commit();
   if ( writeProvenance )
   {
     temporal_output::writeTemporalDatasetMetadata(
@@ -431,12 +431,22 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
                         "2:interpolated" )
             .arg( methodToken )
             .arg( maxGapDays ) );
-    if ( !prov.closeWithError( &closeErr ) )
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "provenance flush failed (disk full?): " +
-                                 closeErr.toStdString() );
-    provGuard.commit();
   }
+
+  // Atomic dual-output publication: both datasets must flush successfully
+  // before EITHER guard commits, so a provenance-side failure cannot leak a
+  // committed primary output from a failed run.
+  QString closeErr;
+  if ( !out.closeWithError( &closeErr ) )
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "output flush failed (disk full?): " + closeErr.toStdString() );
+  if ( writeProvenance && !prov.closeWithError( &closeErr ) )
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "provenance flush failed (disk full?): " +
+                               closeErr.toStdString() );
+  guard.commit();
+  if ( writeProvenance )
+    provGuard.commit();
 
   Json::Value result( Json::objectValue );
   result["output"] = outputPath;

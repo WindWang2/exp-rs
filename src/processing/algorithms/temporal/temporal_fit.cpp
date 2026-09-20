@@ -399,7 +399,9 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
       const double t1 = tDays[static_cast<size_t>( i1 )];
       const double frac = ( t1 > t0 ) ? ( t - t0 ) / ( t1 - t0 ) : 0.0;
       const int d = static_cast<int>( std::lround( d0 + frac * ( d1 - d0 ) ) );
-      return static_cast<double>( ( ( d - 1 ) % 365 ) + 1 );
+      // Unwrap only values shifted past the year end by the +365 bracket
+      // correction — d == 366 is a valid leap-year day-of-year, not a wrap.
+      return static_cast<double>( d > 366 ? d - 365 : d );
     };
 
     int i0 = -1, i1 = -1;

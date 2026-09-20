@@ -84,11 +84,12 @@ struct SeasonalMetrics
   double greenUpRate = std::numeric_limits<double>::quiet_NaN();
   double senescenceRate = std::numeric_limits<double>::quiet_NaN();  ///< positive magnitude, value/day
   /// Day-of-year of the 50%-amplitude crossing on each limb, interpolated
-  /// between the bracketing samples. -1 when undefined. Year-boundary
-  /// brackets interpolate modulo 365 (leap-year Dec-31 brackets may land one
-  /// day early — documented approximation).
-  double greenUpMidDoy = -1.0;
-  double senescenceMidDoy = -1.0;
+  /// between the bracketing samples. NaN when the crossing is not sampled —
+  /// same undefined-marker convention as the rate fields (unlike the legacy
+  /// -1 sos/pos/eos sentinel) so rasters can write it verbatim into a
+  /// NaN-NoData band. Year-boundary brackets interpolate modulo 365.
+  double greenUpMidDoy = std::numeric_limits<double>::quiet_NaN();
+  double senescenceMidDoy = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
 };
 

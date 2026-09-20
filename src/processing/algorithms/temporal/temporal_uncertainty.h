@@ -6,8 +6,9 @@
 // Two complementary, opt-in mechanisms:
 //  1. ANALYTIC: coefficient standard errors for the weighted harmonic+trend
 //     linear model, from diag((XᵀWX)⁻¹)·σ̂² with σ̂² = SSE/(n−terms) and a
-//     normal-approximation quantile at the requested level. Exact for
-//     Gaussian noise, deterministic, O(terms³).
+//     Student-t quantile at df = n−terms (exact for Gaussian noise at any
+//     df ≥ 1 — the normal approximation would be badly anticonservative for
+//     small df). Deterministic, O(terms³).
 //  2. RESIDUAL BOOTSTRAP: fixed-design residual resampling (centered
 //     residuals drawn with replacement at the SAME time points) for any
 //     scalar statistic without closed form — break dates, magnitudes,
@@ -54,7 +55,7 @@ struct AnalyticCiResult
 /// Analytic weighted-LS coefficient CIs for the shared harmonic+trend design
 /// over segment [a, b). Weights: @a weights[i] > 0 participates with that
 /// weight (quality-band weights are valid); non-finite y is skipped.
-/// @a ciLevel in (0, 1) (0.95 default); normal-approximation quantile.
+/// @a ciLevel in (0, 1) (0.95 default); Student-t quantile at df = n−terms.
 AnalyticCiResult harmonicTrendCoefficientCi(
     const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
     int harmonics, const std::vector<double> &weights, double ciLevel );

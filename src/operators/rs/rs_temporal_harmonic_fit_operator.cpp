@@ -98,7 +98,9 @@ Json::Value RsTemporalHarmonicFitOperator::schema() const
       "compute_ci",
       "Append per-coefficient confidence-interval bands (coef_lo_*/coef_hi_*) "
       "from the analytic weighted-LS interval on the SAME no-trend harmonic "
-      "design (Temporal Phenology 12.0); requires writeCoefficients",
+      "design (Temporal Phenology 12.0); requires writeCoefficients, and "
+      "refuses with robust=true (the analytic interval describes the "
+      "least-squares estimator, not the IRLS-reweighted fit)",
       false );
   Json::Value ciLevelParam = makeNumberParam( "ci_level",
                                               "Confidence level for compute_ci (0.01–0.999)", 0.95 );
@@ -198,6 +200,13 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
         ErrorCode::InvalidParameter,
         "compute_ci requires writeCoefficients (interval bands are emitted "
         "alongside the coefficients they bound)" );
+  if ( computeCi && robust )
+    throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "compute_ci is incompatible with robust=true: the analytic interval "
+        "describes the unweighted least-squares estimator on the harmonic "
+        "design, and no robust-weight-aware interval is available — emitting "
+        "OLS bounds around IRLS coefficients would report the wrong model" );
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -486,10 +495,11 @@ Json::Value RsTemporalHarmonicFitOperator::run( const Json::Value &params, RSOpe
   Json::Value memory( Json::objectValue );
   memory["tileWidth"] = tileSize;
   memory["tileHeight"] = tileSize;
-  // series + fitted per scene, RMSE/R² + coefficient rows + gather/tile buffers.
+  // series + fitted per scene, RMSE/R² + coefficient & CI rows + gather/tile
+  // buffers.
   memory["workingSetEstimateBytes"] = Json::Value::UInt64(
     TemporalTileReader::estimateWorkingSetBytes( tileSize, tileSize,
-                                                 2 * sceneCount + coefBands + 3, 0 ) );
+                                                 2 * sceneCount + coefBands + ciBands + 3, 0 ) );
   result["memory"] = memory;
   context.reportProgress( 1.0, "Temporal harmonic fit complete" );
   return result;

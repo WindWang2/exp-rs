@@ -53,6 +53,15 @@ Json::Value RsTemporalSarFusionOperator::schema() const
   props["sar"] = makeRasterParam(
       "sar", "SAR temporal feature raster (e.g. rs:sar_temporal_stats output) "
              "on the same pixel grid" );
+  // Machine-readable contracts: both inputs MUST sit on the same pixel grid
+  // (derives capability crs.requires_shared_grid / the rs:align fixer edge)
+  // and carry distinct modalities for the optical+SAR family record.
+  props["optical"]["x-rs-contract"]["dataKind"] = "raster";
+  props["optical"]["x-rs-contract"]["gridRelation"] = "same-grid";
+  props["optical"]["x-rs-contract"]["modality"] = "optical";
+  props["sar"]["x-rs-contract"]["dataKind"] = "raster";
+  props["sar"]["x-rs-contract"]["gridRelation"] = "same-grid";
+  props["sar"]["x-rs-contract"]["modality"] = "sar";
   props["output"] = makeOutputParam( "output", "Fused feature stack GeoTIFF", "tif" );
   props["tile_size"] = makeIntegerParam( "tile_size", "Streaming tile size (pixels)",
                                          kDefaultTileSize );
@@ -217,9 +226,15 @@ Json::Value RsTemporalSarFusionOperator::run( const Json::Value &params, RSOpera
   int stepsDone = 0;
 
   auto copyBand = [&]( GdalDatasetWrapper &src, int srcBand, int dstBand ) {
+    // The output declares NaN NoData — remap the SOURCE band's sentinel
+    // (e.g. -9999) so foreign NoData never lands as valid fused data.
+    bool hasSrcNodata = false;
+    const double srcNodata = src.bandNoDataValue( srcBand, &hasSrcNodata );
+    const bool remapSentinel = hasSrcNodata && std::isfinite( srcNodata );
     for ( int ty = 0; ty < tilesY; ++ty )
       for ( int tx = 0; tx < tilesX; ++tx )
       {
+        context.throwIfCancelled();
         const int x = tx * tileSize;
         const int y = ty * tileSize;
         const int w = std::min( tileSize, width - x );
@@ -227,12 +242,18 @@ Json::Value RsTemporalSarFusionOperator::run( const Json::Value &params, RSOpera
         if ( !src.readBandWindow( srcBand, x, y, w, h, tile.data() ) )
           throw RSOperatorError( ErrorCode::GdalError,
                                  "failed reading fusion input band" );
+        if ( remapSentinel )
+        {
+          const size_t n = static_cast<size_t>( w ) * static_cast<size_t>( h );
+          for ( size_t i = 0; i < n; ++i )
+            if ( tile[i] == static_cast<float>( srcNodata ) )
+              tile[i] = kNan;
+        }
         if ( !out.writeBandWindow( dstBand, x, y, w, h, tile.data() ) )
           throw RSOperatorError( ErrorCode::GdalError,
                                  "failed writing fused band" );
         ++stepsDone;
       }
-    context.throwIfCancelled();
     context.reportProgress( 0.05 + 0.90 * ( static_cast<double>( stepsDone ) / totalSteps ),
                             "Fusing band " + std::to_string( dstBand ) + "/" +
                                 std::to_string( bandCount ) );

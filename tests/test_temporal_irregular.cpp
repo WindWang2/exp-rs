@@ -412,7 +412,7 @@ TEST_CASE( "phenologyThreshold leaves limb metrics undefined when the "
     const SeasonalMetrics m = phenologyThreshold( y, t, doyOf, 130, 365, 0.2 );
     REQUIRE( m.valid );
     REQUIRE( !( m.greenUpRate == m.greenUpRate ) ); // NaN, not fabricated
-    REQUIRE( m.greenUpMidDoy < 0.0 );
+    REQUIRE( !( m.greenUpMidDoy == m.greenUpMidDoy ) );
     REQUIRE( m.senescenceRate == Approx( 0.42 / 37.0 ).margin( 1e-4 ) );
     REQUIRE( m.senescenceMidDoy == Approx( 230.0 ).margin( 1.0 ) );
 }
@@ -435,8 +435,8 @@ TEST_CASE( "phenologyThreshold leaves limb metrics undefined on a flat season",
     REQUIRE( m.valid ); // sos/eos still resolve on the degenerate curve
     REQUIRE( !( m.greenUpRate == m.greenUpRate ) );
     REQUIRE( !( m.senescenceRate == m.senescenceRate ) );
-    REQUIRE( m.greenUpMidDoy < 0.0 );
-    REQUIRE( m.senescenceMidDoy < 0.0 );
+    REQUIRE( !( m.greenUpMidDoy == m.greenUpMidDoy ) );
+    REQUIRE( !( m.senescenceMidDoy == m.senescenceMidDoy ) );
 }
 
 TEST_CASE( "whittakerSmoothTime refuses duplicate/degenerate axes",
@@ -462,6 +462,29 @@ TEST_CASE( "whittakerSmoothTime refuses duplicate/degenerate axes",
     const auto two = whittakerSmoothTime( { 1.f, kNan }, { 0.0, 9.0 }, {}, 10.0 );
     REQUIRE( two[0] == Approx( 1.0f ).margin( 1e-6 ) );
     REQUIRE( !( two[1] == two[1] ) );
+}
+
+TEST_CASE( "whittakerSmoothTime* refuse malformed weight vectors",
+           "[temporal][irregular][negative]" )
+{
+    ensureApp();
+    const std::vector<float> y = { 1.f, 2.f, 3.f, 4.f, 5.f };
+    const std::vector<double> t = { 0, 4, 9, 17, 30 };
+    // Wrong-sized weights are a caller error — refused, never ignored.
+    REQUIRE( allNan( whittakerSmoothTime( y, t, { 1.f, 1.f }, 10.0 ) ) );
+    REQUIRE( allNan( whittakerSmoothTimeRobust( y, t, { 1.f, 1.f, 1.f }, 10.0, 3 ) ) );
+    // A negative weight would make W + λDᵀCD indefinite — refuse rather
+    // than solve a broken system; NaN weights refuse the same way.
+    const std::vector<float> neg = { 1.f, 1.f, -1.f, 1.f, 1.f };
+    REQUIRE( allNan( whittakerSmoothTime( y, t, neg, 10.0 ) ) );
+    const std::vector<float> nanW = { 1.f, kNan, 1.f, 1.f, 1.f };
+    REQUIRE( allNan( whittakerSmoothTime( y, t, nanW, 10.0 ) ) );
+    REQUIRE( allNan( whittakerSmoothTimeRobust( y, t, neg, 10.0, 3 ) ) );
+    // Zero weights are legal (sample dropped) — sanity: same-shaped valid
+    // weights still produce a finite smooth.
+    const std::vector<float> zero = { 1.f, 0.f, 1.f, 1.f, 1.f };
+    const auto okOut = whittakerSmoothTime( y, t, zero, 10.0 );
+    REQUIRE( std::isfinite( okOut[0] ) );
 }
 
 // ---------------------------------------------------------------------------

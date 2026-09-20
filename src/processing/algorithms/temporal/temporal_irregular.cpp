@@ -32,6 +32,24 @@ bool validTimeAxis( const std::vector<float> &y,
   }
   return true;
 }
+
+/// Optional weight contract: empty = unweighted; otherwise exactly one
+/// finite, non-negative weight per sample. A wrong-sized or invalid weight
+/// vector is a caller error — refusing (all-NaN) beats silently ignoring it
+/// or letting a negative diagonal make the normal equations indefinite.
+bool weightsUsable( const std::vector<float> &w, int n )
+{
+  if ( w.empty() )
+    return true;
+  if ( static_cast<int>( w.size() ) != n )
+    return false;
+  for ( float wi : w )
+  {
+    if ( !( wi >= 0.0f ) )  // also rejects NaN
+      return false;
+  }
+  return true;
+}
 } // namespace
 
 std::vector<std::uint8_t> gapFillProvenance( const std::vector<float> &input,
@@ -112,24 +130,34 @@ std::vector<float> savitzkyGolayDays( const std::vector<float> &y,
     return out;
   const double half = windowDays / 2.0;
 
+  // Two-pointer window bounds: centers advance monotonically, so [lo, hi)
+  // never shrinks backward — O(n) bound updates instead of an O(n) scan per
+  // position. Gather buffers are hoisted out of the loop (per-tile pixel
+  // counts make per-position allocations the dominant cost otherwise).
+  std::vector<float> wy;
+  std::vector<double> wt;
+  wy.reserve( static_cast<size_t>( n ) );
+  wt.reserve( static_cast<size_t>( n ) );
+  int lo = 0;
+  int hi = 0;
   for ( int i = 0; i < n; ++i )
   {
     const double center = tDays[static_cast<size_t>( i )];
-    // Gather the day window. The polynomial is fitted in coordinates
-    // relative to the center (xEval = 0) so the normal equations stay
-    // conditioned even for large day ordinals (~19000 since epoch).
-    std::vector<float> wy;
-    std::vector<double> wt;
-    wy.reserve( static_cast<size_t>( n ) );
-    wt.reserve( static_cast<size_t>( n ) );
-    for ( int j = 0; j < n; ++j )
+    const double loBound = center - half;
+    const double hiBound = center + half;
+    while ( hi < n && tDays[static_cast<size_t>( hi )] <= hiBound )
+      ++hi;
+    while ( lo < n && tDays[static_cast<size_t>( lo )] < loBound )
+      ++lo;
+    // The polynomial is fitted in coordinates relative to the center
+    // (xEval = 0) so the normal equations stay conditioned even for large
+    // day ordinals (~19000 since epoch).
+    wy.clear();
+    wt.clear();
+    for ( int j = lo; j < hi; ++j )
     {
-      const double dt = tDays[static_cast<size_t>( j )] - center;
-      if ( std::fabs( dt ) <= half )
-      {
-        wy.push_back( y[static_cast<size_t>( j )] );
-        wt.push_back( dt );
-      }
+      wy.push_back( y[static_cast<size_t>( j )] );
+      wt.push_back( tDays[static_cast<size_t>( j )] - center );
     }
     if ( static_cast<int>( wy.size() ) < polynomialDegree + 1 )
       continue;
@@ -146,9 +174,10 @@ std::vector<float> whittakerSmoothTime( const std::vector<float> &y,
 {
   const int n = static_cast<int>( y.size() );
   std::vector<float> out( static_cast<size_t>( n ), kNan );
-  if ( !validTimeAxis( y, tDays ) || !( lambda > 0.0 ) )
+  if ( !validTimeAxis( y, tDays ) || !( lambda > 0.0 ) ||
+       !weightsUsable( w, n ) )
     return out;
-  const bool haveWeights = !w.empty() && static_cast<int>( w.size() ) == n;
+  const bool haveWeights = !w.empty();
 
   // Degenerate cases mirror whittakerSmooth: too few instants to define a
   // second difference → pass finite values through unchanged.
@@ -217,9 +246,10 @@ std::vector<float> whittakerSmoothTimeRobust( const std::vector<float> &y,
                                               double lambda, int iterations )
 {
   const int n = static_cast<int>( y.size() );
-  if ( !validTimeAxis( y, tDays ) || !( lambda > 0.0 ) )
+  if ( !validTimeAxis( y, tDays ) || !( lambda > 0.0 ) ||
+       !weightsUsable( w, n ) )
     return std::vector<float>( static_cast<size_t>( n ), kNan );
-  const bool haveWeights = !w.empty() && static_cast<int>( w.size() ) == n;
+  const bool haveWeights = !w.empty();
   std::vector<float> weights( static_cast<size_t>( n ), 0.0f );
   for ( int i = 0; i < n; ++i )
     weights[static_cast<size_t>( i )] =

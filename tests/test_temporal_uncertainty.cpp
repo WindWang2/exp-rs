@@ -66,8 +66,11 @@ TEST_CASE( "analytic CI: noise widens intervals and the 95% bounds bracket "
   CHECK( slope.stdError > 0.0 );
   CHECK( slope.lower <= 0.002 );
   CHECK( slope.upper >= 0.002 );
+  // Width oracle: 2·t_0.975(df)·se with df = 96−4 = 92; the t-table value
+  // 1.9861 (not the normal 1.96) — the interval is exact under Gaussian
+  // noise, and the t quantile is what makes small-df bounds honest.
   CHECK( slope.upper - slope.lower ==
-         Approx( 2.0 * 1.959964 * slope.stdError ).epsilon( 1e-6 ) );
+         Approx( 2.0 * 1.9861 * slope.stdError ).margin( 1e-3 ) );
   // A larger noise realization must not shrink the same-truth interval.
   const temporal_corpus::Scenario noisier =
     temporal_corpus::noChangeControl( 96, 2.0, 0.0, 0.002, 0.20, 20260925u );
