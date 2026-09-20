@@ -98,3 +98,27 @@ Option (a): new files inside `src/processing/algorithms/temporal/`
 (`temporal_irregular.*`, `temporal_fusion.*`), operators as new
 `rs_temporal_*_operator` files, tests `test_temporal_*_12.cpp`. Matches repo
 conventions; temporal12 semantics live in file names + sidecars.
+
+## Post-implementation decisions (iteration 2)
+
+1. **Nonuniform Whittaker = second divided difference × cell width.** D row r =
+   2·(Δz_{r+1}/h_{r+1} − Δz_r/h_r)/span with C = diag(span/2) — a discretized
+   ∫(z″)²dt. Reduces EXACTLY to the existing Σ(Δ²z)² Gram at unit spacing
+   (proven by unit-spacing equivalence test, not assumed).
+2. **Harmonic CI must not reuse harmonicTrendCoefficientCi.** That kernel's
+   design is [1,t,sin/cos…] (2+2h); harmonicFit is [1,sin/cos…] (1+2h).
+   Refactored analyticCoefficientCiImpl with includeTrend flag; exported
+   harmonicCoefficientCi for the no-trend basis.
+3. **Sen CI = Gilbert (1987) order-statistic interval** — reuses the already
+   materialized sorted pairwise slopes; O(1) extra per pixel vs bootstrap's
+   199 refits. Breakpoints get per-segment OLS slope SE (σ̂² = RSS/(n−2)).
+4. **compute_ci is opt-in everywhere**, preserving output band shapes when
+   off; harmonic_fit requires writeCoefficients (typed error otherwise).
+5. **Fusion = verified-stack concatenation, never realignment.** Typed
+   mismatch list (width|height|geotransform|projection), CRS compared
+   textually (fail-closed), SICNU_FUSION_* provenance metadata.
+6. **Provenance sidecar is opt-in** (`provenance_output` UInt8 raster) —
+   keeps default output shape unchanged.
+7. Smooth operator: new `*_days` methods are distinct enum values —
+   positional `window`/`moving_average_window`/`degree` checks scoped to the
+   methods that consume them.
