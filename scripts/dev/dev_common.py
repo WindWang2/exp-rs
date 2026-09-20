@@ -129,15 +129,19 @@ def gh_available() -> bool:
 
 
 def trunk_ref(repo: Path | None) -> str:
-    """Best-effort name of origin's default branch (origin/HEAD, else
-    origin/master, else origin/main). Repositories differ; assuming
-    `master` breaks every fixture and every renamed-default repo."""
-    proc = run_git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"])
+    """Name of origin's default branch as an origin/* ref.
+
+    Returns e.g. "origin/master" — always the remote-tracking ref, never the
+    bare short name: a mid-track worktree's local trunk is at the track base
+    while origin's may have advanced, and comparing against the local one
+    would silently produce wrong ahead/behind counts.
+    """
+    prefix = "refs/remotes/origin/"
+    proc = run_git(repo, ["symbolic-ref", prefix + "HEAD"])
     if proc.returncode == 0:
         target = proc.stdout.strip()
-        prefix = "refs/remotes/origin/"
         if target.startswith(prefix) and len(target) > len(prefix):
-            return target[len(prefix):]
+            return "origin/" + target[len(prefix):]
     for candidate in ("origin/master", "origin/main"):
         proc = run_git(repo, ["rev-parse", "--verify", "--quiet", candidate])
         if proc.returncode == 0:
