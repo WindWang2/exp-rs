@@ -81,11 +81,11 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build-dev -R test_task_center_12 -j1 
   adds `[latency]`, `[cpu]`, snapshot idle-fidelity, `RssSample`).
 - `test_task_center`: 382 assertions / 32 cases, green ×2.
 - `test_execution_plane_8`: ~36k assertions / 12 cases, green ×2.
-- `test_execution_plane_9`: 16 pass + 1 env-gated skip (883 assertions).
-  `[coordinator][eventing]` is intermittently red on this host — the run
-  reaches `Completed` before the post-persist notification drain emits, so
-  the `reentered` probe races disk IO; reproduced on unmodified master →
-  pre-existing, not a Track 12 regression.
+- `test_execution_plane_9`: 15 pass + 1 env-gated skip + 1 intermittent
+  `[coordinator][eventing]` red — the run reaches `Completed` before the
+  post-persist notification drain emits, so the `reentered` probe races
+  disk IO; reproduced on unmodified master → pre-existing, not a Track 12
+  regression.
 - `test_execution_plane_7`: `[worker-route]` hits a PRE-EXISTING Qt
   thread-affinity assert (QProcess owned by a different thread) — reproduced
   on unmodified master; classified not-a-regression.
@@ -96,17 +96,27 @@ vcpkg manifest mode bypassed via the populated `vcpkg_installed` (no lock wait).
 
 ### Review disposition
 Independent two-axis review (Standards: CLAUDE.md/.agents/AGENTS.md; Spec:
-.planning docs) against `adf8f9895...HEAD` — no P0. Fixed in the follow-up
-commit: `admissionSnapshot` never-starve fidelity, duplicated lock-free warm
-logic (now shared helpers), `AdmissionDims::toResourceRequest`, explicit
-`ExecutionRequest.latencyClass` (D2), `RssSample` per pass (D7),
-`setCpuThreadLimit` coverage, cancel-stamp resurrection hardening,
-watchdog shutdown re-spawn guard, source-vocabulary alignment, ep8/ep9
-pending-cap opt-outs. D4 deviation documented: dedicated watchdog thread +
-`onJobRecord` opportunistic check instead of `QTimer` — a timer only fires
-on a pumping event loop (the failure mode being guarded against) and
-`enforceCancelDeadlines` cannot be invoked from inside the locked scheduler
-pass (non-recursive `m_mutex`).
+.planning docs) against `adf8f9895...HEAD` — no P0. Fixed in the first
+follow-up commit (`37a7cf53c`): `admissionSnapshot` never-starve fidelity,
+duplicated lock-free warm logic (now shared helpers),
+`AdmissionDims::toResourceRequest`, explicit `ExecutionRequest.latencyClass`
+(D2), `RssSample` per pass (D7), `setCpuThreadLimit` coverage,
+cancel-stamp resurrection hardening, watchdog shutdown re-spawn guard,
+source-vocabulary alignment, ep8/ep9 pending-cap opt-outs.
+
+Second review pass on the delta returned no P0/P1; residuals closed in
+`94ea44422`: `stopWatchdog` stop-flag + thread handoff under `m_mutex`
+(spawn-vs-shutdown race → stranded joinable thread), `admissionSnapshot`
+gains `source` + `latencyClassOverride` on both `TaskCenter` and
+`ExecutionPlane` (preflight lane fidelity), `retryTask` preserves the
+resolved lane, `RssSample` gated on `isEnabled()` (no `/proc` read on the
+hot path when telemetry is off), plus test/doc hygiene.
+
+D4 deviation documented: dedicated watchdog thread + `onJobRecord`
+opportunistic check instead of `QTimer` — a timer only fires on a pumping
+event loop (the failure mode being guarded against) and
+`enforceCancelDeadlines` cannot be invoked from inside the locked
+scheduler pass (non-recursive `m_mutex`).
 
 ### Out-of-scope but required
 - `pipeline_run_coordinator.cpp` — one-line build fix for a PRE-EXISTING
