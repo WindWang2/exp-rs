@@ -38,8 +38,8 @@
 #include <string>
 #include <vector>
 
-#ifndef SICNU_SOURCE_DIR
-#error "SICNU_SOURCE_DIR must point at the repo source tree"
+#ifndef CMAKE_SOURCE_DIR
+#error "CMAKE_SOURCE_DIR must point at the repo source tree"
 #endif
 
 using namespace sicnu;
@@ -57,7 +57,7 @@ struct Bootstrap
         operators::RSOperatorRegistry::instance();
         operators::rs::initBuiltinRsOperators();
         operators::rs::installRsOperatorProvider();
-        catalog.setDirectory( std::string( SICNU_SOURCE_DIR ) +
+        catalog.setDirectory( std::string( CMAKE_SOURCE_DIR ) +
                               "/data/processing/algorithm_meta/capability" );
         catalog.reload();
         REQUIRE( catalog.loadProblems().empty() );

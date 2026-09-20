@@ -46,6 +46,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QString>
+#include <QVariant>
 #include <QVariantMap>
 
 #include "agent/harness/capability_catalog.h"
@@ -61,6 +62,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
