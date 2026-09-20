@@ -999,7 +999,10 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    for ( const NodeFact &node : resumedDef.nodes )
+    // Iterate the stored document directly (m_state->def was assigned the
+    // parsed checkpoint above): the msbuild/clang builds of this file also
+    // reject the same-scope redefinition of `resumedDef` (C2373).
+    for ( const NodeFact &node : m_state->def.nodes )
     {
         int parents = 0;
         for ( const EdgeFact &edge : m_state->def.edges )

@@ -53,11 +53,16 @@ struct PluginPolicy
     std::vector<std::string> allowedPluginIds;     ///< when non-empty: only these load (SICNU_PLUGIN_ALLOW)
     bool allowThirdPartyNative = true;             ///< SICNU_PLUGIN_DISABLE_NATIVE_THIRD_PARTY flips this
     bool allowThirdPartyPython = true;
+    /// WP4 (plugin-platform 12.0): enables PluginRegistry::reload() hot
+    /// reload. SICNU_PLUGIN_DEV=1|true|yes|on. Off in production builds;
+    /// hot reload is unreachable while false even if a caller asks.
+    bool devMode = false;
 
     /// Builds the policy from environment variables:
     ///   SICNU_PLUGIN_POLICY=audit|enforce
     ///   SICNU_PLUGIN_BLOCK=id1,id2     SICNU_PLUGIN_ALLOW=id1,id2
     ///   SICNU_PLUGIN_DISABLE_NATIVE_THIRD_PARTY=1
+    ///   SICNU_PLUGIN_DEV=1             (hot reload, dev mode only)
     static PluginPolicy fromEnvironment();
 
     Json::Value toJson() const;

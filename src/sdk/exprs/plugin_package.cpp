@@ -20,6 +20,7 @@
 
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_validator.h"
+#include "exprs/path_policy.h"
 
 namespace exprs {
 
@@ -476,6 +477,65 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
             note.message = "package carries SBOM metadata (format "
                                + sbomString( "format" ) + ", path " + sbomString( "path" )
                                + "); carried as metadata, integrity-only contract";
+            log.add( note );
+            // WP6 (plugin-platform 12.0): the SBOM path is metadata, but it is
+            // consumed by doctor surfaces — a traversal-typed path is a
+            // typed warning, never a path that leaves the package.
+            const std::string sbomPath = sbomString( "path" );
+            if ( !sbomPath.empty()
+                 && PathPolicy::checkRelativeLexically( sbomPath )
+                        != PathPolicyRejection::Accepted )
+            {
+                log.add( PluginDiagnosticCode::EntrypointOutsideRoot,
+                         PluginDiagnosticSeverity::Warning,
+                         "package.sbom.path '" + sbomPath
+                             + "' must be a package-relative path (ignored); "
+                               "an absolute or parent-escaping SBOM path is never resolved",
+                         manifest.id, "package.sbom.path" );
+            }
+        }
+    }
+
+    if ( packageJson.isObject() && packageJson.isMember( "signature" ) )
+    {
+        // WP6 (plugin-platform 12.0): the signature section is CARRIED
+        // metadata with an honest contract — there is no trust root / public
+        // key store in v1, so a signature is recorded and reported, never
+        // treated as authenticity. Typed checks only: wrong types become
+        // warnings, not aborts (same totality rule as the SBOM section).
+        const Json::Value &signature = packageJson[ "signature" ];
+        const auto signatureString = [&signature]( const char *key ) -> std::string {
+            return signature.isMember( key ) && signature[ key ].isString()
+                       ? signature[ key ].asString()
+                       : std::string();
+        };
+        if ( !signature.isObject() )
+        {
+            log.add( PluginDiagnosticCode::ManifestInvalidField,
+                     PluginDiagnosticSeverity::Warning,
+                     "package.signature must be an object; the section was ignored",
+                     manifest.id, "package.signature" );
+        }
+        else
+        {
+            for ( const char *key : { "algorithm", "value", "keyId" } )
+            {
+                if ( signature.isMember( key ) && !signature[ key ].isString() )
+                {
+                    log.add( PluginDiagnosticCode::ManifestInvalidField,
+                             PluginDiagnosticSeverity::Warning,
+                             std::string( "package.signature." ) + key
+                                 + " must be a string; the field was ignored",
+                             manifest.id, std::string( "package.signature." ) + key );
+                }
+            }
+            PluginDiagnostic note;
+            note.code = PluginDiagnosticCode::None;
+            note.severity = PluginDiagnosticSeverity::Info;
+            note.pluginId = manifest.id;
+            note.message = "package carries signature metadata (algorithm "
+                               + signatureString( "algorithm" ) + "); carried as metadata, "
+                               "NOT authenticity — no trust root in v1";
             log.add( note );
         }
     }

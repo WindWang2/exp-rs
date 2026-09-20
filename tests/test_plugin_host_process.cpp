@@ -5,6 +5,7 @@
 // recovery, hang → kill ladder, flood → frame cap, unload round-trip.
 #include <catch2/catch_test_macros.hpp>
 
+
 #include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_interface.h"
 #include "exprs/plugin_registry.h"
@@ -1160,4 +1161,170 @@ TEST_CASE( "model framework outside the declared access model fails the load typ
     REQUIRE( sawTypedRefusal );
     REQUIRE( stack.sink.modelFactories.empty() ); // nothing half-registered
     REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}
+
+// -- plugin-platform 12.0: repeated lifecycle cycles return to baseline -------------
+
+/// Counts live host-process worker entries from the runtime snapshot.
+int liveWorkerEntries( sicnu::plugins::PluginHostProcessRuntime &runtime )
+{
+    const Json::Value snapshot = runtime.diagnosticsSnapshot();
+    int live = 0;
+    if ( snapshot.isMember( "plugins" ) && snapshot[ "plugins" ].isObject() )
+    {
+        for ( const std::string &key : snapshot[ "plugins" ].getMemberNames() )
+        {
+            const Json::Value &entry = snapshot[ "plugins" ][ key ];
+            if ( entry.isObject() && entry.isMember( "workerAlive" )
+                 && entry[ "workerAlive" ].asBool() )
+                ++live;
+        }
+    }
+    return live;
+}
+
+TEST_CASE( "repeated load/unload cycles return handles and workers to baseline",
+           "[hostprocess][lifecycle][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+
+    // Baseline: fresh registry, nothing loaded, no live worker entry.
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
+
+    // Five clean cycles: load registers the proxy contributions, unload
+    // revokes them and reaps the worker.
+    for ( int cycle = 0; cycle < 5; ++cycle )
+    {
+        REQUIRE( loadOrExplain( kPluginId ) );
+        REQUIRE( stack.sink.operators.count( "test:iso-echo" ) == 1 );
+        REQUIRE( liveWorkerEntries( *stack.runtime ) == 1 );
+        Json::Value params( Json::objectValue );
+        params["after"] = "cycle";
+        Json::Value echo = runOperator( stack, "test:iso-echo", params );
+        REQUIRE( echo["success"].asBool() );
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( stack.sink.operators.empty() );
+        REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+        REQUIRE( registry.loadedPluginIds().empty() );
+    }
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
+}
+
+TEST_CASE( "repeated crash/restart cycles return handles and workers to baseline",
+           "[hostprocess][crash][lifecycle][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+
+    // Between cycles: load, crash the worker, let the proxy exhaust its
+    // bounded recovery, unload cleanly. The worker entry must be gone each
+    // time — no leaked sessions across repeated crashes.
+    for ( int cycle = 0; cycle < 3; ++cycle )
+    {
+        REQUIRE( loadOrExplain( kPluginId ) );
+        REQUIRE( liveWorkerEntries( *stack.runtime ) == 1 );
+
+        Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+        REQUIRE( crash["__operatorError"].asBool() );
+
+        // unloadAll at the end of each cycle reaps whatever survived the
+        // crash (kill ladder) — the registry must report nothing loaded.
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+        REQUIRE( registry.loadedPluginIds().empty() );
+        REQUIRE( stack.sink.operators.empty() );
+
+        // A fresh load after the crash works again (bounded recovery did not
+        // poison the plugin).
+        REQUIRE( loadOrExplain( kPluginId ) );
+        Json::Value params( Json::objectValue );
+        params["after"] = "recovered";
+        Json::Value echo = runOperator( stack, "test:iso-echo", params );
+        REQUIRE( echo["success"].asBool() );
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    }
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
+}
+
+TEST_CASE( "restart exhaustion keeps the host alive and the state honest",
+           "[hostprocess][crash][restart-exhaustion][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Exhaustion is OBSERVABLE, not inferred: the typed refusal the proxy
+    // returns once the restart budget is spent names the policy explicitly.
+    // (The exact respawn count varies with worker-death timing - a crash and a
+    // kill-ladder termination both spend the budget - so the counter is
+    // reported for evidence, while the refusal MESSAGE is the contract.)
+    bool sawExhaustedRefusal = false;
+    for ( int attempt = 0; attempt < 6; ++attempt )
+    {
+        Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+        REQUIRE( crash["__operatorError"].asBool() );
+        REQUIRE( crash["code"].asString() == "4002" ); // typed E6005 refusal
+        const std::string message = crash.get( "message", "" ).asString();
+        if ( message.find( "restart policy exhausted" ) != std::string::npos )
+            sawExhaustedRefusal = true;
+    }
+    REQUIRE( sawExhaustedRefusal );
+    {
+        const Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+        const Json::Value &policy = snapshot[ "restartPolicy" ];
+        REQUIRE( policy.isObject() );
+        const int restartCount = policy.get( "restartCount", 0 ).asInt();
+        INFO( "restartCount=" << restartCount << " maxRestarts="
+                                  << policy.get( "maxRestarts", 0 ).asInt() );
+        REQUIRE( restartCount >= 1 ); // at least one bounded respawn happened
+    }
+
+    // The reload path is the operator: after the policy exhausted, unload +
+    // load brings a fresh worker and the plugin is usable again.
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( loadOrExplain( kPluginId ) );
+    Json::Value params( Json::objectValue );
+    params["after"] = "post-exhaustion";
+    Json::Value echo = runOperator( stack, "test:iso-echo", params );
+    REQUIRE( echo["success"].asBool() );
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
+}
+
+TEST_CASE( "concurrent close of a live worker leaves no orphan entries",
+           "[hostprocess][lifecycle][concurrency][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 1 );
+
+    // Simultaneous unloads: exactly one wins the drain; every caller must
+    // observe a consistent end state (no double-free, no leaked session).
+    std::atomic<int> successes{ 0 };
+    std::atomic<int> refusals{ 0 };
+    std::vector<std::thread> unloaders;
+    for ( int i = 0; i < 4; ++i )
+    {
+        unloaders.emplace_back( [&registry, &successes, &refusals]() {
+            if ( registry.unload( kPluginId ) )
+                successes.fetch_add( 1 );
+            else
+                refusals.fetch_add( 1 );
+        } );
+    }
+    for ( auto &thread : unloaders )
+        thread.join();
+    INFO( "unload successes: " << successes.load() << ", refusals: " << refusals.load() );
+    REQUIRE( successes.load() >= 1 );
+    REQUIRE( successes.load() + refusals.load() == 4 );
+    REQUIRE_FALSE( registry.isLoaded( kPluginId ) );
+    REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
+    REQUIRE( registry.loadedPluginIds().empty() );
 }

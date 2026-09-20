@@ -549,6 +549,10 @@ Json::Value PluginManifest::toJson() const
     json["version"] = version;
     json["api_version"] = apiVersion;
     json["abi_version"] = abiVersion;
+    if ( !minHostApi.empty() )
+        json["min_host_api"] = minHostApi;
+    if ( !maxHostApi.empty() )
+        json["max_host_api"] = maxHostApi;
     // Structured declarations round-trip too: the discovery index, the
     // record snapshot and the host-process worker's load params all travel
     // through toJson(), and losing them silently disabled the capability
@@ -670,6 +674,8 @@ bool parsePluginManifestObject( const Json::Value &json, PluginManifest &out,
          || !readOptionalString( json, "name", out.name, error )
          || !readOptionalString( json, "version", out.version, error )
          || !readOptionalString( json, "api_version", out.apiVersion, error )
+         || !readOptionalString( json, "min_host_api", out.minHostApi, error )
+         || !readOptionalString( json, "max_host_api", out.maxHostApi, error )
          || !readOptionalString( json, "description", out.description, error )
          || !readOptionalString( json, "vendor", out.vendor, error )
          || !readOptionalString( json, "license", out.license, error )

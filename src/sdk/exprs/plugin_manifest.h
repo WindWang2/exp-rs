@@ -203,6 +203,13 @@ struct PluginManifest
     std::string name;
     std::string version;
     std::string apiVersion;
+    /// WP1 (plugin-platform 12.0): OPTIONAL host-API compatibility range
+    /// ("MAJOR.MINOR"). Empty = not declared (plain isPluginApiCompatible
+    /// rule). Declared bounds are validated by PluginManifestValidator
+    /// against the host version; an out-of-range host is a typed
+    /// ApiVersionMismatch before any code runs.
+    std::string minHostApi;
+    std::string maxHostApi;
     int abiVersion = 0;
     std::string description;
     std::string vendor;

@@ -336,17 +336,24 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
             return true; // nothing hosted (failed load) — nothing to tear down
         // respawn() publishes entry->session under entry.mutex; read it under
         // the SAME mutex (a concurrent shared_ptr copy vs store is UB).
+        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
+        session = iterator->second->session;
         entry = iterator->second;
-        {
-            std::lock_guard<std::mutex> entryLock( entry->mutex );
-            session = entry->session;
-        }
-        // Erase WITHOUT holding entry->mutex: the node owns that mutex, and
-        // destroying a locked std::mutex aborts the Debug CRT
-        // ("mutex destroyed while busy") — the regression that kept the
-        // host-process teardown from completing.
-        mSessions.erase( iterator );
     }
+    // Erase the map entry OUTSIDE the entry's own mutex: erase() drops the
+    // map's shared_ptr, and when this was the last reference the entry (with
+    // its std::mutex member) is destroyed right there — destroying a mutex
+    // while this thread still holds it aborts on MSVC ("mutex destroyed while
+    // busy") and is silent UB on POSIX. Holding our own reference keeps the
+    // entry alive until the lock_guard above has released it; the identity
+    // check keeps a concurrent respawn's fresh entry from being evicted.
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto iterator = mSessions.find( pluginId );
+        if ( iterator != mSessions.end() && iterator->second == entry )
+            mSessions.erase( iterator );
+    }
+    entry.reset();
     const bool shutdownOk = session->shutdown( 10000, log );
     // M3 evidence trail: keep the post-shutdown process-group probe result
     // ("no" = group fully reaped, "unknown" = probe could not decide) so

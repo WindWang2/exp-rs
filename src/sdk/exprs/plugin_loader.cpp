@@ -48,13 +48,34 @@ std::string lastWindowsError()
     return message;
 }
 
+/// Windows library-loading seam note: plain LoadLibraryW searches the
+/// APPLICATION directory, never the loaded plugin's own directory, so a
+/// plugin that ships dependent DLLs next to its entrypoint failed with
+/// "module not found" (E4002) on Windows while the same package loaded on
+/// POSIX via RPATH $ORIGIN.
+///
+/// The loader therefore uses the per-call LOAD_WITH_ALTERED_SEARCH_PATH,
+/// whose order is the plugin's own directory, then the application
+/// directory, then the system directories, then PATH — so BOTH kinds of
+/// dependency resolve (plugin-shipped DLLs and host roots such as the
+/// QCA/keychain/Qt runtime that live on PATH). The LOAD_LIBRARY_SEARCH_*
+/// flag family would disable the PATH half, which is why it is NOT used;
+/// AddDllDirectory would likewise be dead weight under this flag and is
+/// deliberately absent (no process-global registration, no shared state).
+
 void *openLibrary( const std::string &libraryPath, std::string &error )
 {
-    const std::wstring wide = std::filesystem::path( libraryPath ).wstring();
-    HMODULE handle = ::LoadLibraryW( wide.c_str() );
+    // Native (backslash) spelling: manifest/CMake paths carry forward
+    // slashes, and LoadLibraryExW is strictest about the absolute form the
+    // altered search order requires.
+    std::filesystem::path path( libraryPath );
+    path.make_preferred();
+    const std::wstring wide = path.wstring();
+    HMODULE handle = ::LoadLibraryExW( wide.c_str(), nullptr,
+                                       LOAD_WITH_ALTERED_SEARCH_PATH );
     if ( !handle )
     {
-        error = "LoadLibraryW failed: " + lastWindowsError();
+        error = "LoadLibraryExW failed: " + lastWindowsError();
         return nullptr;
     }
     return handle;

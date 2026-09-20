@@ -6,6 +6,7 @@
 #include "plugins/framework/plugin_ui_schema_host.h"
 
 #include <QApplication>
+#include <QPointer>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
@@ -389,5 +390,61 @@ TEST_CASE( "wrong-typed state values are ignored, never thrown (issue #1039)",
     REQUIRE( comboWidget->currentIndex() == 0 );
 
     renderer.releasePluginUi( "org.test.hostile-state" );
+    renderer.setShellSink( nullptr );
+}
+
+TEST_CASE( "repeated attach/re-attach/release is idempotent (dock & menu ownership)",
+           "[uischemahost][p12]" )
+{
+    AppFixture fixture;
+    auto &renderer = *PluginUiSchemaRenderer::instance();
+    TestShellSink sink;
+    renderer.setShellSink( &sink );
+
+    // Re-attach replaces the previous rendering without leaking the old
+    // widgets or stacking menu actions (hot-reload path, WP5 contract).
+    QString error;
+    REQUIRE( renderer.attachPluginSchema( "org.test.idempotent", buildSchema(),
+                                          std::make_unique<FakeDelegate>(), error ) );
+    // QPointer (not a raw pointer): it nulls itself when the widget dies, so
+    // "the old page was released" is an OBSERVABLE fact instead of a pointer
+    // comparison that a heap-reused address would make lie.
+    QPointer<QWidget> firstPage( sink.settingsPage );
+    REQUIRE( !firstPage.isNull() );
+    REQUIRE( sink.actions.size() == 1 );
+
+    REQUIRE( renderer.attachPluginSchema( "org.test.idempotent", buildSchema(),
+                                          std::make_unique<FakeDelegate>(), error ) );
+    REQUIRE( firstPage.isNull() );                    // old page released
+    REQUIRE( sink.settingsPage != nullptr );          // new page attached
+    REQUIRE( sink.actions.size() == 1 );              // not duplicated
+    REQUIRE( renderer.hasPluginUi( "org.test.idempotent" ) );
+
+    // Repeated release is a no-op, not a double delete.
+    renderer.releasePluginUi( "org.test.idempotent" );
+    renderer.releasePluginUi( "org.test.idempotent" );
+    renderer.releasePluginUi( "org.test.never-attached" );
+    REQUIRE_FALSE( renderer.hasPluginUi( "org.test.idempotent" ) );
+    REQUIRE( sink.settingsPage == nullptr );
+    REQUIRE( sink.actions.isEmpty() );
+
+    // A fresh schema for the SAME id after release attaches normally
+    // (reload after unload).
+    REQUIRE( renderer.attachPluginSchema( "org.test.idempotent", buildSchema(),
+                                          std::make_unique<FakeDelegate>(), error ) );
+    REQUIRE( renderer.hasPluginUi( "org.test.idempotent" ) );
+    REQUIRE( sink.actions.size() == 1 );
+    renderer.releasePluginUi( "org.test.idempotent" );
+
+    // While a record exists, a second plugin's UI stays independent.
+    REQUIRE( renderer.attachPluginSchema( "org.test.a", buildSchema(),
+                                          std::make_unique<FakeDelegate>(), error ) );
+    REQUIRE( renderer.attachPluginSchema( "org.test.b", buildSchema(),
+                                          std::make_unique<FakeDelegate>(), error ) );
+    renderer.releasePluginUi( "org.test.a" );
+    REQUIRE( renderer.hasPluginUi( "org.test.b" ) );
+    REQUIRE_FALSE( renderer.hasPluginUi( "org.test.a" ) );
+    renderer.releasePluginUi( "org.test.b" );
+
     renderer.setShellSink( nullptr );
 }

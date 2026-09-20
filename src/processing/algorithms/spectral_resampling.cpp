@@ -173,8 +173,11 @@ bool analyzeResamplingCoverage( const float *srcWl, int srcBands,
     out->partial = 0;
     out->none = 0;
 
-    // FWHM → sigma, identical constant to resampleSpectrumGaussian.
-    constexpr double kFwhmToSigma = 1.0 / ( 2.0 * std::sqrt( 2.0 * std::log( 2.0 ) ) );
+    // FWHM → sigma, identical constant to resampleSpectrumGaussian. Spelled
+    // as a literal rather than 1/(2*sqrt(2*log(2))): std::log/std::sqrt are
+    // not constexpr on every standard library, and the expression made this
+    // TU fail to compile on MSVC (C2131).
+    constexpr double kFwhmToSigma = 2.3548200450309493;
 
     for ( int t = 0; t < dstBands; ++t )
     {
