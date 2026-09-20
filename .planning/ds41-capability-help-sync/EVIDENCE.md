@@ -132,3 +132,48 @@ Review 低危发现与处置：
 - **R2（messaging 勘误）**：同 message 中 4 个 Layer-A 文件 "were truncated" 实为 **emptied**（零长度 blob，`e69de29`）。删除+重生是唯一正确路径的结论不变。
 - **R3（cosmetic，接受不修）**：`rs:solar_geometry`、`rs:brdf_normalization`、`rs:endmember_analysis` 各有两个 `INVALID_PARAMETER` 条目对应不同触发条件。闭环词表无更细码；`errorCatalog()` 按 code 聚合不受影响，manifestPage 两条 `when` 均可见——保留比合并信息量更大，登记为 known limitation。
 - 幂等性声明由主 agent 本地实证（见 O-idempotent，reviewer 受只读约束无法运行 generator）。
+
+## O-tamper：漂移 gate 双向实证（四类篡改）
+
+脚本：`.planning/ds41-capability-help-sync/migration/tamper_evidence.sh`（留档 gitignored）。
+用相对路径执行（MSYS 会把 `/c/...` 风格参数扭曲成 `C:\c\...`，首次运行因此空转，已修正）。
+
+| 篡改 | 目标 gate | 结果 |
+|---|---|---|
+| T1 derived 字段漂移（rs-ndvi.json `family` → "change"） | test_capability_knowledge | FAILED (canonical family / composition / relations) |
+| T2 authored 置空（rs-change.json `summary` → ""） | test_capability_completeness | FAILED (REQUIRE summary non-empty) |
+| T3 Layer-A 字节漂移（rs-classify.json `task` → "tampered_task"） | test_algorithm_meta_drift | FAILED (byte-for-byte) |
+| T4 删除 sidecar（rs-evi.json） | test_capability_knowledge + test_capability_surface_parity | FAILED (coverage / missing sidecar) |
+
+```
+tamper  : 4/4 gates EXIT=42   (all failed)
+restore : 4/4 gates EXIT=0    (all passed)
+git status data/ after restore: clean (0 changes)
+```
+
+## O-parity / O-completeness / O-double-run：最终结果（连续两遍一致）
+
+```
+> gates run #1 (final)
+All tests passed (6793 assertions in 1 test case)   <- test_algorithm_meta_drift   EXIT=0
+All tests passed (1357 assertions in 12 test cases) <- test_capability_knowledge  EXIT=0
+All tests passed (1066 assertions in 1 test case)   <- test_capability_completeness EXIT=0
+All tests passed (247 assertions in 3 test cases)   <- test_capability_surface_parity EXIT=0
+> gates run #2 (consecutive)
+(identical: same four "All tests passed" lines, GATE_FAILURES=0)
+```
+
+关键运行内观测：
+- `test_capability_completeness`：`NoData semantics mentioned by 15 / 152 capability sidecars`（WARN census；无结构化 NoData 契约，known limitation）。
+- `test_capability_surface_parity`：`CLI listed 284 algorithms (152 rs:)`（CLI 全程引擎超集，rs: 切片精确匹配）。
+- `test_capability_knowledge`：`D8 max manifest page bytes: 63175`（< 64 KiB 预算）、`D8 error catalog bytes: 6745`（< 8 KiB 预算）。
+
+## 终态 generator 一致性
+
+```
+gen-meta <WT>          -> wrote 152 capability sidecars, 13 shared-grid operators
+gen-pages <WT> --check -> zero diff
+md5(data/processing/algorithm_meta + pi/knowledge) before == after; git status: 0 changes
+```
+
+即提交态与 generator 输出字节一致（O2 的最终形态）。
