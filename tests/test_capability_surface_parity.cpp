@@ -286,7 +286,8 @@ namespace {
 std::map<std::string, std::string> paramSignatures( const QVariant &schema )
 {
     std::map<std::string, std::string> out;
-    const QVariantMap props = schema.toMap().value( QStringLiteral( "properties" ) ).toMap();
+    const QVariantMap root = schema.toMap();
+    const QVariantMap props = root.value( QStringLiteral( "properties" ) ).toMap();
     for ( auto it = props.constBegin(); it != props.constEnd(); ++it )
     {
         const QVariantMap p = it.value().toMap();
@@ -297,8 +298,20 @@ std::map<std::string, std::string> paramSignatures( const QVariant &schema )
         const QVariant en = p.value( QStringLiteral( "enum" ) );
         if ( en.isValid() )
           sig += QStringLiteral( "|enum=" ) + QString::fromStdString( canonicalJson( en ) );
+        // Nested array item type: retyping items (string -> object) must fail.
+        const QVariant itemsType = p.value( QStringLiteral( "items" ) ).toMap()
+                                     .value( QStringLiteral( "type" ) );
+        if ( itemsType.isValid() )
+          sig += QStringLiteral( "|items=" ) + itemsType.toString();
         out[ it.key().toStdString() ] = sig.toStdString();
     }
+    // The required set, folded under a reserved key: dropping a parameter from
+    // (or adding one to) `required` must fail too.
+    QStringList required;
+    for ( const QVariant &v : root.value( QStringLiteral( "required" ) ).toList() )
+      required << v.toString();
+    required.sort();
+    out[ std::string( "@required" ) ] = required.join( QLatin1Char( ',' ) ).toStdString();
     return out;
 }
 

@@ -7,8 +7,11 @@
 // `summary`, `failure_modes`, and the `io` arrays may all legally be empty, so
 // a first-class capability could ship with no purpose, no failure guidance and
 // no input/output contract while every existing gate stayed green. Measured at
-// the Track D1 baseline: 3/119 sidecars had an empty summary, 4/119 empty
-// failure_modes, 23/119 empty io.inputs.
+// the Track D1 baseline (master adf8f9895): of the 138 shipped Layer-B
+// sidecars, 19 were unparsable and 17 of the 119 parseable ones had an empty
+// summary and 18 an empty failure_modes (the corrupt files hid more); after
+// the Track D1 regeneration + authoring the corpus is 152 sidecars with 0/0
+// empty, and 39 declare no data input port (exempted below).
 //
 // This gate enforces, for every first-class rs: capability (no exemptions
 // beyond the enumerated io.inputs list below):
@@ -67,52 +70,53 @@ struct Bootstrap
     }
 };
 
-/// Collection-style operators whose data inputs are declared as array-of-string
-/// path parameters (`scenes` / `inputs`), not as raster data ports — the
-/// derivation in deriveCapabilityBlock therefore leaves io.inputs empty by
-/// design (verified against the live schemas, e.g. rs:mosaic / rs:temporal_anomaly).
-/// Every exempted id states the same reason; the list is closed and compared
-/// for equality, so additions require editing this table.
+/// Operators that declare NO raster/vector data input port — their inputs are
+/// plain string/array-of-string path parameters (scene lists, `input`, import
+/// paths) — so deriveCapabilityBlock leaves io.inputs empty by design. Every
+/// exempted id was verified against its live schema (e.g. rs:mosaic declares
+/// only `inputs`/`output` strings; the sensor imports take a single `input`
+/// path). The list is closed and compared for equality, so additions require
+/// editing this table deliberately.
 const std::vector<std::pair<std::string, std::string>> kIoInputsExempt = {
-    { "rs:cn_product_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:endmember_analysis", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:gaofen_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:hj_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:landsat_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:library_select", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:modis_georeference", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:modis_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:mosaic", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:quality_mosaic", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:register_images", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:sar_network_inversion", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:sar_pair_network", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:sar_temporal_events", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:sar_temporal_stats", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:sentinel2_import", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:stack_register", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_anomaly", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_breakpoints", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_composite", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_decompose", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_extract_regions", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_extract_series", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_gap_fill", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_harmonic_breaks", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_harmonic_fit", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_index_series", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_model_select", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_monitor", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_phenology", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_phenology_multi", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_region_features", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_regularize", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_seasonal_breaks", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_sen_trend", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_smooth", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_summary", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:temporal_trend", "collection-style: inputs are array-of-string path parameters" },
-    { "rs:zy3_import", "collection-style: inputs are array-of-string path parameters" },
+    { "rs:cn_product_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:endmember_analysis", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:gaofen_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:hj_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:landsat_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:library_select", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:modis_georeference", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:modis_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:mosaic", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:quality_mosaic", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:register_images", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:sar_network_inversion", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:sar_pair_network", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:sar_temporal_events", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:sar_temporal_stats", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:sentinel2_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:stack_register", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_anomaly", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_breakpoints", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_composite", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_decompose", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_extract_regions", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_extract_series", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_gap_fill", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_harmonic_breaks", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_harmonic_fit", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_index_series", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_model_select", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_monitor", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_phenology", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_phenology_multi", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_region_features", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_regularize", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_seasonal_breaks", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_sen_trend", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_smooth", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_summary", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:temporal_trend", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
+    { "rs:zy3_import", "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty" },
 };
 
 std::set<std::string> exemptIds()
