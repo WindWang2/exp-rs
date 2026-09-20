@@ -11468,3 +11468,40 @@ target_include_directories(test_contract_fuzz_payload PRIVATE ${CMAKE_CURRENT_SO
 sicnu_add_sdk_test(test_contract_fuzz_paths)
 sicnu_link_jsoncpp(test_contract_fuzz_paths)
 target_include_directories(test_contract_fuzz_paths PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# ds41-performance-observatory: cross-module performance & memory observatory
+# (append-only block). Two targets sharing tests/perf/perf_observatory.h:
+#   * test_perf_io_observatory — Qt-free raster I/O + atomic-writer workloads
+#     (links only Sicnu::Geospatial, matching the io test family).
+#   * test_perf_observatory    — dataset catalog scaling, governance-store
+#     paging, TaskCenter dispatch/DAG, temporal tile streaming, tiled
+#     inference (execution-plane link set plus the workspace-browser panel
+#     translation unit for the paging model).
+# SICNU_OBS_SCALE=small|mid|scale selects the fixture ladder; ctest runs small.
+# Records land in SICNU_OBS_OUT or a private temp directory, never the repo.
+# All gates are structural (counts, complexity exponents, memory bounds,
+# semantic equivalence) — no absolute millisecond budgets, so the suite stays
+# low-flake on shared CI.
+sicnu_add_io_test(test_perf_io_observatory)
+target_include_directories(test_perf_io_observatory PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+
+sicnu_add_test(test_perf_observatory TIMEOUT 900 RUN_SERIAL TRUE)
+target_sources(test_perf_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/app/panels/workspace_browser_panel.cpp
+)
+target_include_directories(test_perf_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_link_jsoncpp(test_perf_observatory)
+if(TARGET Sicnu::session_map)
+  target_link_libraries(test_perf_observatory PRIVATE Sicnu::session_map)
+endif()
+
+# Link-set note, recorded because it was measured rather than assumed: the
+# observatory uses no agent API, but sicnu_data / sicnu_task_center /
+# sicnu_operators all PUBLIC-reference sicnu_agent, and sicnu_agent links
+# qgis_gui. Dropping qgis_gui from THIS target's own link list therefore does
+# not remove it from the link (verified in build-obs/build.ninja), so the
+# standard sicnu_add_test registration is kept and the vendored gui is built
+# anyway. Anyone who wants to make the observatory gui-free has to break that
+# transitive edge in production CMake, not here.

@@ -378,3 +378,8 @@ data/labs/_tmp/
 !.planning/ds41-dev-worktree-tooling/
 .planning/ds41-dev-worktree-tooling/*
 !.planning/ds41-dev-worktree-tooling/*.md
+
+# ds41-performance-observatory: track planning notes (markdown only; logs stay local).
+!.planning/ds41-performance-observatory/
+.planning/ds41-performance-observatory/*
+!.planning/ds41-performance-observatory/*.md
