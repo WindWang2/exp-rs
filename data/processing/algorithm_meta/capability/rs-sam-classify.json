@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" :
-    {
-      "land_cover" :
   "capability" : 
   {
     "applicability" : 
@@ -14,7 +9,6 @@
         "\u690d\u88ab",
         "\u76ee\u6807\u5149\u8c31"
       ],
-      "scenes" :
       "scenes" : 
       [
         "\u77ff\u7269\u586b\u56fe",
@@ -22,13 +16,11 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -37,7 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
     "failure_modes" : 
     [
       {
@@ -47,9 +38,6 @@
       }
     ],
     "family" : "classification",
-    "io" :
-    {
-      "inputs" :
     "io" : 
     {
       "inputs" : 
@@ -60,7 +48,6 @@
           "required" : true
         }
       ],
-      "outputs" :
       "outputs" : 
       [
         {
@@ -79,7 +66,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -105,7 +91,6 @@
         },
         {
           "default" : "sam",
-          "enum" :
           "enum" : 
           [
             "sam",
@@ -132,11 +117,6 @@
         }
       ]
     },
-    "limitations" :
-    [
-      "SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair)."
-    ],
-    "modality" :
     "limitations" : 
     [
       "SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair)."
@@ -148,16 +128,12 @@
       "multimodal"
     ],
     "operator_group" : "classification",
-    "prerequisites" :
     "prerequisites" : 
     [
       "Reference spectra must use the same band order and units as the input raster."
     ],
     "schema_version" : 2,
     "summary" : "\u5149\u8c31\u89d2\u5236\u56fe\uff08SAM\uff09\u5206\u7c7b\uff1a\u4ee5\u5149\u8c31\u5411\u91cf\u5939\u89d2\u5ea6\u91cf\u76f8\u4f3c\u5ea6\uff0c\u5bf9\u5149\u7167\u5dee\u5f02\u4e0d\u654f\u611f\uff0c\u9002\u5408\u77ff\u7269/\u76ee\u6807\u7cbe\u7ec6\u5206\u7c7b\u3002",
-    "teaching_use" :
-    {
-      "concepts" :
     "teaching_use" : 
     {
       "concepts" : 
@@ -165,7 +141,6 @@
         "\u5149\u8c31\u89d2",
         "\u7aef\u5143\u5149\u8c31"
       ],
-      "courses" :
       "courses" : 
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
@@ -179,7 +154,6 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "classification",

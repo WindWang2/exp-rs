@@ -1,27 +1,27 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u57ce\u5e02",
         "\u519c\u7530",
         "\u68ee\u6797"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u571f\u5730\u8986\u76d6\u8f6c\u79fb\u77e9\u9635",
         "\u7528\u9014\u53d8\u66f4\u7edf\u8ba1"
       ]
     },
     "band_roles" : {},
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "GRID_MISMATCH",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "change",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -58,7 +58,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "numeric",
@@ -111,7 +111,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "0",
@@ -149,32 +149,32 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "Change-type codes are UInt16: class_count must be <= 255 so before * classCount + after fits; auto class_count derives from the maximum observed class + 1."
     ],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
       "multimodal"
     ],
     "operator_group" : "change-detection",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Both inputs are thematic rasters with a shared class coding; before/after grids must be aligned (grid compatibility is preflighted).",
       "\u4e24\u671f\u5206\u7c7b\u56fe\u987b\u540c\u4e00\u5206\u7c7b\u4f53\u7cfb\u4e0e\u7f51\u683c\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u5206\u7c7b\u540e\u53d8\u5316\u68c0\u6d4b\uff1a\u5bf9\u4e24\u671f\u5206\u7c7b\u56fe\u505a\u7c7b\u522b\u8f6c\u79fb\u77e9\u9635\u4e0e\u53d8\u5316/\u4fdd\u7559\u56fe\u8f93\u51fa\uff0c\u53d8\u5316\u7c7b\u578b\u53ef\u89e3\u91ca\uff0c\u7cbe\u5ea6\u53d7\u4e24\u671f\u5206\u7c7b\u8d28\u91cf\u7ea6\u675f\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u8f6c\u79fb\u77e9\u9635",
         "\u5206\u7c7b\u540e\u6bd4\u8f83"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
       ],
@@ -187,7 +187,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "change-detection",
     "temporal",

@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" :
-    {
-      "land_cover" :
   "capability" : 
   {
     "applicability" : 
@@ -14,7 +9,6 @@
         "\u6c34\u4f53",
         "\u707e\u533a"
       ],
-      "scenes" :
       "scenes" : 
       [
         "\u73af\u5883\u51cf\u707e\u6570\u636e\u5904\u7406\u5165\u53e3",
@@ -22,13 +16,11 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -37,7 +29,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
     "failure_modes" : 
     [
       {
@@ -52,10 +43,6 @@
       }
     ],
     "family" : "io",
-    "io" :
-    {
-      "inputs" : [],
-      "outputs" :
     "io" : 
     {
       "inputs" : [],
@@ -78,7 +65,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -105,22 +91,17 @@
       ]
     },
     "limitations" : [],
-    "modality" :
     "modality" : 
     [
       "optical"
     ],
     "operator_group" : "data-formats",
-    "prerequisites" :
     "prerequisites" : 
     [
       "Product directory with CRESDA sidecar XML and TIFF (offline)"
     ],
     "schema_version" : 2,
     "summary" : "\u73af\u5883\u51cf\u707e CCD \u6570\u636e\u5bfc\u5165\uff1a\u8bfb\u53d6 HJ-1A/1B CCD \u4e0e HJ-2A/B CCD L1A \u4ea7\u54c1\uff0c\u6620\u5c04 B1\u2013B4 \u6ce2\u6bb5\u89d2\u8272\u5e76\u6807\u6ce8\u58f0\u660e\u5143\u6570\u636e\u3002",
-    "teaching_use" :
-    {
-      "concepts" :
     "teaching_use" : 
     {
       "concepts" : 
@@ -129,7 +110,6 @@
         "\u6ce2\u6bb5\u89d2\u8272",
         "16m/30m \u5206\u8fa8\u7387"
       ],
-      "courses" :
       "courses" : 
       [
         "\u9065\u611f\u6570\u636e\u5904\u7406"
@@ -143,7 +123,6 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "hj-1",

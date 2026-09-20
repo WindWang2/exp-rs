@@ -2,7 +2,7 @@
 
 # 光谱指数与波段运算（spectral）
 
-共 15 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 19 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:band_math
 
@@ -40,6 +40,22 @@
 - 教学概念：波段比值、光谱特征
 - 适用课程：遥感数字图像处理
 - 典型练习：用 Landsat band5/band4 比值复现简单植被指数并讨论其与 NDVI 的关系。
+
+## rs:endmember_analysis
+
+端元集合分析：按光谱角聚类把端元集压缩为非冗余代表，输出 SAM 角度矩阵，并可投影到传感器波段网格，生成带溯源的光谱表。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：inputRows（integer）、output（json）、outputRows（integer）
+- 参数：angleMatrix（boolean）、endmembersRef（string）、mergeAngleDegrees（numeric）、output（string）、ppiCounts（integer）、requireFullCoverage（boolean）、sensor（string）
+- 前置条件：Input must be an exp-rs:spectral-table with finite, non-zero endmember rows.
+- 局限：Reduction caps at 512 input rows; the angle matrix embed caps at 64 rows (payload bound).；Projection reflects the reduced NATIVE-space set; angles change under resampling by design.
+- 失败模式：
+  - `DATASET_NOT_FOUND` — endmembersRef 指向的端元表文件不存在。处置：确认 endmembersRef 路径（如上游 rs:endmember_extraction 的 endmembersOut）
+  - `INVALID_PARAMETER` — endmembersRef 不是合法的 exp-rs:spectral-table（行含非有限值或零范数、行宽与 bandCount 不一致），或输入行数超过 512 行的归并上限。处置：重新生成合法端元表，或先筛选/合并到 512 行以内
+  - `INVALID_PARAMETER` — ppiCounts 长度与表行数不符或含负值、angleMatrix/requireFullCoverage 非布尔、缩减后行数超过 64 仍请求角度矩阵。处置：按输入表行数对齐 ppiCounts，修正布尔参数，或在 64 行以内再请求角度矩阵
+  - `WAVELENGTH_INCOMPATIBLE` — 传感器投影失败：输入表缺波长元数据、sensor id 未在 data/spectral/sensors.json 注册或未声明波段、端元波长覆盖不足且 requireFullCoverage 被开启。处置：为端元表补齐波长元数据、使用已注册的 sensor id，或关闭 requireFullCoverage 并接受未覆盖波段为 NaN
 
 ## rs:evi
 
@@ -95,6 +111,22 @@
 - 教学概念：光谱库、SAM 匹配
 - 适用课程：高光谱遥感
 - 典型练习：从光谱库中筛选研究区端元并投影到传感器波段。
+
+## rs:local_rx_anomaly
+
+局部（双窗口）RX 异常检测：以内窗口作保护带，计算各像元对局部背景的马氏距离，捕捉全局 RX 会平均掉的局部异常。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：covariance（string）、max（numeric）、mean（numeric）、output（raster）、scoredPixels（integer）、unscoredPixels（integer）
+- 参数：covariance（enum）、innerWindow（integer）、loading（numeric）、minSamples（integer）、outerWindow（integer）、output（string）、qualityOut（string）
+- 局限：Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.；Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics.
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格
+  - `INVALID_PARAMETER` — outerWindow 非奇数或小于 3、innerWindow 非奇数/小于 1/不小于 outerWindow、covariance 取值不在 full/diagonal 之内、loading 为负或非有限。处置：按约束设置窗口与协方差参数（outer 为 >=3 的奇数，inner 为小于 outer 的奇数）
+  - `NOT_SUPPORTED` — 输入栅格波段数少于 2（无法估计局部协方差），或 full 协方差模式下波段数超过 8192。处置：提供至少 2 个波段；高光谱场景改用 covariance=diagonal
+  - `EXECUTION_FAILED` — 瓦片 halo 读取、分数/质量栅格写出或栅格 finalize 失败，或 RX 内核计算返回错误。处置：检查输出路径可写与磁盘空间，缩小 AOI 后重试
 
 ## rs:mndwi
 
@@ -234,6 +266,23 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 典型练习：在荒漠草原区比较 NDVI 与 SAVI 对稀疏植被的敏感度。
 - 可接上游：rs:atmospheric_correction
 
+## rs:sparse_unmixing
+
+稀疏解混（L1 + 非负 FISTA）：在（可超完备的）端元字典上估计每像元稀疏丰度，支持端元数多于波段数的过完备字典。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：atoms（integer）、convergedFraction（numeric）、lambda（numeric）、meanError（numeric）、meanIterations（numeric）、output（raster）
+- 参数：bands（integer）、collinearAngleDegrees（numeric）、endmembers（string）、endmembersRef（string）、errorOut（string）、lambda（numeric）、libraryMaterials（string）、libraryPath（string）、maxIterations（integer）、output（string）、sumToOnePenalty（numeric）、tolerance（numeric）
+- 前置条件：Atoms must use the same band order and units as the input raster.
+- 局限：Sum-to-one is a penalty (like the FCLS solver), not a hard constraint; report mean |sum-1| via sumToOnePenalty QA if needed.；Near-duplicate atoms (below collinearAngleDegrees) refuse: an L1 split across near-identical atoms is not interpretable.
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格（必要时先转换格式）
+  - `INVALID_PARAMETER` — 必填参数 input/output 缺失，解混参数越界（lambda/sumToOnePenalty 为负、tolerance<=0、maxIterations<1），端元字典（endmembers/endmembersRef/libraryPath）未提供或同时提供多种，或端元波段数与影像波段数不一致且任一侧无波长元数据。处置：补齐必填参数、把解混参数调到合法范围，只通过一种形式提供字典，并使端元波段数与影像一致或补齐波长元数据
+  - `WAVELENGTH_INCOMPATIBLE` — 端元字典与输入影像的波长范围不重叠，或所选输入波段落在端元波长覆盖之外。处置：选择落在端元覆盖范围内的输入波段，或提供波长范围匹配的字典
+  - `NOT_SUPPORTED` — 字典构建被拒绝：两原子光谱角小于 collinearAngleDegrees（近共线）、端元为零向量或含非有限值、原子数超过 2048、Gram 矩阵退化。处置：删除重复或近共线端元、调高 collinearAngleDegrees（或置 0 显式关闭守卫），并检查端元有限且非零
+
 ## rs:spectral_band_select
 
 按索引或波长范围选择/剔除波段（坏波段剔除与子集提取）。
@@ -293,4 +342,21 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 典型练习：对同一景影像分别计算 NDVI、NDWI、NDBI 并合成 RGB 假彩色判读。
 - 可接上游：rs:atmospheric_correction
 - 可接下游：rs:change_normalized_difference
+
+## rs:spectral_similarity
+
+SID-SAM 混合光谱相似度：把光谱角（形状）与信息散度（分布）融合为单一有界相似度，将每像元标注到最相似的参考光谱。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：form（string）、meanScore（numeric）、output（raster）、refs（integer）
+- 参数：bands（integer）、form（enum）、libraryMaterials（string）、libraryPath（string）、output（string）、refs（string）、refsRef（string）、scoreOut（string）
+- 前置条件：References must be reflectance-like (non-negative) on the same band grid as the input.
+- 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格
+  - `INVALID_PARAMETER` — 必填参数 input/output 缺失，form 取值不在 product_normalized/classic_tan 之内，参考光谱（refs/refsRef/libraryPath）未提供或同时提供多种，或参考波段数与影像波段数不一致且任一侧无波长元数据。处置：补齐必填参数、只通过一种形式提供参考光谱，并使参考波段数与影像一致或补齐波长元数据
+  - `INVALID_RADIOMETRY` — 参考光谱为 DN/辐亮度等非反射率量纲或含负波段，SID 的概率分布假设不成立，这些像元只能留空（NaN 分数）而不被强行归类。处置：先做辐射定标与大气校正，提供反射率量纲、非负的参考光谱
+  - `WAVELENGTH_INCOMPATIBLE` — 参考光谱与输入影像的波长范围不重叠，或所选输入波段超出参考光谱波长覆盖。处置：选择落在参考覆盖范围内的输入波段，或提供波长匹配的参考光谱
 

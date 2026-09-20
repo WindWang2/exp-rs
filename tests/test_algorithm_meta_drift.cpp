@@ -20,6 +20,21 @@
 #include <QTemporaryDir>
 #include <set>
 
+namespace {
+
+std::string lfOnly( std::string text )
+{
+  std::string out;
+  out.reserve( text.size() );
+  for ( char c : text )
+    if ( c != '
+' )
+      out.push_back( c );
+  return out;
+}
+
+} // namespace
+
 TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors (#707, #729)",
            "[agent][spatial][meta][drift]" )
 {
@@ -96,7 +111,10 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
 
             INFO( "Sidecar content on disk drifted from in-code descriptor generation." );
             INFO( "Regenerate with: sicnu_geo_rs_cli --export-catalog data/processing/algorithm_meta" );
-            CHECK( diskContent == expectedContent );
+            // Line-ending-insensitive on both sides: Windows checkouts with
+            // core.autocrlf materialize CRLF while the generator emits LF; the
+            // gate is byte-for-byte content equality, not checkout normalization.
+            CHECK( lfOnly( diskContent ) == lfOnly( expectedContent ) );
         }
     }
 

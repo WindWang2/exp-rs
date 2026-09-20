@@ -16,6 +16,10 @@
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/remote/range_cache.h"
+// ADR 0159 dry-run declaration for `data plan` (sicnu::operators::rs::
+// dryRunCnProductImport); the call below referenced it without this
+// declaration, so master HEAD failed to compile (C3083/C2039/C3861).
+#include "operators/rs/rs_product_import_plan.h"
 #include "geospatial/stac/stac_mapper.h"
 // Cloud-Native Data Fabric / Data Cube 10.0 (additive surfaces).
 #include "geospatial/fabric/catalog_service.h"

@@ -1,28 +1,28 @@
 {
-  "capability" :
+  "capability" : 
   {
-    "applicability" :
+    "applicability" : 
     {
-      "land_cover" :
+      "land_cover" : 
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" :
+      "scenes" : 
       [
         "\u4e91\u6c61\u67d3\u50cf\u5143\u5254\u9664",
         "QA \u6ce2\u6bb5\u89e3\u6790\u540e\u7684\u8d28\u91cf\u8fc7\u6ee4"
       ]
     },
-    "band_roles" :
+    "band_roles" : 
     {
       "mask" : 1
     },
-    "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "GRID_MISMATCH",
@@ -44,9 +44,9 @@
       }
     ],
     "family" : "optical",
-    "io" :
+    "io" : 
     {
-      "inputs" :
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -59,7 +59,7 @@
           "required" : true
         }
       ],
-      "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "boolean",
@@ -87,7 +87,7 @@
           "required" : true
         }
       ],
-      "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -108,11 +108,11 @@
         }
       ]
     },
-    "limitations" :
+    "limitations" : 
     [
       "Grid alignment uses nearest-neighbor sampling (appropriate for integer masks); CRS mismatches are not auto-corrected."
     ],
-    "modality" :
+    "modality" : 
     [
       "optical",
       "sar",
@@ -120,7 +120,7 @@
       "dem"
     ],
     "operator_group" : "qa",
-    "prerequisites" :
+    "prerequisites" : 
     [
       "Input and mask share a CRS (same-CRS grid differences are auto-aligned).",
       "Input bands must define a NoData value, or `no_data` must be provided for bands without one.",
@@ -128,15 +128,15 @@
     ],
     "schema_version" : 2,
     "summary" : "\u628a\u63a9\u819c\u6805\u683c\u5e94\u7528\u5230\u76ee\u6807\u5f71\u50cf\uff1a\u63a9\u819c\u50cf\u5143\u5904\u5199 nodata\uff0c\u662f\u4e91/\u6c34\u4f53/\u8d28\u91cf\u63a9\u819c\u7684\u6807\u51c6\u6267\u884c\u7b97\u5b50\u3002",
-    "teaching_use" :
+    "teaching_use" : 
     {
-      "concepts" :
+      "concepts" : 
       [
         "\u63a9\u819c",
         "nodata",
         "\u50cf\u5143\u7ea7\u8fc7\u6ee4"
       ],
-      "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -149,7 +149,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
+  "tags" : 
   [
     "qa",
     "cloud",

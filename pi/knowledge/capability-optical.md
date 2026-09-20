@@ -2,7 +2,7 @@
 
 # 光学预处理（optical）
 
-共 17 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 20 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:apply_mask
 
@@ -66,7 +66,7 @@ DOS1 暗像元大气校正：假设场景内存在零反射暗像元，估计大
 
 ## rs:atmospheric_dos2
 
-DOS2 暗像元校正的改进版，在路径辐射估计中考虑大气透过率项，精度高于 DOS1，同样不需要外部大气参数。
+DOS2 经验大气校正（DOS + 透射率）：运行于 TOA 反射率空间（#610），需要带反射率系数的产品元数据；输出地表反射率。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
@@ -75,6 +75,10 @@ DOS2 暗像元校正的改进版，在路径辐射估计中考虑大气透过率
 - 参数：airmass（numeric）、band（integer）、bias（numeric）、gain（numeric）、metadata_path（string）、output（string）
 - 适用地物：植被、土壤、水体
 - 适用场景：无大气参数的定量预处理、教学演示经验校正与辐射传输校正的差异
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少带反射率系数的产品元数据（Landsat MTL REFLECTANCE_MULT/ADD + SUN_ELEVATION 或 Sentinel-2 MTD QUANTIFICATION_VALUE），且未提供 metadata_path、输入旁也无 MTL/MTD。处置：提供 metadata_path 或将 MTL/MTD 放在输入旁；只需辐亮度时改用 rs:dn_to_radiance
+  - `INVALID_RADIOMETRY` — 输入不是 TOA 反射率空间（DOS1/DOS2 在 #610 后运行于 TOA 反射率空间）。处置：先用 rs:radiometric_calibration 或传感器导入算子得到 TOA 反射率再校正
+  - `NOT_SUPPORTED` — 场景内不存在真正的暗像元（DOS 系列 Chavez 1996 暗像元假设不成立，如全部被云覆盖）。处置：先做云掩膜或改用 rs:atmospheric_quac
 - 教学概念：暗像元法、大气透过率、路径辐射
 - 适用课程：遥感数字图像处理
 - 典型练习：以 DOS2 为基准，评估 DOS1 在高气溶胶场景下的反射率高估。
@@ -95,6 +99,23 @@ QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率
 - 教学概念：经验大气校正、辐射传输
 - 适用课程：定量遥感基础
 - 典型练习：对 MODIS 与 Sentinel-2 影像各执行 QUAC，检查反射率量纲一致性。
+
+## rs:brdf_normalization
+
+用 Ross-Thick + Li-Sparse-Reciprocal 核将遥感反射率从观测太阳/视角几何归一化到参考几何（默认天底视角、太阳不变），使不同视角获取的影像在辐射上可比较。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：bandCount（integer）、output（raster）
+- 参数：f_geo（numeric）、f_vol（numeric）、output（string）、ref_relative_azimuth（numeric）、ref_view_zenith（numeric）、sun_azimuth（numeric）、sun_zenith（numeric）、view_azimuth（numeric）、view_zenith（numeric）
+- 前置条件：Sun and view angles via parameters or SICNU_SUN_* / SICNU_VIEW_* dataset metadata — a missing angle is a typed refusal (use rs:solar_geometry to stamp sun angles).；Per-band kernel weights (f_vol, f_geo); the normalization denominator must stay positive.
+- 局限：Single-scene weights cannot be fitted from the scene itself; for angle-less two-date leveling use the BrdfNormalization::PairStatistics::fitCFactor API (mean-preserving c = mean(ref)/mean(target)).；Non-finite pixels pass through as NaN NoData.
+- 失败模式：
+  - `INVALID_PARAMETER` — 太阳或观测角度既未通过 sun_zenith/sun_azimuth/view_zenith/view_azimuth 参数给出，栅格元数据中也无 SICNU_SUN_*/SICNU_VIEW_*。处置：显式传入四个角度参数，或先用 rs:solar_geometry 给栅格打上 SICNU_SUN_* 元数据
+  - `INVALID_PARAMETER` — f_vol/f_geo 缺失或既非数值、也非与波段数等长的数值数组；或太阳天顶角≥90°、视角天顶角/方位角越界，使各向异性因子 1+f_vol·k_vol+f_geo·k_geo ≤ 0（非物理）。处置：用标量或逐波段数值数组给出有限核权重；角度取太阳天顶角 [0,90)、视角天顶角 [0,90) 与方位角 [0,360)，保证归一化分母为正
+  - `DATASET_NOT_FOUND` — 输入反射率栅格无法打开（路径无效/格式不支持），或为空（宽高或波段数为 0）。处置：检查输入路径与产品完整性，确认为至少含一个波段的反射率栅格
+  - `OUTPUT_INVALID` — 输出栅格无法创建、分块写入失败或收尾失败（目标路径不可写、磁盘空间不足）。处置：更换可写输出路径并确认磁盘空间后重跑
 
 ## rs:contrast_stretch
 
@@ -251,8 +272,8 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 确定性：逐位一致（bit_exact）
 - 模态：multimodal、optical
 - 输入：ms（raster）、pan（raster）
-- 输出：bands（integer）、method（string）、output（raster）
-- 参数：blueIdx（integer）、greenIdx（integer）、method（enum）、msWeights（numeric）、output（string）、panWeight（numeric）、redIdx（integer）
+- 输出：bands（integer）、method（string）、output（raster）、qualityPassed（boolean）、qualityReport（string）
+- 参数：blueIdx（integer）、greenIdx（integer）、method（enum）、msWeights（numeric）、output（string）、panWeight（numeric）、qualityReport（string）、redIdx（integer）
 - 前置条件：Pan and MS rasters must be co-registered.；全色与多光谱输入必须几何配准且位于同一网格（ADR 0098）。
 - 局限：IHS requires exactly 3 MS bands mapped to R/G/B.
 - 适用地物：城市、农田、海岸带
@@ -303,6 +324,40 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 适用课程：定量遥感基础
 - 典型练习：把两景不同日期的影像定标到 TOA 反射率，比较季节光照差异。
 - 可接上游：rs:dn_to_radiance
+
+## rs:radiometric_qa
+
+为反射率栅格的每个波段逐像素导出 uint16 质量标志（饱和、负值、超范围、非有限值、云/云影/雪、QA_RADSAT 饱和位），多源标志取并集，0 表示干净像元，并给出汇总报告。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：cloud_mask（raster）、input（raster）
+- 输出：bandCount（integer）、output（raster）
+- 参数：mask_flag（enum）、output（string）、qa_radsat_band（integer）、qa_radsat_bits（string）、saturation_level（numeric）
+- 前置条件：The cloud mask must share the input grid (CRS, geotransform, size); mismatched grids are refused, never resampled.
+- 局限：Flags describe the delivered values, not the sensor's full quality model; pair with QaMask on QA_PIXEL/SCL for the complete classification.；A QA_RADSAT band given via qa_radsat_band also receives its own reflectance-domain flag band; consumers should ignore the flag band of the QA band itself.
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少必需参数 input/output，或 qa_radsat_band 为负、超过输入波段数，或 qa_radsat_bits 条目数与输入波段数不符、取值超出 [0, 65535]。处置：补齐 input/output；qa_radsat_band 用 0（关闭）或 1..波段数；qa_radsat_bits 按输入波段数给出逗号分隔的 [0, 65535] 掩码
+  - `GRID_MISMATCH` — cloud_mask 与输入栅格的 CRS、地理变换或尺寸不一致（不做重采样）。处置：提供与输入同网格的掩膜，或先用 rs:resample 对齐到同一网格
+  - `DATASET_NOT_FOUND` — 输入反射率栅格或 cloud_mask 无法打开（路径无效/格式不支持），或输入为空（宽高或波段数为 0）。处置：检查输入与掩膜路径、驱动及文件权限，确认输入为含至少一个波段的反射率栅格
+  - `OUTPUT_INVALID` — 输出标志栅格无法创建、分块写入失败或收尾失败（目标路径不可写、磁盘空间不足）。处置：更换可写输出路径并确认磁盘空间后重跑
+
+## rs:solar_geometry
+
+由成像日期/UTC 时间与场景中心经纬度，按 Spencer 1971 / NOAA 公式计算太阳高度角、方位角、赤纬、日地距离与平方反比因子，可选把 SICNU_SUN_* 元数据写回输入栅格供定标/BRDF 使用。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：earth_sun_factor（numeric）、sun_azimuth（numeric）、sun_elevation（numeric）
+- 参数：date（string）、latitude（numeric）、longitude（numeric）、utc_time（string）、write_metadata（boolean）
+- 前置条件：Acquisition date and UTC time (e.g. Landsat MTL DATE_ACQUIRED + SCENE_CENTER_TIME) and the scene centre latitude/longitude.
+- 局限：Below-horizon suns are still stamped for traceability; downstream operators refuse to calibrate with them (sun_above_horizon=false and elevation <= 0 in the record).；In-place metadata update requires a writable raster; read-only sources are refused with a typed error.
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少必需参数 date/utc_time，或 date 不是合法 ISO YYYY-MM-DD、utc_time 不是 HH:mm 或 HH:mm:ss。处置：按 schema 提供成像日期与 UTC 时间（如 Landsat MTL 的 DATE_ACQUIRED + SCENE_CENTER_TIME）
+  - `INVALID_PARAMETER` — latitude/longitude 缺失，或超出 [-90, 90] / [-180, 180] 度范围。处置：提供场景中心经纬度并保证落在合法范围内
+  - `INVALID_PARAMETER` — write_metadata=true 但未提供 input 栅格。处置：补上要写元数据的 input 栅格，或将 write_metadata 置为 false 只取计算结果
+  - `NOT_SUPPORTED` — 以 GA_Update 打开 input 栅格失败（只读源或无写权限），无法原地写入 SICNU_SUN_* 元数据。处置：改用可写副本后重试，或将 write_metadata 置为 false
 
 ## rs:topographic_correction
 

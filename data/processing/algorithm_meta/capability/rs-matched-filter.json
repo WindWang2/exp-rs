@@ -1,9 +1,4 @@
 {
-  "capability" :
-  {
-    "applicability" :
-    {
-      "land_cover" :
   "capability" : 
   {
     "applicability" : 
@@ -13,7 +8,6 @@
         "\u77ff\u7269",
         "\u690d\u88ab\u80c1\u8feb\u76ee\u6807"
       ],
-      "scenes" :
       "scenes" : 
       [
         "\u77ff\u7269\u5f02\u5e38\u63a2\u6d4b",
@@ -21,13 +15,11 @@
       ]
     },
     "band_roles" : {},
-    "crs" :
     "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" :
     "determinism" : 
     {
       "grade" : "bit_exact",
@@ -36,7 +28,6 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" :
     "failure_modes" : 
     [
       {
@@ -46,9 +37,6 @@
       }
     ],
     "family" : "hyperspectral",
-    "io" :
-    {
-      "inputs" :
     "io" : 
     {
       "inputs" : 
@@ -59,7 +47,6 @@
           "required" : true
         }
       ],
-      "outputs" :
       "outputs" : 
       [
         {
@@ -68,7 +55,6 @@
           "required" : true
         }
       ],
-      "parameters" :
       "parameters" : 
       [
         {
@@ -98,11 +84,6 @@
         }
       ]
     },
-    "limitations" :
-    [
-      "Background statistics come from the input scene itself; a separate background raster is a future extension."
-    ],
-    "modality" :
     "limitations" : 
     [
       "Background statistics come from the input scene itself; a separate background raster is a future extension."
@@ -112,16 +93,12 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" :
     "prerequisites" : 
     [
       "'target' must have one finite value per input band."
     ],
     "schema_version" : 2,
     "summary" : "\u5339\u914d\u6ee4\u6ce2\u76ee\u6807\u68c0\u6d4b\uff1a\u4ee5\u76ee\u6807\u5149\u8c31\u4e0e\u80cc\u666f\u534f\u65b9\u5dee\u6784\u9020\u6700\u4f18\u6ee4\u6ce2\u5668\uff0c\u6700\u5927\u5316\u76ee\u6807-\u80cc\u666f\u5bf9\u6bd4\u3002",
-    "teaching_use" :
-    {
-      "concepts" :
     "teaching_use" : 
     {
       "concepts" : 
@@ -129,7 +106,6 @@
         "\u5339\u914d\u6ee4\u6ce2",
         "\u80cc\u666f\u534f\u65b9\u5dee"
       ],
-      "courses" :
       "courses" : 
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
@@ -145,7 +121,6 @@
   "notes" : "Three-pass streaming detection (background mean, covariance, score) over the same valid-pixel predicate as rs:rx_anomaly; bit-exact grade. Signed scores: threshold downstream.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" :
   "tags" : 
   [
     "spectral",

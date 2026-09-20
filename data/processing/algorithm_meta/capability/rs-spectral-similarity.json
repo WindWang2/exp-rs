@@ -1,0 +1,157 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u786e\u8ba4 input \u8def\u5f84\u5b58\u5728\u4e14\u4e3a\u53ef\u8bfb\u6805\u683c",
+        "when" : "\u8f93\u5165\u591a\u6ce2\u6bb5\u6805\u683c\u6587\u4ef6\u4e0d\u5b58\u5728\u6216\u65e0\u6cd5\u7528 GDAL \u6253\u5f00"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u8865\u9f50\u5fc5\u586b\u53c2\u6570\u3001\u53ea\u901a\u8fc7\u4e00\u79cd\u5f62\u5f0f\u63d0\u4f9b\u53c2\u8003\u5149\u8c31\uff0c\u5e76\u4f7f\u53c2\u8003\u6ce2\u6bb5\u6570\u4e0e\u5f71\u50cf\u4e00\u81f4\u6216\u8865\u9f50\u6ce2\u957f\u5143\u6570\u636e",
+        "when" : "\u5fc5\u586b\u53c2\u6570 input/output \u7f3a\u5931\uff0cform \u53d6\u503c\u4e0d\u5728 product_normalized/classic_tan \u4e4b\u5185\uff0c\u53c2\u8003\u5149\u8c31\uff08refs/refsRef/libraryPath\uff09\u672a\u63d0\u4f9b\u6216\u540c\u65f6\u63d0\u4f9b\u591a\u79cd\uff0c\u6216\u53c2\u8003\u6ce2\u6bb5\u6570\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e0d\u4e00\u81f4\u4e14\u4efb\u4e00\u4fa7\u65e0\u6ce2\u957f\u5143\u6570\u636e"
+      },
+      {
+        "code" : "INVALID_RADIOMETRY",
+        "remedy" : "\u5148\u505a\u8f90\u5c04\u5b9a\u6807\u4e0e\u5927\u6c14\u6821\u6b63\uff0c\u63d0\u4f9b\u53cd\u5c04\u7387\u91cf\u7eb2\u3001\u975e\u8d1f\u7684\u53c2\u8003\u5149\u8c31",
+        "when" : "\u53c2\u8003\u5149\u8c31\u4e3a DN/\u8f90\u4eae\u5ea6\u7b49\u975e\u53cd\u5c04\u7387\u91cf\u7eb2\u6216\u542b\u8d1f\u6ce2\u6bb5\uff0cSID \u7684\u6982\u7387\u5206\u5e03\u5047\u8bbe\u4e0d\u6210\u7acb\uff0c\u8fd9\u4e9b\u50cf\u5143\u53ea\u80fd\u7559\u7a7a\uff08NaN \u5206\u6570\uff09\u800c\u4e0d\u88ab\u5f3a\u884c\u5f52\u7c7b"
+      },
+      {
+        "code" : "WAVELENGTH_INCOMPATIBLE",
+        "remedy" : "\u9009\u62e9\u843d\u5728\u53c2\u8003\u8986\u76d6\u8303\u56f4\u5185\u7684\u8f93\u5165\u6ce2\u6bb5\uff0c\u6216\u63d0\u4f9b\u6ce2\u957f\u5339\u914d\u7684\u53c2\u8003\u5149\u8c31",
+        "when" : "\u53c2\u8003\u5149\u8c31\u4e0e\u8f93\u5165\u5f71\u50cf\u7684\u6ce2\u957f\u8303\u56f4\u4e0d\u91cd\u53e0\uff0c\u6216\u6240\u9009\u8f93\u5165\u6ce2\u6bb5\u8d85\u51fa\u53c2\u8003\u5149\u8c31\u6ce2\u957f\u8986\u76d6"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "form",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "meanScore",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "refs",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "product_normalized",
+          "enum" : 
+          [
+            "product_normalized",
+            "classic_tan"
+          ],
+          "name" : "form",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "refs",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "refsRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "scoreOut",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "References must be reflectance-like (non-negative) on the same band grid as the input."
+    ],
+    "schema_version" : 2,
+    "summary" : "SID-SAM \u6df7\u5408\u5149\u8c31\u76f8\u4f3c\u5ea6\uff1a\u628a\u5149\u8c31\u89d2\uff08\u5f62\u72b6\uff09\u4e0e\u4fe1\u606f\u6563\u5ea6\uff08\u5206\u5e03\uff09\u878d\u5408\u4e3a\u5355\u4e00\u6709\u754c\u76f8\u4f3c\u5ea6\uff0c\u5c06\u6bcf\u50cf\u5143\u6807\u6ce8\u5230\u6700\u76f8\u4f3c\u7684\u53c2\u8003\u5149\u8c31\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Hybrid spectral similarity combining SAM and SID (bounded product or classic tan form); classifies pixels to the most similar reference.",
+  "display_name" : "SID-SAM Hybrid Similarity",
+  "id" : "rs:spectral_similarity",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "hyperspectral",
+    "similarity"
+  ],
+  "task" : "classification"
+}
