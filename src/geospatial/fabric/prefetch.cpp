@@ -14,6 +14,7 @@
 #include "geospatial/raster/raster_reader.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace sicnu::geo
@@ -296,6 +297,7 @@ Json::Value PrefetchLocalityReport::toJson() const
     json["skippedBudget"] = static_cast<Json::UInt64>( skippedBudget );
     json["skippedCancel"] = static_cast<Json::UInt64>( skippedCancel );
     json["failed"] = static_cast<Json::UInt64>( failed );
+    json["skippedNoOverview"] = static_cast<Json::UInt64>( skippedNoOverview );
     json["budgetExhausted"] = budgetExhausted;
     json["outcomesDropped"] = static_cast<Json::UInt64>( outcomesDropped );
     return json;
@@ -310,6 +312,8 @@ struct MergedRead
 {
     std::size_t assetIndex = 0;
     int xOff = 0, yOff = 0, x1 = 0, y1 = 0;   // source pixel rect, half-open
+    int band = 1;      // 12.0: 1-based band the read warms
+    int overview = 0;  // 12.0: 1-based overview level (0 = native)
 };
 
 /// A touching-or-overlapping merge on the integer grid: two rects merge
@@ -382,6 +386,8 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
             read.yOff = mapped.window.yOff;
             read.x1 = mapped.window.xOff + mapped.window.width - 1;
             read.y1 = mapped.window.yOff + mapped.window.height - 1;
+            read.band = window.band > 0 ? window.band : 1;
+            read.overview = window.overview > 0 ? window.overview : 0;
             reads.push_back( read );
         }
     }
@@ -393,6 +399,11 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
                       [ & ]( const MergedRead &a, const MergedRead &b ) {
                           if ( a.assetIndex != b.assetIndex )
                               return a.assetIndex < b.assetIndex;
+                          // 12.0 progressive refinement: coarser overview
+                          // levels warm BEFORE finer ones — a zoom-in
+                          // trajectory always has its current zoom warm.
+                          if ( a.overview != b.overview )
+                              return a.overview > b.overview;
                           if ( a.yOff != b.yOff )
                               return a.yOff < b.yOff;
                           return a.xOff < b.xOff;
@@ -403,7 +414,8 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
         bool absorbed = false;
         for ( MergedRead &open : merged )
         {
-            if ( open.assetIndex == read.assetIndex && rectsTouchOrOverlap( open, read ) )
+            if ( open.assetIndex == read.assetIndex && open.band == read.band &&
+                 open.overview == read.overview && rectsTouchOrOverlap( open, read ) )
             {
                 mergeRect( open, read );
                 absorbed = true;
@@ -438,8 +450,12 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
         // (grid cells × 8 bytes — the same unit executeWindow uses). A
         // read that cannot fit the remaining budget is skipped honestly;
         // one fat read never blows the budget after the fact.
+        // 12.0: an overview read pulls THAT LEVEL's bytes — the estimate is
+        // decimated by the level factor (a coarse zoom is cheap; that is
+        // the point of warming it first).
+        const int estimateShift = 2 * std::min( read.overview, 30 );
         const std::uint64_t estimate =
-          static_cast<std::uint64_t>( width ) * height * 8;
+          ( static_cast<std::uint64_t>( width ) * height * 8 ) >> estimateShift;
         if ( budget > 0 && pulled + estimate > budget )
         {
             ++report.skippedBudget;
@@ -448,7 +464,10 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
         }
 
         // Mirror coordination: a hit means the bytes are already local.
-        if ( !options.mirrorDirectory.empty() )
+        // 12.0: skipped for overview-declared reads — the mirror holds
+        // NATIVE band chunks only, so a same-window native hit would
+        // misreport as "already local" and silently skip the overview warm.
+        if ( !options.mirrorDirectory.empty() && read.overview == 0 )
         {
             try
             {
@@ -472,16 +491,17 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
                 }
                 if ( !token.empty() )
                 {
+                    const std::string bandSelector = "band" + std::to_string( read.band );
                     const std::string indexKey = fabricMirrorIndexKey( entry.record.path );
                     std::string skippedCorrupt;
                     std::string key =
-                      fabricChunkMirrorKey( token, indexKey, window, "band1" );
+                      fabricChunkMirrorKey( token, indexKey, window, bandSelector );
                     std::string hit =
                       resolveMirrorHit( options.mirrorDirectory, token, key, &skippedCorrupt );
                     if ( hit.empty() )
                     {
                         const std::string legacyKey =
-                          fabricChunkMirrorKey( token, entry.record.path, window, "band1" );
+                          fabricChunkMirrorKey( token, entry.record.path, window, bandSelector );
                         if ( legacyKey != key )
                             hit = resolveMirrorHit( options.mirrorDirectory, token, legacyKey,
                                                     &skippedCorrupt );
@@ -504,9 +524,39 @@ PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
             RasterReader reader = RasterReader::open( fabricCachedPath( entry.record.path ) );
             const std::uintmax_t telemetryBefore =
               RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
-            ( void )reader.readWindow( { 1 }, window,
-                                       options.maxChunkBytes ? options.maxChunkBytes
-                                                             : 16ull * 1024 * 1024 );
+            if ( read.overview > 0 )
+            {
+                // 12.0 overview-aware warm: pull THAT level's blocks through
+                // the cache. A level the source does not have is an honest
+                // skip (never a silent native re-read — that would pull the
+                // full-res bytes the caller was trying to avoid).
+                const std::vector<int> dims = reader.overviewDimensions( read.band );
+                // The dimensions vector can be SHORTER than 2×overviewCount
+                // (null overview handles are skipped upstream) — bounds-check
+                // the level before indexing it.
+                if ( static_cast<std::size_t>( 2 * read.overview ) > dims.size() )
+                {
+                    ++report.skippedNoOverview;
+                    continue;
+                }
+                const int ow = dims[2 * ( read.overview - 1 )];
+                const int oh = dims[2 * ( read.overview - 1 ) + 1];
+                // The level's scale against the full raster (the recorded
+                // index-entry grid is the full-res extent).
+                const int dstWidth = std::max( 1, static_cast<int>( std::lround(
+                                                   window.width * ( ow / double( entry.rasterWidth ) ) )) );
+                const int dstHeight = std::max( 1, static_cast<int>( std::lround(
+                                                    window.height * ( oh / double( entry.rasterHeight ) ) )) );
+                ( void )reader.readWindowResampled( { read.band }, window, dstWidth, dstHeight,
+                                                    read.overview, OverviewPolicy::Exact,
+                                                    "nearest" );
+            }
+            else
+            {
+                ( void )reader.readWindow( { read.band }, window,
+                                           options.maxChunkBytes ? options.maxChunkBytes
+                                                                 : 16ull * 1024 * 1024 );
+            }
             const std::uintmax_t telemetryAfter =
               RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
             const std::uint64_t chunkBytes =

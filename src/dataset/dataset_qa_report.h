@@ -48,6 +48,10 @@ class DatasetQaReport
     AuditVerdict overallVerdict() const;
 
     QJsonObject toJson() const;
+    /// Strict parse (12.0 persistence): a foreign schema_version or an
+    /// unparsable category fails typed — stored QA evidence is never
+    /// half-interpreted.
+    static sicnu::data::Result<DatasetQaReport> fromJson( const QJsonObject &json );
 
   private:
     QString m_datasetVersionId;

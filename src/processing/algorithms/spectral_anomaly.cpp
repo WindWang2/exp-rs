@@ -2,6 +2,7 @@
 #include "spectral_anomaly.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -147,6 +148,57 @@ bool invertCovariance( const std::vector<double> &covariance, int bands,
     for ( int i = 0; i < bands; ++i )
         covRidge[static_cast<size_t>( i ) * bands + i] += kRidge;
     return sicnu::primitives::invertDenseMatrix( covRidge, bands, inverse );
+}
+
+double conditionProxy( const std::vector<double> &background, int bands )
+{
+    if ( bands <= 0 || background.size() != static_cast<size_t>( bands ) * bands )
+        return -1.0;
+    double trace = 0.0;
+    for ( int i = 0; i < bands; ++i )
+    {
+        if ( !std::isfinite( background[static_cast<size_t>( i ) * bands + i] ) )
+            return -1.0;
+        trace += background[static_cast<size_t>( i ) * bands + i];
+    }
+    if ( !( trace > 0.0 ) )
+        return -1.0;
+
+    // Power iteration for λmax, deterministic start (normalized ones) with an
+    // early exit at 1e-12 relative Rayleigh residual; hard-capped iterations.
+    std::vector<double> v( static_cast<size_t>( bands ),
+                           1.0 / std::sqrt( static_cast<double>( bands ) ) );
+    double lambda = -1.0;
+    for ( int it = 0; it < 128; ++it )
+    {
+        double vw = 0.0;
+        double norm2 = 0.0;
+        std::vector<double> w( static_cast<size_t>( bands ), 0.0 );
+        for ( int i = 0; i < bands; ++i )
+        {
+            const size_t rowOffset = static_cast<size_t>( i ) * bands;
+            double row = 0.0;
+            for ( int j = 0; j < bands; ++j )
+                row += background[rowOffset + j] * v[static_cast<size_t>( j )];
+            w[static_cast<size_t>( i )] = row;
+            vw += v[static_cast<size_t>( i )] * row;
+            norm2 += row * row;
+        }
+        if ( !std::isfinite( norm2 ) || !( norm2 > 0.0 ) || !std::isfinite( vw ) )
+            // Also covers a PSD matrix whose dominant eigenvector is exactly
+            // orthogonal to the ones start (e.g. [[1,-1],[-1,1]]): a QA
+            // diagnostic returning "unknown" there is acceptable and honest.
+            return -1.0;
+        lambda = vw;
+        const double norm = std::sqrt( norm2 );
+        if ( std::fabs( norm - lambda ) <= 1e-12 * std::max( 1.0, norm ) )
+            break;
+        for ( int i = 0; i < bands; ++i )
+            v[static_cast<size_t>( i )] = w[static_cast<size_t>( i )] / norm;
+    }
+    if ( !std::isfinite( lambda ) || !( lambda > 0.0 ) )
+        return -1.0;
+    return lambda * static_cast<double>( bands ) / trace;
 }
 
 float rxScore( const float *spectrum, const std::vector<double> &mean,

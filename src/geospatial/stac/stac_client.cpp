@@ -18,10 +18,12 @@ namespace fs = std::filesystem;
 #include "geospatial/util/time_normalization.h"
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <set>
 #include <cctype>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 namespace sicnu::geo
@@ -701,6 +703,61 @@ Json::Value StacClient::cacheStats() const
   json["max_bytes"] = static_cast<Json::UInt64>( mOptions.cacheMaxBytes );
   json["ttl_seconds"] = mOptions.cacheTtlSeconds;
   return json;
+}
+
+std::vector<StacClient::ItemFetchResult> StacClient::fetchItemsConcurrent(
+    const std::vector<std::string> &itemHrefs, int maxConcurrency ) const
+{
+  const int requested = maxConcurrency > 0 ? maxConcurrency : mOptions.maxConcurrency;
+  const int workers = std::clamp( requested, 1, 32 );
+  std::vector<ItemFetchResult> results( itemHrefs.size() );
+  if ( itemHrefs.empty() )
+    return results;
+
+  // Shared work cursor: workers claim indexes atomically — no queue, no
+  // locks; every result slot has exactly one writer (its claiming worker).
+  std::atomic<std::size_t> next{ 0 };
+  const auto run = [ & ] {
+    for ( ;; )
+    {
+      const std::size_t index = next.fetch_add( 1 );
+      if ( index >= itemHrefs.size() )
+        return;
+      ItemFetchResult &slot = results[index];
+      slot.index = index;
+      try
+      {
+        const Json::Value document = fetchDocument( "GET", itemHrefs[index], Json::Value() );
+        if ( !document.isObject() )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "StacClient: item document is not a JSON object" );
+        slot.item = StacItem::parse( document );
+        stampItemProvenance( slot.item, itemHrefs[index] );
+        slot.ok = true;
+      }
+      catch ( const GeoError &error )
+      {
+        slot.errorText = std::string( error.what() ).substr( 0, 512 );
+      }
+      catch ( const std::exception &error )
+      {
+        slot.errorText = std::string( "item fetch failed: " ) + error.what();
+      }
+    }
+  };
+  if ( workers == 1 || itemHrefs.size() == 1 )
+  {
+    run();
+    return results;
+  }
+  std::vector<std::thread> pool;
+  pool.reserve( static_cast<std::size_t>( workers ) - 1 );
+  for ( int i = 0; i < workers - 1; ++i )
+    pool.emplace_back( run );
+  run();
+  for ( std::thread &worker : pool )
+    worker.join();
+  return results;
 }
 
 namespace

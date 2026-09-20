@@ -171,6 +171,27 @@ def scenario_required_empty(script, work):
           rc == 1 and "required prefix empty: data/absent-dir/" in out, out)
 
 
+def scenario_unsafe_required(script, work):
+    # lab platform 12.0: required[] entries get the same containment rule as
+    # files[] — an escaping or drive-qualified entry is a finding, never a
+    # probe outside the bundle.
+    for label, entry in (
+        ("parent-escape", "../outside"),
+        ("dotdot-segment", "data/../../etc"),
+        ("absolute", "/etc/passwd"),
+        ("drive-qualified", "C:/Windows/System32"),
+    ):
+        root = os.path.join(work, "unsafe-required-%s" % label)
+        os.makedirs(root)
+        files = build_valid_tree(root, "sicnu.offline_bundle/2")
+        write_manifest(root, "sicnu.offline_bundle/2", files,
+                       ["data/samples/", "tools/", "RUN.sh", "manifest.json",
+                        entry])
+        rc, out = run_verifier(script, root, work)
+        check("unsafe required %s fails" % label,
+              rc == 1 and "unsafe required entry" in out, out)
+
+
 def scenario_ceiling(script, work):
     root = os.path.join(work, "ceiling")
     os.makedirs(root)
@@ -280,6 +301,7 @@ def main():
     try:
         for scenario in (scenario_valid, scenario_tamper, scenario_missing,
                          scenario_extra, scenario_unsafe, scenario_required_empty,
+                         scenario_unsafe_required,
                          scenario_ceiling, scenario_future_schema,
                          scenario_min_reader, scenario_missing_manifest,
                          scenario_symlink_escape, scenario_ps_lane):

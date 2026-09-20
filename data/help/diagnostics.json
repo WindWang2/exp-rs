@@ -2166,50 +2166,6 @@
     ]
   },
   {
-    "id": "diagnostic.operator.runtime_provider_failed",
-    "family": "operator",
-    "code": "RuntimeProviderFailed",
-    "title": "运行时提供者失败",
-    "whatHappened": "外部模型推理服务崩溃或通信中断。",
-    "severity": "error",
-    "retry": "retryable",
-    "whyItMatters": "模型推理执行中断，无法产出结果。",
-    "remediation": [
-      "检查外部推理后端进程是否正常运行",
-      "重试任务或重新初始化模型运行时"
-    ],
-    "keywords": [
-      "推理引擎",
-      "模型运行时",
-      "RuntimeProviderFailed"
-    ]
-  },
-  {
-    "id": "diagnostic.operator.policy_refused",
-    "family": "operator",
-    "code": "PolicyRefused",
-    "title": "算子被策略拒绝执行",
-    "whatHappened": "算子在执行前被能力/策略层拒绝（capability/policy refusal），而非执行失败。",
-    "whyItMatters": "这是类型化的拒绝而非通用错误：算子本身没有被运行，数据不会被部分写入。",
-    "severity": "error",
-    "retry": "derived",
-    "remediation": [
-      "在插件/算子管理器中确认该算子已被授权启用",
-      "检查工作流参数是否触及策略边界（如外部工具白名单）",
-      "调整策略配置后重新运行"
-    ],
-    "keywords": [
-      "policy",
-      "refused",
-      "策略",
-      "拒绝"
-    ],
-    "related": [
-      "workbench.plugin_manager"
-    ],
-    "category": "错误与诊断"
-  },
-  {
     "id": "diagnostic.env.gdal_drivers_empty",
     "family": "env",
     "code": "GDAL_DRIVERS_EMPTY",
