@@ -2565,8 +2565,10 @@ void QgsClassificationMainWindow::applyClassification()
       *accuracyPtr = res.accuracy;
       Json::Value result( Json::objectValue );
       result["output"] = request.params.get( "output", "" ).asString();
-      result["totalPixels"] = res.totalPixels;
-      result["durationMs"] = res.durationMs;
+      // qint64 → Json::Value is ambiguous under GCC 16's jsoncpp headers; the
+      // explicit Int64 keeps the value identical on every toolchain.
+      result["totalPixels"] = Json::Value( static_cast<Json::Int64>( res.totalPixels ) );
+      result["durationMs"] = Json::Value( static_cast<Json::Int64>( res.durationMs ) );
       if ( !res.accuracy.classIds.isEmpty() )
       {
         result["overallAccuracy"] = res.accuracy.overallAccuracy;

@@ -160,6 +160,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_radiometric_qa_operator.cpp
     rs/rs_spectral_derivative_operator.cpp
     rs/rs_spectral_detection_operators.cpp
+    rs/rs_spectral_spatial_fuse_operator.cpp
     rs/rs_sar_dualpol_operator.cpp
     rs/rs_sar_terrain_masks_operator.cpp
     rs/rs_sar_geocode_operator.cpp
