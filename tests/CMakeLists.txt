@@ -432,6 +432,18 @@ endif()
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
 target_include_directories(test_io_fabric_scale PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — offline mirror maintenance (verify/repair/prune) over plain local
+# fixtures (no network, no Qt).
+sicnu_add_io_test(test_io_mirror_maintenance)
+target_include_directories(test_io_mirror_maintenance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — out-of-core microbench: real loopback HTTP, bytes/requests/peak
+# asserted as correctness gates (latencies reported, never asserted).
+sicnu_add_io_test(test_io_microbench)
+target_sources(test_io_microbench PRIVATE support/http_range_server.cpp)
+target_include_directories(test_io_microbench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_microbench PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
@@ -3066,6 +3078,27 @@ target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu
 sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
 target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation scale Oracle (O1): 100k-sample catalog + 10k-run
+# experiment store — batch ingest, keyset-cursor paging, indexed identity
+# lookup, with a structured JSON perf report emitted to
+# SICNU_PERF_EVIDENCE_DIR. RUN_SERIAL: the benchmark should not compete for
+# memory.
+sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE
+  ENVIRONMENT "SICNU_PERF_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/test-artifacts")
+target_link_libraries(test_data_foundation_scale PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+set_property(TARGET test_data_foundation_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation fault Oracle (O3): deterministic mid-transaction
+# failures, corrupt rows and batch-commit faults leave no partial rows or
+# phantom references.
+sicnu_add_test(test_store_fault_injection TIMEOUT 300)
+target_link_libraries(test_store_fault_injection PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3 sicnu_runtime)
+
+# 12.0 GC/retention Oracle (O4): governance graph fixture proves dry-run ==
+# execution and reachability; experiment run prune plan/execute equivalence.
+sicnu_add_test(test_gc_retention_plan TIMEOUT 300)
+target_link_libraries(test_gc_retention_plan PRIVATE Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
 
 # Foundation 5.0 end-to-end examples (goal §54): optical classification,
 # SAR pair, multimodal temporal, segmentation — small data, whole chain.
