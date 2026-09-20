@@ -8,6 +8,7 @@
 // that makes version references meaningful.
 #include "dataset_store_impl.h"
 
+#include "../data/query_cursor.h"
 #include "annotation.h"
 #include "label_schema.h"
 #include "sample.h"
@@ -284,6 +285,94 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
         records.append( parsed.value() );
     }
     return Result::success( qMakePair( total, records ) );
+}
+
+sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCursor(
+    const DatasetVersionId &versionId, const QString &cursor, qint64 limit ) const
+{
+    using Result = sicnu::data::Result<SampleCursorPage>;
+    if ( !m_impl )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
+
+    // Decode the resume point. The cursor echoes the version id so a stale
+    // or shuffled cursor fails typed instead of paging a different version.
+    qint64 afterRoword = -1;
+    QString afterSampleId;
+    if ( !cursor.isEmpty() )
+    {
+        const auto decoded = sicnu::data::QueryCursor::decode( cursor );
+        if ( !decoded )
+            return Result::failure( decoded.diagnostics() );
+        const QStringList parts = decoded.value();
+        if ( parts.size() != 3 || parts.first() != versionId.toString() )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.cursor_mismatch" ),
+                QStringLiteral( "cursor was issued for a different version" ) ) );
+        bool rowordOk = false;
+        afterRoword = parts.at( 1 ).toLongLong( &rowordOk );
+        if ( !rowordOk )
+            return Result::failure( storeDiag( QStringLiteral( "data.cursor_invalid" ),
+                                               QStringLiteral( "cursor keyset is not numeric" ) ) );
+        afterSampleId = parts.at( 2 );
+    }
+
+    QMutexLocker lock( &m_impl->mutex );
+    SampleCursorPage page;
+    {
+        StoreStmt count( m_impl->db, QStringLiteral(
+            "SELECT COUNT(*) FROM samples WHERE dataset_version_id=?" ) );
+        if ( !count )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               count.error( m_impl->db ) ) );
+        count.bind( 1, versionId.toString() );
+        if ( count.stepRow() )
+            page.total = count.i64( 0 );
+    }
+
+    StoreStmt stmt( m_impl->db, cursor.isEmpty()
+        ? QStringLiteral(
+            "SELECT roword, sample_id, json FROM samples"
+            " WHERE dataset_version_id=? ORDER BY roword, sample_id LIMIT ?" )
+        : QStringLiteral(
+            "SELECT roword, sample_id, json FROM samples"
+            " WHERE dataset_version_id=? AND (roword > ? OR (roword = ? AND sample_id > ?))"
+            " ORDER BY roword, sample_id LIMIT ?" ) );
+    if ( !stmt )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           stmt.error( m_impl->db ) ) );
+    stmt.bind( 1, versionId.toString() );
+    if ( !cursor.isEmpty() )
+    {
+        stmt.bind( 2, afterRoword );
+        stmt.bind( 3, afterRoword );
+        stmt.bind( 4, afterSampleId );
+        stmt.bind( 5, limit );
+    }
+    else
+    {
+        stmt.bind( 2, limit );
+    }
+    while ( stmt.stepRow() )
+    {
+        const qint64 roword = stmt.i64( 0 );
+        const QString sampleId = stmt.text( 1 );
+        auto parsed = SampleRecord::fromJson( textToJson( stmt.text( 2 ) ) );
+        if ( !parsed )
+        {
+            // Same fail-conservative rule as samplesPage: primary data never
+            // silently shrinks past a corrupt row.
+            return Result::failure( storeDiag( QStringLiteral( "dataset.corrupt_sample" ),
+                                               parsed.diagnostics().first().message ) );
+        }
+        page.samples.append( parsed.value() );
+        page.nextCursor = sicnu::data::QueryCursor::encode(
+            { versionId.toString(), QString::number( roword ), sampleId } );
+    }
+    if ( int( page.samples.size() ) < limit )
+        page.nextCursor.clear(); // exhausted: the walk terminates cleanly
+    return Result::success( page );
 }
 
 qint64 DatasetStore::sampleCount( const DatasetVersionId &versionId ) const

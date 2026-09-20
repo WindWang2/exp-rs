@@ -2,7 +2,7 @@
   "gpu" : false,
   "id" : "rs:terrain_flow",
   "input" : "raster",
-  "notes" : "Priority-flood filling (NoData cells are barriers, never routed across); D8 codes are the ESRI powers of two with 0 = sink; accumulation counts include the cell itself. Full-frame kernel contract (O(N log N)).",
+  "notes" : "Priority-flood filling (NoData cells are barriers, never routed across); D8 codes are the ESRI powers of two with 0 = sink; accumulation counts include the cell itself. flat_resolve adds epsilon-gradient flat resolution; flow_direction_inf is D\u221e (Tarboton) in degrees clockwise from north; stream_network thresholds accumulation and assigns Strahler orders; outlets lists D8 direction-0 cells. Full-frame kernel contract (O(N log N)).",
   "output" : "raster",
   "tags" : 
   [

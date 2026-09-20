@@ -468,6 +468,248 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
   return result;
 }
 
+Json::Value MirrorVerifyReport::toJson() const
+{
+  Json::Value json;
+  json["entries_checked"] = static_cast<Json::UInt64>( entriesChecked );
+  json["ok"] = static_cast<Json::UInt64>( ok );
+  json["missing_files"] = static_cast<Json::UInt64>( missingFiles );
+  json["size_mismatches"] = static_cast<Json::UInt64>( sizeMismatches );
+  json["checksum_mismatches"] = static_cast<Json::UInt64>( checksumMismatches );
+  json["bad_entries"] = static_cast<Json::UInt64>( badEntries );
+  json["unreferenced_files"] = static_cast<Json::UInt64>( unreferencedFiles );
+  json["unreferenced_bytes"] = static_cast<Json::UInt64>( unreferencedBytes );
+  json["bytes_checked"] = static_cast<Json::UInt64>( bytesChecked );
+  json["manifest_unreadable"] = manifestUnreadable;
+  return json;
+}
+
+namespace
+{
+
+/// The verdict of one manifest chunk entry (shared by verifyMirror and the
+/// repair cleanup so both apply EXACTLY the same contract).
+enum class ChunkEntryVerdict
+{
+  Ok,
+  BadEntry,           ///< wrong-typed / unsafe name / missing sha256 proof
+  MissingFile,
+  SizeMismatch,
+  ChecksumMismatch,
+};
+
+ChunkEntryVerdict verifyChunkEntry( const Json::Value &manifest, const std::string &mirrorDirectory,
+                                    const std::string &file, bool hasDeclaredBytes,
+                                    std::uint64_t declaredBytes, bool hasSha256,
+                                    const std::string &sha256, std::uint64_t *bytesOut )
+{
+  if ( !isSafeMirrorChunkFileName( file ) )
+    return ChunkEntryVerdict::BadEntry;
+  const std::string fullPath = mirrorDirectory + "/" + kMirrorChunkDir + "/" + file;
+  VSIStatBufL statBuffer;
+  if ( VSIStatL( fullPath.c_str(), &statBuffer ) != 0 )
+    return ChunkEntryVerdict::MissingFile;
+  if ( hasDeclaredBytes && declaredBytes != static_cast<Json::UInt64>( statBuffer.st_size ) )
+    return ChunkEntryVerdict::SizeMismatch;
+  if ( hasSha256 )
+  {
+    const std::string digest = fileSha256Hex( fullPath );
+    if ( digest.empty() || digest != sha256 )
+      return ChunkEntryVerdict::ChecksumMismatch;
+  }
+  else if ( manifest.isMember( "index" ) )
+  {
+    // An 11.0 manifest (it carries the offline index) demands the proof;
+    // absence is corrupt, exactly like the replay-read contract.
+    return ChunkEntryVerdict::BadEntry;
+  }
+  if ( bytesOut != nullptr )
+    *bytesOut = static_cast<std::uint64_t>( statBuffer.st_size );
+  return ChunkEntryVerdict::Ok;
+}
+
+} // namespace
+
+MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
+{
+  MirrorVerifyReport report;
+  const Json::Value manifest = manifestSnapshot( mirrorDirectory );
+  if ( manifest.isNull() || !manifest.isObject() )
+  {
+    report.manifestUnreadable = true;
+    return report;
+  }
+
+  // The referenced chunk file names — the orphan scan at the end compares
+  // the directory listing against this set.
+  std::set<std::string> referenced;
+
+  for ( const std::string &token : manifest.getMemberNames() )
+  {
+    if ( token == "index" )
+      continue;   // the offline index is metadata, not chunk entries
+    const Json::Value &chunks = manifest[token];
+    if ( !chunks.isObject() )
+      continue;
+    for ( const std::string &chunkKey : chunks.getMemberNames() )
+    {
+      const Json::Value &chunk = chunks[chunkKey];
+      if ( !chunk.isObject() )
+        continue;
+      report.entriesChecked += 1;
+      const std::string file = chunk["file"].isString() ? chunk["file"].asString() : std::string();
+      // Referenced = the manifest NAMES the file (name-based, independent of
+      // the verdict): a corrupt-but-present file is not an orphan.
+      if ( !file.empty() )
+        referenced.insert( file );
+      std::uint64_t entryBytes = 0;
+      const ChunkEntryVerdict verdict = verifyChunkEntry(
+        manifest, mirrorDirectory, file, chunk["bytes"].isUInt64(),
+        chunk["bytes"].isUInt64() ? chunk["bytes"].asUInt64() : 0, chunk["sha256"].isString(),
+        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(), &entryBytes );
+      switch ( verdict )
+      {
+        case ChunkEntryVerdict::Ok:
+          report.bytesChecked += entryBytes;
+          report.ok += 1;
+          break;
+        case ChunkEntryVerdict::BadEntry: report.badEntries += 1; break;
+        case ChunkEntryVerdict::MissingFile: report.missingFiles += 1; break;
+        case ChunkEntryVerdict::SizeMismatch: report.sizeMismatches += 1; break;
+        case ChunkEntryVerdict::ChecksumMismatch: report.checksumMismatches += 1; break;
+      }
+    }
+  }
+
+  // Orphan scan: every file in chunks/ the manifest never names. Bounded
+  // work: one listing pass, stat per orphan (no reads).
+  const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
+  std::error_code ec;
+  for ( std::filesystem::directory_iterator it( chunkDir, ec ), end; !ec && it != end;
+        it.increment( ec ) )
+  {
+    // A fresh error_code per probe: one transient stat failure (a racing
+    // directory change) must not abort the whole scan silently.
+    std::error_code probeEc;
+    if ( !it->is_regular_file( probeEc ) || probeEc )
+      continue;
+    const std::string name = it->path().filename().string();
+    if ( referenced.count( name ) > 0 )
+      continue;
+    std::error_code sizeEc;
+    const auto size = std::filesystem::file_size( it->path(), sizeEc );
+    report.unreferencedBytes += sizeEc ? 0 : static_cast<std::uint64_t>( size );
+    report.unreferencedFiles += 1;
+  }
+  return report;
+}
+
+namespace
+{
+
+/// The repair cleanup phase (12.0): re-verify every entry against the
+/// CURRENT manifest, unlink + drop the broken ones, publish atomically.
+/// Re-deriving the verdicts here (instead of replaying the caller's verify
+/// report) means a manifest rewritten between verify and cleanup can never
+/// make the repair drop a healthy entry.
+struct RepairCleanupResult
+{
+  MirrorVerifyReport verify;
+  std::uint64_t removedBadEntries = 0;
+  bool refused = false;
+};
+
+RepairCleanupResult repairCleanup( const std::string &mirrorDirectory )
+{
+  RepairCleanupResult result;
+  result.verify = verifyMirror( mirrorDirectory );
+  if ( result.verify.manifestUnreadable )
+  {
+    result.refused = true;
+    return result;
+  }
+  const bool badState = result.verify.missingFiles > 0 || result.verify.sizeMismatches > 0 ||
+                        result.verify.checksumMismatches > 0 || result.verify.badEntries > 0;
+  if ( !badState )
+    return result;   // nothing to clean; the re-materialization no-ops
+
+  MirrorWriterLock lock( mirrorDirectory );
+  if ( !lock.held() )
+    throw GeoError( ErrorCode::PermissionDenied,
+                    "another writer holds this mirror directory (single-writer contract)" );
+  // Read the manifest UNDER the lock (P0 review fix): reading before the
+  // lock would race a materialization pass that publishes new entries while
+  // we wait — this cleanup would then drop their fresh chunk files as
+  // "broken" and publish the stale view back over them.
+  Json::Value manifest = readManifest( mirrorDirectory );
+  if ( !manifest.isObject() )
+  {
+    // Raced with a corrupting writer between verify and here: refuse.
+    result.refused = true;
+    result.verify = MirrorVerifyReport {};
+    result.verify.manifestUnreadable = true;
+    return result;
+  }
+
+  bool dropped = false;
+  for ( const std::string &token : manifest.getMemberNames() )
+  {
+    if ( token == "index" )
+      continue;
+    Json::Value &chunks = manifest[token];
+    if ( !chunks.isObject() )
+      continue;
+    std::vector<std::string> dropKeys;
+    for ( const std::string &chunkKey : chunks.getMemberNames() )
+    {
+      const Json::Value &chunk = chunks[chunkKey];
+      if ( !chunk.isObject() )
+      {
+        dropKeys.push_back( chunkKey );   // wrong-typed slot
+        continue;
+      }
+      const std::string file = chunk["file"].isString() ? chunk["file"].asString() : std::string();
+      const ChunkEntryVerdict verdict = verifyChunkEntry(
+        manifest, mirrorDirectory, file, chunk["bytes"].isUInt64(),
+        chunk["bytes"].isUInt64() ? chunk["bytes"].asUInt64() : 0, chunk["sha256"].isString(),
+        chunk["sha256"].isString() ? chunk["sha256"].asString() : std::string(), nullptr );
+      if ( verdict == ChunkEntryVerdict::Ok )
+        continue;
+      dropKeys.push_back( chunkKey );
+      // Unlink the file when the manifest provably names a safe path for
+      // it (a missing file needs no unlink; an unsafe name is never a path
+      // we touch).
+      if ( !file.empty() && isSafeMirrorChunkFileName( file ) &&
+           verdict != ChunkEntryVerdict::MissingFile )
+        atomic_fs::removeFileQuiet( mirrorDirectory + "/" + kMirrorChunkDir + "/" + file );
+    }
+    for ( const std::string &key : dropKeys )
+    {
+      chunks.removeMember( key );
+      ++result.removedBadEntries;
+      dropped = true;
+    }
+  }
+  if ( dropped )
+  {
+    atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
+                                [ & ]( const std::string &staged ) {
+      const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
+      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
+      out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
+      out.flush();
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: write failed for " + staged );
+    } );
+    invalidateManifestSnapshot( mirrorDirectory );
+  }
+  return result;
+}
+
+} // namespace
+
 Json::Value mirrorStatsJson( const std::string &mirrorDirectory )
 {
   Json::Value stats;
@@ -818,6 +1060,9 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         // 11.0 integrity checksum: replay can demand a payload proof before
         // serving (size checks are cheap; this is the strong form).
         entry[key]["sha256"] = fileSha256Hex( target );
+        // 12.0 materialization stamp (additive): prune's age basis. Entries
+        // written before 12.0 lack it and simply never age-expire.
+        entry[key]["writtenUtc"] = nowIso8601Utc();
         manifest[token] = entry;
 
         // Throttled flush (11.0): the manifest publishes after every 32nd
@@ -867,6 +1112,263 @@ MirrorReport mirrorChunks( const VirtualCube &cube, const CubeChunkPlan &plan,
                            const MirrorOptions &options, const CancelToken &cancel )
 {
   return mirrorChunksImpl( cube, plan, options, cancel );
+}
+
+Json::Value MirrorRepairReport::toJson() const
+{
+  Json::Value json = before.toJson();
+  json["removed_bad_entries"] = static_cast<Json::UInt64>( removedBadEntries );
+  json["remirror"] = remirror.toJson();
+  json["manifest_unreadable"] = manifestUnreadable;
+  return json;
+}
+
+MirrorRepairReport repairMirror( const VirtualCube &cube, const CubeChunkPlan &plan,
+                                 const MirrorOptions &options, const CancelToken &cancel )
+{
+  // Expected cost: ~2× the mirror's bytes hashed (the audit verify + the
+  // locked re-verification before dropping) — maintenance-grade, not a
+  // per-read path.
+  MirrorRepairReport report;
+  const std::string &mirrorDirectory = options.mirrorDirectory;
+  if ( mirrorDirectory.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "mirror repair needs a directory" );
+  const RepairCleanupResult cleanup = repairCleanup( mirrorDirectory );
+  report.before = cleanup.verify;
+  report.removedBadEntries = cleanup.removedBadEntries;
+  report.manifestUnreadable = cleanup.refused;
+  if ( cleanup.refused )
+    return report;   // refuse: never re-materialize against an unreadable manifest
+  report.remirror = mirrorChunksImpl( cube, plan, options, cancel );
+  return report;
+}
+
+MirrorRepairReport repairMirror( const FabricPlan &plan, const MirrorOptions &options,
+                                 const CancelToken &cancel )
+{
+  const VirtualCube cube =
+    VirtualCube::build( plan.selectedAssets(), plan.grid(), OverlapPolicy::FirstWins, {} );
+  return repairMirror( cube, plan.chunkPlan(), options, cancel );
+}
+
+Json::Value MirrorPruneReport::toJson() const
+{
+  Json::Value json;
+  json["manifest_unreadable"] = manifestUnreadable;
+  json["orphan_files_removed"] = static_cast<Json::UInt64>( orphanFilesRemoved );
+  json["dead_entries_removed"] = static_cast<Json::UInt64>( deadEntriesRemoved );
+  json["expired_entries_removed"] = static_cast<Json::UInt64>( expiredEntriesRemoved );
+  json["quota_entries_removed"] = static_cast<Json::UInt64>( quotaEntriesRemoved );
+  json["kept_entries"] = static_cast<Json::UInt64>( keptEntries );
+  json["bytes_removed"] = static_cast<Json::UInt64>( bytesRemoved );
+  return json;
+}
+
+MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
+                               const MirrorPruneOptions &options )
+{
+  MirrorPruneReport report;
+  MirrorWriterLock lock( mirrorDirectory );
+  if ( !lock.held() )
+    throw GeoError( ErrorCode::PermissionDenied,
+                    "another writer holds this mirror directory (single-writer contract)" );
+  // Read the manifest UNDER the lock (P0 review fix): a pre-lock read races
+  // a materialization pass publishing new entries while we wait for the
+  // lock — this pass would delete their fresh chunk files as "orphans" and
+  // publish the stale manifest back over them (silent data loss).
+  Json::Value manifest = readManifest( mirrorDirectory );
+  if ( !manifest.isObject() )
+  {
+    // readManifest answers NULL for an UNPARSEABLE/oversized manifest: a
+    // refusal, because garbage collection against a manifest it failed to
+    // parse would delete payloads it never saw. (A MISSING manifest parses
+    // to the empty object — an empty mirror, where every chunk file is
+    // orphan and the pass below cleans it.)
+    report.manifestUnreadable = true;
+    return report;
+  }
+
+  const auto nowNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::system_clock::now().time_since_epoch() ).count();
+
+  // One entry record per kept/broken chunk — bounded by the manifest.
+  struct EntryRef
+  {
+    std::string token;
+    std::string key;
+    std::uint64_t bytes = 0;
+    std::int64_t writtenNanos = 0;   // < 0 when unstamped (never ages)
+  };
+  std::vector<EntryRef> kept;
+
+  for ( const std::string &token : manifest.getMemberNames() )
+  {
+    if ( token == "index" )
+      continue;
+    Json::Value &chunks = manifest[token];
+    if ( !chunks.isObject() )
+      continue;
+    std::vector<std::string> dropKeys;
+    for ( const std::string &chunkKey : chunks.getMemberNames() )
+    {
+      const Json::Value &chunk = chunks[chunkKey];
+      if ( !chunk.isObject() || !chunk["file"].isString() )
+        continue;   // wrong-typed slots belong to repair, not prune
+      const std::string file = chunk["file"].asString();
+      if ( !isSafeMirrorChunkFileName( file ) )
+        continue;
+      const std::string fullPath = mirrorDirectory + "/" + kMirrorChunkDir + "/" + file;
+      VSIStatBufL statBuffer;
+      const bool exists = VSIStatL( fullPath.c_str(), &statBuffer ) == 0;
+      if ( !exists )
+      {
+        ++report.deadEntriesRemoved;
+        dropKeys.push_back( chunkKey );
+        continue;
+      }
+      const std::uint64_t entryBytes = static_cast<std::uint64_t>( statBuffer.st_size );
+      // The materialization stamp is ALWAYS parsed (quota eviction needs the
+      // ordering too); only the expiry DECISION depends on maxAgeSeconds.
+      // Unstamped or unparseable entries never age and are un-evictable by
+      // quota (absence is not evidence of staleness).
+      std::int64_t writtenNanos = -1;
+      if ( chunk["writtenUtc"].isString() )
+      {
+        const InstantParse parsed = parseIso8601Instant( chunk["writtenUtc"].asString() );
+        if ( parsed.ok )
+        {
+          writtenNanos = parsed.epochNanos;
+          if ( options.maxAgeSeconds > 0 )
+          {
+            const std::uint64_t ageSeconds = ( nowNanos > parsed.epochNanos )
+              ? static_cast<std::uint64_t>( nowNanos - parsed.epochNanos ) / 1000000000ull
+              : 0;
+            if ( ageSeconds > options.maxAgeSeconds )
+            {
+              atomic_fs::removeFileQuiet( fullPath );
+              ++report.expiredEntriesRemoved;
+              report.bytesRemoved += entryBytes;
+              dropKeys.push_back( chunkKey );
+              continue;
+            }
+          }
+        }
+      }
+      EntryRef ref;
+      ref.token = token;
+      ref.key = chunkKey;
+      ref.bytes = entryBytes;
+      ref.writtenNanos = writtenNanos;
+      kept.push_back( ref );
+    }
+    for ( const std::string &key : dropKeys )
+      chunks.removeMember( key );
+  }
+
+  // Quota: evict the OLDEST-stamped kept entries until the total fits.
+  if ( options.maxBytes > 0 )
+  {
+    std::uint64_t total = 0;
+    for ( const EntryRef &ref : kept )
+      total += ref.bytes;
+    std::vector<EntryRef *> evictable;
+    for ( EntryRef &ref : kept )
+      if ( ref.writtenNanos >= 0 )
+        evictable.push_back( &ref );
+    std::sort( evictable.begin(), evictable.end(),
+               []( const EntryRef *a, const EntryRef *b ) {
+                 return a->writtenNanos < b->writtenNanos;
+               } );
+    for ( EntryRef *ref : evictable )
+    {
+      if ( total <= options.maxBytes )
+        break;
+      Json::Value &chunks = manifest[ref->token];
+      if ( !chunks.isObject() || !chunks.isMember( ref->key ) )
+        continue;   // already dropped this pass
+      atomic_fs::removeFileQuiet( mirrorDirectory + "/" + kMirrorChunkDir + "/" +
+                                  chunks[ref->key]["file"].asString() );
+      chunks.removeMember( ref->key );
+      total -= ref->bytes;
+      report.bytesRemoved += ref->bytes;
+      ++report.quotaEntriesRemoved;
+    }
+  }
+
+  for ( const std::string &token : manifest.getMemberNames() )
+  {
+    if ( token == "index" )
+      continue;
+    const Json::Value &chunks = manifest[token];
+    if ( chunks.isObject() )
+      report.keptEntries += chunks.size();
+  }
+
+  // Orphan scan AFTER entry pruning: dropped entries' files are unlinked,
+  // so anything left in chunks/ that no kept entry names is garbage.
+  std::set<std::string> referenced;
+  for ( const std::string &token : manifest.getMemberNames() )
+  {
+    if ( token == "index" )
+      continue;
+    const Json::Value &chunks = manifest[token];
+    if ( !chunks.isObject() )
+      continue;
+    for ( const std::string &chunkKey : chunks.getMemberNames() )
+    {
+      const Json::Value &chunk = chunks[chunkKey];
+      if ( chunk.isObject() && chunk["file"].isString() &&
+           isSafeMirrorChunkFileName( chunk["file"].asString() ) )
+        referenced.insert( chunk["file"].asString() );
+    }
+  }
+  const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
+  std::error_code ec;
+  for ( std::filesystem::directory_iterator it( chunkDir, ec ), end; !ec && it != end;
+        it.increment( ec ) )
+  {
+    std::error_code probeEc;
+    if ( !it->is_regular_file( probeEc ) || probeEc )
+      continue;
+    const std::string name = it->path().filename().string();
+    if ( referenced.count( name ) > 0 )
+      continue;
+    // Chunk file names are content-derived ASCII (sha256 hex + ".tif") in
+    // every materialized mirror; a hostile NON-ASCII orphan name is counted
+    // but left for a human rather than routed through a possibly
+    // ACP-reencoding removal path on Windows (the atomic_fs house rule).
+    if ( !std::all_of( name.begin(), name.end(),
+                       []( char c ) { return static_cast<unsigned char>( c ) < 0x80; } ) )
+      continue;
+    std::error_code sizeEc;
+    const auto size = std::filesystem::file_size( it->path(), sizeEc );
+    if ( !sizeEc )
+      report.bytesRemoved += static_cast<std::uint64_t>( size );
+    atomic_fs::removeFileQuiet( it->path().string() );
+    ++report.orphanFilesRemoved;
+  }
+
+  // Publish only when this pass actually changed something (P2 review: an
+  // unconditional rewrite would churn mtime and invalidate the snapshot
+  // cache on a no-op prune).
+  const bool changed = report.deadEntriesRemoved > 0 || report.expiredEntriesRemoved > 0 ||
+                       report.quotaEntriesRemoved > 0 || report.orphanFilesRemoved > 0;
+  if ( changed )
+  {
+    atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
+                                [ & ]( const std::string &staged ) {
+      const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
+      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
+      out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
+      out.flush();
+      if ( !out )
+        throw GeoError( ErrorCode::IoError, "mirror manifest: write failed for " + staged );
+    } );
+    invalidateManifestSnapshot( mirrorDirectory );
+  }
+  return report;
 }
 
 } // namespace sicnu::geo

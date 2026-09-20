@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:terrain_viewshed",
+  "input" : "raster",
+  "notes" : "Ring-sweep R3-family viewshed (deterministic, permissive merge). NoData cells are opaque: rays stop at them. Curvature correction lowers elevations by (1-k)*d^2/(2R) and is exact per LOS pair.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "terrain",
+    "visibility",
+    "viewshed"
+  ],
+  "task" : "visibility"
+}

@@ -432,6 +432,18 @@ endif()
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
 target_include_directories(test_io_fabric_scale PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — offline mirror maintenance (verify/repair/prune) over plain local
+# fixtures (no network, no Qt).
+sicnu_add_io_test(test_io_mirror_maintenance)
+target_include_directories(test_io_mirror_maintenance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# 12.0 — out-of-core microbench: real loopback HTTP, bytes/requests/peak
+# asserted as correctness gates (latencies reported, never asserted).
+sicnu_add_io_test(test_io_microbench)
+target_sources(test_io_microbench PRIVATE support/http_range_server.cpp)
+target_include_directories(test_io_microbench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_microbench PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_operators)
 target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
@@ -1474,6 +1486,79 @@ target_include_directories(test_spectral_detection PRIVATE
 )
 sicnu_discover_tests(test_spectral_detection)
 
+# Spectral Intelligence 12.0 work package A: CEM target detector kernel —
+# closed forms, streaming correlation accumulation, scaled loading,
+# condition proxy, fail-closed refusals.
+add_executable(test_spectral_cem test_spectral_cem.cpp)
+target_link_libraries(test_spectral_cem PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_cem)
+target_include_directories(test_spectral_cem PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_cem)
+
+# Spectral Intelligence 12.0 work package G: detector tile-vs-whole-scene
+# streaming equivalence (MF/ACE/CEM), including declared-NoData QA honesty.
+add_executable(test_spectral_detection_streaming test_spectral_detection_streaming.cpp)
+target_link_libraries(test_spectral_detection_streaming PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection_streaming)
+target_include_directories(test_spectral_detection_streaming PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_detection_streaming)
+
+# Spectral Intelligence 12.0 work package B: spatial consistency fusion —
+# closed forms, NoData leak-proofness, tile-halo equivalence, operator E2E.
+add_executable(test_spectral_spatial_fusion test_spectral_spatial_fusion.cpp)
+target_link_libraries(test_spectral_spatial_fusion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_spatial_fusion)
+target_include_directories(test_spectral_spatial_fusion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_spatial_fusion)
+
+# Spectral Intelligence 12.0 work package C: library-scale matching —
+# brute-force equivalence, grid-bucket resample cache, prescreened top-K,
+# machine-independent scale evidence.
+add_executable(test_spectral_library_scale test_spectral_library_scale.cpp)
+target_link_libraries(test_spectral_library_scale PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_library_scale)
+target_include_directories(test_spectral_library_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_library_scale)
+
 # SAR foundation (Foundation 5.0 Milestone D): dual-pol features + terrain
 # geometry closed forms, operator E2E, geometry refusals.
 add_executable(test_sar_orbit test_sar_orbit.cpp)
@@ -2485,6 +2570,90 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_multimodal_inference)
 
+    # Platform 12.0 model ensemble: manifest contract parsing/validation,
+    # member resolution, weighted_mean / weighted_vote combination against
+    # hand-computed answers, uncertainty bands, atomic failure and the
+    # surface exclusions.
+    add_executable(test_model_ensemble test_model_ensemble.cpp)
+    target_link_libraries(test_model_ensemble PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_ensemble)
+    target_include_directories(test_model_ensemble PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_ensemble)
+
+    # Platform 12.0 provider strategy: ordered fallback chain over the SAME
+    # artifact — registry verdicts, typed all-fail errors and the payload /
+    # provenance reporting that makes a fired fallback observable.
+    add_executable(test_provider_fallback test_provider_fallback.cpp)
+    target_link_libraries(test_provider_fallback PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_provider_fallback)
+    target_include_directories(test_provider_fallback PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_provider_fallback)
+
+    # Platform 12.0 session-pool concurrency stress: device pinning,
+    # eviction-while-held lifetime, ledger conservation under races.
+    add_executable(test_model_runtime_stress test_model_runtime_stress.cpp)
+    target_link_libraries(test_model_runtime_stress PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_stress)
+    target_include_directories(test_model_runtime_stress PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_stress)
+
+    # Platform 12.0 tile geometry Oracle: byte-identical probability stacks
+    # across batch/tile/overlap splits, extreme-integer refusals and the
+    # terminal-OOM atomicity (no output, no sidecar, no residue).
+    add_executable(test_tile_semantic_equivalence test_tile_semantic_equivalence.cpp)
+    target_link_libraries(test_tile_semantic_equivalence PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_tile_semantic_equivalence)
+    target_include_directories(test_tile_semantic_equivalence PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_tile_semantic_equivalence)
+
     # Model Runtime 8.0: CRS-aware grid authority + provenance, temporal
     # sequence lane (dynamic T, timestamps, quality masks), placement policy
     # and the Labels class remap. Fake providers + synthetic rasters — runs
@@ -2982,6 +3151,27 @@ target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu
 sicnu_add_test(test_dataset_quality_scale TIMEOUT 600)
 target_link_libraries(test_dataset_quality_scale PRIVATE Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_dataset_quality_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation scale Oracle (O1): 100k-sample catalog + 10k-run
+# experiment store — batch ingest, keyset-cursor paging, indexed identity
+# lookup, with a structured JSON perf report emitted to
+# SICNU_PERF_EVIDENCE_DIR. RUN_SERIAL: the benchmark should not compete for
+# memory.
+sicnu_add_test(test_data_foundation_scale TIMEOUT 900 RUN_SERIAL TRUE
+  ENVIRONMENT "SICNU_PERF_EVIDENCE_DIR=${CMAKE_BINARY_DIR}/test-artifacts")
+target_link_libraries(test_data_foundation_scale PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
+set_property(TARGET test_data_foundation_scale PROPERTY RUN_SERIAL TRUE)
+
+# 12.0 data-foundation fault Oracle (O3): deterministic mid-transaction
+# failures, corrupt rows and batch-commit faults leave no partial rows or
+# phantom references.
+sicnu_add_test(test_store_fault_injection TIMEOUT 300)
+target_link_libraries(test_store_fault_injection PRIVATE Sicnu::dataset Sicnu::experiment SQLite::SQLite3 sicnu_runtime)
+
+# 12.0 GC/retention Oracle (O4): governance graph fixture proves dry-run ==
+# execution and reachability; experiment run prune plan/execute equivalence.
+sicnu_add_test(test_gc_retention_plan TIMEOUT 300)
+target_link_libraries(test_gc_retention_plan PRIVATE Sicnu::data Sicnu::dataset Sicnu::experiment SQLite::SQLite3)
 
 # Foundation 5.0 end-to-end examples (goal §54): optical classification,
 # SAR pair, multimodal temporal, segmentation — small data, whole chain.
@@ -11160,3 +11350,4 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
