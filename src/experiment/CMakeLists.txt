@@ -25,6 +25,8 @@ qt_add_library(sicnu_experiment STATIC
   replay_readiness.cpp
   replay_deviation.cpp
   replay_deviation.h
+  repeat_execution.cpp
+  repeat_execution.h
   replay_readiness.h
   comparison_ext.cpp
   comparison_ext.h
@@ -32,6 +34,8 @@ qt_add_library(sicnu_experiment STATIC
   lineage.h
   reproduction_bundle.cpp
   reproduction_bundle.h
+  reproduction_bundle_import.cpp
+  reproduction_bundle_import.h
   benchmark_definition.cpp
   benchmark_definition.h
   benchmark_runner.cpp

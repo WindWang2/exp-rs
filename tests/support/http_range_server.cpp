@@ -282,6 +282,33 @@ void HttpRangeServer::setConcurrency( unsigned maxConnections )
     mMaxConnections = maxConnections > 8 ? 8 : maxConnections; // bounded by design
 }
 
+void HttpRangeServer::setFaultScript( const std::vector<ServerBehavior> &script )
+{
+  std::lock_guard<std::mutex> lock( mScriptMutex );
+  mScript = script;
+  // Scripts index from INSTALLATION time and count only SERVED-path
+  // requests: GDAL's speculative sibling probes (.aux.xml, .ovr, …) arrive
+  // as 404s between real requests and must not consume script slots — a
+  // test staging "the next body fetch fails" means exactly that.
+  mScriptBase = mServedRequests.load();
+}
+
+/// The behavior governing the CURRENT connection (see setFaultScript).
+/// mServedRequests was already incremented for this connection, so the
+/// script-relative index is the served count since installation minus one.
+ServerBehavior HttpRangeServer::effectiveBehavior() const
+{
+  std::lock_guard<std::mutex> lock( mScriptMutex );
+  if ( mScript.empty() )
+    return mBehavior;
+  const int served = mServedRequests.load();
+  const int index = served - 1 - mScriptBase;
+  if ( index < 0 )
+    return mBehavior;   // requests older than the script installation
+  const std::size_t slot = static_cast<std::size_t>( index );
+  return slot < mScript.size() ? mScript[slot] : mBehavior;
+}
+
 void HttpRangeServer::handleConnection( SocketHandle client )
 {
   mRequestCount.fetch_add( 1 );
@@ -317,6 +344,9 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       return;
     }
   }
+  // A SERVED-path request: this is what fault scripts index against (see
+  // setFaultScript) — sibling 404 probes never take a script slot.
+  mServedRequests.fetch_add( 1 );
   std::string rangeHeader;
   {
     const std::size_t rangePosition = request.find( "Range:" );
@@ -329,17 +359,20 @@ void HttpRangeServer::handleConnection( SocketHandle client )
   const std::string ifNoneMatch = requestHeaderValue( request, "If-None-Match:" );
   const std::string ifModifiedSince = requestHeaderValue( request, "If-Modified-Since:" );
 
-  if ( mBehavior == ServerBehavior::ServerError )
+  // 12.0: the behavior governing THIS connection (fault script or default).
+  const ServerBehavior behavior = effectiveBehavior();
+
+  if ( behavior == ServerBehavior::ServerError )
   {
     respond( client, 500, "Internal Server Error", {}, nullptr, 0, false, true );
     return;
   }
-  if ( mBehavior == ServerBehavior::Gone )
+  if ( behavior == ServerBehavior::Gone )
   {
     respond( client, 410, "Gone", {}, nullptr, 0, false, true );
     return;
   }
-  if ( mBehavior == ServerBehavior::Slow )
+  if ( behavior == ServerBehavior::Slow )
   {
     std::this_thread::sleep_for( std::chrono::milliseconds( 3000 ) );
   }
@@ -353,7 +386,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
 
   std::map<std::string, std::string> headers;
   // A server that ignores Range requests must not advertise range support.
-  if ( mBehavior != ServerBehavior::NoRange )
+  if ( behavior != ServerBehavior::NoRange )
     headers["Accept-Ranges"] = "bytes";
   headers["Content-Type"] = "image/tiff";
   if ( !config.etag.empty() )
@@ -364,7 +397,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
   // RFC 7232 conditional answers. If-None-Match uses the weak comparison;
   // If-Modified-Since revalidates on fixture-grade date equality.
   const bool conditional = !ifNoneMatch.empty() || !ifModifiedSince.empty();
-  if ( conditional && mBehavior != ServerBehavior::ServerError )
+  if ( conditional && behavior != ServerBehavior::ServerError )
   {
     bool matched = false;
     if ( !ifNoneMatch.empty() && !config.etag.empty() )
@@ -392,7 +425,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
   long long rangeStart = 0;
   long long rangeEnd = static_cast<long long>( payloadSize ) - 1;
   bool ranged = false;
-  if ( mBehavior != ServerBehavior::NoRange && !rangeHeader.empty() )
+  if ( behavior != ServerBehavior::NoRange && !rangeHeader.empty() )
   {
     const std::size_t eq = rangeHeader.find( '=' );
     const std::size_t dash = rangeHeader.find( '-' );
@@ -426,6 +459,17 @@ void HttpRangeServer::handleConnection( SocketHandle client )
     if ( mRequestLog.size() < 64 )
       mRequestLog.push_back( signature );
   }
+  if ( behavior == ServerBehavior::RangeNotSatisfiable && ranged && rangeStart > 0 )
+  {
+    // 12.0 fault: 416 + the RFC 9110 size hint — the answer a real origin
+    // produces when the object shrank below the requested offsets. The head
+    // window (start == 0) and non-ranged answers stay normal above, so
+    // identity probes keep working and only body fetches hit the fault.
+    std::map<std::string, std::string> failHeaders;
+    failHeaders["Content-Range"] = "bytes */" + std::to_string( payloadSize );
+    respond( client, 416, "Range Not Satisfiable", failHeaders, nullptr, 0, isHead, true );
+    return;
+  }
   if ( ranged )
   {
     mRangedResponses.fetch_add( 1 );
@@ -433,7 +477,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
                                "/" + std::to_string( payloadSize );
     body = payloadData + rangeStart;
     bodySize = static_cast<std::size_t>( rangeEnd - rangeStart + 1 );
-    if ( mBehavior == ServerBehavior::ResetRanged && !isHead && rangeStart >= 1024 &&
+    if ( behavior == ServerBehavior::ResetRanged && !isHead && rangeStart >= 1024 &&
          mResetArmed.exchange( false ) )
     {
       // Answer the headers, hand over a few body bytes, then kill the
@@ -474,7 +518,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       }
       return;
     }
-    if ( mBehavior == ServerBehavior::LongRange && !isHead && rangeStart >= 1024 &&
+    if ( behavior == ServerBehavior::LongRange && !isHead && rangeStart >= 1024 &&
          bodySize > 8 && mLongRangeArmed.exchange( false ) )
     {
       // 9.0 fault: honest 206 headers for the requested window, but the body
@@ -519,7 +563,7 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       mBytesServed.fetch_add( bodySize + garbageSent );
       return;
     }
-    if ( mBehavior == ServerBehavior::ShortRange && !isHead && rangeStart >= 1024 &&
+    if ( behavior == ServerBehavior::ShortRange && !isHead && rangeStart >= 1024 &&
          bodySize > 8 && mShortRangeArmed.exchange( false ) )
     {
       // 9.0 fault: a HONEST short Content-Length (the transfer completes
@@ -549,13 +593,13 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       return;
     }
     respond( client, 206, "Partial Content", headers, body, bodySize, isHead,
-             mBehavior != ServerBehavior::Truncated );
+             behavior != ServerBehavior::Truncated );
     return;
   }
 
   mFullResponses.fetch_add( 1 );
   respond( client, 200, "OK", headers, body, bodySize, isHead,
-           mBehavior != ServerBehavior::Truncated );
+           behavior != ServerBehavior::Truncated );
 }
 
 void HttpRangeServer::respond( SocketHandle client, int status, const std::string &statusText,

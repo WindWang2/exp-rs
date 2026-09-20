@@ -66,7 +66,10 @@ mkdir -p "$out_root"
 echo "== [1/5] bundle build (samples generated in-bundle) =="
 "$script_dir/build_offline_bundle.sh" --build-dir "$build_dir" --out "$out_root" \
   || fail "bundle build failed"
-bundle_dir=$(ls -d "$out_root"/sicnu-lab-* | tail -1)
+# Newest by mtime: dist/ may hold several versions, and lexical order picks
+# sicnu-lab-10 over sicnu-lab-9.
+bundle_dir=$(ls -dt "$out_root"/sicnu-lab-* 2>/dev/null | head -1)
+[ -n "$bundle_dir" ] || fail "builder produced no sicnu-lab-* bundle under $out_root"
 
 echo "== [2/5] manifest verify =="
 "$script_dir/build_offline_bundle.sh" --verify "$bundle_dir" || fail "manifest verify failed"
@@ -85,10 +88,22 @@ m = json.load(open(root + "/manifest.json"))
 assert any(f["path"] == "dependencies.json" for f in m["files"]), "not in files[]"
 print("   dependencies.json covered by manifest")
 PY
-"$bundle_dir/bin/sicnu_geo_rs_cli" env-doctor > "$out_root/env-doctor.log" 2>&1
-env_rc=$?
+# env-doctor exits 2 for a degraded (still working) machine; that is a
+# verdict to report, not a smoke failure — the fail-closed runtime gate is
+# VERIFY.ps1 -Runtime / build --check-runtime, which act on "broken" only.
+env_rc=0
+"$bundle_dir/bin/sicnu_geo_rs_cli" env-doctor > "$out_root/env-doctor.log" 2>&1 \
+  || env_rc=$?
+if [ "$env_rc" -ne 0 ] && [ "$env_rc" -ne 2 ]; then
+  tail -5 "$out_root/env-doctor.log"
+  fail "env-doctor crashed (exit $env_rc)"
+fi
 grep -q "^ENV DOCTOR " "$out_root/env-doctor.log" \
   || fail "env-doctor produced no verdict line"
+verdict_word=$(grep "^ENV DOCTOR " "$out_root/env-doctor.log" | head -1 | awk '{print $3}')
+if [ "$verdict_word" = "broken" ]; then
+  fail "env-doctor verdict is broken - runtime unusable"
+fi
 echo "   env-doctor verdict: $(tail -1 "$out_root/env-doctor.log") (exit $env_rc)"
 
 echo "== [3/5] lab 1 from inside the bundle (offline pipeline + grade) =="

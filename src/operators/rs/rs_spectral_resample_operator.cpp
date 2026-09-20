@@ -334,6 +334,24 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
     for (float w : sourceWavelengths)
         srcArr.append(w);
     result["sourceWavelengths"] = srcArr;
+
+    // Per-target-band source-range coverage: the linear LUT is center-based,
+    // so its coverage is full/none exactly where the LUT produces data/NaN.
+    // Surfaced for QA so downstream consumers can see how much of the target
+    // grid the source actually covers (Spectral Intelligence 12.0).
+    SpectralResampling::CoverageReport coverage;
+    if ( SpectralResampling::analyzeResamplingCoverage(
+             sourceWavelengths.data(), bandCount, targetWavelengths.data(), nullptr,
+             dstBands, &coverage ) )
+    {
+        result["coverageFull"] = coverage.full;
+        result["coveragePartial"] = coverage.partial;
+        result["coverageNone"] = coverage.none;
+        Json::Value covArr(Json::arrayValue);
+        for (auto c : coverage.bands)
+            covArr.append( SpectralResampling::bandCoverageText( c ) );
+        result["coverage"] = covArr;
+    }
     return result;
 }
 
