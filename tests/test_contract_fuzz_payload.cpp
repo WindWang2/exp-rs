@@ -34,6 +34,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 
 #include <json/json.h>
 
@@ -515,7 +516,10 @@ TEST_CASE( "plugin ui schema fuzz: worker-supplied commandId of the wrong type "
         REQUIRE_NOTHROW( result = exprs::validatePluginUiSchema( schema ) );
         CHECK_FALSE( result.ok() );
     }
-    // Same class on the event side (contributionId/controlId).
+    // The event side (contributionId/controlId) is guarded BEFORE the string
+    // conversion on master already (boundedString() precedes asString()), so
+    // it is asserted here as a totality property only — it pins the contract,
+    // it is not a defect regression.
     for ( const Json::Value &wrong : wrongTypes )
     {
         for ( const char *key : { "contributionId", "controlId" } )
@@ -528,6 +532,47 @@ TEST_CASE( "plugin ui schema fuzz: worker-supplied commandId of the wrong type "
             CHECK_FALSE( result.ok() );
             CHECK_FALSE( result.errors.empty() );
         }
+    }
+
+    // The event VALUE depth cap: a value that is small in bytes but deeply
+    // nested is refused, because the byte cap alone does not bound the
+    // recursion the host/worker JSON readers would perform.
+    {
+        Json::Value deep( Json::objectValue );
+        Json::Value nested( Json::objectValue );
+        Json::Value *cursor = &nested;
+        for ( int i = 0; i < 40; ++i )
+        {
+            ( *cursor )[ "child" ] = Json::Value( Json::objectValue );
+            cursor = &( ( *cursor )[ "child" ] );
+        }
+        ( *cursor )[ "pad" ] = std::string( 32, 'p' );
+        Json::Value event( Json::objectValue );
+        event[ "contributionId" ] = "menu.refresh";
+        event[ "controlId" ] = "ctl.name";
+        event[ "eventType" ] = "changed";
+        event[ "value" ] = nested;
+        exprs::PluginUiEventParseResult result;
+        REQUIRE_NOTHROW( result = exprs::validateUiEvent( event ) );
+        CHECK_FALSE( result.ok() );
+        bool mentionsDepth = false;
+        for ( const std::string &error : result.errors )
+            if ( error.find( "depth cap" ) != std::string::npos )
+                mentionsDepth = true;
+        CHECK( mentionsDepth );
+
+        // At the cap it is accepted (32 levels + the value wrapper).
+        Json::Value shallow( Json::objectValue );
+        Json::Value *walk = &shallow;
+        for ( int i = 0; i < 31; ++i )
+        {
+            ( *walk )[ "child" ] = Json::Value( Json::objectValue );
+            walk = &( ( *walk )[ "child" ] );
+        }
+        ( *walk )[ "pad" ] = "x";
+        event[ "value" ] = shallow;
+        REQUIRE_NOTHROW( result = exprs::validateUiEvent( event ) );
+        CHECK( result.ok() );
     }
 }
 
@@ -942,25 +987,32 @@ TEST_CASE( "manifest file fuzz: loadManifestFromFile is total on hostile files",
         }
         CHECK( !writeAndLoad( R"({"manifest_version":"1"})" ).empty() );
     }
-    // Depth bombs: the contract is TOTALITY. (A bomb is one unknown field, so
-    // an unknown-field-tolerant manifest legitimately loads it; pre-fix the
-    // unbounded reader killed the process at depth ~20000 instead.)
+    // Depth bombs: the contract is TOTALITY, asserted on the SAME deep value
+    // in two shapes — as an unknown field (an unknown-field-tolerant manifest
+    // legitimately loads it) and as the value of a versioned manifest. Pre-fix
+    // the unbounded reader killed the process at depth ~20000 instead.
     for ( const int depth : { 16, 64, 256, 900, 4096, 65536, 200000 } )
     {
         const std::string bomb = sicnu::fuzz::depthBomb( depth );
+        const std::string deepValue = bomb.substr( 5 ); // strip {"a": and trailing }
         exprs::PluginManifest manifest;
         exprs::PluginDiagnostic error;
         bool ok = true;
+
+        {
+            std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+            out.write( bomb.data(), static_cast<std::streamsize>( bomb.size() ) );
+        }
         REQUIRE_NOTHROW( ok = exprs::loadManifestFromFile( manifestPath, manifest, error ) );
-        (void) ok;
-        // The same file must also be refusable in a way that names the reason.
-        const std::string versioned = R"({"manifest_version":1,"id":"com.example.x","name":"N","version":"1.0.0","sdk":"8.0","entry":"p.js","a":)";
-        const std::string tail = "}";
-        std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
-        const std::string content =
-            versioned + sicnu::fuzz::depthBomb( depth ).substr( 5 ) + tail;
-        out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
-        out.close();
+
+        const std::string versioned = R"({"manifest_version":1,"id":"com.example.x",)"
+                                     R"("name":"N","version":"1.0.0","sdk":"8.0",)"
+                                     R"("entry":"p.js","a":)";
+        {
+            std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+            const std::string content = versioned + deepValue + "}";
+            out.write( content.data(), static_cast<std::streamsize>( content.size() ) );
+        }
         REQUIRE_NOTHROW( ok = exprs::loadManifestFromFile( manifestPath, manifest, error ) );
     }
 

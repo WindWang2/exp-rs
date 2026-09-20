@@ -849,7 +849,8 @@ void PluginRegistry::loadUserIndex()
     // rewrite it), and an unbounded parse of a deeply nested document
     // stack-overflows the caller instead of being ignored.
     Json::CharReaderBuilder builder;
-    builder[ "stackLimit" ] = 64;
+    builder[ "allowComments" ] = true;
+    builder[ "stackLimit" ] = 128;
     std::string parseError;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     // Guarded: the reader THROWS when the depth bound is exceeded — a rewritten

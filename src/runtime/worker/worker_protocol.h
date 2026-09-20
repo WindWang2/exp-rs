@@ -168,11 +168,23 @@ inline bool parseFrame( const std::string &line, Json::Value &frame )
     // The documented protocol is shallow (frames carry a bounded payload
     // object), so the limit is set explicitly as the same hardening the reader
     // library provides for this class of input.
-    builder[ "stackLimit" ] = 64;
+    builder[ "stackLimit" ] = 128;
     std::string errors;
-    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( line.data(), line.data() + line.size(), &frame, &errors ) )
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    // Guarded for the same reason as the depth bound: jsoncpp THROWS when the
+    // limit is exceeded, and this header-inline is called from the worker
+    // entry point and the processing worker IO loop, neither of which catches
+    // around it — an escaping Json::Exception there would terminate the
+    // process. A frame past the bound is a protocol violation: false.
+    try
+    {
+        if ( !reader->parse( line.data(), line.data() + line.size(), &frame, &errors ) )
+            return false;
+    }
+    catch ( const Json::Exception & )
+    {
         return false;
+    }
     // isIntegral BEFORE asInt: asInt() throws/aborts on non-numeric values
     // (e.g. {"v":{}} or {"v":"1"}), so a malformed peer frame must not be
     // able to crash the host or worker at the protocol gate itself.

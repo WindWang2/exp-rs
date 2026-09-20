@@ -36,10 +36,10 @@ typed-JSON 硬化（`src/plugins/host/plugin_host_process_runtime.cpp`、`plugin
 `plugin_ui_schema_host.cpp:457`）都有 try/catch → 当前无进程级崩溃，但违反该文件
 自述契约（"must fail VALIDATION, never throw through the worker"）。
 
-(b) 同文件 `validateUiEvent()` — `contributionId`/`controlId` 非字符串时同样抛出；
-调用方 `plugin_host_process_runtime.cpp:559` **无 try/catch**。事件 JSON 来自外部
-surface（shell/MCP），是真实的 typed-boundary 逃逸面。与 #1038（已由 #1103 修）同类，
-但 #1103 未覆盖 `validateUiEvent` 这一侧。
+(b) ~~同文件 `validateUiEvent()` 的 `contributionId`/`controlId` 非字符串时抛出~~
+— **核查后不成立**：master 上 `boundedString()` 已先于 `asString()`（既有守卫），
+`validateUiEvent` 在其调用方无 try/catch 也不构成逃逸。reviewer F7 指正后更正；
+对应测试腿改为纯 totality 断言（明确标注不是 defect regression）。
 
 (c) `src/sdk/exprs/plugin_manifest.cpp:83` — `ManifestPort::fromJson` 中
 `json.get("required", false).asBool()`：`required` 为字符串/数组时 `asBool()` 抛

@@ -853,7 +853,10 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
     // through the bounded Char reader with an explicit stackLimit — the
     // manifest contract is shallow, so 64 levels is far above any real one.
     Json::CharReaderBuilder builder;
-    builder[ "stackLimit" ] = 64;
+    // allowComments keeps the legacy Json::Reader grammar (manifests may
+    // carry // comments); stackLimit closes the unbounded-recursion defect.
+    builder[ "allowComments" ] = true;
+    builder[ "stackLimit" ] = 128;
     std::string parseError;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     // Guarded: the reader THROWS when the depth bound is exceeded, and a

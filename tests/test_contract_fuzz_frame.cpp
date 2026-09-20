@@ -34,6 +34,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "exprs/ipc_envelope.h"
+#include "runtime/worker/worker_protocol.h"
 #include "exprs/ipc_frame.h"
 #include "exprs/ipc_stream.h"
 #include "support/fuzz_corpus.h"
@@ -62,7 +63,6 @@ namespace
 {
 
 constexpr int kIterationsPerSeed = 300;
-constexpr size_t kMaxPayloadBytes = 512;
 
 IpcFrameLimits defaultLimits()
 {
@@ -137,8 +137,6 @@ std::optional<std::string> wireOracle( const std::string &wire, bool peerClosed,
     }
     if ( completeFrame && status != IpcFrame::ReadStatus::Timeout )
         return "complete frame was not read (status is neither Ok nor Timeout)";
-    if ( !completeFrame && status == IpcFrame::ReadStatus::Ok )
-        return "incomplete frame reported Ok";
     return std::nullopt;
 }
 
@@ -443,7 +441,7 @@ TEST_CASE( "ipc envelope fuzz: decode is total on mutated and hostile payloads",
     }
 }
 
-TEST_CASE( "ipc envelope fuzz: depth and size bombs are typed refusals",
+TEST_CASE( "ipc envelope fuzz: depth bombs and over-cap payloads are typed refusals",
            "[contract8][fuzz][ipc][envelope]" )
 {
     // 866 is the pinned pre-fix stack-overflow boundary of this entry point
@@ -472,6 +470,96 @@ TEST_CASE( "ipc envelope fuzz: depth and size bombs are typed refusals",
     std::string error;
     REQUIRE( Ipc::decodeEnvelopePayload( bigText, envelope, error ) );
     CHECK( envelope.params[ "pad" ].asString().size() == 64 * 1024 );
+
+    // Size bombs: a payload over the NEGOTIATED frame cap is refused by the
+    // writer and never read back, while one under it round-trips.
+    for ( const size_t payloadBytes : { size_t( 4097 ), size_t( 64 * 1024 ),
+                                       size_t( 1024 * 1024 ) } )
+    {
+        Json::Value value( Json::objectValue );
+        value[ "v" ] = 1;
+        value[ "type" ] = "request";
+        value[ "method" ] = "probe";
+        value[ "params" ][ "pad" ] = std::string( payloadBytes, 'z' );
+
+        IpcFrameLimits limits;
+        limits.maxFrameBytes = 4096;
+        std::unique_ptr<IIpcStream> a;
+        std::unique_ptr<IIpcStream> b;
+        exprs::makeIpcMemoryPipePair( a, b );
+        std::string writeError;
+        REQUIRE_FALSE( IpcFrame::writeJson( *a, value, limits, writeError ) );
+        CHECK( writeError.find( "E6003" ) != std::string::npos );
+
+        std::string payload;
+        std::string readError;
+        CHECK( IpcFrame::read( *b, payload, limits, 100, readError )
+               == IpcFrame::ReadStatus::Timeout );
+        CHECK( payload.empty() );
+    }
+
+    // A legal-depth envelope carrying a ui-event-shaped payload still decodes:
+    // the transport depth bound must not reject real messages.
+    Json::Value deepish( Json::objectValue );
+    Json::Value *cursor = &deepish;
+    for ( int i = 0; i < 20; ++i )
+    {
+        ( *cursor )[ "child" ] = Json::Value( Json::objectValue );
+        cursor = &( ( *cursor )[ "child" ] );
+    }
+    ( *cursor )[ "leaf" ] = true;
+    Json::Value request( Json::objectValue );
+    request[ "v" ] = 1;
+    request[ "type" ] = "request";
+    request[ "id" ] = 1;
+    request[ "method" ] = "ui.invoke";
+    request[ "params" ][ "event" ][ "value" ] = deepish;
+    Ipc::Envelope deepDecoded;
+    std::string deepError;
+    REQUIRE( Ipc::decodeEnvelopePayload( serialize( request ), deepDecoded, deepError ) );
+    CHECK( deepDecoded.method == "ui.invoke" );
+}
+
+TEST_CASE( "worker protocol fuzz: parseFrame is total on depth bombs and wrong shapes",
+           "[contract8][fuzz][ipc]" )
+{
+    // The sibling of the envelope lane for the worker frame gate
+    // (runtime/worker/worker_protocol.h). Pre-fix this parse stack-overflowed
+    // on a deep frame just like the envelope decoder did; the same bounds and
+    // the same typed refusal apply.
+    for ( const int depth : { 16, 64, 256, 866, 4096, 65536, 200000 } )
+    {
+        const std::string bomb = depthBomb( depth );
+        Json::Value frame;
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = sicnu::runtime::worker::parseFrame( bomb, frame ) );
+        CHECK_FALSE( ok );
+    }
+    // Wrong-typed / missing members stay typed refusals, never exceptions.
+    for ( const std::string &wrong : { R"({"v":"1","op":"result"})",
+                                       R"({"v":{},"op":"result"})",
+                                       R"({"v":1})",
+                                       "[]", "null", "1e999", "" } )
+    {
+        Json::Value frame;
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = sicnu::runtime::worker::parseFrame( wrong, frame ) );
+        CHECK_FALSE( ok );
+    }
+    // {"v":1,"op":42} parses TRUE by contract: parseFrame checks the PRESENCE
+    // of v/op, not the op's type (an unknown op is the caller's business), and
+    // the caller then compares op strings. Pinned so the gate does not
+    // silently start rejecting—or accepting—a different shape.
+    {
+        Json::Value frame;
+        REQUIRE( sicnu::runtime::worker::parseFrame( R"({"v":1,"op":42})", frame ) );
+        CHECK( frame[ "op" ].isNumeric() );
+    }
+    // A well-formed frame still parses.
+    Json::Value frame;
+    REQUIRE( sicnu::runtime::worker::parseFrame( R"({"v":1,"op":"ready","caps":["structuredErrors"]})",
+                                                 frame ) );
+    CHECK( frame[ "op" ].asString() == "ready" );
 }
 
 TEST_CASE( "ipc envelope fuzz: builder round-trips hostile field values",

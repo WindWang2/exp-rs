@@ -140,7 +140,14 @@ TEST_CASE( "path policy fuzz: lexical check is total and correctly classified",
         PathPolicyRejection rejection = PathPolicyRejection::OutsideRoot;
         REQUIRE_NOTHROW( rejection = PathPolicy::checkRelativeLexically( candidate ) );
         const bool empty = candidate.empty();
-        const fs::path parsed = pathFromText( candidate );
+        bool representable = false;
+        const fs::path parsed = pathOrEmpty( candidate, representable );
+        if ( !representable )
+        {
+            // Text the platform cannot express is always a typed rejection.
+            CHECK( rejection != PathPolicyRejection::Accepted );
+            continue;
+        }
         const bool absolute = parsed.is_absolute();
         bool dotdot = false;
         for ( const fs::path &component : parsed )
@@ -381,8 +388,19 @@ TEST_CASE( "path policy fuzz: canonical/isAbsolute are total and sane",
         REQUIRE_NOTHROW( canonical = PathPolicy::canonical( candidate ) );
         bool absolute = false;
         REQUIRE_NOTHROW( absolute = PathPolicy::isAbsolute( candidate ) );
-        CHECK( absolute == pathFromText( candidate ).is_absolute() );
-        CHECK( canonical.empty() == candidate.empty() );
+        bool representable = false;
+        const fs::path parsed = pathOrEmpty( candidate, representable );
+        if ( representable )
+        {
+            CHECK( absolute == parsed.is_absolute() );
+            CHECK( canonical.empty() == candidate.empty() );
+        }
+        else
+        {
+            // Un-representable text: no absolute reading, no canonical form.
+            CHECK_FALSE( absolute );
+            CHECK( canonical.empty() );
+        }
     }
     // Empty is canonicalized to empty (no crash, no "." surprise).
     CHECK( PathPolicy::canonical( "" ).empty() );

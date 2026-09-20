@@ -276,8 +276,10 @@ bool decodeEnvelopePayload( const std::string &payload, Envelope &envelope, std:
     // is therefore set explicitly — jsoncpp's stackLimit setting exists for
     // exactly this hardening. Envelope messages are shallow by design (large
     // artifacts travel as workspace-contained file references, never as raw
-    // JSON), so 64 levels is orders of magnitude above the real contract.
-    builder[ "stackLimit" ] = 64;
+    // JSON), so this bound has ~4x headroom over the deepest legal message
+    // (the ui-event value depth cap in exprs/plugin_ui_schema.h plus the
+    // envelope wrapper) while staying far below any thread's real crash depth.
+    builder[ "stackLimit" ] = 128;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     std::string parseError;
     // The reader THROWS (not returns false) when the depth bound is exceeded,

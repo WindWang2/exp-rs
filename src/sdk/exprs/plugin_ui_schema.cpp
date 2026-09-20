@@ -4,6 +4,7 @@
 #include "exprs/plugin_ui_schema.h"
 
 #include <set>
+#include <vector>
 
 namespace exprs {
 
@@ -491,6 +492,40 @@ PluginUiEventParseResult validateUiEvent( const Json::Value &event,
     const Json::Value &value = event[ "value" ];
     if ( !value.isNull() )
     {
+        // Depth bound FIRST: the byte cap does not bound the recursion a
+        // hostile event can trigger (4096 bytes of "[[[…]]]" is ~2000 levels,
+        // and the readers stack-overflow far below that). Iterative walk, so
+        // the check itself cannot overflow.
+        size_t maxDepthSeen = 0;
+        std::vector<const Json::Value *> pending = { &value };
+        bool tooDeep = false;
+        while ( !pending.empty() && !tooDeep )
+        {
+            const Json::Value *current = pending.back();
+            pending.pop_back();
+            if ( current->isObject() || current->isArray() )
+            {
+                ++maxDepthSeen;
+                if ( maxDepthSeen > limits.maxEventValueDepth )
+                {
+                    fail( result.errors, "event.value",
+                          "value nesting exceeds the depth cap ("
+                              + std::to_string( limits.maxEventValueDepth ) + " levels)" );
+                    return result;
+                }
+                if ( current->isObject() )
+                {
+                    for ( const std::string &key : current->getMemberNames() )
+                        pending.push_back( &( ( *current )[ key ] ) );
+                }
+                else
+                {
+                    for ( Json::ArrayIndex index = 0; index < current->size(); ++index )
+                        pending.push_back( &( ( *current )[ index ] ) );
+                }
+            }
+        }
+
         // Fast path: a plain oversized string is refused without paying the
         // JSON serialization cost. (General bound: the serialized size is
         // the true transport cost; the work is O(full value size) — the cap
