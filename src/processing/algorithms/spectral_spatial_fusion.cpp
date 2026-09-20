@@ -25,6 +25,15 @@ bool fuseScores( const float *scores, const uint8_t *valid, int width, int heigh
                 "Invalid fusion config: radius must be >= 0 and beta within [0, 1]" );
         return false;
     }
+    if ( config.method == Method::Bilateral &&
+         ( !std::isfinite( config.sigmaRange ) || config.sigmaRange <= 0.0 ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral(
+                "Invalid fusion config: sigmaRange must be finite and > 0 for the "
+                "bilateral method" );
+        return false;
+    }
 
     const size_t plane = static_cast<size_t>( width ) * height;
     result->fused.assign( plane, 0.0f );
@@ -32,6 +41,12 @@ bool fuseScores( const float *scores, const uint8_t *valid, int width, int heigh
     result->neighborCount.assign( plane, 0 );
 
     const int r = config.radius;
+    const bool bilateral = ( config.method == Method::Bilateral );
+    // Spatial sigma tied to the radius so the parameter surface stays small;
+    // radius 0 degenerates to a single-member window where any positive sigma
+    // yields the identity (the only member carries weight 1).
+    const double sigmaSpatial2 = r > 0 ? 0.5 * r * r : 1.0; // (r/2)²
+    const double sigmaRange2 = config.sigmaRange * config.sigmaRange;
 
     for ( int y = 0; y < height; ++y )
     {
@@ -47,14 +62,15 @@ bool fuseScores( const float *scores, const uint8_t *valid, int width, int heigh
                 continue;
             }
 
-            // Mean over valid window members (clamped to the raster). The
-            // self pixel is a member, so the mean is defined for every valid
-            // pixel and NoData never enters the sum.
+            // Window aggregate over valid members (clamped to the raster). The
+            // self pixel is a member, so the aggregate is defined for every
+            // valid pixel and NoData never enters the sum.
             const int y0 = std::max( 0, y - r );
             const int y1 = std::min( height - 1, y + r );
             const int x0 = std::max( 0, x - r );
             const int x1 = std::min( width - 1, x + r );
             double sum = 0.0;
+            double weightSum = 0.0;
             int32_t count = 0;
             for ( int wy = y0; wy <= y1; ++wy )
             {
@@ -65,13 +81,25 @@ bool fuseScores( const float *scores, const uint8_t *valid, int width, int heigh
                     const bool qValid = valid ? ( valid[q] != 0 ) : std::isfinite( v );
                     if ( !qValid )
                         continue;
-                    sum += static_cast<double>( v );
+                    double w = 1.0;
+                    if ( bilateral )
+                    {
+                        const double dy = static_cast<double>( wy - y );
+                        const double dx = static_cast<double>( wx - x );
+                        const double dv = static_cast<double>( v ) - static_cast<double>( self );
+                        w = std::exp( -( dx * dx + dy * dy ) / ( 2.0 * sigmaSpatial2 ) -
+                                      ( dv * dv ) / ( 2.0 * sigmaRange2 ) );
+                    }
+                    sum += w * static_cast<double>( v );
+                    weightSum += w;
                     ++count;
                 }
             }
             result->neighborCount[p] = count;
 
-            const double mean = sum / static_cast<double>( count );
+            // count >= 1 for every valid pixel (the self member); weightSum > 0
+            // because every member weight is a positive Gaussian.
+            const double mean = sum / weightSum;
             const double fused =
                 ( 1.0 - config.beta ) * static_cast<double>( self ) + config.beta * mean;
             result->fused[p] = static_cast<float>( fused );

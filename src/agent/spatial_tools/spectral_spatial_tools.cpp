@@ -9,6 +9,7 @@
 #include <gdal_priv.h>
 
 #include "processing/algorithms/spectral_library.h"
+#include "processing/framework/runtime_paths.h"
 
 #include <algorithm>
 #include <cmath>
@@ -258,9 +259,13 @@ namespace exp_agent
     }
     if ( matchLibrary )
     {
-      const std::string libraryPath = params.isMember( "library_path" ) && params["library_path"].isString()
-                                        ? params["library_path"].asString()
-                                        : std::string( "data/spectral/library.json" );
+      // Runtime-resolved default (same discovery as the operators): a hardcoded
+      // relative path only works when the CWD happens to be the repo root.
+      const std::string libraryPath =
+          params.isMember( "library_path" ) && params["library_path"].isString()
+              ? params["library_path"].asString()
+              : sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "spectral/library.json" ) )
+                    .toStdString();
       SpectralLibrary::Library library;
       QString error;
       if ( !SpectralLibrary::Library::load( QString::fromStdString( libraryPath ), &library, &error ) )

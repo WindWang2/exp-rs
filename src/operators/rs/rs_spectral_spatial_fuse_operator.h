@@ -10,14 +10,17 @@ namespace sicnu::operators::rs {
 
 /**
  * rs:spectral_spatial_fuse — fuses a single-band spectral score raster with
- * its local spatial context: fused = (1−β)·s + β·meanValid(s, window).
- * NoData/non-finite scores are excluded from every mean and stay NaN in the
- * output (no leak, no zero-fill bias).
+ * its local spatial context: fused = (1−β)·s + β·aggregate(s, window).
+ * NoData/non-finite scores are excluded from every aggregate and stay NaN in
+ * the output (no leak, no zero-fill bias). Streamed with an r-pixel halo, so
+ * interior results are identical to a whole-plane pass.
  *
  *   input  (string, required)   Single-band score raster (e.g. detection output)
  *   output (string, required)   Single-band fused score raster (Float32)
  *   radius (int, optional)      Window half-side, >= 0, default 1
  *   beta   (number, optional)   Spatial weight in [0, 1], default 0.5
+ *   method (enum, optional)     'mean' (default) or 'bilateral'
+ *   sigmaRange (number, opt.)   Range sigma for the bilateral method, > 0
  */
 class RsSpectralSpatialFuseOperator : public RSOperator {
 public:
@@ -27,11 +30,11 @@ public:
     std::string description() const override {
         return "Fuse a spectral score raster with its local spatial consistency: "
                "a NoData-aware convex combination of the score and the valid "
-               "window mean.";
+               "window mean (or edge-preserving bilateral aggregate).";
     }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        return RSOperatorMemoryPolicy::FullRaster;
+        return RSOperatorMemoryPolicy::Streaming;
     }
     Json::Value schema() const override;
     Json::Value metadata() const override;

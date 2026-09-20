@@ -300,6 +300,15 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
   entry.material = tr( "Untitled" );
   entry.source = tr( "Spectral Profile Panel" );
+  // v2 provenance fields, filled honestly: the profile is a measurement of
+  // unknown license, so it is marked synthetic = false with an explicit
+  // "unspecified" license rather than claiming one on the user's behalf.
+  // Without these the saved file fails loadValidated() — the write path and
+  // the read path would disagree on the schema.
+  entry.id = QStringLiteral( "profile-%1" ).arg( m_library.entries.size() + 1 );
+  entry.license = tr( "unspecified" );
+  entry.citation = tr( "Measured in the Spectral Profile Panel; license unspecified." );
+  entry.synthetic = false;
   entry.spectrum.reserve( m_values.size() );
   for ( double v : m_values )
     entry.spectrum.push_back( static_cast<float>( v ) );

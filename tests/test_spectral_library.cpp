@@ -3,6 +3,8 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QString>
 #include <QTemporaryDir>
 
@@ -225,190 +227,160 @@ TEST_CASE("matchSpectrum keeps skipping band-mismatched entries without waveleng
     CHECK( scores.empty() );
 }
 
-// ─── D13 · exp_spectral::SpectralLibrary retriever ────────────────────────
-// Independent truths: orthogonal-geometry spectral angle (t=[1,1,0] vs
-// r=[1,0,0] → θ = π/4), constant-spectrum resampling invariance, and JSON
-// round-trip identity.
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
-
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-
-#include <cmath>
-#include <vector>
-
-#include "core/spectral_library.h"
-
-namespace
+// ─── Consolidated retriever semantics (Spectral Intelligence 13.0) ─────────
+// The D13 `exp_spectral::SpectralLibrary` retriever (src/core/spectral_library.*)
+// was deleted in the library consolidation: `SpectralLibrary::Library` +
+// `matchSpectrum` (this file's authority) is the single retriever, and these
+// tests re-express the D13 oracle intent on it — analytical spectral-angle
+// ground truth, degenerate-input ordering, and Gaussian-SRF invariance —
+// rather than dropping the coverage.
+TEST_CASE( "Consolidated SAM analytical ground truth from orthogonal geometry",
+           "[spectral][library][consolidated]" )
 {
-exp_spectral::SpectralLibraryEntry makeEntry(const QString &id, const QString &material,
-                                             std::vector<float> spectrum)
-{
-    exp_spectral::SpectralLibraryEntry entry;
-    entry.id = id;
-    entry.name = id;
-    entry.materialClass = material;
-    entry.source = QStringLiteral("D13 synthetic");
-    entry.spectrum = std::move(spectrum);
-    return entry;
-}
-} // namespace
+    Library lib;
+    Entry unitX;
+    unitX.id = QStringLiteral( "unit_x" );
+    unitX.name = QStringLiteral( "unit_x" );
+    unitX.material = QStringLiteral( "axis" );
+    unitX.source = QStringLiteral( "synthetic" );
+    unitX.spectrum = { 1.0f, 0.0f, 0.0f };
+    lib.entries.append( unitX );
 
-TEST_CASE("D13 SAM analytical ground truth from orthogonal geometry", "[spectral][library][d13]")
-{
-    exp_spectral::SpectralLibrary lib;
-    auto unitX = makeEntry(QStringLiteral("unit_x"), QStringLiteral("axis"),
-                           {1.0f, 0.0f, 0.0f});
-    REQUIRE(lib.addEntry(unitX));
+    // Query [1,1,0] vs reference [1,0,0]: cos θ = 1/√2 → θ = π/4 = 45° exactly.
+    const std::vector<float> query = { 1.0f, 1.0f, 0.0f };
+    const auto matches = SpectralLibrary::matchSpectrum( query, lib );
+    REQUIRE( matches.size() == 1 );
+    REQUIRE( matches[0].entryIndex == 0 );
+    REQUIRE( matches[0].angleDegrees == Catch::Approx( 45.0 ).margin( 1e-9 ) );
 
-    // Query [1,1,0] vs reference [1,0,0]: cos θ = 1/√2 → θ = π/4 exactly.
-    const std::vector<float> query = {1.0f, 1.0f, 0.0f};
-    auto matches = lib.matchSpectrum(query.data(), 3, 1, 1.5);
-    REQUIRE(matches.size() == 1);
-    REQUIRE(matches[0].id == QStringLiteral("unit_x"));
-    REQUIRE_THAT(matches[0].spectralAngleRad, Catch::Matchers::WithinAbs(0.78539816, 1e-6));
-
-    // Identical spectra: zero angle, perfect correlation, zero distance.
-    auto same = lib.matchSpectrum(unitX.spectrum.data(), 3, 1, 0.1);
-    REQUIRE(same.size() == 1);
-    REQUIRE_THAT(same[0].spectralAngleRad, Catch::Matchers::WithinAbs(0.0, 1e-9));
-    REQUIRE_THAT(same[0].correlation, Catch::Matchers::WithinAbs(1.0, 1e-9));
-    REQUIRE(same[0].euclideanDistance < 1e-9);
+    // Identical spectra: zero angle.
+    const auto same = SpectralLibrary::matchSpectrum( unitX.spectrum, lib );
+    REQUIRE( same.size() == 1 );
+    REQUIRE( same[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-9 ) );
 }
 
-TEST_CASE("D13 SAM zero-norm spectra score at the maximum angle", "[spectral][library][d13]")
+TEST_CASE( "Consolidated undefined angles sort last without crashing",
+           "[spectral][library][consolidated]" )
 {
-    exp_spectral::SpectralLibrary lib;
-    REQUIRE(lib.addEntry(makeEntry(QStringLiteral("flat"), QStringLiteral("void"),
-                                   {0.0f, 0.0f, 0.0f})));
-    const std::vector<float> query = {0.2f, 0.3f, 0.4f};
+    Library lib;
+    Entry zero;
+    zero.id = QStringLiteral( "flat" );
+    zero.name = QStringLiteral( "flat" );
+    zero.material = QStringLiteral( "void" );
+    zero.source = QStringLiteral( "synthetic" );
+    zero.spectrum = { 0.0f, 0.0f, 0.0f };
+    lib.entries.append( zero );
+    Entry good;
+    good.id = QStringLiteral( "good" );
+    good.name = QStringLiteral( "good" );
+    good.material = QStringLiteral( "axis" );
+    good.source = QStringLiteral( "synthetic" );
+    good.spectrum = { 1.0f, 0.0f, 0.0f };
+    lib.entries.append( good );
 
-    // Zero-norm reference → θ = π/2 (never NaN), and filtered out by a
-    // maxAngleRad < π/2 gate.
-    auto gated = lib.matchSpectrum(query.data(), 3, 5, 0.5);
-    REQUIRE(gated.empty());
-    // Gate above the physical maximum (pi/2 ~ 1.5708) admits the worst match.
-    auto permissive = lib.matchSpectrum(query.data(), 3, 5, 1.6);
-    REQUIRE(permissive.size() == 1);
-    REQUIRE_THAT(permissive[0].spectralAngleRad, Catch::Matchers::WithinAbs(1.5707963, 1e-6));
+    const std::vector<float> query = { 0.2f, 0.3f, 0.4f };
+    const auto matches = SpectralLibrary::matchSpectrum( query, lib );
+    REQUIRE( matches.size() == 2 );
+    // The zero-norm entry has an undefined angle: it sorts LAST (never first,
+    // never NaN-poisoning the ranking) and the finite entry ranks first.
+    REQUIRE( matches[0].name == QStringLiteral( "good" ) );
+    REQUIRE( matches[1].name == QStringLiteral( "flat" ) );
+    REQUIRE( std::isnan( matches[1].angleDegrees ) );
+    REQUIRE( std::isfinite( matches[0].angleDegrees ) );
 }
 
-TEST_CASE("D13 SAM ordering, topK truncation and band-count skip", "[spectral][library][d13]")
+TEST_CASE( "Consolidated SAM ordering and band-count skip",
+           "[spectral][library][consolidated]" )
 {
-    exp_spectral::SpectralLibrary lib;
+    Library lib;
+    auto addEntry = [&lib]( const QString &id, std::vector<float> spectrum ) {
+        Entry e;
+        e.id = id;
+        e.name = id;
+        e.material = QStringLiteral( "synthetic" );
+        e.source = QStringLiteral( "synthetic" );
+        e.spectrum = std::move( spectrum );
+        lib.entries.append( e );
+    };
     // Reference angles vs query [1,1,0]: exact (0), π/4, and π/2 (orthogonal).
-    REQUIRE(lib.addEntry(makeEntry(QStringLiteral("same"), QStringLiteral("a"), {1.0f, 1.0f, 0.0f})));
-    REQUIRE(lib.addEntry(makeEntry(QStringLiteral("diag"), QStringLiteral("b"), {1.0f, 0.0f, 0.0f})));
-    REQUIRE(lib.addEntry(makeEntry(QStringLiteral("ortho"), QStringLiteral("c"), {1.0f, -1.0f, 0.0f})));
-    // Incomparable geometry: 4 bands vs 3-band query → skipped.
-    REQUIRE(lib.addEntry(makeEntry(QStringLiteral("wide"), QStringLiteral("d"),
-                                   {1.0f, 0.0f, 0.0f, 0.0f})));
+    addEntry( QStringLiteral( "same" ), { 1.0f, 1.0f, 0.0f } );
+    addEntry( QStringLiteral( "diag" ), { 1.0f, 0.0f, 0.0f } );
+    addEntry( QStringLiteral( "ortho" ), { 1.0f, -1.0f, 0.0f } );
+    // Incomparable geometry: 4 bands vs the 3-band query, no grids → skipped.
+    addEntry( QStringLiteral( "wide" ), { 1.0f, 0.0f, 0.0f, 0.0f } );
 
-    const std::vector<float> query = {1.0f, 1.0f, 0.0f};
-    auto all = lib.matchSpectrum(query.data(), 3, 10, 1.6);
-    REQUIRE(all.size() == 3); // "wide" skipped
-    REQUIRE(all[0].id == QStringLiteral("same"));
-    REQUIRE(all[1].id == QStringLiteral("diag"));
-    REQUIRE(all[2].id == QStringLiteral("ortho"));
-
-    auto top1 = lib.matchSpectrum(query.data(), 3, 1, 1.6);
-    REQUIRE(top1.size() == 1);
-    REQUIRE(top1[0].id == QStringLiteral("same"));
-
-    auto gated = lib.matchSpectrum(query.data(), 3, 10, 0.8);
-    REQUIRE(gated.size() == 2);
+    const std::vector<float> query = { 1.0f, 1.0f, 0.0f };
+    const auto all = SpectralLibrary::matchSpectrum( query, lib );
+    REQUIRE( all.size() == 3 ); // "wide" skipped
+    REQUIRE( all[0].name == QStringLiteral( "same" ) );
+    REQUIRE( all[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-9 ) );
+    REQUIRE( all[1].name == QStringLiteral( "diag" ) );
+    REQUIRE( all[1].angleDegrees == Catch::Approx( 45.0 ).margin( 1e-9 ) );
+    REQUIRE( all[2].name == QStringLiteral( "ortho" ) );
+    REQUIRE( all[2].angleDegrees == Catch::Approx( 90.0 ).margin( 1e-9 ) );
 }
 
-TEST_CASE("D13 library JSON round-trip is lossless", "[spectral][library][d13]")
+TEST_CASE( "Consolidated Gaussian SRF resampling preserves constant spectra exactly",
+           "[spectral][library][consolidated]" )
 {
-    exp_spectral::SpectralLibrary lib;
-    exp_spectral::SpectralLibraryEntry entry =
-        makeEntry(QStringLiteral("veg_940"), QStringLiteral("vegetation"), {0.1f, 0.3f, 0.6f, 0.4f});
-    entry.wavelengthsNm = {500.0f, 660.0f, 850.0f, 1600.0f};
-    entry.fwhmNm = {20.0f, 30.0f, 40.0f, 50.0f};
-    REQUIRE(lib.addEntry(entry));
-
-    const QJsonObject json = lib.toJson();
-    QString parseError;
-    const exp_spectral::SpectralLibrary restored = exp_spectral::SpectralLibrary::fromJson(json, &parseError);
-    REQUIRE(parseError.isEmpty());
-    REQUIRE(restored.size() == 1);
-    const auto &back = restored.entries()[0];
-    REQUIRE(back.id == entry.id);
-    REQUIRE(back.name == entry.name);
-    REQUIRE(back.materialClass == entry.materialClass);
-    REQUIRE(back.source == entry.source);
-    REQUIRE(back.spectrum == entry.spectrum);
-    REQUIRE(back.wavelengthsNm == entry.wavelengthsNm);
-    REQUIRE(back.fwhmNm == entry.fwhmNm);
-
-    // File round-trip through save/load.
-    QTemporaryDir tmp;
-    const QString path = tmp.filePath(QStringLiteral("lib_d13.json"));
-    QString fileError;
-    REQUIRE(lib.saveToFile(path, &fileError));
-    exp_spectral::SpectralLibrary loaded;
-    REQUIRE(loaded.loadFromFile(path, &fileError));
-    REQUIRE(loaded.size() == 1);
-    REQUIRE(loaded.entries()[0].spectrum == entry.spectrum);
-}
-
-TEST_CASE("D13 library rejects malformed JSON with named errors", "[spectral][library][d13]")
-{
-    QString error;
-    REQUIRE(exp_spectral::SpectralLibrary::fromJson(QJsonObject(), &error).size() == 0);
-    REQUIRE(!error.isEmpty());
-
-    QJsonObject bad;
-    bad.insert(QStringLiteral("entries"), QJsonArray{QJsonValue(42)});
-    error.clear();
-    REQUIRE(exp_spectral::SpectralLibrary::fromJson(bad, &error).size() == 0);
-    REQUIRE(!error.isEmpty());
-
-    QTemporaryDir tmp;
-    QString fileError;
-    exp_spectral::SpectralLibrary missing;
-    REQUIRE_FALSE(missing.loadFromFile(tmp.filePath(QStringLiteral("nope.json")), &fileError));
-    REQUIRE(!fileError.isEmpty());
-}
-
-TEST_CASE("D13 Gaussian SRF resampling preserves constant spectra exactly", "[spectral][library][d13]")
-{
-    exp_spectral::SpectralLibrary lib;
-    exp_spectral::SpectralLibraryEntry entry =
-        makeEntry(QStringLiteral("constant"), QStringLiteral("invariant"), {});
-    for (int i = 0; i < 161; ++i) // 400..2000 nm, 10 nm step
+    // A 161-band constant library entry (400..2000 nm, 10 nm step).
+    Library lib;
+    lib.id = QStringLiteral( "constant-lib" );
+    Entry entry;
+    entry.id = QStringLiteral( "constant" );
+    entry.name = QStringLiteral( "constant" );
+    entry.material = QStringLiteral( "synthetic" );
+    entry.source = QStringLiteral( "synthetic" );
+    for ( int i = 0; i < 161; ++i )
     {
-        entry.spectrum.push_back(0.35f);
-        entry.wavelengthsNm.push_back(400.0f + 10.0f * i);
-        entry.fwhmNm.push_back(10.0f);
+        entry.spectrum.push_back( 0.35f );
+        entry.wavelengths.push_back( 400.0f + 10.0f * i );
+        entry.fwhm.push_back( 10.0f );
     }
-    REQUIRE(lib.addEntry(entry));
+    lib.entries.append( entry );
 
-    // Resample onto an arbitrary sensor grid: constant in → constant out
-    // (SRF weights form a partition of unity over the window).
-    exp_spectral::SpectralLibrary resampled;
-    REQUIRE(lib.resampleToSensor({550.0f, 840.0f, 1610.0f}, {20.0f, 40.0f, 100.0f}, &resampled));
-    REQUIRE(resampled.size() == 1);
-    REQUIRE(resampled.entries()[0].spectrum.size() == 3);
-    for (float value : resampled.entries()[0].spectrum)
-        REQUIRE_THAT(value, Catch::Matchers::WithinAbs(0.35f, 1e-6f));
-    REQUIRE(resampled.entries()[0].wavelengthsNm.front() == 550.0f);
-    REQUIRE(resampled.entries()[0].id == QStringLiteral("constant"));
+    // Sensor with three arbitrary bands; resampleTo projects the library.
+    QJsonObject sensor;
+    sensor[QStringLiteral( "id" )] = QStringLiteral( "test-sensor" );
+    sensor[QStringLiteral( "name" )] = QStringLiteral( "Test Sensor" );
+    QJsonArray bands;
+    for ( const auto &b : { std::make_pair( 550.0, 20.0 ), std::make_pair( 840.0, 40.0 ),
+                            std::make_pair( 1610.0, 100.0 ) } )
+    {
+        QJsonObject band;
+        band[QStringLiteral( "name" )] = QStringLiteral( "b" );
+        band[QStringLiteral( "wavelengthNm" )] = b.first;
+        band[QStringLiteral( "fwhmNm" )] = b.second;
+        bands.append( band );
+    }
+    sensor[QStringLiteral( "bands" )] = bands;
+
+    SpectralLibrary::SensorProfile profile;
+    QString error;
+    REQUIRE( SpectralLibrary::SensorProfile::fromJson( sensor, &profile, &error ) );
+    REQUIRE( profile.isValid() );
+
+    Library resampled;
+    REQUIRE( lib.resampleTo( profile, &resampled, &error ) );
+    REQUIRE( resampled.entries.size() == 1 );
+    REQUIRE( resampled.entries[0].spectrum.size() == 3 );
+    for ( float value : resampled.entries[0].spectrum )
+        REQUIRE( value == Catch::Approx( 0.35f ).margin( 1e-6f ) );
+    // Identity and provenance survive the projection.
+    REQUIRE( resampled.entries[0].id == QStringLiteral( "constant" ) );
+    REQUIRE( resampled.entries[0].tags.contains( QStringLiteral( "resampled" ) ) );
+    REQUIRE( resampled.entries[0].tags.contains( QStringLiteral( "sensor:test-sensor" ) ) );
 
     // Entries without a wavelength grid cannot be resampled — named refusal.
-    exp_spectral::SpectralLibrary gridless;
-    REQUIRE(gridless.addEntry(makeEntry(QStringLiteral("bare"), QStringLiteral("x"), {1.0f, 2.0f})));
-    exp_spectral::SpectralLibrary sink;
-    REQUIRE_FALSE(gridless.resampleToSensor({550.0f}, {20.0f}, &sink));
-
-    // Target bands outside the source coverage refuse (no NaN fills).
-    exp_spectral::SpectralLibrary outside;
-    REQUIRE_FALSE(lib.resampleToSensor({2500.0f}, {20.0f}, &outside));
-
-    // Malformed target grids refuse at the seam.
-    REQUIRE_FALSE(lib.resampleToSensor({}, {}, &sink));
-    REQUIRE_FALSE(lib.resampleToSensor({550.0f}, {0.0f}, &sink));
-    REQUIRE_FALSE(lib.resampleToSensor({550.0f}, {20.0f}, nullptr));
+    Library gridless;
+    Entry bare;
+    bare.id = QStringLiteral( "bare" );
+    bare.name = QStringLiteral( "bare" );
+    bare.material = QStringLiteral( "synthetic" );
+    bare.source = QStringLiteral( "synthetic" );
+    bare.spectrum = { 1.0f, 2.0f };
+    gridless.entries.append( bare );
+    Library sink;
+    REQUIRE_FALSE( gridless.resampleTo( profile, &sink, &error ) );
+    REQUIRE( !error.isEmpty() );
 }

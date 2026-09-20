@@ -102,6 +102,18 @@ TEST_CASE( "SpectralLibraryDialog matches the profile against the library", "[sp
     CHECK( reloaded.entries.last().name.startsWith( QStringLiteral( "profile_" ) ) );
     REQUIRE( reloaded.entries.last().spectrum.size() == 4 );
     CHECK( reloaded.entries.last().spectrum[3] == Catch::Approx( 0.4f ) );
+
+    // The write path and the strict read path agree on the schema: the saved
+    // entry carries the v2 provenance fields (id slug, license, citation) and
+    // the whole file loads through loadValidated (Spectral Intelligence 13.0
+    // library consolidation — before, the dialog wrote entries the strict
+    // loader rejected).
+    SpectralLibrary::Library validated;
+    QString validateError;
+    REQUIRE( SpectralLibrary::Library::loadValidated( libraryPath, &validated, &validateError ) );
+    CHECK( validated.entries.last().id == QStringLiteral( "profile-3" ) );
+    CHECK( validated.entries.last().license == QStringLiteral( "unspecified" ) );
+    CHECK( !validated.entries.last().citation.isEmpty() );
   }
 
   SECTION( "switching library path reloads the new library on match (#340)" )
