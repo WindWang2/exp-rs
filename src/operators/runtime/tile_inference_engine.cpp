@@ -2266,11 +2266,60 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 
 // --- Platform 7.0: multimodal / temporal tiled inference --------------------
 
-Json::Value TileInferenceEngine::runSceneClassification( const std::string &inputPath,
-                                                         const std::vector<int> &bands,
-                                                         const std::string &outputPath,
-                                                         RSOperatorContext &context,
-                                                         const TileInferenceRunOptions &options )
+void TileInferenceEngine::publishClassificationArtifact( const Json::Value &doc,
+                                                        const std::string &outputPath )
+{
+  // Same publish contract as the raster engines: the previous artifact is
+  // backed up first and restored when the rename fails — the caller's path
+  // ends with the NEW artifact or the OLD one, never nothing. Shared by the
+  // single-model writer and the ensemble combiner (Platform 13.0) so ONE
+  // atomic-publish contract exists.
+  const QFileInfo outFi( QString::fromStdString( outputPath ) );
+  const QString stagePath = outFi.absoluteFilePath() + QStringLiteral( ".stage~" );
+  QFile stage( stagePath );
+  if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to stage the classification artifact: "
+                             + stagePath.toStdString() );
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "  ";
+  const std::string text = Json::writeString( builder, doc );
+  stage.write( text.data(), static_cast<qint64>( text.size() ) );
+  stage.close();
+  if ( stage.error() != QFileDevice::NoError )
+  {
+    stage.remove();
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to write the classification artifact: "
+                             + stagePath.toStdString() );
+  }
+  const QString backupPath = outFi.absoluteFilePath() + QStringLiteral( ".prev~" );
+  QFile::remove( backupPath );
+  const bool hadExisting = QFile::exists( outFi.absoluteFilePath() );
+  if ( hadExisting && !QFile::rename( outFi.absoluteFilePath(), backupPath ) )
+  {
+    stage.remove();
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to back up the previous classification artifact: "
+                             + outFi.absoluteFilePath().toStdString() );
+  }
+  QFile::remove( outFi.absoluteFilePath() ); // Windows rename does not overwrite
+  if ( !QFile::rename( stagePath, outFi.absoluteFilePath() ) )
+  {
+    stage.remove();
+    if ( hadExisting )
+      QFile::rename( backupPath, outFi.absoluteFilePath() );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to publish the classification artifact: "
+                             + outFi.absoluteFilePath().toStdString() );
+  }
+  QFile::remove( backupPath );
+}
+
+SceneClassificationResult TileInferenceEngine::classifyScene( const std::string &inputPath,
+                                                             const std::vector<int> &bands,
+                                                             RSOperatorContext &context,
+                                                             const TileInferenceRunOptions &options )
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
@@ -2329,6 +2378,10 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
                              [ &ds ]( int band ) { return ds.bandDataType( band ); } );
        !dtypeError.empty() )
     throw RSOperatorError( ErrorCode::InvalidInputData, dtypeError );
+  // The input fingerprint is computed HERE (where the band list lives) so the
+  // artifact writer and the ensemble combiner record the same evidence.
+  const Json::Value windowFingerprint =
+    feedFingerprint( inputPath, bandList, options.fingerprintContentMaxBytes );
   if ( !m_model.input.bandRoles.empty()
        && m_model.input.bandRoles.size() != static_cast<std::size_t>( bandCount ) )
     throw RSOperatorError( ErrorCode::InvalidParameter,
@@ -2521,6 +2574,27 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
       probabilities[static_cast<std::size_t>( c )] =
         std::clamp( scores[static_cast<std::size_t>( c )], 0.0, 1.0 );
   }
+  m_lastScene = SceneClassificationResult{
+    probabilities, scores,
+    confidenceSemantics.empty() ? std::string( "probability" ) : confidenceSemantics,
+    validSamples, totalFloats, rasterW, rasterH, bandCount, windowFingerprint };
+  return m_lastScene;
+}
+
+Json::Value TileInferenceEngine::runSceneClassification( const std::string &inputPath,
+                                                         const std::vector<int> &bands,
+                                                         const std::string &outputPath,
+                                                         RSOperatorContext &context,
+                                                         const TileInferenceRunOptions &options )
+{
+  // The computation core is shared with the ensemble combiner (Platform 13.0):
+  // ONE implementation of the scene window, preprocessing, forward pass and
+  // score→probability semantics.
+  const SceneClassificationResult scene = classifyScene( inputPath, bands, context, options );
+  const std::vector<double> &probabilities = scene.probabilities;
+  const std::string &confidenceSemantics = scene.scoreSemantics;
+  const int classCount = static_cast<int>( m_model.output.classes.size() );
+
   int best = 0;
   for ( int c = 1; c < classCount; ++c )
     if ( probabilities[static_cast<std::size_t>( c )]
@@ -2544,13 +2618,15 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
       probabilities[static_cast<std::size_t>( c )];
   doc["probabilities"] = probabilitiesJson;
   doc["score_semantics"] = confidenceSemantics.empty() ? "probability" : confidenceSemantics;
-  Json::Value scene( Json::objectValue );
-  scene["width"] = rasterW;
-  scene["height"] = rasterH;
-  scene["bands"] = bandCount;
-  scene["valid_fraction"] =
-    totalFloats > 0 ? static_cast<double>( validSamples ) / static_cast<double>( totalFloats ) : 0.0;
-  doc["scene"] = scene;
+  Json::Value sceneJson( Json::objectValue );
+  sceneJson["width"] = scene.width;
+  sceneJson["height"] = scene.height;
+  sceneJson["bands"] = scene.bands;
+  sceneJson["valid_fraction"] = scene.totalSamples > 0
+                                  ? static_cast<double>( scene.validSamples )
+                                      / static_cast<double>( scene.totalSamples )
+                                  : 0.0;
+  doc["scene"] = sceneJson;
   Json::Value modelJson( Json::objectValue );
   modelJson["name"] = m_model.name;
   modelJson["identity_tag"] = m_model.identityTag();
@@ -2562,8 +2638,7 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
   doc["model"] = modelJson;
   Json::Value inputJson( Json::objectValue );
   inputJson["path"] = inputPath;
-  inputJson["fingerprint"] =
-    feedFingerprint( inputPath, bandList, options.fingerprintContentMaxBytes );
+  inputJson["fingerprint"] = scene.inputFingerprint;
   doc["input"] = inputJson;
   {
     const ProviderRuntimeDetails details = m_runtime->providerDetails();
@@ -2578,49 +2653,7 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
   if ( !m_lastEoPreflight.isNull() )
     doc["eo_preflight"] = m_lastEoPreflight;
 
-  const QFileInfo outFi( QString::fromStdString( outputPath ) );
-  const QString stagePath = outFi.absoluteFilePath() + QStringLiteral( ".stage~" );
-  QFile stage( stagePath );
-  if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to stage the classification artifact: "
-                             + stagePath.toStdString() );
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  const std::string text = Json::writeString( builder, doc );
-  stage.write( text.data(), static_cast<qint64>( text.size() ) );
-  stage.close();
-  if ( stage.error() != QFileDevice::NoError )
-  {
-    stage.remove();
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to write the classification artifact: "
-                             + stagePath.toStdString() );
-  }
-  // Same publish contract as the raster engines: the previous artifact is
-  // backed up first and restored when the rename fails — the caller's path
-  // ends with the NEW artifact or the OLD one, never nothing.
-  const QString backupPath = outFi.absoluteFilePath() + QStringLiteral( ".prev~" );
-  QFile::remove( backupPath );
-  const bool hadExisting = QFile::exists( outFi.absoluteFilePath() );
-  if ( hadExisting && !QFile::rename( outFi.absoluteFilePath(), backupPath ) )
-  {
-    stage.remove();
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to back up the previous classification artifact: "
-                             + outFi.absoluteFilePath().toStdString() );
-  }
-  QFile::remove( outFi.absoluteFilePath() ); // Windows rename does not overwrite
-  if ( !QFile::rename( stagePath, outFi.absoluteFilePath() ) )
-  {
-    stage.remove();
-    if ( hadExisting )
-      QFile::rename( backupPath, outFi.absoluteFilePath() );
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to publish the classification artifact: "
-                             + outFi.absoluteFilePath().toStdString() );
-  }
-  QFile::remove( backupPath );
+  publishClassificationArtifact( doc, outputPath );
 
   context.reportProgress( 1.0, "Scene classification: " + m_model.output.classes[static_cast<std::size_t>( best )] );
   return doc;
