@@ -2560,13 +2560,13 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             }
             else if ( query.sortBy == QLatin1String( "acquisition" ) )
             {
-                orderBy = QStringLiteral( "a.acquisition_ms DESC, a.asset_id ASC" );
+                orderBy = QStringLiteral( "a.acquisition_ms DESC, a.asset_id DESC" );
                 sortKeyColumn = QStringLiteral( "a.acquisition_ms" );
                 sortKeyName = QStringLiteral( "acquisition_ms" );
             }
             else
             {
-                orderBy = QStringLiteral( "a.updated_ms DESC, a.asset_id ASC" );
+                orderBy = QStringLiteral( "a.updated_ms DESC, a.asset_id DESC" );
                 sortKeyColumn = QStringLiteral( "a.updated_ms" );
                 sortKeyName = QStringLiteral( "updated_ms" );
             }
@@ -2577,7 +2577,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                                    " r.updated_ms, r.metrics_json" );
             idCol = QStringLiteral( "r.result_id" );
             idName = QStringLiteral( "result_id" );
-            orderBy = QStringLiteral( "r.updated_ms DESC, r.result_id ASC" );
+            orderBy = QStringLiteral( "r.updated_ms DESC, r.result_id DESC" );
             sortKeyColumn = QStringLiteral( "r.updated_ms" );
             sortKeyName = QStringLiteral( "updated_ms" );
             break;
@@ -2586,7 +2586,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             cols = QStringLiteral( "ru.run_id, ru.workflow_id, ru.state, ru.name, ru.started_ms, ru.finished_ms, ru.updated_ms" );
             idCol = QStringLiteral( "ru.run_id" );
             idName = QStringLiteral( "run_id" );
-            orderBy = QStringLiteral( "ru.updated_ms DESC, ru.run_id ASC" );
+            orderBy = QStringLiteral( "ru.updated_ms DESC, ru.run_id DESC" );
             sortKeyColumn = QStringLiteral( "ru.updated_ms" );
             sortKeyName = QStringLiteral( "updated_ms" );
             break;
@@ -2595,7 +2595,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             cols = QStringLiteral( "d.dataset_id, d.kind, d.name, d.revision, d.updated_ms" );
             idCol = QStringLiteral( "d.dataset_id" );
             idName = QStringLiteral( "dataset_id" );
-            orderBy = QStringLiteral( "d.updated_ms DESC, d.dataset_id ASC" );
+            orderBy = QStringLiteral( "d.updated_ms DESC, d.dataset_id DESC" );
             sortKeyColumn = QStringLiteral( "d.updated_ms" );
             sortKeyName = QStringLiteral( "updated_ms" );
             break;
@@ -2670,18 +2670,24 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
     }
     else
     {
-        // Keyset seek: resume strictly after the cursor's (sort key, id) in
-        // the same total order the ORDER BY defines. The id tiebreak makes the
-        // position unique even when the sort key ties.
-        auto comparison = [&]( const QString &op ) {
-            return sortKeyNumeric
-                       ? QStringLiteral( "%1 %2 ?" ).arg( sortKeyColumn, op )
-                       : QStringLiteral( "%1 %2 ? COLLATE NOCASE" ).arg( sortKeyColumn, op );
-        };
-        const QString seek = QStringLiteral( "(%1 OR (%2 AND %3 > ?))" )
-                                 .arg( comparison( sortDescending ? QStringLiteral( "<" )
-                                                                 : QStringLiteral( ">" ) ),
-                                       comparison( QStringLiteral( "=" ) ), idCol );
+        // Keyset seek as a ROW-VALUE comparison: "(sort key, pk) < (?, ?)"
+        // for a descending order (">" for ascending). The tiebreak shares the
+        // sort key's direction, which is what lets one index walk serve both
+        // the ORDER BY and the seek — a mixed-direction tiebreak forces a temp
+        // B-tree sort per page, and the OR spelling of the same predicate
+        // degrades to a multi-index scan. Verified with EXPLAIN QUERY PLAN:
+        // SEARCH ... USING COVERING INDEX ((updated_ms,asset_id)<(?,?)).
+        // The text sort keeps COLLATE NOCASE inside the row value so the seek
+        // orders exactly like the ORDER BY (case-variant names tiebreak by id).
+        const QString seek = sortKeyNumeric
+                                 ? QStringLiteral( "(%1, %2) %3 (?, ?)" )
+                                       .arg( sortKeyColumn, idCol,
+                                             sortDescending ? QStringLiteral( "<" )
+                                                            : QStringLiteral( ">" ) )
+                                 : QStringLiteral( "(%1 COLLATE NOCASE, %2) %3 (?, ?)" )
+                                       .arg( sortKeyColumn, idCol,
+                                             sortDescending ? QStringLiteral( "<" )
+                                                            : QStringLiteral( ">" ) );
         sql = QStringLiteral( "SELECT %1 FROM %2%3%4 ORDER BY %5 LIMIT ?" )
                   .arg( cols, from,
                         whereSql.isEmpty() ? QStringLiteral( " WHERE " )
@@ -2706,11 +2712,9 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                     return out;
                 }
                 s.bind( idx++, key );
-                s.bind( idx++, key );
             }
             else
             {
-                s.bind( idx++, afterSortKey );
                 s.bind( idx++, afterSortKey );
             }
             s.bind( idx++, afterId );
