@@ -364,3 +364,7 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+# flash-temporal-phenology-12: track planning notes (markdown only; logs stay local).
+!.planning/flash-temporal-phenology-12/
+.planning/flash-temporal-phenology-12/*
+!.planning/flash-temporal-phenology-12/*.md
