@@ -364,3 +364,8 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+
+# ds41-capability-help-sync (Track D1): track planning notes (markdown only; logs stay local).
+!.planning/ds41-capability-help-sync/
+.planning/ds41-capability-help-sync/*
+!.planning/ds41-capability-help-sync/*.md
