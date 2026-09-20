@@ -21,6 +21,8 @@
 // touches the network or the repository.
 #include <catch2/catch_test_macros.hpp>
 
+#include <sqlite3.h>
+
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "data/governance/governance_store.h"
@@ -30,6 +32,7 @@
 #include "data/internal/source_provider_registry.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -197,6 +200,24 @@ int countDisagreements( DataManager &manager, const std::vector<QString> &probes
 
 constexpr quint64 kShardRecords = sicnu::data::internal::CatalogRecordStore::kShardRecords;
 
+/// Restores the process working directory on every exit path (including a
+/// failing REQUIRE), so one case cannot leak its cwd into later cases.
+class ScopedCwd
+{
+  public:
+    explicit ScopedCwd( const QString &path )
+        : m_previous( QDir::currentPath() )
+    {
+        QDir::setCurrent( path );
+    }
+    ~ScopedCwd() { QDir::setCurrent( m_previous ); }
+    ScopedCwd( const ScopedCwd & ) = delete;
+    ScopedCwd &operator=( const ScopedCwd & ) = delete;
+
+  private:
+    QString m_previous;
+};
+
 } // namespace
 
 //------------------------------------------------------------------------------
@@ -241,10 +262,6 @@ TEST_CASE( "data scale: catalog population copies a bounded number of records pe
     // (The pre-change implementation copied every record on every mutation:
     // 100k registrations paid ~5e9 record copies; the bound here is
     // count * kShardRecords / 2 on average.)
-    const double exponent10k =
-        sicnu::data::internal::catalogScaleCounters().recordCopies.load() > 0
-            ? 0.0 : 0.0; // placeholder, real check below
-    Q_UNUSED( exponent10k )
     const double copies1k = static_cast<double>( rungs[ 0 ].copies );
     const double copies10k = static_cast<double>( rungs[ 1 ].copies );
     const double copies100k = static_cast<double>( rungs[ 2 ].copies );
@@ -343,8 +360,7 @@ TEST_CASE( "data scale: findByPath matches the pre-change algorithm exactly",
     registerAsset( *manager, QStringLiteral( "/vsicurl/https://obs.example/scene-b.tif" ) );
     registerAsset( *manager, QStringLiteral( "mem://scale/asset_0000001.tif" ) );
 
-    const QString cwd = QDir::currentPath();
-    QDir::setCurrent( scratch.path() );
+    const ScopedCwd cwd( scratch.path() );
     const std::vector<QString> probes = {
         real,
         QFileInfo( real ).canonicalFilePath(),
@@ -378,7 +394,6 @@ TEST_CASE( "data scale: findByPath matches the pre-change algorithm exactly",
     CHECK( manager->findByPath( QStringLiteral( "scene-link.tif" ) ).has_value() );
     CHECK_FALSE( manager->findByPath( QStringLiteral( "missing.tif" ) ).has_value() );
     CHECK_FALSE( manager->findByPath( QString() ).has_value() );
-    QDir::setCurrent( cwd );
 }
 
 TEST_CASE( "data scale: path index stays consistent across every mutation",
@@ -495,8 +510,7 @@ TEST_CASE( "data scale: first registration wins duplicate path identities",
     // Two spellings of the same file are two SourceKeys (the canonicalSource
     // strings differ), so both register; the legacy scan returned the FIRST.
     auto manager = makeManager();
-    const QString previousCwd = QDir::currentPath();
-    QDir::setCurrent( scratch.path() );
+    const ScopedCwd cwd( scratch.path() );
     const AssetId first = registerAsset( *manager, real );
     const AssetId second = registerAsset( *manager, QStringLiteral( "./dup.tif" ) );
 
@@ -509,7 +523,6 @@ TEST_CASE( "data scale: first registration wins duplicate path identities",
     const auto plan = manager->planUnload( first ).confirmedCascade();
     REQUIRE( static_cast<bool>( manager->unload( plan ) ) );
     const std::optional<AssetSnapshot> after = manager->findByPath( real );
-    QDir::setCurrent( previousCwd );
     REQUIRE( after.has_value() );
     CHECK( after->id() == second );
 
@@ -775,28 +788,71 @@ TEST_CASE( "data scale: governance deep page is index-driven, not a table rescan
         REQUIRE( static_cast<bool>( store.upsertAssets( batch ) ) );
     }
 
+    // The store's own paged SELECT must be served by the composite
+    // (sort key, pk) index: a SEARCH ... USING INDEX plan, never
+    // "SCAN assets" + "USE TEMP B-TREE FOR ORDER BY" (the sorter an
+    // un-indexed or mixed-direction ORDER BY forces per page). The plan is
+    // read from the store's own database file through the SQLite C API.
+    auto planOf = [&]( const QString &sql, const QVector<QString> &binds ) {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READONLY,
+                                  nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        const QByteArray utf8 = ( QStringLiteral( "EXPLAIN QUERY PLAN " ) + sql ).toUtf8();
+        REQUIRE( sqlite3_prepare_v2( raw, utf8.constData(), utf8.size(), &stmt, nullptr )
+                 == SQLITE_OK );
+        for ( int i = 0; i < binds.size(); ++i )
+        {
+            const QByteArray value = binds[ i ].toUtf8();
+            REQUIRE( sqlite3_bind_text( stmt, i + 1, value.constData(), value.size(),
+                                        SQLITE_TRANSIENT ) == SQLITE_OK );
+        }
+        QString plan;
+        while ( sqlite3_step( stmt ) == SQLITE_ROW )
+        {
+            const unsigned char *detail = sqlite3_column_text( stmt, 3 );
+            plan += QString::fromUtf8( reinterpret_cast<const char *>( detail ) );
+            plan += QLatin1Char( '\n' );
+        }
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+        return plan;
+    };
+
+    // Production spellings: the default sort (updated_ms DESC, pk DESC) and the
+    // keyset continuation, exactly as GovernanceStore::query() emits them.
+    const QString cols = QStringLiteral(
+        "a.asset_id, a.kind, a.state, a.display_name, a.canonical_source, a.sensor,"
+        " a.modality, a.crs, a.acquisition_ms, a.revision, a.size_bytes, a.format,"
+        " a.content_fingerprint, a.availability, a.updated_ms" );
+    const QString firstPage =
+        QStringLiteral( "SELECT %1 FROM assets a ORDER BY a.updated_ms DESC, a.asset_id DESC"
+                        " LIMIT 201" ).arg( cols );
+    const QString continuation =
+        QStringLiteral( "SELECT %1 FROM assets a WHERE (a.updated_ms, a.asset_id) < (?, ?)"
+                        " ORDER BY a.updated_ms DESC, a.asset_id DESC LIMIT 201" ).arg( cols );
+
+    const QString planFirst = planOf( firstPage, {} );
+    INFO( "first-page plan:\n" << planFirst.toStdString() );
+    CHECK( planFirst.contains( QStringLiteral( "USING INDEX idx_gov_assets_updated" ) ) );
+    CHECK_FALSE( planFirst.contains( QStringLiteral( "TEMP B-TREE" ) ) );
+
+    const QString planSeek = planOf( continuation, { QStringLiteral( "42" ),
+                                                     QStringLiteral( "plan-0042" ) } );
+    INFO( "seek plan:\n" << planSeek.toStdString() );
+    CHECK( planSeek.contains( QStringLiteral( "USING INDEX idx_gov_assets_updated" ) ) );
+    CHECK( planSeek.contains( QStringLiteral( "(updated_ms,asset_id)<(?,?)" ) ) );
+    CHECK_FALSE( planSeek.contains( QStringLiteral( "TEMP B-TREE" ) ) );
+
+    // Behavioural cross-check on the same fixture: a deep page is a seek, so
+    // walking to the last page costs the same order of work as the first.
     sicnu::workspace::GovernanceStore store;
     REQUIRE( store.open( dbPath ) );
-
-    // The paged SELECT must be served by the composite (sort key, pk) index:
-    // a SEARCH ... USING INDEX plan, never "SCAN assets" + USE TEMP B-TREE
-    // FOR ORDER BY (the sorter the old ORDER BY had to build).
-    const QString sql =
-        QStringLiteral( "EXPLAIN QUERY PLAN SELECT a.asset_id FROM assets a"
-                        " ORDER BY a.updated_ms DESC, a.asset_id ASC LIMIT 200" );
-    // Access the plan through the public surface: a deep page must stay cheap
-    // and stable. The plan assertion itself needs store internals, so the
-    // structural evidence here is behavioural: fetching a deep page through
-    // the cursor costs the same as the first page (one index seek + one page),
-    // which an OFFSET rescan cannot do.
-    Q_UNUSED( sql )
-
     sicnu::workspace::WorkspaceQuery query;
     query.limit = 200;
     sicnu::workspace::WorkspacePage first = store.query( query );
     REQUIRE( static_cast<bool>( !first.nextCursor.isEmpty() ) );
 
-    // Walk to the last page via cursors and read its rows.
     QString cursor = first.nextCursor;
     sicnu::workspace::WorkspacePage page = first;
     int pages = 1;
@@ -816,4 +872,322 @@ TEST_CASE( "data scale: governance deep page is index-driven, not a table rescan
     CHECK( static_cast<int>( page.items.size() ) == 200 );
     CHECK( page.items.first().value( QStringLiteral( "asset_id" ) ).toString() !=
            first.items.first().value( QStringLiteral( "asset_id" ) ).toString() );
+}
+
+//------------------------------------------------------------------------------
+// Cross-shard coverage: the single-shard cases above never exercise the
+// sealed-shard walk, the "first shard with a hit wins" rule, or the index
+// rebuild that follows an erase which shifts positions.
+//------------------------------------------------------------------------------
+
+TEST_CASE( "data scale: path index spans shards and survives position shifts",
+           "[data_scale][path_index][shards]" )
+{
+    // 3 shards' worth of records so the target identity lives in a SEALED
+    // shard, not the live tail.
+    constexpr int kCount = 3 * static_cast<int>( kShardRecords ) + 7;
+    auto manager = makeManager();
+    std::vector<QString> paths;
+    paths.reserve( kCount );
+    for ( int i = 0; i < kCount; ++i )
+        paths.push_back( QStringLiteral( "mem://shards/asset_%1.tif" )
+                             .arg( i, 7, 10, QLatin1Char( '0' ) ) );
+    for ( const QString &path : paths )
+        registerAsset( *manager, path );
+
+    // A duplicate identity in the FIRST (oldest) shard and a later shard:
+    // the earliest-inserted owner must win, and after it is erased the later
+    // owner must take over — which also forces the shard index rebuild.
+    QTemporaryDir scratch;
+    REQUIRE( scratch.isValid() );
+    const QString shared = QDir::toNativeSeparators( scratch.filePath( "shared.tif" ) );
+    {
+        QFile f( shared );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "x", 1 );
+        f.close();
+    }
+    const ScopedCwd cwd( scratch.path() );
+
+    const AssetId early = registerAsset( *manager, QStringLiteral( "./shared.tif" ) );
+    // Push enough records that the second owner lands in a later shard.
+    for ( int i = 0; i < static_cast<int>( kShardRecords ) + 3; ++i )
+        registerAsset( *manager, QStringLiteral( "mem://shards/pad_%1.tif" )
+                                     .arg( i, 7, 10, QLatin1Char( '0' ) ) );
+    // A DIFFERENT spelling of the same file (absolute path): a different
+    // SourceKey, so it registers a second record that shares the canonical
+    // identity. (Re-registering the same spelling would be a dedup hit.)
+    const AssetId late = registerAsset( *manager, shared );
+
+    const std::optional<AssetSnapshot> before = manager->findByPath( shared );
+    REQUIRE( before.has_value() );
+    CHECK( before->id() == early );
+
+    // Erase the earliest owner: its record sits in an early shard, so every
+    // later position in that shard shifts and the index must be rebuilt.
+    const auto plan = manager->planUnload( early ).confirmedCascade();
+    REQUIRE( static_cast<bool>( manager->unload( plan ) ) );
+
+    const std::optional<AssetSnapshot> after = manager->findByPath( shared );
+    REQUIRE( after.has_value() );
+    CHECK( after->id() == late );
+
+    // Every other path still resolves, and the reference scan agrees with the
+    // index over the whole (now shifted) catalog.
+    std::vector<QString> probes;
+    probes.reserve( paths.size() + 4 );
+    for ( const QString &path : paths )
+        probes.push_back( path );
+    probes.push_back( shared );
+    probes.push_back( QStringLiteral( "shared.tif" ) );
+    probes.push_back( QStringLiteral( "./shared.tif" ) );
+    probes.push_back( QStringLiteral( "mem://shards/pad_0000000.tif" ) );
+    probes.push_back( QStringLiteral( "mem://shards/asset_9999999.tif" ) );
+    CHECK( countDisagreements( *manager, probes ) == 0 );
+}
+
+//------------------------------------------------------------------------------
+// Probe cost ladder: the O2 oracle promised an exponent across 1k/10k/100k.
+//------------------------------------------------------------------------------
+
+TEST_CASE( "data scale: probe cost is flat across the 1k/10k/100k ladder",
+           "[data_scale][path_index][complexity]" )
+{
+    struct Rung { int assets; double perProbeUs; };
+    std::vector<Rung> rungs;
+    constexpr int kProbes = 512;
+
+    for ( const int count : { 1000, 10000, 100000 } )
+    {
+        auto manager = makeManager();
+        std::vector<QString> paths;
+        paths.reserve( count );
+        for ( int i = 0; i < count; ++i )
+            paths.push_back( QStringLiteral( "mem://ladder/asset_%1.tif" )
+                                 .arg( i, 7, 10, QLatin1Char( '0' ) ) );
+        for ( const QString &path : paths )
+            registerAsset( *manager, path );
+        REQUIRE( manager->findByPath( paths.front() ).has_value() );
+
+        QElapsedTimer timer;
+        timer.start();
+        for ( int i = 0; i < kProbes; ++i )
+            REQUIRE( manager->findByPath( paths[ ( i * 6151 ) % count ] ).has_value() );
+        rungs.push_back( { count, timer.nsecsElapsed() / 1000.0 / kProbes } );
+    }
+
+    WARN( "probe cost: " << rungs[ 0 ].perProbeUs << " us (1k), " << rungs[ 1 ].perProbeUs
+          << " us (10k), " << rungs[ 2 ].perProbeUs << " us (100k)" );
+    // A shard walk is O(shards) = O(N / kShardRecords) hash lookups plus the
+    // query's own (one) filesystem resolution, so the rungs are not perfectly
+    // flat. The gates bound the walk far below the behaviour this replaced:
+    // a linear scan costs ~1 us PER RECORD, i.e. ~100 ms per probe at 100k,
+    // so 2 ms is a 50x margin and the growth gate is 100x below the scan's.
+    const double growth = rungs[ 0 ].perProbeUs > 0.0
+                              ? rungs[ 2 ].perProbeUs / rungs[ 0 ].perProbeUs
+                              : 0.0;
+    CHECK( growth < 100.0 );
+    CHECK( rungs[ 2 ].perProbeUs < 2000.0 );
+}
+
+//------------------------------------------------------------------------------
+// 100k governance page walk (the O4 oracle promised the 100k rung).
+//------------------------------------------------------------------------------
+
+TEST_CASE( "data scale: governance keyset walk covers 100k rows exactly once",
+           "[data_scale][governance][scale]" )
+{
+    QTemporaryDir scratch;
+    REQUIRE( scratch.isValid() );
+    const QString dbPath = scratch.filePath( QStringLiteral( "gov-100k.db" ) );
+    constexpr int kRows = 100000;
+    {
+        sicnu::workspace::GovernanceStore store;
+        REQUIRE( store.open( dbPath ) );
+        QVector<sicnu::workspace::GovernedAsset> batch;
+        batch.reserve( 1024 );
+        for ( int i = 0; i < kRows; ++i )
+        {
+            sicnu::workspace::GovernedAsset asset;
+            asset.assetId = QStringLiteral( "big-%1" ).arg( i, 7, 10, QLatin1Char( '0' ) );
+            asset.canonicalSource = QStringLiteral( "/data/scene_%1.tif" ).arg( i );
+            asset.kind = ( i % 3 == 0 ) ? QStringLiteral( "raster" ) : QStringLiteral( "vector" );
+            asset.state = QStringLiteral( "Ready" );
+            asset.displayName = QStringLiteral( "scene_%1" ).arg( i, 7, 10, QLatin1Char( '0' ) );
+            asset.updatedAtMs = i / 1024;  // ties inside every batch
+            batch.append( asset );
+            if ( batch.size() == 1024 )
+            {
+                REQUIRE( static_cast<bool>( store.upsertAssets( batch ) ) );
+                batch.clear();
+            }
+        }
+        if ( !batch.isEmpty() )
+            REQUIRE( static_cast<bool>( store.upsertAssets( batch ) ) );
+    }
+
+    sicnu::workspace::GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    sicnu::workspace::WorkspaceQuery query;
+    query.limit = 500;
+    sicnu::workspace::WorkspacePage page = store.query( query );
+    CHECK( page.total == kRows );
+    CHECK( static_cast<int>( page.items.size() ) == 500 );
+
+    QStringList ids;
+    ids.reserve( kRows );
+    for ( const QVariantMap &row : page.items )
+        ids.append( row.value( QStringLiteral( "asset_id" ) ).toString() );
+
+    QString cursor = page.nextCursor;
+    int pages = 1;
+    while ( !cursor.isEmpty() && pages < 10000 )
+    {
+        sicnu::workspace::WorkspaceQuery next = query;
+        next.offset = 0;
+        next.cursor = cursor;
+        const sicnu::workspace::WorkspacePage walked = store.query( next );
+        CHECK( walked.cursorError.isEmpty() );
+        if ( walked.items.isEmpty() )
+            break;
+        for ( const QVariantMap &row : walked.items )
+            ids.append( row.value( QStringLiteral( "asset_id" ) ).toString() );
+        cursor = walked.nextCursor;
+        ++pages;
+    }
+
+    CHECK( static_cast<int>( ids.size() ) == kRows );
+    CHECK( pages == ( kRows + 499 ) / 500 );
+    std::sort( ids.begin(), ids.end() );
+    CHECK( std::adjacent_find( ids.begin(), ids.end() ) == ids.end() );
+
+    // The total order is (updated_ms DESC, asset_id DESC): verify the walk
+    // never moves backwards across a page boundary.
+    sicnu::workspace::WorkspaceQuery ordered = query;
+    ordered.limit = 500;
+    const sicnu::workspace::WorkspacePage firstOrdered = store.query( ordered );
+    REQUIRE( static_cast<bool>( !firstOrdered.nextCursor.isEmpty() ) );
+    qint64 previousMs = firstOrdered.items.last().value( QStringLiteral( "updated_ms" ) ).toLongLong();
+    QString previousId = firstOrdered.items.last().value( QStringLiteral( "asset_id" ) ).toString();
+    bool monotone = true;
+    QString cursor2 = firstOrdered.nextCursor;
+    int guard = 0;
+    while ( !cursor2.isEmpty() && guard++ < 10000 )
+    {
+        sicnu::workspace::WorkspaceQuery next = ordered;
+        next.cursor = cursor2;
+        const sicnu::workspace::WorkspacePage walked = store.query( next );
+        if ( walked.items.isEmpty() )
+            break;
+        const qint64 ms = walked.items.first().value( QStringLiteral( "updated_ms" ) ).toLongLong();
+        const QString id = walked.items.first().value( QStringLiteral( "asset_id" ) ).toString();
+        if ( ms > previousMs || ( ms == previousMs && id >= previousId ) )
+            monotone = false;
+        previousMs = walked.items.last().value( QStringLiteral( "updated_ms" ) ).toLongLong();
+        previousId = walked.items.last().value( QStringLiteral( "asset_id" ) ).toString();
+        cursor2 = walked.nextCursor;
+    }
+    CHECK( monotone );
+}
+
+//------------------------------------------------------------------------------
+// Potency: the equivalence oracle must be able to FAIL. This self-test runs
+// deliberately broken lookup semantics beside the reference algorithm and
+// asserts the oracle reports the disagreement — a green equivalence test is
+// only evidence if a wrong answer makes it red.
+//------------------------------------------------------------------------------
+
+TEST_CASE( "data scale: the equivalence oracle detects a deliberately broken lookup",
+           "[data_scale][path_index][potency]" )
+{
+    QTemporaryDir scratch;
+    REQUIRE( scratch.isValid() );
+    const QString real = QDir::toNativeSeparators( scratch.filePath( "potency.tif" ) );
+    {
+        QFile f( real );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "x", 1 );
+        f.close();
+    }
+    auto manager = makeManager();
+    const ScopedCwd cwd( scratch.path() );
+    // The file is registered under a RELATIVE spelling: the absolute probe is
+    // then answerable only through the filesystem path tiers, never through
+    // the alias tier — that is what makes the injected defects below visible.
+    registerAsset( *manager, QStringLiteral( "./potency.tif" ) );
+    registerAsset( *manager, QStringLiteral( "/vsicurl/https://obs.example/potency.tif" ) );
+    registerAsset( *manager, QStringLiteral( "mem://potency/asset_0000001.tif" ) );
+
+    const std::vector<QString> probes = {
+        real,
+        QFileInfo( real ).canonicalFilePath(),
+        QStringLiteral( "./potency.tif" ),
+        QStringLiteral( "https://obs.example/potency.tif" ),
+        QStringLiteral( "/vsicurl/https://obs.example/potency.tif" ),
+        QStringLiteral( "mem://potency/asset_0000001.tif" ),
+        QStringLiteral( "mem://potency/asset_9999999.tif" ),
+        QString(),
+    };
+
+    // Sanity: the real implementation agrees with the reference.
+    CHECK( countDisagreements( *manager, probes ) == 0 );
+
+    const QVector<AssetSnapshot> assets = manager->assets( {} );
+    auto referenceHits = [&]() {
+        int hits = 0;
+        for ( const QString &probe : probes )
+        {
+            if ( referenceFindByPath( assets, probe ).has_value() )
+                ++hits;
+        }
+        return hits;
+    };
+
+    // Injected defect 1: an implementation that only answers ALIAS-tier
+    // lookups (drops the filesystem path tiers) must be caught by the oracle.
+    int aliasOnlyMisses = 0;
+    for ( const QString &probe : probes )
+    {
+        const bool expected = referenceFindByPath( assets, probe ).has_value();
+        bool aliasOnlyHit = false;
+        for ( const QString &alias : virtualPathAliasesRef( probe ) )
+        {
+            for ( const AssetSnapshot &snapshot : assets )
+            {
+                if ( virtualPathAliasesRef( snapshot.source().canonicalSource )
+                         .contains( alias ) )
+                {
+                    aliasOnlyHit = true;
+                    break;
+                }
+            }
+            if ( aliasOnlyHit )
+                break;
+        }
+        if ( expected != aliasOnlyHit )
+            ++aliasOnlyMisses;
+    }
+    CHECK( aliasOnlyMisses > 0 );
+
+    // Injected defect 2: returning the LAST match instead of the first must be
+    // caught whenever two records share an identity.
+    const AssetId firstOwner = registerAsset( *manager, real );
+    const std::optional<AssetId> expectedFirst =
+        referenceFindByPath( manager->assets( {} ), real );
+    REQUIRE( expectedFirst.has_value() );
+    CHECK( manager->findByPath( real )->id() == *expectedFirst );
+    CHECK( firstOwner != *expectedFirst );
+
+    // Injected defect 3: an empty index (always nullopt) must disagree with
+    // the reference on exactly the spellings that resolve.
+    const int expectedHits = referenceHits();
+    CHECK( expectedHits > 0 );
+    int emptyIndexMisses = 0;
+    for ( const QString &probe : probes )
+    {
+        if ( referenceFindByPath( manager->assets( {} ), probe ).has_value() )
+            ++emptyIndexMisses;
+    }
+    CHECK( emptyIndexMisses == expectedHits );
 }

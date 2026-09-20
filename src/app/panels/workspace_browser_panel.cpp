@@ -40,6 +40,7 @@ void WorkspaceGovernanceModel::setWorkspaceService( WorkspaceService *service )
     m_service = service;
     m_rows.clear();
     m_total = 0;
+    m_nextCursor.clear();
     endResetModel();
 }
 

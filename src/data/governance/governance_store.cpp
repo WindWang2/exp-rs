@@ -2675,10 +2675,21 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
         // sort key's direction, which is what lets one index walk serve both
         // the ORDER BY and the seek — a mixed-direction tiebreak forces a temp
         // B-tree sort per page, and the OR spelling of the same predicate
-        // degrades to a multi-index scan. Verified with EXPLAIN QUERY PLAN:
-        // SEARCH ... USING COVERING INDEX ((updated_ms,asset_id)<(?,?)).
-        // The text sort keeps COLLATE NOCASE inside the row value so the seek
-        // orders exactly like the ORDER BY (case-variant names tiebreak by id).
+        // degrades to a multi-index scan.
+        //
+        // NUMERIC sorts: EXPLAIN QUERY PLAN on the store's own DB reports
+        //   SEARCH a USING COVERING INDEX idx_gov_assets_updated
+        //     ((updated_ms,asset_id)<(?,?))
+        // with no sorter, so a page costs one index range scan. The composite
+        // (sort key, pk) indexes are what make that possible.
+        //
+        // TEXT (name) sort: COLLATE NOCASE is kept inside the row value so the
+        // seek orders exactly like the ORDER BY (case-variant names tiebreak
+        // by id), but SQLite will not turn that comparison into an index RANGE
+        // — the plan is an ordered index scan with a filter, i.e. O(position)
+        // per page. Acceptable because no production caller pages deeply by
+        // name (the workspace browser uses the default sort; project:search is
+        // single-page); tests/test_data_scale.cpp pins the walk's correctness.
         const QString seek = sortKeyNumeric
                                  ? QStringLiteral( "(%1, %2) %3 (?, ?)" )
                                        .arg( sortKeyColumn, idCol,
@@ -2717,7 +2728,10 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             {
                 s.bind( idx++, afterSortKey );
             }
-            s.bind( idx++, afterId );
+            // The id is escaped on mint for symmetry with the sort key: an id
+            // containing the framing separator would otherwise decode to extra
+            // parts and read as a filter mismatch (a silently truncated walk).
+            s.bind( idx++, unescapeCursorPart( afterId ) );
         }
         s.bind( idx++, fetchLimit );
         if ( !haveCursor )
@@ -2752,7 +2766,8 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                                     ? QString::number( last.value( sortKeyName ).toLongLong() )
                                     : last.value( sortKeyName ).toString();
         out.nextCursor = sicnu::data::QueryCursor::encode(
-            { filterEcho, escapeCursorPart( keyPart ), last.value( idName ).toString() } );
+            { filterEcho, escapeCursorPart( keyPart ),
+              escapeCursorPart( last.value( idName ).toString() ) } );
     }
     return out;
 }

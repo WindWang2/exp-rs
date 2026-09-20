@@ -634,7 +634,10 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   if ( QThread::currentThread() != thread() )
     return Result<RelocateResult>::failure( wrongThreadDiagnostic() );
 
-  Impl::AssetRecord *recordIt = m_impl->records.findMutable( request.id );
+  // Read-only access first: every refusal below (unknown asset, kind or
+  // structure mismatch, source conflict) must not pay the shard copy that
+  // mutable access performs.
+  const Impl::AssetRecord *recordIt = m_impl->records.find( request.id );
   if ( !recordIt )
   {
     return Result<RelocateResult>::failure(
@@ -707,12 +710,22 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
                          replacement.structure,
                          current.acquisitionTime(),
                          current.parentCollectionId() };
+  // Validation passed: take mutable access now (this copies the owning shard
+  // once) and apply the relocation.
+  Impl::AssetRecord *mutableRecord = m_impl->records.findMutable( request.id );
+  if ( !mutableRecord )
+  {
+    return Result<RelocateResult>::failure(
+      Diagnostic{ QStringLiteral( "relocate.unknown_asset" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
   // Swap the source-identity index entry BEFORE the snapshot is replaced: the
   // store derives the previous identity from the record itself.
   m_impl->records.reindexSourceKey( request.id, normalizedDescriptor );
   const QString previousSource = current.source().canonicalSource;
-  recordIt->sourceKey = newSourceKey;
-  recordIt->snapshot = std::move( updated );
+  mutableRecord->sourceKey = newSourceKey;
+  mutableRecord->snapshot = std::move( updated );
   // The canonical source moved: refresh this record's identity keys so the
   // path index neither keeps the old spelling nor misses the new one.
   m_impl->records.resyncKeys( request.id );
@@ -818,8 +831,12 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
   // the O(N)-syscall scan this replaced is recorded in
   // benchmarks/observatory/obs_dataset_find_by_path_hotspot.json. Semantics
   // (alias/string identity first, then raw/canonical/absolute path tiers for
-  // non-virtual spellings on both sides, first match in insertion order) are
-  // unchanged and pinned by the equivalence oracle in tests/test_data_scale.cpp.
+  // non-virtual spellings on both sides, first match in insertion order) match
+  // the previous scan for every static-filesystem case and are pinned by the
+  // equivalence oracle in tests/test_data_scale.cpp. The one documented
+  // difference: a record's canonical identity is resolved at registration /
+  // relocation time rather than per probe (see the header's contract note), so
+  // a path retargeted AFTER registration is not observed until it re-registers.
   const Impl::AssetRecord *record = snap->records.probe( path );
   if ( !record )
     return std::nullopt;

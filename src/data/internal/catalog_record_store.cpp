@@ -262,11 +262,9 @@ QStringList CatalogRecordStore::recordKeys( const AssetRecord &record )
     if ( !absolute.isEmpty() && absolute != stored )
         keys.append( pathKey( absolute ) );
     const QString canonical = info.canonicalFilePath();
+    catalogScaleCounters().pathCanonicalizations.fetch_add( 1, std::memory_order_relaxed );
     if ( !canonical.isEmpty() && canonical != stored )
-    {
         keys.append( pathKey( canonical ) );
-        catalogScaleCounters().pathCanonicalizations.fetch_add( 1, std::memory_order_relaxed );
-    }
     keys.removeDuplicates();
     return keys;
 }
@@ -289,11 +287,9 @@ QStringList CatalogRecordStore::queryKeys( const QString &path, bool &virtualOut
     keys.append( pathKey( path ) );
     const QFileInfo info( path );
     const QString canonical = info.canonicalFilePath();
+    catalogScaleCounters().pathCanonicalizations.fetch_add( 1, std::memory_order_relaxed );
     if ( !canonical.isEmpty() && canonical != path )
-    {
         keys.append( pathKey( canonical ) );
-        catalogScaleCounters().pathCanonicalizations.fetch_add( 1, std::memory_order_relaxed );
-    }
     const QString absolute = info.absoluteFilePath();
     if ( !absolute.isEmpty() && absolute != path )
         keys.append( pathKey( absolute ) );
@@ -301,18 +297,49 @@ QStringList CatalogRecordStore::queryKeys( const QString &path, bool &virtualOut
     return keys;
 }
 
+namespace
+{
+
+/// Percent-escapes the framing separators (and the escape itself) inside one
+/// serialized field. Without it the serialization is not injective: the
+/// dataOptions entry {"k\x1e" : "v"} and {"k" : "v\x1e"} would collide even
+/// though the QMap equality of the SourceKey distinguishes them, and a
+/// collision silently hijacks an asset identity on the dedup path.
+QString escapeIdentityField( const QString &field )
+{
+    QString escaped;
+    escaped.reserve( field.size() );
+    for ( const QChar ch : field )
+    {
+        if ( ch == QChar( 0x1f ) )
+            escaped += QStringLiteral( "%1F" );
+        else if ( ch == QChar( 0x1e ) )
+            escaped += QStringLiteral( "%1E" );
+        else if ( ch == QLatin1Char( '%' ) )
+            escaped += QStringLiteral( "%25" );
+        else
+            escaped += ch;
+    }
+    return escaped;
+}
+
+} // namespace
+
 QString CatalogRecordStore::sourceKeyOf( const SourceDescriptor &descriptor )
 {
-    // Faithful serialization of the SourceKey fields. authConfigId is
-    // deliberately excluded: SourceKey ignores it, so two descriptors that
-    // differ only in authConfigId share one identity. QMap iterates sorted,
-    // so the serialization is deterministic.
-    QString key = descriptor.providerKey + QChar( 0x1f ) + descriptor.canonicalSource +
-                  QChar( 0x1f ) + descriptor.subdataset;
+    // Faithful, INJECTIVE serialization of the SourceKey fields: every field
+    // is escaped so serialized equality implies SourceKey equality.
+    // authConfigId is deliberately excluded: SourceKey ignores it, so two
+    // descriptors that differ only in authConfigId share one identity. QMap
+    // iterates sorted, so the serialization is deterministic.
+    QString key = escapeIdentityField( descriptor.providerKey ) + QChar( 0x1f ) +
+                  escapeIdentityField( descriptor.canonicalSource ) + QChar( 0x1f ) +
+                  escapeIdentityField( descriptor.subdataset );
     for ( auto it = descriptor.dataOptions.constBegin();
           it != descriptor.dataOptions.constEnd(); ++it )
     {
-        key += QChar( 0x1f ) + it.key() + QChar( 0x1e ) + it.value();
+        key += QChar( 0x1f ) + escapeIdentityField( it.key() ) + QChar( 0x1e ) +
+               escapeIdentityField( it.value() );
     }
     return key;
 }

@@ -70,22 +70,26 @@ struct AssetRecord
 /// drive one manager per phase.
 struct CatalogScaleCounters
 {
+    // Each counter is cache-line aligned: the read paths (find / locateIn /
+    // forEach) increment them from foreign threads, and unpadded atomics would
+    // ping-pong one shared line between concurrent readers.
     /// AssetRecord copies performed while making a shard private (bounded by
     /// the shard capacity per mutation).
-    std::atomic<quint64> recordCopies{ 0 };
+    alignas( 64 ) std::atomic<quint64> recordCopies{ 0 };
     /// Shard copies (sealed-shard COW) — a superset measure of recordCopies.
-    std::atomic<quint64> shardCopies{ 0 };
+    alignas( 64 ) std::atomic<quint64> shardCopies{ 0 };
     /// Tail → sealed-shard transitions.
-    std::atomic<quint64> shardSeals{ 0 };
+    alignas( 64 ) std::atomic<quint64> shardSeals{ 0 };
     /// publishSnapshot() calls (publication cost itself is O(1)).
-    std::atomic<quint64> snapshotPublications{ 0 };
-    /// Filesystem canonical-path resolutions: one per record key refresh and
-    /// one per probe query. Never per (probe × record).
-    std::atomic<quint64> pathCanonicalizations{ 0 };
+    alignas( 64 ) std::atomic<quint64> snapshotPublications{ 0 };
+    /// Filesystem canonical-path resolution ATTEMPTS: one per record key
+    /// refresh and one per probe query, counted whether or not the path
+    /// resolves. Never per (probe × record).
+    alignas( 64 ) std::atomic<quint64> pathCanonicalizations{ 0 };
     /// Hash lookups served to path probes (shard walk).
-    std::atomic<quint64> pathIndexLookups{ 0 };
+    alignas( 64 ) std::atomic<quint64> pathIndexLookups{ 0 };
     /// Records examined by id lookups / full scans.
-    std::atomic<quint64> recordVisits{ 0 };
+    alignas( 64 ) std::atomic<quint64> recordVisits{ 0 };
 
     void reset()
     {

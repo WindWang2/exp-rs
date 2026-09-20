@@ -19,7 +19,10 @@ All gates are structural (counts, exponents, equivalence) — never absolute mil
   `mem://`, `/vsicurl/`, `https://`, mixed-case scheme, missing-file, and whitespace inputs);
 - structural counter `canonicalizationCalls` must be ≤ probes × small constant (one
   resolution of the QUERY per probe, zero per-record filesystem work);
-- probe cost grows sub-linearly: wall-time exponent across 1k/10k/100k < 1.3;
+- probe cost stays in the shard-walk regime: the walk is O(#shards) = O(N/kShardRecords)
+  hash lookups plus the query's own single filesystem resolution; the ladder gate bounds
+  growth < 100x and the 100k rung < 2 ms (the linear scan it replaced costs ~1 us PER
+  RECORD, ~100 ms per probe at 100k);
 - observatory gates `obs_dataset_find_by_path_scaling` (< 1.5) and
   `obs_dataset_find_by_path_hotspot` stay green.
 

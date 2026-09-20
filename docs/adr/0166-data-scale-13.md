@@ -59,12 +59,16 @@ sides, first match in insertion order).
    `/vsicurl/` ↔ `https` aliases in both directions, case-variant schemes,
    unicode, empty/whitespace).
 3. **Live-side source-identity index.** The registration/restore/relocate
-   conflict scans consult a `QHash<QString, AssetId>` keyed by a faithful
-   serialization of the `SourceKey` fields of the record's descriptor. Those
-   scans were O(N) per insert — on their own enough to make a 100k population
-   pay ~5e9 key comparisons — and they are the reason the measured exponent was
-   2.25 rather than exactly 2. The index is live-side only (every consumer is an
-   owner-affine mutation path), so it needs no copy-on-write.
+   conflict scans consult a `QHash<QString, AssetId>` keyed by an *injective*
+   serialization of the `SourceKey` fields of the record's descriptor (each
+   field percent-escapes the framing separators, so serialized equality implies
+   `SourceKey` equality — an unescaped encoding would let
+   `{"k\x1e":"v"}` and `{"k":"v\x1e"}` collide and silently hijack an asset
+   identity on the dedup path). Those scans were O(N) per insert — on their own
+   enough to make a 100k population pay ~5e9 key comparisons — and they are the
+   reason the measured exponent was 2.25 rather than exactly 2. The index is
+   live-side only (every consumer is an owner-affine mutation path), so it needs
+   no copy-on-write.
 4. **Keyset pagination for the governance store.** Additive
    `CREATE INDEX IF NOT EXISTS (sort_key, pk)` indexes back every `ORDER BY`
    variant, each `ORDER BY` gains its primary key as a unique tiebreak (a whole
@@ -84,12 +88,19 @@ sides, first match in insertion order).
    stays `"1"`: indexes are additive and idempotent, so existing stores gain
    them on open and the forward-tolerance rule is untouched.
 5. **Structural, not temporal, gates.** `CatalogScaleCounters` records record
-   copies, shard seals, publications, filesystem canonicalizations, index
-   lookups and record visits. The scale oracles gate on those counts plus
-   equivalence against the pre-change algorithm; wall-clock exponents are
-   recorded as secondary evidence only. The observatory's existing gates
-   (registration exponent < 2.75, findByPath exponent < 1.5, governance worst
-   doubling < 2.2) are unchanged and now pass with room.
+   copies, shard seals, publications, filesystem canonicalizations (every
+   `canonicalFilePath` attempt, resolved or not), index lookups and record
+   visits. The scale oracles gate on those counts plus equivalence against the
+   pre-change algorithm, and cover the cross-shard cases a single-shard
+   fixture cannot reach (a duplicate identity spanning sealed shards, an erase
+   that shifts positions, the shard-walk cost ladder 1k/10k/100k, a 100k-row
+   governance walk, and SQLite's own query plan for the paged SELECT read back
+   through the C API). A potency case proves the equivalence oracle
+   discriminates: alias-only, last-match-wins and empty-index defects each
+   produce a disagreement the oracle reports. Wall-clock exponents are recorded
+   as secondary evidence only. The observatory's existing gates (registration
+   exponent < 2.75, findByPath exponent < 1.5, governance worst doubling < 2.2)
+   are unchanged and now pass with room.
 
 ## Consequences
 

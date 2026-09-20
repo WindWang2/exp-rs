@@ -59,10 +59,14 @@ class WorkspaceGovernanceModel : public QAbstractTableModel
     sicnu::workspace::WorkspaceService *m_service = nullptr;
     sicnu::workspace::WorkspaceQuery m_query;
     QVector<QVariantMap> m_rows;
+    /// Row total reported by the store for the FIRST page (real COUNT(*));
+    /// continuation pages do not rescan for a count. Retained as the walk's
+    /// provenance (the status line reports loaded rows, not this).
     qint64 m_total = 0;
     /// Keyset continuation for the next page (Data Scale 13.0). Empty when the
     /// walk is exhausted. Replaces offset arithmetic so a deep page is a seek
-    /// instead of a rescan of every row before it.
+    /// instead of a rescan of every row before it. The termination signal for
+    /// canFetchMore()/fetchMore().
     QString m_nextCursor;
 };
 

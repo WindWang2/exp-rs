@@ -11591,6 +11591,10 @@ target_link_libraries(test_data_scale PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_data
+  # The governance plan oracle asserts SQLite's own query plan for the paged
+  # SELECT, so the suite needs the SQLite C API directly (sicnu_data links it
+  # PRIVATE, which does not propagate to consumers).
+  SQLite::SQLite3
 )
 target_include_directories(test_data_scale PRIVATE
   ${CMAKE_SOURCE_DIR}/src
