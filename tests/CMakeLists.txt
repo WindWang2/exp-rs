@@ -11271,6 +11271,48 @@ if(Python_EXECUTABLE)
             "--script" "${CMAKE_SOURCE_DIR}/scripts/verify_bundle_manifest.py")
 endif()
 
+# lab platform 12.0: classroom batch driver conformance. Python-only on
+# purpose: scripts/run_classroom_batch.py is a standalone artifact, and the
+# stub grader covers every isolation path (timeout kill, signal crash,
+# corrupt artifact, usage errors, submission cap, concurrency cap,
+# Unicode/space paths, byte-identical reruns). When the real CLI target
+# exists one corrupt-artifact lane additionally runs through the genuine
+# grading seam (typed exit-3 row).
+if(Python_EXECUTABLE)
+  if(TARGET sicnu_geo_rs_cli)
+    add_test(NAME classroom_batch_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/classroom_batch/conformance.py"
+              "--real-cli" "$<TARGET_FILE:sicnu_geo_rs_cli>")
+  else()
+    add_test(NAME classroom_batch_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/classroom_batch/conformance.py")
+  endif()
+  set_tests_properties(classroom_batch_conformance PROPERTIES TIMEOUT 300)
+endif()
+
+# lab platform 12.0: launcher parity fixtures. Executes the POSIX launchers
+# and locks the cross-platform contract (argument spellings, exit-code
+# propagation, offline env wiring). The real foundry binary lane runs when
+# the target exists; the Windows .cmd twins hold the same contract by
+# construction and are reviewed statically (no Windows host here).
+if(Python_EXECUTABLE)
+  if(TARGET sicnu_generate_samples)
+    add_test(NAME launcher_parity_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/launcher_parity/conformance.py"
+              "--gen-bin" "$<TARGET_FILE:sicnu_generate_samples>"
+              "--repo" "${CMAKE_SOURCE_DIR}")
+  else()
+    add_test(NAME launcher_parity_conformance
+      COMMAND "${Python_EXECUTABLE}"
+              "${CMAKE_SOURCE_DIR}/tests/fixtures/launcher_parity/conformance.py"
+              "--repo" "${CMAKE_SOURCE_DIR}")
+  endif()
+  set_tests_properties(launcher_parity_conformance PROPERTIES TIMEOUT 600)
+endif()
+
 # Deployment 11.0 (F19): environment self-check suite. Qt-free (geospatial
 # doctor layer + offline gate) — the io-test link set, not the fat one.
 sicnu_add_io_test(test_env_doctor)

@@ -1209,6 +1209,7 @@ Outcome generate( const Options &options, GenerateResult *result )
     };
 
     std::vector<std::string> stale;
+    std::vector<std::string> obstructed;
     std::error_code iter_ec;
     fs::directory_iterator it( options.out_dir, iter_ec );
     if ( iter_ec )
@@ -1219,18 +1220,40 @@ Outcome generate( const Options &options, GenerateResult *result )
       if ( iter_ec )
         return fail( "io", "cannot list output directory " + options.out_dir +
                               ": " + iter_ec.message() );
-      std::error_code regular_ec;
-      if ( !it->is_regular_file( regular_ec ) )
-        continue;
       const std::string name = it->path().filename().string();
       if ( !contains( known, name ) || selected( name ) )
         continue;
+      // A foundry-owned name that is not a regular file cannot be pruned and
+      // would poison later --verify runs with an "unlisted data file" that no
+      // regeneration can clear. Fail closed instead of leaving residue.
+      std::error_code regular_ec;
+      if ( !it->is_regular_file( regular_ec ) )
+      {
+        obstructed.push_back( name );
+        continue;
+      }
       stale.push_back( it->path().string() );
+    }
+    if ( !obstructed.empty() )
+    {
+      std::string joined;
+      for ( const std::string &name : obstructed )
+      {
+        if ( !joined.empty() )
+          joined += ", ";
+        joined += name;
+      }
+      return fail( "io", "foundry-owned paths are not regular files and cannot "
+                              "be pruned: " + joined + " (remove them from " +
+                              options.out_dir + " manually)" );
     }
     for ( const std::string &path : stale )
     {
       std::error_code remove_ec;
       fs::remove( path, remove_ec );
+      if ( remove_ec )
+        return fail( "io", "cannot prune stale foundry-owned file " + path +
+                              ": " + remove_ec.message() );
     }
   }
 
@@ -1300,14 +1323,33 @@ Outcome generate( const Options &options, GenerateResult *result )
   std::string manifest_bytes = jsonDumps( root );
   manifest_bytes.push_back( '\n' );
   {
+    // Atomic publish: write a sibling temp file, flush it, then rename over
+    // the manifest. A crash mid-write can no longer leave a truncated
+    // manifest.json that --verify would misread as generated data; the worst
+    // case residue is a .tmp file, which is not a data extension and is
+    // replaced on the next generate. std::filesystem::rename replaces an
+    // existing destination on POSIX and MSVC alike.
     const fs::path manifest_path = fs::path( options.out_dir ) / kManifestName;
-    std::ofstream out( manifest_path, std::ios::binary | std::ios::trunc );
-    if ( !out )
-      return fail( "io", "cannot write " + manifest_path.string() );
-    out.write( manifest_bytes.data(), static_cast<std::streamsize>( manifest_bytes.size() ) );
-    out.flush();
-    if ( !out )
-      return fail( "io", "write failed on " + manifest_path.string() );
+    const fs::path tmp_path = manifest_path.string() + ".tmp";
+    {
+      std::ofstream out( tmp_path, std::ios::binary | std::ios::trunc );
+      if ( !out )
+        return fail( "io", "cannot write " + tmp_path.string() );
+      out.write( manifest_bytes.data(),
+                 static_cast<std::streamsize>( manifest_bytes.size() ) );
+      out.flush();
+      if ( !out )
+        return fail( "io", "write failed on " + tmp_path.string() );
+    }
+    std::error_code rename_ec;
+    fs::rename( tmp_path, manifest_path, rename_ec );
+    if ( rename_ec )
+    {
+      std::error_code cleanup_ec;
+      fs::remove( tmp_path, cleanup_ec );
+      return fail( "io", "cannot publish " + manifest_path.string() + ": " +
+                              rename_ec.message() );
+    }
   }
 
   if ( result )

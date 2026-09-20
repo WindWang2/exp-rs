@@ -1,5 +1,5 @@
 {
-  "spec_version": 1,
+  "spec_version": 2,
   "id": "lab06_georeferencing",
   "title": "Image Georeferencing",
   "title_zh": "影像配准（几何校正）",
