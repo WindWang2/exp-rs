@@ -564,6 +564,44 @@ TEST_CASE( "a tampered last_event_seq cannot mint duplicate event seqs",
     CHECK( seqs.size() == loaded.timeline.events().size() );
 }
 
+// ── the retryable classification is a shared rule (inline in the header) ─
+
+TEST_CASE( "the retryable status rule is stable across the state machine",
+           "[mission][persistence]" )
+{
+    // Locked because the rule is inline in the header (shared by the state
+    // machine, the shell predicates and the tools): a change here must be
+    // deliberate, not accidental.
+    CHECK( missionTaskStatusIsRetryable( MissionTaskStatus::Failed ) );
+    CHECK( missionTaskStatusIsRetryable( MissionTaskStatus::Canceled ) );
+    CHECK( missionTaskStatusIsRetryable( MissionTaskStatus::Stale ) );
+    CHECK_FALSE( missionTaskStatusIsRetryable( MissionTaskStatus::Pending ) );
+    CHECK_FALSE( missionTaskStatusIsRetryable( MissionTaskStatus::Running ) );
+    CHECK_FALSE( missionTaskStatusIsRetryable( MissionTaskStatus::Succeeded ) );
+
+    // …and the state machine agrees: retry() succeeds for exactly those.
+    for ( const MissionTaskStatus status : { MissionTaskStatus::Failed,
+                                             MissionTaskStatus::Canceled,
+                                             MissionTaskStatus::Stale } )
+    {
+        MissionTimeline tl;
+        tl.addTask( makeTask( QStringLiteral( "t" ), MissionStage::Analyze,
+                              QStringLiteral( "t" ), status ) );
+        CHECK( tl.retry( QStringLiteral( "t" ),
+                         QStringLiteral( "2026-09-21T07:00:00Z" ) ).applied );
+    }
+    for ( const MissionTaskStatus status : { MissionTaskStatus::Pending,
+                                             MissionTaskStatus::Running,
+                                             MissionTaskStatus::Succeeded } )
+    {
+        MissionTimeline tl;
+        tl.addTask( makeTask( QStringLiteral( "t" ), MissionStage::Analyze,
+                              QStringLiteral( "t" ), status ) );
+        CHECK_FALSE( tl.retry( QStringLiteral( "t" ),
+                               QStringLiteral( "2026-09-21T07:00:00Z" ) ).applied );
+    }
+}
+
 // ── O8: no fake Running after crash/reopen ───────────────────────────────
 
 TEST_CASE( "run authority reconciliation never reports a fake Running",

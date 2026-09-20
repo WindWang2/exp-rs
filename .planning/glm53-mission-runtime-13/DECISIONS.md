@@ -153,3 +153,35 @@ channel is written by `onProjectWrite` (the sidecar stays the authority
 between saves); the 12.0 legacy sidecar is never deleted; mission tool calls
 perform blocking file I/O on the calling thread; the persisted event log is
 unbounded (projections are bounded).
+
+## Second-pass review dispositions (independent re-review of the remediation)
+
+The re-review returned BLOCK with NEW-1..NEW-7; all fixed and re-verified.
+
+- **NEW-1 (P0)** `main.cpp` called `installMissionToolHost()` without the
+  declaring header. FIXED (include added) and the compile-substitute gate now
+  pins (TU, declaring header, used symbol) triples for every shell TU — the
+  re-injected missing include turns the gate red (verified).
+- **NEW-2 (P0)** `main_window_workbench.cpp` used `resolveMissionRunStatus`
+  without its header. FIXED; same gate covers it.
+- **NEW-3 (P2)** the reload-time `authorityCorrupt` refusal in `onProjectWrite`
+  was unreachable dead code, and a failed reload fell through to publishing the
+  stale cache. FIXED: a failed reload (or a poisoned load) refuses the mission
+  block with an actionable message; the project itself still saves. The gate
+  now pins the reload-before-save order and the read-path propagation.
+- **NEW-4 (P3)** `refreshMissionRuntime()` never cleared `authorityCorrupt`, so
+  a repaired sidecar stayed wedged until reopen. FIXED: a successful load
+  clears the flag.
+- **NEW-5 (P3)** the CMake registration gate was satisfiable by a comment that
+  says a file is NOT compiled. FIXED: the checks now match
+  `workbench/<source>` / `spatial_tools/<source>` on the CMake line, and also
+  assert the agent-owned sources are NOT compiled by the executable (the
+  Windows duplicate-symbol hazard) and that the exe links `sicnu_agent`.
+- **NEW-6 (P1)** `selection_context.cpp` called the out-of-line
+  `missionTaskStatusIsRetryable`, which 17 in-repo test targets do not link.
+  FIXED by making the predicate `inline` in the header (with the exact original
+  semantics — the re-review caught that the first inline attempt dropped
+  `Stale`, and a new gate locks the rule against the state machine). This also
+  keeps `sicnu_geo_rs` free of a duplicate mission-domain TU.
+- **NEW-7 (P3)** a poisoned-authority refusal was reported as a retryable
+  `commit_failed` io error. FIXED: it is `authority_poisoned`, non-retryable.

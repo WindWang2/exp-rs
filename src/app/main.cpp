@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 
+#include "workbench/mission_tool_host_install.h"
 #include "data/data_manager.h"
 #include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"

@@ -196,21 +196,48 @@ TEST_CASE( "the mission family is wired into every surface", "[mission][parity]"
                          QStringLiteral( "\"meta,spatial,data,temporal,cartography,symbology,"
                                          "workflow,workspace,layout,harness,mission\"" ) ) );
 
-    // 6. The new sources are registered in the real build.
+    // 6. The new sources are registered in the target that compiles them —
+    // and NOT in the other one (duplicate definitions across the executable
+    // and the DLL are a Windows link hazard). The checks name the source on a
+    // line that also names the workbench directory, so a comment that merely
+    // mentions the file cannot satisfy them.
+    const auto compiledInto = []( const QString &cmake, const QString &source ) {
+        const QRegularExpression re(
+            QStringLiteral( "workbench/%1|spatial_tools/%1" ).arg( source ) );
+        return re.match( readRepoFile( cmake ).simplified() ).hasMatch();
+    };
+    // sicnu_agent owns the QGIS-free value model + tools.
+    for ( const QString &source : { QStringLiteral( "mission_tools.cpp" ),
+                                    QStringLiteral( "spatial_tool_registry.cpp" ),
+                                    QStringLiteral( "mission_stage.cpp" ),
+                                    QStringLiteral( "mission_projection.cpp" ),
+                                    QStringLiteral( "mission_run_authority.cpp" ) } )
+    {
+        INFO( source.toStdString() + " must be compiled by sicnu_agent" );
+        CHECK( compiledInto( QStringLiteral( "src/agent/CMakeLists.txt" ), source ) );
+    }
+    // The executable owns the persistence chain + shell surface only.
+    for ( const QString &source : { QStringLiteral( "mission_timeline_bridge.cpp" ),
+                                    QStringLiteral( "mission_runtime_store.cpp" ),
+                                    QStringLiteral( "mission_tool_authority.cpp" ),
+                                    QStringLiteral( "mission_timeline_panel.cpp" ),
+                                    QStringLiteral( "mission_run_resolver.cpp" ) } )
+    {
+        INFO( source.toStdString() + " must be compiled by sicnu_geo_rs" );
+        CHECK( compiledInto( QStringLiteral( "src/app/CMakeLists.txt" ), source ) );
+    }
+    // …and the exe must NOT compile the agent-owned ones (no duplicates).
+    for ( const QString &source : { QStringLiteral( "mission_stage.cpp" ),
+                                    QStringLiteral( "mission_projection.cpp" ),
+                                    QStringLiteral( "mission_run_authority.cpp" ),
+                                    QStringLiteral( "mission_tools.cpp" ) } )
+    {
+        INFO( source.toStdString() + " must NOT be compiled twice (exe + DLL)" );
+        CHECK_FALSE( compiledInto( QStringLiteral( "src/app/CMakeLists.txt" ), source ) );
+    }
+    // The executable links the agent library that carries them.
     CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
-                         QStringLiteral( "mission_timeline_bridge.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
-                         QStringLiteral( "mission_runtime_store.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
-                         QStringLiteral( "mission_run_authority.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
-                         QStringLiteral( "mission_tool_authority.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/app/CMakeLists.txt" ),
-                         QStringLiteral( "mission_timeline_panel.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/agent/CMakeLists.txt" ),
-                         QStringLiteral( "mission_tools.cpp" ) ) );
-    CHECK( fileContains( QStringLiteral( "src/agent/CMakeLists.txt" ),
-                         QStringLiteral( "spatial_tool_registry.cpp" ) ) );
+                         QStringLiteral( "sicnu_agent" ) ) );
 
     // 7. The gate targets are registered for the real build.
     CHECK( fileContains( QStringLiteral( "tests/CMakeLists.txt" ),
@@ -282,6 +309,59 @@ TEST_CASE( "shell hunks reference only declared ContextRules predicates", "[miss
         INFO( "main_window_workbench.cpp must define " + slot.toStdString() );
         CHECK( shell.contains( slot ) );
     }
+
+    // Every mission API a shell TU uses must have its declaring header in
+    // that TU's include list — the exact failure class of a missing include
+    // (the compiler is not available for these files here).
+    const auto usesAndIncludes = []( const QString &relative, const QString &header,
+                                     const QString &symbol ) {
+        const QString text = readRepoFile( relative );
+        return text.contains( symbol ) && text.contains( QStringLiteral( "#include \"%1\"" ).arg( header ) );
+    };
+    // main.cpp installs the mission tool host (headless --mcp branch).
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main.cpp" ),
+                            QStringLiteral( "workbench/mission_tool_host_install.h" ),
+                            QStringLiteral( "installMissionToolHost" ) ) );
+    // main_window_workbench.cpp resolves run authority and owns the runtime.
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_workbench.cpp" ),
+                            QStringLiteral( "workbench/mission_run_resolver.h" ),
+                            QStringLiteral( "resolveMissionRunStatus" ) ) );
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_workbench.cpp" ),
+                            QStringLiteral( "workbench/mission_runtime_store.h" ),
+                            QStringLiteral( "MissionRuntimeState" ) ) );
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_workbench.cpp" ),
+                            QStringLiteral( "workbench/mission_timeline_panel.h" ),
+                            QStringLiteral( "MissionTimelinePanel" ) ) );
+    // main_window_connections.cpp loads/saves the runtime and reconciles.
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_connections.cpp" ),
+                            QStringLiteral( "workbench/mission_runtime_store.h" ),
+                            QStringLiteral( "loadMissionRuntime" ) ) );
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_connections.cpp" ),
+                            QStringLiteral( "workbench/mission_run_resolver.h" ),
+                            QStringLiteral( "resolveMissionRunStatus" ) ) );
+    CHECK( usesAndIncludes( QStringLiteral( "src/app/main_window_connections.cpp" ),
+                            QStringLiteral( "workbench/mission_run_authority.h" ),
+                            QStringLiteral( "reconcileRunAuthority" ) ) );
+
+    // The save path must reload the authority before persisting (an agent
+    // commit between saves must never be reverted by a stale cache), and the
+    // open path must propagate a failed load (the poison guard). These are
+    // structural pins on logic the harness cannot execute here.
+    const QString connections =
+        readRepoFile( QStringLiteral( "src/app/main_window_connections.cpp" ) );
+    const int onWrite = connections.indexOf(
+        QStringLiteral( "void QgisDesktopWindow::onProjectWrite" ) );
+    REQUIRE( onWrite > 0 );
+    const QString writeBody = connections.mid( onWrite );
+    CHECK( writeBody.indexOf( QStringLiteral( "loadMissionRuntime" ) )
+           < writeBody.indexOf( QStringLiteral( "saveMissionRuntime" ) ) );
+    CHECK( writeBody.contains( QStringLiteral( "authorityCorrupt" ) ) );
+    const int onRead = connections.indexOf(
+        QStringLiteral( "void QgisDesktopWindow::onProjectRead" ) );
+    REQUIRE( onRead > 0 );
+    const QString readBody = connections.mid( onRead, onWrite - onRead );
+    CHECK( readBody.contains( QStringLiteral( "m_missionRuntime = runtime" ) ) );
+    CHECK( readBody.contains( QStringLiteral( "reconcileRunAuthority" ) ) );
 }
 
 // ── stub parity: the harness stubs match the real QGIS-bound sources ─────

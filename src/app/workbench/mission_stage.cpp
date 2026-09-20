@@ -182,21 +182,6 @@ bool missionTaskStatusIsSettled( MissionTaskStatus status )
     return false;
 }
 
-bool missionTaskStatusIsRetryable( MissionTaskStatus status )
-{
-    switch ( status )
-    {
-        case MissionTaskStatus::Failed:
-        case MissionTaskStatus::Canceled:
-        case MissionTaskStatus::Stale:
-            return true;
-        case MissionTaskStatus::Pending:
-        case MissionTaskStatus::Running:
-        case MissionTaskStatus::Succeeded:
-            return false;
-    }
-    return false;
-}
 
 bool missionTransitionAllowed( MissionTaskStatus from, MissionTaskStatus to )
 {

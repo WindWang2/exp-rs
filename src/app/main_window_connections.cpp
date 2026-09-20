@@ -548,39 +548,58 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
             // project saves. Reload the timeline here so a save can never
             // revert an agent-committed transition with this window's stale
             // cache. The live context (studio publishes) stays owned here.
+            // A successful load can never be poisoned (the store refuses on
+            // exactly the paths that set the flag), so a FAILED reload is the
+            // poison case: refuse the mission block instead of publishing the
+            // window's cache over an artifact that no longer decodes.
             sicnu::app::MissionRuntimeState disk;
             QString reloadErr;
-            if ( sicnu::app::loadMissionRuntime( projectPath, doc, disk, &reloadErr ) )
+            const bool reloaded =
+                sicnu::app::loadMissionRuntime( projectPath, doc, disk, &reloadErr );
+            if ( !reloaded || disk.authorityCorrupt )
             {
-                if ( disk.authorityCorrupt )
-                {
-                    QMessageBox::warning(
-                        this, tr( "Mission Context" ),
-                        tr( "Project saved, but the mission runtime was NOT persisted: "
-                           "its authority document could not be read:\n%1" )
-                            .arg( reloadErr ) );
-                }
-                else
-                {
-                    if ( !disk.timeline.missionId().isEmpty()
-                         && !m_mission.missionId.isEmpty()
-                         && disk.timeline.missionId() != m_mission.missionId )
-                    {
-                        // Different mission on disk (project switched under us):
-                        // keep this window's live mission, do not mix them.
-                        qWarning( "mission save: disk mission %s != live mission %s",
-                                  qPrintable( disk.timeline.missionId() ),
-                                  qPrintable( m_mission.missionId ) );
-                    }
-                    else
-                    {
-                        m_missionRuntime.timeline = disk.timeline;
-                    }
-                }
+                QMessageBox::warning(
+                    this, tr( "Mission Context" ),
+                    tr( "Project saved, but the mission runtime was NOT persisted: "
+                       "its authority document could not be read (corrupt or "
+                       "unsupported version). Fix or remove the mission sidecar "
+                       "next to the project file, then save again." ) );
+                qWarning( "mission save refused (authority unreadable): %s",
+                          qPrintable( reloadErr ) );
             }
             else
             {
-                qWarning( "mission save reload: %s", qPrintable( reloadErr ) );
+                if ( !disk.timeline.missionId().isEmpty() && !m_mission.missionId.isEmpty()
+                     && disk.timeline.missionId() != m_mission.missionId )
+                {
+                    // Different mission on disk (project switched under us):
+                    // keep this window's live mission, do not mix them.
+                    qWarning( "mission save: disk mission %s != live mission %s",
+                              qPrintable( disk.timeline.missionId() ),
+                              qPrintable( m_mission.missionId ) );
+                }
+                else
+                {
+                    m_missionRuntime.timeline = disk.timeline;
+                }
+
+                if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
+                    m_mission.projectRef = projectPath;
+                sicnu::app::ensureMissionId( m_mission );
+                m_missionRuntime.context = m_mission;
+                QString missionErr;
+                if ( !sicnu::app::saveMissionRuntime( projectPath, doc, m_missionRuntime,
+                                                      &missionErr ) )
+                {
+                    QMessageBox::warning(
+                        this, tr( "Mission Context" ),
+                        tr( "Project saved, but mission runtime persistence failed:\n%1" )
+                            .arg( missionErr ) );
+                }
+                else
+                {
+                    m_mission = m_missionRuntime.context;
+                }
             }
 
             if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )

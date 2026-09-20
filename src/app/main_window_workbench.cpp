@@ -30,6 +30,7 @@
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
 #include "workbench/mission_runtime_store.h"
+#include "workbench/mission_run_resolver.h"
 #include "workbench/mission_timeline_panel.h"
 #include "workbench/mission_tool_host_install.h"
 #include "agent/spatial_tools/mission_tools.h"
@@ -1023,6 +1024,9 @@ void QgisDesktopWindow::refreshMissionRuntime()
     // write into it) — a refresh takes the TIMELINE from the authority and
     // leaves that document alone, unless the disk document belongs to a
     // different mission (project switched under us) or we have none yet.
+    // A successful load clears the poison: the authority decodes again, so a
+    // repaired sidecar must un-block the mission save without a reopen.
+    m_missionRuntime.authorityCorrupt = false;
     const sicnu::app::MissionTimeline previous = m_missionRuntime.timeline;
     const bool adoptContext = m_mission.missionId.isEmpty()
                               || ( !state.context.missionId.isEmpty()

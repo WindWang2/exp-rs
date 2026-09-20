@@ -31,7 +31,11 @@ bool MissionStoreAuthority::commit( const QString &projectPath, QDomDocument &do
     QString err;
     if ( !saveMissionRuntime( projectPath, document, state, &err ) )
     {
-        errorCode = QStringLiteral( "commit_failed" );
+        // A poisoned-authority refusal is fail-closed, not a retryable io
+        // error: retrying cannot repair a corrupt artifact.
+        const bool poisoned = err == QLatin1String( "poisoned_authority" );
+        errorCode = poisoned ? QStringLiteral( "authority_poisoned" )
+                             : QStringLiteral( "commit_failed" );
         errorMessage = err;
         return false;
     }

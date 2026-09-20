@@ -88,8 +88,15 @@ QString missionTaskStatusLabel( MissionTaskStatus status );
 
 /// True when the task is not in flight (UI may offer retry/resume).
 bool missionTaskStatusIsSettled( MissionTaskStatus status );
-/// True when the task can be handed to a runner again.
-bool missionTaskStatusIsRetryable( MissionTaskStatus status );
+/// True when the task can be handed to a runner again. Inline: pure
+/// status-classification rule shared by the state machine, the shell's
+/// command predicates and the mission tools — no translation unit should
+/// have to link the state machine just to classify a status.
+inline bool missionTaskStatusIsRetryable( MissionTaskStatus status )
+{
+    return status == MissionTaskStatus::Failed || status == MissionTaskStatus::Canceled
+           || status == MissionTaskStatus::Stale;
+}
 
 // ---------------------------------------------------------------------------
 // Task / event records
