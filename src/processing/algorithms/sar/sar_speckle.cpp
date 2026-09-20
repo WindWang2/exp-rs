@@ -354,8 +354,14 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
           return false;
       }
     }
-    writeSarOutputMetadata( dst, QString(), QStringLiteral( "linear_power" ), polarizations,
-                            sensor, 0.0, 0.0 );
+    // Speckle filtering preserves the radiometric quantity: propagate the
+    // declared calibration state so the output still re-ingests as the same
+    // product (and the re-calibration guard keeps protecting it).
+    const QString declaredCalibration = readCalibration( src );
+    writeSarOutputMetadata( dst, declaredCalibration, QStringLiteral( "linear_power" ),
+                            polarizations, sensor, 0.0, 0.0 );
+    if ( !declaredCalibration.isEmpty() )
+      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredCalibration );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_SPECKLE" ), QStringLiteral( "multitemporal" ) );
     return true;
   }
@@ -421,8 +427,11 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
   } );
   if ( ok )
   {
-    writeSarOutputMetadata( dst, QString(), QStringLiteral( "linear_power" ), polarizations,
-                            sensor, 0.0, 0.0 );
+    const QString declaredCalibration = readCalibration( src );
+    writeSarOutputMetadata( dst, declaredCalibration, QStringLiteral( "linear_power" ),
+                            polarizations, sensor, 0.0, 0.0 );
+    if ( !declaredCalibration.isEmpty() )
+      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredCalibration );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_SPECKLE" ),
                          speckleMethodToString( params.method ) );
   }
