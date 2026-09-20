@@ -240,6 +240,57 @@ bool PluginManifestValidator::validate( const PluginManifest &manifest,
                   + "; rebuild the plugin against this SDK" );
     }
 
+    // WP1 (plugin-platform 12.0): optional declared host-API range. Checked
+    // after the plain gate (both must hold). Each bound is validated on its
+    // own first (a malformed bound is a field error attributed to THAT field,
+    // never a guess), then the range is applied to the host version.
+    PluginApiVersion declaredMin{};
+    PluginApiVersion declaredMax{};
+    // "Parsed" means: either not declared, or declared AND well-formed. A
+    // declared-but-malformed bound fails its own field check and takes the
+    // range gate with it (fail closed).
+    bool minParsed = manifest.minHostApi.empty();
+    bool maxParsed = manifest.maxHostApi.empty();
+    if ( !manifest.minHostApi.empty() )
+    {
+        if ( parseApiVersion( manifest.minHostApi, declaredMin ) )
+            minParsed = true;
+        else
+            fail( PluginDiagnosticCode::ManifestInvalidField, "min_host_api",
+                  "min_host_api '" + manifest.minHostApi + "' must be MAJOR.MINOR" );
+    }
+    if ( !manifest.maxHostApi.empty() )
+    {
+        if ( parseApiVersion( manifest.maxHostApi, declaredMax ) )
+            maxParsed = true;
+        else
+            fail( PluginDiagnosticCode::ManifestInvalidField, "max_host_api",
+                  "max_host_api '" + manifest.maxHostApi + "' must be MAJOR.MINOR" );
+    }
+    if ( minParsed && maxParsed && !manifest.minHostApi.empty()
+         && !manifest.maxHostApi.empty()
+         && ( declaredMin.major > declaredMax.major
+              || ( declaredMin.major == declaredMax.major
+                   && declaredMin.minor > declaredMax.minor ) ) )
+    {
+        fail( PluginDiagnosticCode::ManifestInvalidField, "min_host_api",
+              "declared host API range [" + manifest.minHostApi + ", " + manifest.maxHostApi
+                  + "] is empty (min above max); no host can satisfy it" );
+    }
+    else if ( minParsed && maxParsed )
+    {
+        std::string rangeError;
+        std::string offendingField;
+        if ( !isHostApiWithinRange( request.hostApi, manifest.minHostApi, manifest.maxHostApi,
+                                    rangeError, offendingField ) )
+        {
+            const std::string field = offendingField.empty() ? "min_host_api" : offendingField;
+            fail( PluginDiagnosticCode::ApiVersionMismatch, field,
+                  "declared host API range [" + manifest.minHostApi + ", "
+                      + manifest.maxHostApi + "] rejects this host: " + rangeError );
+        }
+    }
+
     if ( !manifest.platforms.empty() )
     {
 #if defined( _WIN32 )

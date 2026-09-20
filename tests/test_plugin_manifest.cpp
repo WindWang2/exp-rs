@@ -492,6 +492,238 @@ TEST_CASE( "api compatibility rule", "[plugin][version]" )
     REQUIRE_FALSE( isPluginApiCompatible( { 3, 0 }, { 4, 0 } ) );
 }
 
+TEST_CASE( "host API range negotiation rejects before any code runs", "[plugin][version][p12]" )
+{
+    // Bound parsing: exactly "MAJOR.MINOR" numeric; everything else fails.
+    PluginApiVersion parsed{};
+    REQUIRE( parseApiVersion( "3.0", parsed ) );
+    REQUIRE( parsed.major == 3 );
+    REQUIRE( parsed.minor == 0 );
+    REQUIRE( parseApiVersion( "10.42", parsed ) );
+    REQUIRE( parsed.major == 10 );
+    REQUIRE( parsed.minor == 42 );
+    REQUIRE_FALSE( parseApiVersion( "", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "3", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "3.0.1", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "3.", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( ".0", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "3.x", parsed ) );
+
+    std::string error;
+    std::string offendingField;
+    // Inside the declared range (both bounds inclusive).
+    REQUIRE( isHostApiWithinRange( { 3, 0 }, "3.0", "3.2", error, offendingField ) );
+    REQUIRE( isHostApiWithinRange( { 3, 1 }, "3.0", "3.2", error, offendingField ) );
+    REQUIRE( isHostApiWithinRange( { 3, 2 }, "3.0", "3.2", error, offendingField ) );
+    REQUIRE( isHostApiWithinRange( { 3, 1 }, "3.0", "", error, offendingField ) );
+    REQUIRE( isHostApiWithinRange( { 3, 1 }, "", "3.2", error, offendingField ) );
+    REQUIRE( isHostApiWithinRange( { 3, 1 }, "", "", error, offendingField ) );
+
+    // Below the minimum / above the maximum: rejected, with the offending
+    // bound surfaced as `expected` so a diagnostic can name the field.
+    REQUIRE_FALSE( isHostApiWithinRange( { 2, 9 }, "3.0", "", error, offendingField ) );
+    REQUIRE( offendingField == "min_host_api" );
+    REQUIRE( error.find( "below" ) != std::string::npos );
+    REQUIRE_FALSE( isHostApiWithinRange( { 3, 3 }, "", "3.2", error, offendingField ) );
+    REQUIRE( offendingField == "max_host_api" );
+    REQUIRE( error.find( "above" ) != std::string::npos );
+    REQUIRE_FALSE( isHostApiWithinRange( { 4, 0 }, "3.0", "3.2", error, offendingField ) );
+
+    // A malformed bound fails closed (never an exception).
+    REQUIRE_FALSE( isHostApiWithinRange( { 3, 0 }, "abc", "", error, offendingField ) );
+    REQUIRE( error.find( "min_host_api" ) != std::string::npos );
+    REQUIRE_FALSE( isHostApiWithinRange( { 3, 0 }, "", "3.0.0", error, offendingField ) );
+    REQUIRE( error.find( "max_host_api" ) != std::string::npos );
+
+    // Validator end-to-end: the range is enforced through the typed
+    // compatibility gate (E2001), before any entrypoint is touched.
+    PluginManifest manifest = parseOk( replaceApi( R"({
+        "manifest_version": 1,
+        "id": "org.test.range",
+        "name": "Range",
+        "version": "1.0.0",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "min_host_api": "3.0",
+        "max_host_api": "3.0",
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })" ) );
+    REQUIRE( manifest.minHostApi == "3.0" );
+    REQUIRE( manifest.maxHostApi == "3.0" );
+
+    PluginDiagnosticLog log;
+    PluginManifest current = manifest;
+    REQUIRE( PluginManifestValidator::validate( current, validRequest(), log ) );
+    REQUIRE_FALSE( log.hasErrorsFor( "org.test.range" ) );
+
+    // Round-trip: the bounds survive toJson()/fromJson() (load params and the
+    // discovery index both travel through them).
+    const Json::Value json = current.toJson();
+    REQUIRE( json.isMember( "min_host_api" ) );
+    PluginManifest reparsed;
+    PluginDiagnostic parseError;
+    REQUIRE( PluginManifest::fromJson( json, reparsed, parseError ) );
+    REQUIRE( reparsed.minHostApi == "3.0" );
+    REQUIRE( reparsed.maxHostApi == "3.0" );
+
+    // Host inside the declared range passes; a host outside it is refused
+    // typed before execution (old plugin refuses, never silently runs).
+    PluginValidationRequest outOfRange = validRequest();
+    outOfRange.hostApi = { 3, 5 };
+    PluginDiagnosticLog rejectedLog;
+    PluginManifest rejected = manifest;
+    REQUIRE_FALSE( PluginManifestValidator::validate( rejected, outOfRange, rejectedLog ) );
+    bool sawRangeError = false;
+    for ( const PluginDiagnostic &item : rejectedLog.items() )
+    {
+        if ( item.pluginId == "org.test.range"
+             && item.code == PluginDiagnosticCode::ApiVersionMismatch )
+            sawRangeError = true;
+    }
+    REQUIRE( sawRangeError );
+
+    // The declared minimum itself is INSIDE the range (inclusive bounds):
+    // host 3.0 against [3.0, 3.0] validates.
+    PluginValidationRequest atMinimum = validRequest();
+    atMinimum.hostApi = { 3, 0 };
+    PluginDiagnosticLog atMinimumLog;
+    PluginManifest atMin = manifest;
+    REQUIRE( PluginManifestValidator::validate( atMin, atMinimum, atMinimumLog ) );
+    REQUIRE_FALSE( atMinimumLog.hasErrorsFor( "org.test.range" ) );
+
+    // A host OLDER than the declared minimum (same API major, so the plain
+    // gate passes) is refused by the RANGE gate, and the diagnostic names the
+    // min bound as the offending field.
+    PluginManifest minOnly = parseOk( replaceApi( R"({
+        "manifest_version": 1,
+        "id": "org.test.range",
+        "name": "Range",
+        "version": "1.0.0",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "min_host_api": ")" + std::to_string( pluginApiVersion().major ) + "."
+               + std::to_string( pluginApiVersion().minor + 5 ) + R"(",
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })" ) );
+    PluginValidationRequest tooOld = validRequest();
+    tooOld.hostApi = { pluginApiVersion().major, pluginApiVersion().minor };
+    PluginDiagnosticLog tooOldLog;
+    REQUIRE_FALSE( PluginManifestValidator::validate( minOnly, tooOld, tooOldLog ) );
+    bool sawMinField = false;
+    for ( const PluginDiagnostic &item : tooOldLog.items() )
+    {
+        if ( item.pluginId == "org.test.range"
+             && item.code == PluginDiagnosticCode::ApiVersionMismatch
+             && item.field == "min_host_api" )
+            sawMinField = true;
+    }
+    REQUIRE( sawMinField );
+
+    // A malformed max bound is attributed to max_host_api (not guessed as
+    // the min field), and an inverted range (min above max) fails typed.
+    PluginManifest badMax = parseOk( replaceApi( R"({
+        "manifest_version": 1,
+        "id": "org.test.badmax",
+        "name": "BadMax",
+        "version": "1.0.0",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "max_host_api": "3.x",
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })" ) );
+    PluginDiagnosticLog badMaxLog;
+    REQUIRE_FALSE( PluginManifestValidator::validate( badMax, validRequest(), badMaxLog ) );
+    bool sawMaxField = false;
+    for ( const PluginDiagnostic &item : badMaxLog.items() )
+    {
+        if ( item.pluginId == "org.test.badmax"
+             && item.code == PluginDiagnosticCode::ManifestInvalidField
+             && item.field == "max_host_api" )
+            sawMaxField = true;
+    }
+    REQUIRE( sawMaxField );
+
+    PluginManifest inverted = parseOk( replaceApi( R"({
+        "manifest_version": 1,
+        "id": "org.test.inverted",
+        "name": "Inverted",
+        "version": "1.0.0",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "min_host_api": "4.0",
+        "max_host_api": "3.0",
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })" ) );
+    PluginDiagnosticLog invertedLog;
+    REQUIRE_FALSE(
+        PluginManifestValidator::validate( inverted, validRequest(), invertedLog ) );
+    bool sawInverted = false;
+    for ( const PluginDiagnostic &item : invertedLog.items() )
+    {
+        if ( item.pluginId == "org.test.inverted"
+             && item.message.find( "empty (min above max)" ) != std::string::npos )
+            sawInverted = true;
+    }
+    REQUIRE( sawInverted );
+
+    // Signed / spaced bounds are rejected (digit-only parsing).
+    REQUIRE_FALSE( parseApiVersion( "-1.0", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "+3.0", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( " 3.0", parsed ) );
+    REQUIRE_FALSE( parseApiVersion( "3.0 ", parsed ) );
+}
+
+TEST_CASE( "manifests without the optional range keep the old semantics",
+           "[plugin][version][p12]" )
+{
+    // A manifest that declares no min/max keeps the plain rule: no new
+    // diagnostics, and the round-trip carries no empty fields either.
+    PluginManifest manifest = parseOk( replaceApi( R"({
+        "manifest_version": 1,
+        "id": "org.test.norange",
+        "name": "NoRange",
+        "version": "1.0.0",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })" ) );
+    REQUIRE( manifest.minHostApi.empty() );
+    REQUIRE( manifest.maxHostApi.empty() );
+    PluginDiagnosticLog log;
+    REQUIRE( PluginManifestValidator::validate( manifest, validRequest(), log ) );
+    REQUIRE_FALSE( log.hasErrorsFor( "org.test.norange" ) );
+    REQUIRE_FALSE( manifest.toJson().isMember( "min_host_api" ) );
+    REQUIRE_FALSE( manifest.toJson().isMember( "max_host_api" ) );
+}
+
+TEST_CASE( "wrong-typed host API bounds fail typed", "[plugin][version][p12]" )
+{
+    // Issue #1038 pattern: a wrong-typed declaration must be a typed field
+    // error, never an exception out of discovery.
+    Json::Value root;
+    Json::Reader reader;
+    REQUIRE( reader.parse( R"({
+        "manifest_version": 1,
+        "id": "org.test.badrange",
+        "name": "BadRange",
+        "version": "1.0.0",
+        "api_version": "3.0",
+        "min_host_api": 3,
+        "entrypoint_kind": "manifest",
+        "capabilities": ["operator"]
+    })", root, false ) );
+    PluginManifest manifest;
+    PluginDiagnostic error;
+    REQUIRE_FALSE( PluginManifest::fromJson( root, manifest, error ) );
+    REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+    REQUIRE( error.field == "min_host_api" );
+}
+
 TEST_CASE( "entrypoint containment (issue #756)", "[plugin][validator][containment]" )
 {
     namespace fs = std::filesystem;
