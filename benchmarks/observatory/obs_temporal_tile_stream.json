@@ -11,10 +11,10 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
@@ -23,21 +23,21 @@
     "scenes" : 3,
     "tiles" : 9
   },
-  "generated_at" : "2026-09-20T04:48:06Z",
+  "generated_at" : "2026-09-20T22:28:44Z",
   "measurement" : 
   {
-    "cpu_ms" : 93.75,
+    "cpu_ms" : 118.76700000000005,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 71,
-    "peak_rss_mb" : 10,
+    "peak_rss_baseline_mb" : 242,
+    "peak_rss_mb" : 7,
     "peak_rss_unavailable_reason" : null,
-    "read_bytes" : 8072813,
-    "read_ops" : 64,
-    "wall_ms" : 123.6084,
+    "read_bytes" : 0,
+    "read_ops" : 88,
+    "wall_ms" : 117.491449,
     "write_bytes" : 0,
     "write_ops" : 0
   },

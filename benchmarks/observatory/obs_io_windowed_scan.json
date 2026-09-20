@@ -11,10 +11,10 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
@@ -22,21 +22,21 @@
     "tile" : 256,
     "windows" : 1
   },
-  "generated_at" : "2026-09-20T04:46:34Z",
+  "generated_at" : "2026-09-20T22:28:36Z",
   "measurement" : 
   {
-    "cpu_ms" : 0.0,
+    "cpu_ms" : 1.695999999999998,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 35,
+    "peak_rss_baseline_mb" : 49,
     "peak_rss_mb" : null,
     "peak_rss_unavailable_reason" : "watermark never rose above the 1 MiB / 2 ms sample resolution; see docs/perf-observatory.md",
-    "read_bytes" : 270062,
-    "read_ops" : 64,
-    "wall_ms" : 17.963699999999999,
+    "read_bytes" : 0,
+    "read_ops" : 39,
+    "wall_ms" : 2.3528009999999999,
     "write_bytes" : 0,
     "write_ops" : 0
   },

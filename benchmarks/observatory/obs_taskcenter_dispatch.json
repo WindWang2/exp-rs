@@ -11,33 +11,33 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
     "completed" : 64,
-    "queue_wait_ms_max" : 1.0,
-    "queue_wait_ms_mean" : 0.0625,
-    "queue_wait_ms_total" : 4.0
+    "queue_wait_ms_max" : 2.0,
+    "queue_wait_ms_mean" : 0.078125,
+    "queue_wait_ms_total" : 5.0
   },
-  "generated_at" : "2026-09-20T04:48:04Z",
+  "generated_at" : "2026-09-20T22:28:42Z",
   "measurement" : 
   {
-    "cpu_ms" : 546.875,
+    "cpu_ms" : 197.34899999999999,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 52,
-    "peak_rss_mb" : 10,
+    "peak_rss_baseline_mb" : 213,
+    "peak_rss_mb" : 7,
     "peak_rss_unavailable_reason" : null,
     "read_bytes" : 0,
-    "read_ops" : 0,
-    "wall_ms" : 299.51670000000001,
+    "read_ops" : 438,
+    "wall_ms" : 109.342032,
     "write_bytes" : 0,
     "write_ops" : 0
   },
@@ -50,8 +50,8 @@
   "schema" : "sicnu-perf-observatory/1",
   "structural" : 
   {
-    "queue_wait_ms_max" : 1.0,
-    "queue_wait_ms_mean" : 0.0625,
+    "queue_wait_ms_max" : 2.0,
+    "queue_wait_ms_mean" : 0.078125,
     "tasks_completed" : 64,
     "tasks_submitted" : 64
   },

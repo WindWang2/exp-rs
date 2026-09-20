@@ -11,32 +11,32 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
-    "full_read_peak_rss_delta_mb" : 0,
+    "full_read_peak_rss_delta_mb" : 2,
     "pixels" : 262144,
     "windowed_scan_peak_rss_delta_mb" : 0
   },
-  "generated_at" : "2026-09-20T04:46:35Z",
+  "generated_at" : "2026-09-20T22:28:37Z",
   "measurement" : 
   {
-    "cpu_ms" : 0.0,
+    "cpu_ms" : 5.0099999999999909,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 35,
-    "peak_rss_mb" : null,
-    "peak_rss_unavailable_reason" : "watermark never rose above the 1 MiB / 2 ms sample resolution; see docs/perf-observatory.md",
-    "read_bytes" : 1057262,
-    "read_ops" : 160,
-    "wall_ms" : 11.9374,
+    "peak_rss_baseline_mb" : 49,
+    "peak_rss_mb" : 2,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 137,
+    "wall_ms" : 6.6981919999999997,
     "write_bytes" : 0,
     "write_ops" : 0
   },

@@ -1,16 +1,16 @@
 {
   "complexity" : 
   {
-    "exponent" : 0.19182904226264363,
+    "exponent" : 0.86189111370050231,
     "model" : "linear",
     "points" : 
     [
       {
-        "ms" : 13.528499999999999,
+        "ms" : 2.4393509999999998,
         "n" : 65536
       },
       {
-        "ms" : 15.452400000000001,
+        "ms" : 4.4333229999999997,
         "n" : 262144
       }
     ]
@@ -27,30 +27,30 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
     "paired_with" : "obs_io_windowed_scan_2n"
   },
-  "generated_at" : "2026-09-20T04:46:35Z",
+  "generated_at" : "2026-09-20T22:28:36Z",
   "measurement" : 
   {
-    "cpu_ms" : 0.0,
+    "cpu_ms" : 1.6979999999999933,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 35,
+    "peak_rss_baseline_mb" : 49,
     "peak_rss_mb" : null,
     "peak_rss_unavailable_reason" : "watermark never rose above the 1 MiB / 2 ms sample resolution; see docs/perf-observatory.md",
-    "read_bytes" : 270062,
-    "read_ops" : 64,
-    "wall_ms" : 13.528499999999999,
+    "read_bytes" : 0,
+    "read_ops" : 39,
+    "wall_ms" : 2.4393509999999998,
     "write_bytes" : 0,
     "write_ops" : 0
   },
@@ -58,7 +58,7 @@
   "schema" : "sicnu-perf-observatory/1",
   "structural" : 
   {
-    "exponent" : 0.19182904226264363,
+    "exponent" : 0.86189111370050231,
     "tiles_2n" : 4,
     "tiles_n" : 1
   },

@@ -1,25 +1,34 @@
 # Performance Observatory — baseline and hotspot evidence
 
-Schema `sicnu-perf-observatory/1`. Machine: Windows 11 x64, MSVC 19.38.33130,
-**Debug**, 16 cores, Qt 6.8.0, GDAL from the x64-windows vcpkg manifest.
-Produced by `test_perf_observatory` + `test_perf_io_observatory` at
+Schema `sicnu-perf-observatory/1`. Machine: Linux x64, GCC 16, **Debug**, 16 cores
+(shared with parallel agent sessions), Qt 6.11.2, GDAL from the local SDK root,
+SQLite 3.53. Produced by `test_perf_observatory` + `test_perf_io_observatory` at
 `SICNU_OBS_SCALE=small`. The record files under `benchmarks/observatory/` and
 every number below come from the **same** run.
 
 Reproduce:
 
-```bat
+```bash
 cmake --build <build> --target test_perf_io_observatory test_perf_observatory
-set SICNU_OBS_OUT=%TEMP%\obs-run
-set QT_QPA_PLATFORM=offscreen
-ctest --test-dir <build> -j1 --output-on-failure ^
+export SICNU_OBS_OUT=$PWD/obs-run QT_QPA_PLATFORM=offscreen
+ctest --test-dir <build> -j1 --output-on-failure \
     -R "obs (io|dataset|governance|taskcenter|temporal|tiled)"
-python scripts\bench\perf_observatory_report.py compare %TEMP%\obs-run benchmarks\observatory
+python scripts/bench/perf_observatory_report.py compare obs-run benchmarks/observatory
 ```
 
 **Every claim below is labelled MEASURED (a number the harness produced),
 INFERRED (a mechanism read off source lines), or RECOMMENDED (a candidate
 change).** A recommendation that is not anchored to a measurement is not made.
+
+> **Data Scale 13.0 regeneration.** The previous committed records were produced
+> on a Windows/MSVC machine by the observatory track (#1125), which measured
+> three hotspots and deliberately left them unfixed. Branch
+> `agent/flash-data-scale-13` lands those fixes and regenerates every record
+> with the same command on this machine. The before numbers below are the
+> committed Windows records plus a same-machine A/B (master code vs branch
+> code, both at `SICNU_OBS_SCALE=small` and `mid`); the after numbers are this
+> run's records. All three hotspots are now **closed**; the gates that bounded
+> them stay in place unchanged.
 
 ---
 
@@ -30,131 +39,120 @@ change).** A recommendation that is not anchored to a measurement is not made.
 | Windowed raster scan visits every tile once | `tiles_observed == tiles_expected`, pixels == side² | holds |
 | Full raster read and windowed scan agree | identical checksums, `max_abs_error < 1e-3` | holds |
 | Atomic writer round-trips values | 0 mismatched pixels vs an independent replay | holds |
-| `findByPath` is O(catalog) | exponent under 1.5 over 2000 → 4000 assets (1.55 and 2.25 style spread across runs) | linear, as intended |
+| `findByPath` complexity | exponent **0.00** over 2000 → 4000 assets (index probe, not a scan) | better than linear |
 | Governance paging never materializes the table | first page 200 rows = `kPageSize`; 10 pages = ceil(2000/200); materialized rows = 200 | holds |
-| Temporal fold produces the right numbers | 6 sampled pixels vs an independent generator replay: **0 mismatches, max error 1.5e-06** (float32 rounding) | holds |
-| Temporal tile scratch is date-count independent | `peak_slots` 131072 at 3 scenes vs 131072 at 6 scenes — **identical** | holds |
+| Temporal fold produces the right numbers | 6 sampled pixels vs an independent generator replay: 0 mismatches, max error 1.5e-06 | holds |
+| Temporal tile scratch is date-count independent | `peak_slots` identical at 3 and 6 scenes | holds |
 | Tiled inference working set is tile-proportional | 524288 bytes = 2 × 256² × 4, independent of raster size | holds |
 | TaskCenter drains a batch | 64/64 completed; queue wait mean 0.11 ms, max 1.0 ms | holds |
-| DAG gates children on parents | 0 ordering violations across a 4-level chain | holds |
+| DAG gates children on parents | 0 ordering violations across a 4-level chain | holds (order-sensitive: see limits) |
 
 Gate potency was checked by injecting defects, not by reading the code: a
 scene-dropping bug in the temporal fold made all 6 sampled pixels mismatch
 (max error 41.8), and a "pretend one page held the whole table" regression
-failed `pages == expectedPages` with `1 == 10`.
+failed `pages == expectedPages` with `1 == 10`. The Data Scale oracles add
+their own potency evidence in `tests/test_data_scale.cpp` (the equivalence
+oracle compares the indexed lookup against a verbatim copy of the pre-change
+algorithm over a path matrix).
 
 ---
 
-## Hotspot 1 — catalog registration is quadratic in catalog size
+## Hotspot 1 — catalog registration was quadratic in catalog size — CLOSED
 
-**MEASURED.** `obs_dataset_register_scaling`, 1000 → 2000 assets:
+**MEASURED (before, committed Windows record).** `obs_dataset_register_scaling`,
+1000 → 2000 assets: 1256.8 ms → 5992.1 ms, empirical exponent **2.25**.
+**MEASURED (same-machine A/B, master vs branch):** exponent **1.99 → 1.00**,
+wall **4540 ms → 529 ms** at the `small` rung. **MEASURED (this run):** exponent
+**1.03**, wall 512.6 ms.
 
-| assets | wall ms |
-|---|---|
-| 1000 | 1256.8 |
-| 2000 | 5992.1 |
+**INFERRED then, IMPLEMENTED now.** `publishSnapshot()` used to copy the live
+`QVector<AssetRecord>` into every published snapshot; Qt copy-on-write made the
+publication itself cheap but the *next* mutation detached and deep-copied every
+record, so N registrations paid ~N²/2 record copies. The store is now an
+immutable chunked structure (`src/data/internal/catalog_record_store.*`):
+fixed-capacity shards plus a live tail, publication aliases both by
+`shared_ptr` (O(1)), and a mutation copies at most one shard (bounded by
+`kShardRecords`). Structural counters in `CatalogScaleCounters` prove it:
+124 record copies per mutation at 1k assets, 127 at 100k — linear, not
+quadratic (the 1k→100k ladder in `tests/test_data_scale.cpp` gates
+`copies(10k)/copies(1k) < 20` and `copies ≤ count × kShardRecords`).
 
-Empirical exponent **2.25** (base-2) in the committed record, i.e. registering
-2 000 assets cost 4.8× what 1 000 cost rather than 2×. Across the runs made
-while building this track the exponent moved between 1.55 and 2.25 — the gate is
-set at 2.75 so that spread is not a flake, and only a path that becomes worse
-than quadratic trips it.
+## Hotspot 2 — `findByPath` redid per-record identity work on every probe — CLOSED
 
-**INFERRED.** `DataManager::publishSnapshot()`
-(`src/data/data_manager.cpp:210-224`) constructs a fresh `CatalogSnapshot` and
-copies **every** `AssetRecord` on **every** mutation, so `registerSource()` is
-O(N) and a batch of N registrations is O(N²). At the `scale` rung (20 000
-assets) that is seconds of pure copying.
+**MEASURED (before, committed Windows record).** Controlled A/B at a fixed
+2000-asset catalog: the filesystem-backed spelling cost 115 448 µs per probe vs
+5554 µs for the virtual spelling — 57.7 µs per record per probe.
+**MEASURED (same-machine A/B, master vs branch):** wall **278 ms → 2.4 ms** for
+the hotspot workload (115×), probe exponent **0.81 → 0.00**, per-record cost
+**2.17 µs → 0.019 µs**. **MEASURED (this run):** local-ish 35.0 µs/probe,
+0.017 µs/record, identity-branch slowdown **0.91×** (was 3.4–20.8×).
 
-**RECOMMENDED.** Copy-on-write or append-diff snapshot publication (publish a
-generation plus the mutation, or an immutable chain of record vectors) turns
-population into O(N) total. The gate `checkComplexity(exponent, 2.75)` documents
-the current behaviour and trips if the per-mutation cost itself starts growing
-with N.
+**IMPLEMENTED.** Each shard carries a tier-prefixed path→record key index
+(`a|` alias/string tier, `p|` filesystem path tier) computed once per mutation;
+a probe resolves at most the query path and walks the shard maps — zero
+per-record work, zero per-record filesystem resolutions (counters:
+`record_visits == 0`, `pathCanonicalizations ≈ probes`). Semantics are pinned
+by an equivalence oracle against a verbatim copy of the pre-change algorithm
+(aliases, `/vsicurl` ↔ `https`, relative/absolute/canonical/symlink spellings,
+case-variant schemes, unicode, empty/whitespace, insertion-order precedence).
 
-**Scope note.** `src/data/` is production code outside this track's owner
-area; no change is made here — this is evidence for a follow-up issue.
+## Hotspot 3 — governance paging cost per page grew with the table — CLOSED
 
----
+**MEASURED (before, committed Windows record).** `obs_governance_paging_scaling`,
+500/1000/2000 rows: 9.3 / 15.5 / 21.9 ms per page, worst doubling **1.50**.
+**MEASURED (same-machine A/B at `SICNU_OBS_SCALE=mid`, 2500/5000/10000 rows —
+where the OFFSET rescan actually dominates):** master **7.0 / 10.2 / 16.9 ms
+per page** (worst doubling 1.72) vs branch **4.4 / 4.8 / 4.8 ms per page**
+(worst doubling **1.05**) — flat. **MEASURED (this run, small):** 3.1 / 3.9 /
+4.5 ms per page, worst doubling **1.21**.
 
-## Hotspot 2 — `findByPath` redoes per-record identity work on every probe
-
-**MEASURED.** Controlled A/B at a **fixed** 2000-asset catalog, same 64 probes,
-differing only in the scheme of the stored canonical source:
-
-| case | µs per probe |
-|---|---|
-| `/vsicurl/https://…` (string/alias identity) | 5554 |
-| `mem://…` (treated as filesystem-backed) | 115448 |
-
-In the committed record the local-ish case is **20.8×** slower than the virtual
-one, i.e. **57.7 µs per record per probe**. The per-probe numbers are printed
-by the run itself (`virtual_path_us_per_probe` / `localish_path_us_per_probe` in
-`obs_dataset_find_by_path_hotspot.json`) rather than transcribed here, because
-they move by tens of percent between runs on a loaded machine.
-
-**INFERRED.** `DataManager::findByPath()`
-(`src/data/data_manager.cpp:821-872`) loops over the whole catalog and, for
-every record, rebuilds `virtualPathAliases(stored)` (a fresh `QStringList`
-alloc) and constructs a `QFileInfo` whose `canonicalFilePath()` resolves the
-path. `isVirtualOrRemotePath()` only recognises `/vsi`, `http://` and
-`https://`, so a path with any other scheme takes the filesystem branch for
-every record on every probe — O(N) alias allocations and path resolutions per
-lookup, with no index behind it.
-
-**RECOMMENDED.** Cache the resolved alias set and the canonical path as part
-of the record (or behind a path→index map rebuilt per generation), so a probe
-is one hash lookup plus alias comparison. Both numbers above are the
-before/after anchor; the gate already bounds the overall scan at exponent
-1.5, which catches a *worse* regressor but not this constant-factor cost.
-
----
-
-## Hotspot 3 — governance paging cost per page grows with the table
-
-**MEASURED.** `obs_governance_paging_scaling`, three rungs walked in one
-process (500 / 1000 / 2000 rows):
-
-| rows | wall ms | ms per page |
-|---|---|---|
-| 500 | — | 9.3 |
-| 1000 | — | 15.5 |
-| 2000 | — | 21.9 |
-
-Worst doubling exponent **1.50**; ladder exponent **2.97**. Per-page cost
-roughly doubles from the smallest rung to the largest.
-
-**INFERRED.** `GovernanceStore::query()` issues a `SELECT COUNT(*)` and then a
-`SELECT … LIMIT ? OFFSET ?` per page (`src/data/governance/governance_store.cpp`
-around 2424-2445). OFFSET pagination makes each page rescan everything before
-it, so a full drain is O(rows × pages) rather than O(rows). The memory
-behaviour is already correct — one page at a time — so this is purely a
-latency/complexity issue that only shows up on large workspaces.
-
-**RECOMMENDED.** Keyset (seek) pagination — carry the last row's sort key into
-`WHERE key > ?` instead of `OFFSET ?` — or index the filter column so the
-offset scan does not walk the table. The gate is set at 2.2 for the worst
-doubling: above the measured 1.50 baseline, so it catches further degradation
-toward O(N²) without flagging the known behaviour.
+**IMPLEMENTED.** `GovernanceStore::query()` now issues a row-value keyset seek
+(`(sort_key, pk) < (?, ?)`, tiebreak sharing the sort key's direction so one
+index walk serves both the ORDER BY and the seek — `EXPLAIN QUERY PLAN`:
+`SEARCH … USING COVERING INDEX ((updated_ms,asset_id)<(?,?))`, no sorter) and
+composite `(sort_key, pk)` indexes back every ORDER BY variant. The legacy
+`offset` path is preserved for its single-page callers; the workspace-browser
+panel (the only multi-page consumer) pages by cursor. `total` stays the real
+`COUNT(*)` for non-cursor queries and is not recomputed for cursor
+continuations; a cursor that fails to decode or whose filter echo does not
+match yields an empty page with `cursorError` — never fabricated rows.
+Correctness oracles: a 20 000-row cursor walk returns every row exactly once
+(no duplicates, no skips, `pages == ceil(rows/pageSize)`), duplicate sort keys
+paginate stably, and a bogus or filter-mismatched cursor fails closed.
 
 ---
 
 ## Honest limits of this baseline
 
-- **The windowed-scan complexity gate measured exponent 0.00** (the 512² rung
-  was *faster* than the 256² rung, so the exponent clamps to zero). At these
-  sizes the scan is noise-dominated: the gate `exponent < 1.5` is directionally
-  right — it fires if a 4× area scan costs ≥ 2.83× — but nothing in the current
-  numbers is close to it, and the record says so rather than hiding it.
-- **No absolute millisecond budget.** The two runs compared above differ by up
-  to **−71 %** on the same 14.9 ms workload and **+28 %** on an 11 ms one. On a
-  shared machine that spread is normal, which is exactly why the gates are
-  counts, complexity exponents and structural memory units.
+- **The windowed-scan complexity gate is noise-dominated on this host.** At the
+  `small` rungs the scan is sub-millisecond, so the measured exponent moves
+  between 0.0 and ~2.2 between runs (this workload links only
+  `Sicnu::Geospatial` — it does not link any code this branch changes). It
+  passes in isolation and in most full runs; when it fires, re-run. The gate
+  itself is unchanged.
+- **No absolute millisecond budget.** Runs on this shared 16-core host (with
+  parallel agent sessions compiling) differ by tens of percent on the same
+  workload, which is exactly why the gates are counts, complexity exponents and
+  structural memory units.
 - **`peak_rss_mb` is often `null`**, with a reason: the watermark is 1 MiB /
   2 ms sampled, so a sub-MiB or sub-interval allocation is invisible. A zero
   there would be the fake number the schema promises never to write.
 - **`cpu_ms` is process CPU across all threads**, so it can exceed `wall_ms`
   on a multi-core lane and is not comparable across machines.
+- **The text (`sortBy=name`) keyset seek falls back to an ordered index scan**
+  (O(position) per page): SQLite will not turn the `COLLATE NOCASE` row-value
+  comparison into an index range. No production caller pages deeply by name —
+  the workspace browser uses the default sort and `project:search` is
+  single-page — so this is documented, not gated.
+- **A record's canonical (symlink-resolved) identity is resolved when the
+  record enters the catalog or is relocated, not per probe** (see ADR 0166).
+  A filesystem change that retargets a path *after* registration is not
+  observed by the index.
+- **Pre-existing red tests on this host, reproduced on master code and outside
+  this branch's ownership** (see the PR body): the `#860` observer re-entrancy
+  case in `test_execution_plane_9`, the affinity-warning expectation in
+  `test_data_manager_reap`, and the untranslated labels in
+  `test_data_manager_panel` (no `.qm` files are built by this preset).
 - **No scientific-semantics change.** None of these workloads alters a result;
   the writer round-trip, full/windowed and temporal replay comparisons are
   equivalence oracles, and all pass.

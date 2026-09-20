@@ -1,20 +1,20 @@
 {
   "complexity" : 
   {
-    "exponent" : 2.9734960954903733,
+    "exponent" : 2.3058743873681919,
     "model" : "super-linear",
     "points" : 
     [
       {
-        "ms" : 27.839600000000001,
+        "ms" : 9.1603940000000001,
         "n" : 500
       },
       {
-        "ms" : 77.486900000000006,
+        "ms" : 19.637646,
         "n" : 1000
       },
       {
-        "ms" : 218.6626,
+        "ms" : 45.29513,
         "n" : 2000
       }
     ]
@@ -31,31 +31,31 @@
   "environment" : 
   {
     "build_type" : "Debug",
-    "compiler" : "MSVC 1938",
-    "cores" : 16,
-    "cpu_model" : null,
-    "os" : "windows"
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
   },
   "extra" : 
   {
     "pages" : 10,
     "rows" : 2000
   },
-  "generated_at" : "2026-09-20T04:48:04Z",
+  "generated_at" : "2026-09-20T22:28:42Z",
   "measurement" : 
   {
-    "cpu_ms" : 218.75,
+    "cpu_ms" : 45.314000000000021,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 58,
-    "peak_rss_mb" : 9,
+    "peak_rss_baseline_mb" : 222,
+    "peak_rss_mb" : 3,
     "peak_rss_unavailable_reason" : null,
     "read_bytes" : 0,
-    "read_ops" : 0,
-    "wall_ms" : 218.6626,
+    "read_ops" : 82,
+    "wall_ms" : 45.29513,
     "write_bytes" : 0,
     "write_ops" : 0
   },
@@ -69,16 +69,16 @@
   "structural" : 
   {
     "doublings" : 2,
-    "exponent" : 2.9734960954903733,
+    "exponent" : 2.3058743873681919,
     "ms_per_page" : 
     {
-      "1000" : 15.497380000000001,
-      "2000" : 21.86626,
-      "500" : 9.2798666666666669
+      "1000" : 3.9275291999999999,
+      "2000" : 4.5295129999999997,
+      "500" : 3.0534646666666667
     },
     "rows_largest" : 2000,
     "rows_smallest" : 500,
-    "worst_doubling_exponent" : 1.4966821503772578
+    "worst_doubling_exponent" : 1.2057339426915246
   },
   "workload" : "obs_governance_paging_scaling"
 }
