@@ -177,3 +177,17 @@ md5(data/processing/algorithm_meta + pi/knowledge) before == after; git status: 
 ```
 
 即提交态与 generator 输出字节一致（O2 的最终形态）。
+
+## O-review-2：第二遍独立 review（含两个新测试源码）
+
+只读深审（reviewer 另外独立运行了四个 gate 二进制 + 活 CLI schema 探测 + 全量数据重推导）：**P0 = 0**。
+
+处置记录：
+- **P1-1（豁免理由文本不实）**：39 条豁免理由原写 "inputs are array-of-string path parameters"，reviewer 活 schema 验证后指出约 31 条不成立（import 类为单字符串 `input`；SAR network/register 类根本没有数组参数）。已改为准确共性原因 "no data input port declared (string/path parameters only); deriveCapabilityBlock leaves io.inputs empty"，表头注释同步更正。断言集合不变（相等性核对仍 39/39）。
+- **P1-2（schema parity 嵌套类型盲区）**：`paramSignatures` 原只比顶层 type/default/enum；reviewer 以 `rs:quality_mosaic` 的未定义 item type 为例证明 "never retype" 在嵌套层不成立。已扩展签名为 `type|default|enum|items=<items.type>`，并把 `required` 集合折进映射（保留键 `@required`）——重排/改写数组项类型、从 required 增删参数现在都会 FAIL。修复后四 gate 保持全绿（6793/1357/1066/247）。
+- **P2-3（尾随空格）**：152 个 Layer-B sidecar 的 `"key" : ` 尾随空格来自 generator（jsoncpp StreamWriterBuilder），drift gate 的字节相等正是对该 writer 的契约；master 语料混杂（部分文件被早前 commit 手工 strip），重生后全部归一为 generator 输出——这是字节 gate 的目的，非回归。PR body 明示。
+- **P2-4（EVIDENCE 措辞）**：preprocess.json 与坏合并（43dcf19cd）两父字节一致（本轮再次逐字符复核，21 个 entry 完全相同）；其他在飞支线（fbcb4f351 等）携带更多 Layer-C entry（rs:radiometric_qa / rs:solar_geometry / rs:brdf_normalization / rs:quality_mosaic 等），属并行会话在途工作，已在 PR body known limitations 声明由 Layer-C owner 重新落地。
+- **P2-5/6（杂物与文档）**：worktree 根 `$null` 临时文件已删；PR_BODY 定稿；测试头注释的基线数字与全量实测（17/18 of 152）对齐。
+- **P2-7（Layer-A 重复 id 隐蔽性）**：`AlgorithmMetaStore::loadFromDirectory` 按 id emplace，重复 id 文件对 parity 测试不可见；由 drift 测试的文件数断言兜底——两个 gate 必须同时保留（已注明）。
+
+Reviewer 独立复核确认：四个 gate 在其环境同样全绿、断言计数一致、沙袋证据可复现、窃用 CLAIM 全部实证。
