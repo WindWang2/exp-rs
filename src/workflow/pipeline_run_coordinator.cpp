@@ -1036,6 +1036,14 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
 
+    // Clear any STALE cancel flag before the verification loop: an idle
+    // requestCancel (no run loaded) trips the atomic and returns without
+    // touching state, so without this reset the loop's cancel check would
+    // refuse a perfectly good resume (Track 13 review P1). A cancel that
+    // arrives DURING this resume still trips the flag via requestCancel's
+    // phase 1 and aborts at the loop checks below.
+    m_state->cancelRequested.store( false, std::memory_order_relaxed );
+
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
         return fail( QStringLiteral( "cannot open checkpoint '%1'" ).arg( checkpointFilePath ) );

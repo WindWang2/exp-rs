@@ -273,10 +273,12 @@ QString electionGroupFor( const QString &filePath, const QString &legacyGroup, b
   QFile file( filePath );
   if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
     return legacyGroup;
-  if ( file.size() > kMaxCheckpointDocumentBytes )
-    return legacyGroup; // oversized: same treatment as the corrupt case
-  const QByteArray data = file.readAll();
+  // Read cap+1 rather than size-then-readAll so a file growing between the
+  // two calls cannot bypass the bound (same idiom as loadCheckpoint).
+  const QByteArray data = file.read( kMaxCheckpointDocumentBytes + 1 );
   file.close();
+  if ( data.size() > kMaxCheckpointDocumentBytes )
+    return legacyGroup; // oversized: same treatment as the corrupt case
 
   Json::CharReaderBuilder readerBuilder;
   Json::Value root;

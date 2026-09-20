@@ -2059,3 +2059,27 @@ TEST_CASE( "A moved artifact is never served on resume", "[d17][workflow][identi
     REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
     REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
 }
+
+TEST_CASE( "An idle requestCancel does not poison a later resume", "[d17][workflow][affinity]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "stale-cancel" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // An idle cancel trips the atomic and returns without touching state —
+    // it must not leave a stale flag that refuses the NEXT resume ON THE
+    // SAME coordinator (Track 13 review P1).
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( countingExecutor( &executed ) );
+    coordinator.requestCancel(); // idle: no run loaded
+
+    QString error;
+    REQUIRE( coordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    REQUIRE( executed.load() == 0 );
+    for ( const NodeStatusSnapshot &snapshot : coordinator.getAllStatuses() )
+        REQUIRE( snapshot.isCacheHit );
+}

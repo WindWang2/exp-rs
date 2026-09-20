@@ -38,7 +38,8 @@
 // foreign caller may block until the owner is idle, bounded by the owner's
 // current unit of work. requestCancel is two-phase so a canceller never waits
 // on a whole-file hash. Destroy the coordinator on its affinity thread (the
-// fast path) — a foreign-thread destruction is safe but marshals a drain.
+// fast path) — a foreign-thread destruction is safe but marshals a drain,
+// which completes only while that thread services its event loop.
 //
 
 #include <QHash>
