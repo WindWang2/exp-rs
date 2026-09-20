@@ -163,10 +163,11 @@ bool WorkspaceGovernanceModel::canFetchMore( const QModelIndex &parent ) const
 {
     if ( parent.isValid() || !m_service )
         return false;
-    // Keyset walk: the continuation cursor is authoritative (it is empty
-    // exactly when the walk is exhausted). The total is a secondary signal for
-    // the case where the store shrank under a live walk.
-    return !m_nextCursor.isEmpty() || m_rows.size() < m_total;
+    // Keyset walk: the continuation cursor is the termination signal — it is
+    // empty exactly when the walk is exhausted, so a view can never spin on a
+    // cursor that fetches nothing. (The total from the first page is kept for
+    // the status line only; a store that shrank mid-walk simply ends early.)
+    return !m_nextCursor.isEmpty();
 }
 
 void WorkspaceGovernanceModel::fetchMore( const QModelIndex &parent )

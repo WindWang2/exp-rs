@@ -2341,7 +2341,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     // lease-safety rule. Reaped/already-removed children are skipped.
     for ( const AssetId &childId : collectionIt->childAssetIds )
     {
-      if ( m_impl->records.find( childId ) )
+      if ( !m_impl->records.find( childId ) )
         continue;
       if ( !m_impl->leaseImpacts( childId ).isEmpty() )
       {
@@ -2367,7 +2367,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     QVector<Diagnostic> externalDependentDiagnostics;
     for ( const AssetId &childId : children )
     {
-      if ( m_impl->records.find( childId ) )
+      if ( !m_impl->records.find( childId ) )
         continue;
       const QVector<AssetId> dependents = strongDependentsOf( childId );
       for ( const AssetId &dependent : dependents )
