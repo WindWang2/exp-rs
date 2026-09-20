@@ -139,10 +139,14 @@ produced / reusedFrom / retriedAs. Query API answers artifact→producer and
 node→inputs without re-parsing checkpoints. Built on checkpoint data + run
 record, emitted at finalize — no second truth.
 
-## D10 — WP6 determinism
+## D10 — WP6 determinism (implemented)
 
 `computeLineageSignatures` is already order-insensitive in doc order and
-port-sensitive. Add `computePlanSignature(def)` = digest over the sorted node
-signature multiset + canonical edge set, so "same workflow, reordered
-serialization" is provably identical and CSE cannot collide across port
-renames (rename = different signature = different cache identity — correct).
+port-sensitive. `computePlanSignature(def)` is now the whole-plan topology
+signature: SHA-256 over the sorted multiset of `nodeId=nodeSignature`
+pairs plus the sorted canonical edge set
+(`src.srcPort->dst.dstPort`). Edge ids are excluded — they are bookkeeping
+labels, not topology — so reordering nodes/edges or renaming edge ids is
+provably identical, while parameter, port or wiring changes (including a
+port rename, which re-keys the node signatures) change the digest. This is
+the stable identity a plan/provenance record can cite.

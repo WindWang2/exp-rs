@@ -18,6 +18,8 @@
 #include <QJsonObject>
 #include <QPointF>
 
+#include <algorithm>
+
 using namespace sicnu::workflow;
 
 namespace {
@@ -326,5 +328,61 @@ TEST_CASE( "Expansion failures are closed and name the instance", "[d17][workflo
         const auto result = WorkflowComposer::expandSubflows( def );
         REQUIRE_FALSE( result.isSuccess() );
         REQUIRE( result.error().contains( QStringLiteral( "'S'" ) ) );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WP6 deterministic planning: the plan signature is a pure function of
+// topology + parameters — invariant to serialization order and edge labels.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Plan signature is invariant to serialization order and edge ids", "[d17][workflow][planning]" )
+{
+    WorkflowDocument def = parentDoc();
+    const QString baseline = WorkflowPlanOptimizer::computePlanSignature( def );
+    REQUIRE( baseline.size() == 64 );
+
+    // Same graph, nodes and edges enumerated in reverse order.
+    WorkflowDocument reordered = def;
+    std::reverse( reordered.nodes.begin(), reordered.nodes.end() );
+    std::reverse( reordered.edges.begin(), reordered.edges.end() );
+    REQUIRE( WorkflowPlanOptimizer::computePlanSignature( reordered ) == baseline );
+
+    // Edge ids are bookkeeping labels: renaming them changes nothing.
+    WorkflowDocument relabeled = def;
+    relabeled.edges[0].edgeId = QStringLiteral( "renamed_e1" );
+    REQUIRE( WorkflowPlanOptimizer::computePlanSignature( relabeled ) == baseline );
+}
+
+TEST_CASE( "Plan signature changes on parameter, port and wiring edits", "[d17][workflow][planning]" )
+{
+    const QString baseline = WorkflowPlanOptimizer::computePlanSignature( parentDoc() );
+
+    SECTION( "parameter change" )
+    {
+        WorkflowDocument def = parentDoc();
+        def.nodes[0].parameters.insert( QStringLiteral( "alpha" ), 1 );
+        REQUIRE( WorkflowPlanOptimizer::computePlanSignature( def ) != baseline );
+    }
+    SECTION( "port rename" )
+    {
+        WorkflowDocument def = parentDoc();
+        def.nodes[0].outputPorts[0].portName = QStringLiteral( "renamed" );
+        def.edges[0].sourcePortName = QStringLiteral( "renamed" );
+        REQUIRE( WorkflowPlanOptimizer::computePlanSignature( def ) != baseline );
+    }
+    SECTION( "rewire to a different source" )
+    {
+        WorkflowDocument def = parentDoc();
+        def.nodes.append( plainNode( "A2", {}, { port( "out" ) } ) );
+        def.edges[0].sourceNodeId = QStringLiteral( "A2" );
+        REQUIRE( WorkflowPlanOptimizer::computePlanSignature( def ) != baseline );
+    }
+    SECTION( "node id rename" )
+    {
+        WorkflowDocument def = parentDoc();
+        def.nodes[0].nodeId = QStringLiteral( "A_renamed" );
+        def.edges[0].sourceNodeId = QStringLiteral( "A_renamed" );
+        REQUIRE( WorkflowPlanOptimizer::computePlanSignature( def ) != baseline );
     }
 }
