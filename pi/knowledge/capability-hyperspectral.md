@@ -2,7 +2,7 @@
 
 # 高光谱分析（hyperspectral）
 
-共 8 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 10 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:ace
 
@@ -10,7 +10,7 @@
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
-- 输入：input（raster）
+- 输入：background（raster）、input（raster）
 - 输出：output（raster）
 - 参数：libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.
@@ -22,6 +22,16 @@
 - 教学概念：ACE、目标检测、白化
 - 适用课程：高光谱遥感
 - 典型练习：以标布光谱为目标运行 ACE 并评估 ROC 检测性能。
+
+## rs:cem_detection
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：background（raster）、input（raster）
+- 输出：output（raster）
+- 参数：libraryMaterials（string）、libraryPath（string）、loading（numeric）、output（string）、target（string）、targetRef（string）
+- 前置条件：'target' must have one finite value per input band.；At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) — under-sampled scenes are refused.
+- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).
 
 ## rs:continuum_removal
 
@@ -65,11 +75,11 @@
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
-- 输入：input（raster）
+- 输入：background（raster）、input（raster）
 - 输出：output（raster）
 - 参数：libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.
-- 局限：Background statistics come from the input scene itself; a separate background raster is a future extension.
+- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).；Background statistics come from the input scene itself; a separate background raster is a future extension.
 - 适用地物：矿物、植被胁迫目标
 - 适用场景：矿物异常探测、肥料/胁迫高光谱识别
 - 失败模式：
@@ -133,6 +143,16 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 教学概念：光谱响应函数、波段模拟
 - 适用课程：高光谱遥感
 - 典型练习：把 EO-1 Hyperion 重采样到 Sentinel-2 波段设置并对比 NDVI。
+
+## rs:spectral_spatial_fuse
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：output（raster）
+- 参数：beta（numeric）、method（enum）、output（string）、radius（integer）、sigmaRange（numeric）
+- 前置条件：Input must be a single-band score raster.
+- 局限：The bilateral method is O(pixels * (2r+1)^2) with no interior cancellation point, like the mean; radius is bounded to [0, 128].
 
 ## rs:spectral_unmixing
 

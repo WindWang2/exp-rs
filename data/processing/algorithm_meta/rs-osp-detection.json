@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:osp_detection",
+  "input" : "raster",
+  "notes" : "Single-pass streaming OSP: orthogonal projection of the target onto the complement of the undesired signature subspace; every interference signature scores exactly 0; bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

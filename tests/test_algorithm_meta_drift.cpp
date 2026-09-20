@@ -27,8 +27,7 @@ std::string lfOnly( std::string text )
   std::string out;
   out.reserve( text.size() );
   for ( char c : text )
-    if ( c != '
-' )
+    if ( c != '\r' )
       out.push_back( c );
   return out;
 }
@@ -75,8 +74,11 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // rs:terrain_solar / rs:terrain_viewshed (F16) had no shipped sidecars,
     // and four rs:temporal_* sidecars whose operators no longer declare task
     // families were still on disk (the D16 removal never landed on disk).
-    REQUIRE( expectedCatalog.size() == 55 );
-    REQUIRE( expectedCatalog.size() == 55 ); // 51 master-sidecar set at adf8f989 + 6 missing exports + 4 stale removals + 2 Spectral Intelligence 12.0
+    // 51 master-sidecar set at adf8f989 + 6 missing exports + 4 stale removals
+    // + 2 Spectral Intelligence 12.0 + 2 Spectral Intelligence 13.0
+    // (rs:tcimf_detection, rs:osp_detection).
+    REQUIRE( expectedCatalog.size() == 57 );
+    REQUIRE( expectedCatalog.size() == 57 );
     // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
 
     const QString metaDir =
@@ -157,7 +159,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 55 );
+        REQUIRE( written == 57 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

@@ -2,7 +2,7 @@
 
 # 光谱指数与波段运算（spectral）
 
-共 19 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 21 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:band_math
 
@@ -228,6 +228,16 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 典型练习：提取丰水期与枯水期湖泊范围并计算面积变化。
 - 可接上游：rs:atmospheric_correction
 
+## rs:osp_detection
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：output（raster）
+- 参数：interference（string）、interferenceRef（string）、libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
+- 前置条件：'target' must have one finite value per input band.；'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band, linearly independent of the others.
+- 局限：A target that lies (numerically) inside the undesired subspace is refused — no filter can suppress the interference and keep the target at the same time.
+
 ## rs:pca
 
 主成分分析（PCA/K-L 变换）：把相关波段压缩为按方差排序的互不相关主成分，用于降维、去相关与信息浓缩。
@@ -359,4 +369,14 @@ SID-SAM 混合光谱相似度：把光谱角（形状）与信息散度（分布
   - `INVALID_PARAMETER` — 必填参数 input/output 缺失，form 取值不在 product_normalized/classic_tan 之内，参考光谱（refs/refsRef/libraryPath）未提供或同时提供多种，或参考波段数与影像波段数不一致且任一侧无波长元数据。处置：补齐必填参数、只通过一种形式提供参考光谱，并使参考波段数与影像一致或补齐波长元数据
   - `INVALID_RADIOMETRY` — 参考光谱为 DN/辐亮度等非反射率量纲或含负波段，SID 的概率分布假设不成立，这些像元只能留空（NaN 分数）而不被强行归类。处置：先做辐射定标与大气校正，提供反射率量纲、非负的参考光谱
   - `WAVELENGTH_INCOMPATIBLE` — 参考光谱与输入影像的波长范围不重叠，或所选输入波段超出参考光谱波长覆盖。处置：选择落在参考覆盖范围内的输入波段，或提供波长匹配的参考光谱
+
+## rs:tcimf_detection
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：background（raster）、input（raster）
+- 输出：output（raster）
+- 参数：interference（string）、interferenceRef（string）、libraryMaterials（string）、libraryPath（string）、loading（numeric）、output（string）、target（string）、targetRef（string）
+- 前置条件：'target' must have one finite value per input band.；At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) — under-sampled scenes are refused.；'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band.
+- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).；Interference spectra must be linearly independent under the background metric; a target inside the interference span is refused.
 

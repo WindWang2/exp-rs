@@ -1,0 +1,111 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "interference",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "interferenceRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "target",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "targetRef",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "A target that lies (numerically) inside the undesired subspace is refused \u2014 no filter can suppress the interference and keep the target at the same time."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "'target' must have one finite value per input band.",
+      "'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band, linearly independent of the others."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Orthogonal subspace projection target detection: suppresses the undesired signature subspace and projects the target onto what remains; interference scores exactly 0.",
+  "display_name" : "OSP Detector",
+  "gpu" : false,
+  "id" : "rs:osp_detection",
+  "input" : "raster",
+  "notes" : "Single-pass streaming OSP: orthogonal projection of the target onto the complement of the undesired signature subspace; every interference signature scores exactly 0; bit-exact grade.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

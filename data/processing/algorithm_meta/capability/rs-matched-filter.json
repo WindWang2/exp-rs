@@ -43,6 +43,11 @@
       [
         {
           "data_kind" : "raster",
+          "name" : "background",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
           "name" : "input",
           "required" : true
         }
@@ -86,6 +91,7 @@
     },
     "limitations" : 
     [
+      "Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only \u2014 no spatial co-registration required).",
       "Background statistics come from the input scene itself; a separate background raster is a future extension."
     ],
     "modality" : 

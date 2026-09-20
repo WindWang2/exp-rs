@@ -561,7 +561,8 @@ Json::Value detectorSchema( const std::string &displayName, const std::string &d
                             "Optional independent background raster for the background "
                             "statistics (same band count; a differing wavelength grid is "
                             "resampled onto the scene grid — no spatial co-registration "
-                            "required)" );
+                            "required)",
+                            false );
     }
     const Json::Value referenceProps = referenceInputSchemaProps(
         "target", "targetRef", "Target spectrum (one value per input band, same order)" );
