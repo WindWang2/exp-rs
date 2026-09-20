@@ -6,14 +6,23 @@
 // parseable document). Executors are injected test doubles.
 #include <catch2/catch_test_macros.hpp>
 #include <QApplication>
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QEventLoop>
 #include <QDir>
 #include <QFile>
+#include <QFileDevice>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QSignalSpy>
+#include <QtEndian>
 #include <QTimer>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <functional>
 
 #include "workflow/pipeline_run_coordinator.h"
 #include "workflow/workflow_dag_analyzer.h"
@@ -443,15 +452,19 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
     std::atomic<bool> stop{ false };
     std::atomic<int> reads{ 0 };
     std::atomic<bool> inconsistent{ false };
-    QThread reader;
-    QObject::connect( &reader, &QThread::started, [&]() {
+    // QThread::create: the lambda IS run() — the thread finishes when it
+    // returns. (A plain QThread would enter exec() after `started` and never
+    // terminate: isFinished() would stay false forever.)
+    QThread *reader = QThread::create( [&]() {
         while ( !stop.load() )
         {
             const auto statuses = coordinator.getAllStatuses();
-            const bool running = coordinator.isRunning();
             const bool completed = coordinator.hasCompleted();
             // A snapshotted status map must always cover the whole document.
-            if ( statuses.size() != 12 || ( running && completed ) )
+            // (running && completed) is NOT checked: two separately marshalled
+            // reads legitimately straddle the terminal transition — that is a
+            // benign interleaving, not a torn field.
+            if ( statuses.size() != 12 )
                 inconsistent = true;
             for ( const NodeStatusSnapshot &snapshot : statuses )
                 if ( executionStateString( snapshot.state ).isEmpty() )
@@ -462,15 +475,18 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
         }
     } );
     REQUIRE( coordinator.startRun( chain( 12 ), dir ) );
-    reader.start();
+    reader->start();
     REQUIRE( waitForCompleted( coordinator ) );
 
     // The reader blocks inside marshalled accessor calls until the
     // coordinator's thread services them: keep pumping events until it
-    // observed the terminal state.
-    while ( !reader.isFinished() )
+    // observed the terminal state (bounded — then release it via `stop`).
+    const qint64 pumpDeadline = QDateTime::currentMSecsSinceEpoch() + 30000;
+    while ( !reader->isFinished() && QDateTime::currentMSecsSinceEpoch() < pumpDeadline )
         QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
-    REQUIRE( reader.wait( 30000 ) );
+    stop.store( true );
+    REQUIRE( reader->wait( 30000 ) );
+    delete reader;
 
     CHECK_FALSE( inconsistent.load() );
     CHECK( reads.load() > 0 );
@@ -481,4 +497,479 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
         REQUIRE( snapshot.state == ExecutionState::Succeeded );
     CHECK( coordinator.hasCompleted() );
     CHECK_FALSE( coordinator.isRunning() );
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint hardening (flash-workflow-engine-12 / DECISIONS D2-D4): envelope
+// gate, bounded reads, strict state vocabulary, artifact identity +
+// run-directory containment, minimal invalidation.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Runs a 3-node chain to completion with the synthetic executor; returns the
+/// checkpoint path ("" on failure) and the run directory via @p outRunDir.
+QString produceChainCheckpoint( const QString &tag, QString *outRunDir )
+{
+    const QString dir = scratchDir( tag );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    if ( !coordinator.startRun( chain( 3 ), dir ) || !waitForCompleted( coordinator ) )
+        return {};
+    if ( outRunDir )
+        *outRunDir = dir;
+    return coordinator.checkpointPath();
+}
+
+QJsonObject readJsonObject( const QString &path )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return {};
+    return QJsonDocument::fromJson( file.readAll() ).object();
+}
+
+bool writeJsonObject( const QString &path, const QJsonObject &object )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        return false;
+    return file.write( QJsonDocument( object ).toJson() ) > 0;
+}
+
+/// Counting executor: same contract as makeSyntheticNodeExecutor but records
+/// invocations so tests can assert WHICH nodes recomputed.
+NodeExecutor countingExecutor( std::atomic<int> *count )
+{
+    return [count]( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+        count->fetch_add( 1 );
+        NodeExecutionResult result;
+        const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        QFile f( artifact );
+        // No Catch2 assertions on pool threads (thread-local): report through
+        // the typed result instead.
+        if ( !f.open( QIODevice::WriteOnly ) )
+        {
+            result.errorMessage = QStringLiteral( "artifact open failed for %1" ).arg( node.nodeId );
+            return result;
+        }
+        f.write( QByteArrayLiteral( "ok" ) );
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    };
+}
+
+/// Independent reimplementation of the coordinator's sha256fl scheme — the
+/// test forges a *valid* identity for a foreign file so that ONLY the
+/// containment gate can refuse it.
+QString testFingerprint( const QString &path, qint64 size )
+{
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+        return {};
+    constexpr qint64 kWindow = 1024 * 1024;
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    QByteArray sizeLE( 8, '\0' );
+    qToLittleEndian<qint64>( size, sizeLE.data() );
+    hash.addData( sizeLE );
+    hash.addData( file.read( qMin( kWindow, size ) ) );
+    if ( size > kWindow )
+    {
+        if ( !file.seek( size - kWindow ) )
+            return {};
+        hash.addData( file.read( kWindow ) );
+    }
+    return QStringLiteral( "sha256fl:%1" ).arg( QString::fromLatin1( hash.result().toHex() ) );
+}
+
+/// Restore a file's modification time to @p targetMs (ms since epoch) — the
+/// file clock ticks with the system clock on all supported platforms, so the
+/// offset conversion is exact enough for the coordinator's ms comparisons.
+bool restoreMtime( const QString &path, qint64 targetMs )
+{
+    const auto fileNow = std::filesystem::file_time_type::clock::now();
+    const qint64 sysNowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch() )
+                                .count();
+    std::error_code ec;
+    std::filesystem::last_write_time(
+        std::filesystem::path( path.toStdWString() ),
+        fileNow - std::chrono::milliseconds( sysNowMs - targetMs ), ec );
+    return !ec;
+}
+
+/// Replace one node's entry inside a checkpoint document.
+void mutateNodeEntry( QJsonObject &doc, const QString &nodeId,
+                      const std::function<void( QJsonObject & )> &mutate )
+{
+    QJsonArray nodes = doc.value( QLatin1String( "nodes" ) ).toArray();
+    for ( qsizetype i = 0; i < nodes.size(); ++i )
+    {
+        QJsonObject entry = nodes.at( i ).toObject();
+        if ( entry.value( QLatin1String( "nodeId" ) ).toString() != nodeId )
+            continue;
+        mutate( entry );
+        nodes.replace( i, entry );
+        break;
+    }
+    doc.insert( QLatin1String( "nodes" ), nodes );
+}
+
+QJsonObject nodeEntry( const QJsonObject &doc, const QString &nodeId )
+{
+    for ( const QJsonValue &value : doc.value( QLatin1String( "nodes" ) ).toArray() )
+    {
+        const QJsonObject entry = value.toObject();
+        if ( entry.value( QLatin1String( "nodeId" ) ).toString() == nodeId )
+            return entry;
+    }
+    return {};
+}
+
+} // namespace
+
+TEST_CASE( "Resume rejects a checkpoint with a foreign kind", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "kind" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    QJsonObject doc = readJsonObject( checkpoint );
+    doc.insert( QLatin1String( "kind" ), QStringLiteral( "forged_checkpoint" ) );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE_FALSE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "kind" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "Resume rejects a checkpoint from an unknown future version", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "version" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    QJsonObject doc = readJsonObject( checkpoint );
+    doc.insert( QLatin1String( "version" ), QStringLiteral( "9.9" ) );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE_FALSE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "version" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "Resume rejects an oversized checkpoint before buffering it", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "oversize" ) );
+    const QString path = QDir( dir ).filePath( QStringLiteral( "checkpoint_big.json" ) );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    REQUIRE( file.write( QByteArray( 16 * 1024 * 1024 + 1, 'x' ) ) > 0 );
+    file.close();
+
+    PipelineRunCoordinator coordinator;
+    QString error;
+    REQUIRE_FALSE( coordinator.resumeFromCheckpoint( path, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "cap" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "Resume rejects an unknown node state key fail-closed", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "badstate" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    QJsonObject doc = readJsonObject( checkpoint );
+    mutateNodeEntry( doc, QStringLiteral( "node_2" ), []( QJsonObject &entry ) {
+        entry.insert( QLatin1String( "state" ), QStringLiteral( "Teleporting" ) );
+    } );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE_FALSE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "Teleporting" ) ) );
+}
+
+TEST_CASE( "Legacy 1.0 checkpoints resume but conservatively recompute", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "legacy" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // A format-1.0 checkpoint carries no artifact identity: every node must
+    // degrade to recompute rather than trust an unverifiable file.
+    QJsonObject doc = readJsonObject( checkpoint );
+    doc.insert( QLatin1String( "version" ), QStringLiteral( "1.0" ) );
+    QJsonArray nodes = doc.value( QLatin1String( "nodes" ) ).toArray();
+    for ( qsizetype i = 0; i < nodes.size(); ++i )
+    {
+        QJsonObject entry = nodes.at( i ).toObject();
+        entry.remove( QLatin1String( "artifactSize" ) );
+        entry.remove( QLatin1String( "artifactMtimeMs" ) );
+        entry.remove( QLatin1String( "artifactFingerprint" ) );
+        nodes.replace( i, entry );
+    }
+    doc.insert( QLatin1String( "nodes" ), nodes );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 3 );
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+    {
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+        REQUIRE_FALSE( snapshot.isCacheHit );
+    }
+}
+
+TEST_CASE( "A tampered artifact recomputes instead of producing a false CacheHit", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "tamper" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Rewrite node_2's artifact with same-length different bytes and restore
+    // the recorded mtime — only the content fingerprint can catch this.
+    const QJsonObject doc = readJsonObject( checkpoint );
+    const QJsonObject entry = nodeEntry( doc, QStringLiteral( "node_2" ) );
+    const QString artifact = entry.value( QLatin1String( "artifact" ) ).toString();
+    const qint64 recordedMtime = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger();
+    REQUIRE( QFile::exists( artifact ) );
+
+    {
+        QFile file( artifact );
+        REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        const QByteArray garbage( static_cast<qsizetype>( entry.value( QLatin1String( "artifactSize" ) ).toInteger() ), 'Z' );
+        REQUIRE( file.write( garbage ) == garbage.size() );
+    }
+    REQUIRE( restoreMtime( artifact, recordedMtime ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    // Minimal invalidation: only the tampered node recomputes; its untouched
+    // siblings stay CacheHit (deterministic re-execution reproduces an
+    // equivalent product, so node_3's cached output remains valid).
+    REQUIRE( executed.load() == 1 );
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "An artifact path outside the run directory is never served", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "escape" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Plant a foreign file outside the run directory and forge a VALID
+    // identity for it — only the containment gate can refuse the hit.
+    const QString foreignDir = scratchDir( QStringLiteral( "foreign" ) );
+    const QString foreignPath = QDir( foreignDir ).filePath( QStringLiteral( "foreign.bin" ) );
+    {
+        QFile file( foreignPath );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        REQUIRE( file.write( QByteArrayLiteral( "planted" ) ) > 0 );
+    }
+    const QFileInfo foreignInfo( foreignPath );
+
+    QJsonObject doc = readJsonObject( checkpoint );
+    mutateNodeEntry( doc, QStringLiteral( "node_1" ), [&]( QJsonObject &entry ) {
+        entry.insert( QLatin1String( "artifact" ), foreignInfo.absoluteFilePath() );
+        entry.insert( QLatin1String( "artifactSize" ), foreignInfo.size() );
+        entry.insert( QLatin1String( "artifactMtimeMs" ),
+                      foreignInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch() );
+        entry.insert( QLatin1String( "artifactFingerprint" ),
+                      testFingerprint( foreignInfo.canonicalFilePath(), foreignInfo.size() ) );
+    } );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).state == ExecutionState::Succeeded );
+    // node_1 recomputed; the still-verified siblings stay cached.
+    REQUIRE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+}
+
+TEST_CASE( "An executor artifact outside the run directory fails the node", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    PipelineRunCoordinator coordinator;
+    const QString runDir = scratchDir( QStringLiteral( "outside-run" ) );
+    const QString foreignDir = scratchDir( QStringLiteral( "outside-foreign" ) );
+
+    coordinator.setExecutor( [&]( const NodeFact &, const QHash<QString, QString> &, const QString & ) {
+        NodeExecutionResult result;
+        const QString artifact = QDir( foreignDir ).filePath( QStringLiteral( "escape.bin" ) );
+        QFile f( artifact );
+        if ( !f.open( QIODevice::WriteOnly ) )
+        {
+            result.errorMessage = QStringLiteral( "artifact open failed" );
+            return result;
+        }
+        f.write( QByteArrayLiteral( "escape" ) );
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    } );
+
+    REQUIRE( coordinator.startRun( chain( 1 ), runDir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const NodeStatusSnapshot snapshot =
+        coordinator.getAllStatuses().value( QStringLiteral( "node_1" ) );
+    REQUIRE( snapshot.state == ExecutionState::Failed );
+    REQUIRE( snapshot.errorMessage.contains( QStringLiteral( "ir2.artifact_outside_run" ) ) );
+    REQUIRE( snapshot.outputArtifactPath.isEmpty() );
+}
+
+TEST_CASE( "A parameter change invalidates exactly the downstream subgraph", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "invalidate" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Edit node_2's parameters inside the embedded workflow: its signature
+    // changes, and so does node_3's (parent component) — node_1's doesn't.
+    QJsonObject doc = readJsonObject( checkpoint );
+    QJsonObject workflow = doc.value( QLatin1String( "workflow" ) ).toObject();
+    QJsonArray wnodes = workflow.value( QLatin1String( "nodes" ) ).toArray();
+    for ( qsizetype i = 0; i < wnodes.size(); ++i )
+    {
+        QJsonObject node = wnodes.at( i ).toObject();
+        if ( node.value( QLatin1String( "nodeId" ) ).toString() != QLatin1String( "node_2" ) )
+            continue;
+        node.insert( QLatin1String( "parameters" ),
+                     QJsonObject{ { QStringLiteral( "changed" ), true } } );
+        wnodes.replace( i, node );
+    }
+    workflow.insert( QLatin1String( "nodes" ), wnodes );
+    doc.insert( QLatin1String( "workflow" ), workflow );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 2 ); // node_2 + node_3, nothing else
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "A node recorded as Running recomputes (crash mid-run)", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    QString runDir;
+    const QString checkpoint = produceChainCheckpoint( QStringLiteral( "crash" ), &runDir );
+    REQUIRE( !checkpoint.isEmpty() );
+
+    // Simulate a process death between node_3's dispatch and completion.
+    QJsonObject doc = readJsonObject( checkpoint );
+    mutateNodeEntry( doc, QStringLiteral( "node_3" ), []( QJsonObject &entry ) {
+        entry.insert( QLatin1String( "state" ), QStringLiteral( "Running" ) );
+    } );
+    REQUIRE( writeJsonObject( checkpoint, doc ) );
+
+    std::atomic<int> executed{ 0 };
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( countingExecutor( &executed ) );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpoint, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    REQUIRE( executed.load() == 1 );
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "A cancelled run resumes to full success", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "cancel-resume" ) );
+    QString checkpointFile;
+
+    {
+        PipelineRunCoordinator coordinator;
+        // Slow executor: keeps the run in flight so the cancel lands mid-run.
+        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+            QThread::msleep( 15 );
+            NodeExecutionResult result;
+            const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+            QFile f( artifact );
+            if ( !f.open( QIODevice::WriteOnly ) )
+            {
+                result.errorMessage = QStringLiteral( "artifact open failed" );
+                return result;
+            }
+            f.write( QByteArrayLiteral( "ok" ) );
+            result.success = true;
+            result.artifactPath = artifact;
+            return result;
+        } );
+        REQUIRE( coordinator.startRun( chain( 4 ), dir ) );
+        QEventLoop loop;
+        QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop, &QEventLoop::quit );
+        QTimer::singleShot( 0, &coordinator, [ &coordinator ]() { coordinator.requestCancel(); } );
+        QTimer::singleShot( 20000, &loop, &QEventLoop::quit );
+        loop.exec();
+        checkpointFile = coordinator.checkpointPath();
+        REQUIRE( QFile::exists( checkpointFile ) );
+    }
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 4 );
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+        REQUIRE( snapshot.state == ExecutionState::Succeeded );
 }

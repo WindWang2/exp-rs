@@ -3,16 +3,21 @@
 
 #include "workflow/plan_optimizer.h"
 #include "workflow/workflow_dag_analyzer.h"
+#include "workflow/workflow_limits.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QSet>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QRegularExpression>
+#include <QtEndian>
 #include <QThread>
 
 #ifdef Q_OS_WIN
@@ -25,6 +30,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <optional>
 
 #include <fcntl.h>
 #ifdef Q_OS_WIN
@@ -53,14 +59,65 @@ QString stateKey( ExecutionState state )
     return executionStateString( state );
 }
 
-ExecutionState stateFromKey( const QString &key )
+/// Fail-closed inverse of stateKey: the checkpoint state vocabulary is part
+/// of the format contract — an unknown key means the document is corrupt (or
+/// written by a build with a wider vocabulary, which must bump `version`).
+std::optional<ExecutionState> stateFromKey( const QString &key )
 {
     for ( ExecutionState s :
           { ExecutionState::Pending, ExecutionState::Ready, ExecutionState::Running, ExecutionState::Succeeded,
             ExecutionState::Failed, ExecutionState::Cancelled, ExecutionState::Skipped } )
         if ( executionStateString( s ) == key )
             return s;
-    return ExecutionState::Pending;
+    return std::nullopt;
+}
+
+/// Checkpoint envelope this build writes; the reader accepts the closed set
+/// below. 1.1 adds per-node artifact identity (size / mtime / fingerprint).
+const QString kCheckpointKind = QStringLiteral( "d17_pipeline_checkpoint" );
+const QString kCheckpointVersionCurrent = QStringLiteral( "1.1" );
+const QString kCheckpointVersionLegacy = QStringLiteral( "1.0" );
+
+/// sha256fl: SHA-256 over [8-byte LE size][first <=1MiB][last <=1MiB] — an
+/// O(2 MiB) deterministic identity for arbitrarily large artifacts (whole
+/// file when <= 2 MiB). Empty string when the file cannot be read.
+QString computeArtifactFingerprint( const QString &path, qint64 size )
+{
+    QFile file( path );
+    if ( size < 0 || !file.open( QIODevice::ReadOnly ) )
+        return {};
+    constexpr qint64 kWindow = 1024 * 1024;
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    QByteArray sizeLE( 8, '\0' );
+    qToLittleEndian<qint64>( size, sizeLE.data() );
+    hash.addData( sizeLE );
+    hash.addData( file.read( qMin( kWindow, size ) ) );
+    if ( size > kWindow )
+    {
+        if ( !file.seek( size - kWindow ) )
+            return {};
+        hash.addData( file.read( kWindow ) );
+    }
+    return QStringLiteral( "sha256fl:%1" ).arg( QString::fromLatin1( hash.result().toHex() ) );
+}
+
+/// Canonical-path containment: the artifact must resolve (symlinks included)
+/// to a path strictly inside the canonical run directory. Unresolvable or
+/// empty paths fail closed; the run directory itself does not count.
+bool isContainedInDirectory( const QString &artifactPath, const QString &canonicalRunDir )
+{
+    if ( artifactPath.isEmpty() || canonicalRunDir.isEmpty() )
+        return false;
+    const QString canonicalArtifact = QFileInfo( artifactPath ).canonicalFilePath();
+    if ( canonicalArtifact.isEmpty() )
+        return false;
+    return canonicalArtifact.startsWith( canonicalRunDir + QLatin1Char( '/' ),
+#ifdef Q_OS_WIN
+                                         Qt::CaseInsensitive
+#else
+                                         Qt::CaseSensitive
+#endif
+    );
 }
 
 bool fsyncFile( const QString &path )
@@ -502,10 +559,46 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
         // of its outcome — the run as a whole did not produce it.
         snapshot.state = ExecutionState::Cancelled;
     }
+    else if ( result.success && !result.artifactPath.isEmpty() )
+    {
+        // Artifact contract (DECISIONS D3): a reported product must be a real
+        // file that resolves inside the run directory, and it must be
+        // fingerprintable — a success we cannot re-verify on resume is a
+        // contract violation, not a cacheable result.
+        const QFileInfo artifactInfo( result.artifactPath );
+        const QString canonicalRunDir = QDir( m_state->runDirectory ).canonicalPath();
+        if ( !artifactInfo.isFile()
+             || !isContainedInDirectory( result.artifactPath, canonicalRunDir ) )
+        {
+            snapshot.state = ExecutionState::Failed;
+            snapshot.errorMessage =
+                QStringLiteral( "ir2.artifact_outside_run: artifact '%1' is missing or resolves outside run directory '%2' (node '%3')" )
+                    .arg( result.artifactPath, m_state->runDirectory, nodeId );
+        }
+        else if ( ( snapshot.artifactFingerprint =
+                        computeArtifactFingerprint( artifactInfo.canonicalFilePath(), artifactInfo.size() ) )
+                      .isEmpty() )
+        {
+            snapshot.state = ExecutionState::Failed;
+            snapshot.errorMessage =
+                QStringLiteral( "ir2.artifact_unverifiable: cannot fingerprint artifact '%1' (node '%2')" )
+                    .arg( result.artifactPath, nodeId );
+        }
+        else
+        {
+            snapshot.state = ExecutionState::Succeeded;
+            snapshot.outputArtifactPath = result.artifactPath;
+            snapshot.artifactSizeBytes = artifactInfo.size();
+            snapshot.artifactLastModifiedMs =
+                artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+            snapshot.progress = 1.0f;
+        }
+    }
     else if ( result.success )
     {
+        // A sink node may legitimately produce no file; it Succeeds but can
+        // never be a cache hit (no artifact to verify on resume).
         snapshot.state = ExecutionState::Succeeded;
-        snapshot.outputArtifactPath = result.artifactPath;
         snapshot.progress = 1.0f;
     }
     else
@@ -585,8 +678,8 @@ void PipelineRunCoordinator::persistCheckpoint()
         return;
 
     QJsonObject document;
-    document.insert( QLatin1String( "kind" ), QStringLiteral( "d17_pipeline_checkpoint" ) );
-    document.insert( QLatin1String( "version" ), QStringLiteral( "1.0" ) );
+    document.insert( QLatin1String( "kind" ), kCheckpointKind );
+    document.insert( QLatin1String( "version" ), kCheckpointVersionCurrent );
     document.insert( QLatin1String( "runId" ), m_state->runId );
     document.insert( QLatin1String( "runDirectory" ), m_state->runDirectory );
     document.insert( QLatin1String( "workflow" ), WorkflowIR::toJson( m_state->def ) );
@@ -606,6 +699,9 @@ void PipelineRunCoordinator::persistCheckpoint()
         entry.insert( QLatin1String( "errorMessage" ), snapshot.errorMessage );
         entry.insert( QLatin1String( "elapsedMs" ), snapshot.elapsedMs );
         entry.insert( QLatin1String( "artifact" ), snapshot.outputArtifactPath );
+        entry.insert( QLatin1String( "artifactSize" ), snapshot.artifactSizeBytes );
+        entry.insert( QLatin1String( "artifactMtimeMs" ), snapshot.artifactLastModifiedMs );
+        entry.insert( QLatin1String( "artifactFingerprint" ), snapshot.artifactFingerprint );
         entry.insert( QLatin1String( "isCacheHit" ), snapshot.isCacheHit );
         entry.insert( QLatin1String( "signature" ), snapshot.lineageSignature );
         nodes.append( entry );
@@ -633,11 +729,37 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
         return fail( QStringLiteral( "cannot open checkpoint '%1'" ).arg( checkpointFilePath ) );
+    // Bounded read (DECISIONS D5): a checkpoint is a small JSON sidecar —
+    // anything past the shared cap is planted or corrupt and must not be
+    // buffered unbounded.
+    if ( file.size() > kMaxCheckpointDocumentBytes )
+        return fail( QStringLiteral( "checkpoint '%1' exceeds the %2-byte size cap" )
+                         .arg( checkpointFilePath )
+                         .arg( kMaxCheckpointDocumentBytes ) );
     const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
     if ( doc.isNull() || !doc.object().value( QLatin1String( "workflow" ) ).isObject() )
         return fail( QStringLiteral( "checkpoint '%1' is not a valid document" ).arg( checkpointFilePath ) );
 
     const QJsonObject document = doc.object();
+    // Envelope gate (DECISIONS D2): unknown kind or a version outside the
+    // closed supported set is refused outright — a checkpoint this build did
+    // not write must never be silently reinterpreted.
+    if ( document.value( QLatin1String( "kind" ) ).toString() != kCheckpointKind )
+        return fail( QStringLiteral( "checkpoint '%1' has unsupported kind '%2'" )
+                         .arg( checkpointFilePath,
+                               document.value( QLatin1String( "kind" ) ).toString() ) );
+    const QString checkpointVersion = document.value( QLatin1String( "version" ) ).toString();
+    if ( checkpointVersion != kCheckpointVersionLegacy
+         && checkpointVersion != kCheckpointVersionCurrent )
+        return fail( QStringLiteral( "checkpoint '%1' has unsupported version '%2'" )
+                         .arg( checkpointFilePath, checkpointVersion ) );
+    // runId is persisted into provenance artifacts; refuse ids that could not
+    // safely name a file (mirrors the Engine-2.0 isValidRunId policy).
+    const QString runId = document.value( QLatin1String( "runId" ) ).toString();
+    if ( runId.isEmpty() || runId.size() > 128 || runId.contains( QLatin1String( ".." ) )
+         || !runId.contains( QRegularExpression( QStringLiteral( "\\A[A-Za-z0-9._-]+\\z" ) ) ) )
+        return fail( QStringLiteral( "checkpoint '%1' carries an unsafe runId '%2'" )
+                         .arg( checkpointFilePath, runId ) );
     auto parsed = WorkflowIR::fromJson( document.value( QLatin1String( "workflow" ) ).toObject() );
     if ( !parsed.isSuccess() )
         return fail( QStringLiteral( "checkpoint workflow does not parse: %1" ).arg( parsed.error() ) );
@@ -668,9 +790,16 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     m_state->statuses.clear();
     m_state->remainingParents.clear();
 
-    // Replay statuses; CacheHit requires BOTH a matching recomputed lineage
-    // signature and a still-existing artifact.
+    // Replay statuses. A node becomes CacheHit iff ALL of:
+    //   recorded state Succeeded, lineage signature still matches, and the
+    //   recorded artifact re-verifies — exists, resolves inside the recorded
+    //   run directory, and matches size / mtime / content fingerprint.
+    // Anything less reverts to Pending and recomputes: a tampered, moved, or
+    // foreign artifact is never served (DECISIONS D3). Checkpoints written
+    // before format 1.1 carry no identity fields and degrade to a full
+    // recompute — correct but cold.
     const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( m_state->def );
+    const QString canonicalRunDir = QDir( m_state->runDirectory ).canonicalPath();
     for ( const QJsonValue &value : nodes )
     {
         const QJsonObject entry = value.toObject();
@@ -686,25 +815,54 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         snapshot.outputArtifactPath = entry.value( QLatin1String( "artifact" ) ).toString();
         snapshot.progress = static_cast<float>( entry.value( QLatin1String( "progress" ) ).toDouble() );
 
-        const ExecutionState recorded = stateFromKey( entry.value( QLatin1String( "state" ) ).toString() );
+        const QString recordedStateKey = entry.value( QLatin1String( "state" ) ).toString();
+        const std::optional<ExecutionState> recorded = stateFromKey( recordedStateKey );
+        if ( !recorded.has_value() )
+            return fail( QStringLiteral( "checkpoint '%1' records unknown state '%2' for node '%3'" )
+                             .arg( checkpointFilePath, recordedStateKey, nodeId ) );
         const QString recordedSignature = entry.value( QLatin1String( "signature" ) ).toString();
-        const bool artifactExists = !snapshot.outputArtifactPath.isEmpty()
-            && QFileInfo::exists( snapshot.outputArtifactPath );
         const bool signatureMatches = recordedSignature == recomputed.value( nodeId );
 
-        if ( recorded == ExecutionState::Succeeded && artifactExists && signatureMatches )
+        bool artifactVerified = false;
+        if ( *recorded == ExecutionState::Succeeded && !snapshot.outputArtifactPath.isEmpty() )
+        {
+            const QFileInfo artifactInfo( snapshot.outputArtifactPath );
+            const qint64 recordedSize = entry.value( QLatin1String( "artifactSize" ) ).toInteger( -1 );
+            const qint64 recordedMtime = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger( -1 );
+            const QString recordedFingerprint =
+                entry.value( QLatin1String( "artifactFingerprint" ) ).toString();
+            const qint64 liveMtime =
+                artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+            artifactVerified =
+                artifactInfo.isFile()
+                && isContainedInDirectory( snapshot.outputArtifactPath, canonicalRunDir )
+                && recordedSize >= 0 && recordedSize == artifactInfo.size() && recordedMtime >= 0
+                && recordedMtime == liveMtime && !recordedFingerprint.isEmpty()
+                && recordedFingerprint
+                       == computeArtifactFingerprint( snapshot.outputArtifactPath, artifactInfo.size() );
+            if ( artifactVerified )
+            {
+                snapshot.artifactSizeBytes = artifactInfo.size();
+                snapshot.artifactLastModifiedMs = liveMtime;
+                snapshot.artifactFingerprint = recordedFingerprint;
+            }
+        }
+
+        if ( *recorded == ExecutionState::Succeeded && artifactVerified && signatureMatches )
         {
             snapshot.state = ExecutionState::Succeeded;
             snapshot.isCacheHit = true;
         }
-        else if ( recorded == ExecutionState::Skipped )
+        else if ( *recorded == ExecutionState::Skipped )
         {
             // Skip decisions are re-derived by the frontier; treat as fresh.
             snapshot.state = ExecutionState::Pending;
+            snapshot.outputArtifactPath.clear();
         }
         else
         {
             snapshot.state = ExecutionState::Pending; // recompute (incl. Failed/Cancelled/Running)
+            snapshot.outputArtifactPath.clear(); // stale path must not leak into this run
         }
         snapshot.lineageSignature = recomputed.value( nodeId );
         m_state->statuses.insert( nodeId, snapshot );
@@ -717,7 +875,6 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    const WorkflowDocument &resumedDef = m_state->def;
     for ( const NodeFact &node : resumedDef.nodes )
     {
         int parents = 0;

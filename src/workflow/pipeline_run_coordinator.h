@@ -15,9 +15,18 @@
 // Checkpoints: after every node terminal transition, the full status
 // snapshot is written atomically — JSON to `checkpoint_<runId>.json.tmp`,
 // flush, fsync (POSIX) / _commit (Win32), rename over the target, directory
-// fsync. resumeFromCheckpoint replays the document: a node is CacheHit iff
-// its recomputed lineage signature matches the recorded one AND its
-// recorded artifact still exists; everything else is recomputed.
+// fsync. The envelope is gated on load: `kind` must be the D17 tag and
+// `version` must be a member of the closed supported set — a checkpoint this
+// build did not write is refused, never reinterpreted.
+//
+// resumeFromCheckpoint replays the document: a node is CacheHit iff its
+// recomputed lineage signature matches the recorded one AND its recorded
+// artifact still verifies — exists, resolves (symlinks included) inside the
+// recorded run directory, and matches the recorded size / modification time /
+// content fingerprint. A tampered, moved, or foreign artifact is never
+// served: the node reverts to Pending and recomputes. Executors returning a
+// path outside the run directory fail their node with
+// `ir2.artifact_outside_run:` instead of recording a false success.
 //
 // Node work is an injectable NodeExecutor — production may bind real
 // operators, tests bind deterministic synthetic ones.
@@ -56,6 +65,12 @@ struct NodeStatusSnapshot
     QString errorMessage;
     qint64 elapsedMs = 0;
     QString outputArtifactPath;
+    /// Artifact identity recorded at success time and re-verified on resume
+    /// (DECISIONS D3): -1 / empty when no artifact was produced or the run
+    /// predates checkpoint format 1.1 (which forces a conservative recompute).
+    qint64 artifactSizeBytes = -1;
+    qint64 artifactLastModifiedMs = -1;
+    QString artifactFingerprint; // "sha256fl:<hex>" — see coordinator cpp
     bool isCacheHit = false;
     QString lineageSignature;
 };
