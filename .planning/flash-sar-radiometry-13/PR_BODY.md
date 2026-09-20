@@ -62,4 +62,4 @@ Reproduced identically with this branch's `src/` stashed (pristine master), so t
 
 ## Conflict hotspots
 
-`tests/CMakeLists.txt` (append-only convention — the open PRs also append there; textual conflict only), `.goal-loop-ledger.md` and `.planning/` (every track appends). `docs/processing/sar-domain.md` §16 follows §15 from SAR 12.0.
+`tests/CMakeLists.txt` (append-only convention — the open PRs also append there; textual conflict only), `.goal-loop-ledger.md` and `.gitignore` (every track appends its `.planning/<track>/` whitelist entry — this branch appends one for `flash-sar-radiometry-13`, exactly as SAR 12.0 did for its own). `docs/processing/sar-domain.md` §16 follows §15 from SAR 12.0. Final overlap scan at PR time: 8 open PRs (#1135–#1142), none with SAR/radiometric source overlap.
