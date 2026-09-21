@@ -11970,3 +11970,18 @@ target_include_directories(test_suitability_profiles PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_profiles)
+
+qt_add_executable(test_suitability_adversarial
+  test_suitability_adversarial.cpp
+)
+target_link_libraries(test_suitability_adversarial PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_suitability_adversarial PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_adversarial)
