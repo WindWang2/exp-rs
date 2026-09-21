@@ -22,8 +22,8 @@
     "determinism" : 
     {
       "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
       "side_effects" : false,
       "stochastic" : false
     },
@@ -35,9 +35,9 @@
         "when" : "\u8f93\u5165\u4e0d\u662f\u5355\u6ce2\u6bb5\u5f97\u5206\u6805\u683c"
       },
       {
-        "code" : "INSUFFICIENT_MEMORY",
-        "remedy" : "\u88c1\u526a\u5f71\u50cf\u8303\u56f4\u6216\u5148\u964d\u91c7\u6837\u518d\u878d\u5408",
-        "when" : "\u6574\u5e45\u5f97\u5206\u9762\u65e0\u6cd5\u9a7b\u7559\u5185\u5b58\uff08full_raster \u7b56\u7565\uff09"
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "method='bilateral' \u65f6\u63d0\u4f9b\u6709\u9650\u7684 sigmaRange\uff08\u5f97\u5206\u5355\u4f4d\uff09",
+        "when" : "sigmaRange \u975e\u6b63\u6216\u975e\u6709\u9650\u503c"
       }
     ],
     "family" : "hyperspectral",
@@ -68,6 +68,17 @@
           "type" : "numeric"
         },
         {
+          "default" : "mean",
+          "enum" : 
+          [
+            "mean",
+            "bilateral"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
           "name" : "output",
           "required" : true,
           "type" : "string"
@@ -77,12 +88,18 @@
           "name" : "radius",
           "required" : false,
           "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "sigmaRange",
+          "required" : false,
+          "type" : "numeric"
         }
       ]
     },
     "limitations" : 
     [
-      "Full-raster memory policy: the whole single-band score plane is held in memory (float32 width*height)."
+      "The bilateral method is O(pixels * (2r+1)^2) with no interior cancellation point, like the mean; radius is bounded to [0, 128]."
     ],
     "modality" : 
     [
@@ -94,28 +111,15 @@
       "Input must be a single-band score raster."
     ],
     "schema_version" : 2,
-    "summary" : "\u5149\u8c31\u2014\u7a7a\u95f4\u878d\u5408\uff1a\u5bf9\u76ee\u6807\u68c0\u6d4b\u5f97\u5206\u56fe\u505a\u5c40\u90e8\u7a97\u53e3\u5747\u503c\u878d\u5408\uff0c\u6291\u5236\u5b64\u7acb\u5355\u50cf\u7d20\u865a\u8b66\uff0c\u65e0\u6548\u50cf\u5143\u4e0d\u53c2\u4e0e\u90bb\u57df\u5747\u503c\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u7a7a\u95f4\u6ee4\u6ce2",
-        "\u865a\u8b66\u6291\u5236",
-        "NoData"
-      ],
-      "courses" : 
-      [
-        "\u9ad8\u5149\u8c31\u9065\u611f"
-      ],
-      "exercise" : "\u5bf9 ACE \u5f97\u5206\u56fe\u505a\u878d\u5408\u524d\u540e\u5bf9\u6bd4\uff0c\u7edf\u8ba1\u5b64\u7acb\u865a\u8b66\u50cf\u5143\u7684\u6570\u91cf\u53d8\u5316\u3002"
-    }
+    "summary" : "\u5149\u8c31\u2014\u7a7a\u95f4\u878d\u5408\uff1a\u5bf9\u76ee\u6807\u68c0\u6d4b\u5f97\u5206\u56fe\u505a\u5c40\u90e8\u7a97\u53e3\u805a\u5408\uff08mean \u5747\u503c\u6216 bilateral \u4fdd\u8fb9\uff09\uff0c\u6291\u5236\u5b64\u7acb\u5355\u50cf\u7d20\u865a\u8b66\uff0c\u65e0\u6548\u50cf\u5143\u4e0d\u53c2\u4e0e\u90bb\u57df\u805a\u5408\u3002",
+    "teaching_use" : {}
   },
-  "description" : "Fuse a spectral score raster with its local spatial consistency: a NoData-aware convex combination of the score and the valid window mean.",
+  "description" : "Fuse a spectral score raster with its local spatial consistency: a NoData-aware convex combination of the score and the valid window mean (or edge-preserving bilateral aggregate).",
   "display_name" : "Spectral-Spatial Fuse",
   "gpu" : false,
   "id" : "rs:spectral_spatial_fuse",
   "input" : "raster",
-  "notes" : "Pure window function of the score plane: tile-agnostic, deterministic; invalid (NoData / non-finite) pixels are never fused and never enter a neighbor's mean (renormalized, no zero-fill bias). Bit-exact grade.",
+  "notes" : "Pure window function of the score plane: tile-agnostic, deterministic; invalid (NoData / non-finite) pixels are never fused and never enter a neighbor's aggregate (renormalized, no zero-fill bias). Bit-exact grade. method 'bilateral' range-weights the neighborhood so score edges are preserved instead of smeared.",
   "output" : "raster",
   "schema_version" : 2,
   "tags" : 

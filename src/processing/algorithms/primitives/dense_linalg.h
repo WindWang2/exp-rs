@@ -23,8 +23,19 @@ namespace sicnu::primitives
 /// |value| < 1e-12); @a m is then left in an unspecified state.
 bool invertDenseMatrixInPlace( std::vector<double> &m, int n );
 
-/// Convenience form: @a m is preserved, the inverse is written to
-/// @a inverse (row-major, n×n). Same singular contract.
-bool invertDenseMatrix( const std::vector<double> &m, int n, std::vector<double> *inverse );
+    /// Convenience form: @a m is preserved, the inverse is written to
+    /// @a inverse (row-major, n×n). Same singular contract.
+    bool invertDenseMatrix( const std::vector<double> &m, int n, std::vector<double> *inverse );
+
+    /// Condition number λmax/λmin of a symmetric positive-semi-definite n×n
+    /// row-major matrix, for diagnostics on small Gram matrices (the
+    /// interference matrices of the TCIMF/OSP detectors). Computed from the
+    /// eigenvalues of a deterministic cyclic-Jacobi diagonalization (exact to
+    /// machine precision — a fixed-start power iteration is structurally blind
+    /// for the equiangular Gram matrices this diagnostic exists to measure).
+    /// Returns -1 when the matrix is not computable (size mismatch,
+    /// non-finite, or a non-positive smallest eigenvalue) — "unknown" is
+    /// reported honestly rather than guessed.
+    double conditionNumber( const std::vector<double> &m, int n );
 
 } // namespace sicnu::primitives

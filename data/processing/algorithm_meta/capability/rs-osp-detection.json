@@ -1,0 +1,140 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4eba\u5de5\u76ee\u6807",
+        "\u81ea\u7136\u80cc\u666f"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u5149\u8c31\u76ee\u6807\u68c0\u6d4b",
+        "\u5df2\u77e5\u5e72\u6270\u5b50\u7a7a\u95f4\u7684\u573a\u666f"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u901a\u8fc7 interference / interferenceRef \u63d0\u4f9b\u81f3\u5c11\u4e00\u4e2a\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e00\u81f4\u7684\u975e\u96f6\u5e72\u6270\u5149\u8c31",
+        "when" : "\u7f3a\u5c11\u5e72\u6270\u5149\u8c31\u6216\u5e72\u6270\u5149\u8c31\u6ce2\u6bb5\u6570\u4e0d\u5339\u914d"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5254\u9664\u91cd\u590d\u6216\u5171\u7ebf\u7684\u5e72\u6270\u5149\u8c31\uff1b\u786e\u8ba4\u76ee\u6807\u4e0d\u5728\u5e72\u6270\u5b50\u7a7a\u95f4\u5185",
+        "when" : "\u5e72\u6270\u5149\u8c31\u7ebf\u6027\u76f8\u5173\uff08U\u1d40U \u5947\u5f02\uff09\uff0c\u6216\u76ee\u6807\u6295\u5f71\u540e\u80fd\u91cf\u4e0d\u8db3"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "OSP \u4e0d\u6d88\u8d39\u80cc\u666f\u6805\u683c\uff1b\u9700\u8981\u80cc\u666f\u9a71\u52a8\u68c0\u6d4b\u65f6\u4f7f\u7528 rs:tcimf_detection \u6216 rs:cem_detection",
+        "when" : "\u4e3a OSP \u63d0\u4f9b\u4e86 background \u53c2\u6570"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "interference",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "interferenceRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryMaterials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "libraryPath",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "target",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "targetRef",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "A target that lies (numerically) inside the undesired subspace is refused \u2014 no filter can suppress the interference and keep the target at the same time."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "'target' must have one finite value per input band.",
+      "'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band, linearly independent of the others."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u6b63\u4ea4\u5b50\u7a7a\u95f4\u6295\u5f71\uff08OSP\uff09\u76ee\u6807\u68c0\u6d4b\uff1a\u5c06\u76ee\u6807\u5149\u8c31\u6295\u5f71\u5230\u5df2\u77e5\u5e72\u6270\u5b50\u7a7a\u95f4\u7684\u6b63\u4ea4\u8865\u7a7a\u95f4\u4e0a\u9010\u50cf\u5143\u6253\u5206\uff0c\u4e0d\u4f30\u8ba1\u80cc\u666f\u7edf\u8ba1\u91cf\uff08\u5355\u904d\u6d41\u5f0f\uff09\uff0c\u5e72\u6270\u5149\u8c31\u5f97\u5206\u6052\u4e3a 0\u3002",
+    "teaching_use" : {}
+  },
+  "description" : "Orthogonal subspace projection target detection: suppresses the undesired signature subspace and projects the target onto what remains; interference scores exactly 0.",
+  "display_name" : "OSP Detector",
+  "gpu" : false,
+  "id" : "rs:osp_detection",
+  "input" : "raster",
+  "notes" : "Single-pass streaming OSP: orthogonal projection of the target onto the complement of the undesired signature subspace; every interference signature scores exactly 0; bit-exact grade.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

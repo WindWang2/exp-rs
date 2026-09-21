@@ -411,32 +411,31 @@ data/labs/_tmp/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
 
+# flash-spectral-intelligence-13 (Track D): track planning notes (markdown only; logs stay local).
+!.planning/flash-spectral-intelligence-13/
+.planning/flash-spectral-intelligence-13/*
+!.planning/flash-spectral-intelligence-13/*.md
 # flash-data-scale-13 (Track C): Data Scale & Catalog Performance 13.0 — track
 # planning notes (markdown only; logs stay local).
 !.planning/flash-data-scale-13/
 .planning/flash-data-scale-13/*
 !.planning/flash-data-scale-13/*.md
-
 # flash-sar-radiometry-13 (Track E): track planning notes (markdown only; logs stay local).
 !.planning/flash-sar-radiometry-13/
 .planning/flash-sar-radiometry-13/*
 !.planning/flash-sar-radiometry-13/*.md
-
 # ds41-capability-search-13 (Track I): track planning notes (markdown only; logs stay local).
 !.planning/ds41-capability-search-13/
 .planning/ds41-capability-search-13/*
 !.planning/ds41-capability-search-13/*.md
-
 # glm53-mission-runtime-13 (Mission Runtime 13.0): track planning notes (markdown only; logs stay local).
 !.planning/glm53-mission-runtime-13/
 .planning/glm53-mission-runtime-13/*
 !.planning/glm53-mission-runtime-13/*.md
-
 # ds41-geospatial-maintenance-13 (Track H): track planning notes (markdown only; logs stay local).
 !.planning/ds41-geospatial-maintenance-13/
 .planning/ds41-geospatial-maintenance-13/*
 !.planning/ds41-geospatial-maintenance-13/*.md
-
 # ds41-workflow-durability-13 (Track 13): track planning notes (markdown only; logs stay local).
 !.planning/ds41-workflow-durability-13/
 .planning/ds41-workflow-durability-13/*

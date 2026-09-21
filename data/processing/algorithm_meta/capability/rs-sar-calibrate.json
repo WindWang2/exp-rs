@@ -131,6 +131,7 @@
     },
     "limitations" : 
     [
+      "LUT calibration reads a per-row sidecar (one constant per input row, no interpolation); annotation-XML LUTs are not parsed and a missing LUT is a typed refusal, never a constant-A fallback.",
       "LUT-based calibration (per-block/per-pixel annotation LUTs) is not applied; use a constant A or pre-calibrated input."
     ],
     "modality" : 
@@ -140,6 +141,7 @@
     "operator_group" : "sar",
     "prerequisites" : 
     [
+      "SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run), or a per-row calibration LUT sidecar (one constant per input row).",
       "SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run)."
     ],
     "schema_version" : 2,

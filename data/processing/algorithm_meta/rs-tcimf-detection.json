@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:tcimf_detection",
+  "input" : "raster",
+  "notes" : "Two-pass streaming TCIMF (background correlation, score) over the shared valid-pixel predicate: the CEM filter with exact null constraints on the interference signatures (target scores 1, interference scores 0); bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

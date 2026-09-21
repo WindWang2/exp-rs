@@ -28,11 +28,15 @@ class SpectralLibraryDialog : public QDialog
 public:
     explicit SpectralLibraryDialog( QWidget *parent = nullptr );
 
-    /// Set the spectrum to match (per-band values, optional wavelength grid
-    /// and labels from the spectral profile dock).
+    /// Set the spectrum to match (per-band values, optional wavelength grid,
+    /// labels from the spectral profile dock, and an optional FWHM grid).
+    /// Saving to a v2 library requires BOTH grids (the schema of record makes
+    /// them mandatory); without them the save is refused, never written
+    /// half-valid.
     void setSpectrum( const QVector<double> &values,
                       const QVector<double> &wavelengths = {},
-                      const QVector<QString> &labels = {} );
+                      const QVector<QString> &labels = {},
+                      const QVector<double> &fwhm = {} );
 
     /// Load the library at @p path (SpectralLibrary JSON) and run the match.
     /// Returns false with @p errorMessage when the file cannot be loaded.
@@ -64,6 +68,7 @@ private:
 
     QVector<double> m_values;
     QVector<double> m_wavelengths;
+    QVector<double> m_fwhm;
     QVector<QString> m_labels;
     SpectralLibrary::Library m_library;
     QString m_loadedPath;

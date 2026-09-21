@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -146,11 +147,13 @@ void SpectralLibraryDialog::setupUi()
 
 void SpectralLibraryDialog::setSpectrum( const QVector<double> &values,
                                          const QVector<double> &wavelengths,
-                                         const QVector<QString> &labels )
+                                         const QVector<QString> &labels,
+                                         const QVector<double> &fwhm )
 {
   m_values = values;
   m_wavelengths = wavelengths;
   m_labels = labels;
+  m_fwhm = fwhm;
   updateSpectrumSummary();
 }
 
@@ -296,19 +299,96 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
     m_libraryPathEdit->setProperty( "loadedPath", path );
   }
 
+  // A v2 library entry requires BOTH a wavelength grid and an FWHM grid (the
+  // schema of record lists them as required, and validateLibrary enforces
+  // grid/spectrum size equality). Saving an incomplete profile would write an
+  // entry the strict loader rejects — refuse instead of producing a
+  // schema-invalid library.
+  const bool hasWavelengths = m_wavelengths.size() == m_values.size() &&
+                              !m_values.isEmpty();
+  const bool hasFwhm = m_fwhm.size() == m_values.size() && !m_values.isEmpty();
+  if ( !hasWavelengths || !hasFwhm )
+  {
+    QStringList missing;
+    if ( !hasWavelengths )
+      missing.append( tr( "wavelength grid" ) );
+    if ( !hasFwhm )
+      missing.append( tr( "FWHM grid" ) );
+    m_statusLabel->setText(
+        tr( "Cannot save: the profile lacks the %1 (a library entry requires one "
+            "value per band)." ).arg( missing.join( QLatin1String( " and " ) ) ) );
+    return;
+  }
+
+  // The strict loader's value rules (validateLibrary): finite reflectance in
+  // [0, 1], strictly increasing wavelengths, positive FWHM. A raw-DN profile
+  // fails them, so refuse here instead of writing an entry the strict read
+  // path rejects.
+  for ( double v : m_values )
+  {
+    if ( !std::isfinite( v ) || v < 0.0 || v > 1.0 )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: reflectance values must be finite and within [0, 1] "
+              "(a raw-DN profile is not a reflectance library entry)." ) );
+      return;
+    }
+  }
+  for ( int i = 1; i < m_wavelengths.size(); ++i )
+  {
+    if ( !( m_wavelengths[i] > m_wavelengths[i - 1] ) )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: the wavelength grid must be strictly increasing." ) );
+      return;
+    }
+  }
+  for ( double f : m_fwhm )
+  {
+    if ( !std::isfinite( f ) || f <= 0.0 )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: FWHM values must be finite and positive." ) );
+      return;
+    }
+  }
+
   SpectralLibrary::Entry entry;
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
   entry.material = tr( "Untitled" );
   entry.source = tr( "Spectral Profile Panel" );
+  // v2 provenance fields, filled honestly: the profile is a measurement of
+  // unknown license, so it is marked synthetic = false with an explicit
+  // "unspecified" license rather than claiming one on the user's behalf.
+  // Without these the saved file fails loadValidated() — the write path and
+  // the read path would disagree on the schema.
+  // Stable slug that cannot collide with an existing entry id: the count is
+  // only a starting guess, advanced until the slug is free.
+  int slugIndex = m_library.entries.size() + 1;
+  auto idTaken = [this]( const QString &candidate ) {
+    for ( const SpectralLibrary::Entry &existing : m_library.entries )
+    {
+      if ( existing.id == candidate )
+        return true;
+    }
+    return false;
+  };
+  QString slug = QStringLiteral( "profile-%1" ).arg( slugIndex );
+  while ( idTaken( slug ) )
+    slug = QStringLiteral( "profile-%1" ).arg( ++slugIndex );
+  entry.id = slug;
+  entry.license = tr( "unspecified" );
+  entry.citation = tr( "Measured in the Spectral Profile Panel; license unspecified." );
+  entry.synthetic = false;
   entry.spectrum.reserve( m_values.size() );
   for ( double v : m_values )
     entry.spectrum.push_back( static_cast<float>( v ) );
-  if ( m_wavelengths.size() == m_values.size() )
-  {
-    entry.wavelengths.reserve( m_wavelengths.size() );
-    for ( double w : m_wavelengths )
-      entry.wavelengths.push_back( static_cast<float>( w ) );
-  }
+  entry.wavelengths.reserve( m_wavelengths.size() );
+  for ( double w : m_wavelengths )
+    entry.wavelengths.push_back( static_cast<float>( w ) );
+  entry.fwhm.reserve( m_fwhm.size() );
+  for ( double f : m_fwhm )
+    entry.fwhm.push_back( static_cast<float>( f ) );
 
   m_library.entries.append( entry );
   QString errorMessage;

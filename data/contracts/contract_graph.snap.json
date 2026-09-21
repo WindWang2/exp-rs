@@ -560,6 +560,12 @@
       "to" : "rs:obia_segment"
     },
     {
+      "from" : "rs:osp_detection",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:osp_detection"
+    },
+    {
       "from" : "rs:pca",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral_transform.json",
@@ -858,6 +864,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/classify.json",
       "to" : "rs:supervised_classification"
+    },
+    {
+      "from" : "rs:tcimf_detection",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:tcimf_detection"
     },
     {
       "from" : "rs:temporal_anomaly",
@@ -2492,6 +2504,12 @@
       "to" : "rs:obia_segment"
     },
     {
+      "from" : "rs:osp_detection",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:osp_detection"
+    },
+    {
       "from" : "rs:pca",
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
@@ -2810,6 +2828,12 @@
       "to" : "rs:supervised_classification"
     },
     {
+      "from" : "rs:tcimf_detection",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:tcimf_detection"
+    },
+    {
       "from" : "rs:temporal_anomaly",
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
@@ -2998,8 +3022,14 @@
     {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
-      "origin" : "main_window_workbench.cpp:400",
+      "origin" : "main_window_workbench.cpp:407",
       "to" : "app.commandPalette"
+    },
+    {
+      "from" : "mission.timeline.show",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:767",
+      "to" : "mission.timeline.show"
     },
     {
       "from" : "workbench.cartography",
@@ -3837,6 +3867,11 @@
       "origin" : "data/agent/capabilities/classify.json"
     },
     {
+      "id" : "rs:osp_detection",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
       "id" : "rs:pca",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/spectral_transform.json"
@@ -4087,6 +4122,11 @@
       "origin" : "data/agent/capabilities/classify.json"
     },
     {
+      "id" : "rs:tcimf_detection",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
       "id" : "rs:temporal_anomaly",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/temporal.json"
@@ -4294,7 +4334,7 @@
     {
       "id" : "app.commandPalette",
       "kind" : "command",
-      "origin" : "main_window_workbench.cpp:400"
+      "origin" : "main_window_workbench.cpp:407"
     },
     {
       "id" : "cartography.compose",
@@ -4410,6 +4450,21 @@
       "id" : "map.zoomOut",
       "kind" : "command",
       "origin" : "command_defs.cpp:209"
+    },
+    {
+      "id" : "mission.task.resume",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:785"
+    },
+    {
+      "id" : "mission.task.retry",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:774"
+    },
+    {
+      "id" : "mission.timeline.show",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:767"
     },
     {
       "id" : "project.exit",
@@ -7614,6 +7669,7 @@
     {
       "attributes" : 
       [
+        "background",
         "input",
         "loading",
         "output"
@@ -7752,6 +7808,7 @@
     {
       "attributes" : 
       [
+        "background",
         "input",
         "loading",
         "output"
@@ -8351,6 +8408,7 @@
     {
       "attributes" : 
       [
+        "background",
         "input",
         "loading",
         "output"
@@ -8600,6 +8658,18 @@
     {
       "attributes" : 
       [
+        "background",
+        "input",
+        "loading",
+        "output"
+      ],
+      "id" : "rs:osp_detection",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "input",
         "numComponents",
         "output"
@@ -8820,6 +8890,7 @@
       [
         "band",
         "calibrationA",
+        "calibrationLut",
         "incidenceDeg",
         "input",
         "noiseLinear",
@@ -9363,8 +9434,10 @@
       [
         "beta",
         "input",
+        "method",
         "output",
-        "radius"
+        "radius",
+        "sigmaRange"
       ],
       "id" : "rs:spectral_spatial_fuse",
       "kind" : "operator",
@@ -9416,6 +9489,18 @@
         "uncertaintyOutput"
       ],
       "id" : "rs:supervised_classification",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "background",
+        "input",
+        "loading",
+        "output"
+      ],
+      "id" : "rs:tcimf_detection",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -10929,6 +11014,15 @@
     {
       "attributes" : 
       [
+        "review:spectral detection writer reads (Float32 scores)"
+      ],
+      "id" : "rs:osp_detection",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "family:components + schema read"
       ],
       "id" : "rs:pca",
@@ -11400,6 +11494,15 @@
         "family:classification + pipeline seam"
       ],
       "id" : "rs:supervised_classification",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "review:spectral detection writer reads (Float32 scores)"
+      ],
+      "id" : "rs:tcimf_detection",
       "kind" : "scientific_contract",
       "origin" : "src/contracts/scientific_contract.cpp"
     },

@@ -304,9 +304,13 @@ TEST_CASE( "committed contract graph snapshot mirrors the live surface",
     // KNOWN scanner-scope gap (documented, platform-9-owned surface): the
     // graph's operator nodes come from OperatorParamScanner, which covers
     // src/operators only and does not parse lambda registrations / inline
-    // schema bodies — so the 6 cartography: adapters and the 4 io: fabric
+    // schema bodies — so the 5 cartography: adapters and the 4 io: fabric
     // operators are absent from the snapshot. The missing set must be
-    // EXACTLY these ten: growth means a new record lost its graph node.
+    // EXACTLY these nine: growth means a new record lost its graph node.
+    // cartography:produce joined the set on master: it carries a contract
+    // record (determinism_census) but no operator node — the same
+    // scanner-scope gap as the other cartography: adapters (the scanner does
+    // not parse its inline schema body).
     std::set<std::string> expectedMissing = {
         "cartography:compose",  "cartography:preflight", "cartography:validate",
         "cartography:repair",   "cartography:export",    "cartography:produce",

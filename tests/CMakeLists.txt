@@ -11774,7 +11774,12 @@ set(SICNU_MISSION_RUNTIME_SOURCES
 )
 
 function(sicnu_add_mission_runtime_test NAME)
-  add_executable(${NAME} ${NAME}.cpp ${SICNU_MISSION_RUNTIME_SOURCES})
+  # The mission-runtime test sources live in mission-runtime-gate/tests/ (not
+  # tests/): a bare ${NAME}.cpp fails to configure. Pre-existing master
+  # breakage (mission-runtime 13.0, PR #1139); repaired minimally here because
+  # this branch's union tree must configure.
+  add_executable(${NAME} ${CMAKE_SOURCE_DIR}/mission-runtime-gate/tests/${NAME}.cpp
+                 ${SICNU_MISSION_RUNTIME_SOURCES})
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -11804,3 +11809,70 @@ sicnu_add_mission_runtime_test(test_mission_runtime_persistence)
 sicnu_add_mission_runtime_test(test_mission_tools)
 sicnu_add_mission_runtime_test(test_mission_runtime_parity)
 sicnu_add_mission_runtime_test(test_mission_runtime_scale)
+
+# Spectral Intelligence 13.0 work package A: TCIMF / OSP detector kernels.
+add_executable(test_spectral_tcimf test_spectral_tcimf.cpp)
+target_link_libraries(test_spectral_tcimf PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_tcimf)
+target_include_directories(test_spectral_tcimf PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_tcimf)
+
+add_executable(test_spectral_osp test_spectral_osp.cpp)
+target_link_libraries(test_spectral_osp PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_osp)
+target_include_directories(test_spectral_osp PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_osp)
+
+# Spectral Intelligence 13.0 work package A: TCIMF / OSP operator contracts.
+add_executable(test_spectral_detection_13 test_spectral_detection_13.cpp)
+target_link_libraries(test_spectral_detection_13 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_detection_13)
+target_include_directories(test_spectral_detection_13 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_spectral_detection_13)
+
+# Spectral Intelligence 13.0 work package B: independent background raster.
+add_executable(test_spectral_background_raster test_spectral_background_raster.cpp)
+target_link_libraries(test_spectral_background_raster PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_spectral_background_raster)
+target_include_directories(test_spectral_background_raster PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests(test_spectral_background_raster)

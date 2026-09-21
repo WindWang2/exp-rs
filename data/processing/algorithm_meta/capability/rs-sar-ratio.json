@@ -74,6 +74,11 @@
           "data_kind" : "string",
           "name" : "outputType",
           "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "radiometricState",
+          "required" : true
         }
       ],
       "parameters" : 
@@ -133,6 +138,8 @@
     "limitations" : 
     [
       "Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.",
+      "Both inputs must declare the same recognized radiometric state (or nothing); a sigma0/gamma0 mix or a derived input is a typed refusal.",
+      "The output is a derived pair metric (SICNU_RADIOMETRIC_STATE=sar_pair_metric), not a backscatter calibration; rs:sar_calibrate and rs:sar_backscatter refuse it.",
       "If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first).",
       "Nonpositive power becomes NoData (NaN) for the log-domain outputs; B == 0 is NoData for ratio."
     ],

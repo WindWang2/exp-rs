@@ -312,7 +312,8 @@ void QgisDesktopWindow::openSpectralLibraryDialog()
     {
         dlg.setSpectrum(m_spectralProfile->values(),
                         m_spectralProfile->wavelengths(),
-                        m_spectralProfile->bandLabels());
+                        m_spectralProfile->bandLabels(),
+                        m_spectralProfile->fwhm());
     }
     dlg.exec();
 }

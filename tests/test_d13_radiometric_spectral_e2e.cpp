@@ -13,7 +13,7 @@
 #include "analysis/atmospheric/fast_6s_lookup.h"
 #include "analysis/hyperspectral/continuum_removal.h"
 #include "core/radiometric_state.h"
-#include "core/spectral_library.h"
+#include "processing/algorithms/spectral_library.h"
 #include "processing/algorithms/radiometric_calibration.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/spectral_unmixing.h"
@@ -227,28 +227,28 @@ TEST_CASE( "D13 end-to-end pipeline: DN to material report", "[e2e][radiometric]
     REQUIRE( unmix.meanSumConstraintViolation < 1e-5 );
 
     // ── Stage 6: spectral library match → material report (Pkg F) ──────────
-    exp_spectral::SpectralLibrary library;
-    exp_spectral::SpectralLibraryEntry vegetationEntry;
+    SpectralLibrary::Library library;
+    SpectralLibrary::Entry vegetationEntry;
     vegetationEntry.id = "veg";
     vegetationEntry.name = "healthy canopy";
-    vegetationEntry.materialClass = "vegetation";
+    vegetationEntry.material = "vegetation";
     vegetationEntry.source = "D13 E2E";
     vegetationEntry.spectrum = { 0.10f, 0.60f, 0.30f }; // NIR-dominant shape
-    exp_spectral::SpectralLibraryEntry waterEntry;
+    SpectralLibrary::Entry waterEntry;
     waterEntry.id = "water";
     waterEntry.name = "clear water";
-    waterEntry.materialClass = "water";
+    waterEntry.material = "water";
     waterEntry.source = "D13 E2E";
     waterEntry.spectrum = { 0.06f, 0.01f, 0.00f };
-    REQUIRE( library.addEntry( vegetationEntry ) );
-    REQUIRE( library.addEntry( waterEntry ) );
+    library.entries.append( vegetationEntry );
+    library.entries.append( waterEntry );
 
     // The vegetation pixel's (green, NIR, SWIR) shape matches "vegetation".
     const std::vector<float> pixelShape = { scene.green[0], scene.nir[0], scene.swir[0] };
-    const auto matches = library.matchSpectrum( pixelShape.data(), 3, 1, 1.0 );
-    REQUIRE( matches.size() == 1 );
-    REQUIRE( matches[0].materialClass == "vegetation" );
-    REQUIRE( matches[0].spectralAngleRad < matches.size() * 0.7 );
+    const auto matches = SpectralLibrary::matchSpectrum( pixelShape, library );
+    REQUIRE( matches.size() == 2 );
+    REQUIRE( matches[0].material == "vegetation" );
+    REQUIRE( matches[0].angleDegrees < 40.1 ); // < 0.7 rad, as before
 
     // ── Stage 7: thermal chain — radiance → Kelvin via USGS constants ──────
     std::vector<float> btKelvin( Scene::kPixels );
@@ -276,16 +276,16 @@ TEST_CASE( "D13 lab rubrics grade reference artifacts at exactly 100", "[e2e][ra
                                     std::all_of( scene.nir.begin(), scene.nir.end(),
                                                  []( float v ) { return v >= 0.0f && v <= 1.0f; } );
 
-    exp_spectral::SpectralLibrary library;
-    exp_spectral::SpectralLibraryEntry entry;
+    SpectralLibrary::Library library;
+    SpectralLibrary::Entry entry;
     entry.id = "veg";
     entry.name = "canopy";
-    entry.materialClass = "vegetation";
+    entry.material = "vegetation";
     entry.spectrum = { 0.10f, 0.60f, 0.30f };
-    REQUIRE( library.addEntry( entry ) );
+    library.entries.append( entry );
     const std::vector<float> pixelShape = { scene.green[0], scene.nir[0], scene.swir[0] };
-    const auto matches = library.matchSpectrum( pixelShape.data(), 3, 1, 1.0 );
-    const bool libraryTop1 = !matches.empty() && matches[0].materialClass == "vegetation";
+    const auto matches = SpectralLibrary::matchSpectrum( pixelShape, library );
+    const bool libraryTop1 = !matches.empty() && matches[0].material == "vegetation";
 
     std::vector<float> wavelengths, spectrum;
     buildSpectrum( wavelengths, spectrum );

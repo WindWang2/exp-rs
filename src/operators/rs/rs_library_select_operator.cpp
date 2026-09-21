@@ -44,27 +44,14 @@ Json::Value findNearDuplicates(const QVector<SpectralLibrary::Entry> &entries,
             const auto &b = entries[j].spectrum;
             if (a.size() != b.size() || a.empty())
                 continue;
-            double dot = 0.0, na = 0.0, nb = 0.0;
-            bool usable = true;
-            for (size_t k = 0; k < a.size(); ++k)
-            {
-                const float x = a[k];
-                const float y = b[k];
-                if (!std::isfinite(x) || !std::isfinite(y)
-                    || (nodata != 0.0f && (x == nodata || y == nodata)))
-                {
-                    usable = false;
-                    break;
-                }
-                dot += static_cast<double>(x) * y;
-                na += static_cast<double>(x) * x;
-                nb += static_cast<double>(y) * y;
-            }
-            if (!usable || na <= 0.0 || nb <= 0.0)
+            // Shared SAM kernel (single authority for similarity math after the
+            // library consolidation): NaN for non-finite, nodata-equal or
+            // zero-norm pairs — exactly the pairs this QA skips.
+            const double angleRad = SpectralClassification::spectralAngle(
+                a.data(), b.data(), a.size(), nodata);
+            if (std::isnan(angleRad))
                 continue;
-            const double cosAngle = dot / (std::sqrt(na) * std::sqrt(nb));
-            const double angleDeg =
-                std::acos(std::clamp(cosAngle, -1.0, 1.0)) * 180.0 / kPi;
+            const double angleDeg = angleRad * 180.0 / kPi;
             if (angleDeg <= thresholdDeg)
             {
                 Json::Value pair(Json::objectValue);

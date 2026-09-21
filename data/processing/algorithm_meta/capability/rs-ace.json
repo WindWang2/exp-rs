@@ -43,6 +43,11 @@
       [
         {
           "data_kind" : "raster",
+          "name" : "background",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
           "name" : "input",
           "required" : true
         }

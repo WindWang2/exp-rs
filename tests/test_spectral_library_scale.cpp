@@ -286,3 +286,68 @@ TEST_CASE( "MatchIndex cross-bucket undefined-angle tail keeps library order",
     auto scaledTop = index.match( query, gridA, topK );
     expectSameMatches( brute, scaledTop );
 }
+
+TEST_CASE( "MatchIndex scales to a 10k-entry library without per-query full "
+           "resampling",
+           "[spectral][library][scale][consolidation]" )
+{
+    // 10k entries on three grids (9000/750/250): the consolidation must not
+    // degrade the scale path — one query resamples per DISTINCT grid (2 here),
+    // never per entry, and the ranking stays bit-identical to brute force.
+    // Grid A spans 400–715 nm so grids B (to 710) and C (to 600) are fully
+    // inside the query range (an out-of-range grid would be legitimately
+    // skipped as incomparable, which is not what this case measures).
+    std::vector<float> gridA( 64 );
+    for ( size_t i = 0; i < gridA.size(); ++i )
+        gridA[i] = 400.0f + 5.0f * static_cast<float>( i );
+    std::vector<float> gridB{ 420.0f, 470.0f, 520.0f, 570.0f, 620.0f, 650.0f, 690.0f };
+    std::vector<float> gridC( 16 );
+    for ( size_t i = 0; i < gridC.size(); ++i )
+        gridC[i] = 450.0f + 10.0f * static_cast<float>( i );
+
+    Library library;
+    Lcg lcg;
+    for ( int i = 0; i < 9000; ++i )
+        library.entries.append( makeEntry( i, 64, lcg, gridA ) );
+    for ( int i = 0; i < 750; ++i )
+        library.entries.append( makeEntry( 9000 + i, 7, lcg, gridB ) );
+    for ( int i = 0; i < 250; ++i )
+        library.entries.append( makeEntry( 9750 + i, 16, lcg, gridC ) );
+
+    Lcg lcgQuery;
+    std::vector<float> query( 64 );
+    for ( size_t b = 0; b < query.size(); ++b )
+        query[b] = lcgQuery.next( 0.02f, 0.85f );
+
+    MatchIndex index;
+    REQUIRE( MatchIndex::build( library, &index ) );
+
+    const auto brute = matchSpectrum( query, gridA, library );
+    const auto scaled = index.match( query, gridA );
+    expectSameMatches( brute, scaled );
+
+    const Stats stats = index.lastStats();
+    REQUIRE( stats.resamplesPerformed == 2 ); // B and C, NOT 1000 entries
+    REQUIRE( stats.resamplesAvoided == 998 );
+    REQUIRE( stats.entriesScored == static_cast<int>( brute.size() ) );
+
+    // Top-K prefix: identical ranking and values, only the prefix scored.
+    Options topK;
+    topK.topK = 25;
+    const auto scaledTop = index.match( query, gridA, topK );
+    REQUIRE( scaledTop.size() == 25 );
+    for ( int i = 0; i < 25; ++i )
+    {
+        INFO( "top-K rank " << i );
+        REQUIRE( scaledTop[static_cast<size_t>( i )].entryIndex ==
+                 brute[static_cast<size_t>( i )].entryIndex );
+        REQUIRE( scaledTop[static_cast<size_t>( i )].angleDegrees ==
+                 brute[static_cast<size_t>( i )].angleDegrees );
+        REQUIRE( scaledTop[static_cast<size_t>( i )].divergence ==
+                 brute[static_cast<size_t>( i )].divergence );
+    }
+    const Stats topStats = index.lastStats();
+    REQUIRE( topStats.resamplesPerformed == 2 );
+    REQUIRE( topStats.entriesPrescreened == 10000 );
+    REQUIRE( topStats.entriesScored == 25 );
+}

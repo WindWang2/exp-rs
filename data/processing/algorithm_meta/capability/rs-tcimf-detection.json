@@ -11,7 +11,7 @@
       "scenes" : 
       [
         "\u9ad8\u5149\u8c31\u76ee\u6807\u68c0\u6d4b",
-        "\u4e9a\u50cf\u7d20\u5c0f\u76ee\u6807\u573a\u666f"
+        "\u5b58\u5728\u5df2\u77e5\u5e72\u6270\u5149\u8c31\u7684\u573a\u666f"
       ]
     },
     "band_roles" : {},
@@ -32,8 +32,13 @@
     [
       {
         "code" : "INVALID_PARAMETER",
-        "remedy" : "\u5c06\u76ee\u6807\u5149\u8c31\u91cd\u91c7\u6837\u5230\u5f71\u50cf\u6ce2\u6bb5\uff0c\u4fdd\u8bc1\u6bcf\u4e2a\u6ce2\u6bb5\u5bf9\u5e94\u4e00\u4e2a\u6709\u9650\u503c",
-        "when" : "\u76ee\u6807\u5149\u8c31\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e0d\u5339\u914d"
+        "remedy" : "\u901a\u8fc7 interference / interferenceRef \u63d0\u4f9b\u81f3\u5c11\u4e00\u4e2a\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e00\u81f4\u7684\u975e\u96f6\u5e72\u6270\u5149\u8c31",
+        "when" : "\u7f3a\u5c11\u5e72\u6270\u5149\u8c31\u6216\u5e72\u6270\u5149\u8c31\u6ce2\u6bb5\u6570\u4e0d\u5339\u914d"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5254\u9664\u91cd\u590d\u6216\u5171\u7ebf\u7684\u5e72\u6270\u5149\u8c31\uff1b\u786e\u8ba4\u76ee\u6807\u4e0d\u5728\u5e72\u6270\u5f20\u6210\u7684\u5b50\u7a7a\u95f4\u5185",
+        "when" : "\u5e72\u6270\u5149\u8c31\u5728\u80cc\u666f\u5ea6\u91cf\u4e0b\u7ebf\u6027\u76f8\u5173\uff0c\u6216\u76ee\u6807\u4f4d\u4e8e\u5e72\u6270\u5b50\u7a7a\u95f4\u5185"
       },
       {
         "code" : "INVALID_PARAMETER",
@@ -67,6 +72,16 @@
       ],
       "parameters" : 
       [
+        {
+          "name" : "interference",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "interferenceRef",
+          "required" : false,
+          "type" : "string"
+        },
         {
           "name" : "libraryMaterials",
           "required" : false,
@@ -102,7 +117,8 @@
     },
     "limitations" : 
     [
-      "Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only \u2014 no spatial co-registration required)."
+      "Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only \u2014 no spatial co-registration required).",
+      "Interference spectra must be linearly independent under the background metric; a target inside the interference span is refused."
     ],
     "modality" : 
     [
@@ -112,18 +128,19 @@
     "prerequisites" : 
     [
       "'target' must have one finite value per input band.",
-      "At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) \u2014 under-sampled scenes are refused."
+      "At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) \u2014 under-sampled scenes are refused.",
+      "'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band."
     ],
     "schema_version" : 2,
-    "summary" : "\u7ea6\u675f\u80fd\u91cf\u6700\u5c0f\u5316\uff08CEM\uff09\u76ee\u6807\u68c0\u6d4b\uff1a\u4ee5\u573a\u666f\u76f8\u5173\u77e9\u9635\u5efa\u6a21\u80cc\u666f\uff0c\u65e0\u5931\u771f\u7ea6\u675f\u4e0b\u76ee\u6807\u5f97\u5206\u6052\u4e3a 1\uff0c\u5bf9\u4e58\u6027\u4eae\u5ea6\u53d8\u5316\u7a33\u5065\u3002",
+    "summary" : "\u76ee\u6807\u7ea6\u675f\u5e72\u6270\u6700\u5c0f\u5316\u6ee4\u6ce2\uff08TCIMF\uff09\u76ee\u6807\u68c0\u6d4b\uff1a\u5728 CEM \u7684\u65e0\u5931\u771f\u7ea6\u675f\u4e4b\u5916\uff0c\u5bf9\u5df2\u77e5\u5e72\u6270\u5149\u8c31\u65bd\u52a0\u7cbe\u786e\u96f6\u7ea6\u675f\uff08\u5e72\u6270\u5f97\u5206\u6052\u4e3a 0\uff09\uff0c\u4ee5\u573a\u666f\u76f8\u5173\u77e9\u9635\u5efa\u6a21\u80cc\u666f\u3002",
     "teaching_use" : {}
   },
-  "description" : "Constrained energy minimization target detection against the scene correlation background: the target scores exactly 1.",
-  "display_name" : "CEM Detector",
+  "description" : "Target-constrained interference-minimized filter: CEM with exact null constraints on undesired signatures (target scores 1, interference scores 0).",
+  "display_name" : "TCIMF Detector",
   "gpu" : false,
-  "id" : "rs:cem_detection",
+  "id" : "rs:tcimf_detection",
   "input" : "raster",
-  "notes" : "Two-pass streaming CEM (background correlation, score) over the shared valid-pixel predicate; scores are signed with the target scoring exactly 1 (distortionless constraint); bit-exact grade.",
+  "notes" : "Two-pass streaming TCIMF (background correlation, score) over the shared valid-pixel predicate: the CEM filter with exact null constraints on the interference signatures (target scores 1, interference scores 0); bit-exact grade.",
   "output" : "raster",
   "schema_version" : 2,
   "tags" : 

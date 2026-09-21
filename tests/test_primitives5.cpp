@@ -441,3 +441,61 @@ TEST_CASE( "Dense inverse refuses a singular matrix at the shared 1e-12 pivot fl
     std::vector<double> zero( 4, 0.0 );
     REQUIRE_FALSE( sicnu::primitives::invertDenseMatrix( zero, 2, &inv ) );
 }
+
+// ---------------------------------------------------------------------------
+// conditionNumber (Spectral Intelligence 13.0): the TCIMF/OSP interference
+// conditioning diagnostic. The eigenvalues come from a deterministic cyclic
+// Jacobi diagonalization — a fixed-start power iteration is structurally
+// blind for the equiangular Gram matrices this diagnostic exists to measure
+// (its start vector is an exact eigenvector of [[1,c],[c,1]], reporting
+// λmin as λmax(A⁻¹)).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Condition number: exact values on hand-computable Gram matrices",
+           "[primitives][linalg][condition]" )
+{
+    // Identity: cond == 1 exactly.
+    const std::vector<double> identity2 = { 1.0, 0.0, 0.0, 1.0 };
+    REQUIRE( sicnu::primitives::conditionNumber( identity2, 2 ) ==
+             Catch::Approx( 1.0 ).margin( 1e-12 ) );
+
+    // [[1, c], [c, 1]] has eigenvalues 1±c → cond = (1+c)/(1−c).
+    const double c = 0.5;
+    const std::vector<double> gram = { 1.0, c, c, 1.0 };
+    REQUIRE( sicnu::primitives::conditionNumber( gram, 2 ) ==
+             Catch::Approx( ( 1.0 + c ) / ( 1.0 - c ) ).margin( 1e-12 ) );
+
+    // The equiangular pair (60°): Gram [[1, −1/2], [−1/2, 1]] → cond = 3.
+    // A fixed-start power iteration reports 1 here (its start is an exact
+    // eigenvector); the Jacobi diagonalization reports the true 3.
+    const std::vector<double> equiangular = { 1.0, -0.5, -0.5, 1.0 };
+    REQUIRE( sicnu::primitives::conditionNumber( equiangular, 2 ) ==
+             Catch::Approx( 3.0 ).margin( 1e-12 ) );
+
+    // Near-collinear pair (angle 1e-4 rad): cond ≈ 4e8, the diagnostic the
+    // TCIMF/OSP kernels report for ill-conditioned interference sets.
+    const double eps = 1e-4;
+    const std::vector<double> near = { 1.0, std::cos( eps ), std::cos( eps ), 1.0 };
+    const double nearCond = sicnu::primitives::conditionNumber( near, 2 );
+    REQUIRE( nearCond > 1.0e6 );
+    // cond = (1+cos ε)/(1−cos ε) ≈ 4e8 for ε = 1e-4.
+    REQUIRE( nearCond ==
+             Catch::Approx( ( 1.0 + std::cos( eps ) ) / ( 1.0 - std::cos( eps ) ) )
+                 .margin( 1e-3 * nearCond ) );
+}
+
+TEST_CASE( "Condition number refuses non-computable input honestly",
+           "[primitives][linalg][condition]" )
+{
+    // Singular (rank 1): the smallest eigenvalue is 0 → "unknown", not a
+    // fabricated number.
+    const std::vector<double> singular = { 1.0, 1.0, 1.0, 1.0 };
+    REQUIRE( sicnu::primitives::conditionNumber( singular, 2 ) == -1.0 );
+
+    // Size mismatch and non-finite entries refuse too.
+    const std::vector<double> wrong = { 1.0, 0.0, 0.0 };
+    REQUIRE( sicnu::primitives::conditionNumber( wrong, 2 ) == -1.0 );
+    const std::vector<double> nanMatrix = { 1.0, 0.0, 0.0,
+                                            std::numeric_limits<double>::quiet_NaN() };
+    REQUIRE( sicnu::primitives::conditionNumber( nanMatrix, 2 ) == -1.0 );
+}
