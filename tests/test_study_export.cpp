@@ -82,7 +82,7 @@ ParameterStudySpec specWithObjective()
 
 QDateTime frozenTime()
 {
-    return QDateTime( QDate( 2026, 9, 22 ), QTime( 12, 0, 0 ), Qt::UTC );
+    return QDateTime( QDate( 2026, 9, 22 ), QTime( 12, 0, 0 ), QTimeZone::utc() );
 }
 
 } // namespace
