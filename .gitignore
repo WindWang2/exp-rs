@@ -440,3 +440,8 @@ data/labs/_tmp/
 !.planning/ds41-workflow-durability-13/
 .planning/ds41-workflow-durability-13/*
 !.planning/ds41-workflow-durability-13/*.md
+
+# RS14-14-agent-benchmark: track planning notes (markdown only; logs stay local).
+!.planning/RS14-14-agent-benchmark/
+.planning/RS14-14-agent-benchmark/*
+!.planning/RS14-14-agent-benchmark/*.md
