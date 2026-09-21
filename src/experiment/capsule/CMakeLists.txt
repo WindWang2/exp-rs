@@ -8,6 +8,8 @@ qt_add_library(sicnu_experiment_capsule STATIC
   capsule_builder.h
   capsule_document.cpp
   capsule_document.h
+  capsule_portability.cpp
+  capsule_portability.h
 )
 
 add_library(Sicnu::experiment_capsule ALIAS sicnu_experiment_capsule)

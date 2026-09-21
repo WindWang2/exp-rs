@@ -13,3 +13,9 @@
   7/8 builder cases failed against stub; store identity pins turned out
   immutable after first insert — fixtures now record final identity up
   front. 21 cases / 84 assertions all pass.
+- 2026-09-21 Slice C GREEN: outputs (portable refs, digest-pinned, no-digest
+  labeled honestly), evidence (EvidenceProjector completeness verbatim,
+  artifacts/env blocks deduped away from the document, verifier hook
+  embedded or empty — never faked), provenance (recorded lineage slice +
+  slice digest). Absolute-path leak asserted absent over canonical bytes.
+  Portability core (toPortableRef) landed. 26 cases / 121 assertions pass.

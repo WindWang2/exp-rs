@@ -34,9 +34,6 @@ struct CapsuleHooks
     /// run id → pre-computed verifier summary (OutputVerification-style
     /// JSON). Empty object ⇒ not wired.
     std::function<QJsonObject( const QString &runId )> verifierSummary;
-    /// run id → lineage slice projection (recorded edges around the run).
-    /// Empty object ⇒ not wired.
-    std::function<QJsonObject( const QString &runId )> lineageSlice;
 };
 
 struct CapsuleOptions
@@ -45,6 +42,11 @@ struct CapsuleOptions
     /// Empty ⇒ wall clock at build time. Two builds of the same store
     /// content with the same createdUtc produce byte-identical capsules.
     QString createdUtc;
+    /// Absolute root of the PRODUCING workspace (portability policy).
+    /// Recorded artifact paths inside it are rewritten to
+    /// "workspace:<relative>" references; anything outside becomes
+    /// "external:<file-name>". The capsule never carries absolute paths.
+    QString workspaceRoot;
 };
 
 class CapsuleBuilder

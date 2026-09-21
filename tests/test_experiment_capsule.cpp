@@ -16,6 +16,7 @@
 #include "dataset/dataset_types.h"
 #include "experiment/capsule/capsule_builder.h"
 #include "experiment/capsule/capsule_document.h"
+#include "experiment/evidence.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 
@@ -26,6 +27,7 @@ using sicnu::dataset::DatasetId;
 using sicnu::dataset::DatasetManifest;
 using sicnu::dataset::DatasetStore;
 using sicnu::dataset::DatasetVersionId;
+using sicnu::experiment::EvidenceProjector;
 using sicnu::experiment::Experiment;
 using sicnu::experiment::ExperimentRun;
 using sicnu::experiment::ExperimentStore;
@@ -357,7 +359,8 @@ struct StoreFixture
                           const QString &experimentId = QStringLiteral( "exp-1" ),
                           const QString &algorithmId = QStringLiteral( "rs:classify" ),
                           const QString &datasetVersionOverride = QString(),
-                          const QString &datasetFingerprintOverride = QString() )
+                          const QString &datasetFingerprintOverride = QString(),
+                          const QVector<ExperimentRun::Artifact> &artifacts = {} )
     {
         ExperimentRun run;
         run.setRunId( runId );
@@ -381,6 +384,7 @@ struct StoreFixture
         envFields.insert( QStringLiteral( "platform" ), QStringLiteral( "linux" ) );
         envFields.insert( QStringLiteral( "qt_version" ), QStringLiteral( "6.8" ) );
         run.setEnvironment( RunEnvironment::fromFields( envFields ) );
+        run.artifacts() = artifacts;
         // The store only accepts truthful lifecycle transitions: record the
         // run as Created first, then complete it (same pattern as the
         // reproduction-bundle tests).
@@ -608,4 +612,210 @@ TEST_CASE( "identical store content builds byte-identical capsules",
     REQUIRE( first.has_value() );
     REQUIRE( second.has_value() );
     CHECK( first->canonicalBytes() == second->canonicalBytes() );
+}
+
+// --- Slice C: outputs / evidence / provenance -------------------------------
+
+namespace
+{
+
+QVector<ExperimentRun::Artifact> twoArtifacts( const QString &insidePath,
+                                               const QString &outsidePath )
+{
+    ExperimentRun::Artifact primary;
+    primary.path = insidePath;
+    primary.role = QStringLiteral( "primary" );
+    primary.digest = QStringLiteral( "digest-primary" );
+    primary.sizeBytes = 100;
+    ExperimentRun::Artifact sidecar;
+    sidecar.path = outsidePath;
+    sidecar.role = QStringLiteral( "sidecar" );
+    sidecar.digest = QStringLiteral( "digest-sidecar" );
+    sidecar.sizeBytes = 5;
+    return { primary, sidecar };
+}
+
+} // namespace
+
+TEST_CASE( "outputs project recorded artifacts as digest-pinned portable refs",
+           "[capsule][builder][outputs]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const QString inside = fixture.dir.filePath( QStringLiteral( "out/raster.tif" ) );
+    const QString outside = QStringLiteral( "/mnt/external_drive/other.tif" );
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QString(), QString(), twoArtifacts( inside, outside ) );
+
+    CapsuleOptions options = fixedOptions();
+    options.workspaceRoot = fixture.dir.path();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), options );
+    REQUIRE( built.has_value() );
+
+    const QJsonArray outputs = built->root().value( QStringLiteral( "outputs" ) ).toArray();
+    REQUIRE( outputs.size() == 2 );
+    const QJsonObject primary = outputs.at( 0 ).toObject();
+    CHECK( primary.value( QStringLiteral( "portable_ref" ) ).toString()
+           == QLatin1String( "workspace:out/raster.tif" ) );
+    CHECK( primary.value( QStringLiteral( "digest" ) ).toString()
+           == QLatin1String( "digest-primary" ) );
+    CHECK( primary.value( QStringLiteral( "size_bytes" ) ).toInt() == 100 );
+    CHECK( primary.value( QStringLiteral( "role" ) ).toString() == QLatin1String( "primary" ) );
+    CHECK( primary.value( QStringLiteral( "state" ) ).toString() == QLatin1String( "pinned" ) );
+
+    const QJsonObject sidecar = outputs.at( 1 ).toObject();
+    CHECK( sidecar.value( QStringLiteral( "portable_ref" ) ).toString()
+           == QLatin1String( "external:other.tif" ) );
+
+    // No absolute path — inside or outside the workspace — may appear
+    // anywhere in the document.
+    const QByteArray bytes = built->canonicalBytes();
+    CHECK( !bytes.contains( fixture.dir.path().toUtf8() ) );
+    CHECK( !bytes.contains( "/mnt/external_drive" ) );
+}
+
+TEST_CASE( "artifact without a recorded digest is labeled no-digest, never fabricated",
+           "[capsule][builder][outputs]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    ExperimentRun::Artifact naked;
+    naked.path = fixture.dir.filePath( QStringLiteral( "out/plot.png" ) );
+    naked.role = QStringLiteral( "report" );
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QString(), QString(), { naked } );
+
+    CapsuleOptions options = fixedOptions();
+    options.workspaceRoot = fixture.dir.path();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), options );
+    REQUIRE( built.has_value() );
+
+    const QJsonArray outputs = built->root().value( QStringLiteral( "outputs" ) ).toArray();
+    REQUIRE( outputs.size() == 1 );
+    const QJsonObject output = outputs.at( 0 ).toObject();
+    CHECK( output.value( QStringLiteral( "state" ) ).toString() == QLatin1String( "no-digest" ) );
+    CHECK( output.value( QStringLiteral( "digest" ) ).toString().isEmpty() );
+}
+
+TEST_CASE( "evidence mirrors the projector completeness and never leaks raw paths",
+           "[capsule][builder][evidence]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const QString inside = fixture.dir.filePath( QStringLiteral( "out/raster.tif" ) );
+    ExperimentRun::Artifact primary;
+    primary.path = inside;
+    primary.role = QStringLiteral( "primary" );
+    primary.digest = QStringLiteral( "digest-primary" );
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QString(), QString(), QVector<ExperimentRun::Artifact>{ primary } );
+    sicnu::experiment::MetricRecord record;
+    record.runId = run.runId();
+    record.protocol.setDatasetVersionId( run.datasetVersionId() );
+    record.protocol.setSplitManifestId( run.splitManifestId() );
+    record.metrics = QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.85 } };
+    REQUIRE( fixture.experiments.saveMetricRecord( record ).has_value() );
+
+    CapsuleOptions options = fixedOptions();
+    options.workspaceRoot = fixture.dir.path();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), options );
+    REQUIRE( built.has_value() );
+
+    const QJsonObject evidence = built->root().value( QStringLiteral( "evidence" ) ).toObject();
+    CHECK( evidence.value( QStringLiteral( "schema_version" ) ).toInt()
+           == sicnu::experiment::kEvidenceSchemaVersion );
+    CHECK( evidence.contains( QStringLiteral( "completeness" ) ) );
+    CHECK( !evidence.contains( QStringLiteral( "artifacts" ) ) );
+
+    // Same completeness verdict as the projector for the same run.
+    EvidenceProjector::Input input;
+    input.run = run;
+    input.metricRecord = fixture.experiments.metricRecordForRun( run.runId() );
+    auto summary = EvidenceProjector::summarize( input );
+    REQUIRE( summary.has_value() );
+    CHECK( evidence.value( QStringLiteral( "completeness" ) )
+           == summary->value( QStringLiteral( "completeness" ) ) );
+
+    CHECK( !built->canonicalBytes().contains( fixture.dir.path().toUtf8() ) );
+}
+
+TEST_CASE( "verifier hook summary is embedded verbatim; unwired stays empty",
+           "[capsule][builder][evidence]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    CapsuleHooks hooks;
+    hooks.verifierSummary = []( const QString & ) {
+        return QJsonObject{ { QStringLiteral( "verdict" ), QStringLiteral( "pass" ) },
+                            { QStringLiteral( "score" ), 0.9 } };
+    };
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto wired = builder.build( run.runId(), fixedOptions(), hooks );
+    auto unwired = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( wired.has_value() );
+    REQUIRE( unwired.has_value() );
+
+    const QJsonObject wiredEvidence =
+        wired->root().value( QStringLiteral( "evidence" ) ).toObject();
+    CHECK( wiredEvidence.value( QStringLiteral( "verifier" ) ).toObject()
+               .value( QStringLiteral( "verdict" ) ).toString() == QLatin1String( "pass" ) );
+    CHECK( wiredEvidence.value( QStringLiteral( "verifier" ) ).toObject()
+               .value( QStringLiteral( "score" ) ).toDouble() == 0.9 );
+
+    const QJsonObject unwiredEvidence =
+        unwired->root().value( QStringLiteral( "evidence" ) ).toObject();
+    CHECK( unwiredEvidence.value( QStringLiteral( "verifier" ) ).toObject().isEmpty() );
+}
+
+TEST_CASE( "provenance projects the lineage slice and pins its digest",
+           "[capsule][builder][provenance]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+    // The auto-recording bridge (ADR 0143) records lineage edges; plain
+    // store inserts do not — mirror the bridge here.
+    REQUIRE( fixture.experiments
+                 .addLineageEdge( QStringLiteral( "experiment" ),
+                                  QStringLiteral( "exp-1" ),
+                                  QStringLiteral( "produced" ),
+                                  QStringLiteral( "run" ), run.runId() )
+                 .has_value() );
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( built.has_value() );
+
+    const QJsonObject provenance =
+        built->root().value( QStringLiteral( "provenance" ) ).toObject();
+    const QJsonArray edges = provenance.value( QStringLiteral( "run_edges" ) ).toArray();
+    REQUIRE( !edges.isEmpty() );
+    bool sawExperimentEdge = false;
+    for ( const auto &edge : edges )
+        if ( edge.toObject().value( QStringLiteral( "other_id" ) ).toString()
+             == QLatin1String( "exp-1" ) )
+            sawExperimentEdge = true;
+    CHECK( sawExperimentEdge );
+
+    QJsonObject slice;
+    slice.insert( QStringLiteral( "run_edges" ), edges );
+    CHECK( provenance.value( QStringLiteral( "slice_digest" ) ).toString()
+           == capsuleDigest( slice ) );
 }

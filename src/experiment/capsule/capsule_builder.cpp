@@ -4,8 +4,12 @@
 // diagnostic), never dropped or fabricated.
 #include "capsule_builder.h"
 
+#include "capsule_portability.h"
+
 #include "dataset/dataset_manifest.h"
 #include "dataset/dataset_types.h"
+#include "experiment/evidence.h"
+#include "experiment/lineage.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -202,10 +206,72 @@ Result<CapsuleDocument> CapsuleBuilder::build( const QString &runId,
     // Environment: the recorded, re-redacted snapshot — never a live read.
     payload.insert( QStringLiteral( "environment" ), run.environment().redacted().toJson() );
 
-    // Filled by later slices; present-but-empty keeps documents stable.
-    payload.insert( QStringLiteral( "outputs" ), QJsonArray{} );
-    payload.insert( QStringLiteral( "evidence" ), QJsonObject{} );
-    payload.insert( QStringLiteral( "provenance" ), QJsonObject{} );
+    // Outputs: recorded artifacts as digest-pinned portable references.
+    // The capsule NEVER reads artifact bytes here — digests were recorded
+    // when the artifact was committed; one without a digest is labeled
+    // no-digest, never fabricated.
+    QJsonArray outputs;
+    for ( const ExperimentRun::Artifact &artifact : run.artifacts() )
+    {
+        QJsonObject output;
+        output.insert( QStringLiteral( "portable_ref" ),
+                       toPortableRef( artifact.path, options.workspaceRoot ) );
+        output.insert( QStringLiteral( "digest" ), artifact.digest );
+        output.insert( QStringLiteral( "size_bytes" ), artifact.sizeBytes );
+        output.insert( QStringLiteral( "role" ), artifact.role );
+        output.insert( QStringLiteral( "state" ),
+                       artifact.digest.isEmpty() ? QLatin1String( "no-digest" )
+                                                 : QLatin1String( "pinned" ) );
+        outputs.append( output );
+    }
+    payload.insert( QStringLiteral( "outputs" ), outputs );
+
+    // Evidence: the schema-versioned projection of recorded completeness.
+    // The projector's artifacts array is REPLACED by the portable outputs
+    // above (its raw recorded paths must not enter the document); the
+    // verifier summary arrives verbatim from the hook or stays empty —
+    // an unwired verifier is never faked.
+    QJsonObject evidence;
+    {
+        EvidenceProjector::Input input;
+        input.run = run;
+        input.metricRecord = m_experimentStore->metricRecordForRun( run.runId() );
+        const auto summary = EvidenceProjector::summarize( input );
+        if ( summary.has_value() )
+        {
+            evidence = summary.value();
+            evidence.remove( QStringLiteral( "artifacts" ) );
+            evidence.remove( QStringLiteral( "environment" ) );
+        }
+        evidence.insert( QStringLiteral( "verifier" ),
+                         hooks.verifierSummary ? hooks.verifierSummary( run.runId() )
+                                               : QJsonObject{} );
+    }
+    payload.insert( QStringLiteral( "evidence" ), evidence );
+
+    // Provenance: the recorded lineage slice around the run (direct edges),
+    // pinned by its own digest. Ids only — portable by construction.
+    QJsonObject provenance;
+    {
+        const LineageGraph graph( *m_datasetStore, *m_experimentStore );
+        QJsonArray edges;
+        const LineageNodeId runNode{ QStringLiteral( "run" ), run.runId() };
+        for ( const LineageEdgeRecord &edge : graph.edgesOf( runNode ) )
+        {
+            QJsonObject item;
+            item.insert( QStringLiteral( "edge" ), edge.edgeKind );
+            item.insert( QStringLiteral( "other_kind" ),
+                         edge.from.id == run.runId() ? edge.to.kind : edge.from.kind );
+            item.insert( QStringLiteral( "other_id" ),
+                         edge.from.id == run.runId() ? edge.to.id : edge.from.id );
+            edges.append( item );
+        }
+        QJsonObject slice;
+        slice.insert( QStringLiteral( "run_edges" ), edges );
+        provenance.insert( QStringLiteral( "run_edges" ), edges );
+        provenance.insert( QStringLiteral( "slice_digest" ), capsuleDigest( slice ) );
+    }
+    payload.insert( QStringLiteral( "provenance" ), provenance );
 
     auto finalized = CapsuleDocument::finalize( std::move( payload ) );
     if ( !finalized.has_value() )
