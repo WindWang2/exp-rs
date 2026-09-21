@@ -9574,6 +9574,14 @@ sicnu_add_test(test_contract_platform_9)
 target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_platform_9)
 
+# RS14-11: evidence-first agent session core (pure C++; no Qt/GDAL link).
+add_executable(test_agent_loop_core test_agent_loop_core.cpp)
+target_link_libraries(test_agent_loop_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_core)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
