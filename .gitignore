@@ -440,3 +440,7 @@ data/labs/_tmp/
 !.planning/ds41-workflow-durability-13/
 .planning/ds41-workflow-durability-13/*
 !.planning/ds41-workflow-durability-13/*.md
+# rs14-06-experiment-debugger (RS14 Track 06): track planning notes (markdown only; logs stay local).
+!.planning/rs14-06-experiment-debugger/
+.planning/rs14-06-experiment-debugger/*
+!.planning/rs14-06-experiment-debugger/*.md
