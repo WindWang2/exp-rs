@@ -2,7 +2,7 @@
 
 # 高光谱分析（hyperspectral）
 
-共 10 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:ace
 
@@ -25,6 +25,8 @@
 
 ## rs:cem_detection
 
+约束能量最小化（CEM）目标检测：以场景相关矩阵建模背景，无失真约束下目标得分恒为 1，对乘性亮度变化稳健。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：background（raster）、input（raster）
@@ -32,6 +34,11 @@
 - 参数：libraryMaterials（string）、libraryPath（string）、loading（numeric）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.；At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) — under-sampled scenes are refused.
 - 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).
+- 适用地物：人工目标、自然背景
+- 适用场景：高光谱目标检测、亚像素小目标场景
+- 失败模式：
+  - `INVALID_PARAMETER` — 目标光谱与影像波段数不匹配。处置：将目标光谱重采样到影像波段，保证每个波段对应一个有限值
+  - `INVALID_PARAMETER` — 有效背景像元不足（无 loading 需 2B+2，loading>0 需 B+1）。处置：扩大场景范围或增大 loading 对角加载系数
 
 ## rs:continuum_removal
 
@@ -79,7 +86,7 @@
 - 输出：output（raster）
 - 参数：libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.
-- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).；Background statistics come from the input scene itself; a separate background raster is a future extension.
+- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).
 - 适用地物：矿物、植被胁迫目标
 - 适用场景：矿物异常探测、肥料/胁迫高光谱识别
 - 失败模式：
@@ -106,6 +113,24 @@ MNF 最小噪声分离变换：按信噪比排序的正交变换，先白化噪�
 - 教学概念：MNF、信噪比、噪声白化
 - 适用课程：高光谱遥感
 - 典型练习：对 200 波段影像做 MNF 并保留前 20 个高信噪比分量。
+
+## rs:osp_detection
+
+正交子空间投影（OSP）目标检测：将目标光谱投影到已知干扰子空间的正交补空间上逐像元打分，不估计背景统计量（单遍流式），干扰光谱得分恒为 0。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：output（raster）
+- 参数：interference（string）、interferenceRef（string）、libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
+- 前置条件：'target' must have one finite value per input band.；'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band, linearly independent of the others.
+- 局限：A target that lies (numerically) inside the undesired subspace is refused — no filter can suppress the interference and keep the target at the same time.
+- 适用地物：人工目标、自然背景
+- 适用场景：高光谱目标检测、已知干扰子空间的场景
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少干扰光谱或干扰光谱波段数不匹配。处置：通过 interference / interferenceRef 提供至少一个与影像波段数一致的非零干扰光谱
+  - `INVALID_PARAMETER` — 干扰光谱线性相关（UᵀU 奇异），或目标投影后能量不足。处置：剔除重复或共线的干扰光谱；确认目标不在干扰子空间内
+  - `INVALID_PARAMETER` — 为 OSP 提供了 background 参数。处置：OSP 不消费背景栅格；需要背景驱动检测时使用 rs:tcimf_detection 或 rs:cem_detection
 
 ## rs:rx_anomaly
 
@@ -146,6 +171,8 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 
 ## rs:spectral_spatial_fuse
 
+光谱—空间融合：对目标检测得分图做局部窗口聚合（mean 均值或 bilateral 保边），抑制孤立单像素虚警，无效像元不参与邻域聚合。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
@@ -153,6 +180,11 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 参数：beta（numeric）、method（enum）、output（string）、radius（integer）、sigmaRange（numeric）
 - 前置条件：Input must be a single-band score raster.
 - 局限：The bilateral method is O(pixels * (2r+1)^2) with no interior cancellation point, like the mean; radius is bounded to [0, 128].
+- 适用地物：人工目标
+- 适用场景：目标检测后处理、孤立虚警抑制
+- 失败模式：
+  - `INVALID_PARAMETER` — 输入不是单波段得分栅格。处置：先用 rs:matched_filter/rs:ace/rs:cem_detection 生成单波段得分图
+  - `INVALID_PARAMETER` — sigmaRange 非正或非有限值。处置：method='bilateral' 时提供有限的 sigmaRange（得分单位）
 
 ## rs:spectral_unmixing
 
@@ -173,4 +205,22 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 教学概念：线性混合模型、丰度、和为一约束
 - 适用课程：高光谱遥感
 - 典型练习：解混得到植被/土壤/水体丰度图并验证丰度和为 1。
+
+## rs:tcimf_detection
+
+目标约束干扰最小化滤波（TCIMF）目标检测：在 CEM 的无失真约束之外，对已知干扰光谱施加精确零约束（干扰得分恒为 0），以场景相关矩阵建模背景。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：background（raster）、input（raster）
+- 输出：output（raster）
+- 参数：interference（string）、interferenceRef（string）、libraryMaterials（string）、libraryPath（string）、loading（numeric）、output（string）、target（string）、targetRef（string）
+- 前置条件：'target' must have one finite value per input band.；At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) — under-sampled scenes are refused.；'interference' (or 'interferenceRef') must resolve to at least one finite, non-zero spectrum per input band.
+- 局限：Background statistics come from the input scene by default; 'background' accepts an independent background raster (spectral statistics only — no spatial co-registration required).；Interference spectra must be linearly independent under the background metric; a target inside the interference span is refused.
+- 适用地物：人工目标、自然背景
+- 适用场景：高光谱目标检测、存在已知干扰光谱的场景
+- 失败模式：
+  - `INVALID_PARAMETER` — 缺少干扰光谱或干扰光谱波段数不匹配。处置：通过 interference / interferenceRef 提供至少一个与影像波段数一致的非零干扰光谱
+  - `INVALID_PARAMETER` — 干扰光谱在背景度量下线性相关，或目标位于干扰子空间内。处置：剔除重复或共线的干扰光谱；确认目标不在干扰张成的子空间内
+  - `INVALID_PARAMETER` — 有效背景像元不足（无 loading 需 2B+2，loading>0 需 B+1）。处置：扩大场景范围或增大 loading 对角加载系数
 

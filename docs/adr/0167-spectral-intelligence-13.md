@@ -68,9 +68,13 @@ min_w wᵀRw   s.t.  wᵀt = 1,  Sᵀw = 0
   denominator falls to 1e-12 of its unconstrained value).
 - Diagnostics: `interferenceCount` plus the true condition number
   λmax/λmin of the small Gram matrix (new
-  `sicnu::primitives::conditionNumber`, deterministic power iteration) —
-  the family's λmax·B/tr proxy is a *lower* bound and cannot expose
-  near-collinear signature sets.
+  `sicnu::primitives::conditionNumber`, eigenvalues from a deterministic
+  cyclic-Jacobi diagonalization) — the family's λmax·B/tr proxy is a *lower*
+  bound and cannot expose near-collinear signature sets, and a fixed-start
+  power iteration is structurally blind for exactly the equiangular Grams
+  this diagnostic exists to measure (its start vector is an eigenvector of
+  `[[1,c],[c,1]]`, so inverse iteration reports λmin as λmax(A⁻¹) and
+  under-reports the condition number as 1 instead of 3).
 
 ### B. OSP (`SpectralOsp`, `rs:osp_detection`)
 

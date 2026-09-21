@@ -39,8 +39,12 @@ the whole targeted set at the end (and after review fixes).
   collinear columns) → typed false; target fully inside the interference subspace
   (w ≈ 0) → typed false; non-finite input → false. Not "plausible-looking" output.
 - O2.4 Conditioning diagnostic: result JSON reports the interference-matrix
-  conditioning proxy (λmax·k/tr) and the projected target norm; a deliberately
-  near-collinear interference pair produces a diagnostic above a documented bound.
+  condition number λmax/λmin (deterministic cyclic-Jacobi eigenvalues via
+  `sicnu::primitives::conditionNumber`) and the projected target norm; a
+  deliberately near-collinear interference pair produces a diagnostic above a
+  documented bound, and the realized suppression residual is asserted to be
+  bounded by ~1e-12·cond (the constraints are exact in exact arithmetic; the
+  residual scales with the conditioning).
 - O2.5 Streaming equivalence: operator `rs:osp_detection` single-tile bit-exact vs
   kernel; multi-tile 300×300 within 2% gate.
 - O2.6 Scale behavior documented and tested: OSP score scales with |d| (not

@@ -320,6 +320,39 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
     return;
   }
 
+  // The strict loader's value rules (validateLibrary): finite reflectance in
+  // [0, 1], strictly increasing wavelengths, positive FWHM. A raw-DN profile
+  // fails them, so refuse here instead of writing an entry the strict read
+  // path rejects.
+  for ( double v : m_values )
+  {
+    if ( !std::isfinite( v ) || v < 0.0 || v > 1.0 )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: reflectance values must be finite and within [0, 1] "
+              "(a raw-DN profile is not a reflectance library entry)." ) );
+      return;
+    }
+  }
+  for ( int i = 1; i < m_wavelengths.size(); ++i )
+  {
+    if ( !( m_wavelengths[i] > m_wavelengths[i - 1] ) )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: the wavelength grid must be strictly increasing." ) );
+      return;
+    }
+  }
+  for ( double f : m_fwhm )
+  {
+    if ( !std::isfinite( f ) || f <= 0.0 )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: FWHM values must be finite and positive." ) );
+      return;
+    }
+  }
+
   SpectralLibrary::Entry entry;
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
   entry.material = tr( "Untitled" );

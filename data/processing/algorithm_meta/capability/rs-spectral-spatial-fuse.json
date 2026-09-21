@@ -1,7 +1,18 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4eba\u5de5\u76ee\u6807"
+      ],
+      "scenes" : 
+      [
+        "\u76ee\u6807\u68c0\u6d4b\u540e\u5904\u7406",
+        "\u5b64\u7acb\u865a\u8b66\u6291\u5236"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -16,7 +27,19 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5148\u7528 rs:matched_filter/rs:ace/rs:cem_detection \u751f\u6210\u5355\u6ce2\u6bb5\u5f97\u5206\u56fe",
+        "when" : "\u8f93\u5165\u4e0d\u662f\u5355\u6ce2\u6bb5\u5f97\u5206\u6805\u683c"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "method='bilateral' \u65f6\u63d0\u4f9b\u6709\u9650\u7684 sigmaRange\uff08\u5f97\u5206\u5355\u4f4d\uff09",
+        "when" : "sigmaRange \u975e\u6b63\u6216\u975e\u6709\u9650\u503c"
+      }
+    ],
     "family" : "hyperspectral",
     "io" : 
     {
@@ -88,7 +111,7 @@
       "Input must be a single-band score raster."
     ],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "\u5149\u8c31\u2014\u7a7a\u95f4\u878d\u5408\uff1a\u5bf9\u76ee\u6807\u68c0\u6d4b\u5f97\u5206\u56fe\u505a\u5c40\u90e8\u7a97\u53e3\u805a\u5408\uff08mean \u5747\u503c\u6216 bilateral \u4fdd\u8fb9\uff09\uff0c\u6291\u5236\u5b64\u7acb\u5355\u50cf\u7d20\u865a\u8b66\uff0c\u65e0\u6548\u50cf\u5143\u4e0d\u53c2\u4e0e\u90bb\u57df\u805a\u5408\u3002",
     "teaching_use" : {}
   },
   "description" : "Fuse a spectral score raster with its local spatial consistency: a NoData-aware convex combination of the score and the valid window mean (or edge-preserving bilateral aggregate).",
