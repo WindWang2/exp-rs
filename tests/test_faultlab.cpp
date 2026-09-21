@@ -849,3 +849,265 @@ TEST_CASE( "fault lab: temporal gap drops one dated epoch", "[faultlab]" )
         CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Slice D — ML/evaluation faults (train/test spatial leakage, threshold
+// misuse, model channel mismatch)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// 16x16 grid with train points clustered in two cells and test points in
+/// disjoint cells (cell size 4): a clean leakage.overlap_fraction of 0.
+FaultGrid leakageGrid()
+{
+    FaultGrid grid;
+    grid.width = 16;
+    grid.height = 16;
+    grid.extras["leakage_cell_size"] = 4;
+
+    Json::Value samples( Json::arrayValue );
+    auto addSample = [&samples]( const char *role, double x, double y ) {
+        Json::Value sample( Json::objectValue );
+        sample["role"] = role;
+        sample["x"] = x;
+        sample["y"] = y;
+        samples.append( sample );
+    };
+    addSample( "train", 1.0, 1.0 );
+    addSample( "train", 2.0, 2.5 );
+    addSample( "train", 3.0, 3.5 );
+    addSample( "train", 13.0, 13.0 );
+    addSample( "test", 9.0, 1.0 );
+    addSample( "test", 9.5, 1.5 );
+    addSample( "test", 10.0, 2.0 );
+    addSample( "test", 10.5, 2.5 );
+    grid.extras["samples"] = samples;
+    return grid;
+}
+
+/// Score layer + truth labels with a separable-at-0.5 closed form: scores
+/// below 0.5 are truth-0, above are truth-1. A destructive threshold
+/// (0.95) collapses kappa toward 0.
+FaultGrid thresholdGrid()
+{
+    FaultGrid grid = sampleGrid();
+    Json::Value score( Json::arrayValue );
+    Json::Value truth( Json::arrayValue );
+    for ( int i = 0; i < 12; ++i )
+    {
+        const bool positive = i % 2 == 0;
+        score.append( positive ? 0.6 + 0.03 * i : 0.4 - 0.03 * i );
+        truth.append( positive ? 1 : 0 );
+    }
+    grid.extras["score"] = score;
+    grid.extras["truth"] = truth;
+    grid.extras["threshold"] = 0.5;
+    return grid;
+}
+
+/// Three constant bands feeding a declared linear model over channel order.
+FaultGrid modelGrid()
+{
+    FaultGrid grid = sampleGrid();
+    for ( double &sample : grid.bands[0].samples )
+    {
+        sample = 1.0; // red
+    }
+    for ( double &sample : grid.bands[1].samples )
+    {
+        sample = 2.0; // nir
+    }
+    BandSpec green;
+    green.role = "green";
+    green.samples.assign( 12, 3.0 );
+    grid.bands.push_back( green );
+
+    Json::Value model( Json::objectValue );
+    Json::Value order( Json::arrayValue );
+    order.append( "red" );
+    order.append( "nir" );
+    order.append( "green" );
+    model["channel_order"] = order;
+    Json::Value weights( Json::arrayValue );
+    weights.append( 1.0 );
+    weights.append( 2.0 );
+    weights.append( 3.0 );
+    model["weights"] = weights;
+    model["bias"] = 0.1;
+    grid.extras["model"] = model;
+    return grid;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: train/test spatial leakage duplicates or relocates samples", "[faultlab]" )
+{
+    const auto before = measureObservables( leakageGrid() );
+    CHECK( before.at( "leakage.overlap_fraction" ).number == 0.0 );
+    CHECK( before.at( "leakage.test_count" ).number == 4 );
+
+    SECTION( "duplicate mode clones train points into the test role" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        spec.seed = 17;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 4 ); // four train points cloned
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "leakage.test_count" ).number == 8 );
+        // Four of the eight test samples (the clones) now sit inside train
+        // cells; the four original test samples stay outside.
+        CHECK( after.at( "leakage.overlap_fraction" ).number == 0.5 );
+    }
+    SECTION( "relocate mode moves a train point into the test role" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "relocate";
+        spec.seed = 17;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 1 );
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "leakage.test_count" ).number == 4 ); // unchanged
+        CHECK( after.at( "leakage.overlap_fraction" ).number > 0.0 );
+    }
+    SECTION( "unknown mode refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "smuggle";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without samples refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: threshold misuse rewrites the decision cut", "[faultlab]" )
+{
+    FaultGrid grid = thresholdGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "threshold" ).number == 0.5 );
+    CHECK( before.at( "kappa" ).number == Catch::Approx( 1.0 ) );
+
+    FaultSpec spec;
+    spec.familyId = "threshold_misuse";
+    spec.params["threshold"] = 0.95;
+    spec.seed = 23;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( grid.extras["threshold"].asDouble() == 0.95 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "threshold" ).number == 0.95 );
+    CHECK( after.at( "positive_fraction" ).number < before.at( "positive_fraction" ).number );
+    // A destructive cut destroys the prediction-truth agreement.
+    CHECK( after.at( "kappa" ).number < 0.5 );
+
+    SECTION( "out-of-range threshold refused" )
+    {
+        FaultGrid local = thresholdGrid();
+        FaultSpec bad;
+        bad.familyId = "threshold_misuse";
+        bad.params["threshold"] = 1.5;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "re-declaring the current threshold is not a fault" )
+    {
+        FaultGrid local = thresholdGrid();
+        FaultSpec same;
+        same.familyId = "threshold_misuse";
+        same.params["threshold"] = 0.5;
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: model channel mismatch permutes the channel order", "[faultlab]" )
+{
+    FaultGrid grid = modelGrid();
+    const auto before = measureObservables( grid );
+    REQUIRE( before.count( "channel_order" ) == 1 );
+    CHECK( before.at( "channel_order" ).text == "red,nir,green" );
+    CHECK( before.at( "model_output_mean" ).number == Catch::Approx( 14.1 ) );
+
+    FaultSpec spec;
+    spec.familyId = "model_channel_mismatch";
+    Json::Value permutation( Json::arrayValue );
+    permutation.append( 1 );
+    permutation.append( 0 );
+    permutation.append( 2 );
+    spec.params["permutation"] = permutation;
+    spec.seed = 31;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "channel_order" ).text == "nir,red,green" );
+    // Weights stay put, channels move: 1*nir + 2*red + 3*green + 0.1
+    // = 2 + 2 + 9 + 0.1 = 13.1.
+    CHECK( after.at( "model_output_mean" ).number == Catch::Approx( 13.1 ) );
+
+    SECTION( "non-bijection refused" )
+    {
+        FaultGrid local = modelGrid();
+        FaultSpec bad;
+        bad.familyId = "model_channel_mismatch";
+        Json::Value notBijection( Json::arrayValue );
+        notBijection.append( 0 );
+        notBijection.append( 0 );
+        notBijection.append( 1 );
+        bad.params["permutation"] = notBijection;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "identity permutation is not a fault" )
+    {
+        FaultGrid local = modelGrid();
+        FaultSpec same;
+        same.familyId = "model_channel_mismatch";
+        Json::Value identity( Json::arrayValue );
+        identity.append( 0 );
+        identity.append( 1 );
+        identity.append( 2 );
+        same.params["permutation"] = identity;
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without a model refuses" )
+    {
+        FaultGrid local = sampleGrid();
+        FaultSpec spec2;
+        spec2.familyId = "model_channel_mismatch";
+        Json::Value perm( Json::arrayValue );
+        perm.append( 0 );
+        perm.append( 1 );
+        spec2.params["permutation"] = perm;
+        const auto refused = applyFault( local, spec2 );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}

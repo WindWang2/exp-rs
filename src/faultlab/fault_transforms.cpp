@@ -324,6 +324,182 @@ FaultOutcome applyTemporalGap( FaultGrid &grid, const Json::Value &params,
     return okOutcome( 1 );
 }
 
+
+// --- ML/evaluation families (slice D) ----------------------------------------
+
+FaultOutcome applyTrainTestSpatialLeakage( FaultGrid &grid, const Json::Value &params,
+                                           std::uint32_t /*seed*/ )
+{
+    if ( !params.isMember( "mode" ) || !params["mode"].isString() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "train_test_spatial_leakage needs a mode string" );
+    }
+    const std::string mode = params["mode"].asString();
+    if ( mode != "duplicate" && mode != "relocate" )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "train_test_spatial_leakage mode '" + mode +
+                                 "' is outside the closed vocabulary {duplicate, relocate}" );
+    }
+    if ( !grid.extras.isMember( "samples" ) || !grid.extras["samples"].isArray() )
+    {
+        return errorOutcome( "faultlab.fault_unsafe_target",
+                             "train_test_spatial_leakage needs a fixture with sample points" );
+    }
+    Json::Value &samples = grid.extras["samples"];
+
+    if ( mode == "duplicate" )
+    {
+        // Clone every train sample into the test role: the classic
+        // "same patch in train and test" leakage.
+        Json::Value clones( Json::arrayValue );
+        std::uint32_t cloned = 0;
+        for ( const auto &sample : samples )
+        {
+            if ( sample.isObject() && sample.isMember( "role" ) &&
+                 sample["role"].asString() == "train" )
+            {
+                Json::Value clone = sample;
+                clone["role"] = "test";
+                clones.append( clone );
+                ++cloned;
+            }
+        }
+        for ( const auto &clone : clones )
+        {
+            samples.append( clone );
+        }
+        if ( cloned == 0 )
+        {
+            return errorOutcome( "faultlab.fault_unsafe_target",
+                                 "train_test_spatial_leakage found no train samples to clone" );
+        }
+        return okOutcome( cloned );
+    }
+
+    // relocate: move the first test sample onto the first train sample's
+    // coordinates — a test point sitting inside a training region.
+    int firstTrain = -1;
+    int firstTest = -1;
+    for ( Json::ArrayIndex i = 0; i < samples.size(); ++i )
+    {
+        const auto &sample = samples[i];
+        if ( !sample.isObject() || !sample.isMember( "role" ) )
+        {
+            continue;
+        }
+        if ( firstTrain < 0 && sample["role"].asString() == "train" )
+        {
+            firstTrain = static_cast<int>( i );
+        }
+        if ( firstTest < 0 && sample["role"].asString() == "test" )
+        {
+            firstTest = static_cast<int>( i );
+        }
+    }
+    if ( firstTrain < 0 || firstTest < 0 )
+    {
+        return errorOutcome( "faultlab.fault_unsafe_target",
+                             "train_test_spatial_leakage relocate needs train and test samples" );
+    }
+    samples[Json::ArrayIndex( firstTest )]["x"] = samples[Json::ArrayIndex( firstTrain )]["x"];
+    samples[Json::ArrayIndex( firstTest )]["y"] = samples[Json::ArrayIndex( firstTrain )]["y"];
+    return okOutcome( 1 );
+}
+
+FaultOutcome applyThresholdMisuse( FaultGrid &grid, const Json::Value &params,
+                                    std::uint32_t /*seed*/ )
+{
+    if ( !grid.extras.isMember( "score" ) || !grid.extras["score"].isArray() )
+    {
+        return errorOutcome( "faultlab.fault_unsafe_target",
+                             "threshold_misuse needs a fixture with a score layer" );
+    }
+    if ( !params.isMember( "threshold" ) || !isFiniteNumber( params["threshold"] ) ||
+         params["threshold"].asDouble() < 0.0 || params["threshold"].asDouble() > 1.0 )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "threshold_misuse needs a threshold in [0, 1]" );
+    }
+    const double threshold = params["threshold"].asDouble();
+    if ( grid.extras.isMember( "threshold" ) && grid.extras["threshold"].isNumeric() &&
+         grid.extras["threshold"].asDouble() == threshold )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "threshold_misuse requires a threshold different from the fixture's" );
+    }
+    grid.extras["threshold"] = threshold;
+    return okOutcome( 1 );
+}
+
+FaultOutcome applyModelChannelMismatch( FaultGrid &grid, const Json::Value &params,
+                                        std::uint32_t /*seed*/ )
+{
+    if ( !grid.extras.isMember( "model" ) || !grid.extras["model"].isObject() ||
+         !grid.extras["model"].isMember( "channel_order" ) ||
+         !grid.extras["model"]["channel_order"].isArray() )
+    {
+        return errorOutcome( "faultlab.fault_unsafe_target",
+                             "model_channel_mismatch needs a fixture with a declared model" );
+    }
+    const auto &order = grid.extras["model"]["channel_order"];
+    if ( !params.isMember( "permutation" ) || !params["permutation"].isArray() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "model_channel_mismatch needs a permutation array" );
+    }
+    const auto &permutation = params["permutation"];
+    if ( permutation.size() != order.size() )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "model_channel_mismatch permutation must cover every channel" );
+    }
+    std::vector<bool> seen( static_cast<std::size_t>( order.size() ), false );
+    std::vector<std::size_t> indices;
+    bool identity = true;
+    for ( Json::ArrayIndex i = 0; i < permutation.size(); ++i )
+    {
+        const auto &entry = permutation[i];
+        if ( !entry.isIntegral() )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "model_channel_mismatch permutation entries must be integers" );
+        }
+        const std::int64_t raw = entry.asInt64();
+        if ( raw < 0 || raw >= static_cast<std::int64_t>( order.size() ) )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "model_channel_mismatch permutation entry out of range" );
+        }
+        const auto index = static_cast<std::size_t>( raw );
+        if ( seen[index] )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "model_channel_mismatch permutation is not a bijection" );
+        }
+        seen[index] = true;
+        indices.push_back( index );
+        if ( index != static_cast<std::size_t>( i ) )
+        {
+            identity = false;
+        }
+    }
+    if ( identity )
+    {
+        return errorOutcome( "faultlab.fault_unsupported_params",
+                             "model_channel_mismatch identity permutation is not a fault" );
+    }
+
+    Json::Value reordered( Json::arrayValue );
+    for ( const auto index : indices )
+    {
+        reordered.append( order[Json::ArrayIndex( index )] );
+    }
+    grid.extras["model"]["channel_order"] = reordered;
+    return okOutcome( 1 );
+}
+
 using TransformFn = FaultOutcome ( *)( FaultGrid &, const Json::Value &, std::uint32_t );
 
 struct FamilyDispatch
@@ -343,6 +519,10 @@ const FamilyDispatch kDispatches[] = {
     { "crs_mismatch", applyCrsMismatch },
     { "temporal_gap", applyTemporalGap },
     { "temporal_shuffle", applyTemporalShuffle },
+    // ml/evaluation families (slice D)
+    { "train_test_spatial_leakage", applyTrainTestSpatialLeakage },
+    { "threshold_misuse", applyThresholdMisuse },
+    { "model_channel_mismatch", applyModelChannelMismatch },
 };
 
 } // namespace

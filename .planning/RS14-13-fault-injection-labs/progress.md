@@ -13,3 +13,6 @@
 - Slice C (geometry/temporal faults): RED tests first, 25/25 green.
   - New transforms: grid_shift (image-space pixel offsets × pixel size, sign documented), crs_mismatch (closed CRS vocabulary, same-CRS refused as non-fault), temporal_shuffle (purpose-derived seed Fisher-Yates, identity-draw retry + rotate fallback so the fault always moves), temporal_gap (integer index, range-checked, date-carrying target).
   - Uniform TransformFn signature (grid, params, seed) so stochastic and deterministic transforms share one dispatch table.
+- Slice D (ML/evaluation faults): RED tests first, 28/28 green.
+  - New transforms: train_test_spatial_leakage (duplicate clones train points into test role; relocate moves a test point onto a train coordinate — both move leakage.overlap_fraction with typed evidence), threshold_misuse (closed [0,1] range, same-threshold refused as non-fault), model_channel_mismatch (bijection-checked permutation of the declared channel order; weights stay put so model_output_mean moves by an exactly computable delta).
+  - Fixed during TDD: relocate semantics = test point moved into train region (test_count unchanged); model output arithmetic (13.1); duplicate overlap = 0.5 (clones overlap, originals do not).
