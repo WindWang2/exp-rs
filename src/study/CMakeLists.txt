@@ -13,6 +13,8 @@ qt_add_library(sicnu_study STATIC
   study_runner.h
   study_analysis.cpp
   study_analysis.h
+  study_spatial.cpp
+  study_spatial.h
 )
 
 add_library(Sicnu::study ALIAS sicnu_study)
