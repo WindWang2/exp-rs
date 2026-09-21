@@ -75,6 +75,16 @@ inline constexpr const char *kTemporalCalendarConflict = "TEMPORAL_CALENDAR_CONF
 inline constexpr const char *kNumericDomainChain = "NUMERIC_DOMAIN_CHAIN";
 inline constexpr const char *kBandIdentityMismatch = "BAND_IDENTITY_MISMATCH";
 inline constexpr const char *kOutputIdentityMismatch = "OUTPUT_IDENTITY_MISMATCH";
+/// #1187 follow-up: the Advanced SAR / PolSAR / InSAR 10.0 codes existed in
+/// the harness_error.cpp mapping but were never declared here — the contract
+/// graph (contract_inventory) builds its error_code nodes from THIS header,
+/// so the omission left dangling diagnostic_for edges for every diagnostics
+/// page keyed on them.
+inline constexpr const char *kComplexBandsRequired = "COMPLEX_BANDS_REQUIRED";
+inline constexpr const char *kAcquisitionDatesMissing = "ACQUISITION_DATES_MISSING";
+inline constexpr const char *kDatesNotAscending = "DATES_NOT_ASCENDING";
+inline constexpr const char *kUnwrapProviderUnavailable = "UNWRAP_PROVIDER_UNAVAILABLE";
+inline constexpr const char *kIoError = "IO_ERROR";
 } // namespace error_codes
 
 /// Retry policy class for an error code.

@@ -215,7 +215,7 @@
 - 模态：optical
 - 波段角色要求：nir×1、red×1
 - 输出：bands（integer）、memory（json）、metrics（string）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）、validPixelFraction（numeric）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、cycles（integer）、duplicate_policy（enum）、minValidPerSeason（integer）、output（string）、scenes（string）、season2EndDoy（integer）、season2StartDoy（integer）、seasonEndDoy（integer）、seasonStartDoy（integer）、tile_size（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、cycles（integer）、duplicate_policy（enum）、minValidPerSeason（integer）、output（string）、provenance（string）、scenes（string）、season2EndDoy（integer）、season2StartDoy（integer）、seasonEndDoy（integer）、seasonStartDoy（integer）、tile_size（integer）
 - 前置条件：建议先用 rs:temporal_smooth / rs:temporal_harmonic_fit 重构时序。
 - 适用地物：农田、草地、落叶林
 - 适用场景：作物生育期监测、物候对气候响应研究
@@ -278,12 +278,17 @@
 
 ## rs:temporal_sar_fusion
 
+Fuse co-registered optical and SAR temporal feature rasters into one stacked feature cube
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
 - 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：optical（raster）、sar（raster）
 - 输出：bands（integer）、memory（json）、opticalBands（integer）、output（raster）、sarBands（integer）
 - 参数：grid_tolerance（numeric）、output（string）、tile_size（integer）
+- 失败模式：
+  - `GRID_MISMATCH` — the optical and SAR inputs are not on the same pixel grid。处置：co-register both inputs first (rs:align or io:warp); the operator never resamples
+  - `INVALID_PARAMETER` — a band name in the fusion band list is missing from one of the inputs。处置：check band names against each input's wavelength metadata before running
 
 ## rs:temporal_seasonal_breaks
 
@@ -310,7 +315,7 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bands（integer）、memory（json）、output（raster）、sceneCount（integer）、significantPixelFraction（numeric）、timeEnd（string）、timeStart（string）
-- 参数：alpha（numeric）、apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、output（string）、scenes（string）、tile_size（integer）
+- 参数：alpha（numeric）、apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、output（string）、provenance（string）、scenes（string）、tile_size（integer）
 - 适用地物：植被、干旱区、农田
 - 适用场景：干旱区退化监测、含云时序的稳健趋势估计
 - 失败模式：
@@ -326,7 +331,7 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 - 确定性：容差级（并行执行与串行结果在 1e-6 相对容差内一致）
 - 模态：optical
 - 输出：bands（integer）、memory（json）、method（string）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、degree（integer）、duplicate_policy（enum）、lambda（numeric）、method（enum）、moving_average_window（integer）、output（string）、robust_iterations（integer）、scenes（string）、tile_size（integer）、window（integer）、window_days（numeric）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、degree（integer）、duplicate_policy（enum）、lambda（numeric）、method（enum）、moving_average_window（integer）、output（string）、provenance（string）、robust_iterations（integer）、scenes（string）、tile_size（integer）、window（integer）、window_days（numeric）
 - 适用地物：植被、农田
 - 适用场景：物候曲线整形、时序异常检测前的平滑
 - 失败模式：
@@ -359,7 +364,7 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：output（raster）、sceneCount（integer）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、output（string）、scenes（string）、tile_size（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、output（string）、provenance（string）、scenes（string）、tile_size（integer）
 - 适用地物：植被、城市、水体
 - 适用场景：绿化/退化趋势制图、围填海等长期变化速率估计
 - 失败模式：

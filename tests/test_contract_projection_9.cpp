@@ -90,6 +90,27 @@ const std::vector<AllowEntry> kAllowedUndeclaredReads = {
     // in REVIEW_LOG.md; the schema catch-up must land there.
     { "rs:sar_terrain_flatten", "look_azimuth",
       "legacy alias accepted by run(); schema catch-up owned by #883" },
+    // #1187: rs:sar_pair_network consumes a per-scene orbit sub-object (the
+    // scenes array items); the shared parser takes each item as its
+    // Json::Value parameter, so the scanner attributes the item keys to the
+    // params root (same over-approximation class as rs:obia_classify).
+    { "rs:sar_pair_network", "acquisitionUtc", "per-scene sub-object (network scenes array)" },
+    { "rs:sar_pair_network", "acquisitionUtcSec", "per-scene sub-object (network scenes array)" },
+    { "rs:sar_pair_network", "azimuthStartUtc", "per-scene sub-object (network scenes array)" },
+    { "rs:sar_pair_network", "azimuthStartUtcSec", "per-scene sub-object (network scenes array)" },
+    { "rs:sar_pair_network", "orbitStates", "per-scene sub-object (network scenes array)" },
+    { "rs:sar_pair_network", "wavelengthUm", "per-scene sub-object (network scenes array)" },
+    // #1187: rs:quality_mosaic consumes per-input sub-objects (the inputs
+    // array items) through shared readers — same class as above.
+    { "rs:quality_mosaic", "path", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "cloudFraction", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "cloudMask", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "priority", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "quality", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "timeDays", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "timeScaleDays", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "viewAngleDeg", "per-input sub-object (mosaic inputs array)" },
+    { "rs:quality_mosaic", "viewScaleDeg", "per-input sub-object (mosaic inputs array)" },
 };
 
 const std::vector<AllowEntry> kAllowedDeadParams = {
@@ -97,6 +118,15 @@ const std::vector<AllowEntry> kAllowedDeadParams = {
     // temporal runners (outside the operators scan root).
     { "rs:temporal_anomaly", "*", "collection params consumed by processing runner" },
     { "rs:temporal_breakpoints", "*", "collection params consumed by processing runner" },
+    // #1187: the 12.0 collection-based temporal operators added since share
+    // the same runner consumption (scenes/collection/duplicate_policy).
+    { "rs:temporal_extract_regions", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_harmonic_breaks", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_model_select", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_phenology_multi", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_region_features", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_regularize", "*", "collection params consumed by processing runner" },
+    { "rs:temporal_seasonal_breaks", "*", "collection params consumed by processing runner" },
     { "rs:temporal_composite", "*", "collection params consumed by processing runner" },
     { "rs:temporal_decompose", "*", "collection params consumed by processing runner" },
     { "rs:temporal_extract_series", "*", "collection params consumed by processing runner" },
@@ -130,6 +160,19 @@ const std::vector<AllowEntry> kAllowedDeadParams = {
     // through the shared obia helpers.
     { "rs:obia_classify", "*", "classifier knobs read via obia helpers" },
     { "rs:obia_hierarchy", "*", "classifier knobs read via obia helpers" },
+    // #1187: BRDF kernel geometry/weights are declared as scalars but read
+    // through the per-band resolveWeights helper (literal keys at every
+    // call site) and the sun/view angle readers.
+    { "rs:brdf_normalization", "f_vol", "per-band kernel weights read via resolveWeights" },
+    { "rs:brdf_normalization", "f_geo", "per-band kernel weights read via resolveWeights" },
+    { "rs:brdf_normalization", "sun_zenith", "angle pair read via the angle reader helper" },
+    { "rs:brdf_normalization", "sun_azimuth", "angle pair read via the angle reader helper" },
+    { "rs:brdf_normalization", "view_zenith", "angle pair read via the angle reader helper" },
+    { "rs:brdf_normalization", "view_azimuth", "angle pair read via the angle reader helper" },
+    // #1187: rs:change reads inputA/inputB through the dynamic bands-key
+    // composition of the shared model-task runner.
+    { "rs:change", "inputA", "dynamic input/bands key composition (model-task runner)" },
+    { "rs:change", "inputB", "dynamic input/bands key composition (model-task runner)" },
 };
 
 const std::vector<AllowEntry> kAllowedUnresolved = {
@@ -168,6 +211,15 @@ const std::vector<AllowEntry> kAllowedUnresolved = {
     { "rs:obia_classify", "*", "dynamic key access on params" },
     { "rs:obia_hierarchy", "*", "dynamic key access on params" },
     { "rs:spectral_resample", "*", "dynamic key access on array" },
+    // #1187: dynamic input/bands key composition (inputA/bandsA ↔
+    // inputB/bandsB pairs) in the shared model-task runner.
+    { "rs:change", "*", "dynamic input/bands key composition (model-task runner)" },
+    // #1187: per-band kernel weights read via resolveWeights(params, key)
+    // with literal keys at every call site.
+    { "rs:brdf_normalization", "*", "per-band resolveWeights helper (literal keys at call sites)" },
+    // #1187: generic Json→Qt converter traverses value[key] — an object
+    // walk, not a params key.
+    { "rs:stack_register", "*", "generic Json→Qt converter object traversal (value[key])" },
 };
 
 bool allowed( const std::vector<AllowEntry> &list, const std::string &op,
@@ -585,7 +637,7 @@ TEST_CASE( "Canonical descriptor: projection, round-trip and single source",
             CHECK_FALSE( p.type.empty() );
     }
     for ( const auto &f : projectionFailures )
-        INFO( "projection failure: " << f );
+        WARN( "projection failure: " << f ); // INFO dies with the loop body
     CHECK( projectionFailures.empty() );
     // ADR 0124 determinism grades: adoption is partial on master (only some
     // operators stamp the grade). The enforceable contract today: a stamped
