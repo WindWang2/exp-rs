@@ -407,26 +407,27 @@ TEST_CASE( "temporal_phenology cycles=2: double-cropping bands and cycle_count E
     params["seasonEndDoy"] = 200;
     params["output"] = fx.filePath( QStringLiteral( "ph2.tif" ) ).toStdString();
     const Json::Value result = runOp( "rs:temporal_phenology", params );
-    // 7 (cycle 1) + 7 (c2_*) + cycle_count = 15 bands, c2 names pinned.
-    REQUIRE( result["bands"].asInt() == 15 );
+    // 11 (cycle 1) + 11 (c2_*) + cycle_count = 23 bands, c2 names pinned.
+    // (Temporal Phenology 12.0 added the four limb metrics per cycle.)
+    REQUIRE( result["bands"].asInt() == 23 );
     const Json::Value metrics = result["metrics"];
-    REQUIRE( metrics.size() == 15 );
-    REQUIRE( std::string( metrics[7].asString() ) == "c2_sos" );
-    REQUIRE( std::string( metrics[14].asString() ) == "cycle_count" );
-    REQUIRE( bandCount( fx.filePath( "ph2.tif" ) ) == 15 );
+    REQUIRE( metrics.size() == 23 );
+    REQUIRE( std::string( metrics[11].asString() ) == "c2_sos" );
+    REQUIRE( std::string( metrics[22].asString() ) == "cycle_count" );
+    REQUIRE( bandCount( fx.filePath( "ph2.tif" ) ) == 23 );
 
     // Both cycles are valid on the bimodal pixel; cycle_count = 2.
     const auto c1Sos = readBand( fx.filePath( "ph2.tif" ), 1 );
     CAPTURE( c1Sos[0] );
     REQUIRE( std::isfinite( c1Sos[0] ) ); // cycle 1 defined on [60, 200]
-    const auto cycleCount = readBand( fx.filePath( "ph2.tif" ), 15 );
+    const auto cycleCount = readBand( fx.filePath( "ph2.tif" ), 23 );
     CAPTURE( cycleCount[0] );
     REQUIRE( cycleCount[0] == Approx( 2 ) );
     // The second cycle's SOS falls in the complement window (doy > 200 or
-    // < 60 by the complement of [60, 200] = [201, 59]). Band 8 must hold a
+    // < 60 by the complement of [60, 200] = [201, 59]). Band 12 must hold a
     // real doy (>= 1): an unwritten band reads 0 and would pass the range
     // test vacuously.
-    const auto c2Sos = readBand( fx.filePath( "ph2.tif" ), 8 );
+    const auto c2Sos = readBand( fx.filePath( "ph2.tif" ), 12 );
     CAPTURE( c2Sos[0] );
     REQUIRE( c2Sos[0] >= 1.0 );
     REQUIRE( ( c2Sos[0] >= 201.0 || c2Sos[0] <= 59.0 ) );
@@ -605,4 +606,156 @@ TEST_CASE( "temporal_region_features: typed table + schema sidecar E2E",
     REQUIRE( Json::parseFromStream( b, s, &doc, &errs ) );
     REQUIRE( doc["featureNames"].size() == header.size() - 1 );
     REQUIRE( doc["missingToken"].asString() == "nan" );
+}
+
+// --------------------------------------------------------------- fusion ----
+// rs:temporal_sar_fusion (Temporal Phenology 12.0, WP6): concatenates two
+// already-coregistered feature stacks on ONE verified pixel grid and refuses
+// mismatched grids with a typed error — it never realigns.
+
+namespace
+{
+struct TestStack
+{
+    QString path;
+    int width = 2;
+    int height = 1;
+    std::array<double, 6> gt = { 500000, 30, 0, 4500000, 0, -30 };
+    int epsg = 32648;
+    /// (band name, pixel values) pairs — one raster band each.
+    std::vector<std::pair<QString, std::vector<float>>> bands;
+};
+
+bool writeTestStack( const TestStack &s )
+{
+    ensureGdalInit();
+    OGRSpatialReference srs;
+    if ( srs.importFromEPSG( s.epsg ) != OGRERR_NONE )
+        return false;
+    char *wktOut = nullptr;
+    srs.exportToWkt( &wktOut );
+    const QString wkt = QString::fromUtf8( wktOut );
+    CPLFree( wktOut );
+
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    GDALDatasetH ds = GDALCreate( driver, s.path.toUtf8().constData(), s.width, s.height,
+                                  static_cast<int>( s.bands.size() ), GDT_Float32, nullptr );
+    if ( !ds )
+        return false;
+    GDALSetGeoTransform( ds, const_cast<double *>( s.gt.data() ) );
+    GDALSetProjection( ds, wkt.toUtf8().constData() );
+    bool ok = true;
+    for ( size_t b = 0; b < s.bands.size(); ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( ds, static_cast<int>( b ) + 1 );
+        GDALSetDescription( band, s.bands[b].first.toUtf8().constData() );
+        ok = ok && GDALRasterIO( band, GF_Write, 0, 0, s.width, s.height,
+                                 const_cast<float *>( s.bands[b].second.data() ),
+                                 s.width, s.height, GDT_Float32, 0, 0 ) == CE_None;
+    }
+    GDALClose( ds );
+    return ok;
+}
+
+QString bandDescription( const QString &path, int band )
+{
+    GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    const QString d = QString::fromUtf8(
+        GDALGetDescription( GDALGetRasterBand( ds, band ) ) );
+    GDALClose( ds );
+    return d;
+}
+} // namespace
+
+TEST_CASE( "rs:temporal_sar_fusion concatenates shared-grid feature stacks "
+           "with prefixed names and provenance",
+           "[temporal][fusion][operators10]" )
+{
+    ensureApp();
+    Fixture fx;
+    TestStack opt;
+    opt.path = fx.filePath( "optical.tif" );
+    opt.bands = { { QStringLiteral( "sos" ), { 112.0f, 111.0f } },
+                  { QStringLiteral( "amplitude" ), { 0.7f, 0.65f } } };
+    REQUIRE( writeTestStack( opt ) );
+    TestStack sar;
+    sar.path = fx.filePath( "sar.tif" );
+    sar.bands = { { QStringLiteral( "vv_mean" ), { -12.5f, -11.0f } } };
+    REQUIRE( writeTestStack( sar ) );
+
+    Json::Value params;
+    params["optical"] = opt.path.toStdString();
+    params["sar"] = sar.path.toStdString();
+    params["output"] = fx.filePath( "fused.tif" ).toStdString();
+    const Json::Value result = runOp( "rs:temporal_sar_fusion", params );
+    REQUIRE( result["bands"].asInt() == 3 );
+    REQUIRE( result["opticalBands"].asInt() == 2 );
+    REQUIRE( result["sarBands"].asInt() == 1 );
+
+    const QString out = QString::fromStdString( result["output"].asString() );
+    REQUIRE( bandCount( out ) == 3 );
+    REQUIRE( bandDescription( out, 1 ) == QLatin1String( "opt_sos" ) );
+    REQUIRE( bandDescription( out, 2 ) == QLatin1String( "opt_amplitude" ) );
+    REQUIRE( bandDescription( out, 3 ) == QLatin1String( "sar_vv_mean" ) );
+    const auto b1 = readBand( out, 1 );
+    REQUIRE( b1[0] == Approx( 112.0f ).margin( 1e-5 ) );
+    const auto b3 = readBand( out, 3 );
+    REQUIRE( b3[0] == Approx( -12.5f ).margin( 1e-5 ) );
+
+    // Provenance metadata records both inputs and the grid contract.
+    GDALDatasetH ds = GDALOpen( out.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    const char *optProv = GDALGetMetadataItem( ds, "SICNU_FUSION_OPTICAL_PATH", nullptr );
+    const char *mode = GDALGetMetadataItem( ds, "SICNU_FUSION_MODE", nullptr );
+    REQUIRE( optProv != nullptr );
+    REQUIRE( QString::fromUtf8( optProv ).endsWith( "optical.tif" ) );
+    REQUIRE( mode != nullptr );
+    REQUIRE( QString::fromUtf8( mode ) == QLatin1String( "feature_stack_shared_grid" ) );
+    GDALClose( ds );
+}
+
+TEST_CASE( "rs:temporal_sar_fusion refuses mismatched grids as a typed error",
+           "[temporal][fusion][operators10]" )
+{
+    ensureApp();
+    Fixture fx;
+    TestStack opt;
+    opt.path = fx.filePath( "optical.tif" );
+    opt.bands = { { QStringLiteral( "sos" ), { 112.0f, 111.0f } } };
+    REQUIRE( writeTestStack( opt ) );
+
+    // Same CRS/extent family but a shifted origin → geotransform mismatch.
+    TestStack shifted = opt;
+    shifted.path = fx.filePath( "sar_shifted.tif" );
+    shifted.gt = { 500000, 30, 0, 4500001, 0, -30 };
+    REQUIRE( writeTestStack( shifted ) );
+
+    // Same geotransform but different extent → dimension mismatch.
+    TestStack wider = opt;
+    wider.path = fx.filePath( "sar_wider.tif" );
+    wider.width = 4;
+    wider.bands = { { QStringLiteral( "vv_mean" ),
+                      { -12.0f, -12.0f, -12.0f, -12.0f } } };
+    REQUIRE( writeTestStack( wider ) );
+
+    // Different CRS → projection mismatch.
+    TestStack otherCrs = opt;
+    otherCrs.path = fx.filePath( "sar_othercrs.tif" );
+    otherCrs.epsg = 32649;
+    REQUIRE( writeTestStack( otherCrs ) );
+
+    for ( const QString &bad : { shifted.path, wider.path, otherCrs.path } )
+    {
+        Json::Value params;
+        params["optical"] = opt.path.toStdString();
+        params["sar"] = bad.toStdString();
+        params["output"] = fx.filePath( "should_not_exist.tif" ).toStdString();
+        auto op = RSOperatorRegistry::instance().create( "rs:temporal_sar_fusion" );
+        REQUIRE( op != nullptr );
+        RSOperatorContext ctx;
+        REQUIRE_THROWS( op->run( params, ctx ) );
+        // Refusal must not leave a partial output behind.
+        REQUIRE( !QFile::exists( fx.filePath( "should_not_exist.tif" ) ) );
+    }
 }

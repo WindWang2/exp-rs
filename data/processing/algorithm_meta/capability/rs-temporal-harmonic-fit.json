@@ -120,9 +120,21 @@
           "type" : "enum"
         },
         {
+          "default" : "0.950000",
+          "name" : "ci_level",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
           "name" : "collection",
           "required" : false,
           "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "compute_ci",
+          "required" : false,
+          "type" : "boolean"
         },
         {
           "default" : "keep_all",

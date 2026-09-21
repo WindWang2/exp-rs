@@ -68,6 +68,35 @@ bool isSafeMirrorChunkFileName( const std::string &file )
   return true;
 }
 
+/// 13.0: a directory entry's name in UTF-8 — the manifest's own domain,
+/// so the orphan test compares like with like. POSIX names are bytes and
+/// always convert; on Windows the UTF-16→UTF-8 step throws on an invalid
+/// boundary (unpaired surrogate) — and a lossy implementation that
+/// substitutes U+FFFD instead of throwing is caught by the round-trip
+/// check: a name that cannot re-encode to itself was never proven
+/// unreferenced — the caller counts it as a refusal, never as an orphan
+/// to delete (fail closed).
+bool utf8FileName( const std::filesystem::directory_entry &entry, std::string &out )
+{
+  try
+  {
+    const std::filesystem::path filename = entry.path().filename();
+    const std::u8string name = filename.u8string();
+    out.assign( reinterpret_cast<const char *>( name.c_str() ), name.size() );
+    if ( std::filesystem::u8path( out ) != filename )
+    {
+      out.clear();
+      return false;
+    }
+    return true;
+  }
+  catch ( const std::exception & )
+  {
+    out.clear();
+    return false;
+  }
+}
+
 Json::Value readManifest( const std::string &mirrorDirectory )
 {
   const std::string path = mirrorDirectory + "/" + kMirrorManifest;
@@ -76,9 +105,15 @@ Json::Value readManifest( const std::string &mirrorDirectory )
     return Json::Value( Json::objectValue );
   if ( static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxMirrorManifestBytes )
     return Json::Value();   // corrupt-by-contract (oversized) — caller counts the skip
-  std::ifstream in( path, std::ios::binary );
+  // The stream opens the UTF-8 path — a narrow-char open would route a
+  // non-ASCII mirror root through the Windows ANSI code page and fail.
+  std::ifstream in( std::filesystem::u8path( path ), std::ios::binary );
   if ( !in )
-    return Json::Value( Json::objectValue );
+    // Stat succeeded but the open failed (permissions, transient lock):
+    // an UNREADABLE manifest, not an empty one — reporting it empty
+    // would mark every chunk file an orphan and let prune delete the
+    // whole mirror payload (fail closed, same as a corrupt parse).
+    return Json::Value();
   std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
   Json::CharReaderBuilder builder;
   std::string errors;
@@ -155,21 +190,39 @@ std::string nowIso8601Utc()
 
 /// SHA-256 hex of a local file (integrity checksum of a mirrored chunk).
 /// Returns "" when the file cannot be read back.
+/// 13.0: reads through the VSI layer — the manifest's file-name domain is
+/// UTF-8 and VSIFOpenL converts it to the native spelling on every
+/// platform; a narrow std::ifstream would route a non-ASCII name through
+/// the active code page on Windows and fail the proof of a healthy entry.
 std::string fileSha256Hex( const std::string &path )
 {
-  std::ifstream in( path, std::ios::binary );
-  if ( !in )
+  VSILFILE *file = VSIFOpenL( path.c_str(), "rb" );
+  if ( file == nullptr )
     return {};
   Sha256 hash;
   char buffer[64 * 1024];
-  while ( in.read( buffer, sizeof( buffer ) ) || in.gcount() > 0 )
-  {
-    hash.update( buffer, static_cast<std::size_t>( in.gcount() ) );
-    if ( !in )
-      break;
-  }
+  std::size_t read = 0;
+  while ( ( read = VSIFReadL( buffer, 1, sizeof( buffer ), file ) ) > 0 )
+    hash.update( buffer, read );
+  VSIFCloseL( file );
   return toHex( hash.finalize() );
 }
+
+#ifdef _WIN32
+/// UTF-8→UTF-16 for the Win32 lock call — the mirror path domain is
+/// UTF-8 everywhere else (VSIStatL, fs::u8path), so the A-codepage
+/// CreateFileA would misresolve a non-ASCII mirror root.
+std::wstring wideFromUtf8( const std::string &text )
+{
+  if ( text.empty() )
+    return std::wstring();
+  const int size = MultiByteToWideChar( CP_UTF8, 0, text.c_str(), static_cast<int>( text.size() ),
+                                        nullptr, 0 );
+  std::wstring wide( static_cast<std::size_t>( size ), L'\0' );
+  MultiByteToWideChar( CP_UTF8, 0, text.c_str(), static_cast<int>( text.size() ), wide.data(), size );
+  return wide;
+}
+#endif
 
 /// Single-writer guard for one mirror directory (O_EXCL create; a crashed
 /// writer's lock is broken by age — the pid is recorded, liveness is not
@@ -181,7 +234,7 @@ class MirrorWriterLock
         : mLockPath( mirrorDirectory + "/" + kMirrorLockFile )
     {
 #ifdef _WIN32
-      mHandle = CreateFileA( ( mirrorDirectory + "/" + kMirrorLockFile ).c_str(), GENERIC_WRITE, 0,
+      mHandle = CreateFileW( wideFromUtf8( mLockPath ).c_str(), GENERIC_WRITE, 0,
                              nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr );
       mHeld = mHandle != INVALID_HANDLE_VALUE;
 #else
@@ -479,6 +532,7 @@ Json::Value MirrorVerifyReport::toJson() const
   json["bad_entries"] = static_cast<Json::UInt64>( badEntries );
   json["unreferenced_files"] = static_cast<Json::UInt64>( unreferencedFiles );
   json["unreferenced_bytes"] = static_cast<Json::UInt64>( unreferencedBytes );
+  json["unclassified_entries"] = static_cast<Json::UInt64>( unclassifiedEntries );
   json["bytes_checked"] = static_cast<Json::UInt64>( bytesChecked );
   json["manifest_unreadable"] = manifestUnreadable;
   return json;
@@ -583,17 +637,36 @@ MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
 
   // Orphan scan: every file in chunks/ the manifest never names. Bounded
   // work: one listing pass, stat per orphan (no reads).
+  // 13.0: the iterator spells the dir through atomic_fs's UTF-8 path
+  // discipline (a non-ASCII mirror root survives on Windows), and each
+  // entry is classified by symlink_status — a symlink/reparse point is
+  // never a chunk payload and is never followed.
   const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
   std::error_code ec;
-  for ( std::filesystem::directory_iterator it( chunkDir, ec ), end; !ec && it != end;
-        it.increment( ec ) )
+  for ( std::filesystem::directory_iterator it( std::filesystem::u8path( chunkDir ), ec ), end;
+        !ec && it != end; it.increment( ec ) )
   {
     // A fresh error_code per probe: one transient stat failure (a racing
-    // directory change) must not abort the whole scan silently.
-    std::error_code probeEc;
-    if ( !it->is_regular_file( probeEc ) || probeEc )
+    // directory change) must not abort the whole scan silently — but it
+    // IS counted: the audit admits what it could not classify.
+    std::error_code statusEc;
+    const std::filesystem::file_status status = it->symlink_status( statusEc );
+    if ( statusEc || std::filesystem::is_symlink( status ) )
+    {
+      ++report.unclassifiedEntries;
       continue;
-    const std::string name = it->path().filename().string();
+    }
+    if ( !std::filesystem::is_regular_file( status ) )
+      continue;
+    // The name must convert to the manifest's UTF-8 domain before it can
+    // be compared to the referenced set — an unconvertible name cannot be
+    // proven unreferenced (counted, not reported as an orphan).
+    std::string name;
+    if ( !utf8FileName( *it, name ) )
+    {
+      ++report.unclassifiedEntries;
+      continue;
+    }
     if ( referenced.count( name ) > 0 )
       continue;
     std::error_code sizeEc;
@@ -601,6 +674,11 @@ MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
     report.unreferencedBytes += sizeEc ? 0 : static_cast<std::uint64_t>( size );
     report.unreferencedFiles += 1;
   }
+  // A mid-scan increment error truncates the inventory: the tail held at
+  // least one uninspected entry, and the audit admits that rather than
+  // reporting a clean sweep it never completed.
+  if ( ec )
+    ++report.unclassifiedEntries;
   return report;
 }
 
@@ -695,7 +773,9 @@ RepairCleanupResult repairCleanup( const std::string &mirrorDirectory )
     atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
                                 [ & ]( const std::string &staged ) {
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
-      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      // The staged path is UTF-8 — open it as such, not through the
+      // Windows ANSI code page (a non-ASCII mirror root would fail here).
+      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -817,7 +897,9 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
     atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
                                 [ & ]( const std::string &staged ) {
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
-      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      // The staged path is UTF-8 — open it as such, not through the
+      // Windows ANSI code page (a non-ASCII mirror root would fail here).
+      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -1156,6 +1238,8 @@ Json::Value MirrorPruneReport::toJson() const
   Json::Value json;
   json["manifest_unreadable"] = manifestUnreadable;
   json["orphan_files_removed"] = static_cast<Json::UInt64>( orphanFilesRemoved );
+  json["orphan_files_refused"] = static_cast<Json::UInt64>( orphanFilesRefused );
+  json["orphan_files_failed"] = static_cast<Json::UInt64>( orphanFilesFailed );
   json["dead_entries_removed"] = static_cast<Json::UInt64>( deadEntriesRemoved );
   json["expired_entries_removed"] = static_cast<Json::UInt64>( expiredEntriesRemoved );
   json["quota_entries_removed"] = static_cast<Json::UInt64>( quotaEntriesRemoved );
@@ -1324,41 +1408,74 @@ MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
   }
   const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
   std::error_code ec;
-  for ( std::filesystem::directory_iterator it( chunkDir, ec ), end; !ec && it != end;
-        it.increment( ec ) )
+  for ( std::filesystem::directory_iterator it( std::filesystem::u8path( chunkDir ), ec ), end;
+        !ec && it != end; it.increment( ec ) )
   {
-    std::error_code probeEc;
-    if ( !it->is_regular_file( probeEc ) || probeEc )
+    // 13.0: classify by symlink_status — a symlink/reparse point is never
+    // deleted through, and an unstatable entry is left alone (fail closed,
+    // both counted).
+    std::error_code statusEc;
+    const std::filesystem::file_status status = it->symlink_status( statusEc );
+    if ( statusEc )
+    {
+      ++report.orphanFilesFailed;
       continue;
-    const std::string name = it->path().filename().string();
+    }
+    if ( std::filesystem::is_symlink( status ) )
+    {
+      ++report.orphanFilesRefused;
+      continue;
+    }
+    if ( !std::filesystem::is_regular_file( status ) )
+      continue;
+    // 13.0: the name must convert to the manifest's UTF-8 domain to prove
+    // it unreferenced — an unconvertible name (Windows invalid UTF-16
+    // boundary) is a refusal, never a deletion. Non-ASCII names that DO
+    // convert are deleted through atomic_fs's UTF-8 path discipline, which
+    // re-encodes to the exact native spelling — the path never travels
+    // through the active code page.
+    std::string name;
+    if ( !utf8FileName( *it, name ) )
+    {
+      ++report.orphanFilesRefused;
+      continue;
+    }
     if ( referenced.count( name ) > 0 )
-      continue;
-    // Chunk file names are content-derived ASCII (sha256 hex + ".tif") in
-    // every materialized mirror; a hostile NON-ASCII orphan name is counted
-    // but left for a human rather than routed through a possibly
-    // ACP-reencoding removal path on Windows (the atomic_fs house rule).
-    if ( !std::all_of( name.begin(), name.end(),
-                       []( char c ) { return static_cast<unsigned char>( c ) < 0x80; } ) )
       continue;
     std::error_code sizeEc;
     const auto size = std::filesystem::file_size( it->path(), sizeEc );
-    if ( !sizeEc )
-      report.bytesRemoved += static_cast<std::uint64_t>( size );
-    atomic_fs::removeFileQuiet( it->path().string() );
-    ++report.orphanFilesRemoved;
+    if ( atomic_fs::removeFileQuiet( chunkDir + "/" + name ) )
+    {
+      if ( !sizeEc )
+        report.bytesRemoved += static_cast<std::uint64_t>( size );
+      ++report.orphanFilesRemoved;
+    }
+    else
+    {
+      // Locked / unremovable: fail closed — counted, file preserved.
+      ++report.orphanFilesFailed;
+    }
   }
+  // A mid-scan increment error truncates the sweep: the tail held at
+  // least one uninspected entry — counted as a failed action rather than
+  // a silently incomplete pass.
+  if ( ec )
+    ++report.orphanFilesFailed;
 
-  // Publish only when this pass actually changed something (P2 review: an
-  // unconditional rewrite would churn mtime and invalidate the snapshot
-  // cache on a no-op prune).
+  // Publish only when this pass actually changed the MANIFEST (P2
+  // review: an unconditional rewrite would churn mtime and invalidate
+  // the snapshot cache on a no-op prune — and orphan-file removal does
+  // not alter the manifest at all).
   const bool changed = report.deadEntriesRemoved > 0 || report.expiredEntriesRemoved > 0 ||
-                       report.quotaEntriesRemoved > 0 || report.orphanFilesRemoved > 0;
+                       report.quotaEntriesRemoved > 0;
   if ( changed )
   {
     atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
                                 [ & ]( const std::string &staged ) {
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
-      std::ofstream out( staged, std::ios::binary | std::ios::trunc );
+      // The staged path is UTF-8 — open it as such, not through the
+      // Windows ANSI code page (a non-ASCII mirror root would fail here).
+      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
