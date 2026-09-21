@@ -1126,6 +1126,76 @@ ResolveOutcome resolveAssetState( const StateResolutionInput &input )
         appendClaim( state, "temporal.refs", refs );
     }
 
+    // ---- Provenance (catalog DerivationRecord projection) ----
+    if ( input.derivation )
+    {
+        const DerivationFacts &derivation = *input.derivation;
+        state.provenance.isDerived = true;
+        state.provenance.algorithmId = derivation.algorithmId;
+        state.provenance.algorithmVersion = derivation.algorithmVersion;
+        for ( const DerivationFacts::Input &derivationInput : derivation.inputs )
+        {
+            ProvenanceInputRef ref;
+            ref.assetId = derivationInput.assetId;
+            ref.revision = derivationInput.revision;
+            ref.bandReferences = derivationInput.bandReferences;
+            ref.valueDomain = derivationInput.valueDomain;
+            state.provenance.inputs.push_back( ref );
+        }
+        state.provenance.completedAtUtc = derivation.completedAtUtc;
+        state.provenance.executionFingerprint = derivation.executionFingerprint;
+        state.provenance.softwareVersion = derivation.softwareVersion;
+        state.provenance.workflowRef = derivation.workflowRef;
+        state.provenance.cacheHit = derivation.cacheHit;
+
+        // Claims only for the parts the record actually carries.
+        if ( !derivation.algorithmId.empty() || !derivation.algorithmVersion.empty() )
+        {
+            MergedValue algorithm;
+            algorithm.present = true;
+            algorithm.value = derivation.algorithmId;
+            algorithm.kind = ClaimKind::Known;
+            algorithm.sources = { "catalog:DerivationRecord" };
+            appendClaim( state, "provenance.algorithm", algorithm );
+        }
+        if ( !derivation.inputs.empty() )
+        {
+            MergedValue inputs;
+            inputs.present = true;
+            inputs.kind = ClaimKind::Known;
+            inputs.sources = { "catalog:DerivationRecord" };
+            appendClaim( state, "provenance.inputs", inputs );
+        }
+    }
+
+    // ---- Model-derived (classifier sidecar projection) ----
+    if ( input.modelSidecar )
+    {
+        const ModelSidecarFacts &sidecar = *input.modelSidecar;
+        state.modelDerived.present = true;
+        state.modelDerived.modelKind = sidecar.modelKind;
+        state.modelDerived.labels = sidecar.labels;
+        state.modelDerived.hasAccuracy = sidecar.hasAccuracy;
+        state.modelDerived.accuracy = sidecar.accuracy;
+        state.modelDerived.sidecarPath = sidecar.sidecarPath;
+        state.modelDerived.featureSchema = sidecar.featureSchema;
+
+        if ( !state.modelDerived.labels.empty() )
+        {
+            MergedValue labels;
+            labels.present = true;
+            labels.kind = ClaimKind::Known;
+            labels.sources = { "sidecar:classifier-meta" };
+            appendClaim( state, "model_derived.labels", labels );
+        }
+        else
+        {
+            // The sidecar declares no class labels: record the absence, never
+            // an empty claim.
+            addUnknown( state, "model_derived.labels" );
+        }
+    }
+
     state.notes.insert( state.notes.end(), notes.begin(), notes.end() );
     normalizeState( state );
     return outcome;

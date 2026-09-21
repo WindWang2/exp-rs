@@ -5,6 +5,7 @@
 add_library( sicnu_scientific_state STATIC
     asset_state_json.cpp
     asset_state_resolver.cpp
+    model_sidecar.cpp
 )
 
 add_library( Sicnu::ScientificState ALIAS sicnu_scientific_state )
