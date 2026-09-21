@@ -11876,3 +11876,55 @@ target_include_directories(test_spectral_background_raster PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_background_raster)
+
+# ===========================================================================
+# Unified Scientific Verifier (RS14-10, ADR 0172)
+#
+# These lanes link sicnu_verification rather than recompiling the module's
+# sources per test. The library is Qt-free and QGIS-free, so unlike most lanes
+# in this file these need neither Qt6::Core nor qgis_core -- which is the point
+# of the module and worth keeping true by construction.
+#
+# The suite is split by concern so a failure names a layer:
+#   core         the lattice, the closed code table, canonical bytes, digests
+#   checks       the seven check families, one TEST_CASE group each
+#   provenance   provenance / reproducibility / cross-output, two-level roll-up
+#   packs        pack composition: conflicts, overrides, empty compositions
+#   render       the teaching and agent renderers
+#   drift        the mirrored kFactKeys vocabulary still matches the harness
+#   adversarial  the fail-open battery: a Pass must be impossible without evidence
+# ===========================================================================
+
+set( SICNU_VERIFIER_LANES
+    core
+    checks
+    provenance
+    packs
+    render
+    drift
+    adversarial
+)
+
+foreach( LANE ${SICNU_VERIFIER_LANES} )
+    set( LANE_TARGET "test_verifier_${LANE}_14" )
+    add_executable( ${LANE_TARGET} ${LANE_TARGET}.cpp )
+    target_link_libraries( ${LANE_TARGET} PRIVATE
+        Catch2::Catch2WithMain
+        sicnu_verification
+    )
+    target_include_directories( ${LANE_TARGET} PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+        ${CMAKE_SOURCE_DIR}/tests
+    )
+    sicnu_discover_tests( ${LANE_TARGET} )
+endforeach()
+
+# The drift guard reads src/agent/harness/workflow_ir.cpp at run time and
+# compares its kFactKeys table against the mirror in the verifier, so it needs
+# to know where the source tree is. CMAKE_SOURCE_DIR is baked in as a define
+# because the guard must read the REAL file: the whole point is to notice that
+# another file changed, which a fixture could never do.
+target_compile_definitions( test_verifier_drift_14 PRIVATE
+    "CMAKE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+)

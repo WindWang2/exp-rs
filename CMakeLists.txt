@@ -790,6 +790,11 @@ add_subdirectory(src/operators)
 # Contract Platform 9.0: canonical descriptors, contract graph and the
 # mechanical drift scanners (test/tooling side, zero product runtime cost).
 add_subdirectory(src/contracts)
+# Unified Scientific Verifier (RS14-10, ADR 0172): three-valued verification of
+# declared expectations. Qt-free and QGIS-free by design, so it stays usable
+# headless; must follow src/contracts (packs_builtin reads the registry) and
+# src/geospatial (the module compiles in the repo's single sha256 TU).
+add_subdirectory(src/verification)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
