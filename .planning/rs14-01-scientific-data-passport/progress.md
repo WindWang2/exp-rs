@@ -56,3 +56,34 @@
   (tighter semantics, not weaker).
 - Result: test_scientific_state_provenance 71 assertions / 15 cases green;
   core 76/12, resolver 78/18, geo 96/22 unchanged green.
+
+## Slice E — confidence lattice + state diff API (2026-09-22)
+- RED: new `tests/test_scientific_state_diff.cpp` failed to compile —
+  `scientific_state/asset_state_diff.h` did not exist.
+- GREEN (minimal):
+  - Confidence: deterministic lattice over the 8 key paths (identity.asset_id
+    when catalog, sensor.modality always, bands[*].role worst-band when bands,
+    radiometric.unit, acquisition.time, geometry.crs when dataset,
+    provenance.algorithm when derivation, validity.noDataPolicy when bands);
+    known=1.0 inferred=0.75 assumed=0.25 conflicted/unknown=0;
+    confidence = total/applicable, rounded to 3 decimals. Implemented in
+    resolver (computeConfidence/claimPathScore); full contract documented in
+    `asset_state_schema.h` and the test file header.
+  - Refinement: a fully *declared* noDataPolicy is now a Known claim (directly
+    attested by every band's declaration); undeclared/partial stay Inferred —
+    required so the all-known fixture reaches 1.0; Slice C assertions
+    unaffected (they pin undeclared=Inferred).
+  - New `src/scientific_state/asset_state_diff.{h,cpp}`: FieldDiff/StateDiff,
+    diffStates (flattens assetStateToJson docs into path → canonical JSON text;
+    claims at special "claims[<path>]" paths with full-record comparison,
+    before/after = claim kind texts), sorted output, unchangedFields;
+    stateDiffToJson/FromJson (schema sicnu.asset_state_diff.v1, typed errors)
+    and byte-deterministic serializeStateDiff. Added to library CMake.
+- Pinned scenarios: all-known S2 → 1.0; raw FSM-default dataset → 0.167
+  (1.0/6, identity out of denominator without catalog); +catalog → 0.286
+  (2/7); conflicted role → 0.429 (3/7); DN→TOA calibration diff (unit changed
+  + claim_changed assumed→known, bands/geometry untouched, unchanged>0);
+  provenance added; numeric-scale removed; empty-empty and same-input diffs
+  empty; byte determinism; JSON round-trip; typed rejections.
+- Result: test_scientific_state_diff 41 assertions / 12 cases green; core
+  76/12, resolver 78/18, geo 96/22, provenance 71/15 all unchanged green.

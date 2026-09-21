@@ -933,7 +933,10 @@ void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput
         MergedValue policy;
         policy.present = true;
         policy.value = state.validity.noDataPolicy;
-        policy.kind = ClaimKind::Inferred;
+        // A fully declared policy is directly attested by every band's own
+        // authoritative declaration ⇒ known. Deriving it from partial
+        // coverage or from silence stays inferred.
+        policy.kind = ( declaredBands == totalBands ) ? ClaimKind::Known : ClaimKind::Inferred;
         if ( anyDatasetDeclaration )
             policy.sources.push_back( "gdal:NO_DATA_VALUE" );
         if ( anyCatalogDeclaration )
@@ -999,6 +1002,67 @@ void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput
 }
 
 } // namespace
+
+/// Score of one key claim path in the confidence lattice (see
+/// asset_state_schema.h for the full contract).
+double claimPathScore( const RemoteSensingAssetState &state, const std::string &path )
+{
+    switch ( claimFor( state, path ).kind )
+    {
+        case ClaimKind::Known: return 1.0;
+        case ClaimKind::Inferred: return 0.75;
+        case ClaimKind::Assumed: return 0.25;
+        case ClaimKind::Conflicted:
+        case ClaimKind::Unknown: return 0.0;
+    }
+    return 0.0;
+}
+
+/// Deterministic overall confidence: the lattice over the 8 key paths,
+/// normalized by the count of applicable paths (paths whose source exists —
+/// absent sources never dilute), rounded to 3 decimals.
+double computeConfidence( const RemoteSensingAssetState &state,
+                          const StateResolutionInput &input )
+{
+    double total = 0.0;
+    std::size_t denominator = 0;
+    const auto consider = [&]( double score )
+    {
+        ++denominator;
+        total += score;
+    };
+
+    if ( input.catalog )
+        consider( claimPathScore( state, "identity.asset_id" ) );
+    consider( claimPathScore( state, "sensor.modality" ) );
+
+    if ( !state.bands.empty() )
+    {
+        // Full credit only when every band role resolves; the worst band wins.
+        double worst = 1.0;
+        for ( const BandState &band : state.bands )
+        {
+            worst = std::min(
+                worst, claimPathScore( state,
+                                       "bands[" + std::to_string( band.index ) + "].role" ) );
+        }
+        consider( worst );
+    }
+
+    consider( claimPathScore( state, "radiometric.unit" ) );
+    consider( claimPathScore( state, "acquisition.time" ) );
+
+    if ( input.dataset )
+        consider( claimPathScore( state, "geometry.crs" ) );
+    if ( input.derivation )
+        consider( claimPathScore( state, "provenance.algorithm" ) );
+    if ( !state.bands.empty() )
+        consider( claimPathScore( state, "validity.no_data_policy" ) );
+
+    if ( denominator == 0 )
+        return 0.0;
+    return std::round( ( total / static_cast<double>( denominator ) ) * 1000.0 ) / 1000.0;
+}
 
 ResolveOutcome resolveAssetState( const StateResolutionInput &input )
 {
@@ -1195,6 +1259,9 @@ ResolveOutcome resolveAssetState( const StateResolutionInput &input )
             addUnknown( state, "model_derived.labels" );
         }
     }
+
+    // ---- Confidence (deterministic key-path lattice) ----
+    state.confidence = computeConfidence( state, input );
 
     state.notes.insert( state.notes.end(), notes.begin(), notes.end() );
     normalizeState( state );

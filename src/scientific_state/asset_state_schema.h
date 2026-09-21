@@ -23,6 +23,23 @@ inline constexpr const char *kAssetStateSchemaId = "sicnu.asset_state.v1";
 /// Canonical schema id of a serialized state diff document.
 inline constexpr const char *kAssetStateDiffSchemaId = "sicnu.asset_state_diff.v1";
 
+/// Overall resolvability confidence (state.confidence, [0,1]) — deterministic
+/// lattice over 8 key claim paths. Each applicable path scores
+///   known=1.0, inferred=0.75, assumed=0.25, conflicted/unknown=0
+/// and confidence = total / applicable-path count, rounded to 3 decimals.
+/// A path is applicable when its source exists; absent sources never dilute:
+///   identity.asset_id     — only when a catalog is present
+///   sensor.modality       — always
+///   bands[*].role         — when bands exist; scores the worst band (full
+///                           credit only when every band role resolves)
+///   radiometric.unit      — always
+///   acquisition.time      — always
+///   geometry.crs          — only when a dataset is present
+///   provenance.algorithm  — only when a derivation record is present
+///   validity.noDataPolicy — only when bands exist
+/// Computed by the resolver (asset_state_resolver.cpp); see
+/// tests/test_scientific_state_diff.cpp for the pinned scenarios.
+
 /// Hard upper bound on projected bands. Passport resolution is a metadata
 /// projection, never a pixel scan; pathological inputs (10k-band rasters)
 /// are truncated with an explicit note, never silently.
