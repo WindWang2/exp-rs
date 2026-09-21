@@ -790,6 +790,9 @@ add_subdirectory(src/operators)
 # Contract Platform 9.0: canonical descriptors, contract graph and the
 # mechanical drift scanners (test/tooling side, zero product runtime cost).
 add_subdirectory(src/contracts)
+# RS14-01 Scientific Data Passport: versioned read-only scientific asset
+# state layer (Qt-free, jsoncpp-only core).
+add_subdirectory(src/scientific_state)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)

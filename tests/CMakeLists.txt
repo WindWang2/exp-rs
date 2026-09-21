@@ -11876,3 +11876,11 @@ target_include_directories(test_spectral_background_raster PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_background_raster)
+
+# =============================================================================
+# RS14-01 Scientific Data Passport: unified scientific asset state layer.
+# Core contracts run in the jsoncpp-only lane (no Qt, no QGIS, no GDAL);
+# the GDAL facts collector gets its own io-lane target once it lands.
+# =============================================================================
+sicnu_add_sdk_test(test_scientific_state_core)
+target_link_libraries(test_scientific_state_core PRIVATE Sicnu::ScientificState)
