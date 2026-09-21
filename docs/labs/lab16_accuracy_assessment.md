@@ -50,18 +50,11 @@ Quantify classification quality with a disagreement map, a hand-derived confusio
 
 ### 步骤 2：堆叠双图层（Stack the pair into a feature cube）
 
-执行 rs:feature_stack，把分类图与真值图作为两个 feature 依（band=1）堆叠为 outputs/lab16_pair_stack.tif。堆叠是逐像元对比的前提：两条输入必须在同一网格上（ rs:feature_stack 会强制校验网格一致）。
+在工具箱中执行 rs:feature_stack（本步骤为手动执行：features 参数是对象数组，超出引导面板的参数绑定契约），features 填两条 {input, band:1, id}：data/labs/_tmp/landcover/landcover_classified.tif（id=classified）与 data/labs/_tmp/landcover/landcover_truth.tif（id=truth），输出 outputs/lab16_pair_stack.tif。堆叠是逐像元对比的前提：两条输入必须在同一网格上（rs:feature_stack 会强制校验网格一致）。
 
-- **绑定算子**：`rs:feature_stack`
-- **预置参数**：
+- **手动步骤**：无绑定操作
 
-| 参数 | 值 |
-|------|-----|
-| `features` | `[{"input": "data/labs/_tmp/landcover/landcover_classified.tif", "band": 1, "id": "classified"}, {"input": "data/labs/_tmp/landcover/landcover_truth.tif", "band": 1, "id": "truth"}]` |
-| `output` | `outputs/lab16_pair_stack.tif` |
-
-
-> **原理**：feature 的 id 会写进输出特征合同——给波段起语义名是可解释处理链的习惯。
+> **原理**：feature 的 id 会写进输出特征合同——给波段起语义名是可解释处理链的习惯。绑定契约边界本身也是一个教学点：不是所有算子参数形态都能进引导面板。
 
 ✅ **完成标志**：outputs/lab16_pair_stack.tif 生成，应为 2 波段。
 
