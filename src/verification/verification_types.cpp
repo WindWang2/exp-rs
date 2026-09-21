@@ -285,4 +285,73 @@ bool VerificationCheck::fromJson( const Json::Value &json, VerificationCheck &ou
     return true;
 }
 
+Json::Value CheckResult::toJson() const
+{
+    Json::Value json{ Json::objectValue };
+    json["check_id"] = checkId;
+    json["kind"] = kind;
+    json["title"] = title;
+    json["status"] = statusToWire( status );
+    json["failure_code"] = failureCode;
+    json["message"] = message;
+    json["evidence"] = evidence.toJson();
+    json["hints"] = hints.isObject() ? hints : Json::Value{ Json::objectValue };
+    json["promoted"] = promoted;
+    return json;
+}
+
+bool CheckResult::fromJson( const Json::Value &json, CheckResult &out, std::string &error )
+{
+    if ( !json.isObject() )
+    {
+        error = "each result must be an object";
+        return false;
+    }
+
+    CheckResult loaded;
+    if ( !requireString( json, "check_id", true, loaded.checkId, error ) ||
+         !requireString( json, "kind", false, loaded.kind, error ) ||
+         !requireString( json, "title", false, loaded.title, error ) ||
+         !requireString( json, "failure_code", false, loaded.failureCode, error ) ||
+         !requireString( json, "message", false, loaded.message, error ) ||
+         !requireObject( json, "hints", loaded.hints, error ) )
+    {
+        return false;
+    }
+
+    const Json::Value *statusMember = optionalMember( json, "status" );
+    if ( statusMember != nullptr )
+    {
+        if ( !statusMember->isString() || !statusFromWire( statusMember->asString(), loaded.status ) )
+        {
+            // A status this build does not recognise must not be read as Pass.
+            // Leaving it Indeterminate is the conservative reading and keeps the
+            // record inside the three values the rest of the module reasons in.
+            error = "member 'status' must be one of pass|fail|indeterminate";
+            return false;
+        }
+    }
+
+    const Json::Value *evidenceMember = optionalMember( json, "evidence" );
+    if ( evidenceMember != nullptr &&
+         !VerificationEvidence::fromJson( *evidenceMember, loaded.evidence, error ) )
+    {
+        return false;
+    }
+
+    const Json::Value *promotedMember = optionalMember( json, "promoted" );
+    if ( promotedMember != nullptr )
+    {
+        if ( !promotedMember->isBool() )
+        {
+            error = "member 'promoted' must be a boolean";
+            return false;
+        }
+        loaded.promoted = promotedMember->asBool();
+    }
+
+    out = std::move( loaded );
+    return true;
+}
+
 } // namespace sicnu::verification

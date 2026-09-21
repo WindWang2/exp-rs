@@ -17,6 +17,9 @@
  ***************************************************************************/
 #pragma once
 
+#include "verification/evidence.h"
+#include "verification/status_lattice.h"
+
 #include <json/json.h>
 
 #include <cstddef>
@@ -91,6 +94,33 @@ struct VerificationCheck
 
     Json::Value toJson() const;
     static bool fromJson( const Json::Value &json, VerificationCheck &out, std::string &error );
+};
+
+/// What one check concluded, together with the evidence it concluded it from.
+///
+/// The default status is **Indeterminate, never Pass**. Every path that did not
+/// actually evaluate something therefore lands on "we do not know" rather than
+/// on success: constructing a CheckResult without setting a status is exactly
+/// the failure mode this whole module exists to prevent, and reading a default
+/// Pass off an uninitialized struct is indistinguishable from a real pass in
+/// the report.
+struct CheckResult
+{
+    std::string checkId;
+    std::string kind;              ///< wire spelling of the evaluated kind
+    std::string title;
+    CheckStatus status = CheckStatus::Indeterminate;
+    std::string failureCode;       ///< empty unless the status is Fail or Indeterminate
+    std::string message;           ///< human-readable, must say WHY it matters
+    VerificationEvidence evidence;
+    Json::Value hints{ Json::objectValue };  ///< repair hints copied from the check
+
+    /// True when IndeterminatePolicy::Fail raised an Indeterminate to Fail.
+    /// Recorded so a reader can tell "this failed" from "we raised it to fail".
+    bool promoted = false;
+
+    Json::Value toJson() const;
+    static bool fromJson( const Json::Value &json, CheckResult &out, std::string &error );
 };
 
 } // namespace sicnu::verification
