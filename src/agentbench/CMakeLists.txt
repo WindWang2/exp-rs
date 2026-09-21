@@ -22,6 +22,8 @@ add_library( sicnu_agentbench STATIC
     json_writer.h
     report.cpp
     report.h
+    suite.cpp
+    suite.h
     trace.cpp
     trace.h
     version.h

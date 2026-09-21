@@ -1,0 +1,64 @@
+{
+  "allowed_tools": [
+    "rs:train_classifier",
+    "rs:classify",
+    "harness:verify"
+  ],
+  "case_id": "classification/supervised-basic",
+  "description": "Supervised land-cover classification",
+  "expected_evidence": [
+    {
+      "id": "classified-map",
+      "kind": "raster",
+      "path": "work://case/classes.tif",
+      "required_fields": [
+        "accuracy"
+      ]
+    }
+  ],
+  "goal": "Train a classifier on the pinned labels and deliver an accuracy-checked classification.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "classified-map",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "scientific",
+      "id": "sci-accuracy",
+      "kind": "numeric_ge",
+      "params": {
+        "evidence_id": "classified-map",
+        "field": "accuracy",
+        "min": 0.8
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 8000,
+    "max_tool_calls": 10
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "classification",
+  "title": "Supervised land-cover classification"
+}

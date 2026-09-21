@@ -1,0 +1,27 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "map/crs-refusal",
+  "explanation": "Refusing delivery: scene CRS does not match the required EPSG:32633.",
+  "outcome_claim": {
+    "note": "refusing on CRS mismatch",
+    "success": false
+  },
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/crs-refusal",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "verdict": "FAIL"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ],
+  "stop_reason_override": "blocked"
+}

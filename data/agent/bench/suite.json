@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "case": "cases/optical-ndvi-basic.json",
+      "script": "scripts/optical-ndvi-basic.json"
+    },
+    {
+      "case": "cases/optical-ndvi-cloud-explain.json",
+      "script": "scripts/optical-ndvi-cloud-explain.json"
+    },
+    {
+      "case": "cases/optical-ndvi-transient.json",
+      "script": "scripts/optical-ndvi-transient.json"
+    },
+    {
+      "case": "cases/optical-redundant-ndvi.json",
+      "script": "scripts/optical-redundant-ndvi.json"
+    },
+    {
+      "case": "cases/classification-supervised-basic.json",
+      "script": "scripts/classification-supervised-basic.json"
+    },
+    {
+      "case": "cases/classification-ensemble-transient.json",
+      "script": "scripts/classification-ensemble-transient.json"
+    },
+    {
+      "case": "cases/classification-rogue-recorded.json",
+      "trace": "traces/recorded-rogue.json"
+    },
+    {
+      "case": "cases/classification-inefficient-recorded.json",
+      "trace": "traces/recorded-inefficient.json"
+    },
+    {
+      "case": "cases/change-bi-temporal-basic.json",
+      "script": "scripts/change-bi-temporal-basic.json"
+    },
+    {
+      "case": "cases/change-serial-threshold.json",
+      "script": "scripts/change-serial-threshold.json"
+    },
+    {
+      "case": "cases/change-service-unavailable.json",
+      "script": "scripts/change-service-unavailable.json"
+    },
+    {
+      "case": "cases/change-order-recorded.json",
+      "trace": "traces/recorded-change-clean.json"
+    },
+    {
+      "case": "cases/temporal-smoothing-basic.json",
+      "script": "scripts/temporal-smoothing-basic.json"
+    },
+    {
+      "case": "cases/temporal-phenology-explain.json",
+      "script": "scripts/temporal-phenology-explain.json"
+    },
+    {
+      "case": "cases/temporal-budget-tight.json",
+      "script": "scripts/temporal-budget-tight.json"
+    },
+    {
+      "case": "cases/temporal-gap-fill-transient.json",
+      "script": "scripts/temporal-gap-fill-transient.json"
+    },
+    {
+      "case": "cases/model-inference-basic.json",
+      "script": "scripts/model-inference-basic.json"
+    },
+    {
+      "case": "cases/model-vram-guard.json",
+      "script": "scripts/model-vram-guard.json"
+    },
+    {
+      "case": "cases/model-silent-corruption.json",
+      "trace": "traces/recorded-silent.json"
+    },
+    {
+      "case": "cases/model-batch-explain.json",
+      "script": "scripts/model-batch-explain.json"
+    },
+    {
+      "case": "cases/map-export-geotiff-basic.json",
+      "script": "scripts/map-export-geotiff-basic.json"
+    },
+    {
+      "case": "cases/map-crs-refusal.json",
+      "script": "scripts/map-crs-refusal.json"
+    },
+    {
+      "case": "cases/map-legend-explain.json",
+      "script": "scripts/map-legend-explain.json"
+    },
+    {
+      "case": "cases/map-publisher-transient.json",
+      "script": "scripts/map-publisher-transient.json"
+    }
+  ],
+  "description": "RS14 starter pack: 24 goal-level agent benchmark cases across six task families, plus 4 recorded-trajectory replays.",
+  "schema": "sicnu.agentbench.suite/v1",
+  "suite_id": "rs14-agent-bench-core",
+  "version": "1.0.0"
+}

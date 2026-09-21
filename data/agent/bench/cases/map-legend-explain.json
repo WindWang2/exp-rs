@@ -1,0 +1,54 @@
+{
+  "allowed_tools": [
+    "map:export_geotiff",
+    "harness:verify"
+  ],
+  "case_id": "map/legend-explain",
+  "description": "Map delivery with a mandatory legend note",
+  "expected_evidence": [
+    {
+      "id": "delivery",
+      "kind": "map",
+      "require_in_explanation": true,
+      "required_fields": [
+        "crs"
+      ]
+    }
+  ],
+  "goal": "Export the map and describe the legend in the final explanation.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "delivery",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-explain",
+      "kind": "explanation_mentions",
+      "params": {
+        "phrase": "legend"
+      },
+      "severity": "warning"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "map_delivery",
+  "title": "Map delivery with a mandatory legend note"
+}

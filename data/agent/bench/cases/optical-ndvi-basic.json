@@ -1,0 +1,62 @@
+{
+  "allowed_tools": [
+    "rs:ndvi",
+    "harness:verify"
+  ],
+  "case_id": "optical/ndvi-basic",
+  "description": "Basic NDVI delivery",
+  "expected_evidence": [
+    {
+      "id": "ndvi-raster",
+      "kind": "raster",
+      "path": "work://case/ndvi.tif",
+      "required_fields": [
+        "mean",
+        "crs"
+      ]
+    }
+  ],
+  "goal": "Produce an NDVI raster for the pinned scene and report the mean value.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "ndvi-raster",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-uses-ndvi",
+      "kind": "tool_used",
+      "params": {
+        "tool": "rs:ndvi"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-budget",
+      "kind": "budget_within",
+      "params": {},
+      "severity": "warning"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "optical",
+  "title": "Basic NDVI delivery"
+}

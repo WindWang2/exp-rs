@@ -1,0 +1,54 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "classification/supervised-basic",
+  "explanation": "Trained rf-7 and classified the scene; evidence classified-map holds accuracy 0.87.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/supervised-basic",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "labels": "work://case/labels.gpkg"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "model_id": "rf-7",
+        "output_path": "work://case/model.json"
+      },
+      "tokens": 120,
+      "tool": "rs:train_classifier"
+    },
+    {
+      "input": {
+        "model": "work://case/model.json"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "accuracy": 0.87,
+          "classes": 5
+        },
+        "output_path": "work://case/classes.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:classify"
+    },
+    {
+      "evidence": "classified-map",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "accuracy": 0.87
+        },
+        "output_path": "work://case/classes.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

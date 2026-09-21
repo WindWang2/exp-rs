@@ -1,0 +1,50 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "optical/redundant-ndvi",
+  "explanation": "Computed NDVI with a cloud mask; delivered mean 0.42 as evidence ndvi-raster.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/redundant-ndvi",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "scene": "work://case/scene.tif"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "output_path": "work://case/ndvi.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:ndvi"
+    },
+    {
+      "evidence": "ndvi-raster",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "crs": "EPSG:32633",
+          "mean": 0.42
+        },
+        "output_path": "work://case/ndvi.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    },
+    {
+      "input": {
+        "scene": "work://case/scene.tif"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "output_path": "work://case/ndvi.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:ndvi"
+    }
+  ]
+}

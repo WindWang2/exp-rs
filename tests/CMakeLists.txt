@@ -11989,3 +11989,38 @@ set_target_properties(test_agentbench_report PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_report TEST_PREFIX "test_agentbench_report::")
+
+# RS14 agent-benchmark Slice H: suite runner.
+add_executable(test_agentbench_suite test_agentbench_suite.cpp)
+target_link_libraries(test_agentbench_suite PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_suite)
+target_include_directories(test_agentbench_suite PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_suite PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_suite TEST_PREFIX "test_agentbench_suite::")
+
+# RS14 agent-benchmark Slice H: corpus validation (reads data/agent/bench).
+add_executable(test_agentbench_corpus test_agentbench_corpus.cpp)
+target_link_libraries(test_agentbench_corpus PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_corpus)
+target_include_directories(test_agentbench_corpus PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_agentbench_corpus PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_agentbench_corpus PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_corpus TEST_PREFIX "test_agentbench_corpus::")

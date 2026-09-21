@@ -383,8 +383,10 @@ CaseEvaluation evaluateCore( const AgentCase &caseValue, const AgentTrace &trace
 		explanationPassed++;
 	evaluation.metrics.push_back( makeMetric( kMetricNames[7], static_cast<double>( explanationPassed ) / static_cast<double>( explanationTotal ) ) );
 
-	// Verdict.
-	if ( derived.scopeViolation || derived.anyErrorFailed )
+	// Verdict. Undelivered expected evidence fails the run even when the
+	// declared invariants happen to pass: a missing deliverable is not a pass.
+	if ( derived.scopeViolation || derived.anyErrorFailed ||
+	     ( verifierTotal > 0 && derived.verifierDelivered < verifierTotal ) )
 		evaluation.verdict = BenchVerdict::Fail;
 	else if ( derived.anyWarningFailed )
 		evaluation.verdict = BenchVerdict::PassWithWarnings;

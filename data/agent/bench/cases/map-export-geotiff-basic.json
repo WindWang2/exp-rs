@@ -1,0 +1,55 @@
+{
+  "allowed_tools": [
+    "map:export_geotiff",
+    "harness:verify"
+  ],
+  "case_id": "map/export-geotiff-basic",
+  "description": "GeoTIFF map delivery",
+  "expected_evidence": [
+    {
+      "id": "delivery",
+      "kind": "map",
+      "required_fields": [
+        "crs"
+      ]
+    }
+  ],
+  "goal": "Export the composited map as a GeoTIFF in the project CRS.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "delivery",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "scientific",
+      "id": "sci-crs",
+      "kind": "field_equals",
+      "params": {
+        "evidence_id": "delivery",
+        "field": "crs",
+        "value": "EPSG:32633"
+      },
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "map_delivery",
+  "title": "GeoTIFF map delivery"
+}

@@ -452,9 +452,11 @@ CaseParse parseCase( const std::string &jsonText )
 	// Evidence is validated before invariants: invariant params carry
 	// cross-references to declared expected_evidence ids.
 	const Json::Value &evidence = root["expected_evidence"];
-	if ( !evidence.isArray() || evidence.empty() )
+	// Expected evidence may be empty: refusal/impossible tasks legitimately
+	// demand no artifact (the correct run delivers nothing on purpose).
+	if ( !evidence.isArray() )
 	{
-		result.error = invalidField( "expected_evidence", "expected_evidence must be a non-empty array" );
+		result.error = invalidField( "expected_evidence", "expected_evidence must be an array (possibly empty)" );
 		return result;
 	}
 	for ( const Json::Value &entry : evidence )
