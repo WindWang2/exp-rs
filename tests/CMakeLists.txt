@@ -11907,3 +11907,5 @@ target_link_libraries(test_scientific_state_catalog PRIVATE
   Sicnu::ScientificStateGdal
 )
 set_target_properties(test_scientific_state_catalog PROPERTIES AUTOMOC ON)
+sicnu_add_sdk_test(test_scientific_state_fixtures)
+target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificState)
