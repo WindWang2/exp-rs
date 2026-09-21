@@ -11917,7 +11917,11 @@ foreach( LANE ${SICNU_VERIFIER_LANES} )
         ${CMAKE_BINARY_DIR}
         ${CMAKE_SOURCE_DIR}/tests
     )
-    sicnu_discover_tests( ${LANE_TARGET} )
+    # TEST_PREFIX is the repo's D15 convention (see sicnu_discover_tests above):
+    # without it, track gating cannot select these cases by binary name --
+    # `ctest -R "test_verifier_core_14::"` matches nothing and a gate that
+    # selects nothing reports success. Every other lane in this file passes it.
+    sicnu_discover_tests( ${LANE_TARGET} TEST_PREFIX "${LANE_TARGET}::" )
 endforeach()
 
 # The drift guard reads src/agent/harness/workflow_ir.cpp at run time and
