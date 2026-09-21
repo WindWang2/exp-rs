@@ -762,6 +762,9 @@ add_subdirectory(src/geospatial)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
+# Scientific Fault Injection Lab Framework (RS14-13). Qt-free C++20 leaf over
+# jsoncpp only; placed after the runtime/data leaves, before consumers.
+add_subdirectory(src/faultlab)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)
