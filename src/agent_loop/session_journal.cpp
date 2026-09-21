@@ -314,6 +314,8 @@ SessionJournal::ReplayResult SessionJournal::replay() const
         else if ( entry.event == "terminal" && isKnownTerminalState( entry.stage ) )
         {
             result.terminalState = entry.stage;
+            if ( entry.payload.isString() )
+                result.stopReason = entry.payload.asString();
         }
     }
     return result;

@@ -110,6 +110,11 @@ class SessionStageMachine {
     TransitionResult terminate( const std::string &terminalState,
                                 const std::string &stopReason );
 
+    /// Restarts the machine at `stage` (and the replay count) — used ONLY
+    /// by session resume, which reconstructs the cursor from the persisted
+    /// journal. Typed error when the stage is unknown or a terminal state.
+    TransitionResult rewindTo( const std::string &stage, int replanCount = 0 );
+
   private:
     std::string mStage;
     std::string mTerminal;

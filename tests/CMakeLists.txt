@@ -9606,6 +9606,14 @@ target_link_libraries(test_agent_loop_e2e PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_e2e)
 
+# RS14-11: journal restart/resume of a cancelled session.
+add_executable(test_agent_loop_resume test_agent_loop_resume.cpp)
+target_link_libraries(test_agent_loop_resume PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_resume)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)

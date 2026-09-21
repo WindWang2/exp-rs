@@ -53,6 +53,47 @@ ScientificAgentSession::ScientificAgentSession( SessionPolicy policy, Dependenci
 {
 }
 
+ScientificAgentSession::ScientificAgentSession( SessionPolicy policy, Dependencies deps,
+                                                SessionJournal adopted, int attempt,
+                                                int decisionSeq,
+                                                std::function< long long() > clock )
+    : mPolicy( std::move( policy ) ), mDeps( deps ), mJournal( std::move( adopted ) ),
+      mClock( std::move( clock ) ), mAttempt( attempt ), mDecisionSeq( decisionSeq )
+{
+    const SessionJournal::ReplayResult replay = mJournal.replay();
+    mMachine.rewindTo( replay.finalStage, replay.replanCount );
+}
+
+std::optional< ScientificAgentSession > ScientificAgentSession::resume(
+    const SessionJournal &journal, SessionPolicy policy, Dependencies deps,
+    std::function< long long() > clock )
+{
+    const SessionJournal::ReplayResult replay = journal.replay();
+    // A cancelled session is the ONLY terminal journal that may resume:
+    // the work was stopped by the user, not by a failure that would repeat
+    // on retry. Budget/no-progress aborts and refusals are absorbing.
+    const bool resumableCancel =
+        replay.terminalState == terminal_states::kAborted &&
+        replay.stopReason == stop_reasons::kCancelled;
+    if ( !replay.terminalState.empty() && !resumableCancel )
+        return std::nullopt; // terminal: nothing to resume
+    if ( replay.finalStage.empty() || !isKnownStage( replay.finalStage ) )
+        return std::nullopt;
+
+    int decisionSeq = 0;
+    for ( const JournalEntry &entry : journal.entries() )
+        if ( entry.decision )
+            ++decisionSeq;
+
+    ScientificAgentSession session( std::move( policy ), deps, journal, replay.replanCount + 1,
+                                    decisionSeq, std::move( clock ) );
+    // rewindTo succeeded by construction (finalStage validated above); the
+    // machine is now at the journal's final stage and run() continues there.
+    if ( !session.mMachine.terminal() && session.mMachine.stage() != replay.finalStage )
+        return std::nullopt;
+    return session;
+}
+
 long long ScientificAgentSession::now()
 {
     if ( mClock )
@@ -155,7 +196,7 @@ SessionResult ScientificAgentSession::run( const SessionRunRequest &request )
             abort( stop_reasons::kStepLimit );
             break;
         }
-        if ( mCancelRequested.load() )
+        if ( mCancelRequested->load() )
         {
             abort( stop_reasons::kCancelled );
             break;
@@ -494,7 +535,7 @@ bool ScientificAgentSession::stageExecute()
 
     mOutcome = mDeps.executor->poll( start, mPolicy.executorTimeoutMs );
 
-    if ( mCancelRequested.load() )
+    if ( mCancelRequested->load() )
     {
         mDeps.executor->cancel( start );
         return abort( stop_reasons::kCancelled );

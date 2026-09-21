@@ -29,6 +29,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <map>
 #include <string>
 #include <vector>
@@ -90,13 +91,29 @@ class ScientificAgentSession {
                             std::function< long long() > clock = {},
                             std::string sessionId = {} );
 
+    /// Resume a NON-TERMINAL session from its persisted journal: the stage
+    /// machine restarts at the journal's final stage, the journal (with its
+    /// sequence and decision numbering) is adopted, and the attempt counter
+    /// is derived from the recorded replans. Seams are re-injected — no work
+    /// is re-executed; the resumed session appends to the same journal.
+    /// Returns nullopt when the journal is terminal or has no resumable
+    /// stage.
+    static std::optional< ScientificAgentSession > resume(
+        const SessionJournal &journal, SessionPolicy policy, Dependencies deps,
+        std::function< long long() > clock = {} );
+
     /// Cooperative cancellation: the session stops at the next stage
     /// boundary and cancels any in-flight execution.
-    void requestCancel() { mCancelRequested.store( true ); }
+    void requestCancel() { mCancelRequested->store( true ); }
 
     SessionResult run( const SessionRunRequest &request );
 
   private:
+    /// Adopting constructor for resume(); see resume().
+    ScientificAgentSession( SessionPolicy policy, Dependencies deps, SessionJournal adopted,
+                            int attempt, int decisionSeq,
+                            std::function< long long() > clock );
+
     // --- journal helpers -------------------------------------------------
     long long now();
     bool enterStage( const std::string &stage );
@@ -130,7 +147,7 @@ class ScientificAgentSession {
     SessionJournal mJournal;
     std::function< long long() > mClock;
     long long mClockValue = 0;
-    std::atomic< bool > mCancelRequested{ false };
+    std::shared_ptr< std::atomic< bool > > mCancelRequested{ std::make_shared< std::atomic< bool > >( false ) };
 
     std::string mGoal;
     DataStateSnapshot mSnapshot;

@@ -164,4 +164,27 @@ TransitionResult SessionStageMachine::terminate( const std::string &terminalStat
     return result;
 }
 
+TransitionResult SessionStageMachine::rewindTo( const std::string &stage, int replanCount )
+{
+    TransitionResult result;
+    result.from = mStage;
+    result.to = stage;
+    if ( terminal() )
+    {
+        result.error = { error_codes::kAlreadyTerminal,
+                         "session is terminal (" + mTerminal + "); cannot rewind" };
+        return result;
+    }
+    if ( !isKnownStage( stage ) )
+    {
+        result.error = { error_codes::kUnknownStage,
+                         "cannot rewind to '" + stage + "'" };
+        return result;
+    }
+    mStage = stage;
+    mReplans = replanCount < 0 ? 0 : replanCount;
+    result.ok = true;
+    return result;
+}
+
 } // namespace sicnu::agent_loop

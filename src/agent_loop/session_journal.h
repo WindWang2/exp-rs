@@ -87,6 +87,7 @@ class SessionJournal {
         std::vector< JournalEntry > entries;
         std::string finalStage;
         std::string terminalState; ///< empty while the session is running
+        std::string stopReason;    ///< typed stop reason of the terminal entry
         int replanCount = 0;
     };
 
