@@ -497,6 +497,27 @@ TEST_CASE( "curriculum: structural contracts produce typed issues", "[curriculum
     CHECK( hasIssue( issues, "invalid_lab_role" ) );
   }
 
+  SECTION( "wrong-typed containers are rejected, never silently skipped" )
+  {
+    FixtureWorld world;
+    std::string manifest = world.manifestJson();
+    const auto pos = manifest.rfind( "}" );
+    REQUIRE( pos != std::string::npos );
+    manifest.insert( pos, R"(,
+        "forward_references": 42)" );
+    validate( manifest );
+    CHECK( hasIssue( issues, "missing_field", "forward_references" ) );
+  }
+
+  SECTION( "non-object teacher_notes is rejected" )
+  {
+    FixtureWorld world;
+    validate( world.manifestJson(
+      "{\"lab_id\": \"" + world.labId + "\", \"role\": \"core\", "
+      "\"estimated_effort_minutes\": 60, \"teacher_notes\": \"读文档\"}" ) );
+    CHECK( hasIssue( issues, "missing_field", "teacher_notes" ) );
+  }
+
   SECTION( "unknown key inside a lab reference is rejected" )
   {
     validate( world.manifestJson(

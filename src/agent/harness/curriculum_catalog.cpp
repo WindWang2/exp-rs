@@ -364,6 +364,9 @@ void validateCurriculumManifest( const Json::Value &manifest, const CurriculumPa
             }
         }
 
+        if ( module.isMember( "prerequisite_modules" ) && !module["prerequisite_modules"].isArray() )
+            issues.push_back( { "missing_field", at + ".prerequisite_modules",
+                                "prerequisite_modules 必须是数组。" } );
         size_t prereqIndex = 0;
         if ( module["prerequisite_modules"].isArray() )
             for ( const auto &prereq : module["prerequisite_modules"] )
@@ -452,6 +455,9 @@ void validateCurriculumManifest( const Json::Value &manifest, const CurriculumPa
                                                 + "\" 未在 lab-registry 的 out_of_scope 中声明。" } );
                 }
 
+                if ( lab.isMember( "required_data_packs" ) && !lab["required_data_packs"].isArray() )
+                    issues.push_back( { "missing_field", labAt + ".required_data_packs",
+                                        "required_data_packs 必须是数组。" } );
                 size_t packIndex = 0;
                 if ( lab["required_data_packs"].isArray() )
                     for ( const auto &pack : lab["required_data_packs"] )
@@ -482,6 +488,9 @@ void validateCurriculumManifest( const Json::Value &manifest, const CurriculumPa
                                                 "数据包 \"" + pack.asString() + "\" 不存在或不是 sicnu.lab-pack/1。" } );
                     }
 
+                if ( lab.isMember( "teacher_notes" ) && !lab["teacher_notes"].isObject() )
+                    issues.push_back( { "missing_field", labAt + ".teacher_notes",
+                                        "teacher_notes 必须是对象。" } );
                 if ( lab["teacher_notes"].isObject() )
                 {
                     checkKeys( lab["teacher_notes"], kTeacherNoteKeys, std::size( kTeacherNoteKeys ),
@@ -503,7 +512,10 @@ void validateCurriculumManifest( const Json::Value &manifest, const CurriculumPa
 
     // forward_references: honest declarations only; no capability probing here.
     size_t forwardIndex = 0;
-    if ( manifest.isMember( "forward_references" ) )
+    if ( manifest.isMember( "forward_references" ) && !manifest["forward_references"].isArray() )
+        issues.push_back( { "missing_field", "forward_references",
+                            "forward_references 必须是数组。" } );
+    if ( manifest["forward_references"].isArray() )
         for ( const auto &forward : manifest["forward_references"] )
         {
             const std::string at = "forward_references[" + std::to_string( forwardIndex++ ) + "]";
