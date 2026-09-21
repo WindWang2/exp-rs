@@ -143,6 +143,25 @@ function(sicnu_add_sdk_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# RS14-07 Parameter Studio: light study test executables. Links only
+# Catch2 + Sicnu::study (Qt Core + experiment authority transitively) —
+# no QGIS, no GUI — so the study contract suites build and run fast offline.
+function(sicnu_add_study_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::study
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
 # Helper function to add a Catch2 offscreen UI dialog test executable
 function(sicnu_add_dialog_test NAME)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_DEFAULT_MAIN" "MAIN_SOURCE" "SOURCES;EXTRA_LIBS;EXTRA_INCLUDES")
@@ -267,6 +286,9 @@ catch_discover_tests(test_sample_fixtures
 
 # Geospatial I/O Foundation 4.0 (light targets — see sicnu_add_io_test above).
 sicnu_add_io_test(test_io_canonical_metadata)
+
+# RS14-07 Parameter Sensitivity & Uncertainty Studio (light study targets).
+sicnu_add_study_test(test_study_spec)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)

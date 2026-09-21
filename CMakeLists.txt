@@ -748,6 +748,9 @@ add_subdirectory(src/grader)
 # link Sicnu::dataset / Sicnu::experiment.
 add_subdirectory(src/dataset)
 add_subdirectory(src/experiment)
+# Parameter Sensitivity & Uncertainty Studio (RS14-07): studies the existing
+# experiment/execution authorities — never a second store or scheduler.
+add_subdirectory(src/study)
 # Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
 # help/diagnostic knowledge (descriptor model, registry, search, JSON store,
 # projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
