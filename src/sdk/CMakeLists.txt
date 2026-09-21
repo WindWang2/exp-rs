@@ -29,6 +29,7 @@ set( EXPRS_SDK_SOURCES
   exprs/plugin_loader.cpp
   exprs/plugin_registry.cpp
   exprs/plugin_package.cpp
+  exprs/plugin_snapshot.cpp
   exprs/external_process.cpp
   exprs/ipc_frame.cpp
   exprs/ipc_envelope.cpp
@@ -84,6 +85,7 @@ set( EXPRS_SDK_INCLUDE_HEADERS
   exprs/plugin_registry.h
   exprs/plugin_interface.h
   exprs/plugin_package.h
+  exprs/plugin_snapshot.h
   exprs/external_process.h
   exprs/plugin_ui.h
   exprs/exit_codes.h

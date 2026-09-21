@@ -59,6 +59,7 @@
 
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/rs/rs_product_import_plan.h"
 #include "operators/runtime/model_runtime.h"
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/algorithm_meta_store.h"
@@ -733,18 +734,30 @@ int commandPlugin( QStringList args, const CliIO &io )
             return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                               {}, "usage: plugin install <package-dir>" );
         }
-        exprs_ns::PluginDiagnosticLog diagnostics;
-        std::string installedDir;
-        if ( !exprs_ns::PluginPackage::install( args.takeFirst().toStdString(), installedDir,
-                                                diagnostics ) )
-        {
-            return io.finish( false, "plugin", diagnostics.toJson(),
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
-                              diagnostics.toJson(), "install failed" );
-        }
+        // Track 13.0: install over an EXISTING plugin is a lifecycle-aware
+        // atomic upgrade (drain -> swap -> load -> rollback on failure),
+        // not the raw two-step package install. First-time installs still
+        // run the same staged atomic copy inside.
+        const exprs_ns::PluginRegistry::PluginUpgradeResult outcome =
+            registry.installOrUpgrade( args.takeFirst().toStdString(), {} );
+        const Json::Value diagnostics = registry.diagnostics().toJson();
+        const bool ok = outcome.status == exprs_ns::PluginRegistry::PluginUpgradeStatus::Installed
+                        || outcome.status
+                               == exprs_ns::PluginRegistry::PluginUpgradeStatus::Upgraded;
         Json::Value data( Json::objectValue );
-        data["installed_to"] = installedDir;
-        return io.finish( true, "plugin", data, 0, diagnostics.toJson() );
+        data["installed_to"] = outcome.installedDir;
+        data["id"] = outcome.pluginId;
+        data["status"] =
+            outcome.status == exprs_ns::PluginRegistry::PluginUpgradeStatus::Installed ? "installed"
+            : outcome.status == exprs_ns::PluginRegistry::PluginUpgradeStatus::Upgraded ? "upgraded"
+            : outcome.status == exprs_ns::PluginRegistry::PluginUpgradeStatus::RolledBack
+                ? "rolled-back"
+            : outcome.status == exprs_ns::PluginRegistry::PluginUpgradeStatus::Failed ? "failed"
+                                                                                      : "refused";
+        return io.finish( ok, "plugin", data,
+                          ok ? 0
+                             : exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
+                          diagnostics, ok ? "" : "install/upgrade failed" );
     }
 
     if ( sub == "uninstall" )
@@ -754,13 +767,16 @@ int commandPlugin( QStringList args, const CliIO &io )
             return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                               {}, "usage: plugin uninstall <plugin-id>" );
         }
-        exprs_ns::PluginDiagnosticLog diagnostics;
-        if ( !exprs_ns::PluginPackage::uninstall( args.takeFirst().toStdString(), diagnostics ) )
+        // Track 13.0: drain-gated uninstall — a loaded plugin unloads
+        // first (E4005 while executing), and its last-good snapshot is
+        // removed with the package.
+        if ( !registry.uninstallPlugin( args.takeFirst().toStdString() ) )
         {
-            return io.finish( false, "plugin", diagnostics.toJson(), 1, diagnostics.toJson(),
+            const Json::Value diagnostics = registry.diagnostics().toJson();
+            return io.finish( false, "plugin", {}, 1, diagnostics,
                               "uninstall failed" );
         }
-        return io.finish( true, "plugin", {}, 0, diagnostics.toJson() );
+        return io.finish( true, "plugin", {}, 0, registry.diagnostics().toJson() );
     }
 
     if ( sub == "inspect" )

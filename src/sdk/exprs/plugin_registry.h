@@ -24,15 +24,18 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_permissions.h"
+#include "exprs/plugin_snapshot.h"
 
 namespace exprs {
 
@@ -143,8 +146,8 @@ public:
     ///   1. re-validate the package directory (manifest gate) WITHOUT
     ///      touching the mapped code — a broken new manifest refuses the
     ///      reload and the old version stays loaded;
-    ///   2. snapshot the plugin directory (files only, symlink-free) so a
-    ///      failed new load can roll back to the exact bytes that worked;
+    ///   2. consult the last-known-good snapshot (marker-verified; a
+    ///      still-in-flight capture is awaited bounded first);
     ///   3. drain + unload (existing barrier; a busy plugin is refused and
     ///      stays loaded);
     ///   4. run the optional state migration and load the new code;
@@ -154,6 +157,63 @@ public:
     /// Refused typed (dev mode off / not loaded / busy / broken manifest)
     /// — every refusal keeps the old version usable.
     bool reload( const std::string &pluginId, const ReloadOptions &options );
+
+    // -- install-time upgrade (plugin-lifecycle 13.0) --------------------------
+    /// Outcome vocabulary for installOrUpgrade(). Every refusal keeps the
+    /// previously installed version running (or on disk); RolledBack means
+    /// the drain/swap was attempted and the previous install was restored;
+    /// Failed means the rollback itself could not restore the old bytes —
+    /// the kept snapshot is named in diagnostics.
+    enum class PluginUpgradeStatus
+    {
+        Installed,   ///< no previous install — PluginPackage::install ran
+        Upgraded,    ///< new version committed (loaded iff it was loaded)
+        Refused,     ///< gated before any change (bad manifest, policy,
+                     ///< migration, busy drain, snapshot budget, concurrency)
+        RolledBack,  ///< drain/swap attempted; previous install restored
+        Failed,      ///< rollback could not restore the previous install
+    };
+    struct PluginUpgradeResult
+    {
+        PluginUpgradeStatus status = PluginUpgradeStatus::Refused;
+        std::string pluginId;
+        std::string installedDir;
+    };
+    struct PluginUpgradeOptions
+    {
+        /// Same seam as ReloadOptions::migrateState: runs while the OLD
+        /// version is still loaded, before the drain. Returning false
+        /// aborts the upgrade with nothing changed.
+        std::function<bool( const std::string &pluginDir )> migrateState;
+        /// Drain budget for the old version (0 = SICNU_PLUGIN_UNLOAD_TIMEOUT_MS
+        /// default). Only consulted when the plugin is currently loaded.
+        int drainTimeoutMs = 0;
+    };
+
+    /// Atomic install-time upgrade over an existing plugin:
+    ///   stage-validate → policy/capability gate → snapshot the CURRENT
+    ///   install (bounded, marker-verified) → migrate → drain →
+    ///   PluginPackage::install's staged atomic swap → refresh → load →
+    ///   commit (snapshot GC'd) or roll back to the snapshot.
+    /// Works in BOTH production and dev mode — never consults
+    /// SICNU_PLUGIN_DEV. One lifecycle operation per plugin at a time
+    /// (shares the reload() guard); every failure path returns a typed
+    /// status + diagnostics, never a half-upgraded install.
+    PluginUpgradeResult installOrUpgrade( const std::string &sourceDir,
+                                          const PluginUpgradeOptions &options );
+    /// Convenience overload with default options (a default member
+    /// initializer of a nested struct cannot serve as a default argument
+    /// inside its own enclosing class).
+    PluginUpgradeResult installOrUpgrade( const std::string &sourceDir )
+    {
+        return installOrUpgrade( sourceDir, PluginUpgradeOptions() );
+    }
+
+    /// Unload (drain-gated) then remove the package AND its last-good
+    /// snapshot — the uninstall half of snapshot lifecycle (WP3). Returns
+    /// false when the drain is refused (plugin stays loaded AND installed)
+    /// or the package removal fails.
+    bool uninstallPlugin( const std::string &pluginId, int timeoutMs = 0 );
 
     // -- user enable/disable -------------------------------------------------
     /// Persists enable/disable in the user plugin index. Returns false when
@@ -177,15 +237,53 @@ private:
     /// so the granted path carries the same structured evidence as the
     /// denied one (E5001). No declared permissions = no events.
     void auditGrantedPermissions( const std::string &pluginId );
+    /// Track 13.0: deterministic snapshot root inside the configured temp
+    /// directory (<temp>/sicnu-plugin-snapshots).
+    std::string snapshotRoot() const;
     /// WP4 (plugin-platform 12.0): directory holding the last-known-good
-    /// copy of @p pluginId's package (empty when the host keeps none). Dev
-    /// mode refreshes it after every successful load; reload() rolls back to
-    /// it when the new bytes fail to load.
+    /// copy of @p pluginId's package. Dev mode refreshes it after every
+    /// successful load; reload() rolls back to it when the new bytes fail
+    /// to load.
     std::string lastGoodSnapshotPath( const std::string &pluginId ) const;
+    /// Per-upgrade rollback copy of the CURRENT install (both modes):
+    /// <root>/upgrade-<id>-<pid>. Removed on commit/rollback, kept + named
+    /// on a failed rollback, swept as crash residue by sweepPluginSnapshots.
+    std::string upgradeSnapshotPath( const std::string &pluginId ) const;
     /// Replaces the last-known-good snapshot for @p pluginId with the bytes
     /// currently in @p pluginDir. No-op outside dev mode (production keeps no
-    /// copies).
+    /// copies). Track 13.0: ASYNC — starts a bounded PluginSnapshotJob so the
+    /// load() publish path never blocks on a whole-directory copy; reload()
+    /// awaits the job (bounded) before consulting the snapshot.
     void refreshLastGoodSnapshot( const std::string &pluginId, const std::string &pluginDir );
+    /// Waits (bounded) for an in-flight snapshot capture of @p pluginId and
+    /// reaps the finished job. True = nothing left in flight.
+    bool waitForSnapshotJob( const std::string &pluginId, int timeoutMs );
+    /// Detaches @p pluginId's in-flight job from the map, if any; the
+    /// caller cancels + joins the returned job outside the registry lock.
+    std::shared_ptr<PluginSnapshotJob> takePendingSnapshotJob(
+        const std::string &pluginId );
+    /// Cancels + joins every in-flight snapshot job (teardown/unloadAll).
+    void cancelSnapshotJobs();
+    /// RAII release of this thread's lifecycle ownership of one plugin
+    /// (the mReloading entry). Shared by reload()/installOrUpgrade()/
+    /// uninstallPlugin() so every exit path clears the owner.
+    struct LifecycleOwnerGuard
+    {
+        LifecycleOwnerGuard( PluginRegistry *owner, std::string id )
+            : registry( owner ), pluginId( std::move( id ) )
+        {
+        }
+        ~LifecycleOwnerGuard();
+        LifecycleOwnerGuard( const LifecycleOwnerGuard & ) = delete;
+        LifecycleOwnerGuard &operator=( const LifecycleOwnerGuard & ) = delete;
+        PluginRegistry *registry;
+        std::string pluginId;
+    };
+    /// Applies blocked/allowed/third-party-native/enforce-capability policy
+    /// to one record's manifest (extracted from applyPolicyAndIndex so the
+    /// upgrade gate runs the identical checks on a manifest that has no
+    /// record yet). Mutates record.state/diagnostics on refusal.
+    void applyPolicyGate( PluginRecord &record );
     /// Scan+validate+policy pass; caller must hold the registry mutex.
     void refreshUnlocked();
     std::string userIndexPath() const;
@@ -202,10 +300,17 @@ private:
     std::vector<LoadedPlugin> mLoaded; // parallel to nothing; lookup by pluginId
     std::unique_ptr<HostServicesV1> mServices;
     std::vector<std::string> mDisabledIds; // persisted user index
-    /// WP4 (plugin-platform 12.0): pluginIds with a reload() in flight.
-    /// Guards the unload/load window against a concurrent reload of the same
-    /// plugin publishing the wrong generation. Guarded by gRegistryMutex.
-    std::set<std::string> mReloading;
+    /// WP4 (plugin-platform 12.0): pluginIds with a reload() in flight;
+    /// track 13.0 shares it with installOrUpgrade and records the OWNING
+    /// thread — load()/unload() calls from any other thread are refused
+    /// while an owner holds the entry, so a concurrent caller can never
+    /// publish or tear down a generation mid-transaction. The owner's own
+    /// re-entrant calls pass through. Guarded by gRegistryMutex.
+    std::map<std::string, std::thread::id> mReloading;
+    /// Track 13.0: in-flight async last-good captures, one slot per plugin.
+    /// Replaced on supersede (the dropped job's dtor cancels + joins);
+    /// reaped by waitForSnapshotJob / cancelSnapshotJobs.
+    std::map<std::string, std::shared_ptr<PluginSnapshotJob>> mSnapshotJobs;
 };
 
 } // namespace exprs

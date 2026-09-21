@@ -8,6 +8,7 @@
 #include "operators/rs/rs_temporal_collection_input.h"
 #include "operators/rs/rs_temporal_output.h"
 #include "processing/algorithms/temporal/temporal_fit.h"
+#include "processing/algorithms/temporal/temporal_irregular.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -41,8 +42,22 @@ enum class Method
   SavitzkyGolay,
   Whittaker,
   WhittakerRobust,
-  MovingAverage
+  MovingAverage,
+  // Day-axis variants (Temporal Phenology 12.0, WP2): windows/penalties are
+  // measured in days on the real acquisition-time axis, so irregular
+  // cadence is handled exactly. They require strictly increasing scene
+  // times — keep_all duplicate instants are a typed error here.
+  SavitzkyGolayDays,
+  WhittakerDays,
+  WhittakerRobustDays,
+  MovingAverageDays
 };
+
+bool isDayAxisMethod( Method m )
+{
+  return m == Method::SavitzkyGolayDays || m == Method::WhittakerDays ||
+         m == Method::WhittakerRobustDays || m == Method::MovingAverageDays;
+}
 
 /// Centered boxcar average over the valid (finite) samples inside a window of
 /// half-width window/2; NaN when the window holds no valid sample. Double
@@ -110,8 +125,14 @@ Json::Value RsTemporalSmoothOperator::schema() const
                                    "samples per window); whittaker: penalty smoother "
                                    "Σ(y−z)²+λΣ(Δ²z)²; whittaker_robust: whittaker with IRLS "
                                    "Cauchy reweighting (damps spikes); moving_average: "
-                                   "centered boxcar of valid samples",
-                                   { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average" },
+                                   "centered boxcar of valid samples. The *_days variants "
+                                   "(savitzky_golay_days, whittaker_days, whittaker_robust_days, "
+                                   "moving_average_days) measure windows/penalties in days on the "
+                                   "real acquisition-time axis — use them on irregularly sampled "
+                                   "collections; they require strictly increasing scene times",
+                                   { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average",
+                                     "savitzky_golay_days", "whittaker_days",
+                                     "whittaker_robust_days", "moving_average_days" },
                                    "savitzky_golay" );
   Json::Value window = makeIntegerParam(
       "window", "Savitzky–Golay window length (odd number of samples)", kDefaultWindow );
@@ -134,6 +155,11 @@ Json::Value RsTemporalSmoothOperator::schema() const
       "moving_average_window", "Moving-average window length (samples)", kDefaultMovingAverageWindow );
   setRange( maWindow, 3, 31 );
   props["moving_average_window"] = maWindow;
+  Json::Value windowDays = makeNumberParam(
+      "window_days", "Window width in days for the *_days methods "
+                     "(savitzky_golay_days, moving_average_days)", 32.0 );
+  setRange( windowDays, 1e-6, 36525.0 );
+  props["window_days"] = windowDays;
   props["tile_size"] = makeIntegerParam( "tile_size", "Streaming tile size (pixels)", kDefaultTileSize );
   props["output"] = makeOutputParam( "output",
                                      "Smoothed GeoTIFF (one band per scene date: smoothed_<date>)",
@@ -210,34 +236,47 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
 {
   const std::string outputPath = requireString( params, "output" );
   const QString methodToken = QString::fromStdString(
-      getEnum( params, "method", { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average" },
+      getEnum( params, "method",
+               { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average",
+                 "savitzky_golay_days", "whittaker_days", "whittaker_robust_days",
+                 "moving_average_days" },
                "savitzky_golay" ) );
-  const Method method = methodToken == QLatin1String( "whittaker" )  ? Method::Whittaker
-                        : methodToken == QLatin1String( "whittaker_robust" )
-                            ? Method::WhittakerRobust
-                        : methodToken == QLatin1String( "moving_average" )
-                            ? Method::MovingAverage
-                            : Method::SavitzkyGolay;
+  const Method method =
+      methodToken == QLatin1String( "whittaker" )             ? Method::Whittaker
+      : methodToken == QLatin1String( "whittaker_robust" )    ? Method::WhittakerRobust
+      : methodToken == QLatin1String( "moving_average" )      ? Method::MovingAverage
+      : methodToken == QLatin1String( "savitzky_golay_days" ) ? Method::SavitzkyGolayDays
+      : methodToken == QLatin1String( "whittaker_days" )      ? Method::WhittakerDays
+      : methodToken == QLatin1String( "whittaker_robust_days" )
+                                                              ? Method::WhittakerRobustDays
+      : methodToken == QLatin1String( "moving_average_days" ) ? Method::MovingAverageDays
+                                                              : Method::SavitzkyGolay;
   const int window = getInt( params, "window", kDefaultWindow );
-  if ( window < 3 || window > 31 || window % 2 == 0 )
+  if ( method == Method::SavitzkyGolay &&
+       ( window < 3 || window > 31 || window % 2 == 0 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter,
                            "window must be an odd integer in [3, 31] (got " +
                                std::to_string( window ) + ")" );
   const int degree = getInt( params, "degree", kDefaultDegree );
-  if ( degree < 1 || degree > 4 )
+  if ( ( method == Method::SavitzkyGolay || method == Method::SavitzkyGolayDays ) &&
+       ( degree < 1 || degree > 4 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter,
                            "degree must be in [1, 4] (got " + std::to_string( degree ) + ")" );
   const double lambda = getDouble( params, "lambda", kDefaultLambda );
   const int robustIterations =
       std::clamp( getInt( params, "robust_iterations", 3 ), 1, 10 );
-  if ( ( method == Method::Whittaker || method == Method::WhittakerRobust ) &&
+  if ( ( method == Method::Whittaker || method == Method::WhittakerRobust ||
+         method == Method::WhittakerDays || method == Method::WhittakerRobustDays ) &&
        !( lambda > 0.0 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter, "lambda must be > 0" );
   const int maWindow = getInt( params, "moving_average_window", kDefaultMovingAverageWindow );
-  if ( maWindow < 3 || maWindow > 31 )
+  if ( method == Method::MovingAverage && ( maWindow < 3 || maWindow > 31 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter,
                            "moving_average_window must be in [3, 31] (got " +
                                std::to_string( maWindow ) + ")" );
+  const double windowDays = getDouble( params, "window_days", 32.0 );
+  if ( isDayAxisMethod( method ) && !( windowDays > 0.0 ) )
+    throw RSOperatorError( ErrorCode::InvalidParameter, "window_days must be > 0" );
 
   const bool applyQaMasking = getBool( params, "apply_qa_masking", true );
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
@@ -283,6 +322,37 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   if ( anyFallback )
     context.logWarning( "Analysis band resolved by positional fallback for at least one scene; "
                         "pass 'band' or 'bands' to pin it." );
+
+  // Day-axis methods need the real acquisition-time axis, strictly
+  // increasing — duplicate instants (duplicate_policy=keep_all) make the
+  // day metric degenerate. Validated once on the collection, before any
+  // output is created (fail fast, typed error).
+  std::vector<double> tDays;
+  if ( isDayAxisMethod( method ) )
+  {
+    tDays.resize( static_cast<size_t>( sceneCount ) );
+    for ( int s = 0; s < sceneCount; ++s )
+      tDays[static_cast<size_t>( s )] = reader.sceneDayOffset( s );
+    for ( int s = 0; s < sceneCount; ++s )
+    {
+      if ( !std::isfinite( tDays[static_cast<size_t>( s )] ) )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "method '" + methodToken.toStdString() +
+                "' requires a fully timed collection; scene " +
+                prepared.collection.scenes().at( s ).path.toStdString() +
+                " has no acquisition time" );
+      if ( s > 0 && !( tDays[static_cast<size_t>( s )] >
+                       tDays[static_cast<size_t>( s - 1 )] ) )
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "method '" + methodToken.toStdString() +
+                "' requires strictly increasing scene times; scenes " +
+                std::to_string( s ) + " and " + std::to_string( s + 1 ) +
+                " share an instant — use duplicate_policy=reject or run "
+                "rs:temporal_regularize first" );
+    }
+  }
 
   const int width = reader.width();
   const int height = reader.height();
@@ -363,6 +433,15 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
         smoothed = temporal::whittakerSmooth( pixelSeries, {}, lambda );
       else if ( method == Method::WhittakerRobust )
         smoothed = temporal::whittakerSmoothRobust( pixelSeries, {}, lambda, robustIterations );
+      else if ( method == Method::SavitzkyGolayDays )
+        smoothed = temporal::savitzkyGolayDays( pixelSeries, tDays, windowDays, degree );
+      else if ( method == Method::WhittakerDays )
+        smoothed = temporal::whittakerSmoothTime( pixelSeries, tDays, {}, lambda );
+      else if ( method == Method::WhittakerRobustDays )
+        smoothed = temporal::whittakerSmoothTimeRobust( pixelSeries, tDays, {},
+                                                        lambda, robustIterations );
+      else if ( method == Method::MovingAverageDays )
+        smoothed = temporal::movingAverageDays( pixelSeries, tDays, windowDays );
       else
         movingAverage( pixelSeries, maWindow, &smoothed );
       for ( int s = 0; s < sceneCount; ++s )
@@ -393,13 +472,15 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   }
   temporal_output::writeTemporalDatasetMetadata(
     out, prepared.collection, "rs:temporal_smooth",
-    QStringLiteral( "method=%1 window=%2 degree=%3 lambda=%4 ma_window=%5 robust_iterations=%6" )
+    QStringLiteral( "method=%1 window=%2 degree=%3 lambda=%4 ma_window=%5 "
+                    "robust_iterations=%6 window_days=%7" )
         .arg( methodToken )
         .arg( window )
         .arg( degree )
         .arg( lambda )
         .arg( maWindow )
-        .arg( robustIterations ) );
+        .arg( robustIterations )
+        .arg( windowDays ) );
   if ( !prepared.preflight.commonRadiometricState.isEmpty() )
     GDALSetMetadataItem( static_cast<GDALDatasetH>( out.dataset() ), "SICNU_RADIOMETRIC_STATE",
                          prepared.preflight.commonRadiometricState.toUtf8().constData(), nullptr );

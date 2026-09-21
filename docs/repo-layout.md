@@ -28,7 +28,7 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 | Path | Role |
 |------|------|
-| `docs/adr/` | ADR ledger `0001`–`0145` (one file per decision) |
+| `docs/adr/` | ADR ledger `0001`–`0145` (one file per decision) — **superseding note (ADR 0166):** the ledger now runs past `0145`; the highest numbered ADR is `0165` and new ones start at `0166`. Numbers are duplicated in a few places, so `ls docs/adr` is the authority. |
 | `docs/design/` | Product design (`DESIGN.md`), UI mockups (`ui/`) |
 | `docs/architecture/` | QGIS/OTB implementation notes, phase reports |
 | `docs/labs/` | Course / tutorial lab writeups |

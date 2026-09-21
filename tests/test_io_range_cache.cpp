@@ -1548,6 +1548,267 @@ TEST_CASE( "an entry past its TTL is dropped and re-proven even under ValidateOn
   CHECK( server.rangedResponses() > rangedAfterFirst );
 }
 
+TEST_CASE( "a retry's backoff sleep releases the in-flight admission slot",
+           "[io][remote][range_cache][admission][backoff][utc13]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "backoffslot" );
+  const std::vector<unsigned char> payloadA = buildTiff( dir + "/a.tif" );
+  const std::vector<unsigned char> payloadB = buildTiff( dir + "/b.tif" );
+  HttpRangeServer serverA( payloadA );
+  HttpRangeServer serverB( payloadB );
+  serverA.setEtag( "\"slot-a\"" );
+  serverB.setEtag( "\"slot-b\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::ValidateOnce;
+  config.maxSingleFetchBytes = 256ull * 1024;
+  // cap=1 admits at most ONE transfer at a time (an idle gate still admits
+  // a larger-than-cap run head-of-line): A's sleeping retry either frees
+  // B immediately (13.0) or pins the gate until the retry lands (12.0).
+  config.maxConcurrentFetchBytes = 1;
+  config.fetchAttempts = 3;
+  config.retryBackoffBaseMs = 2500;               // attempt 2 waits ~2.5 s
+  config.retryBackoffMaxMs = 5000;
+  InstalledCache guard( config );
+
+  // Resource A: one scripted 500 — its body fetch fails once, then sleeps
+  // ~2.5 s in backoff. Resource B: healthy. If the sleeping retry kept its
+  // admission (the 12.0 defect), B's fetch could not be admitted until
+  // A's retry finished — the cap admits only one transfer at a time. The
+  // wide window keeps B's whole open+read comfortably inside the backoff
+  // even on a loaded shared host.
+  const std::string pathA = RemoteRangeCache::cachedPath( serverA.url() );
+  RasterReader readerA = RasterReader::open( pathA );
+  REQUIRE( readerA.isOpen() );
+  serverA.setFaultScript( { ServerBehavior::ServerError } );
+
+  const int requestsAfterOpen = serverA.requestCount();
+  std::atomic<bool> aDone{ false };
+  std::vector<double> aRead;
+  std::thread readerThreadA( [ & ] {
+    try
+    {
+      aRead = readerA.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    }
+    catch ( ... )
+    {
+    }
+    aDone.store( true );
+  } );
+  // Wait until the scripted 500 was consumed — requestCount counts at
+  // request ARRIVAL, so a short settle lets the (instant, bodiless) 500
+  // response finish: A is then inside its ~2.5 s backoff window, holding
+  // (13.0) NO admission slot.
+  for ( int i = 0; i < 300 && serverA.requestCount() <= requestsAfterOpen; ++i )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  REQUIRE( serverA.requestCount() > requestsAfterOpen );
+  std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+  const int requestsAfterFailure = serverA.requestCount();
+
+  // B's open+read completes inside A's backoff window: under the 12.0
+  // admission B's fetch waited out the backoff AND the retry (~2.5 s), so
+  // A's second attempt would have landed first — requestCount() would
+  // already have advanced when B finished. The admission_waits delta is
+  // the sharper occupancy oracle: a released slot admits B instantly
+  // (delta 0); a held slot queues it (delta 1).
+  const std::uint64_t admissionWaitsBefore =
+    RemoteRangeCache::telemetryJson()["admission_waits"].asUInt64();
+  std::vector<double> bRead;
+  {
+    RasterReader readerB = RasterReader::open( RemoteRangeCache::cachedPath( serverB.url() ) );
+    REQUIRE( readerB.isOpen() );
+    bRead = readerB.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  }
+  CHECK( serverA.requestCount() == requestsAfterFailure );
+  CHECK( RemoteRangeCache::telemetryJson()["admission_waits"].asUInt64() ==
+         admissionWaitsBefore );
+
+  readerThreadA.join();
+  REQUIRE( aDone.load() );
+
+  // A's retry still lands correctly — the backoff is released, not removed.
+  RasterReader localA = RasterReader::open( dir + "/a.tif" );
+  RasterReader localB = RasterReader::open( dir + "/b.tif" );
+  CHECK( aRead == localA.readWindow( { 1 }, { 0, 0, 256, 256 } ) );
+  CHECK( bRead == localB.readWindow( { 1 }, { 0, 0, 256, 256 } ) );
+
+  const Json::Value telemetry = RemoteRangeCache::telemetryJson();
+  CHECK( telemetry["backoff_waits"].asUInt64() > 0 );
+  CHECK( telemetry["retried_fetches"].asUInt64() > 0 );
+  CHECK( telemetry["fetch_attempts"].asUInt64() > 0 );
+}
+
+TEST_CASE( "a fetch cancelled during retry backoff exits promptly",
+           "[io][remote][range_cache][cancel][backoff][utc13]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "cancelbackoff" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"cancel-bo\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::ValidateOnce;
+  config.fetchAttempts = 3;
+  config.retryBackoffBaseMs = 4000; // attempt 2 would wait ~4 s if unbroken
+  config.retryBackoffMaxMs = 8000;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  RasterReader reader = RasterReader::open( cachedPath );
+  REQUIRE( reader.isOpen() );
+  server.setFaultScript( { ServerBehavior::ServerError } );
+
+  const int requestsAfterOpen = server.requestCount();
+  std::atomic<bool> readDone{ false };
+  std::vector<double> got;
+  std::thread slowRead( [ & ] {
+    try
+    {
+      got = reader.readWindow( { 1 }, { 0, 512, 128, 128 } );
+    }
+    catch ( ... )
+    {
+    }
+    readDone.store( true );
+  } );
+  // The scripted 500 lands; the retry enters its ~4 s backoff sleep.
+  for ( int i = 0; i < 300 && server.requestCount() <= requestsAfterOpen; ++i )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  REQUIRE( server.requestCount() > requestsAfterOpen );
+
+  RemoteRangeCache::cancelFetches( server.url() );
+  // The veto must wake the sleeper — finishing well inside the remaining
+  // ~4 s backoff (2.5 s bound leaves 1.5 s of scheduling headroom).
+  for ( int i = 0; i < 250 && !readDone.load(); ++i )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  const bool woke = readDone.load();
+  slowRead.join();
+  REQUIRE( woke );
+
+  // Cancelled mid-backoff the read still answers correctly — the fallback
+  // (the correctness gate) serves the same bytes; the script's tail is
+  // healthy so /vsicurl/ succeeds.
+  RasterReader local = RasterReader::open( dir + "/scene.tif" );
+  CHECK( got == local.readWindow( { 1 }, { 0, 512, 128, 128 } ) );
+  const Json::Value telemetry = RemoteRangeCache::telemetryJson();
+  CHECK( telemetry["backoff_waits"].asUInt64() > 0 );
+  CHECK( telemetry["cancelled_fetches"].asUInt64() > 0 );
+}
+
+TEST_CASE( "stat shares the entry TTL trust horizon with open",
+           "[io][remote][range_cache][ttl][stat][utc13]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "stattl" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"stat-ttl\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::ValidateOnce; // trust within TTL
+  config.entryTtlSeconds = 1;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
+
+  // Warm the entry through the normal open path.
+  {
+    RasterReader reader = RasterReader::open( cachedPath );
+    REQUIRE( reader.isOpen() );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 128, 128 } ).size() == 128ull * 128 );
+  }
+  const std::uint64_t fileBytes =
+    std::filesystem::file_size( std::filesystem::path( dir + "/scene.tif" ) );
+  const int requestsAfterWarm = server.requestCount();
+
+  // A stat INSIDE the TTL answers from the proven identity — zero origin.
+  VSIStatBufL statBuf;
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) == fileBytes );
+  CHECK( server.requestCount() == requestsAfterWarm );
+
+  // Past the TTL the stat must re-prove exactly like an open: a fresh
+  // identity request lands on the server and the answer stays correct.
+  // (12.0 defect: stat served the cached size forever — requestCount
+  // stayed flat and this check failed.)
+  std::this_thread::sleep_for( std::chrono::milliseconds( 1200 ) );
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) == fileBytes );
+  CHECK( server.requestCount() > requestsAfterWarm );
+  CHECK( RemoteRangeCache::telemetryJson()["ttl_expirations"].asUInt64() > 0 );
+
+  // The re-proven entry is fresh: another stat issues nothing new — the
+  // TTL parity adds no origin storm.
+  const int requestsAfterReprobe = server.requestCount();
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) == fileBytes );
+  CHECK( server.requestCount() == requestsAfterReprobe );
+}
+
+TEST_CASE( "stat revalidates through the shared trust policy",
+           "[io][remote][range_cache][stat][revalidate][utc13]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "statreval" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  const std::vector<unsigned char> shrunk = buildSmallTiff( dir + "/shrunk.tif" );
+  auto server = std::make_unique<HttpRangeServer>( payload );
+  server->setEtag( "\"stat-r1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 32 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::RevalidateOnOpen;
+  InstalledCache guard( config );
+  const std::string cachedPath = RemoteRangeCache::cachedPath( server->url() );
+
+  {
+    RasterReader reader = RasterReader::open( cachedPath );
+    REQUIRE( reader.isOpen() );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 128, 128 } ).size() == 128ull * 128 );
+  }
+
+  // Stat under RevalidateOnOpen issues the SAME conditional request an
+  // open would: the unchanged origin answers 304 and the trust horizon
+  // (and the entry's size) refreshes — never a fabricated answer.
+  VSIStatBufL statBuf;
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) ==
+         static_cast<std::uint64_t>( payload.size() ) );
+  CHECK( server->notModifiedResponses() > 0 );
+  const Json::Value after304 = RemoteRangeCache::telemetryJson();
+  CHECK( after304["revalidations"].asUInt64() > 0 );
+  CHECK( after304["ttl_refreshes"].asUInt64() > 0 );
+
+  // ETag change + object shrink: the conditional answer mismatches, the
+  // entry is invalidated and re-proven — stat reports the NEW size, never
+  // the stale one (the 12.0 stat path returned the cached size forever).
+  server->replacePayload( shrunk, "\"stat-r2\"", "" );
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) ==
+         static_cast<std::uint64_t>( shrunk.size() ) );
+
+  // No storm: under RevalidateOnOpen a stat pays exactly what an open
+  // pays — ONE conditional request (answered 304 here) — never a probe
+  // loop or a body fetch.
+  const int requestsAfterReprobe = server->requestCount();
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) ==
+         static_cast<std::uint64_t>( shrunk.size() ) );
+  CHECK( server->requestCount() - requestsAfterReprobe <= 1 );
+
+  // Offline is explicit and conservative: with the origin unreachable the
+  // revalidation is INCONCLUSIVE — stat serves the last proven identity
+  // (the declared trust level), never a fabricated zero or an error.
+  server.reset();
+  REQUIRE( VSIStatL( cachedPath.c_str(), &statBuf ) == 0 );
+  CHECK( static_cast<std::uint64_t>( statBuf.st_size ) ==
+         static_cast<std::uint64_t>( shrunk.size() ) );
+}
+
 TEST_CASE( "offline guard keeps loopback exempt from proxies",
            "[io][offline-guard]" )
 {
