@@ -229,6 +229,31 @@ RunEnvironment RunEnvironment::redacted() const
     return copy;
 }
 
+namespace
+{
+// Distinct-name bridges into the anonymous-namespace denylist matchers above
+// (unqualified calls inside the methods below would resolve to the member
+// functions themselves).
+bool denylistNameLooksSecret( const QString &name )
+{
+    return nameLooksSecret( name );
+}
+bool denylistValueLooksSecret( const QString &value )
+{
+    return valueLooksSecret( value );
+}
+}
+
+bool RunEnvironment::nameLooksSecret( const QString &name )
+{
+    return denylistNameLooksSecret( name );
+}
+
+bool RunEnvironment::valueLooksSecret( const QString &value )
+{
+    return denylistValueLooksSecret( value );
+}
+
 QJsonObject RunEnvironment::redactSecretKeys( const QJsonObject &json )
 {
     // Deep key-based pass (#789): export bundles serialize canonical

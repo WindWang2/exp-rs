@@ -16,6 +16,7 @@
 #include "dataset/dataset_types.h"
 #include "experiment/capsule/capsule_builder.h"
 #include "experiment/capsule/capsule_document.h"
+#include "experiment/capsule/capsule_io.h"
 #include "experiment/evidence.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
@@ -34,6 +35,7 @@ using sicnu::experiment::ExperimentStore;
 using sicnu::experiment::RunEnvironment;
 using sicnu::experiment::capsule::CapsuleBuilder;
 using sicnu::experiment::capsule::CapsuleDocument;
+using sicnu::experiment::capsule::CapsuleIO;
 using sicnu::experiment::capsule::CapsuleHooks;
 using sicnu::experiment::capsule::CapsuleOptions;
 using sicnu::experiment::capsule::CapsuleValidation;
@@ -818,4 +820,225 @@ TEST_CASE( "provenance projects the lineage slice and pins its digest",
     slice.insert( QStringLiteral( "run_edges" ), edges );
     CHECK( provenance.value( QStringLiteral( "slice_digest" ) ).toString()
            == capsuleDigest( slice ) );
+}
+
+// --- Slice D: export / load / validate --------------------------------------
+
+namespace
+{
+
+/// Builds a small valid capsule from a fresh fixture, with the workspace
+/// root set so the artifact paths are portable.
+struct BuiltCapsule
+{
+    StoreFixture fixture;
+    sicnu::experiment::capsule::CapsuleDocument doc;
+
+    bool build()
+    {
+        if ( !fixture.open() )
+            return false;
+        fixture.addExperiment();
+        ExperimentRun::Artifact artifact;
+        artifact.path = fixture.dir.filePath( QStringLiteral( "out/raster.tif" ) );
+        artifact.role = QStringLiteral( "primary" );
+        artifact.digest = QStringLiteral( "digest-primary" );
+        const ExperimentRun run = fixture.addRun(
+            QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+            QString(), QString(), QVector<ExperimentRun::Artifact>{ artifact } );
+        CapsuleOptions options = fixedOptions();
+        options.workspaceRoot = fixture.dir.path();
+        const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+        auto built = builder.build( run.runId(), options );
+        if ( !built.has_value() )
+            return false;
+        doc = built.take();
+        return true;
+    }
+};
+
+} // namespace
+
+TEST_CASE( "export/load round-trips the canonical bytes and digest",
+           "[capsule][io]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QTemporaryDir dir;
+    const QString path = dir.filePath( QStringLiteral( "sub/capsule.json" ) );
+
+    const auto exported = CapsuleIO::exportCapsule( built.doc, path );
+    REQUIRE( exported.has_value() );
+    CHECK( exported->bytes == built.doc.canonicalBytes().size() );
+
+    const auto loaded = CapsuleIO::loadCapsule( path );
+    REQUIRE( loaded.has_value() );
+    CHECK( loaded->digestValue() == built.doc.digestValue() );
+    CHECK( loaded->canonicalBytes() == built.doc.canonicalBytes() );
+}
+
+TEST_CASE( "load refuses a semantically identical but reformatted file",
+           "[capsule][io][canonical]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QTemporaryDir dir;
+    const QString path = dir.filePath( QStringLiteral( "capsule.json" ) );
+
+    // Pretty-print the same document — semantically identical, not canonical.
+    const QJsonDocument pretty( built.doc.root() );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    file.write( pretty.toJson( QJsonDocument::Indented ) );
+    file.close();
+
+    auto refused = CapsuleIO::loadCapsule( path );
+    REQUIRE( !refused.has_value() );
+    bool sawCode = false;
+    for ( const auto &diagnostic : refused.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "capsule.not-canonical" ) )
+            sawCode = true;
+    CHECK( sawCode );
+}
+
+TEST_CASE( "load refuses digest tampering", "[capsule][io][tamper]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QJsonObject root = built.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonObject parameters = root.value( QStringLiteral( "parameters" ) ).toObject();
+    parameters.insert( QStringLiteral( "model" ), QStringLiteral( "swapped" ) );
+    root.insert( QStringLiteral( "parameters" ), parameters );
+    auto refinalized = CapsuleDocument::finalize( root );
+    REQUIRE( refinalized.has_value() );
+
+    QTemporaryDir dir;
+    const QString path = dir.filePath( QStringLiteral( "capsule.json" ) );
+    REQUIRE( CapsuleIO::exportCapsule( refinalized.take(), path ).has_value() );
+
+    // Now tamper on disk: rewrite one canonical member value in place.
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::ReadOnly ) );
+    QByteArray bytes = file.readAll();
+    file.close();
+    QByteArray tampered = bytes;
+    tampered.replace( "\"swapped\"", "\"forged\"" );
+    REQUIRE( tampered != bytes );
+    QFile out( path );
+    REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    out.write( tampered );
+    out.close();
+
+    auto refused = CapsuleIO::loadCapsule( path );
+    REQUIRE( !refused.has_value() );
+    bool sawMismatch = false;
+    for ( const auto &diagnostic : refused.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "capsule.digest-mismatch" ) )
+            sawMismatch = true;
+    CHECK( sawMismatch );
+}
+
+TEST_CASE( "export refuses a document whose self digest does not verify",
+           "[capsule][io]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QJsonObject root = built.doc.root();
+    root.insert( QStringLiteral( "capsule_id" ), QStringLiteral( "capsule-forged" ) );
+    const CapsuleDocument forged = CapsuleDocument::fromRoot( root );
+    CHECK( !forged.digestValid() );
+
+    QTemporaryDir dir;
+    auto refused = CapsuleIO::exportCapsule( forged, dir.filePath( QStringLiteral( "c.json" ) ) );
+    REQUIRE( !refused.has_value() );
+    CHECK( refused.diagnostics().first().code == QLatin1String( "capsule.digest-mismatch" ) );
+}
+
+TEST_CASE( "validate refuses secret-shaped members and values (fail closed)",
+           "[capsule][io][secrets]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+
+    // Plant a credential-shaped KEY into parameters (post-build — the
+    // builder itself would have masked it) and re-stamp a valid digest so
+    // only the CONTENT gate can catch it.
+    QJsonObject root = built.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonObject parameters = root.value( QStringLiteral( "parameters" ) ).toObject();
+    parameters.insert( QStringLiteral( "api_token" ), QStringLiteral( "hunter2" ) );
+    root.insert( QStringLiteral( "parameters" ), parameters );
+    auto replanted = CapsuleDocument::finalize( root );
+    REQUIRE( replanted.has_value() );
+
+    const CapsuleValidation validation = CapsuleIO::validate( replanted.take() );
+    CHECK( !validation.ok );
+    bool sawSecret = false;
+    for ( const auto &issue : validation.issues )
+    {
+        INFO( issue.code.toStdString() );
+        if ( issue.code == QLatin1String( "capsule.secret-detected" ) )
+            sawSecret = true;
+    }
+    CHECK( sawSecret );
+}
+
+TEST_CASE( "validate refuses credential-shaped VALUES, not just keys",
+           "[capsule][io][secrets]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QJsonObject root = built.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonObject parameters = root.value( QStringLiteral( "parameters" ) ).toObject();
+    parameters.insert( QStringLiteral( "note" ),
+                       QStringLiteral( "fallback sk-abcdefghijklmnopqrst" ) );
+    root.insert( QStringLiteral( "parameters" ), parameters );
+    auto replanted = CapsuleDocument::finalize( root );
+    REQUIRE( replanted.has_value() );
+    const CapsuleValidation validation = CapsuleIO::validate( replanted.take() );
+    CHECK( !validation.ok );
+    bool sawSecretValue = false;
+    for ( const auto &issue : validation.issues )
+        if ( issue.code == QLatin1String( "capsule.secret-detected" ) )
+            sawSecretValue = true;
+    CHECK( sawSecretValue );
+}
+
+TEST_CASE( "validate refuses absolute-path values anywhere in the document",
+           "[capsule][io][paths]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QJsonObject root = built.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonObject goal = root.value( QStringLiteral( "goal" ) ).toObject();
+    goal.insert( QStringLiteral( "data_root" ), QStringLiteral( "/home/student/data" ) );
+    root.insert( QStringLiteral( "goal" ), goal );
+    auto replanted = CapsuleDocument::finalize( root );
+    REQUIRE( replanted.has_value() );
+
+    const CapsuleValidation validation = CapsuleIO::validate( replanted.take() );
+    CHECK( !validation.ok );
+    bool sawPath = false;
+    for ( const auto &issue : validation.issues )
+        if ( issue.code == QLatin1String( "capsule.absolute-path" ) )
+            sawPath = true;
+    CHECK( sawPath );
+}
+
+TEST_CASE( "validate passes a clean capsule with per-gate evidence",
+           "[capsule][io]" )
+{
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    const CapsuleValidation validation = CapsuleIO::validate( built.doc );
+    if ( !validation.ok )
+    {
+        for ( const auto &issue : validation.issues )
+            WARN( issue.code.toStdString() << ": " << issue.message.toStdString() );
+    }
+    CHECK( validation.ok );
+    CHECK( !validation.checks.isEmpty() );
 }

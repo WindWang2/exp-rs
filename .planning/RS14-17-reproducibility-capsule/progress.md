@@ -19,3 +19,9 @@
   embedded or empty — never faked), provenance (recorded lineage slice +
   slice digest). Absolute-path leak asserted absent over canonical bytes.
   Portability core (toPortableRef) landed. 26 cases / 121 assertions pass.
+- 2026-09-21 Slice D GREEN: CapsuleIO export (refuses unverified digest),
+  load (parse → canonical-form gate → shape gates; reformatting is refused
+  so integrity stays byte-checkable), validate (shape + secret denylist +
+  absolute-path scan, fail closed with typed codes). RunEnvironment
+  denylist matchers exposed additively (single source of truth, no second
+  pattern list). 34 cases / 158 assertions pass.
