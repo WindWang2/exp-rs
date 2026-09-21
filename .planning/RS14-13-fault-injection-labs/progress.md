@@ -7,3 +7,6 @@
   - New: src/faultlab/{fault_types,fault_registry,fault_sandbox,fault_scenario,deterministic}.{h,cpp}, util/{sha256,canonical_json}.{h,cpp}
   - New: data/faultlab/faults.schema.json (sicnu.lab.faults/1), tests/test_faultlab.cpp, CMake wiring (2 root lines + appended test block)
   - Committed as slice A.
+- Slice B (metadata/state faults): RED tests first, 21/21 green.
+  - New: fault_transforms.{h,cpp} (band_role_swap, omit_quality_mask, wrong_scale_offset, nodata_as_data + closed param validation + typed refusals), fault_observables.{h,cpp} (band_count/band_roles/crs/grid/nodata+valid_fraction/per-band stats/index_mean/leakage/threshold+kappa/channel_order/model_output/provenance), fault_expectations.{h,cpp} (Changed/DeltaGe/DeltaLe/Equals/NotEquals/InRange/TruthIs with evidence + typed missing-observable failures).
+  - Fixed during TDD: registry optional param metadata; mutations counts; index fixture design (constant bands so the swap delta is exact).

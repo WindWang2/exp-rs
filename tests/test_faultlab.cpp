@@ -4,12 +4,16 @@
 // TEST_CASE name is prefixed "fault lab: " so `ctest -R 'fault lab'` selects
 // the suite regardless of executable name.
 #include "faultlab/deterministic.h"
+#include "faultlab/fault_expectations.h"
+#include "faultlab/fault_observables.h"
 #include "faultlab/fault_registry.h"
 #include "faultlab/fault_sandbox.h"
+#include "faultlab/fault_transforms.h"
 #include "faultlab/fault_types.h"
 #include "faultlab/util/canonical_json.h"
 #include "faultlab/util/sha256.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
@@ -17,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -369,4 +374,284 @@ TEST_CASE( "fault lab: canonical grid digest is stable and NaN-safe", "[faultlab
     FaultGrid other = FaultSandbox::copyOf( grid );
     other.bands[1].scale = 2.0;
     CHECK( canonical::sha256HexOf( other.toJson() ) != first );
+}
+
+// ---------------------------------------------------------------------------
+// Slice B — metadata/state faults (band role swap, omit quality mask,
+// wrong scale/offset, NoData-as-data) + observables + expectations
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Fixture with a QA-masked pair: QA==0 marks cloud pixels; a subset of
+/// masked pixels are additionally NaN, the rest are finite-but-masked — so
+/// dropping the QA band measurably changes `valid_fraction`.
+FaultGrid qualityMaskedGrid()
+{
+    FaultGrid grid;
+    grid.width = 4;
+    grid.height = 3;
+    grid.crsId = "EPSG:4326";
+    grid.hasNoData = true;
+    grid.noDataValue = -9999.0;
+
+    BandSpec red;
+    red.role = "red";
+    red.samples = { 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32 };
+    BandSpec nir;
+    nir.role = "nir";
+    nir.samples = { 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62 };
+    BandSpec qa;
+    qa.role = "qa";
+    qa.samples = { 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1 };
+    grid.bands = { red, nir, qa };
+
+    // Two of the four QA-invalid pixels are NaN in the data bands; two stay
+    // finite so that omitting the mask moves `valid_fraction`.
+    for ( int band = 0; band < 2; ++band )
+    {
+        grid.bands[band].samples[5] = std::nan( "" );
+        grid.bands[band].samples[6] = std::nan( "" );
+    }
+    return grid;
+}
+
+/// Base grid whose extras declare a role-resolved index pair (red/nir) so
+/// `index_mean` is measurable. Constant bands keep the expected index mean
+/// exactly computable: (0.1-0.9)/(0.1+0.9) = -0.8, and a role swap flips it.
+FaultGrid indexPairGrid()
+{
+    FaultGrid grid = sampleGrid();
+    for ( double &sample : grid.bands[0].samples )
+    {
+        sample = 0.1;
+    }
+    for ( double &sample : grid.bands[1].samples )
+    {
+        sample = 0.9;
+    }
+    Json::Value pair( Json::objectValue );
+    pair["numerator"] = "red";
+    pair["denominator"] = "nir";
+    grid.extras["index_pair"] = pair;
+    return grid;
+}
+
+FaultSpec swapSpec()
+{
+    FaultSpec spec;
+    spec.familyId = "band_role_swap";
+    spec.params["role_a"] = "red";
+    spec.params["role_b"] = "nir";
+    spec.seed = 42;
+    return spec;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: band role swap exchanges exactly the two roles", "[faultlab]" )
+{
+    FaultGrid grid = indexPairGrid();
+    const auto before = measureObservables( grid );
+    REQUIRE( before.count( "index_mean" ) == 1 );
+    const double cleanMean = before.at( "index_mean" ).number;
+
+    const auto outcome = applyFault( grid, swapSpec() );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands[0].role == "nir" );
+    CHECK( grid.bands[1].role == "red" );
+
+    const auto after = measureObservables( grid );
+    REQUIRE( after.count( "index_mean" ) == 1 );
+    // Swapping numerator/denominator flips the ratio index sign.
+    CHECK( after.at( "index_mean" ).number == Catch::Approx( -cleanMean ) );
+    CHECK( before.at( "band_roles" ).text != after.at( "band_roles" ).text );
+}
+
+TEST_CASE( "fault lab: band role swap refuses unsafe targets and params", "[faultlab]" )
+{
+    SECTION( "role absent from the fixture" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_b"] = "swir2";
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+        // The grid is untouched by a refused transform.
+        CHECK( grid.bands[0].role == "red" );
+    }
+    SECTION( "identical roles" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_b"] = "red";
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "unknown param name" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["channels"] = Json::arrayValue;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: omitting the quality mask changes masking observables", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    const double cleanValid = before.at( "valid_fraction" ).number;
+    CHECK( before.at( "band_count" ).number == 3 );
+
+    FaultSpec spec;
+    spec.familyId = "omit_quality_mask";
+    spec.seed = 7;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands.size() == 2 );
+    CHECK( grid.bandIndexByRole( "qa" ) == -1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "band_count" ).number == 2 );
+    CHECK( before.at( "band_roles" ).text != after.at( "band_roles" ).text );
+    // Two finite-but-masked pixels per band are now counted as valid.
+    CHECK( after.at( "valid_fraction" ).number > cleanValid );
+}
+
+TEST_CASE( "fault lab: wrong scale/offset moves band statistics, NaN-safe", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    const double cleanMean = before.at( "band.mean.red" ).number;
+
+    SECTION( "samples mutated (gain + offset)" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = 1.0;
+        spec.seed = 11;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 10 ); // 12 samples minus 2 no-data
+        CHECK( grid.bands[0].samples[5] != grid.bands[0].samples[5] ); // still NaN
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "band.mean.red" ).number ==
+               Catch::Approx( cleanMean * 2.0 + 1.0 ) );
+    }
+    SECTION( "declared metadata mutated (data kept)" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["metadata"] = true;
+        spec.seed = 11;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( grid.bands[0].samples[0] == 0.10 ); // samples untouched
+        CHECK( grid.bands[0].scale == 2.0 );       // declared scale wrong
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "band.scale.red" ).number != before.at( "band.scale.red" ).number );
+        CHECK( after.at( "band.mean.red" ).number == Catch::Approx( cleanMean ) );
+    }
+    SECTION( "zero gain refused" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 0.0;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: NoData-as-data fills sentinel pixels and moves stats", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "nodata_fraction" ).number > 0.0 );
+
+    SECTION( "default fill = declared sentinel" )
+    {
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        spec.seed = 5;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 4 ); // two NaN samples in two data bands
+        CHECK( grid.bands[0].samples[5] == grid.noDataValue );
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "nodata_fraction" ).number == 0.0 );
+        CHECK( after.at( "finite_fraction" ).number == 1.0 );
+        CHECK( after.at( "band.mean.red" ).number != before.at( "band.mean.red" ).number );
+    }
+    SECTION( "explicit fill value" )
+    {
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        spec.params["fill_value"] = 0.0;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( grid.bands[1].samples[6] == 0.0 );
+    }
+    SECTION( "non-finite fill refused" )
+    {
+        FaultGrid nanGrid = qualityMaskedGrid();
+        nanGrid.noDataValue = std::nan( "" );
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        const auto outcome = applyFault( nanGrid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: expectation relations evaluate observables with evidence", "[faultlab]" )
+{
+    const FaultGrid clean = indexPairGrid();
+    const ObservableSet cleanSet = measureObservables( clean );
+    FaultGrid faulted = FaultSandbox::copyOf( clean );
+    REQUIRE( applyFault( faulted, swapSpec() ).ok );
+    const ObservableSet faultedSet = measureObservables( faulted );
+
+    std::vector<ObservableExpectation> expectations;
+    ObservableExpectation changed;
+    changed.id = "band_roles";
+    changed.relation = ExpectationRelation::Changed;
+    expectations.push_back( changed );
+    ObservableExpectation deltaGe;
+    deltaGe.id = "index_mean";
+    deltaGe.relation = ExpectationRelation::DeltaGe;
+    deltaGe.value = 0.5;
+    expectations.push_back( deltaGe );
+    ObservableExpectation truthIs;
+    truthIs.id = "provenance.generator_present";
+    truthIs.relation = ExpectationRelation::TruthIs;
+    truthIs.value = 0.0;
+    expectations.push_back( truthIs );
+    ObservableExpectation missing;
+    missing.id = "channel_order";
+    missing.relation = ExpectationRelation::Changed;
+    expectations.push_back( missing );
+
+    const auto results = checkExpectations( cleanSet, faultedSet, expectations );
+    REQUIRE( results.size() == 4 );
+    CHECK( results[0].passed );                                     // band_roles changed
+    CHECK( results[1].passed );                                     // index delta >= 0.5
+    CHECK( results[1].delta >= 0.5 );                               // evidence carries the delta
+    CHECK_FALSE( results[2].passed );                               // truth observable never produced
+    CHECK( results[2].note.find( "observable" ) != std::string::npos );
+    CHECK_FALSE( results[3].passed );                               // channel_order never produced
+    CHECK( results[3].note.find( "observable" ) != std::string::npos );
 }

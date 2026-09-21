@@ -81,7 +81,7 @@ const std::vector<FaultFamilyInfo> &faultFamilyCatalog()
           kDiagnosisUnmatched,
           { "band.mean", "band.min", "band.max", "band.scale", "band.offset" },
           { "role", "gain" },
-          { "offset" },
+          { "offset", "metadata" },
           "temp_copy",
           false },
         { "nodata_as_data",
