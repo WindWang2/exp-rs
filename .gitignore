@@ -158,6 +158,7 @@ vendor/
 .planning/teaching-lab-platform-11/*
 !.planning/teaching-lab-platform-11/*.md
 !.planning/plugin-platform-9/
+!.planning/rs14-explainable-workflow/
 !.planning/ds41-plugin-lifecycle-13/
 !.planning/geospatial-data-fabric-9/
 !.planning/lab-content-expansion/
