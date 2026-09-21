@@ -3,3 +3,5 @@
 | Round | Change | Verification | Status | Next |
 |---|---|---|---|---|
 | 1 | recon/plan/slices + dynamic dedup (no open PRs; master at 4f6632e1f6; no benchmark-harness overlap in issues) | docs written; worktree `../exp-rs-wt-rs14-agent-benchmark` on `agent/rs14-agent-benchmark` @ 4f6632e1f6 | PASS | Slice 0 skeleton |
+| 2 | Slice 0 skeleton + smoke (json_writer, lane wiring) | ctest ^test_agentbench_core:: 5/5 green (0.05s) | PASS | Slice A |
+| 3 | Slice A case schema v1 (parse/validate/version/digest; RED→GREEN; fixed cross-ref order + test helper double-serialize bug) | ctest ^test_agentbench_case:: 9/9 green | PASS | Slice B trace/replay |

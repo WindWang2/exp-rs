@@ -7,6 +7,11 @@
 # store, never schedules work (no second scheduler, no third truth source).
 
 add_library( sicnu_agentbench STATIC
+    case_schema.cpp
+    case_schema.h
+    errors.h
+    failure_taxonomy.cpp
+    failure_taxonomy.h
     json_writer.cpp
     json_writer.h
     version.h
