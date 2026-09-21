@@ -65,7 +65,7 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
     if ( !validated )
         return Result<StudyRunSummary>::failure( validated.diagnostics() );
 
-    const auto sampled = sampleStudyPoints( spec );
+    auto sampled = sampleStudyPoints( spec );
     if ( !sampled )
         return Result<StudyRunSummary>::failure( sampled.diagnostics() );
     const QVector<StudyPoint> points = sampled.take();
@@ -248,7 +248,7 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
                 abortCode = QStringLiteral( "study.store_unavailable" );
                 break;
             }
-            inFlight.push_back( InFlight{ point, std::move( submission.value() ),
+            inFlight.push_back( InFlight{ point, submission.take(),
                                           runId.value() } );
             emitProgress( StudyProgress::Phase::PointSubmitted, point.pointId,
                           correlationId, static_cast<int>( inFlight.size() ) );

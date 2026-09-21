@@ -282,7 +282,7 @@ TEST_CASE( "failed points are recorded as failures with typed evidence", "[study
     const QJsonObject metrics = failed.value().metrics();
     const QJsonObject error = metrics.value( QStringLiteral( "error" ) ).toObject();
     REQUIRE( !error.isEmpty() );
-    REQUIRE( error.value( QStringLiteral( "code" ) ).toString()
+    REQUIRE( error.value( QStringLiteral( "error_code" ) ).toString()
              == QStringLiteral( "study.operator_failed" ) );
     // The failed point is still linked in the ledger.
     const auto points = sampleStudyPoints( spec ).value();
@@ -310,7 +310,7 @@ TEST_CASE( "submit refusals become failed runs with an empty execution ref",
     const QJsonObject error = run.value().metrics()
                                   .value( QStringLiteral( "error" ) )
                                   .toObject();
-    REQUIRE( error.value( QStringLiteral( "code" ) ).toString()
+    REQUIRE( error.value( QStringLiteral( "error_code" ) ).toString()
              == QStringLiteral( "study.run_submit_refused" ) );
 }
 
@@ -320,16 +320,16 @@ TEST_CASE( "timed-out executions are recorded as deadline failures",
     Fixture fix;
     fix.backend.fallback = Script::Timeout;
     StudyRunner runner( fix.store, fix.ledger, fix.backend );
-    const auto spec = specFor( 1 );
+    const auto spec = specFor( 2 );
     std::atomic<bool> cancel{ false };
 
     const auto result = runner.run( spec, cancel, fix.outputDir() );
     REQUIRE( result.has_value() );
-    REQUIRE( result.value().failedCount == 1 );
+    REQUIRE( result.value().failedCount == 2 );
     const auto run = fix.store.runById( result.value().runIds.at( 0 ) );
     const QJsonObject error =
         run.value().metrics().value( QStringLiteral( "error" ) ).toObject();
-    REQUIRE( error.value( QStringLiteral( "code" ) ).toString()
+    REQUIRE( error.value( QStringLiteral( "error_code" ) ).toString()
              == QStringLiteral( "study.run_timeout" ) );
 }
 
@@ -338,17 +338,17 @@ TEST_CASE( "a success without a committed output is not a success", "[study][run
     Fixture fix;
     fix.backend.fallback = Script::SucceedWithoutOutput;
     StudyRunner runner( fix.store, fix.ledger, fix.backend );
-    const auto spec = specFor( 1 );
+    const auto spec = specFor( 2 );
     std::atomic<bool> cancel{ false };
 
     const auto result = runner.run( spec, cancel, fix.outputDir() );
     REQUIRE( result.has_value() );
     REQUIRE( result.value().recordedCount == 0 );
-    REQUIRE( result.value().failedCount == 1 );
+    REQUIRE( result.value().failedCount == 2 );
     const auto run = fix.store.runById( result.value().runIds.at( 0 ) );
     const QJsonObject error =
         run.value().metrics().value( QStringLiteral( "error" ) ).toObject();
-    REQUIRE( error.value( QStringLiteral( "code" ) ).toString()
+    REQUIRE( error.value( QStringLiteral( "error_code" ) ).toString()
              == QStringLiteral( "study.run_missing_output" ) );
 }
 

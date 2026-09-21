@@ -141,7 +141,7 @@ TEST_CASE( "grid sampling is deterministic across calls", "[study][sampling][rep
                          { dim( QStringLiteral( "threshold" ), 0.1, 0.9, 5 ) } );
     const auto first = sampleStudyPoints( s );
     const auto second = sampleStudyPoints( s );
-    REQUIRE( first.has_value() && second.has_value() );
+    REQUIRE( ( first.has_value() && second.has_value() ) );
     REQUIRE( first.value() == second.value() );
 }
 
@@ -180,12 +180,13 @@ TEST_CASE( "one-at-a-time sampling varies exactly one dimension per point", "[st
         if ( point.pointId == baseline.pointId )
             continue;
         QStringList differing;
-        for ( const auto &it : point.assignments.toStdMap() )
+        for ( auto it = point.assignments.constBegin(); it != point.assignments.constEnd(); ++it )
         {
-            if ( it.first == QStringLiteral( "seed" ) )
+            const QString &key = it.key();
+            if ( key == QStringLiteral( "seed" ) )
                 continue;
-            if ( point.assignments.value( it.first ) != baseline.assignments.value( it.first ) )
-                differing.append( it.first );
+            if ( point.assignments.value( key ) != baseline.assignments.value( key ) )
+                differing.append( key );
         }
         REQUIRE( differing.size() == 1 );
         variedValues[differing.first()].insert(

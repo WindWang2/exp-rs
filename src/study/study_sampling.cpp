@@ -291,7 +291,7 @@ Result<QVector<StudyPoint>> sampleStudyPoints( const ParameterStudySpec &spec )
     {
         case SamplingStrategy::Grid:
         {
-            const auto grid = sampleGrid( spec );
+            auto grid = sampleGrid( spec );
             if ( !grid )
                 return Result<QVector<StudyPoint>>::failure( grid.diagnostics() );
             points = grid.take();
