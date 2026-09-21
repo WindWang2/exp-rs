@@ -175,6 +175,12 @@ TEST_CASE( "ParameterStudySpec validation refusals are typed", "[study][spec]" )
         spec.objectiveMetrics.append( StudyMetricSpec{ QStringLiteral( "notCollected" ), true } );
         REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_unknown_metric" ) ) );
     }
+    SECTION( "a declared task metric requires a declared direction" )
+    {
+        auto spec = validSpec();
+        spec.objectiveMetric = QStringLiteral( "maskedPercent" ); // no objective_metrics entry
+        REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_missing_direction" ) ) );
+    }
     SECTION( "negative spatial epsilon" )
     {
         auto spec = validSpec();

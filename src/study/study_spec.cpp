@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
 
 namespace sicnu::study
@@ -131,6 +132,21 @@ Result<void> ParameterStudySpec::validate() const
             specError( QStringLiteral( "study.spec_unknown_metric" ),
                        QStringLiteral( "declared task metric %1 is not an aggregated metric" )
                            .arg( objectiveMetric ) ) );
+
+    if ( !objectiveMetric.isEmpty() )
+    {
+        const bool declared =
+            std::any_of( objectiveMetrics.cbegin(), objectiveMetrics.cend(),
+                         [&]( const StudyMetricSpec &objective ) {
+                             return objective.name == objectiveMetric;
+                         } );
+        if ( !declared )
+            return Result<void>::failure(
+                specError( QStringLiteral( "study.spec_missing_direction" ),
+                           QStringLiteral( "declared task metric %1 requires an "
+                                            "objective_metrics entry with its direction" )
+                               .arg( objectiveMetric ) ) );
+    }
 
     if ( spatialEpsilon < 0.0 || !std::isfinite( spatialEpsilon ) )
         return Result<void>::failure(

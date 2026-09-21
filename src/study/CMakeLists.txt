@@ -11,6 +11,8 @@ qt_add_library(sicnu_study STATIC
   study_execution.h
   study_runner.cpp
   study_runner.h
+  study_analysis.cpp
+  study_analysis.h
 )
 
 add_library(Sicnu::study ALIAS sicnu_study)
@@ -24,6 +26,8 @@ target_link_libraries(sicnu_study
   PUBLIC
     Qt6::Core
     Sicnu::experiment
+  PRIVATE
+    GDAL::GDAL # raster reading for the spatial difference adapter only
 )
 
 # Same science-core layer guard as sicnu_experiment: no GUI, no network.
