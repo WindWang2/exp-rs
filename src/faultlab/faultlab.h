@@ -8,6 +8,7 @@
 #include "fault_expectations.h"
 #include "fault_observables.h"
 #include "fault_registry.h"
+#include "fault_report.h"
 #include "fault_sandbox.h"
 #include "fault_transforms.h"
 #include "fault_types.h"

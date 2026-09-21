@@ -500,6 +500,52 @@ FaultOutcome applyModelChannelMismatch( FaultGrid &grid, const Json::Value &para
     return okOutcome( 1 );
 }
 
+
+// --- artifact/provenance family (slice E) ------------------------------------
+
+FaultOutcome applyProvenanceRemoval( FaultGrid &grid, const Json::Value &params,
+                                     std::uint32_t /*seed*/ )
+{
+    std::string scope = "generator";
+    if ( params.isMember( "scope" ) )
+    {
+        if ( !params["scope"].isString() )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "provenance_removal scope must be a string" );
+        }
+        scope = params["scope"].asString();
+        if ( scope != "generator" && scope != "all" )
+        {
+            return errorOutcome( "faultlab.fault_unsupported_params",
+                                 "provenance_removal scope '" + scope +
+                                     "' is outside the closed vocabulary {generator, all}" );
+        }
+    }
+    if ( !grid.extras.isMember( "provenance" ) || !grid.extras["provenance"].isObject() ||
+         !grid.extras["provenance"].isMember( "generator" ) ||
+         !grid.extras["provenance"]["generator"].isString() ||
+         grid.extras["provenance"]["generator"].asString().empty() )
+    {
+        return errorOutcome( "faultlab.fault_unsafe_target",
+                             "provenance_removal needs a fixture carrying generator provenance" );
+    }
+
+    if ( scope == "all" )
+    {
+        // Whole provenance block gone: the observable disappears rather
+        // than reporting a faked default.
+        grid.extras.removeMember( "provenance" );
+        return okOutcome( 1 );
+    }
+
+    // Generator identity (and its seed) removed: the artifact can no longer
+    // be traced back to the sample it was computed from.
+    grid.extras["provenance"].removeMember( "generator" );
+    grid.extras["provenance"].removeMember( "seed" );
+    return okOutcome( 1 );
+}
+
 using TransformFn = FaultOutcome ( *)( FaultGrid &, const Json::Value &, std::uint32_t );
 
 struct FamilyDispatch
@@ -523,6 +569,8 @@ const FamilyDispatch kDispatches[] = {
     { "train_test_spatial_leakage", applyTrainTestSpatialLeakage },
     { "threshold_misuse", applyThresholdMisuse },
     { "model_channel_mismatch", applyModelChannelMismatch },
+    // artifact/provenance family (slice E)
+    { "provenance_removal", applyProvenanceRemoval },
 };
 
 } // namespace

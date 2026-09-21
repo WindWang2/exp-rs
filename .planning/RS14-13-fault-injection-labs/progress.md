@@ -16,3 +16,6 @@
 - Slice D (ML/evaluation faults): RED tests first, 28/28 green.
   - New transforms: train_test_spatial_leakage (duplicate clones train points into test role; relocate moves a test point onto a train coordinate — both move leakage.overlap_fraction with typed evidence), threshold_misuse (closed [0,1] range, same-threshold refused as non-fault), model_channel_mismatch (bijection-checked permutation of the declared channel order; weights stay put so model_output_mean moves by an exactly computable delta).
   - Fixed during TDD: relocate semantics = test point moved into train region (test_count unchanged); model output arithmetic (13.1); duplicate overlap = 0.5 (clones overlap, originals do not).
+- Slice E (artifact/provenance fault + report schema): RED tests first, 30/30 green.
+  - provenance_removal: scope generator (blanks generator+seed, observable flips true→false) / all (block removed, observable disappears as typed absence); refusals for unknown scope and provenance-free fixtures.
+  - fault_report.{h,cpp}: sicnu.faultlab.report/1 canonical body (no timestamps/paths), digest-stable across runs, parseable, verdict + evidence + diagnostics sections.

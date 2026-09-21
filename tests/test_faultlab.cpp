@@ -7,6 +7,7 @@
 #include "faultlab/fault_expectations.h"
 #include "faultlab/fault_observables.h"
 #include "faultlab/fault_registry.h"
+#include "faultlab/fault_report.h"
 #include "faultlab/fault_sandbox.h"
 #include "faultlab/fault_transforms.h"
 #include "faultlab/fault_types.h"
@@ -1109,5 +1110,154 @@ TEST_CASE( "fault lab: model channel mismatch permutes the channel order", "[fau
         const auto refused = applyFault( local, spec2 );
         CHECK_FALSE( refused.ok );
         CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice E — artifact/provenance faults + the canonical report schema
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+FaultGrid provenanceGrid()
+{
+    FaultGrid grid = sampleGrid();
+    Json::Value provenance( Json::objectValue );
+    provenance["schema"] = "exp-rs-prov/1";
+    provenance["generator"] = "faultlab.fixture_factory";
+    provenance["seed"] = 42u;
+    provenance["product"] = "two_band_index_pair";
+    grid.extras["provenance"] = provenance;
+    return grid;
+}
+
+FaultRunReport sampleReport()
+{
+    FaultRunReport report;
+    report.scenarioId = "fs_provenance_removal_generator";
+    report.faultFamily = "provenance_removal";
+    report.seed = 42;
+    report.fixtureSeed = 42;
+    report.fixtureId = "provenanced_pair";
+    report.faultApplied = true;
+    report.faultMutations = 1;
+    report.expectationsPassed = true;
+    report.expectedDiagnosisSignature = "diagnostic.unmatched";
+    report.actualDiagnosisSignature = "diagnostic.unmatched";
+    report.diagnosisMatched = true;
+    report.sandboxRemoved = true;
+    report.sourceDigestBefore = std::string( "a" ).append( 64, 'b' );
+    report.sourceDigestAfter = std::string( "a" ).append( 64, 'b' );
+    report.sourceUnchanged = true;
+    report.replayDigest = std::string( "c" ).append( 64, 'd' );
+    report.replayDeterministic = true;
+    report.passed = true;
+
+    ExpectationResult evidence;
+    evidence.id = "provenance.generator_present";
+    evidence.relation = ExpectationRelation::TruthIs;
+    evidence.passed = true;
+    evidence.expected = 0.0;
+    evidence.observed = 0.0;
+    report.expectationResults.push_back( evidence );
+    return report;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: provenance removal clears generator evidence", "[faultlab]" )
+{
+    SECTION( "default scope blanks the generator fields" )
+    {
+        FaultGrid grid = provenanceGrid();
+        const auto before = measureObservables( grid );
+        CHECK( before.at( "provenance.generator_present" ).truth );
+
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.seed = 13;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 1 );
+
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "provenance.generator_present" ).truth == false );
+        // Schema/seed survive; the generator identity is what vanished.
+        CHECK( grid.extras["provenance"].isMember( "schema" ) );
+    }
+    SECTION( "scope all removes the whole block" )
+    {
+        FaultGrid grid = provenanceGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.params["scope"] = "all";
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK_FALSE( grid.extras.isMember( "provenance" ) );
+        // The observable now vanishes rather than reporting a faked default.
+        CHECK( measureObservables( grid ).count( "provenance.generator_present" ) == 0 );
+    }
+    SECTION( "unknown scope refused" )
+    {
+        FaultGrid grid = provenanceGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.params["scope"] = "half";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without provenance refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: report schema serializes canonically and digests stably", "[faultlab]" )
+{
+    const FaultRunReport first = sampleReport();
+    const FaultRunReport second = sampleReport();
+
+    const std::string textFirst = faultReportToJson( first );
+    const std::string textSecond = faultReportToJson( second );
+    CHECK( textFirst == textSecond );
+    CHECK( faultReportDigest( first ) == faultReportDigest( second ) );
+    CHECK( faultReportDigest( first ).size() == 64 );
+
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    REQUIRE( reader->parse( textFirst.data(), textFirst.data() + textFirst.size(), &parsed,
+                            &errors ) );
+    CHECK( parsed["schema_version"].asString() == kFaultReportSchemaId );
+    CHECK( parsed["scenario_id"].asString() == "fs_provenance_removal_generator" );
+    CHECK( parsed["verdict"]["passed"].asBool() );
+    CHECK( parsed["verdict"]["source_unchanged"].asBool() );
+    CHECK( parsed["verdict"]["replay_deterministic"].asBool() );
+    CHECK( parsed["expected_diagnosis"]["signature"].asString() == "diagnostic.unmatched" );
+    CHECK( parsed["cleanup"]["sandbox_removed"].asBool() );
+    REQUIRE( parsed["observable_evidence"].isArray() );
+    CHECK( parsed["observable_evidence"][0]["id"].asString() == "provenance.generator_present" );
+
+    SECTION( "a mutated report digests differently" )
+    {
+        FaultRunReport mutated = sampleReport();
+        mutated.expectationsPassed = false;
+        CHECK( faultReportDigest( mutated ) != faultReportDigest( first ) );
+    }
+    SECTION( "diagnostics travel in the report body" )
+    {
+        FaultRunReport withDiagnostic = sampleReport();
+        withDiagnostic.diagnostics.push_back(
+            FaultDiagnostic{ "faultlab.cleanup_failed", "sandbox residue", FaultSeverity::Error } );
+        const std::string text = faultReportToJson( withDiagnostic );
+        CHECK( text.find( "faultlab.cleanup_failed" ) != std::string::npos );
     }
 }
