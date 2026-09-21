@@ -120,6 +120,48 @@ TEST_CASE( "StacClient search encodes core filters as GET query params",
   CHECK_THAT( requests[0].query, ContainsSubstring( "limit=25" ) );
 }
 
+TEST_CASE( "httpFetchJson refuses a deeply-nested depth bomb cleanly (#1155)",
+           "[io][stac][client][robustness]" )
+{
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  std::string bomb;
+  for ( int i = 0; i < 1000; ++i )
+    bomb += '[';
+  bomb += '1';
+  for ( int i = 0; i < 1000; ++i )
+    bomb += ']';
+  testsupport::StacRoute route;
+  route.body = bomb;
+  server.setRoute( "/search", route );
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.limit = 1;
+  // The pre-#1155 default reader overflowed its stack on this body; the
+  // hardened reader must surface the ordinary invalid-JSON GeoError.
+  bool typedRefusal = false;
+  try
+  {
+    static_cast<void>( client.search( query ) );
+  }
+  catch ( const GeoError &e )
+  {
+    typedRefusal = true;
+    CHECK( std::string( e.what() ).find( "not valid JSON" ) != std::string::npos );
+  }
+  REQUIRE( typedRefusal );
+
+  // The fetch layer stays alive: a well-formed page parses.
+  testsupport::StacRoute good;
+  good.body = renderPage( { renderItem( "s1", "2026-08-01T10:00:00Z", "12.5",
+                                        "[10.0,40.0,11.0,41.0]" ) },
+                          "" );
+  server.setRoute( "/search", good );
+  const StacPage page = client.search( query );
+  CHECK( page.items.size() == 1 );
+}
+
 TEST_CASE( "StacClient uses POST for the query extension and intersects",
            "[io][stac][client]" )
 {
