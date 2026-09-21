@@ -2,6 +2,7 @@
 
 #include "criteria_spatial.h"
 #include "criteria_spectral.h"
+#include "criteria_temporal.h"
 
 namespace sicnu::suitability
 {
@@ -48,6 +49,9 @@ sicnu::data::Result<SuitabilityReport> SuitabilityAssessor::assess( const Inputs
     report.addCriterion( assessResolution( *resolved, inputs.scenes ) );
     report.addCriterion( assessSpectralBands( *resolved, inputs.scenes, inputs.facts ) );
     report.addCriterion( assessCloudCover( *resolved, inputs.scenes ) );
+    report.addCriterion( assessTemporalCoverage( *resolved, inputs.scenes, inputs.facts ) );
+    report.addCriterion( assessTemporalDensity( *resolved, inputs.scenes, inputs.facts ) );
+    report.addCriterion( assessTemporalSeasonality( *resolved, inputs.scenes, inputs.facts ) );
     return sicnu::data::Result<SuitabilityReport>::success( report );
 }
 

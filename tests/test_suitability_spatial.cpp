@@ -676,8 +676,14 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
 {
     SuitabilityAssessor::Inputs inputs;
     inputs.goal = goalWithAoi( 0, 0, 100, 100 );
+    inputs.goal.hasTimeWindow = true;
+    inputs.goal.windowStartUtc = QDateTime::fromString( QStringLiteral( "2024-01-01T00:00:00Z" ), Qt::ISODate );
+    inputs.goal.windowEndUtc = QDateTime::fromString( QStringLiteral( "2025-01-01T00:00:00Z" ), Qt::ISODate );
     inputs.datasetVersionId = QStringLiteral( "dv-1" );
-    inputs.scenes.append( makeScene( QStringLiteral( "s1" ), 0, 0, 100, 100, QStringLiteral( "aoi-crs" ) ) );
+    SceneCandidate scene = makeScene( QStringLiteral( "s1" ), 0, 0, 100, 100, QStringLiteral( "aoi-crs" ) );
+    scene.acquisitionTimeUtc =
+        QDateTime::fromString( QStringLiteral( "2024-06-01T00:00:00Z" ), Qt::ISODate );
+    inputs.scenes.append( scene );
 
     const auto result = SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
@@ -686,9 +692,16 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     REQUIRE( report.sceneIds() == QStringList{ QStringLiteral( "s1" ) } );
     REQUIRE( report.goalDigest() == inputs.goal.contentDigest() );
 
-    REQUIRE( report.criteria().size() == 2 );
-    REQUIRE( report.criteria().at( 0 ).id == QStringLiteral( "spatial.coverage" ) );
-    REQUIRE( report.criteria().at( 1 ).id == QStringLiteral( "spatial.resolution" ) );
+    REQUIRE( report.criteria().size() == 7 );
+    REQUIRE( report.criteria().at( 0 ).id == QStringLiteral( "quality.cloud" ) );
+    REQUIRE( report.criteria().at( 1 ).id == QStringLiteral( "spatial.coverage" ) );
+    REQUIRE( report.criteria().at( 2 ).id == QStringLiteral( "spatial.resolution" ) );
+    REQUIRE( report.criteria().at( 3 ).id == QStringLiteral( "spectral.bands" ) );
+    REQUIRE( report.criteria().at( 4 ).id == QStringLiteral( "temporal.coverage" ) );
+    REQUIRE( report.criteria().at( 5 ).id == QStringLiteral( "temporal.density" ) );
+    REQUIRE( report.criteria().at( 6 ).id == QStringLiteral( "temporal.seasonality" ) );
+    // Every graded dimension is suitable or not-applicable (partial evidence
+    // would hold the overall at Unknown).
     REQUIRE( report.overallLevel() == SuitabilityLevel::Suitable );
 
     // Deterministic replay: same inputs, same digest.

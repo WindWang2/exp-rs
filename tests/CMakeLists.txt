@@ -11916,3 +11916,16 @@ target_include_directories(test_suitability_spectral PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_spectral)
+
+qt_add_executable(test_suitability_temporal
+  test_suitability_temporal.cpp
+)
+target_link_libraries(test_suitability_temporal PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_temporal PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_temporal)
