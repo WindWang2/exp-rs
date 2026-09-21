@@ -11876,3 +11876,36 @@ target_include_directories(test_spectral_background_raster PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_background_raster)
+
+# RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
+# (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
+add_executable(test_agentbench_core test_agentbench_core.cpp)
+target_link_libraries(test_agentbench_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_core)
+target_include_directories(test_agentbench_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_core PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_core TEST_PREFIX "test_agentbench_core::")
+
+# RS14 agent-benchmark Slice A: case schema contract.
+add_executable(test_agentbench_case test_agentbench_case.cpp)
+target_link_libraries(test_agentbench_case PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_case)
+target_include_directories(test_agentbench_case PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_case PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_case TEST_PREFIX "test_agentbench_case::")
