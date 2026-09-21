@@ -20,6 +20,8 @@
 #include "operators/framework/rs_schema.h"
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/algorithm_search.h"
+#include "processing/framework/provider_algorithm_adapter.h"
 #include "processing/framework/algorithm_meta_store.h"
 #include "processing/framework/json_params_converter.h"
 #include "processing/framework/algorithm_preflight.h"
@@ -751,14 +753,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("search_algorithms"))
             {
-                resultData = handleSearchAlgorithms(
-                    arguments.value(QStringLiteral("query")).toString(),
-                    arguments.value(QStringLiteral("group")).toString(),
-                    arguments.value(QStringLiteral("input_type")).toString(),
-                    arguments.value(QStringLiteral("output_type")).toString(),
-                    arguments.value(QStringLiteral("large_raster_safe")).toBool(),
-                    mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt()),
-                    qMax(0, arguments.value(QStringLiteral("cursor")).toInt()));
+                resultData = handleSearchAlgorithms( arguments );
             }
             else if (toolName == QStringLiteral("get_algorithm_schema"))
             {
@@ -1356,6 +1351,105 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
 }
 
 // MCP Handlers implementation
+/// Projects one registry descriptor into the canonical discovery entry —
+/// shared by list_algorithms and search_algorithms so the two surfaces can
+/// never drift on entry shape (capability search track).
+static QVariantMap algorithmEntryMap( const sicnu::processing::AlgorithmDescriptor &desc )
+{
+    const QString id = QString::fromStdString(desc.id);
+
+    QVariantMap algMap;
+    algMap[QStringLiteral("id")] = id;
+    algMap[QStringLiteral("displayName")] = QString::fromStdString(desc.displayName);
+    algMap[QStringLiteral("group")] = QString::fromStdString(desc.group);
+    algMap[QStringLiteral("description")] = QString::fromStdString(desc.description);
+    algMap[QStringLiteral("source")] = QStringLiteral("rs");
+
+    QVariantList tags;
+    for (const auto &t : desc.agentMetadata.tags)
+        tags.append(QString::fromStdString(t));
+    algMap[QStringLiteral("tags")] = tags;
+    algMap[QStringLiteral("memoryPolicy")] = QString::fromStdString(desc.agentMetadata.memoryPolicy);
+    algMap[QStringLiteral("largeRasterSafe")] = desc.agentMetadata.largeRasterSafe;
+
+    // Surface the descriptor's agent purpose (provider metadata() or
+    // generated) under the same "metadata" key the provider branch
+    // below uses, so both listing paths speak one shape (#620).
+    if (!desc.agentMetadata.purpose.empty())
+    {
+        QVariantMap metaMap;
+        metaMap[QStringLiteral("purpose")] = QString::fromStdString(desc.agentMetadata.purpose);
+        algMap[QStringLiteral("metadata")] = metaMap;
+    }
+
+    QVariantList outList;
+    for (const auto &out : desc.outputs)
+    {
+        QVariantMap outMap;
+        outMap[QStringLiteral("name")] = QString::fromStdString(out.name);
+        outMap[QStringLiteral("type")] = QString::fromUtf8(sicnu::processing::dataTypeToString(out.type).c_str());
+        outList.append(outMap);
+    }
+    algMap[QStringLiteral("outputs")] = outList;
+
+    attachCatalogEntry( algMap, id );
+    return algMap;
+}
+
+/// Projects one QGIS processing-registry algorithm into the canonical
+/// provider discovery entry — shared by list_algorithms and
+/// search_algorithms so the two surfaces can never drift on entry shape.
+static QVariantMap providerEntryMap( const QgsProcessingAlgorithm *alg )
+{
+    QVariantMap algMap;
+    algMap[QStringLiteral("id")] = alg->id();
+    algMap[QStringLiteral("displayName")] = alg->displayName();
+    algMap[QStringLiteral("group")] = alg->group();
+    const QString help = alg->shortHelpString();
+    algMap[QStringLiteral("description")] = help.isEmpty() ? alg->shortDescription() : help;
+    algMap[QStringLiteral("source")] = QStringLiteral("provider");
+
+    QVariantList tags;
+    const QStringList algTags = alg->tags();
+    for (const QString &t : algTags)
+        tags.append(t);
+    algMap[QStringLiteral("tags")] = tags;
+    algMap[QStringLiteral("memoryPolicy")] = QStringLiteral("unknown");
+    algMap[QStringLiteral("largeRasterSafe")] = false;
+
+    // Preserve the provider's native metadata map (purpose, help, ...)
+    // for backward compatibility with MCP clients.
+    QVariantMap providerMeta = alg->metadata();
+    if (!providerMeta.isEmpty())
+        algMap[QStringLiteral("metadata")] = providerMeta;
+
+    QVariantList outList;
+    const auto outputs = alg->outputDefinitions();
+    for (const QgsProcessingOutputDefinition *out : outputs)
+    {
+        if (!out)
+            continue;
+        QVariantMap outMap;
+        outMap[QStringLiteral("name")] = out->name();
+        outMap[QStringLiteral("type")] = out->type();
+        outList.append(outMap);
+    }
+    algMap[QStringLiteral("outputs")] = outList;
+    return algMap;
+}
+
+/// Search-side descriptor for a provider algorithm: the same view the old
+/// adapter-lookup contract produced (ProviderAlgorithmAdapter carries typed
+/// input/output ports, provider tags, and purpose), so free-text/group/tag,
+/// purpose, and input/output-type facets all resolve. Facets that live only
+/// in authored agentMetadata (taskFamily, modality, largeRasterSafe) remain
+/// unmatched for providers, exactly as before.
+static sicnu::processing::AlgorithmDescriptor providerSearchDescriptor(
+    const QgsProcessingAlgorithm *alg )
+{
+    return sicnu::processing::ProviderAlgorithmAdapter( *alg ).descriptor();
+}
+
 QVariantMap McpServer::handleListAlgorithms(int limit, int cursor)
 {
     QVariantMap result;
@@ -1372,46 +1466,8 @@ QVariantMap McpServer::handleListAlgorithms(int limit, int cursor)
 
     for (const auto &desc : descriptors)
     {
-        const QString id = QString::fromStdString(desc.id);
-        seenIds.insert(id);
-
-        QVariantMap algMap;
-        algMap[QStringLiteral("id")] = id;
-        algMap[QStringLiteral("displayName")] = QString::fromStdString(desc.displayName);
-        algMap[QStringLiteral("group")] = QString::fromStdString(desc.group);
-        algMap[QStringLiteral("description")] = QString::fromStdString(desc.description);
-        algMap[QStringLiteral("source")] = QStringLiteral("rs");
-
-        QVariantList tags;
-        for (const auto &t : desc.agentMetadata.tags)
-            tags.append(QString::fromStdString(t));
-        algMap[QStringLiteral("tags")] = tags;
-        algMap[QStringLiteral("memoryPolicy")] = QString::fromStdString(desc.agentMetadata.memoryPolicy);
-        algMap[QStringLiteral("largeRasterSafe")] = desc.agentMetadata.largeRasterSafe;
-
-        // Surface the descriptor's agent purpose (provider metadata() or
-        // generated) under the same "metadata" key the provider branch
-        // below uses, so both listing paths speak one shape (#620).
-        if (!desc.agentMetadata.purpose.empty())
-        {
-            QVariantMap metaMap;
-            metaMap[QStringLiteral("purpose")] = QString::fromStdString(desc.agentMetadata.purpose);
-            algMap[QStringLiteral("metadata")] = metaMap;
-        }
-
-        QVariantList outList;
-        for (const auto &out : desc.outputs)
-        {
-            QVariantMap outMap;
-            outMap[QStringLiteral("name")] = QString::fromStdString(out.name);
-            outMap[QStringLiteral("type")] = QString::fromUtf8(sicnu::processing::dataTypeToString(out.type).c_str());
-            outList.append(outMap);
-        }
-        algMap[QStringLiteral("outputs")] = outList;
-
-        attachCatalogEntry( algMap, id );
-
-        algList.append(algMap);
+        seenIds.insert(QString::fromStdString(desc.id));
+        algList.append(algorithmEntryMap(desc));
     }
 
     // Provider algorithms reachable through the same dispatcher (findAdapter
@@ -1428,50 +1484,13 @@ QVariantMap McpServer::handleListAlgorithms(int limit, int cursor)
             if (seenIds.contains(id))
                 continue;
             seenIds.insert(id);
-
-            QVariantMap algMap;
-            algMap[QStringLiteral("id")] = id;
-            algMap[QStringLiteral("displayName")] = alg->displayName();
-            algMap[QStringLiteral("group")] = alg->group();
-            const QString help = alg->shortHelpString();
-            algMap[QStringLiteral("description")] = help.isEmpty() ? alg->shortDescription() : help;
-            algMap[QStringLiteral("source")] = QStringLiteral("provider");
-
-            QVariantList tags;
-            const QStringList algTags = alg->tags();
-            for (const QString &t : algTags)
-                tags.append(t);
-            algMap[QStringLiteral("tags")] = tags;
-            algMap[QStringLiteral("memoryPolicy")] = QStringLiteral("unknown");
-            algMap[QStringLiteral("largeRasterSafe")] = false;
-
-            // Preserve the provider's native metadata map (purpose, help, ...)
-            // for backward compatibility with MCP clients.
-            QVariantMap providerMeta = alg->metadata();
-            if (!providerMeta.isEmpty())
-                algMap[QStringLiteral("metadata")] = providerMeta;
-
-            QVariantList outList;
-            const auto outputs = alg->outputDefinitions();
-            for (const QgsProcessingOutputDefinition *out : outputs)
-            {
-                if (!out)
-                    continue;
-                QVariantMap outMap;
-                outMap[QStringLiteral("name")] = out->name();
-                outMap[QStringLiteral("type")] = out->type();
-                outList.append(outMap);
-            }
-            algMap[QStringLiteral("outputs")] = outList;
-
-            algList.append(algMap);
+            algList.append(providerEntryMap(alg));
         }
     }
 
     // #701: the catalog runs to hundreds of entries; unbounded responses
     // flooded agent contexts. Mirror list_tools pagination (limit/cursor,
-    // nextCursor empty on the last page). limit <= 0 returns everything
-    // (internal callers like search).
+    // nextCursor empty on the last page). limit <= 0 returns everything.
     const int totalCount = static_cast<int>(algList.size());
     if (limit > 0)
     {
@@ -1495,94 +1514,102 @@ QVariantMap McpServer::handleListAlgorithms(int limit, int cursor)
     return result;
 }
 
-QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QString &group,
-                                              const QString &inputType, const QString &outputType,
-                                              bool largeRasterSafeOnly, int limit, int cursor)
+QVariantMap McpServer::handleSearchAlgorithms(const QVariantMap &arguments)
 {
-    QVariantMap result = handleListAlgorithms(0, 0); // unfiltered fetch; paginate below
-    const QVariantList all = result.value(QStringLiteral("algorithms")).toList();
-    QVariantList filtered;
+    // Authoritative search contract (capability search track): every filter
+    // maps to declared descriptor metadata, evaluated by the same engine the
+    // CLI drives — identical ids and ordering across surfaces by
+    // construction.
+    sicnu::processing::AlgorithmSearchQuery query;
+    query.text = arguments.value(QStringLiteral("query")).toString().toStdString();
+    query.group = arguments.value(QStringLiteral("group")).toString().toStdString();
+    query.tags = sicnu::processing::splitSearchList(
+        arguments.value(QStringLiteral("tag")).toString().toStdString() );
+    query.purpose = arguments.value(QStringLiteral("purpose")).toString().toStdString();
+    query.taskFamily = arguments.value(QStringLiteral("task")).toString().toStdString();
+    query.modalities = sicnu::processing::splitSearchList(
+        arguments.value(QStringLiteral("modality")).toString().toStdString() );
+    query.inputType = arguments.value(QStringLiteral("input_type")).toString().toStdString();
+    query.outputType = arguments.value(QStringLiteral("output_type")).toString().toStdString();
+    query.largeRasterSafeOnly =
+        arguments.value(QStringLiteral("large_raster_safe")).toBool();
+    query.limit = mcpPageLimit(arguments.value(QStringLiteral("limit")).toInt());
+    query.cursor = qMax(0, arguments.value(QStringLiteral("cursor")).toInt());
 
-    const QString needle = query.trimmed().toLower();
-    for (const QVariant &entryVar : all)
+    // Search universe mirrors list_algorithms exactly: registry descriptors
+    // plus provider algorithms (gdal:/otb:/native:/qgis:) reachable through
+    // the same dispatcher. Providers enter through their adapter descriptor —
+    // the same typed-port view the old findAdapter path produced — so
+    // text/group/tag/purpose and input/output-type filters all resolve;
+    // facets that only exist in authored agentMetadata (taskFamily,
+    // modality, largeRasterSafe) still don't match providers.
+    auto universe = sicnu::processing::AtomicAlgorithmRegistry::instance().listDescriptors();
+    QSet<QString> seenIds;
+    seenIds.reserve( universe.size() + 200 );
+    for ( const auto &desc : universe )
+        seenIds.insert( QString::fromStdString( desc.id ) );
+
+    QHash<QString, const QgsProcessingAlgorithm *> providers;
+    if ( QgsApplication::processingRegistry() )
     {
-        const QVariantMap entry = entryVar.toMap();
-
-        if (!group.isEmpty() && entry.value(QStringLiteral("group")).toString() != group)
-            continue;
-        if (largeRasterSafeOnly && !entry.value(QStringLiteral("largeRasterSafe")).toBool())
-            continue;
-
-        if (!inputType.isEmpty())
+        const QList<const QgsProcessingAlgorithm *> algs =
+            QgsApplication::processingRegistry()->algorithms();
+        providers.reserve( algs.size() );
+        for ( const QgsProcessingAlgorithm *alg : algs )
         {
-            // Resolve the algorithm's input types via the canonical descriptor.
-            const QString id = entry.value(QStringLiteral("id")).toString();
-            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(id.toStdString());
-            bool matched = false;
-            if (adapter)
-            {
-                const auto &inputs = adapter->descriptor().inputs;
-                for (const auto &port : inputs)
-                {
-                    if (QString::compare(QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()), inputType, Qt::CaseInsensitive) == 0)
-                    { matched = true; break; }
-                }
-            }
-            if (!matched)
+            if ( !alg || seenIds.contains( alg->id() ) )
                 continue;
+            seenIds.insert( alg->id() );
+            providers.insert( alg->id(), alg );
+            universe.push_back( providerSearchDescriptor( alg ) );
         }
-        if (!outputType.isEmpty())
-        {
-            const QString id = entry.value(QStringLiteral("id")).toString();
-            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(id.toStdString());
-            bool matched = false;
-            if (adapter)
-            {
-                const auto &outputs = adapter->descriptor().outputs;
-                for (const auto &port : outputs)
-                {
-                    if (QString::compare(QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()), outputType, Qt::CaseInsensitive) == 0)
-                    { matched = true; break; }
-                }
-            }
-            if (!matched)
-                continue;
-        }
-
-        if (!needle.isEmpty())
-        {
-            const QString haystack = (entry.value(QStringLiteral("id")).toString() + " "
-                                      + entry.value(QStringLiteral("displayName")).toString() + " "
-                                      + entry.value(QStringLiteral("group")).toString() + " "
-                                      + entry.value(QStringLiteral("description")).toString()).toLower();
-            if (!haystack.contains(needle))
-                continue;
-        }
-
-        filtered.append(entryVar);
     }
 
-    // #701: paginated like list_algorithms (search hits can be large too).
+    const auto result = sicnu::processing::searchAlgorithms( universe, query );
+    if ( result.error.has_value() )
+        throw McpToolError( QStringLiteral("search_algorithms: ")
+                                + QString::fromStdString( *result.error ),
+                            QStringLiteral("INVALID_QUERY"), QStringLiteral("validation") );
+
+    QVariantList page;
+    for ( const auto &hit : result.hits )
+    {
+        const auto &desc = universe[hit.index];
+        const auto providerIt = providers.constFind( QString::fromStdString( desc.id ) );
+        page.append( providerIt != providers.constEnd()
+                         ? providerEntryMap( providerIt.value() )
+                         : algorithmEntryMap( desc ) );
+    }
+
     QVariantMap out;
-    const int totalCount = static_cast<int>(filtered.size());
-    if (limit > 0)
+    out[QStringLiteral("algorithms")] = page;
+    out[QStringLiteral("count")] = static_cast<int>(page.size());
+    out[QStringLiteral("total")] = result.total;
+    out[QStringLiteral("limit")] = result.limit;
+    out[QStringLiteral("cursor")] = result.cursor;
+    out[QStringLiteral("nextCursor")] = result.nextCursor;
+
+    // Zero hits: hand the agent the honest filter vocabulary (declared
+    // metadata only) plus closest id suggestions, so a bad filter value is
+    // debuggable instead of a silent empty list.
+    if ( result.total == 0 )
     {
-        const int start = qMax(0, cursor);
-        const int end = qMin(totalCount, start + limit);
-        QVariantList page;
-        for (int i = start; i < end; ++i)
-            page.append(filtered.at(i));
-        out[QStringLiteral("algorithms")] = page;
-        out[QStringLiteral("count")] = static_cast<int>(page.size());
-        out[QStringLiteral("total")] = totalCount;
-        out[QStringLiteral("limit")] = limit;
-        out[QStringLiteral("cursor")] = start;
-        out[QStringLiteral("nextCursor")] = (end < totalCount) ? end : QVariant(-1);
-    }
-    else
-    {
-        out[QStringLiteral("algorithms")] = filtered;
-        out[QStringLiteral("count")] = totalCount;
+        const auto toList = []( const std::vector<std::string> &values ) {
+            QVariantList list;
+            for ( const auto &v : values )
+                list.append( QString::fromStdString( v ) );
+            return list;
+        };
+        QVariantMap vocabulary;
+        vocabulary[QStringLiteral("groups")] = toList( result.vocabulary.groups );
+        vocabulary[QStringLiteral("tags")] = toList( result.vocabulary.tags );
+        vocabulary[QStringLiteral("taskFamilies")] = toList( result.vocabulary.taskFamilies );
+        vocabulary[QStringLiteral("modalities")] = toList( result.vocabulary.modalities );
+        vocabulary[QStringLiteral("dataTypes")] = toList( result.vocabulary.dataTypes );
+        QVariantMap hints;
+        hints[QStringLiteral("vocabulary")] = vocabulary;
+        hints[QStringLiteral("suggestions")] = toList( result.suggestions );
+        out[QStringLiteral("hints")] = hints;
     }
     return out;
 }

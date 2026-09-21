@@ -68,7 +68,13 @@ A FAIL verification is final: report failure, never success. Error codes
    keeps provenance for every output.
 4. **Large rasters**: prefer `large_raster_safe` algorithms
    (`search_algorithms` filter) when the input exceeds ~1 GB.
-5. **Outputs are assets**: completed executions return an `asset_id`;
+5. **Search honestly**: `search_algorithms` filters are ANDed across
+   fields (`query` text tokens ANDed too; comma lists like
+   `tag: 'sar,insar'` are ANY-of) and match declared metadata only —
+   `group`, `tag`, `purpose`, `task`, `modality`, `input_type`,
+   `output_type`, `large_raster_safe`. A zero-hit result carries `hints`
+   with the declared filter vocabulary; use it instead of guessing.
+6. **Outputs are assets**: completed executions return an `asset_id`;
    `get_lineage` recovers sources, parameters, and downstream products.
 
 ## Failure modes worth remembering

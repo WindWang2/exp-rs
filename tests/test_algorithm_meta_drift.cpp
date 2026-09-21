@@ -27,7 +27,7 @@ std::string lfOnly( std::string text )
   std::string out;
   out.reserve( text.size() );
   for ( char c : text )
-    if ( c != '' )
+    if ( c != '\r' )
       out.push_back( c );
   return out;
 }

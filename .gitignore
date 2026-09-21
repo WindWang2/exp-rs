@@ -410,6 +410,11 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+# ds41-capability-search-13 (Track I): track planning notes (markdown only; logs stay local).
+!.planning/ds41-capability-search-13/
+.planning/ds41-capability-search-13/*
+!.planning/ds41-capability-search-13/*.md
+
 # glm53-mission-runtime-13 (Mission Runtime 13.0): track planning notes (markdown only; logs stay local).
 !.planning/glm53-mission-runtime-13/
 .planning/glm53-mission-runtime-13/*

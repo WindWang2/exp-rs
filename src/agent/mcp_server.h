@@ -125,9 +125,11 @@ protected:
 
     // MCP Methods — canonical algorithm surface
     QVariantMap handleListAlgorithms(int limit = 50, int cursor = 0);
-    QVariantMap handleSearchAlgorithms(const QString &query, const QString &group,
-                                       const QString &inputType, const QString &outputType,
-                                       bool largeRasterSafeOnly, int limit = 50, int cursor = 0);
+    /// Authoritative algorithm search (capability search track): all query
+    /// fields map to declared descriptor metadata via
+    /// processing::searchAlgorithms — the same engine the CLI drives.
+    /// Returns {algorithms, count, total, limit, cursor, nextCursor, hints?}.
+    QVariantMap handleSearchAlgorithms(const QVariantMap &arguments);
     QVariantMap handleGetAlgorithmSchema(const QString &algorithmId);
     QVariantMap handlePreflightAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
     QVariantMap handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters);

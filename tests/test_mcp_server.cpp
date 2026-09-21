@@ -18,6 +18,7 @@
 #include "data/internal/source_provider_registry.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/provider_algorithm_adapter.h"
 #include "processing/framework/output_committer.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -156,7 +157,18 @@ public:
                                      const QString &inputType = QString(), const QString &outputType = QString(),
                                      bool largeRasterSafeOnly = false)
     {
-        return handleSearchAlgorithms(query, group, inputType, outputType, largeRasterSafeOnly);
+        QVariantMap args;
+        if (!query.isEmpty())
+            args[QStringLiteral("query")] = query;
+        if (!group.isEmpty())
+            args[QStringLiteral("group")] = group;
+        if (!inputType.isEmpty())
+            args[QStringLiteral("input_type")] = inputType;
+        if (!outputType.isEmpty())
+            args[QStringLiteral("output_type")] = outputType;
+        args[QStringLiteral("large_raster_safe")] = largeRasterSafeOnly;
+        args[QStringLiteral("limit")] = 500;
+        return handleSearchAlgorithms(args);
     }
     QVariantMap testGetToolSchema(const QString &id) { return handleGetToolSchema(id); }
 };
@@ -1153,7 +1165,7 @@ TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][w
     catch ( const std::runtime_error &e )
     {
         threw = true;
-        CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "Invalid pipeline" ) ) );
+        CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "pipeline rejected" ) ) );
     }
     CHECK( threw );
 
@@ -1508,21 +1520,38 @@ TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputTyp
     const QVariantList results = res.value( QStringLiteral( "algorithms" ) ).toList();
     REQUIRE_FALSE( results.isEmpty() );
 
-    // Verify all returned algorithms have at least one Raster input port
+    // Verify all returned algorithms have at least one Raster input port.
+    // Results may include provider algorithms (input_type now resolves their
+    // adapter-typed ports, matching the pre-refactor contract); under a bare
+    // QCoreApplication findAdapter intentionally declines the lazy provider
+    // path (#697), so provider entries are verified through the processing
+    // registry's own adapter view — the same one the engine searched.
     for ( const QVariant &entryVar : results )
     {
         const QVariantMap entry = entryVar.toMap();
         const QString id = entry.value( QStringLiteral( "id" ) ).toString();
         const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( id.toStdString() );
-        REQUIRE( adapter != nullptr );
         bool hasRasterInput = false;
-        for ( const auto &port : adapter->descriptor().inputs )
+        if ( adapter )
         {
-            if ( port.type == sicnu::processing::DataType::Raster )
-            {
-                hasRasterInput = true;
-                break;
-            }
+            for ( const auto &port : adapter->descriptor().inputs )
+                if ( port.type == sicnu::processing::DataType::Raster )
+                {
+                    hasRasterInput = true;
+                    break;
+                }
+        }
+        else
+        {
+            const QgsProcessingAlgorithm *alg =
+                QgsApplication::processingRegistry()->algorithmById( id );
+            REQUIRE( alg != nullptr );
+            for ( const auto &port : sicnu::processing::ProviderAlgorithmAdapter( *alg ).descriptor().inputs )
+                if ( port.type == sicnu::processing::DataType::Raster )
+                {
+                    hasRasterInput = true;
+                    break;
+                }
         }
         CHECK( hasRasterInput );
     }

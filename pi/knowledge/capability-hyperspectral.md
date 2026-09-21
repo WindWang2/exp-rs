@@ -25,6 +25,8 @@
 
 ## rs:cem_detection
 
+约束能量最小化（CEM）目标检测：以场景相关矩阵建模背景，无失真约束下目标得分恒为 1，对乘性亮度变化稳健。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
@@ -32,6 +34,14 @@
 - 参数：libraryMaterials（string）、libraryPath（string）、loading（numeric）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.；At least 2*B+2 valid background pixels (B+1 when 'loading' > 0) — under-sampled scenes are refused.
 - 局限：Background statistics come from the input scene itself; a separate background raster is a future extension.
+- 适用地物：人工目标、自然背景
+- 适用场景：高光谱目标检测、亚像素小目标场景
+- 失败模式：
+  - `INVALID_PARAMETER` — 目标光谱与影像波段数不匹配。处置：将目标光谱重采样到影像波段，保证每个波段对应一个有限值
+  - `INVALID_PARAMETER` — 有效背景像元不足（无 loading 需 2B+2，loading>0 需 B+1）。处置：扩大场景范围或增大 loading 对角加载系数
+- 教学概念：CEM、目标检测、场景相关矩阵
+- 适用课程：高光谱遥感
+- 典型练习：以布设目标为真值，比较 CEM 与 ACE 得分图的 ROC 表现。
 
 ## rs:continuum_removal
 
@@ -146,6 +156,8 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 
 ## rs:spectral_spatial_fuse
 
+光谱—空间融合：对目标检测得分图做局部窗口均值融合，抑制孤立单像素虚警，无效像元不参与邻域均值。
+
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
@@ -153,6 +165,14 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 参数：beta（numeric）、output（string）、radius（integer）
 - 前置条件：Input must be a single-band score raster.
 - 局限：Full-raster memory policy: the whole single-band score plane is held in memory (float32 width*height).
+- 适用地物：人工目标
+- 适用场景：目标检测后处理、孤立虚警抑制
+- 失败模式：
+  - `INVALID_PARAMETER` — 输入不是单波段得分栅格。处置：先用 rs:matched_filter/rs:ace/rs:cem_detection 生成单波段得分图
+  - `INSUFFICIENT_MEMORY` — 整幅得分面无法驻留内存（full_raster 策略）。处置：裁剪影像范围或先降采样再融合
+- 教学概念：空间滤波、虚警抑制、NoData
+- 适用课程：高光谱遥感
+- 典型练习：对 ACE 得分图做融合前后对比，统计孤立虚警像元的数量变化。
 
 ## rs:spectral_unmixing
 
