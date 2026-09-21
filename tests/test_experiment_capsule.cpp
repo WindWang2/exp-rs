@@ -6,6 +6,8 @@
 // before any builder exists.
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,6 +20,7 @@
 #include "experiment/capsule/capsule_diff.h"
 #include "experiment/capsule/capsule_document.h"
 #include "experiment/capsule/capsule_io.h"
+#include "experiment/capsule/capsule_portability.h"
 #include "experiment/capsule/capsule_readiness.h"
 #include "experiment/evidence.h"
 #include "experiment/experiment_store.h"
@@ -1401,4 +1404,169 @@ TEST_CASE( "diff direction only swaps left/right, never the verdict",
     const CapsuleDiffReport reverse = CapsuleDiffReport::diff( windowsDoc, linuxDoc );
     CHECK( forward.level == reverse.level );
     CHECK( forward.sections.size() == reverse.sections.size() );
+}
+
+// --- Slice G: cross-machine path normalization --------------------------------
+
+namespace
+{
+
+/// Logical content shared by two "machines": fixed dataset/version ids so
+/// the derived fingerprints match across stores.
+struct RelocationIds
+{
+    QString datasetId = QStringLiteral( "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" );
+    QString versionId = QStringLiteral( "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" );
+};
+
+/// Fills a fixture with the SAME logical content (ids, experiment, run,
+/// split manifest) and records one workspace artifact at @p artifactPath.
+bool fillRelocatableFixture( StoreFixture &fixture, const RelocationIds &ids,
+                             const QString &artifactPath )
+{
+    if ( !fixture.open() )
+        return false;
+    const auto datasetId = DatasetId::fromString( ids.datasetId ).value_or( DatasetId{} );
+    if ( !fixture.datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() )
+        return false;
+    DatasetManifest manifest;
+    manifest.setDatasetId( ids.datasetId );
+    manifest.setVersionId( ids.versionId );
+    const auto draft = fixture.datasets.createDraftVersion( manifest );
+    if ( !draft.has_value() )
+        return false;
+    if ( draft->versionId() != ids.versionId )
+        return false;
+    const auto versionIdParsed =
+        DatasetVersionId::fromString( ids.versionId ).value_or( DatasetVersionId{} );
+    if ( !fixture.datasets.stageVersion( versionIdParsed ).has_value() )
+        return false;
+    if ( !fixture.datasets.commitVersion( versionIdParsed ).has_value() )
+        return false;
+    const auto version = fixture.datasets.versionById( versionIdParsed );
+    if ( !version.has_value() )
+        return false;
+    fixture.versionId = version->versionId();
+    fixture.fingerprint = version->fingerprint();
+    fixture.manifestJson = version->manifestJson();
+
+    fixture.addExperiment();
+
+    sicnu::dataset::SplitManifest split;
+    split.setManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+    split.setDatasetVersionId( ids.versionId );
+    sicnu::dataset::SplitConfig config;
+    config.method = sicnu::dataset::SplitMethod::Random;
+    config.seed = 7;
+    split.setConfig( config );
+    sicnu::dataset::SplitAssignment assignment;
+    assignment.sampleId = QStringLiteral( "sample-1" );
+    assignment.role = sicnu::dataset::SplitRole::Train;
+    split.assignments().append( assignment );
+    if ( !fixture.datasets.saveSplitManifest( split ).has_value() )
+        return false;
+    const auto saved = fixture.datasets.splitManifestById( split.manifestId() );
+    if ( !saved.has_value() )
+        return false;
+    fixture.splitFingerprint = saved->fingerprint();
+
+    ExperimentRun::Artifact artifact;
+    artifact.path = artifactPath;
+    artifact.role = QStringLiteral( "primary" );
+    artifact.digest = QStringLiteral( "digest-primary" );
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QString(), QString(), QVector<ExperimentRun::Artifact>{ artifact } );
+    return run.runId() == QLatin1String( "run-1" );
+}
+
+} // namespace
+
+TEST_CASE( "a relocated workspace builds a byte-identical capsule",
+           "[capsule][portability]" )
+{
+    const RelocationIds ids;
+    StoreFixture machineA;
+    REQUIRE( machineA.open() );
+    REQUIRE( fillRelocatableFixture( machineA, ids,
+                                     machineA.dir.filePath( QStringLiteral( "out/raster.tif" ) ) ) );
+    StoreFixture machineB;
+    REQUIRE( machineB.open() );
+    REQUIRE( fillRelocatableFixture( machineB, ids,
+                                     machineB.dir.filePath( QStringLiteral( "out/raster.tif" ) ) ) );
+
+    const CapsuleBuilder builderA( machineA.experiments, machineA.datasets );
+    CapsuleOptions optionsA = fixedOptions();
+    optionsA.workspaceRoot = machineA.dir.path();
+    auto capsuleA = builderA.build( QStringLiteral( "run-1" ), optionsA );
+    REQUIRE( capsuleA.has_value() );
+
+    const CapsuleBuilder builderB( machineB.experiments, machineB.datasets );
+    CapsuleOptions optionsB = fixedOptions();
+    optionsB.workspaceRoot = machineB.dir.path();
+    auto capsuleB = builderB.build( QStringLiteral( "run-1" ), optionsB );
+    REQUIRE( capsuleB.has_value() );
+
+    CHECK( capsuleA->digestValue() == capsuleB->digestValue() );
+    CHECK( capsuleA->canonicalBytes() == capsuleB->canonicalBytes() );
+    CHECK( capsuleA->root().value( QStringLiteral( "outputs" ) ).toArray().at( 0 )
+               .toObject().value( QStringLiteral( "portable_ref" ) ).toString()
+           == QLatin1String( "workspace:out/raster.tif" ) );
+}
+
+TEST_CASE( "portable refs survive separators, drive letters and root slashes",
+           "[capsule][portability]" )
+{
+    using sicnu::experiment::capsule::toPortableRef;
+    CHECK( toPortableRef( QStringLiteral( "C:\\ws\\out\\a.tif" ), QStringLiteral( "C:\\ws" ) )
+           == QLatin1String( "workspace:out/a.tif" ) );
+    CHECK( toPortableRef( QStringLiteral( "/ws/out/a.tif" ), QStringLiteral( "/ws/" ) )
+           == QLatin1String( "workspace:out/a.tif" ) );
+    CHECK( toPortableRef( QStringLiteral( "/ws/out/a.tif" ), QStringLiteral( "/ws/out" ) )
+           == QLatin1String( "workspace:a.tif" ) );
+    CHECK( toPortableRef( QStringLiteral( "/elsewhere/a.tif" ), QStringLiteral( "/ws" ) )
+           == QLatin1String( "external:a.tif" ) );
+}
+
+TEST_CASE( "an empty workspace root marks everything external", "[capsule][portability]" )
+{
+    using sicnu::experiment::capsule::toPortableRef;
+    CHECK( toPortableRef( QStringLiteral( "/x/y/z.tif" ), QString() )
+           == QLatin1String( "external:z.tif" ) );
+}
+
+TEST_CASE( "a non-canonical workspace root is announced and never leaks paths",
+           "[capsule][portability]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    // Artifact under a symlinked subdirectory of the workspace.
+    QDir( fixture.dir.path() ).mkpath( QStringLiteral( "real/out" ) );
+    const QString linkPath = fixture.dir.filePath( QStringLiteral( "linked" ) );
+    QFile::link( fixture.dir.filePath( QStringLiteral( "real" ) ), linkPath );
+
+    ExperimentRun::Artifact artifact;
+    artifact.path = linkPath + QStringLiteral( "/out/raster.tif" );
+    artifact.role = QStringLiteral( "primary" );
+    artifact.digest = QStringLiteral( "digest-primary" );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QString(), QString(), QVector<ExperimentRun::Artifact>{ artifact } );
+
+    CapsuleOptions options = fixedOptions();
+    options.workspaceRoot = linkPath;
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), options );
+    REQUIRE( built.has_value() );
+
+    // The non-canonical root is announced, not silently accepted.
+    bool sawWarning = false;
+    for ( const auto &diagnostic : built.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "capsule.workspace-root-noncanonical" ) )
+            sawWarning = true;
+    CHECK( sawWarning );
+
+    // And no absolute path enters the document regardless.
+    CHECK( !built->canonicalBytes().contains( fixture.dir.path().toUtf8() ) );
 }

@@ -12,6 +12,7 @@
 #include "experiment/lineage.h"
 
 #include <QDateTime>
+#include <QFileInfo>
 #include <QJsonArray>
 
 namespace sicnu::experiment::capsule
@@ -106,6 +107,32 @@ Result<CapsuleDocument> CapsuleBuilder::build( const QString &runId,
     }
     const ExperimentRun run = *runRecord;
     QVector<Diagnostic> diagnostics;
+
+    // Portability policy: canonicalize the producing workspace root so
+    // symlinked or dotted roots cannot make two machines disagree about
+    // what is "inside the workspace". A rewritten root is announced (the
+    // identity of an output is its digest either way; the portable ref is
+    // only a human hint).
+    QString workspaceRoot = options.workspaceRoot;
+    if ( !workspaceRoot.isEmpty() )
+    {
+        const QFileInfo rootInfo( workspaceRoot );
+        const QString absolute = rootInfo.absoluteFilePath();
+        const QString canonical = rootInfo.canonicalFilePath();
+        if ( !canonical.isEmpty() && canonical != absolute )
+        {
+            diagnostics.append( warning(
+                QStringLiteral( "capsule.workspace-root-noncanonical" ),
+                QStringLiteral( "workspace root contains symlinks or non-canonical "
+                                "segments; portable refs are computed against the "
+                                "canonical path" ) ) );
+            workspaceRoot = canonical;
+        }
+        else
+        {
+            workspaceRoot = absolute;
+        }
+    }
 
     QJsonObject payload;
 
@@ -215,7 +242,7 @@ Result<CapsuleDocument> CapsuleBuilder::build( const QString &runId,
     {
         QJsonObject output;
         output.insert( QStringLiteral( "portable_ref" ),
-                       toPortableRef( artifact.path, options.workspaceRoot ) );
+                       toPortableRef( artifact.path, workspaceRoot ) );
         output.insert( QStringLiteral( "digest" ), artifact.digest );
         output.insert( QStringLiteral( "size_bytes" ), artifact.sizeBytes );
         output.insert( QStringLiteral( "role" ), artifact.role );

@@ -39,3 +39,9 @@
   EquivalentRerun (environment, evidence, created_utc, capsule_id only) /
   IdentityBreak (any pin section). Direction only swaps left/right.
   45 cases / 210 assertions pass.
+- 2026-09-21 Slice G GREEN: relocation test (two stores, fixed dataset/
+  version ids, same logical content, different absolute roots) ⇒
+  byte-identical capsules — absolute paths provably not identity.
+  Windows separators/trailing roots normalized; empty root ⇒ external;
+  non-canonical (symlinked) workspace root announced via warning and
+  canonicalized, paths never leak. 49 cases / 228 assertions pass.
