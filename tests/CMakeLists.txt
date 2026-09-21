@@ -11895,3 +11895,6 @@ target_link_libraries(test_scientific_state_diff PRIVATE Sicnu::ScientificState)
 
 sicnu_add_sdk_test(test_scientific_state_teaching)
 target_link_libraries(test_scientific_state_teaching PRIVATE Sicnu::ScientificState)
+
+sicnu_add_io_test(test_scientific_state_gdal)
+target_link_libraries(test_scientific_state_gdal PRIVATE Sicnu::ScientificStateGdal)
