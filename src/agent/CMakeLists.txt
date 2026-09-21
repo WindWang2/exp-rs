@@ -247,6 +247,9 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters
+  # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
+  # decision engine the lab copilot and the plan executor gate on.
+  Sicnu::autonomy
   ${JSONCPP_LIBRARIES}
 )
 

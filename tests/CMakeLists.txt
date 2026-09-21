@@ -9730,6 +9730,32 @@ endfunction()
 
 sicnu_add_help_test(test_help_core)
 
+# ── RS14-12 teaching autonomy ladder ───────────────────────────────────────
+# Policy-layer tests: Catch2 + Sicnu::autonomy (jsoncpp transitively) only —
+# no Qt, no QGIS — so the level semantics, schema, decision engine, audit
+# log and projection suites build and run fast. Gate-wiring tests that must
+# exercise the real seams use the standard heavy helper (sicnu_add_test).
+function(sicnu_add_autonomy_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::autonomy
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_autonomy_test(test_autonomy_policy)
+
 # Coverage & drift contracts against the LIVE operator registry + harness
 # taxonomy: reuses the standard heavy test helper (sicnu_operators +
 # sicnu_agent + processing) because the whole point is real schemas/codes.
