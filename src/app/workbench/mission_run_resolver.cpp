@@ -57,10 +57,18 @@ MissionRunStatus fromRunState( sicnu::workflow::WorkflowRunState state, const QS
         case sicnu::workflow::WorkflowRunState::Ready:
         case sicnu::workflow::WorkflowRunState::Running:
         case sicnu::workflow::WorkflowRunState::WaitingResource:
-        case sicnu::workflow::WorkflowRunState::Interrupted:
         case sicnu::workflow::WorkflowRunState::Cancelling:
             s.liveness = MissionRunLiveness::Alive;
             s.stateKey = QStringLiteral( "in_flight" );
+            break;
+        case sicnu::workflow::WorkflowRunState::Interrupted:
+            // #1168: the workflow layer itself treats Interrupted as a
+            // terminal recovery state — nothing executes. Mapping it to
+            // Alive made the reconcile count the task leftRunning and
+            // mission:advance report a fake Running; Unknown routes the
+            // task through the fail-closed Stale/retryable path instead.
+            s.liveness = MissionRunLiveness::Unknown;
+            s.stateKey = QStringLiteral( "interrupted" );
             break;
         case sicnu::workflow::WorkflowRunState::Completed:
             s.liveness = MissionRunLiveness::TerminalSuccess;
