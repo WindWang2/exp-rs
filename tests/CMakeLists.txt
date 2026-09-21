@@ -11941,3 +11941,19 @@ set_target_properties(test_agentbench_fake PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_fake TEST_PREFIX "test_agentbench_fake::")
+
+# RS14 agent-benchmark Slice D: hidden-invariant oracle.
+add_executable(test_agentbench_invariants test_agentbench_invariants.cpp)
+target_link_libraries(test_agentbench_invariants PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_invariants)
+target_include_directories(test_agentbench_invariants PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_invariants PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_invariants TEST_PREFIX "test_agentbench_invariants::")
