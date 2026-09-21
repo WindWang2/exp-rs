@@ -596,7 +596,8 @@
     "rs:change_sam",
     "rs:sar_change",
     "rs:sar_terrain_correction",
-    "rs:sar_terrain_flatten"
+    "rs:sar_terrain_flatten",
+    "rs:temporal_sar_fusion"
   ],
   "schema_version" : 1
 }

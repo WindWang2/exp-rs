@@ -1393,3 +1393,196 @@ TEST_CASE( "temporal_breakpoints: locates a step change E2E",
     const auto breakDay = readBand( fx.filePath( "brk.tif" ), breakBand );
     REQUIRE( breakDay[0] == Approx( 56.0 ).margin( 15.0 ) );
 }
+
+TEST_CASE( "temporal_sen_trend: compute_ci appends Gilbert slope bounds E2E",
+           "[temporal][operators][sen][ci]" )
+{
+    ensureApp();
+    Fixture fx;
+    // 6 dates, 10 days apart, one increasing pixel. compute_ci appends
+    // slope_ci_lo / slope_ci_hi after the base 5 bands; the Gilbert
+    // order-statistic interval must bracket the emitted Sen slope.
+    const float y[] = { 1.0f, 2.0f, 6.0f, 3.0f, 5.0f, 9.0f };
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+    {
+        const QString date = QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate );
+        const QString p = fx.filePath( QStringLiteral( "sc%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( p, date, { y[i] }, 1, 1 ) ) );
+        scenes.append( p.toStdString() );
+    }
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["compute_ci"] = true;
+    params["output"] = fx.filePath( QStringLiteral( "sen_ci.tif" ) ).toStdString();
+    const Json::Value result = runOp( "rs:temporal_sen_trend", params );
+    REQUIRE( result["bands"].asInt() == 7 );
+    REQUIRE( result["computeCi"].asBool() );
+
+    const auto slope = readBand( fx.filePath( "sen_ci.tif" ), 1 );
+    const auto lo = readBand( fx.filePath( "sen_ci.tif" ), 6 );
+    const auto hi = readBand( fx.filePath( "sen_ci.tif" ), 7 );
+    REQUIRE( std::isfinite( slope[0] ) );
+    REQUIRE( std::isfinite( lo[0] ) );
+    REQUIRE( std::isfinite( hi[0] ) );
+    REQUIRE( lo[0] <= slope[0] );
+    REQUIRE( hi[0] >= slope[0] );
+    REQUIRE( findBandByDescription( fx.filePath( "sen_ci.tif" ), "slope_ci_lo" ) == 6 );
+}
+
+TEST_CASE( "temporal_harmonic_fit: compute_ci appends coefficient intervals E2E",
+           "[temporal][operators][harmonic][ci]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Same exact-sine fixture as the coefficient test: y = 0.2 +
+    // 0.1·sin(2π·doy/365.25) every 10 days. Band layout with
+    // writeCoefficients + compute_ci: 36 fitted + rmse + r2 + 3 coef +
+    // 6 interval bounds (lo/hi per coefficient) = 47.
+    const int nScenes = 36;
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < nScenes; ++i )
+    {
+        const int doy = 1 + 10 * i;
+        const QString date = QDate( 2025, 1, 1 ).addDays( doy - 1 ).toString( Qt::ISODate );
+        const float v = static_cast<float>(
+            0.2 + 0.1 * std::sin( 2.0 * M_PI * doy / 365.25 ) );
+        const QString p = fx.filePath( QStringLiteral( "hc%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( p, date, { v, v }, 2, 1 ) ) );
+        scenes.append( p.toStdString() );
+    }
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["harmonics"] = 1;
+    params["writeCoefficients"] = true;
+    params["compute_ci"] = true;
+    params["output"] = fx.filePath( QStringLiteral( "fitci.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_harmonic_fit", params );
+    REQUIRE( result["bands"].asInt() == nScenes + 2 + 3 + 6 );
+
+    const int interceptBand = findBandByDescription( fx.filePath( "fitci.tif" ),
+                                                     "coef_intercept" );
+    const int loBand = findBandByDescription( fx.filePath( "fitci.tif" ),
+                                              "coef_lo_intercept" );
+    const int hiBand = findBandByDescription( fx.filePath( "fitci.tif" ),
+                                              "coef_hi_intercept" );
+    REQUIRE( interceptBand > 0 );
+    REQUIRE( loBand > 0 );
+    REQUIRE( hiBand > 0 );
+    const auto coef = readBand( fx.filePath( "fitci.tif" ), interceptBand );
+    const auto lo = readBand( fx.filePath( "fitci.tif" ), loBand );
+    const auto hi = readBand( fx.filePath( "fitci.tif" ), hiBand );
+    REQUIRE( coef[0] == Approx( 0.2 ).margin( 0.01 ) );
+    REQUIRE( std::isfinite( lo[0] ) );
+    REQUIRE( std::isfinite( hi[0] ) );
+    REQUIRE( lo[0] <= coef[0] );
+    REQUIRE( hi[0] >= coef[0] );
+}
+
+TEST_CASE( "temporal_harmonic_fit: compute_ci with robust refuses the mismatched model",
+           "[temporal][operators][harmonic][ci][negative]" )
+{
+    ensureApp();
+    Fixture fx;
+    // The analytic interval describes the unweighted LS estimator — under
+    // robust=true the emitted coefficients come from IRLS, so the pair is a
+    // typed refusal rather than an interval for a different model.
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+    {
+        const QString date = QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate );
+        const QString p = fx.filePath( QStringLiteral( "hr%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( p, date, { 1.0f }, 1, 1 ) ) );
+        scenes.append( p.toStdString() );
+    }
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["writeCoefficients"] = true;
+    params["compute_ci"] = true;
+    params["robust"] = true;
+    params["output"] = fx.filePath( QStringLiteral( "fitci_refused.tif" ) ).toStdString();
+    REQUIRE_THROWS( runOp( "rs:temporal_harmonic_fit", params ) );
+    REQUIRE( !QFile::exists( fx.filePath( "fitci_refused.tif" ) ) );
+}
+
+TEST_CASE( "temporal_smooth: moving_average_days windows on the real day axis E2E",
+           "[temporal][operators][smooth][irregular]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Irregular cadence — days 0, 1, 9, 10 (values 10, 20, 30, 40). With
+    // window_days = 3 the centered ±1.5-day windows pair only the clustered
+    // dates: {0,1} → 15 and {9,10} → 35. A POSITIONAL 3-sample window would
+    // average {0,1,9} → 20 at index 1 — the day-axis answer is the oracle.
+    const char *dates[] = { "2025-01-01", "2025-01-02", "2025-01-10", "2025-01-11" };
+    const float y[] = { 10.0f, 20.0f, 30.0f, 40.0f };
+    const float expected[] = { 15.0f, 15.0f, 35.0f, 35.0f };
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 4; ++i )
+    {
+        const QString p = fx.filePath( QStringLiteral( "ir%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( p, QString::fromLatin1( dates[i] ),
+                                                { y[i] }, 1, 1 ) ) );
+        scenes.append( p.toStdString() );
+    }
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["method"] = "moving_average_days";
+    params["window_days"] = 3.0;
+    params["output"] = fx.filePath( QStringLiteral( "ir_smooth.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_smooth", params );
+    REQUIRE( result["bands"].asInt() == 4 );
+    for ( int s = 0; s < 4; ++s )
+    {
+        const auto out = readBand( fx.filePath( "ir_smooth.tif" ), s + 1 );
+        REQUIRE( out[0] == Approx( expected[s] ).margin( 1e-4 ) );
+    }
+}
+
+TEST_CASE( "temporal_gap_fill: provenance_output emits per-date 0/1/2 codes E2E",
+           "[temporal][operators][gapfill][provenance]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Three dates, two pixels: pixel 0 always observed (10, 20, 30 → code
+    // 1), pixel 1 missing on the middle date (10, NoData, 30 → linear fill
+    // → code 2 on the interpolated date only). NoData input is -9999.
+    const char *dates[] = { "2025-01-01", "2025-01-06", "2025-01-11" };
+    const float px0[] = { 10.0f, 20.0f, 30.0f };
+    const float px1[] = { 10.0f, -9999.0f, 30.0f };
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 3; ++i )
+    {
+        const QString p = fx.filePath( QStringLiteral( "gf%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( p, QString::fromLatin1( dates[i] ),
+                                                { px0[i], px1[i] }, 2, 1 ) ) );
+        scenes.append( p.toStdString() );
+    }
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( QStringLiteral( "gf.tif" ) ).toStdString();
+    params["provenance_output"] = fx.filePath( QStringLiteral( "gf_prov.tif" ) ).toStdString();
+
+    const Json::Value result = runOp( "rs:temporal_gap_fill", params );
+    REQUIRE( result["provenanceOutput"].asString() ==
+             fx.filePath( "gf_prov.tif" ).toStdString() );
+
+    // Filled raster: the NaN pixel becomes 20 on the middle date.
+    const auto filled = readBand( fx.filePath( "gf.tif" ), 2 );
+    REQUIRE( filled[1] == Approx( 20.0f ).margin( 1e-4 ) );
+    // Provenance raster: Byte codes 1/2/1 for pixel 1 across the dates.
+    const auto prov1 = readBand( fx.filePath( "gf_prov.tif" ), 1 );
+    const auto prov2 = readBand( fx.filePath( "gf_prov.tif" ), 2 );
+    const auto prov3 = readBand( fx.filePath( "gf_prov.tif" ), 3 );
+    REQUIRE( prov1[1] == Approx( 1.0f ) );
+    REQUIRE( prov2[1] == Approx( 2.0f ) );
+    REQUIRE( prov3[1] == Approx( 1.0f ) );
+    REQUIRE( prov1[0] == Approx( 1.0f ) );
+}

@@ -364,6 +364,10 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+# flash-temporal-phenology-12: track planning notes (markdown only; logs stay local).
+!.planning/flash-temporal-phenology-12/
+.planning/flash-temporal-phenology-12/*
+!.planning/flash-temporal-phenology-12/*.md
 # flash-plugin-sdk-12 (Track 07): plugin SDK / capability negotiation / lifecycle 12.0 planning notes (markdown only; logs stay local).
 !.planning/flash-plugin-sdk-12/
 .planning/flash-plugin-sdk-12/*

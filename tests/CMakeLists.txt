@@ -6067,6 +6067,10 @@ if(TARGET sicnu_operators)
   # Platform 3.0 temporal fit numeric references (goal §7/§12).
   sicnu_add_test(test_temporal_fit)
 
+  # Temporal Phenology 12.0 (WP2): day-axis smoothing kernels and gap-fill
+  # provenance on irregular time axes.
+  sicnu_add_test(test_temporal_irregular)
+
   # Platform 3.0 model library gate: every shipped manifest parses cleanly,
   # names uniquely, and carries honest template readiness.
   sicnu_add_test(test_model_library_manifests)
