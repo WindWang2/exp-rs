@@ -10611,6 +10611,12 @@ sicnu_discover_tests(test_georef_crs_pick_failclosed)
 # =============================================================================
 # D17 — workflow pipeline designer (ADR 0162)
 # =============================================================================
+# The D17 engine sources call SICNU_FAULT_POINT (workflow_checkpoint.cpp,
+# pipeline_run_coordinator.cpp); the Qt-free leaf registry is compiled into
+# the light targets directly so they stay independent of sicnu_runtime.
+set(SICNU_FAULT_REGISTRY_SOURCE
+  ${CMAKE_SOURCE_DIR}/src/runtime/observability/fault_registry.cpp
+)
 # D17 test targets are deliberately MINIMAL: Catch2 + Qt (Core/Gui/Widgets as
 # needed) + jsoncpp where the LabSpec loader is compiled in. They do not link
 # the qgis/processing/task_center chain, so the whole designer suite builds
@@ -10691,6 +10697,7 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test jsoncpp sicnu_operators
 )
 
@@ -10702,6 +10709,7 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test
 )
 
@@ -10741,6 +10749,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+    ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test jsoncpp
 )
 
@@ -10755,6 +10764,30 @@ foreach(_d17_embeds_coordinator
     test_d17_workflow_pipeline_e2e)
   target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
 endforeach()
+
+# --- Track 13 (workflow durability): Engine-2.0 lineage envelope, checkpoint
+# election, legacy migration and runId fuzz. Light lane: the checkpoint/run
+# sources are compiled directly so the suite stays independent of the
+# qgis/task_center chain (same pattern as the D17 targets above).
+add_executable(test_workflow_durability_13 test_workflow_durability_13.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_definition.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
+)
+target_link_libraries(test_workflow_durability_13 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Network
+  jsoncpp
+)
+target_include_directories(test_workflow_durability_13 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_durability_13)
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------

@@ -409,3 +409,8 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+
+# ds41-workflow-durability-13 (Track 13): track planning notes (markdown only; logs stay local).
+!.planning/ds41-workflow-durability-13/
+.planning/ds41-workflow-durability-13/*
+!.planning/ds41-workflow-durability-13/*.md
