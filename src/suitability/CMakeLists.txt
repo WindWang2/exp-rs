@@ -8,6 +8,14 @@
 # BenchmarkTaskFamily; it never re-derives either.
 
 qt_add_library(sicnu_suitability STATIC
+  criteria_spatial.cpp
+  criteria_spatial.h
+  scene_candidate.cpp
+  scene_candidate.h
+  suitability_assessor.cpp
+  suitability_assessor.h
+  suitability_goal.cpp
+  suitability_goal.h
   suitability_level.cpp
   suitability_level.h
   suitability_types.cpp
