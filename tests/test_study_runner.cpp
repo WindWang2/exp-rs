@@ -461,3 +461,57 @@ TEST_CASE( "progress callbacks observe the full lifecycle", "[study][runner]" )
     REQUIRE( phases.count( StudyProgress::Phase::PointFinished ) == 2 );
     REQUIRE( phases.contains( StudyProgress::Phase::Finished ) );
 }
+
+// ── Slice G: replay / cancel / budget hardening oracles ─────────────────────
+
+TEST_CASE( "deterministic replay: same spec on a fresh store yields identical "
+           "point identities and run parameter documents",
+           "[study][runner][replay]" )
+{
+    Fixture fixA;
+    Fixture fixB;
+    StudyRunner runnerA( fixA.store, fixA.ledger, fixA.backend );
+    StudyRunner runnerB( fixB.store, fixB.ledger, fixB.backend );
+    const auto spec = specFor( /*steps=*/4 );
+    std::atomic<bool> cancel{ false };
+
+    REQUIRE( runnerA.run( spec, cancel, fixA.outputDir() ).has_value() );
+    REQUIRE( runnerB.run( spec, cancel, fixB.outputDir() ).has_value() );
+
+    REQUIRE( fixA.backend.submittedParameters.size()
+             == fixB.backend.submittedParameters.size() );
+    for ( int i = 0; i < fixA.backend.submittedParameters.size(); ++i )
+    {
+        // The "output" location is environment, not semantics — strip it and
+        // require the scientific parameters to be identical.
+        QJsonObject a = fixA.backend.submittedParameters.at( i );
+        QJsonObject b = fixB.backend.submittedParameters.at( i );
+        a.remove( QStringLiteral( "output" ) );
+        b.remove( QStringLiteral( "output" ) );
+        REQUIRE( a == b );
+    }
+
+    const auto pointsA = sampleStudyPoints( spec ).value();
+    const auto pointsB = sampleStudyPoints( spec ).value();
+    REQUIRE( pointsA == pointsB );
+    REQUIRE( fixA.backend.submittedParameters.size() == pointsA.size() );
+}
+
+TEST_CASE( "cancellation before any submission leaves zero runs and a typed reason",
+           "[study][runner][cancel]" )
+{
+    Fixture fix;
+    StudyRunner runner( fix.store, fix.ledger, fix.backend );
+    const auto spec = specFor( 3 );
+    std::atomic<bool> cancel{ true }; // cancelled before the study even starts
+
+    const auto result = runner.run( spec, cancel, fix.outputDir() );
+    REQUIRE( result.has_value() );
+    const auto &summary = result.value();
+    REQUIRE( summary.stoppedReason == QStringLiteral( "cancelled" ) );
+    REQUIRE( summary.recordedCount == 0 );
+    REQUIRE( summary.failedCount == 0 );
+    REQUIRE( summary.cancelledCount == 0 );
+    REQUIRE( fix.backend.submissions == 0 );
+    REQUIRE( summary.runIds.isEmpty() );
+}
