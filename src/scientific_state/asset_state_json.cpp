@@ -332,6 +332,7 @@ Json::Value assetStateToJson( const RemoteSensingAssetState &state )
     setStringIfNotEmpty( sensor, "sensor_key", canonical.sensor.sensorKey );
     sensor["modality"] = modalityToString( canonical.sensor.modality );
     setStringIfNotEmpty( sensor, "product_family", canonical.sensor.productFamily );
+    setStringIfNotEmpty( sensor, "product_id", canonical.sensor.productId );
     setStringIfNotEmpty( sensor, "processing_level", canonical.sensor.processingLevel );
     doc["sensor"] = sensor;
 
@@ -603,6 +604,7 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
              !readString( sensor, "instrument", state.sensor.instrument, error ) ||
              !readString( sensor, "sensor_key", state.sensor.sensorKey, error ) ||
              !readString( sensor, "product_family", state.sensor.productFamily, error ) ||
+             !readString( sensor, "product_id", state.sensor.productId, error ) ||
              !readString( sensor, "processing_level", state.sensor.processingLevel, error ) )
             return false;
         if ( sensor.isMember( "modality" ) &&

@@ -11884,3 +11884,5 @@ sicnu_discover_tests(test_spectral_background_raster)
 # =============================================================================
 sicnu_add_sdk_test(test_scientific_state_core)
 target_link_libraries(test_scientific_state_core PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_resolver)
+target_link_libraries(test_scientific_state_resolver PRIVATE Sicnu::ScientificState)

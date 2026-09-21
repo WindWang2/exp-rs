@@ -146,13 +146,15 @@ struct SensorStateSection
     std::string sensorKey;
     Modality modality = Modality::Unknown;
     std::string productFamily;
+    std::string productId;
     std::string processingLevel;
 
     bool operator==( const SensorStateSection &other ) const
     {
         return platform == other.platform && instrument == other.instrument &&
                sensorKey == other.sensorKey && modality == other.modality &&
-               productFamily == other.productFamily && processingLevel == other.processingLevel;
+               productFamily == other.productFamily && productId == other.productId &&
+               processingLevel == other.processingLevel;
     }
     bool operator!=( const SensorStateSection &other ) const { return !( *this == other ); }
 };
