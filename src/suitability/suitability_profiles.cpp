@@ -6,122 +6,82 @@ namespace sicnu::suitability
 namespace
 {
 
+// Designated initializers (C++20) on purpose: a positional aggregate here
+// once needed 12 arguments in exact member order, and a silently shifted
+// field would rewrite a task family's scientific prior. Named fields make a
+// future member addition a compile-safe edit.
+SuitabilityProfile baseProfile( const char *key, const char *displayName,
+                                const char *taskFamily, bool requireLabels )
+{
+    SuitabilityProfile profile;
+    profile.key = QLatin1String( key );
+    profile.displayName = QLatin1String( displayName );
+    profile.taskFamily = QLatin1String( taskFamily );
+    profile.requireLabels = requireLabels;
+    profile.pseudoLabelsAllowed = true;
+    return profile;
+}
+
 QVector<SuitabilityProfile> makeBuiltinProfiles()
 {
     QVector<SuitabilityProfile> profiles;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "classification" ),
-        QStringLiteral( "Land-cover classification" ),
-        QStringLiteral( "classification" ),
-        /*requireLabels*/ true,
-        /*minSamples*/ 200,
-        /*minCoverageFraction*/ 0.95,
-        /*minScenesInWindow*/ {},
-        /*minGsdM*/ {},
-        /*maxGsdM*/ {},
-        /*requiredSeasons*/ {},
-        /*pseudoLabelsAllowed*/ true,
-        /*gridStrict*/ {} } );
+    // Land-cover category mapping: declared vocabulary + enough samples to
+    // train/validate + 95% AOI coverage (no extrapolating classes).
+    profiles.append( baseProfile( "classification", "Land-cover classification",
+                                  "classification", true ) );
+    profiles.last().minSamples = 200;
+    profiles.last().minCoverageFraction = 0.95;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "segmentation" ),
-        QStringLiteral( "Segmentation" ),
-        QStringLiteral( "segmentation" ),
-        true,
-        50,
-        0.95,
-        {},
-        {},
-        {},
-        {},
-        true,
-        {} } );
+    // Pixel/object masks are denser than points: fewer samples support a
+    // model, but the labeled area must still cover 95% of the AOI.
+    profiles.append( baseProfile( "segmentation", "Segmentation", "segmentation", true ) );
+    profiles.last().minSamples = 50;
+    profiles.last().minCoverageFraction = 0.95;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "change_detection" ),
-        QStringLiteral( "Change detection" ),
-        QStringLiteral( "change_detection" ),
-        true,
-        100,
-        0.95,
-        2,
-        {},
-        {},
-        {},
-        /*pseudoLabelsAllowed*/ false,
-        {} } );
+    // Bi-temporal by definition: at least one scene per date. Pseudo-labels
+    // are forbidden — benchmark evaluation must not score a model against
+    // labels derived from a model.
+    profiles.append( baseProfile( "change_detection", "Change detection",
+                                  "change_detection", true ) );
+    profiles.last().minSamples = 100;
+    profiles.last().minCoverageFraction = 0.95;
+    profiles.last().minScenesInWindow = 2;
+    profiles.last().pseudoLabelsAllowed = false;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "object_detection" ),
-        QStringLiteral( "Object detection" ),
-        QStringLiteral( "object_detection" ),
-        true,
-        300,
-        0.9,
-        {},
-        {},
-        2.0,
-        {},
-        true,
-        {} } );
+    // Targets must be resolvable: a 2 m GSD ceiling keeps objects more than
+    // a few pixels wide; 300 targets floor stable per-class evaluation;
+    // 90% coverage (detection tolerates small uncovered margins).
+    profiles.append( baseProfile( "object_detection", "Object detection",
+                                  "object_detection", true ) );
+    profiles.last().minSamples = 300;
+    profiles.last().minCoverageFraction = 0.9;
+    profiles.last().maxGsdM = 2.0;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "regression" ),
-        QStringLiteral( "Regression" ),
-        QStringLiteral( "regression" ),
-        true,
-        100,
-        {},
-        {},
-        {},
-        {},
-        {},
-        true,
-        {} } );
+    // Continuous targets need a declared label field and enough samples to
+    // constrain the response surface.
+    profiles.append( baseProfile( "regression", "Regression", "regression", true ) );
+    profiles.last().minSamples = 100;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "temporal_prediction" ),
-        QStringLiteral( "Temporal prediction" ),
-        QStringLiteral( "temporal_prediction" ),
-        false,
-        {},
-        {},
-        4,
-        {},
-        {},
-        {},
-        true,
-        {} } );
+    // Labels are future observations, not annotated samples — no label
+    // requirement, but at least 4 scenes so a time series has structure.
+    profiles.append( baseProfile( "temporal_prediction", "Temporal prediction",
+                                  "temporal_prediction", false ) );
+    profiles.last().minScenesInWindow = 4;
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "spectral_matching" ),
-        QStringLiteral( "Spectral matching" ),
-        QStringLiteral( "spectral_matching" ),
-        false,
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        true,
-        {} } );
+    // Band requirements are scene/library-specific and come from the goal;
+    // matching is unsupervised (no label requirement).
+    profiles.append( baseProfile( "spectral_matching", "Spectral matching",
+                                  "spectral_matching", false ) );
 
-    profiles.append( SuitabilityProfile{
-        QStringLiteral( "phenology" ),
-        QStringLiteral( "Phenology (full-year temporal curve)" ),
-        QStringLiteral( "temporal_prediction" ),
-        false,
-        {},
-        {},
-        6,
-        {},
-        {},
-        /*requiredSeasons*/ { QStringLiteral( "spring" ), QStringLiteral( "summer" ),
-                              QStringLiteral( "autumn" ), QStringLiteral( "winter" ) },
-        true,
-        {} } );
+    // Phenological metrics need full-year coverage: at least 6 scenes spread
+    // over ALL FOUR meteorological seasons; a missing season (e.g. winter
+    // dormancy) invalidates the curve.
+    profiles.append( baseProfile( "phenology", "Phenology (full-year temporal curve)",
+                                  "temporal_prediction", false ) );
+    profiles.last().minScenesInWindow = 6;
+    profiles.last().requiredSeasons = { QStringLiteral( "spring" ), QStringLiteral( "summer" ),
+                                        QStringLiteral( "autumn" ), QStringLiteral( "winter" ) };
 
     return profiles;
 }
