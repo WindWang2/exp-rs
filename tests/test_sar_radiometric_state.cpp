@@ -587,6 +587,9 @@ TEST_CASE( "terrain operators accept a legacy undeclared input with a warning",
         // downstream guards can see it (a log line does not travel with the
         // file).
         REQUIRE( metaItem( out, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
+        // #1165: the numeric-domain assumption travels the same way (the
+        // undeclared-domain case was previously assumed linear with no flag).
+        REQUIRE( metaItem( out, "SICNU_SAR_DOMAIN_ASSUMED" ) == "linear_power" );
 
         // A declared sigma0 input carries no assumed-state key.
         const QString declaredIn = tmp.filePath( tag + "_declared_in.tif" );
@@ -599,6 +602,7 @@ TEST_CASE( "terrain operators accept a legacy undeclared input with a warning",
         runOp( id, declaredParams );
         REQUIRE( metaItem( declaredOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
         REQUIRE( metaItem( declaredOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
+        REQUIRE( metaItem( declaredOut, "SICNU_SAR_DOMAIN_ASSUMED" ).empty() );
     }
 }
 
@@ -1000,6 +1004,23 @@ TEST_CASE( "calibrate LUT resolution: precedence, containment and count directio
         REQUIRE( !QFileInfo::exists( out ) );
     }
 
+    // #1164: a symlink INSIDE the raster's directory pointing at an outside
+    // LUT is lexically contained but canonically outside — the containment
+    // rule must refuse it (the pre-fix || accepted the traversal).
+    {
+        REQUIRE( QDir( tmp.path() ).mkdir( "symlinked" ) );
+        const QString outsideLut = tmp.filePath( "symlink_target_lut.txt" );
+        REQUIRE( writeTextFile( outsideLut, QStringLiteral( "2\n2\n2\n2\n" ) ) );
+        const QString in = tmp.filePath( "symlinked/sym_in.tif" );
+        const QString out = tmp.filePath( "symlinked/sym_out.tif" );
+        REQUIRE( writeRasterEx( in, std::vector<float>( 16, 10.0f ), 4, 4,
+                                { { "SICNU_SAR_CALIBRATION_LUT", "lut_link.txt" } } ) );
+        REQUIRE( QFile::link( outsideLut, tmp.filePath( "symlinked/lut_link.txt" ) ) );
+        Json::Value params = baseParams( in, out );
+        REQUIRE_THROWS_AS( runOp( "rs:sar_calibrate", params ), RSOperatorError );
+        REQUIRE( !QFileInfo::exists( out ) );
+    }
+
     // More values than rows is refused (no silent truncation).
     {
         const QString in = tmp.filePath( "more_in.tif" );
@@ -1168,4 +1189,114 @@ TEST_CASE( "end-to-end SAR chain preserves and transitions radiometric state",
         REQUIRE( metaItem( path, sicnu::sar::kRadiometricStateKey ) == e.state );
         REQUIRE( metaItem( path, sicnu::sar::kCalibrationKey ) == e.state );
     }
+}
+
+TEST_CASE( "calibrate and backscatter refuse a declared SICNU_SAR_DOMAIN=db input",
+           "[sar][radiometry][domain]" )
+{
+    // #1147: the two entry-point operators of the radiometric chain used to
+    // ignore the declared numeric domain — a dB product sailed through the
+    // linear-power kernels with an exponentially wrong, confidently declared
+    // linear_power output. The declared db must be a typed refusal exactly
+    // like the six downstream family operators.
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Produce a genuine declared-dB product through the chain's own writer:
+    // calibrate with outputDomain=db stamps SICNU_SAR_DOMAIN=db.
+    const QString dn = tmp.filePath( "db_dn.tif" );
+    REQUIRE( writeRasterEx( dn, std::vector<float>( 16, 100.0f ), 4, 4, {} ) );
+    const QString dbProduct = tmp.filePath( "cal_db.tif" );
+    {
+        Json::Value params = baseParams( dn, dbProduct );
+        params["calibrationA"] = 2.0;
+        params["outputDomain"] = "db";
+        runOp( "rs:sar_calibrate", params );
+    }
+    REQUIRE( metaItem( dbProduct, sicnu::sar::kDomainKey ) == "db" );
+    REQUIRE( metaItem( dbProduct, sicnu::sar::kCalibrationKey ) == "sigma0" );
+
+    // backscatter sigma0→gamma0 with the DEFAULT inputDomain=linear_power:
+    // the declared db must refuse before any output exists.
+    const QString outBs = tmp.filePath( "bs_from_db.tif" );
+    {
+        Json::Value params = baseParams( dbProduct, outBs );
+        params["fromCalibration"] = "sigma0";
+        params["toCalibration"] = "gamma0";
+        params["incidenceDeg"] = 30.0;
+        REQUIRE_THROWS_WITH( runOp( "rs:sar_backscatter", params ),
+                             Catch::Matchers::ContainsSubstring( "SICNU_SAR_DOMAIN=db" ) );
+    }
+    REQUIRE( !QFileInfo::exists( outBs ) );
+
+    // calibrate on the declared-dB product: the DN formula is linear-only.
+    const QString outCal = tmp.filePath( "cal_from_db.tif" );
+    {
+        Json::Value params = baseParams( dbProduct, outCal );
+        params["calibrationA"] = 2.0;
+        REQUIRE_THROWS_WITH( runOp( "rs:sar_calibrate", params ),
+                             Catch::Matchers::ContainsSubstring( "SICNU_SAR_DOMAIN=db" ) );
+    }
+    REQUIRE( !QFileInfo::exists( outCal ) );
+
+    // The lawful path stays open: inputDomain=db + same-state conversion is
+    // the pure numeric dB→linear step (declared db agrees with the param).
+    const QString outLinear = tmp.filePath( "linear_from_db.tif" );
+    {
+        Json::Value params = baseParams( dbProduct, outLinear );
+        params["fromCalibration"] = "sigma0";
+        params["toCalibration"] = "sigma0";
+        params["inputDomain"] = "db";
+        runOp( "rs:sar_backscatter", params );
+    }
+    REQUIRE( QFileInfo::exists( outLinear ) );
+    REQUIRE( metaItem( outLinear, sicnu::sar::kDomainKey ) == "linear_power" );
+}
+
+
+TEST_CASE( "rs:sar_ratio consumes the terrain family's assumption provenance (#1165)",
+           "[sar][radiometry][assumed]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString dem = tmp.filePath( "assume_dem.tif" );
+    REQUIRE( writeRasterEx( dem, std::vector<float>( 16, 100.0f ), 4, 4, {} ) );
+
+    // Legacy undeclared raster through flatten: the output carries BOTH the
+    // positive gamma0 declaration and the assumption provenance.
+    const QString flatIn = tmp.filePath( "assume_in.tif" );
+    const QString flatOut = tmp.filePath( "assume_flat.tif" );
+    REQUIRE( writeRasterEx( flatIn, std::vector<float>( 16, 0.4f ), 4, 4, {} ) );
+    {
+        Json::Value params = baseParams( flatIn, flatOut );
+        params["dem"] = dem.toStdString();
+        params["incidenceDeg"] = 35.0;
+        runOp( "rs:sar_terrain_flatten", params );
+    }
+    REQUIRE( metaItem( flatOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
+    REQUIRE( metaItem( flatOut, "SICNU_SAR_STATE_ASSUMED" ) == "sigma0_legacy_undeclared" );
+    REQUIRE( metaItem( flatOut, "SICNU_SAR_DOMAIN_ASSUMED" ) == "linear_power" );
+
+    // A declared gamma0 partner: same recognized state, the ratio RUNS —
+    // and inherits + propagates the assumption (the key finally has a
+    // reader; the warning travels with the artifact).
+    const QString partner = tmp.filePath( "assume_partner.tif" );
+    REQUIRE( writeRasterEx( partner, std::vector<float>( 16, 0.4f ), 4, 4,
+                            { { sicnu::sar::kCalibrationKey, "gamma0" } } ) );
+    const QString ratioOut = tmp.filePath( "assume_ratio.tif" );
+    {
+        Json::Value params( Json::objectValue );
+        params["inputA"] = flatOut.toStdString();
+        params["inputB"] = partner.toStdString();
+        params["output"] = ratioOut.toStdString();
+        runOp( "rs:sar_ratio", params );
+    }
+    REQUIRE( QFileInfo::exists( ratioOut ) );
+    REQUIRE_FALSE( metaItem( ratioOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
+    REQUIRE( metaItem( ratioOut, "SICNU_SAR_STATE_ASSUMED" ).find( "sigma0_legacy_undeclared" )
+             != std::string::npos );
+    REQUIRE( metaItem( ratioOut, "SICNU_SAR_STATE_ASSUMED" ).find( "linear_power" )
+             != std::string::npos );
 }
