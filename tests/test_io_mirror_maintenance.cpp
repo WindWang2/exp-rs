@@ -26,6 +26,13 @@
 
 #include <filesystem>
 #include <fstream>
+
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <chrono>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -331,6 +338,66 @@ TEST_CASE( "pruneMirror garbage-collects orphans, dead entries, expiry and quota
   CHECK( pruned.quotaEntriesRemoved == 1 );
   CHECK( pruned.keptEntries == 1 );
   CHECK( verifyMirror( fix.mirrorDir ).ok == 1 );
+}
+
+TEST_CASE( "a leftover writer.lock from a crashed writer is broken by pid or age (#1163)",
+           "[io][fabric][mirror][lock][issue1163]" )
+{
+  Fixture fix( "stalelock" );
+  const MirrorReport report = fix.materialize();
+  REQUIRE( report.mirrored == 4 );
+
+  // 1) Empty pre-#1163 leftover with a BACKDATED mtime: age rule breaks it,
+  //    the prune pass proceeds.
+  {
+    std::ofstream out( fix.mirrorDir + "/writer.lock", std::ios::binary );
+    out << "";
+  }
+  {
+    struct ::stat st {};
+    REQUIRE( ::stat( ( fix.mirrorDir + "/writer.lock" ).c_str(), &st ) == 0 );
+    std::filesystem::last_write_time(
+        fix.mirrorDir + "/writer.lock",
+        std::filesystem::last_write_time( fix.mirrorDir + "/writer.lock" ) - std::chrono::hours( 2 ) );
+  }
+  std::filesystem::copy_file( fix.chunkFiles()[0],
+                              fix.mirrorDir + "/chunks/orphan_stale_lock.tif" );
+  MirrorPruneReport pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.keptEntries == 4 );
+  CHECK( std::filesystem::remove( fix.mirrorDir + "/chunks/orphan_stale_lock.tif" ) );
+  pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.orphanFilesRemoved == 1 );
+  CHECK( !std::filesystem::exists( fix.mirrorDir + "/writer.lock" ) );
+
+  // 2) A lock naming a DEAD pid (the crash case with the #1163 stamp): the
+  //    liveness rule breaks it even though the stamp is fresh.
+  {
+    std::ofstream out( fix.mirrorDir + "/writer.lock", std::ios::binary );
+    out << "999999999 " << std::time( nullptr ) << "\n";
+  }
+  pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.keptEntries == 4 );
+  CHECK( !std::filesystem::exists( fix.mirrorDir + "/writer.lock" ) );
+
+  // 3) A lock naming THIS live pid is never stolen: the pass refuses with
+  //    the typed single-writer error naming the lock file.
+  {
+    std::ofstream out( fix.mirrorDir + "/writer.lock", std::ios::binary );
+    out << static_cast<long>( ::getpid() ) << " " << std::time( nullptr ) << "\n";
+  }
+  bool refused = false;
+  try
+  {
+    static_cast<void>( pruneMirror( fix.mirrorDir, {} ) );
+  }
+  catch ( const GeoError &e )
+  {
+    refused = true;
+    CHECK( std::string( e.what() ).find( "writer.lock" ) != std::string::npos );
+  }
+  CHECK( refused );
+  CHECK( std::filesystem::exists( fix.mirrorDir + "/writer.lock" ) );
+  std::filesystem::remove( fix.mirrorDir + "/writer.lock" );
 }
 
 TEST_CASE( "pruneMirror refuses against an unreadable manifest",
