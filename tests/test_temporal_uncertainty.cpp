@@ -66,8 +66,11 @@ TEST_CASE( "analytic CI: noise widens intervals and the 95% bounds bracket "
   CHECK( slope.stdError > 0.0 );
   CHECK( slope.lower <= 0.002 );
   CHECK( slope.upper >= 0.002 );
+  // Width oracle: 2·t_0.975(df)·se with df = 96−4 = 92; the t-table value
+  // 1.9861 (not the normal 1.96) — the interval is exact under Gaussian
+  // noise, and the t quantile is what makes small-df bounds honest.
   CHECK( slope.upper - slope.lower ==
-         Approx( 2.0 * 1.959964 * slope.stdError ).epsilon( 1e-6 ) );
+         Approx( 2.0 * 1.9861 * slope.stdError ).margin( 1e-3 ) );
   // A larger noise realization must not shrink the same-truth interval.
   const temporal_corpus::Scenario noisier =
     temporal_corpus::noChangeControl( 96, 2.0, 0.0, 0.002, 0.20, 20260925u );
@@ -253,4 +256,113 @@ TEST_CASE( "bootstrap: missing/irregular sampling keeps only observed indices",
   REQUIRE( ci.valid );
   CHECK( std::isfinite( ci.lower ) );
   CHECK( std::isfinite( ci.upper ) );
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Phenology 12.0 (WP5): no-trend harmonic CI + Sen slope CI +
+// breakpoint slope standard errors.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "harmonicCoefficientCi uses the no-trend design that harmonicFit "
+           "actually fits", "[temporal][uncertainty][analytic]" )
+{
+  // harmonicFit's model is [1, sin/cos…] (1 + 2h terms). The CI kernel must
+  // return one interval per coefficient of THAT design — wiring the
+  // harmonic+trend variant would silently report bounds for a different
+  // model (the bug this entry point exists to prevent).
+  const int n = 40;
+  std::vector<float> y;
+  std::vector<double> t;
+  for ( int i = 0; i < n; ++i )
+  {
+    t.push_back( 30.0 * i );
+    y.push_back( static_cast<float>( 5.0 + 0.8 * std::sin( 2.0 * kPi * t.back() / 365.25 )
+                                     + 0.3 * std::cos( 2.0 * kPi * t.back() / 365.25 ) ) );
+  }
+  const AnalyticCiResult ci = harmonicCoefficientCi( y, t, 0, n, 1, {}, 0.95 );
+  REQUIRE( ci.valid );
+  // 1 intercept + 2 harmonics terms — NOT the 4-term trend design.
+  REQUIRE( ci.coefficients.size() == 3 );
+  // Exact sinusoid → sigma2 ≈ 0 and the coefficient bounds collapse onto
+  // the true values.
+  CHECK( ci.coefficients[0].estimate == Approx( 5.0 ).margin( 1e-3 ) );
+  CHECK( ci.coefficients[1].estimate == Approx( 0.8 ).margin( 1e-3 ) );
+  CHECK( ci.coefficients[2].estimate == Approx( 0.3 ).margin( 1e-3 ) );
+
+  // Refusal parity: underdetermined series refuses rather than fabricates.
+  std::vector<float> y2( 3, 1.0f );
+  std::vector<double> t2 = { 0.0, 10.0, 20.0 };
+  const AnalyticCiResult refused =
+    harmonicCoefficientCi( y2, t2, 0, 3, 2, {}, 0.95 );
+  REQUIRE( !refused.valid );
+  REQUIRE( refused.refusalReason != nullptr );
+}
+
+TEST_CASE( "Sen slope CI brackets the true slope and refuses on short "
+           "series", "[temporal][uncertainty][sen]" )
+{
+  // A clean monotone ramp: the Gilbert order-statistic CI must bracket the
+  // planted slope (0.05/day) and be tighter than the full slope range.
+  const int n = 30;
+  std::vector<float> y;
+  std::vector<double> t;
+  for ( int i = 0; i < n; ++i )
+  {
+    t.push_back( 12.0 * i );
+    y.push_back( static_cast<float>( 3.0 + 0.05 * t.back()
+                                     + 0.1 * std::sin( i * 2.13 ) ) );
+  }
+  const SenTrendResult tr = mannKendallSenSlope( y, t, 0.95 );
+  REQUIRE( tr.validCount == n );
+  REQUIRE( std::isfinite( tr.slopeCiLo ) );
+  REQUIRE( std::isfinite( tr.slopeCiHi ) );
+  CHECK( tr.slopeCiLo <= tr.slope );
+  CHECK( tr.slope <= tr.slopeCiHi );
+  CHECK( tr.slopeCiLo < tr.slopeCiHi ); // non-degenerate
+  CHECK( tr.slopeCiLo <= Approx( 0.05 ) );
+  CHECK( tr.slopeCiHi >= Approx( 0.05 ) );
+
+  // ciLevel = 0 → CI not computed: NaN bounds (opt-in contract).
+  const SenTrendResult off = mannKendallSenSlope( y, t, 0.0 );
+  CHECK( !std::isfinite( off.slopeCiLo ) );
+  CHECK( !std::isfinite( off.slopeCiHi ) );
+
+  // Too few valid observations → refusal semantics, never fabricated bounds.
+  std::vector<float> y3 = { 1.f, 2.f };
+  std::vector<double> t3 = { 0.0, 5.0 };
+  const SenTrendResult thin = mannKendallSenSlope( y3, t3, 0.95 );
+  CHECK( !std::isfinite( thin.slopeCiLo ) );
+  CHECK( !std::isfinite( thin.slopeCiHi ) );
+}
+
+TEST_CASE( "piecewiseLinearTrend reports per-segment slope standard errors",
+           "[temporal][uncertainty][breaks]" )
+{
+  // Two exact linear regimes: zero residual → zero standard error. The SE
+  // contract is OLS σ̂² = RSS/(n−2), se = √(σ̂²/Sxx).
+  std::vector<float> y;
+  std::vector<double> t;
+  for ( int i = 0; i < 40; ++i )
+  {
+    t.push_back( 10.0 * i );
+    y.push_back( i < 20 ? static_cast<float>( 1.0 + 0.1 * t.back() )
+                        : static_cast<float>( 3.0 - 0.05 * ( t.back() - 190.0 ) ) );
+  }
+  const BreakpointResult br = piecewiseLinearTrend( y, t, 1, 8, 0.05 );
+  REQUIRE( br.breakIndices.size() == 1 );
+  REQUIRE( br.slopes.size() == 2 );
+  REQUIRE( br.slopeStdErrors.size() == br.slopes.size() );
+  CHECK( br.slopeStdErrors[0] == Approx( 0.0 ).margin( 1e-6 ) );
+  CHECK( br.slopeStdErrors[1] == Approx( 0.0 ).margin( 1e-6 ) );
+
+  // Noisy segments → positive SEs; a segment too short for OLS (< 3 points)
+  // or a singleton is undefined (NaN), never a fake zero.
+  std::vector<float> ny;
+  for ( int i = 0; i < 40; ++i )
+    ny.push_back( y[static_cast<size_t>( i )]
+                  + static_cast<float>( 0.5 * std::sin( i * 1.7 ) ) );
+  const BreakpointResult nbr = piecewiseLinearTrend( ny, t, 1, 8, 0.02 );
+  REQUIRE( nbr.slopeStdErrors.size() == nbr.slopes.size() );
+  for ( double se : nbr.slopeStdErrors )
+    CHECK( se > 0.0 );
 }

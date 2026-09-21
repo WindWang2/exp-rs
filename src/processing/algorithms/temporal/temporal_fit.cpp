@@ -17,122 +17,6 @@ namespace
 constexpr double kPi = 3.14159265358979323846;
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
-/// One local polynomial fit (normal equations, degree <= 4) over the window
-/// [lo, hi] of y/t; evaluates the fitted polynomial at xEval.
-float localPolynomialAt( const std::vector<float> &y, const std::vector<double> &t,
-                         int lo, int hi, int degree, double xEval )
-{
-  const int terms = degree + 1;
-  std::vector<double> ata( static_cast<size_t>( terms ) * terms, 0.0 );
-  std::vector<double> atb( terms, 0.0 );
-  int count = 0;
-  for ( int i = lo; i <= hi; ++i )
-  {
-    if ( !std::isfinite( y[i] ) )
-      continue;
-    double powers[5] = { 1.0, t[i], t[i] * t[i], t[i] * t[i] * t[i],
-                         t[i] * t[i] * t[i] * t[i] };
-    for ( int r = 0; r < terms; ++r )
-    {
-      atb[r] += powers[r] * y[i];
-      for ( int c = 0; c < terms; ++c )
-        ata[static_cast<size_t>( r ) * terms + c] += powers[r] * powers[c];
-    }
-    ++count;
-  }
-  if ( count < terms )
-    return kNan;
-  std::vector<double> coef;
-  if ( !detail::solveSmallDense( ata, atb, terms, &coef ) )
-    return kNan;
-  double value = 0.0;
-  double xPow = 1.0;
-  for ( int r = 0; r < terms; ++r )
-  {
-    value += coef[r] * xPow;
-    xPow *= xEval;
-  }
-  return std::isfinite( value ) ? static_cast<float>( value ) : kNan;
-}
-
-/// Pentadiagonal LDLᵀ solve for A = W + λDᵀD (symmetric, bandwidth 2).
-/// @a main (n), @a off1 (n-1), @a off2 (n-2) describe the symmetric matrix.
-bool solvePentadiagonal( const std::vector<double> &main, const std::vector<double> &off1,
-                         const std::vector<double> &off2, const std::vector<double> &rhs,
-                         std::vector<double> *x )
-{
-  const int n = static_cast<int>( main.size() );
-  if ( n < 5 )
-  {
-    // Small systems: fall back to dense elimination.
-    std::vector<double> a( static_cast<size_t>( n ) * n, 0.0 );
-    for ( int i = 0; i < n; ++i )
-    {
-      a[static_cast<size_t>( i ) * n + i] = main[i];
-      if ( i + 1 < n )
-      {
-        a[static_cast<size_t>( i ) * n + ( i + 1 )] = off1[i];
-        a[static_cast<size_t>( i + 1 ) * n + i] = off1[i];
-      }
-      if ( i + 2 < n )
-      {
-        a[static_cast<size_t>( i ) * n + ( i + 2 )] = off2[i];
-        a[static_cast<size_t>( i + 2 ) * n + i] = off2[i];
-      }
-    }
-    return detail::solveSmallDense( a, rhs, n, x );
-  }
-  std::vector<double> d( n, 0.0 ), l1( n, 0.0 ), l2( n, 0.0 );
-  // Column-wise banded LDLᵀ for bandwidth 2:
-  //   D[i]  = A[i][i] − L1[i−1]²·D[i−1] − L2[i−2]²·D[i−2]
-  //   L1[i] = ( A[i+1][i] − L1[i−1]·L2[i−1]·D[i−1] ) / D[i]
-  //   L2[i] = A[i+2][i] / D[i]
-  for ( int i = 0; i < n; ++i )
-  {
-    double sum = main[i];
-    if ( i >= 1 )
-      sum -= l1[i - 1] * l1[i - 1] * d[i - 1];
-    if ( i >= 2 )
-      sum -= l2[i - 2] * l2[i - 2] * d[i - 2];
-    if ( !( sum > 1e-12 ) )
-      return false;
-    d[i] = sum;
-    if ( i + 1 < n )
-    {
-      double s1 = off1[i];
-      if ( i >= 1 )
-        s1 -= l1[i - 1] * l2[i - 1] * d[i - 1];
-      l1[i] = s1 / d[i];
-    }
-    if ( i + 2 < n )
-      l2[i] = off2[i] / d[i];
-  }
-  // Forward substitution (L y = b).
-  std::vector<double> yy( n, 0.0 );
-  for ( int i = 0; i < n; ++i )
-  {
-    double s = rhs[i];
-    if ( i >= 1 )
-      s -= l1[i - 1] * yy[i - 1];
-    if ( i >= 2 )
-      s -= l2[i - 2] * yy[i - 2];
-    yy[i] = s;
-  }
-  // Diagonal solve + back substitution (Lᵀ x = D⁻¹ y).
-  for ( int i = 0; i < n; ++i )
-    yy[i] /= d[i];
-  x->assign( n, 0.0 );
-  for ( int i = n - 1; i >= 0; --i )
-  {
-    double s = yy[i];
-    if ( i + 1 < n )
-      s -= l1[i] * ( *x )[i + 1];
-    if ( i + 2 < n )
-      s -= l2[i] * ( *x )[i + 2];
-    ( *x )[i] = s;
-  }
-  return true;
-}
 } // namespace
 
 std::vector<float> savitzkyGolay( const std::vector<float> &y, int window,
@@ -150,7 +34,7 @@ std::vector<float> savitzkyGolay( const std::vector<float> &y, int window,
   {
     const int lo = std::max( 0, i - half );
     const int hi = std::min( n - 1, i + half );
-    out[i] = localPolynomialAt( y, t, lo, hi, polynomialDegree, static_cast<double>( i ) );
+    out[i] = detail::localPolynomialAt( y, t, lo, hi, polynomialDegree, static_cast<double>( i ) );
   }
   return out;
 }
@@ -197,7 +81,7 @@ std::vector<float> whittakerSmooth( const std::vector<float> &y,
   std::vector<double> off2( n - 2, lambda );
 
   std::vector<double> x;
-  if ( !solvePentadiagonal( main, off1, off2, rhs, &x ) )
+  if ( !detail::solvePentadiagonal( main, off1, off2, rhs, &x ) )
     return out;
   for ( int i = 0; i < n; ++i )
     out[i] = std::isfinite( x[i] ) ? static_cast<float>( x[i] ) : kNan;
@@ -457,6 +341,94 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
     span += 365.25;
   out.los = span;
 
+  // Limb metrics (Temporal Phenology 12.0, WP4): green-up / senescence rates
+  // and midpoints. Crossings of the 20%/50%/80% amplitude levels are located
+  // on the real day axis (linear interpolation inside the bracketing
+  // segment), so irregular cadence is handled exactly. A crossing that only
+  // occurs outside the sampled limb (e.g. the window opens mid-ramp) leaves
+  // the metric undefined (NaN / -1) — never extrapolated.
+  const auto posOf = [&]( int sampleIdx ) -> int {
+    for ( int k = 0; k < static_cast<int>( idx.size() ); ++k )
+      if ( idx[static_cast<size_t>( k )] == sampleIdx )
+        return k;
+    return -1;
+  };
+  const int pk = posOf( posIdx );
+  const int lastK = static_cast<int>( idx.size() ) - 1;
+  if ( pk >= 0 )
+  {
+    const double amp = maxV - minV;
+    const double v20 = minV + 0.20 * amp;
+    const double v50 = minV + 0.50 * amp;
+    const double v80 = minV + 0.80 * amp;
+
+    // First upward (rising limb) or downward (falling limb) crossing of
+    // @a level within idx range (loK, hiK]; returns the interpolated crossing
+    // time in tDays units, NaN when absent. Bracket indices are reported for
+    // the doy mapping below.
+    const auto crossingTime = [&]( int loK, int hiK, double level, bool rising,
+                                   int *i0Out, int *i1Out ) -> double {
+      for ( int k = loK + 1; k <= hiK; ++k )
+      {
+        const double v0 = y[idx[static_cast<size_t>( k - 1 )]];
+        const double v1 = y[idx[static_cast<size_t>( k )]];
+        const bool cross = rising ? ( v0 < level && v1 >= level )
+                                  : ( v0 >= level && v1 < level );
+        if ( !cross )
+          continue;
+        const double t0 = tDays[idx[static_cast<size_t>( k - 1 )]];
+        const double t1 = tDays[idx[static_cast<size_t>( k )]];
+        if ( !( t1 > t0 ) )
+          continue; // duplicate instant: degenerate crossing time — skip
+        const double frac = ( level - v0 ) / ( v1 - v0 );
+        if ( i0Out ) *i0Out = idx[static_cast<size_t>( k - 1 )];
+        if ( i1Out ) *i1Out = idx[static_cast<size_t>( k )];
+        return t0 + frac * ( t1 - t0 );
+      }
+      return std::numeric_limits<double>::quiet_NaN();
+    };
+    // Maps an interpolated crossing time back to a day-of-year by linear
+    // interpolation of the bracketing samples' doys (year-boundary brackets
+    // counted modulo 365; leap Dec-31 brackets may land one day early).
+    const auto doyAt = [&]( double t, int i0, int i1 ) -> double {
+      const int d0 = doyOf[static_cast<size_t>( i0 )];
+      int d1 = doyOf[static_cast<size_t>( i1 )];
+      if ( d1 < d0 )
+        d1 += 365;
+      const double t0 = tDays[static_cast<size_t>( i0 )];
+      const double t1 = tDays[static_cast<size_t>( i1 )];
+      const double frac = ( t1 > t0 ) ? ( t - t0 ) / ( t1 - t0 ) : 0.0;
+      const int d = static_cast<int>( std::lround( d0 + frac * ( d1 - d0 ) ) );
+      // Unwrap only values shifted past the year end by the +365 bracket
+      // correction — d == 366 is a valid leap-year day-of-year, not a wrap.
+      return static_cast<double>( d > 366 ? d - 365 : d );
+    };
+
+    int i0 = -1, i1 = -1;
+    if ( pk > 0 )
+    {
+      const double t20u = crossingTime( 0, pk, v20, true, nullptr, nullptr );
+      const double t80u = crossingTime( 0, pk, v80, true, nullptr, nullptr );
+      if ( std::isfinite( t20u ) && std::isfinite( t80u ) && t80u > t20u )
+        out.greenUpRate = ( v80 - v20 ) / ( t80u - t20u );
+      const double t50u = crossingTime( 0, pk, v50, true, &i0, &i1 );
+      if ( std::isfinite( t50u ) )
+        out.greenUpMidDoy = doyAt( t50u, i0, i1 );
+    }
+
+    if ( pk < lastK )
+    {
+      i0 = i1 = -1;
+      const double t80d = crossingTime( pk, lastK, v80, false, nullptr, nullptr );
+      const double t20d = crossingTime( pk, lastK, v20, false, nullptr, nullptr );
+      if ( std::isfinite( t80d ) && std::isfinite( t20d ) && t20d > t80d )
+        out.senescenceRate = ( v80 - v20 ) / ( t20d - t80d );
+      const double t50d = crossingTime( pk, lastK, v50, false, &i0, &i1 );
+      if ( std::isfinite( t50d ) )
+        out.senescenceMidDoy = doyAt( t50d, i0, i1 );
+    }
+  }
+
   // Small integral: Σ v·Δt over the season's valid samples.
   out.integral = 0.0;
   for ( int k = 1; k < static_cast<int>( idx.size() ); ++k )
@@ -589,12 +561,24 @@ BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
   {
     double slope = 0.0;
     double intercept = 0.0;
-    totalSse += segmentRss( seg.first, seg.second, &slope, &intercept );
+    const double segRss =
+        segmentRss( seg.first, seg.second, &slope, &intercept );
+    totalSse += segRss;
     result.slopes.push_back( slope );
     result.intercepts.push_back( intercept );
+    // Per-segment slope SE (WP5): σ̂² = RSS/(n−2), var(β̂) = σ̂²/Sxx. Same
+    // weighted cumsums as the fit — NaN slots are weight-0 everywhere.
+    const double segN = c1[seg.second] - c1[seg.first];
+    const double segT = ct[seg.second] - ct[seg.first];
+    const double segT2 = ct2[seg.second] - ct2[seg.first];
+    const double sxx = segN > 0.0 ? segT2 - segT * segT / segN : 0.0;
+    result.slopeStdErrors.push_back(
+        segN > 2.0 && sxx > 0.0
+            ? std::sqrt( segRss / ( segN - 2.0 ) / sxx )
+            : std::numeric_limits<double>::quiet_NaN() );
     // Count finite observations only, via the same weighted cumsum that feeds
     // the RSS numerator — NaN slots must not inflate the denominator (#759).
-    totalValid += static_cast<long>( c1[seg.second] - c1[seg.first] );
+    totalValid += static_cast<long>( segN );
   }
   result.breakIndices = breaks;
   result.validCount = totalValid;
@@ -604,7 +588,8 @@ BreakpointResult piecewiseLinearTrend( const std::vector<float> &y,
 }
 
 SenTrendResult mannKendallSenSlope( const std::vector<float> &y,
-                                    const std::vector<double> &tDays )
+                                    const std::vector<double> &tDays,
+                                    double ciLevel )
 {
   SenTrendResult out;
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -693,6 +678,23 @@ SenTrendResult mannKendallSenSlope( const std::vector<float> &y,
     const double sd = std::sqrt( variance );
     out.z = s > 0.0 ? ( s - 1.0 ) / sd : ( s < 0.0 ? ( s + 1.0 ) / sd : 0.0 );
     out.pValue = std::erfc( std::fabs( out.z ) / std::sqrt( 2.0 ) );
+  }
+
+  // Gilbert (1987 §16) slope CI: the two-sided level-`ciLevel` interval is
+  // bracketed by the sorted pairwise slopes at ranks (K ∓ Cα)/2 with
+  // Cα = z_{1−α/2}·√var(S). Ranks are rounded to the nearest order
+  // statistic and clamped inside [1, K].
+  if ( ciLevel > 0.0 && ciLevel < 1.0 && variance > 0.0 && m >= 2 )
+  {
+    const double zA = detail::normalQuantile( 0.5 + ciLevel / 2.0 );
+    const double cAlpha = zA * std::sqrt( variance );
+    const auto rankOf = [&]( double r ) -> size_t {
+      const long rr = std::lround( r );
+      return static_cast<size_t>( std::clamp<long>( rr, 1, static_cast<long>( m ) ) - 1 );
+    };
+    out.slopeCiLo = pairwiseSlopes[rankOf( ( static_cast<double>( m ) - cAlpha ) / 2.0 )];
+    out.slopeCiHi = pairwiseSlopes[rankOf( ( static_cast<double>( m ) + cAlpha ) / 2.0 + 1.0 )];
+    out.slopeCiValid = out.slopeCiLo <= out.slopeCiHi;
   }
   return out;
 }

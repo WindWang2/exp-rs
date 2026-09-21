@@ -135,6 +135,8 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_workspace.cpp
     algorithms/temporal/temporal_stac_adapter.cpp
     algorithms/temporal/temporal_fit.cpp
+    algorithms/temporal/temporal_fusion.cpp
+    algorithms/temporal/temporal_irregular.cpp
     algorithms/temporal/temporal_gapfill.cpp
     algorithms/temporal/temporal_calendar.cpp
     algorithms/temporal/temporal_change.cpp

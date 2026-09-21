@@ -121,6 +121,12 @@
           "type" : "string"
         },
         {
+          "default" : "false",
+          "name" : "compute_ci",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
           "default" : "keep_all",
           "enum" : 
           [

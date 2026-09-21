@@ -59,6 +59,7 @@
 
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/rs/rs_product_import_plan.h"
 #include "operators/runtime/model_runtime.h"
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/algorithm_meta_store.h"
