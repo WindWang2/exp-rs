@@ -356,6 +356,22 @@ TEST_CASE( "shell hunks reference only declared ContextRules predicates", "[miss
     CHECK( writeBody.indexOf( QStringLiteral( "loadMissionRuntime" ) )
            < writeBody.indexOf( QStringLiteral( "saveMissionRuntime" ) ) );
     CHECK( writeBody.contains( QStringLiteral( "authorityCorrupt" ) ) );
+    // The write path must contain exactly ONE save call, and it must sit
+    // after the reload-check refusal branch (a save that runs when the
+    // authority cannot be re-read publishes the window's stale cache over a
+    // corrupt-but-recoverable artifact — the #1148 merge-residue duplicate
+    // did exactly that, invisibly to the load<save ordering pin above).
+    const int saveAt = writeBody.indexOf( QStringLiteral( "saveMissionRuntime" ) );
+    CHECK( writeBody.indexOf( QStringLiteral( "saveMissionRuntime" ), saveAt + 1 ) < 0 );
+    CHECK( saveAt > writeBody.indexOf( QStringLiteral( "disk.authorityCorrupt" ) ) );
+    // #1149: "no authority at the target path" is first-publication, not an
+    // adopt-an-empty-timeline order — the adopt assignment must be guarded by
+    // an empty-authority check (Save-As / moved project / removed sidecar
+    // must never wipe the live task space).
+    const int adoptAt = writeBody.indexOf( QStringLiteral( "m_missionRuntime.timeline = disk.timeline" ) );
+    REQUIRE( adoptAt > 0 );
+    CHECK( writeBody.lastIndexOf( QStringLiteral( "!disk.authorityLoaded" ),
+                                  adoptAt ) >= 0 );
     const int onRead = connections.indexOf(
         QStringLiteral( "void QgisDesktopWindow::onProjectRead" ) );
     REQUIRE( onRead > 0 );

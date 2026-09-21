@@ -578,6 +578,19 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                               qPrintable( disk.timeline.missionId() ),
                               qPrintable( m_mission.missionId ) );
                 }
+                else if ( !disk.authorityLoaded && disk.timeline.missionId().isEmpty() )
+                {
+                    // No authority at the target path (Save-As to a new path,
+                    // moved/copied project directory, or the sidecar removed
+                    // per the corrupt-authority dialog's advice): there is
+                    // nothing to adopt. Adopting disk's empty timeline would
+                    // silently wipe the live task space on the first save —
+                    // treat this as first publication of the window's
+                    // timeline instead. (A legacy 12.0 timeline sidecar still
+                    // adopts: that path yields a non-empty disk mission id.)
+                    qWarning( "mission save: no authority at target path, publishing live "
+                              "timeline (first publication)" );
+                }
                 else
                 {
                     m_missionRuntime.timeline = disk.timeline;
@@ -600,23 +613,6 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                 {
                     m_mission = m_missionRuntime.context;
                 }
-            }
-
-            if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
-                m_mission.projectRef = projectPath;
-            sicnu::app::ensureMissionId( m_mission );
-            m_missionRuntime.context = m_mission;
-            QString missionErr;
-            if ( !sicnu::app::saveMissionRuntime( projectPath, doc, m_missionRuntime, &missionErr ) )
-            {
-                QMessageBox::warning(
-                    this, tr( "Mission Context" ),
-                    tr( "Project saved, but mission runtime persistence failed:\n%1" )
-                        .arg( missionErr ) );
-            }
-            else
-            {
-                m_mission = m_missionRuntime.context;
             }
         }
     }
