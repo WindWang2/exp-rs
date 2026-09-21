@@ -161,6 +161,23 @@ struct NamedRasterFeed
   std::vector<std::string> qualityMasks;
 };
 
+/// One scene-classification outcome (Platform 13.0): the per-class
+/// probabilities (index-aligned with the model's `output.classes`) plus the
+/// scene statistics the artifact/provenance surfaces record. Shared by the
+/// single-model artifact writer and the ensemble combiner.
+struct SceneClassificationResult
+{
+  std::vector<double> probabilities;  ///< per-class probabilities, class order
+  std::vector<double> scores;         ///< pre-normalization class scores
+  std::string scoreSemantics;         ///< "logit" | "probability" | "" (default)
+  std::size_t validSamples = 0;       ///< finite input samples fed to the pass
+  std::size_t totalSamples = 0;       ///< samples in the scene window (× bands)
+  int width = 0;                      ///< scene window geometry (evidence)
+  int height = 0;
+  int bands = 0;                      ///< bands actually fed
+  Json::Value inputFingerprint;       ///< feedFingerprint of the fed window
+};
+
 class TileInferenceEngine
 {
   public:
@@ -205,6 +222,27 @@ class TileInferenceEngine
                                       const TileInferenceRunOptions &options = {} );
 
     // --- Platform 10.0: scene classification (rs:classify) -------------------
+    /**
+     * Pure scene-classification core (Platform 13.0): ONE forward pass over
+     * the whole scene window, class planes reduced to per-class scores by
+     * spatial mean-pooling, scores turned into probabilities per the head's
+     * confidence semantics ("logit" → softmax; default "probability" →
+     * clamped, never silently renormalized). NO file output — the artifact
+     * writer (runSceneClassification) and the ensemble combiner share this
+     * core so a single-model run and an ensemble member CANNOT drift apart.
+     * @throws RSOperatorError on any contract/size/read/forward failure.
+     */
+    SceneClassificationResult classifyScene( const std::string &inputPath,
+                                             const std::vector<int> &bands,
+                                             RSOperatorContext &context,
+                                             const TileInferenceRunOptions &options = {} );
+
+    /// Atomic publish of a classification artifact (stage + rename with
+    /// backup/rollback). Shared by runSceneClassification and the ensemble
+    /// combiner so ONE publish contract exists.
+    static void publishClassificationArtifact( const Json::Value &doc,
+                                               const std::string &outputPath );
+
     /**
      * Classify ONE scene/chip in a single forward pass and publish a typed
      * JSON classification artifact (schema exp-rs-classification/1). Unlike
@@ -337,6 +375,9 @@ class TileInferenceEngine
     /// Platform 10.0: EO preflight report of the most recent run (empty when
     /// the manifest declares no `eo` section).
     Json::Value m_lastEoPreflight;
+    /// Platform 13.0: the last classifyScene() outcome (the artifact writer
+    /// and the ensemble combiner read the same evidence).
+    SceneClassificationResult m_lastScene;
 };
 
 } // namespace sicnu::operators::runtime
