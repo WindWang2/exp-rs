@@ -100,7 +100,11 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 				return invalidParams( invariant );
 			std::vector<std::string> wanted;
 			for ( const Json::Value &entry : params["steps"] )
+			{
+				if ( !entry.isString() )
+					return invalidParams( invariant );
 				wanted.push_back( entry.asString() );
+			}
 			// Ordered subsequence match over the trace tools.
 			size_t cursor = 0;
 			for ( const TraceStep &step : trace.steps )

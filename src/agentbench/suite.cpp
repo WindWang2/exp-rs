@@ -171,8 +171,10 @@ SuiteRun runSuite( const SuiteDoc &suite, const Loader &loader )
 		return result;
 	}
 
-	// Sorted (casePath → digests) map so the pack digest is order-insensitive
-	// over entries while remaining sensitive to every byte of content.
+	// Pins keyed by (casePath, sourcePath) so replay entries sharing a case
+	// document each pin their own source digest. Sorted keys make the pins
+	// object independent of entry order; the suite document itself is also
+	// mixed in, so entry ORDER still moves the pack digest (suite.h wording).
 	std::map<std::string, Json::Value> packPins;
 	SuiteReport report;
 	report.suiteId = suite.suiteId;
@@ -276,7 +278,7 @@ SuiteRun runSuite( const SuiteDoc &suite, const Loader &loader )
 		pin["case"] = entry_result.caseDigest;
 		pin["source"] = sourceDigest;
 		pin["source_kind"] = entry_result.sourceKind;
-		packPins[entry.casePath] = pin;
+		packPins[entry.casePath + "\n" + sourcePath] = pin;
 
 		if ( entry_result.verdict == "PASS" )
 			report.summary.passCount++;

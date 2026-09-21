@@ -159,27 +159,36 @@ void assessRecovery( const AgentCase &caseValue, const AgentTrace &trace, int &o
 	for ( const FaultSpec &fault : caseValue.faults )
 	{
 		const std::string expectedKind = faultKindToString( fault.kind );
+		// Per-marker attribution: each later success is consumed by the
+		// EARLIEST still-unhandled marker of this kind, so two same-kind
+		// faults cannot both claim the same recovery.
 		bool seen = false;
-		bool handledHere = false;
+		std::vector<size_t> markerIndices;
 		for ( size_t i = 0; i < trace.steps.size(); ++i )
 		{
-			const TraceStep &step = trace.steps[i];
-			const Json::Value &marker = step.payload["fault"];
-			if ( !marker.isString() || marker.asString() != expectedKind )
+			const Json::Value &marker = trace.steps[i].payload["fault"];
+			if ( marker.isString() && marker.asString() == expectedKind )
+				markerIndices.push_back( i );
+		}
+		seen = !markerIndices.empty();
+		std::vector<bool> markerHandled( markerIndices.size(), false );
+		for ( size_t j = 0; j < trace.steps.size(); ++j )
+		{
+			if ( !trace.steps[j].success )
 				continue;
-			seen = true;
-			// Recovery probe: some later step of the run must have succeeded —
-			// a successful repeat of this call, or any subsequent progress.
-			for ( size_t j = i + 1; j < trace.steps.size() && !handledHere; ++j )
+			for ( size_t m = 0; m < markerIndices.size(); ++m )
 			{
-				if ( trace.steps[j].success )
-					handledHere = true;
+				if ( !markerHandled[m] && markerIndices[m] < j )
+				{
+					markerHandled[m] = true;
+					break;
+				}
 			}
 		}
 		if ( seen )
 		{
 			observable++;
-			if ( handledHere )
+			if ( std::all_of( markerHandled.begin(), markerHandled.end(), []( bool flag ) { return flag; } ) )
 				handled++;
 		}
 	}
@@ -207,9 +216,9 @@ std::string classifyFailure( const Derived &derived, BenchVerdict verdict, const
 	}
 	if ( faultsObservable > 0 && faultsHandled < faultsObservable )
 		return kRecoveryFailed;
-	// A completed, passing run the agent itself denies — claim contradicts
+	// A completed non-failing run the agent itself denies — claim contradicts
 	// the recorded evidence in the other direction.
-	if ( verdict == BenchVerdict::Pass && !trace.outcomeClaimSuccess && trace.stopReason == StopReason::Completed )
+	if ( verdict != BenchVerdict::Fail && !trace.outcomeClaimSuccess && trace.stopReason == StopReason::Completed )
 		return kClaimMismatch;
 	return kNone;
 }

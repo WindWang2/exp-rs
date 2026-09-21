@@ -31,7 +31,7 @@ namespace
 /// accidental content change between review and merge).
 std::uint64_t fnv1a64( const std::string &text )
 {
-	std::uint64_t hash = 1469598103934665603ull;
+	std::uint64_t hash = 14695981039346656037ull; // standard FNV-1a 64 offset basis
 	for ( const char c : text )
 	{
 		hash ^= static_cast<std::uint8_t>( c );
@@ -179,11 +179,11 @@ TEST_CASE( "pack digests are stable across double runs and pinned", "[agentbench
 
 	// Version pin: bump suite.json's version consciously when these change.
 	CHECK( suite().version == "1.0.0" );
-	CHECK( fnv1a64( first.report->packDigest ) == 0xa553029dbbcc6d83ull ); // rs14 starter pack v1.0.0 (to_chars serializer)
+	CHECK( fnv1a64( first.report->packDigest ) == 0xcf506e2fb0a9db91ull ); // rs14 starter pack v1.0.0 (to_chars serializer)
 	for ( const SuiteCaseResult &entry : first.report->cases )
 	{
 		if ( entry.caseId == "optical/ndvi-basic" && entry.sourceKind == "script" )
-			CHECK( fnv1a64( entry.evaluationDigest ) == 0xb7d5b3a1b0b86c1eull ); // optical/ndvi-basic reference evaluation v1.0.0
+			CHECK( fnv1a64( entry.evaluationDigest ) == 0xac4b5112a5cb8b90ull ); // optical/ndvi-basic reference evaluation v1.0.0
 	}
 }
 

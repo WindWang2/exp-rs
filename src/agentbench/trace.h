@@ -113,7 +113,9 @@ struct ResourceUsage
 {
 	int toolCalls = 0;
 	long long tokens = 0;
-	int retries = 0; ///< post-failure repeats of an identical (tool, input)
+	int retries = 0; ///< post-failure repeats of an identical (tool, input);
+	                 ///  adjacency contract: only an immediate repeat counts —
+	                 ///  interleaved attempts are separate calls by definition
 };
 
 struct ReplayValidation

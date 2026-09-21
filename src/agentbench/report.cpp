@@ -22,9 +22,11 @@ std::string metricValueText( const MetricResult &metric )
 		return "n/a (" + metric.reason + ")";
 	if ( metric.value.isIntegral() && !metric.value.isDouble() )
 	{
-		std::ostringstream out;
-		out << metric.value.asInt64();
-		return out.str();
+		// to_chars, not stream insertion: stream ints honor the global
+		// locale's grouping ("5,000"), which would break byte determinism.
+		char buffer[32];
+		const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), metric.value.asInt64() );
+		return std::string( buffer, written.ptr - buffer );
 	}
 	// Shortest round-trip, locale-independent (matches json_writer).
 	char buffer[64];
@@ -69,9 +71,21 @@ std::string renderReportMarkdown( const CaseEvaluation &evaluation )
 	out << "\n";
 
 	out << "## Resource usage\n\n";
-	out << "- tool calls: " << evaluation.usage.toolCalls << "\n";
-	out << "- tokens: " << evaluation.usage.tokens << "\n";
-	out << "- retries: " << evaluation.usage.retries << "\n";
+	{
+		// Locale-free integers (same contract as json_writer).
+		char buffer[32];
+		const auto writeInt = [ &out, &buffer ]( long long value ) {
+			const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), value );
+			out.write( buffer, written.ptr - buffer );
+		};
+		out << "- tool calls: ";
+		writeInt( evaluation.usage.toolCalls );
+		out << "\n- tokens: ";
+		writeInt( evaluation.usage.tokens );
+		out << "\n- retries: ";
+		writeInt( evaluation.usage.retries );
+		out << "\n";
+	}
 	return out.str();
 }
 

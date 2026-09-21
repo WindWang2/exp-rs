@@ -369,6 +369,25 @@ ScriptRun runScript( const AgentCase &caseValue, const AgentScript &script )
 		if ( faults[fault.atStep] == nullptr )
 			faults[fault.atStep] = &fault;
 	}
+	// A script may declare each evidence id at most once — the parser rejects
+	// duplicate ids in recorded traces, and scripted runs never round-trip
+	// through it.
+	std::vector<std::string> declaredEvidenceIds;
+	for ( size_t i = 0; i < script.steps.size(); ++i )
+	{
+		if ( script.steps[i].evidenceId.empty() )
+			continue;
+		if ( std::find( declaredEvidenceIds.begin(), declaredEvidenceIds.end(), script.steps[i].evidenceId ) != declaredEvidenceIds.end() )
+		{
+			Json::Value details{Json::objectValue};
+			details["field"] = "steps[" + std::to_string( i ) + "].evidence";
+			details["reason"] = "script declares the same evidence id more than once";
+			details["evidence_id"] = script.steps[i].evidenceId;
+			result.error = makeError( error_codes::kScriptInvalid, "script declares duplicate evidence", std::move( details ) );
+			return result;
+		}
+		declaredEvidenceIds.push_back( script.steps[i].evidenceId );
+	}
 	std::vector<bool> faultApplied( script.steps.size(), false );
 
 	AgentTrace trace;
