@@ -716,3 +716,71 @@ TEST_CASE( "protocol compatibility matrix (1.2)", "[ipc][envelope][p12]" )
     REQUIRE( hostProtocolVersionMinor() >= 2 );
 }
 
+
+// -- track 13.0 WP4: concurrent close() must never double-join the reader ----
+
+TEST_CASE( "concurrent close() calls never throw and always reap the reader",
+           "[ipc][channel][race][p13]" )
+{
+    // Regression oracle for the untyped "no such process" flake: killProcess
+    // paths (timeout ladder racing confirm-death, shutdown racing a
+    // destructor) all funnel into IpcChannel::close(). Without join
+    // serialization, two closers both observe joinable()==true and the
+    // second join() throws std::system_error(errc::no_such_process) —
+    // escaped killProcess untyped. N threads barrier-release on close();
+    // any throw is captured and fails the test.
+    for ( int round = 0; round < 20; ++round )
+    {
+        std::unique_ptr<IIpcStream> a;
+        std::unique_ptr<IIpcStream> b;
+        makeIpcMemoryPipePair( a, b );
+        auto channel = std::make_unique<IpcChannel>( std::move( a ) );
+
+        constexpr int kClosers = 8;
+        std::atomic<int> ready{ 0 };
+        std::atomic<bool> go{ false };
+        std::vector<std::exception_ptr> thrown( kClosers );
+        std::vector<std::thread> closers;
+        closers.reserve( kClosers );
+        for ( int i = 0; i < kClosers; ++i )
+        {
+            closers.emplace_back( [&, i] {
+                ready.fetch_add( 1 );
+                while ( !go.load() )
+                    std::this_thread::yield();
+                try
+                {
+                    channel->close();
+                }
+                catch ( ... )
+                {
+                    thrown[ i ] = std::current_exception();
+                }
+            } );
+        }
+        while ( ready.load() < kClosers )
+            std::this_thread::yield();
+        go.store( true );
+        for ( std::thread &thread : closers )
+            thread.join();
+
+        for ( int i = 0; i < kClosers; ++i )
+        {
+            if ( thrown[ i ] )
+            {
+                try
+                {
+                    std::rethrow_exception( thrown[ i ] );
+                }
+                catch ( const std::exception &exception )
+                {
+                    FAIL( "round " << round << " closer " << i
+                                   << " threw untyped: " << exception.what() );
+                }
+            }
+        }
+        REQUIRE_FALSE( channel->isOpen() );
+        channel.reset(); // destructor re-enters close() — must stay quiet
+        b->close();
+    }
+}

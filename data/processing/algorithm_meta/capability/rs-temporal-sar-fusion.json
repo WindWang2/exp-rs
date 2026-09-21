@@ -1,0 +1,115 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : true
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile) streaming copy per band",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "grid_relation" : "same-grid",
+          "modality" : "optical",
+          "name" : "optical",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "grid_relation" : "same-grid",
+          "modality" : "sar",
+          "name" : "sar",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "opticalBands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sarBands",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0.000000",
+          "name" : "grid_tolerance",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Feature-level fusion of already-coregistered optical and SAR temporal feature rasters. Both inputs must share the SAME pixel grid (width, height, geotransform, CRS); the operator verifies the grid signature and concatenates bands as opt_<name> / sar_<name> with fusion provenance metadata. Registration, resampling and reprojection are NOT performed \u2014 a grid mismatch is a typed error, keeping 'coregister' and 'fuse' as separate, explicit steps.",
+  "display_name" : "Temporal Optical+SAR Feature Fusion",
+  "id" : "rs:temporal_sar_fusion",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "sar",
+    "fusion"
+  ]
+}

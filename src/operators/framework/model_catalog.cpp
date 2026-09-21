@@ -669,7 +669,16 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "provider", "supports_tiling", "framework_fallback" },
                         "runtime.", &unknown );
     collectUnknownKeys( obj.value( QStringLiteral( "ensemble" ) ).toObject(),
-                        { "members", "combination", "uncertainty" }, "ensemble.", &unknown );
+                        { "members", "combination", "uncertainty", "detection",
+                          "max_concurrent_members", "staging_compression" },
+                        "ensemble.", &unknown );
+    if ( obj.contains( QStringLiteral( "ensemble" ) )
+         && obj.value( QStringLiteral( "ensemble" ) ).toObject()
+              .contains( QStringLiteral( "detection" ) ) )
+      collectUnknownKeys( obj.value( QStringLiteral( "ensemble" ) ).toObject()
+                            .value( QStringLiteral( "detection" ) ).toObject(),
+                          { "iou_threshold", "skip_box_threshold" },
+                          "ensemble.detection.", &unknown );
     if ( runtimeObj.contains( QStringLiteral( "provider" ) )
          && runtimeObj.value( QStringLiteral( "provider" ) ).isObject() )
       collectUnknownKeys( runtimeObj.value( QStringLiteral( "provider" ) ).toObject(),
@@ -878,14 +887,58 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       {
         markInvalid( "ensemble.members must be an array" );
       }
+      // Platform 13.0: detection fusion contract (combination "wbf" only).
+      const QJsonValue detectionVal = ensembleObj.value( QStringLiteral( "detection" ) );
+      if ( !detectionVal.isUndefined() && !detectionVal.isObject() )
+        markInvalid( "ensemble.detection must be an object" );
+      if ( detectionVal.isObject() )
+      {
+        const QJsonObject detectionObj = detectionVal.toObject();
+        if ( const QJsonValue iouVal = detectionObj.value( QStringLiteral( "iou_threshold" ) );
+             iouVal.isDouble() )
+          info.ensemble.detection.iouThreshold = iouVal.toDouble();
+        else if ( !iouVal.isUndefined() )
+          markInvalid( "ensemble.detection.iou_threshold must be a number" );
+        if ( const QJsonValue skipVal =
+               detectionObj.value( QStringLiteral( "skip_box_threshold" ) );
+             skipVal.isDouble() )
+          info.ensemble.detection.skipBoxThreshold = skipVal.toDouble();
+        else if ( !skipVal.isUndefined() )
+          markInvalid( "ensemble.detection.skip_box_threshold must be a number" );
+      }
+      // Platform 13.0: bounded member-execution budget (0 = auto). A
+      // non-integral number is refused — silently truncating 3.7 to 3 would
+      // change the admission budget the manifest asked for.
+      const QJsonValue budgetVal = ensembleObj.value( QStringLiteral( "max_concurrent_members" ) );
+      if ( budgetVal.isDouble() )
+      {
+        const double budgetNumber = budgetVal.toDouble();
+        if ( budgetNumber != std::floor( budgetNumber ) )
+          markInvalid( "ensemble.max_concurrent_members must be a whole number" );
+        else
+          info.ensemble.maxConcurrentMembers = static_cast<int>( budgetNumber );
+      }
+      else if ( !budgetVal.isUndefined() )
+        markInvalid( "ensemble.max_concurrent_members must be a number" );
+      // Platform 13.0: combine-stage compression ("none" | "deflate"); a
+      // non-string value is a contract error, never a silent default.
+      const QJsonValue stagingVal = ensembleObj.value( QStringLiteral( "staging_compression" ) );
+      if ( stagingVal.isString() )
+        info.ensemble.stagingCompression = stagingVal.toString().toStdString();
+      else if ( !stagingVal.isUndefined() )
+        markInvalid( "ensemble.staging_compression must be a string" );
       if ( const std::string issue = info.ensemble.validate(); !issue.empty() )
         markInvalid( issue );
       if ( info.ensemble.declared && !info.artifact.path.empty() )
         markInvalid( "an ensemble manifest declares no weights of its own - remove artifact.path "
                      "(members carry their own artifacts)" );
+      // Platform 13.0: the ensemble manifest itself never declares a detection
+      // decode contract — the fusion knobs live under `ensemble.detection` and
+      // the decode contract belongs to the MEMBERS.
       if ( info.ensemble.declared && info.output.detectionDeclared )
-        markInvalid( "ensemble execution covers raster products only - output.detection decode "
-                       "cannot be combined with an ensemble" );
+        markInvalid( "ensemble execution combines member products - output.detection decode "
+                       "belongs to the members (declaration knobs live under ensemble.detection "
+                       "with combination 'wbf')" );
     }
     else
     {
@@ -1333,6 +1386,28 @@ std::string ModelDetectionContract::validate() const
 // not an unbounded one (#1044 failure class).
 inline constexpr int kMaxEnsembleMembers = 16;
 
+// Platform 13.0: the auto member-execution budget (manifest
+// `ensemble.max_concurrent_members` absent). 4 bounds the concurrent engine
+// buffers (window + batch per running member) while giving real parallelism
+// for the typical 2-8 member ensemble; the budget bounds CONCURRENCY only —
+// the VRAM ledger remains the device-memory admission authority.
+inline constexpr int kAutoMemberConcurrency = 4;
+
+std::string ModelEnsembleDetectionContract::validate() const
+{
+  if ( !std::isfinite( iouThreshold ) || iouThreshold <= 0.0 || iouThreshold > 1.0 )
+    return "ensemble.detection.iou_threshold must be a finite value in (0, 1]";
+  if ( !std::isfinite( skipBoxThreshold ) || skipBoxThreshold < 0.0
+       || skipBoxThreshold >= 1.0 )
+    return "ensemble.detection.skip_box_threshold must be a finite value in [0, 1)";
+  return {};
+}
+
+bool ModelEnsembleDetectionContract::isDefault() const
+{
+  return iouThreshold == 0.55 && skipBoxThreshold == 0.0;
+}
+
 std::string ModelEnsembleContract::validate() const
 {
   if ( members.size() < 2 )
@@ -1356,9 +1431,9 @@ std::string ModelEnsembleContract::validate() const
       if ( members[i].model == members[j].model )
         return "ensemble.members references model '" + members[i].model + "' twice";
   const std::string combo = effectiveCombination();
-  if ( combo != "weighted_mean" && combo != "weighted_vote" )
+  if ( combo != "weighted_mean" && combo != "weighted_vote" && combo != "wbf" )
     return "ensemble.combination '" + combination
-             + "' is unsupported (supported: weighted_mean, weighted_vote, mean)";
+             + "' is unsupported (supported: weighted_mean, weighted_vote, mean, wbf)";
   const std::string unc = uncertainty.empty() ? "auto" : uncertainty;
   if ( unc != "auto" && unc != "none" && unc != "variance" && unc != "agreement" )
     return "ensemble.uncertainty '" + uncertainty
@@ -1369,7 +1444,37 @@ std::string ModelEnsembleContract::validate() const
   if ( unc == "agreement" && combo == "weighted_mean" )
     return "ensemble.uncertainty 'agreement' contradicts combination 'weighted_mean' "
              "(vote share is undefined without a vote; use 'variance')";
+  // Platform 13.0: "wbf" fuses detection boxes; the box set carries no
+  // per-pixel uncertainty band (auto/none are legal and publish none).
+  if ( combo == "wbf" && ( unc == "variance" || unc == "agreement" ) )
+    return "ensemble.uncertainty '" + unc + "' contradicts combination 'wbf' "
+             "(a fused box set carries no per-pixel uncertainty; use 'auto' or 'none')";
+  if ( const std::string detectionIssue = detection.validate(); !detectionIssue.empty() )
+    return detectionIssue;
+  if ( !detection.isDefault() && combo != "wbf" )
+    return "ensemble.detection declares fusion knobs but the combination is '" + combo
+             + "' - the detection fusion contract applies to combination 'wbf' only";
+  if ( maxConcurrentMembers < 0 || maxConcurrentMembers > kMaxEnsembleMembers )
+    return "ensemble.max_concurrent_members must be 0 (auto) or 1.."
+           + std::to_string( kMaxEnsembleMembers );
+  if ( !stagingCompression.empty() && stagingCompression != "none"
+       && stagingCompression != "deflate" )
+    return "ensemble.staging_compression '" + stagingCompression
+             + "' is unsupported (supported: none, deflate)";
   return {};
+}
+
+int ModelEnsembleContract::effectiveMaxConcurrentMembers() const
+{
+  if ( maxConcurrentMembers > 0 )
+    return maxConcurrentMembers;
+  const int memberCount = static_cast<int>( members.size() );
+  return std::max( 1, std::min( memberCount, kAutoMemberConcurrency ) );
+}
+
+bool ModelEnsembleContract::stagingCompressed() const
+{
+  return stagingCompression != "none";
 }
 
 std::string ModelEnsembleContract::effectiveCombination() const

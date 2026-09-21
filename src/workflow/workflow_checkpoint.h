@@ -21,9 +21,17 @@ public:
                                    const QString &directoryPath, int keep = 50 );
 
   /// Phase J (W3): when BOTH a run checkpoint and its post-resume ghost
-  /// (`<runId>_resume`) exist, keep the NEWER file and quarantine the older
-  /// one (renamed to *.orphaned) so resuming both can never re-execute the
-  /// remaining steps twice. Returns the number of quarantined files.
+  /// exist, keep the NEWER file and quarantine the older one (renamed to
+  /// *.orphaned) so resuming both can never re-execute the remaining steps
+  /// twice. Returns the number of quarantined files.
+  ///
+  /// Grouping follows the DECLARED lineage: a version-2+ checkpoint's
+  /// `resumeOf` field (the ghost joins its original regardless of filename)
+  /// or, without it, the run's own id — a user-named `*_resume` run is
+  /// standalone and is never merged into an unrelated run's election. Legacy
+  /// version-1 payloads and corrupt files carry no envelope, so the
+  /// historical `<runId>_resume` filename-suffix rule remains their evidence
+  /// (the migration path for ghosts written before the envelope existed).
   static int electCheckpoints( const QString &directoryPath );
 
   /// Atomically save the workflow run checkpoint to disk. The payload is

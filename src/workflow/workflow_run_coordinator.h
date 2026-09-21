@@ -54,6 +54,15 @@ class WorkflowRunCoordinator : public QObject {
     /// swept by ArtifactGC. Returns the TaskCenter pipelineId (> 0), or -1.
     long startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad = true );
 
+    /// Same as startTrackedPipeline, but the created run carries an explicit
+    /// lineage envelope (`resumeOf`) naming the run it resumes. The resume
+    /// submission is a TEMPORARY run: the envelope is what lets checkpoint
+    /// election group a crash-leftover ghost with its original regardless of
+    /// the generated filename — and what keeps a user-named `*_resume` run
+    /// from being mistaken for one (Track 13).
+    long startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad,
+                               const std::string &resumeOf );
+
     /// JSON flavor (MCP run_workflow): parses the pipeline JSON with the same
     /// rules as TaskCenter::submitPipelineJson and tracks it. -1 on a parse
     /// error (the caller reports the expected shape).

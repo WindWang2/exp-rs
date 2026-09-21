@@ -557,9 +557,15 @@ TEST_CASE( "ensemble failures are atomic — no partial output, no residue",
   CHECK_FALSE( QFile::exists( output ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
-  // No member residue either.
+  // No member residue either — the stacks AND the member provenance
+  // sidecars the member engines publish next to them (Platform 13.0 residue
+  // fix: 12.0 tracked only the stacks).
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( ".never.tif.ensemble-member0.tmp~" ) ) ) );
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( ".never.tif.ensemble-member1.tmp~" ) ) ) );
+  CHECK_FALSE( QFile::exists(
+    dir.filePath( QStringLiteral( ".never.tif.ensemble-member0.tmp~.prov.json" ) ) ) );
+  CHECK_FALSE( QFile::exists(
+    dir.filePath( QStringLiteral( ".never.tif.ensemble-member1.tmp~.prov.json" ) ) ) );
 }
 
 TEST_CASE( "ensemble channel-count disagreement is a typed refusal",
@@ -619,31 +625,55 @@ TEST_CASE( "ensemble surface exclusions refuse loudly", "[models][ensemble][refu
   const QString input = writeConstantRaster( dir, "input.tif", 16, 2, 10.0f );
   RSOperatorContext context;
 
-  SECTION( "detection decode" )
+  // Platform 13.0: detection decode now HAS a defined combination ("wbf").
+  // A detection request on a probability-combination ensemble is still a
+  // typed refusal — the combination token states the product semantics.
+  SECTION( "detection decode on a non-wbf ensemble" )
   {
     ModelExecutionRequest request =
       rasterRequest( input.toStdString(), dir.filePath( QStringLiteral( "d.tif" ) ).toStdString(), "ens-refuse" );
     request.asDetection = true;
     REQUIRE_THROWS_WITH( sicnu::operators::runtime::runModelInference( request, context ),
-                         Catch::Matchers::ContainsSubstring( "detection decode cannot be combined" ) );
+                         Catch::Matchers::ContainsSubstring( "requires combination 'wbf'" ) );
   }
 
-  SECTION( "scene classification" )
+  // Platform 13.0: scene classification now HAS a defined combination over
+  // per-class probability vectors. These members declare no output.classes,
+  // so the shared-vocabulary contract still refuses — loudly.
+  SECTION( "scene classification without a class vocabulary" )
   {
     ModelExecutionRequest request =
       rasterRequest( input.toStdString(), dir.filePath( QStringLiteral( "c.json" ) ).toStdString(), "ens-refuse" );
     request.asSceneClassification = true;
     REQUIRE_THROWS_WITH( sicnu::operators::runtime::runModelInference( request, context ),
-                         Catch::Matchers::ContainsSubstring( "scene classification" ) );
+                         Catch::Matchers::ContainsSubstring( "no output.classes" ) );
   }
 
-  SECTION( "derived output mode" )
+  // Platform 13.0: request-level derived modes are defined over the
+  // weighted MEAN (argmax/top-1/threshold). Over weighted VOTES they stay
+  // refused — the vote product IS the label product.
+  SECTION( "derived output mode on a vote ensemble" )
   {
+    Json::Value voteEnsemble( Json::objectValue );
+    voteEnsemble["name"] = "ens-refuse-vote";
+    voteEnsemble["task"] = "segmentation";
+    voteEnsemble["framework"] = "onnx";
+    Json::Value voteMembers( Json::arrayValue );
+    voteMembers.append( "member-a" );
+    voteMembers.append( "member-b" );
+    voteEnsemble["ensemble"]["members"] = voteMembers;
+    voteEnsemble["ensemble"]["combination"] = "weighted_vote";
+    voteEnsemble["ensemble"]["uncertainty"] = "agreement";
+    std::string voteError;
+    REQUIRE( ModelCatalog::instance().registerManifestJson(
+      Json::writeString( Json::StreamWriterBuilder(), voteEnsemble ),
+      dir.filePath( QStringLiteral( "refuse-vote/model.json" ) ).toStdString(), &voteError ) );
+
     ModelExecutionRequest request =
-      rasterRequest( input.toStdString(), dir.filePath( QStringLiteral( "l.tif" ) ).toStdString(), "ens-refuse" );
-    request.outputMode = RasterOutputMode::Labels;
+      rasterRequest( input.toStdString(), dir.filePath( QStringLiteral( "l.tif" ) ).toStdString(), "ens-refuse-vote" );
+    request.outputMode = RasterOutputMode::Mask;
     REQUIRE_THROWS_WITH( sicnu::operators::runtime::runModelInference( request, context ),
-                         Catch::Matchers::ContainsSubstring( "derived output modes" ) );
+                         Catch::Matchers::ContainsSubstring( "undefined over weighted votes" ) );
   }
 
   SECTION( "multi-feed request" )
@@ -770,8 +800,13 @@ TEST_CASE( "a successful ensemble run leaves no member residue behind",
   REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
   REQUIRE( QFile::exists( output ) );
 
-  // The success path must clean up every staged member stack.
+  // The success path must clean up every staged member stack AND its
+  // provenance sidecar (Platform 13.0 residue fix).
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( ".clean.tif.ensemble-member0.tmp~" ) ) ) );
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( ".clean.tif.ensemble-member1.tmp~" ) ) ) );
+  CHECK_FALSE( QFile::exists(
+    dir.filePath( QStringLiteral( ".clean.tif.ensemble-member0.tmp~.prov.json" ) ) ) );
+  CHECK_FALSE( QFile::exists(
+    dir.filePath( QStringLiteral( ".clean.tif.ensemble-member1.tmp~.prov.json" ) ) ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
 }

@@ -70,6 +70,11 @@
           "required" : true
         },
         {
+          "data_kind" : "string",
+          "name" : "provenanceOutput",
+          "required" : true
+        },
+        {
           "data_kind" : "integer",
           "name" : "sceneCount",
           "required" : true
@@ -152,6 +157,11 @@
         {
           "name" : "output",
           "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "provenance_output",
+          "required" : false,
           "type" : "string"
         },
         {

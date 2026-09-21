@@ -39,6 +39,15 @@ public:
     /// Lists plugin ids currently installed in the user root.
     static std::vector<std::string> installedIds();
 
+    /// Reconciles <userRoot>/.staging after a crashed install (plugin
+    /// lifecycle 13.0): restores a <id>.old.<pid> parked install whose
+    /// target vanished mid-swap, drops residue whose swap committed, and
+    /// ages out abandoned staging trees (24 h). A same-pid or live-owner
+    /// park is a transaction in flight — never touched. install() runs
+    /// this before staging; the registry runs it at configure() so a crash
+    /// heals at startup without waiting for the next install.
+    static void reconcileStaging( const std::string &userRoot );
+
     /// Resolves the manifest's dependency constraints against the CURRENTLY
     /// INSTALLED plugins (plugin-platform 9.0). Ranges: "^X.Y.Z" (same
     /// major), "~X.Y.Z" (same minor), ">=X.Y.Z", "=X.Y.Z", "X.Y.Z" (exact)

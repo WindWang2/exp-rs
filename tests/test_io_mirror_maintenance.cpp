@@ -417,3 +417,120 @@ TEST_CASE( "verifyMirror detects missing, tampered and orphan chunk files",
   CHECK( verify.unreferencedBytes == std::string( "orphan bytes" ).size() );
   CHECK( verify.entriesChecked == 4 );
 }
+
+TEST_CASE( "pruneMirror removes UTF-8 orphans and refuses unsafe entries",
+           "[io][fabric][mirror][prune][unicode][utc13]" )
+{
+  Fixture fix( "prune_unicode" );
+  const MirrorReport report = fix.materialize();
+  REQUIRE( report.mirrored == 4 );
+  const std::string manifestPath = fix.mirrorDir + "/manifest.json";
+  const std::string chunksDir = fix.mirrorDir + "/chunks";
+
+  // 1) A manifest-REFERENCED non-ASCII name verifies healthy: the manifest
+  //    domain is UTF-8, and both the stat (VSIStatL) and the sha256 proof
+  //    (VSIFOpenL) resolve it to the native spelling on every platform.
+  const std::vector<std::string> chunks = fix.chunkFiles();
+  REQUIRE( chunks.size() == 4 );
+  const std::string utf8Name = "块_碎片.tif"; // UTF-8 in the manifest domain
+  {
+    Json::Value manifest;
+    {
+      std::ifstream in( manifestPath, std::ios::binary );
+      std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+      Json::CharReaderBuilder builder;
+      std::string errors;
+      std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+      REQUIRE( reader->parse( text.data(), text.data() + text.size(), &manifest, &errors ) );
+    }
+    const std::string oldName = std::filesystem::path( chunks[0] ).filename().string();
+    bool renamedEntry = false;
+    for ( const std::string &token : manifest.getMemberNames() )
+    {
+      if ( token == "index" )
+        continue;
+      Json::Value &chunksJson = manifest[token];
+      if ( !chunksJson.isObject() )
+        continue;
+      for ( const std::string &key : chunksJson.getMemberNames() )
+      {
+        if ( chunksJson[key]["file"].asString() == oldName )
+        {
+          chunksJson[key]["file"] = utf8Name;
+          renamedEntry = true;
+        }
+      }
+    }
+    REQUIRE( renamedEntry );
+    {
+      std::ofstream out( manifestPath, std::ios::binary | std::ios::trunc );
+      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+    }
+    // The rename itself stays inside the UTF-8 path discipline — a narrow
+    // path would route the name through the active code page on Windows.
+    std::filesystem::rename( std::filesystem::u8path( chunks[0] ),
+                             std::filesystem::u8path( chunksDir + "/" + utf8Name ) );
+  }
+  {
+    const MirrorVerifyReport verify = verifyMirror( fix.mirrorDir );
+    CHECK( verify.ok == 4 );
+    CHECK( verify.unreferencedFiles == 0 ); // a referenced name is no orphan
+  }
+
+  // 2) An UNREFERENCED non-ASCII file is inventoried and safely deleted
+  //    inside the mirror root (12.0 counted it but never removed it).
+  const std::string utf8Orphan = chunksDir + "/游离碎片.tif";
+  {
+    std::ofstream out( std::filesystem::u8path( utf8Orphan ), std::ios::binary );
+    out << "orphan utf8";
+  }
+  CHECK( verifyMirror( fix.mirrorDir ).unreferencedFiles == 1 );
+  MirrorPruneReport pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.orphanFilesRemoved == 1 );
+  CHECK( pruned.orphanFilesRefused == 0 );
+  CHECK( !std::filesystem::exists( std::filesystem::u8path( utf8Orphan ) ) );
+  // The referenced UTF-8 file is untouched and the mirror stays healthy.
+  CHECK( verifyMirror( fix.mirrorDir ).ok == 4 );
+
+  // 3) A symlink inside chunks/ is never deleted through — it is a
+  //    refusal, and neither link nor (out-of-mirror) target is touched.
+  const std::string linkPath = chunksDir + "/escape_link.tif";
+  std::error_code linkEc;
+  std::filesystem::create_symlink( fix.scene, linkPath, linkEc );
+  if ( !linkEc )
+  {
+    pruned = pruneMirror( fix.mirrorDir, {} );
+    CHECK( pruned.orphanFilesRefused >= 1 );
+    CHECK( std::filesystem::exists( linkPath ) );
+    CHECK( std::filesystem::exists( fix.scene ) );
+  }
+  else
+  {
+    INFO( "symlink creation unavailable (privileges) — refusal arm skipped" );
+  }
+
+  // 4) An orphan that cannot be unlinked is a counted FAILURE, kept — the
+  //    report distinguishes "refused" from "tried and failed".
+#ifndef _WIN32
+  const std::string lockedOrphan = chunksDir + "/locked_orphan.tif";
+  {
+    std::ofstream out( lockedOrphan, std::ios::binary );
+    out << "cannot unlink me";
+  }
+  namespace fs = std::filesystem;
+  std::error_code permEc;
+  fs::permissions( chunksDir, fs::perms::owner_read | fs::perms::owner_exec,
+                   fs::perm_options::replace, permEc );
+  REQUIRE( !permEc );
+  pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.orphanFilesFailed >= 1 );
+  CHECK( fs::exists( lockedOrphan ) );
+  fs::permissions( chunksDir, fs::perms::owner_all, fs::perm_options::replace, permEc );
+  REQUIRE( !permEc );
+  pruned = pruneMirror( fix.mirrorDir, {} );
+  CHECK( pruned.orphanFilesRemoved >= 1 );
+  CHECK( !fs::exists( lockedOrphan ) );
+#endif
+
+  CHECK( verifyMirror( fix.mirrorDir ).ok == 4 );
+}

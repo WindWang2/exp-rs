@@ -64,13 +64,23 @@ bool calibrateRaster( const GdalDatasetWrapper &src, int band, double calibratio
                       double noiseLinear, SarDomain outputDomain, float nodata,
                       GdalStreamingOutput &dst, int tileDim, int outBand,
                       const QString &polarizations, const QString &sensor,
-                      double incidenceDeg, double headingDeg )
+                      double incidenceDeg, double headingDeg,
+                      const std::vector<double> *rowA )
 {
   GdalBlockStream stream( src, band, tileDim, tileDim, 0 );
   const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *pixels ) {
     std::vector<float> out( static_cast<size_t>( tile.width ) * tile.height );
     for ( int y = 0; y < tile.height; ++y )
     {
+      double rowCalibrationA = calibrationA;
+      if ( rowA )
+      {
+        // Row coverage is validated at the operator seam; an out-of-range
+        // row is a hard failure here, never a fallback to the constant.
+        if ( static_cast<size_t>( tile.yOffset + y ) >= rowA->size() )
+          return false;
+        rowCalibrationA = ( *rowA )[static_cast<size_t>( tile.yOffset + y )];
+      }
       for ( int x = 0; x < tile.width; ++x )
       {
         const float v = pixels[y * tile.width + x];
@@ -79,7 +89,7 @@ bool calibrateRaster( const GdalDatasetWrapper &src, int band, double calibratio
           out[static_cast<size_t>( y ) * tile.width + x] = kNan;
           continue;
         }
-        const double sigma0 = calibrateDn( v, calibrationA, noiseLinear );
+        const double sigma0 = calibrateDn( v, rowCalibrationA, noiseLinear );
         out[static_cast<size_t>( y ) * tile.width + x] = finishValue( sigma0, outputDomain );
       }
     }

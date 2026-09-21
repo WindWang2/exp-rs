@@ -169,18 +169,34 @@ Json::Value RsSarBackscatterOperator::run(const Json::Value& params,
 
     // Cross-check the assumed input state against the product's declared
     // SICNU_SAR_CALIBRATION: applying a geometry conversion for the wrong
-    // state silently corrupts the radiometry, and DN-declared products need
+    // state silently corrupts the radiometry, derived products (pair metric /
+    // texture) carry no backscatter at all, and DN-declared products need
     // rs:sar_calibrate first. A pure numeric-domain conversion (from == to)
     // applies no geometry, so the declared token is inert there and must
     // not block an otherwise legitimate dB <-> linear step.
-    const QString declaredCalibration = sicnu::sar::declaredCalibrationToken(src);
-    if (!sameState && !declaredCalibration.isEmpty()) {
-        const QString normalized = sicnu::sar::normalizeCalibration(declaredCalibration);
+    const sicnu::sar::SarStateRead declared = sicnu::sar::readDeclaredSarState( src );
+    if ( !sameState && declared.conflict )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares conflicting SICNU_SAR_CALIBRATION='" +
+                declared.calibration.toStdString() + "' and SICNU_RADIOMETRIC_STATE='" +
+                declared.state.toStdString() + "'; refusing to guess the radiometric state" );
+    }
+    if (!sameState && !declared.token.isEmpty()) {
+        const QString normalized = sicnu::sar::normalizeCalibration(declared.token);
         if (normalized.isEmpty()) {
+            if (sicnu::sar::isSarDerivedState(declared.token)) {
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "input declares the derived SAR product '" + declared.token.toStdString() +
+                        "' (pair metric / texture), which carries no backscatter "
+                        "calibration; rs:sar_backscatter converts calibrated states only");
+            }
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
                 "input declares unrecognized SICNU_SAR_CALIBRATION='" +
-                    declaredCalibration.toStdString() +
+                    declared.token.toStdString() +
                     "'; refusing to guess the radiometric state");
         }
         if (normalized != QString::fromStdString(fromStr)) {

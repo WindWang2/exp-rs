@@ -57,7 +57,13 @@ void appendCsvField( std::string &row, const QString &field )
 {
     if ( !row.empty() )
         row.push_back( ',' );
-    std::string value = field.toStdString();
+    // classroom-safety 13.0: neutralize first, then quote. Student ids, lab
+    // ids and deduction texts are attacker-controlled in the classroom threat
+    // model (a student names their file "=cmd|'/c calc'!A1"), and a leading
+    // = + - @ TAB CR turns the cell into a formula the moment a teacher opens
+    // the CSV in Excel/LibreOffice. Same rule and same character set as
+    // scripts/run_classroom_batch.py::csv_safe — see csvSafeCell().
+    std::string value = csvSafeCell( field ).toStdString();
     const bool needsQuoting = value.find_first_of( ",\"\r\n" ) != std::string::npos;
     if ( !needsQuoting )
     {
@@ -200,6 +206,43 @@ QByteArray summaryHtmlFor( const QString &labId, const QString &submissionsDir,
 }
 
 } // namespace
+
+QString csvSafeCell( const QString &field )
+{
+    if ( field.isEmpty() )
+        return field;
+    switch ( field.at( 0 ).unicode() )
+    {
+        case '=':
+        case '+':
+        case '-':
+        case '@':
+        case '\t':
+        case '\r':
+            // Prefix, never escape-inside: the apostrophe must be the FIRST
+            // character or the spreadsheet still parses the rest as a formula.
+            return QString( QLatin1Char( '\'' ) ) + field;
+        default:
+            return field;
+    }
+}
+
+LabBatchRow LabBatchRunner::unavailableRow( const QString &studentId, const QString &labId,
+                                            const QString &artifactPath, const QString &reason )
+{
+    LabBatchRow row;
+    row.studentId = studentId;
+    row.labId = labId;
+    row.artifactPath = artifactPath;
+    row.verdict = QLatin1String( kUnavailableVerdict );
+    row.unavailable = true;
+    row.unavailableReason = reason.isEmpty()
+                              ? QStringLiteral( "unavailable: reason not supplied" )
+                              : reason;
+    row.topDeduction = row.unavailableReason;
+    // score stays -1.0 — no grade, and explicitly not zero.
+    return row;
+}
 
 bool LabRoster::load( const QString &path, LabRoster *roster, QString *error )
 {
@@ -397,8 +440,21 @@ LabBatchSummary LabBatchRunner::run( const QString &submissionsDir, const QStrin
                 // the submission simply carries no gradeable raster.
                 row.verdict = result.verdict;
                 row.topDeduction = result.error;
+                if ( result.verdict == QLatin1String( kUnavailableVerdict ) )
+                {
+                    // classroom-safety 13.0: the grader declared that this lab
+                    // cannot be graded here (missing capability / fixture /
+                    // rules / artifact). Counted separately from a crash and
+                    // from a real zero — no score is invented.
+                    ++summary.unavailable;
+                    row.unavailable = true;
+                    row.unavailableReason = result.error.isEmpty()
+                                              ? QStringLiteral( "unavailable: no reason supplied" )
+                                              : result.error;
+                    row.topDeduction = row.unavailableReason;
+                }
                 csvRow = csvRowFor( studentId, labId, QString(), result.verdict,
-                                    result.error, artifactPath );
+                                    row.topDeduction, artifactPath );
             }
         }
         catch ( const std::exception &e )
@@ -478,6 +534,7 @@ QJsonObject LabBatchRunner::summaryBodyJson( const QString &labId, const QString
     body.insert( QStringLiteral( "graded" ), summary.graded );
     body.insert( QStringLiteral( "isolated" ), summary.isolated );
     body.insert( QStringLiteral( "duplicates" ), summary.duplicates );
+    body.insert( QStringLiteral( "unavailable" ), summary.unavailable );
     body.insert( QStringLiteral( "unknown_roster" ), summary.unknownRoster );
     body.insert( QStringLiteral( "missing_roster" ), summary.missingRoster );
     body.insert( QStringLiteral( "capped_by_max_submissions" ), summary.cappedByMaxSubmissions );
@@ -496,6 +553,13 @@ QJsonObject LabBatchRunner::summaryBodyJson( const QString &labId, const QString
         if ( row.score >= 0.0 )
             entry.insert( QStringLiteral( "score" ), row.score );
         entry.insert( QStringLiteral( "verdict" ), row.verdict );
+        if ( row.unavailable )
+        {
+            // Canonical truth carries the typed reason; the CSV projection
+            // only ever sees the neutralized verdict column.
+            entry.insert( QStringLiteral( "unavailable" ), true );
+            entry.insert( QStringLiteral( "unavailable_reason" ), row.unavailableReason );
+        }
         if ( !row.topDeduction.isEmpty() )
             entry.insert( QStringLiteral( "top_deduction" ), row.topDeduction );
         entry.insert( QStringLiteral( "sha256" ), row.sha256 );
@@ -524,7 +588,10 @@ int batchExitCodeFor( const LabBatchSummary &summary )
     namespace exprs_ns = exprs;
     if ( summary.usageError )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
-    if ( summary.isolated > 0 || summary.cancelled || summary.cappedByMaxSubmissions )
+    // An unavailable row is not a crash, but a class nobody could grade must
+    // not exit Ok — the teacher has to see it.
+    if ( summary.isolated > 0 || summary.unavailable > 0 || summary.cancelled ||
+         summary.cappedByMaxSubmissions )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
     return exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok );
 }

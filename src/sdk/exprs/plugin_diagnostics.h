@@ -61,6 +61,18 @@ enum class PluginDiagnosticCode
     /// The reload itself still reports false — a downgrade is recovery, never
     /// a silent success.
     PluginReloadRolledBack = 4006,
+    /// Track 13.0: an install-time upgrade committed — the new version is
+    /// running (or validated when it was not loaded). Info severity; the
+    /// message carries the from->to version provenance.
+    PluginUpgraded = 4007,
+    /// Track 13.0: an install-time upgrade failed AFTER the drain/swap and
+    /// the previous install was restored — Warning severity (recovery, not
+    /// success).
+    PluginUpgradeRolledBack = 4008,
+    /// Track 13.0: an install-time upgrade failed AND the rollback could
+    /// not restore the previous install — Error severity; the snapshot kept
+    /// for recovery is named in the message.
+    PluginUpgradeFailed = 4009,
 
     // E5xxx — policy
     PermissionDenied = 5001,

@@ -9,18 +9,32 @@
 #
 #   1. every data/labs/*.lab.json gets spec_version bumped to 2 (text-level,
 #      no reformatting);
-#   2. the four D3-era `*.labspec.json` authoring files (lab8–lab11) are
-#      merged into the matching `.lab.json`: their structured Chinese teaching
-#      content finally lands in the format every consumer parses.
+#   2. the D3-era `*.labspec.json` authoring files are merged into a
+#      **canonical** `.lab.json`: their structured Chinese teaching content
+#      finally lands in the format every consumer parses.
 #      Mapping: objectives→objective_zh (plus theme/audience/duration line),
 #      principles→principles, glossary{term,en,definition}→glossary
 #      {term_zh,term,definition_zh}, expected_results→expected_artifacts,
 #      questions{prompt,hint}→thinking_questions strings.
 #      NOT migrated (recorded in the PR notes): D3 `operators[]`/
 #      `dependencies[]`/`notes[]` are tooling metadata already covered by
-#      packs and data-specs; `grading_ref.intent_ref` stays D3-only — the
-#      rules-file pointer (`grading_rules`) is left unset where no
-#      `sicnu.lab.rules/1` file is addressed by the lab id.
+#      packs and data-specs; D3 `steps[]` has a different shape and the
+#      operator sequence is already authoritative in
+#      `data/labs/pipelines/<lab>.pipeline.json`; `grading_ref.intent_ref`
+#      stays D3-only — the rules-file pointer (`grading_rules`) is taken from
+#      the registry instead.
+#
+# canonical ids (classroom-safety 13.0)
+#   The D3 files are named lab8/lab9/lab10/lab11, but those numeric slots
+#   already belong to the D1-era labs lab08…lab11, and a one-digit `lab9_…`
+#   cannot satisfy the strict loader's `^lab[0-9]{2}_…$` contract. The three
+#   in-scope labs therefore take the first free slots (lab12–lab14) and keep
+#   every legacy spelling as an alias — see data/labs/lab-registry.json, which
+#   is the authority this script reads, not a hardcoded guess.
+#
+#   lab8_temporal_analysis is deliberately NOT migrated here: the temporal
+#   track (PR #1135) owns it and its own DECISIONS D16 says the labspec stays
+#   untouched.
 #
 # usage:
 #   python3 scripts/upgrade_labspec.py            # apply
@@ -32,12 +46,66 @@ import json
 import os
 import sys
 
-D3_MERGES = {
-    "lab8_temporal_analysis": "lab8_temporal_analysis.labspec.json",
-    "lab9_sar_processing": "lab9_sar_processing.labspec.json",
-    "lab10_hyperspectral_analysis": "lab10_hyperspectral_analysis.labspec.json",
-    "lab11_cartographic_mapping": "lab11_cartographic_mapping.labspec.json",
-}
+REGISTRY_NAME = "lab-registry.json"
+
+
+def load_registry(labs_dir):
+    """data/labs/lab-registry.json: the authority for canonical ids.
+
+    Read rather than hardcoded so that adding a lab is a registry edit, not a
+    script edit, and so `--check` fails loudly when the two disagree.
+    """
+    path = os.path.join(labs_dir, REGISTRY_NAME)
+    if not os.path.exists(path):
+        raise SystemExit("upgrade_labspec: no %s under %s" % (REGISTRY_NAME, labs_dir))
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def canonical_targets(registry):
+    """canonical id -> registry entry, for every entry with a D3 source."""
+    return {lab_id: entry for lab_id, entry in registry.get("canonical", {}).items()
+            if entry.get("source")}
+
+
+def canonical_base(entry, d3_doc, lab_id):
+    """The minimal LabSpec-2 skeleton a brand-new canonical document starts
+    from, before the D3 teaching content is folded in.
+
+    Only pointers that already exist in the tree are used — no capability is
+    invented: `prerequisites` points at the shipped data-spec, `grading_ref`
+    at the shipped pipeline and `grading_rules` at the shipped rules file.
+    """
+    data_spec = entry.get("data_spec")
+    prerequisites = []
+    if data_spec:
+        note = "离线数据规格（D1 foundry 生成）；实验室环境见 data-specs 的 spec_ref 字段。"
+        prerequisites.append({"path": data_spec, "note": note})
+    doc = {
+        "spec_version": 1,  # merge_d3() bumps it to 2 once v2 keys are added
+        "id": lab_id,
+        "title": entry.get("title", lab_id),
+        "title_zh": entry.get("title_zh", d3_doc.get("title", "")),
+        "objective": "Course lab %s — %s. Structured teaching content "
+                     "(objectives, principles, glossary, expected artifacts, "
+                     "thinking questions) is carried in the LabSpec 2 fields "
+                     "merged from %s."
+                     % (entry.get("course_index", "?"), entry.get("title", lab_id),
+                        os.path.basename(entry.get("source", ""))),
+        "prerequisites": prerequisites,
+        "grading_ref": {"pipeline": entry.get("pipeline", "")},
+    }
+    if not doc["grading_ref"]["pipeline"]:
+        del doc["grading_ref"]
+    if not prerequisites:
+        del doc["prerequisites"]
+    rules = entry.get("grading_rules")
+    if rules:
+        doc["grading_rules"] = rules
+    knowledge = [p for p in d3_doc.get("prerequisites", []) if isinstance(p, str)]
+    if knowledge:
+        doc["prerequisite_knowledge"] = knowledge
+    return doc
 
 
 def dumps(doc):
@@ -139,26 +207,33 @@ def merge_d3(lab_doc, d3_doc, stem):
     return doc
 
 
-def migrated_bytes(labs_dir, name):
+def migrated_bytes(labs_dir, name, targets):
     """The exact bytes the migrated file must have."""
     path = os.path.join(labs_dir, name)
+    stem = name[: -len(".lab.json")]
+
+    # Canonical target: a lab whose content lives in a D3 authoring file. The
+    # `.lab.json` may not exist yet — that is exactly the gap this migration
+    # closes (before 13.0 the D3 content was invisible to every consumer).
+    if stem in targets:
+        entry = targets[stem]
+        d3_path = os.path.join(labs_dir, os.path.basename(entry.get("source", "")))
+        if not os.path.exists(d3_path):
+            raise SystemExit("upgrade_labspec: %s sources missing %s"
+                             % (name, d3_path))
+        with open(d3_path, "r", encoding="utf-8") as handle:
+            d3_doc = json.load(handle)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                base = json.load(handle)
+        else:
+            base = canonical_base(entry, d3_doc, stem)
+        return dumps(merge_d3(base, d3_doc, stem))
+
     with open(path, "r", encoding="utf-8") as handle:
         raw = handle.read()
     doc = json.loads(raw)
     version = doc.get("spec_version")
-    stem = name[: -len(".lab.json")]
-    if stem in D3_MERGES:
-        d3_path = os.path.join(labs_dir, D3_MERGES[stem])
-        if not os.path.exists(d3_path):
-            if version == 2:
-                return raw
-            if version != 1:
-                raise SystemExit("upgrade_labspec: %s has spec_version %r"
-                                 % (name, version))
-            return raw.replace('"spec_version": 1', '"spec_version": 2', 1)
-        with open(d3_path, "r", encoding="utf-8") as handle:
-            d3_doc = json.load(handle)
-        return dumps(merge_d3(doc, d3_doc, stem))
     if version == 2:
         return raw
     if version != 1:
@@ -185,18 +260,26 @@ def main():
     if not os.path.isdir(labs_dir):
         raise SystemExit("upgrade_labspec: no data/labs under %s" % root)
 
+    targets = canonical_targets(load_registry(labs_dir))
+
+    # Existing *.lab.json plus every canonical target that does not exist yet —
+    # the missing counterparts are precisely the pre-13.0 gap.
+    names = sorted(set(
+        [n for n in os.listdir(labs_dir) if n.endswith(".lab.json")]
+        + ["%s.lab.json" % lab_id for lab_id in targets]))
+
     pending = []
-    for name in sorted(os.listdir(labs_dir)):
-        if not name.endswith(".lab.json"):
-            continue
-        wanted = migrated_bytes(labs_dir, name)
+    for name in names:
+        wanted = migrated_bytes(labs_dir, name, targets)
         path = os.path.join(labs_dir, name)
-        with open(path, "r", encoding="utf-8") as handle:
-            current = handle.read()
+        current = None
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                current = handle.read()
         if wanted != current:
             pending.append(name)
         if not args.check and wanted != current:
-            with open(path, "w", encoding="utf-8") as handle:
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(wanted)
             print("migrated %s" % name)
 

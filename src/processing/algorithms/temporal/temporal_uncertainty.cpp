@@ -16,60 +16,114 @@ namespace
 {
 constexpr double kNanD = std::numeric_limits<double>::quiet_NaN();
 using detail::kMaxTerms;
+using detail::kMaxHarmonicTerms;
+using detail::harmonicDesignRow;
 using detail::harmonicTrendDesignRow;
 
-/// Acklam's rational-approximation inverse standard-normal CDF
-/// (|ε| < 1.15e-9 relative); deterministic, allocation-free.
-double normalQuantile( double p )
+/// Continued fraction for the incomplete beta function (Numerical Recipes
+/// betacf) — building block for the Student-t CDF below.
+double betacf( double a, double b, double x )
 {
-  p = std::clamp( p, 1e-15, 1.0 - 1e-15 );
-  constexpr double a[] = { -3.969683028665376e+01, 2.209460984245205e+02,
-                           -2.759285104469687e+02, 1.383577518672690e+02,
-                           -3.066479806614716e+01, 2.506628277459239e+00 };
-  constexpr double b[] = { -5.447609879822406e+01, 1.615858368580409e+02,
-                           -1.556989798598866e+02, 6.680131188771972e+01,
-                           -1.328068155288572e+01 };
-  constexpr double c[] = { -7.784894002430293e-03, -3.223964580411365e-01,
-                           -2.400758277161838e+00, -2.549732539343734e+00,
-                           4.374664141464968e+00,  2.938163982698783e+00 };
-  constexpr double d[] = { 7.784695709041462e-03, 3.224671290700398e-01,
-                           2.445134137142996e+00, 3.754408661907416e+00 };
-  const double pLow = 0.02425;
-  if ( p < pLow )
+  const double qab = a + b, qap = a + 1.0, qam = a - 1.0;
+  double c = 1.0;
+  double d = 1.0 - qab * x / qap;
+  if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+  d = 1.0 / d;
+  double h = d;
+  for ( int m = 1; m <= 300; ++m )
   {
-    const double q = std::sqrt( -2.0 * std::log( p ) );
-    const double num =
-      ( ( ( ( c[0] * q + c[1] ) * q + c[2] ) * q + c[3] ) * q + c[4] ) * q + c[5];
-    const double den = ( ( ( d[0] * q + d[1] ) * q + d[2] ) * q + d[3] ) * q + 1.0;
-    return num / den;
+    const int m2 = 2 * m;
+    double aa = m * ( b - m ) * x / ( ( qam + m2 ) * ( a + m2 ) );
+    d = 1.0 + aa * d;
+    if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+    c = 1.0 + aa / c;
+    if ( std::fabs( c ) < 1e-300 ) c = 1e-300;
+    d = 1.0 / d;
+    h *= d * c;
+    aa = -( a + m ) * ( qab + m ) * x / ( ( a + m2 ) * ( qap + m2 ) );
+    d = 1.0 + aa * d;
+    if ( std::fabs( d ) < 1e-300 ) d = 1e-300;
+    c = 1.0 + aa / c;
+    if ( std::fabs( c ) < 1e-300 ) c = 1e-300;
+    d = 1.0 / d;
+    const double del = d * c;
+    h *= del;
+    if ( std::fabs( del - 1.0 ) < 3e-14 )
+      break;
   }
-  if ( p <= 1.0 - pLow )
+  return h;
+}
+
+/// Regularized incomplete beta I_x(a, b) — 0/1-clamped at the ends.
+double incompleteBeta( double a, double b, double x )
+{
+  if ( x <= 0.0 ) return 0.0;
+  if ( x >= 1.0 ) return 1.0;
+  const double bt = std::exp( std::lgamma( a + b ) - std::lgamma( a ) -
+                              std::lgamma( b ) + a * std::log( x ) +
+                              b * std::log( 1.0 - x ) );
+  if ( x < ( a + 1.0 ) / ( a + b + 2.0 ) )
+    return bt * betacf( a, b, x ) / a;
+  return 1.0 - bt * betacf( b, a, 1.0 - x ) / b;
+}
+
+/// Two-sided Student-t quantile: returns t ≥ 0 with P(T ≤ t) = p for
+/// T ~ t(df). The regression-coefficient intervals are t-distributed
+/// exactly under Gaussian noise — at df = 1 the 95% quantile is 12.7, not
+/// the normal 1.96, so small-sample intervals stay honest instead of
+/// anticonservative. Solved by bisection on the exact CDF
+/// P(T > t) = ½·I_{df/(df+t²)}(df/2, ½).
+double studentTQuantile( double p, double df )
+{
+  if ( !( df >= 1.0 ) || !( p > 0.5 && p < 1.0 ) )
+    return kNanD;
+  const double target = 2.0 * ( 1.0 - p ); // = I_x value at the quantile
+  const auto tail = [&]( double t ) {
+    return incompleteBeta( df / 2.0, 0.5, df / ( df + t * t ) );
+  };
+  double lo = 0.0, hi = 1.0;
+  while ( tail( hi ) > target )
   {
-    const double q = p - 0.5;
-    const double r = q * q;
-    const double num =
-      ( ( ( ( a[0] * r + a[1] ) * r + a[2] ) * r + a[3] ) * r + a[4] ) * r + a[5];
-    const double den = ( ( ( ( b[0] * r + b[1] ) * r + b[2] ) * r + b[3] ) * r +
-                         b[4] ) * r + 1.0;
-    return num * q / den;
+    hi *= 2.0;
+    if ( hi > 1e12 )  // numerically unreachable for df ≥ 1, p < 0.999
+      return hi;
   }
-  const double q = std::sqrt( -2.0 * std::log( 1.0 - p ) );
-  const double num =
-    ( ( ( ( c[0] * q + c[1] ) * q + c[2] ) * q + c[3] ) * q + c[4] ) * q + c[5];
-  const double den = ( ( ( d[0] * q + d[1] ) * q + d[2] ) * q + d[3] ) * q + 1.0;
-  return -num / den;
+  for ( int i = 0; i < 80; ++i )
+  {
+    const double mid = 0.5 * ( lo + hi );
+    if ( tail( mid ) > target )
+      lo = mid;
+    else
+      hi = mid;
+  }
+  return 0.5 * ( lo + hi );
 }
 } // namespace
 
-AnalyticCiResult harmonicTrendCoefficientCi(
+namespace
+{
+/// Shared weighted-LS coefficient-CI core. @a includeTrend selects the design:
+/// true → harmonicTrendDesignRow ([1, t, sin/cos…], terms = 2 + 2h, h ≤ 3),
+/// false → harmonicDesignRow ([1, sin/cos…], terms = 1 + 2h, h ≤ 6 — the
+/// harmonicFit basis).
+AnalyticCiResult analyticCoefficientCiImpl(
     const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
-    int harmonics, const std::vector<double> &weights, double ciLevel )
+    int harmonics, const std::vector<double> &weights, double ciLevel,
+    bool includeTrend )
 {
   AnalyticCiResult result;
   a = std::max( 0, a );
   b = std::min( b, static_cast<int>( y.size() ) );
-  const int harmonicsClamped = std::clamp( harmonics, 1, 3 );
-  const int terms = 2 + 2 * harmonicsClamped;
+  const int harmonicsClamped =
+    std::clamp( harmonics, 1, includeTrend ? 3 : 6 );
+  const int terms =
+    includeTrend ? 2 + 2 * harmonicsClamped : 1 + 2 * harmonicsClamped;
+  const int cap = includeTrend ? kMaxTerms : kMaxHarmonicTerms;
+  const auto designRow = [&]( double t, double *design ) -> int {
+    return includeTrend
+               ? harmonicTrendDesignRow( t, harmonicsClamped, design )
+               : harmonicDesignRow( t, harmonicsClamped, design );
+  };
   const double level = std::clamp( ciLevel, 0.01, 0.999 );
   if ( b - a < terms + 1 ||
        tDays.size() != y.size() ||
@@ -82,9 +136,9 @@ AnalyticCiResult harmonicTrendCoefficientCi(
 
   // Weighted normal equations over the segment (same accumulation order as
   // the shared fit kernels).
-  std::vector<double> ata( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
-  std::vector<double> atb( kMaxTerms, 0.0 );
-  double design[kMaxTerms];
+  std::vector<double> ata( static_cast<size_t>( cap ) * cap, 0.0 );
+  std::vector<double> atb( static_cast<size_t>( cap ), 0.0 );
+  double design[kMaxHarmonicTerms];
   int n = 0;
   for ( int i = a; i < b; ++i )
   {
@@ -93,13 +147,12 @@ AnalyticCiResult harmonicTrendCoefficientCi(
                       : weights[static_cast<size_t>( i )];
     if ( !( w > 0.0 ) || !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;  // rejects w <= 0 AND NaN weights (NaN > 0 is false)
-    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )],
-                                          harmonicsClamped, design );
+    const int m = designRow( tDays[static_cast<size_t>( i )], design );
     for ( int r = 0; r < m; ++r )
     {
       atb[static_cast<size_t>( r )] += w * design[r] * y[static_cast<size_t>( i )];
       for ( int c = 0; c < m; ++c )
-        ata[static_cast<size_t>( r ) * kMaxTerms + c] += w * design[r] * design[c];
+        ata[static_cast<size_t>( r ) * cap + c] += w * design[r] * design[c];
     }
     ++n;
   }
@@ -116,13 +169,13 @@ AnalyticCiResult harmonicTrendCoefficientCi(
   std::vector<double> coef;
   {
     std::vector<double> aDense( static_cast<size_t>( terms ) * terms, 0.0 );
-    std::vector<double> bDense( terms, 0.0 );
+    std::vector<double> bDense( static_cast<size_t>( terms ), 0.0 );
     for ( int r = 0; r < terms; ++r )
     {
       bDense[static_cast<size_t>( r )] = atb[static_cast<size_t>( r )];
       for ( int c = 0; c < terms; ++c )
         aDense[static_cast<size_t>( r ) * terms + c] =
-          ata[static_cast<size_t>( r ) * kMaxTerms + c];
+          ata[static_cast<size_t>( r ) * cap + c];
     }
     if ( !detail::solveSmallDense( aDense, bDense, terms, &coef ) )
     {
@@ -139,7 +192,7 @@ AnalyticCiResult harmonicTrendCoefficientCi(
     for ( int r = 0; r < terms; ++r )
       for ( int c = 0; c < terms; ++c )
         aDense[static_cast<size_t>( r ) * terms + c] =
-          ata[static_cast<size_t>( r ) * kMaxTerms + c];
+          ata[static_cast<size_t>( r ) * cap + c];
     e[static_cast<size_t>( j )] = 1.0;
     std::vector<double> col;
     if ( !detail::solveSmallDense( aDense, e, terms, &col ) )
@@ -160,8 +213,7 @@ AnalyticCiResult harmonicTrendCoefficientCi(
                       : weights[static_cast<size_t>( i )];
     if ( !( w > 0.0 ) || !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
-    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )],
-                                          harmonicsClamped, design );
+    const int m = designRow( tDays[static_cast<size_t>( i )], design );
     double v = 0.0;
     for ( int r = 0; r < m; ++r )
       v += coef[static_cast<size_t>( r )] * design[r];
@@ -172,7 +224,7 @@ AnalyticCiResult harmonicTrendCoefficientCi(
   result.df = df;
   result.valid = true;
 
-  const double z = normalQuantile( 0.5 + level / 2.0 );
+  const double z = studentTQuantile( 0.5 + level / 2.0, static_cast<double>( df ) );
   result.coefficients.resize( static_cast<size_t>( terms ) );
   for ( int j = 0; j < terms; ++j )
   {
@@ -193,6 +245,23 @@ AnalyticCiResult harmonicTrendCoefficientCi(
     ci.valid = true;
   }
   return result;
+}
+} // namespace
+
+AnalyticCiResult harmonicTrendCoefficientCi(
+    const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
+    int harmonics, const std::vector<double> &weights, double ciLevel )
+{
+  return analyticCoefficientCiImpl( y, tDays, a, b, harmonics, weights,
+                                    ciLevel, true );
+}
+
+AnalyticCiResult harmonicCoefficientCi(
+    const std::vector<float> &y, const std::vector<double> &tDays, int a, int b,
+    int harmonics, const std::vector<double> &weights, double ciLevel )
+{
+  return analyticCoefficientCiImpl( y, tDays, a, b, harmonics, weights,
+                                    ciLevel, false );
 }
 
 BootstrapCi residualBootstrapCi(

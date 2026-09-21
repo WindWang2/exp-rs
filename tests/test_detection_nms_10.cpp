@@ -181,10 +181,10 @@ TEST_CASE( "F-OPS-5: NMS honours a mid-pass cancel predicate with a typed Cancel
 
   std::atomic<int> polls { 0 };
   const std::function<bool()> predicate = [&]() {
-    // Flip LATE: poll 1 is the before-the-scan probe, every later poll is the
-    // per-candidate (or in-scan) checkpoint — so the abort below can only
-    // come from a MID-SCAN poll site, never from the pre-scan guard.
-    return ++polls >= 5000;
+    // Flip mid-scan: poll 1 is the before-the-scan probe, the grid-accelerated
+    // pass polls every 256 candidates (~195 polls for 50k boxes), so the flip
+    // at poll 5 lands on an IN-SCAN checkpoint — never the pre-scan guard.
+    return ++polls >= 5;
   };
   const int pollsBefore = polls.load();
   REQUIRE_THROWS_AS( nonMaxSuppression( field, 0.45, predicate ), RSOperatorError );
@@ -206,16 +206,17 @@ TEST_CASE( "F-OPS-5: empty input and pre-scan cancellation are typed no-crash pa
   // P0 regression: zero detections passing the confidence gate is a NORMAL
   // outcome — dedup/NMS must return an empty kept set, never crash.
   std::vector<DetectionBox> empty;
+  const std::function<bool()> never = [] { return false; };
+  const std::function<bool()> always = [] { return true; };
   REQUIRE( nonMaxSuppression( empty, 0.45 ).empty() );
-  REQUIRE( nonMaxSuppression( empty, 0.45, [] { return false; } ).empty() );
+  REQUIRE( nonMaxSuppression( empty, 0.45, never ).empty() );
   dedupDetections( empty, 0.45 );
-  dedupDetections( empty, 0.45, [] { return false; } );
+  dedupDetections( empty, 0.45, never );
   REQUIRE( empty.empty() );
 
   // Pre-scan cancellation: the predicate is true BEFORE any scanning.
   auto field = syntheticField( 100, 5u, 100.0f, 20.0f );
-  REQUIRE_THROWS_AS( nonMaxSuppression( field, 0.45, [] { return true; } ),
-                     RSOperatorError );
+  REQUIRE_THROWS_AS( nonMaxSuppression( field, 0.45, always ), RSOperatorError );
 }
 
 TEST_CASE( "F-OPS-5: dedup cancel overload keeps the exact-duplicate collapse contract",
@@ -230,7 +231,8 @@ TEST_CASE( "F-OPS-5: dedup cancel overload keeps the exact-duplicate collapse co
   boxes.push_back( box( 50.0f, 50.0f, 40.0f, 40.0f, 1, 0.8f ) );
   boxes.push_back( box( 55.0f, 55.0f, 40.0f, 40.0f, 1, 0.7f ) );
 
-  dedupDetections( boxes, 0.45, [] { return false; } );
+  const std::function<bool()> never = [] { return false; };
+  dedupDetections( boxes, 0.45, never );
   REQUIRE( boxes.size() == 2 );
   REQUIRE( boxes[0].confidence == 0.9f );
   REQUIRE( boxes[1].confidence == 0.8f );
@@ -239,7 +241,7 @@ TEST_CASE( "F-OPS-5: dedup cancel overload keeps the exact-duplicate collapse co
     box( 0.0f, 0.0f, 10.0f, 10.0f, 0, 0.5f ),
   };
   int calls = 0;
-  REQUIRE_THROWS_AS( dedupDetections( cancelMe, 0.45,
-                                      [&] { return ++calls >= 1; } ),
+  const std::function<bool()> cancelImmediately = [&] { return ++calls >= 1; };
+  REQUIRE_THROWS_AS( dedupDetections( cancelMe, 0.45, cancelImmediately ),
                      RSOperatorError );
 }

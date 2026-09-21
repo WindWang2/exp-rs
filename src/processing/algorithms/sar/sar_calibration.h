@@ -4,8 +4,11 @@
 // Sentinel-1 GRD convention: sigma0 = DN² / A² (A = calibration constant,
 // optionally after noise subtraction L = DN² - σnoise). The kernel applies
 // the SAME formula for any SAR product whose DN→backscatter relation reduces
-// to a scaled squared amplitude; products with LUT calibration must be
-// pre-calibrated upstream (documented limitation).
+// to a scaled squared amplitude. Radiometric State 13.0 adds the per-row LUT
+// path: when the caller supplies rowA (one calibration constant per input
+// row, parsed from a declared SICNU_SAR_CALIBRATION_LUT sidecar), A varies by
+// row; products without a readable LUT are typed refusals at the operator
+// seam, never a constant-scale guess.
 //
 // Backscatter conversions (constant or per-pixel local incidence θi):
 //   gamma0 = sigma0 / cos θi     beta0 = sigma0 / sin θi
@@ -43,6 +46,10 @@ double gamma0ToSigma0( double gamma0, double incidenceDeg );
 /// Streaming calibration of one band: DN → sigma0 (linear or dB).
 /// Writes SICNU_* SAR metadata on the output dataset. @a nodata is the input
 /// sentinel (NaN when undeclared); sentinel/NaN stay NaN on output.
+/// @a rowA optionally supplies one calibration constant per input row
+/// (Radiometric State 13.0 LUT path): sigma0 = (DN² − noise)/rowA[row]². The
+/// caller must have validated the vector length against the raster height
+/// (parseCalibrationLut); an out-of-range row is a hard failure here.
 /// Returns false on I/O failure (caller must abandon the output).
 bool calibrateRaster( const GdalDatasetWrapper &src, int band, double calibrationA,
                       double noiseLinear, SarDomain outputDomain, float nodata,
@@ -50,7 +57,8 @@ bool calibrateRaster( const GdalDatasetWrapper &src, int band, double calibratio
                       const QString &polarizations = QString(),
                       const QString &sensor = QString(),
                       double incidenceDeg = 0.0,
-                      double headingDeg = 0.0 );
+                      double headingDeg = 0.0,
+                      const std::vector<double> *rowA = nullptr );
 
 struct BackscatterConvertOptions
 {

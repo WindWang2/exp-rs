@@ -40,7 +40,15 @@ bool isValidRunId( const std::string &runId );
 
 /// Serialization schema version stamped into every WorkflowRun JSON payload.
 /// Loaders reject payloads that carry a different (or missing) version.
-constexpr int kWorkflowRunSerializationVersion = 1;
+/// 2 adds the explicit lineage envelope (attempt / resumeOf); 1 is accepted
+/// as legacy (no lineage fields — a fresh attempt with no declared resume).
+constexpr int kWorkflowRunSerializationVersion = 2;
+/// Oldest schema version a loader still accepts (legacy checkpoints on disk
+/// carry no lineage envelope; they migrate to attempt=1, resumeOf="").
+constexpr int kWorkflowRunSerializationVersionLegacy = 1;
+/// Sanity bound for the persisted attempt counter: a resume lineage longer
+/// than this is corrupt, not real (each attempt needs a crash + resume).
+constexpr int kMaxRunAttempt = 1000000;
 
 struct StepPlan {
   std::string stepId;
@@ -117,6 +125,17 @@ public:
   std::string workflowId() const;
   void setWorkflowId( const std::string &id );
 
+  /// System attempt lineage, kept OUT of the runId (Track 13): the runId is
+  /// the user-facing identity, the envelope carries the lineage. attempt is
+  /// 1 for a fresh run and increments once per resume of the same runId.
+  int attempt() const;
+  void setAttempt( int attempt );
+  /// When non-empty this run is a temporary resume submission OF another run
+  /// (the ghost that checkpoint election groups under its original). Empty
+  /// for every run a user started directly.
+  const std::string &resumeOf() const;
+  void setResumeOf( const std::string &runId );
+
   WorkflowRunState state() const;
   bool transitionTo( WorkflowRunState newState );
   void forceSetState( WorkflowRunState state );
@@ -170,6 +189,10 @@ private:
   mutable std::mutex m_mutex;
   std::string m_runId;
   std::string m_workflowId;
+  /// Lineage envelope (Track 13): 1-based attempt counter and the original
+  /// runId when this run is a temporary resume submission.
+  int m_attempt = 1;
+  std::string m_resumeOf;
   WorkflowRunState m_state = WorkflowRunState::Created;
   WorkflowDefinition m_definition;
   std::vector<StepPlan> m_stepPlans;
