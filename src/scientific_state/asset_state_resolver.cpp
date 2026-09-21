@@ -263,6 +263,23 @@ struct NormalizeRadiometric
     }
 };
 
+/// NoData declarations merge on a canonical numeric text form so that "0"
+/// and "0.0" agree; unparsable declarations fail with a typed note code.
+struct NormalizeNoData
+{
+    std::optional<std::string> operator()( const RawObservation &observation,
+                                           std::string &failCode ) const
+    {
+        double value = 0.0;
+        if ( !parseDouble( observation.value, value ) )
+        {
+            failCode = "validity.nodata_invalid";
+            return std::nullopt;
+        }
+        return std::to_string( value );
+    }
+};
+
 } // namespace
 
 bool normalizeRadiometricToken( const std::string &raw, std::string &unit )
@@ -741,15 +758,243 @@ void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &i
             }
         }
 
-        if ( catalogBand && catalogBand->hasNoData )
+        // NoData: dataset band declaration first, then the catalog structure
+        // mirror. Disagreement is a conflict, never a silent pick; unparsable
+        // declarations stay typed unknowns.
+        std::vector<RawObservation> noDataObservations;
+        if ( datasetBand )
         {
-            band.hasNoData = true;
-            band.noDataValue = catalogBand->noDataValue;
+            for ( const RawObservation &observation :
+                  datasetBand->metadata.find( "NO_DATA_VALUE" ) )
+                noDataObservations.push_back( observation );
+        }
+        if ( catalogBand && catalogBand->hasNoData )
+            noDataObservations.push_back(
+                { std::to_string( catalogBand->noDataValue ), "catalog:structure" } );
+        if ( !noDataObservations.empty() )
+        {
+            const MergedValue noData =
+                resolveBandField( noDataObservations, NormalizeNoData{}, notes,
+                                  pathPrefix + ".no_data" );
+            if ( noData.present && noData.kind == ClaimKind::Conflicted )
+            {
+                appendClaim( state, pathPrefix + ".no_data", noData,
+                             "noData declarations disagree" );
+                addNote( state, "validity.nodata_conflict", pathPrefix + ".no_data",
+                         "noData declarations disagree; kept both alternatives" );
+            }
+            else if ( noData.present )
+            {
+                band.hasNoData = true;
+                parseDouble( noData.value, band.noDataValue );
+                appendClaim( state, pathPrefix + ".no_data", noData );
+            }
+            else
+            {
+                addUnknown( state, pathPrefix + ".no_data" );
+            }
         }
         if ( catalogBand && band.dataType.empty() )
             band.dataType = catalogBand->dataType;
 
         state.bands.push_back( band );
+    }
+}
+
+/// Projects CRS facts (known or typed unknown), the geotransform verbatim,
+/// and — only derived, as inferred claims — pixel size and the four-corner
+/// bounding-box extent. A missing geotransform or size simply leaves the
+/// corresponding fields unprojected.
+void resolveGeometry( RemoteSensingAssetState &state, const DatasetFacts &dataset )
+{
+    const GeometryFacts &geometry = dataset.geometry;
+
+    if ( geometry.hasCrs )
+    {
+        state.geometry.hasCrs = true;
+        state.geometry.crsWkt = geometry.crsWkt;
+        state.geometry.crsAuthid = geometry.crsAuthid;
+        state.geometry.crsGeographic = geometry.crsGeographic;
+        state.geometry.crsProjected = geometry.crsProjected;
+        MergedValue crs;
+        crs.present = true;
+        crs.value = geometry.crsAuthid.empty() ? geometry.crsWkt : geometry.crsAuthid;
+        crs.kind = ClaimKind::Known;
+        crs.sources = { "gdal:CRS" };
+        appendClaim( state, "geometry.crs", crs );
+    }
+    else
+    {
+        addUnknown( state, "geometry.crs" );
+    }
+
+    const bool hasSize = geometry.width > 0 && geometry.height > 0;
+
+    if ( geometry.hasGeoTransform )
+    {
+        state.geometry.hasGeoTransform = true;
+        state.geometry.geoTransform = geometry.geoTransform;
+
+        state.geometry.hasPixelSize = true;
+        state.geometry.pixelSizeX = std::fabs( geometry.geoTransform[1] );
+        state.geometry.pixelSizeY = std::fabs( geometry.geoTransform[5] );
+        MergedValue pixelSize;
+        pixelSize.present = true;
+        pixelSize.kind = ClaimKind::Inferred;
+        pixelSize.sources = { "gdal:geo_transform" };
+        appendClaim( state, "geometry.pixel_size", pixelSize );
+        addNote( state, "geometry.pixel_size_from_geotransform", "geometry.pixel_size",
+                 "pixel size derived from the geotransform axis scales" );
+
+        if ( hasSize )
+        {
+            const double gt0 = geometry.geoTransform[0];
+            const double gt1 = geometry.geoTransform[1];
+            const double gt2 = geometry.geoTransform[2];
+            const double gt3 = geometry.geoTransform[3];
+            const double gt4 = geometry.geoTransform[4];
+            const double gt5 = geometry.geoTransform[5];
+            const double xs[4] = { gt0,
+                                   gt0 + geometry.width * gt1,
+                                   gt0 + geometry.height * gt2,
+                                   gt0 + geometry.width * gt1 + geometry.height * gt2 };
+            const double ys[4] = { gt3,
+                                   gt3 + geometry.width * gt4,
+                                   gt3 + geometry.height * gt5,
+                                   gt3 + geometry.width * gt4 + geometry.height * gt5 };
+            state.geometry.hasExtent = true;
+            state.geometry.minX = *std::min_element( xs, xs + 4 );
+            state.geometry.maxX = *std::max_element( xs, xs + 4 );
+            state.geometry.minY = *std::min_element( ys, ys + 4 );
+            state.geometry.maxY = *std::max_element( ys, ys + 4 );
+
+            MergedValue extent;
+            extent.present = true;
+            extent.kind = ClaimKind::Inferred;
+            extent.sources = { "gdal:geo_transform" };
+            appendClaim( state, "geometry.extent", extent );
+            addNote( state, "geometry.extent_from_geotransform", "geometry.extent",
+                     "extent derived as the geotransform bounding box of the four image "
+                     "corners (rotation terms included)" );
+        }
+    }
+
+    if ( hasSize )
+    {
+        state.geometry.hasSize = true;
+        state.geometry.width = geometry.width;
+        state.geometry.height = geometry.height;
+    }
+}
+
+/// Projects the validity section: the noData policy is a census over the
+/// band noData declarations (dataset metadata item "NO_DATA_VALUE" and the
+/// catalog structure mirror both count), cloud cover comes from the
+/// "CLOUDCOVER" dataset item, and the QA vocabulary prefers the declared
+/// "SICNU_QA_VOCABULARY" over the sensor profile family truth.
+void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput &input,
+                      const DatasetFacts *dataset )
+{
+    const CatalogFacts *catalog = input.catalog ? &*input.catalog : nullptr;
+    const SensorProfileFacts *profile =
+        input.sensorProfile ? &*input.sensorProfile : nullptr;
+
+    // ---- noData policy (declaration census over the band universe) ----
+    const bool useDatasetBands = dataset && !dataset->bands.empty();
+    const std::size_t totalBands = useDatasetBands ? dataset->bands.size()
+                                                   : ( catalog ? catalog->bands.size() : 0 );
+    if ( totalBands > 0 )
+    {
+        std::size_t declaredBands = 0;
+        bool anyDatasetDeclaration = false;
+        bool anyCatalogDeclaration = false;
+        for ( std::size_t position = 0; position < totalBands; ++position )
+        {
+            const BandFacts *datasetBand = useDatasetBands ? &dataset->bands[position] : nullptr;
+            const CatalogBandFacts *catalogBand =
+                catalog && position < catalog->bands.size() ? &catalog->bands[position]
+                                                            : nullptr;
+            const bool datasetDeclaration =
+                datasetBand && datasetBand->metadata.contains( "NO_DATA_VALUE" );
+            const bool catalogDeclaration = catalogBand && catalogBand->hasNoData;
+            anyDatasetDeclaration = anyDatasetDeclaration || datasetDeclaration;
+            anyCatalogDeclaration = anyCatalogDeclaration || catalogDeclaration;
+            if ( datasetDeclaration || catalogDeclaration )
+                ++declaredBands;
+        }
+
+        if ( declaredBands == totalBands )
+            state.validity.noDataPolicy = "declared";
+        else if ( declaredBands == 0 )
+            state.validity.noDataPolicy = "undeclared";
+        else
+            state.validity.noDataPolicy = "partial";
+
+        MergedValue policy;
+        policy.present = true;
+        policy.value = state.validity.noDataPolicy;
+        policy.kind = ClaimKind::Inferred;
+        if ( anyDatasetDeclaration )
+            policy.sources.push_back( "gdal:NO_DATA_VALUE" );
+        if ( anyCatalogDeclaration )
+            policy.sources.push_back( "catalog:structure" );
+        appendClaim( state, "validity.no_data_policy", policy,
+                     std::to_string( declaredBands ) + " of " + std::to_string( totalBands ) +
+                         " bands declare a NoData value" );
+    }
+
+    // ---- cloud cover (dataset metadata only; absent key ⇒ not projected) ----
+    if ( dataset )
+    {
+        const std::vector<RawObservation> cloud = dataset->metadata.find( "CLOUDCOVER" );
+        if ( !cloud.empty() )
+        {
+            double value = 0.0;
+            if ( parseDouble( cloud.front().value, value ) )
+            {
+                state.validity.hasCloudCover = true;
+                state.validity.cloudCoverPercent = value;
+                MergedValue cloudMerged;
+                cloudMerged.present = true;
+                cloudMerged.value = cloud.front().value;
+                cloudMerged.kind = ClaimKind::Known;
+                cloudMerged.sources = { cloud.front().source };
+                appendClaim( state, "validity.cloud_cover", cloudMerged );
+            }
+            else
+            {
+                addUnknown( state, "validity.cloud_cover" );
+                addNote( state, "validity.cloud_cover_invalid", "validity.cloud_cover",
+                         "unparsable CLOUDCOVER '" + cloud.front().value + "'" );
+            }
+        }
+    }
+
+    // ---- QA vocabulary: declared dataset key first, then sensor profile ----
+    const std::vector<RawObservation> declaredQa =
+        dataset ? dataset->metadata.find( "SICNU_QA_VOCABULARY" )
+                : std::vector<RawObservation>{};
+    if ( !declaredQa.empty() && !trimAscii( declaredQa.front().value ).empty() )
+    {
+        state.validity.qualityMaskInfo = trimAscii( declaredQa.front().value );
+        MergedValue qaMerged;
+        qaMerged.present = true;
+        qaMerged.value = state.validity.qualityMaskInfo;
+        qaMerged.kind = ClaimKind::Known;
+        qaMerged.sources = { declaredQa.front().source };
+        appendClaim( state, "validity.quality_mask_info", qaMerged );
+    }
+    else if ( profile && !profile->qaVocabulary.empty() )
+    {
+        state.validity.qualityMaskInfo = profile->qaVocabulary;
+        MergedValue qaMerged;
+        qaMerged.present = true;
+        qaMerged.value = profile->qaVocabulary;
+        qaMerged.kind = ClaimKind::Inferred;
+        qaMerged.sources = { std::string( "sensor_profile:" ) + profile->sensorKey };
+        appendClaim( state, "validity.quality_mask_info", qaMerged );
+        addNote( state, "validity.qa_from_sensor_profile", "validity.quality_mask_info",
+                 "QA vocabulary inferred from the sensor profile" );
     }
 }
 
@@ -852,6 +1097,34 @@ ResolveOutcome resolveAssetState( const StateResolutionInput &input )
     // ---- Radiometric ----
     if ( dataset )
         resolveRadiometric( state, *dataset, notes );
+
+    // ---- Geometry ----
+    if ( dataset )
+        resolveGeometry( state, *dataset );
+
+    // ---- Validity ----
+    resolveValidity( state, input, dataset );
+
+    // ---- Temporal (catalog collection references) ----
+    if ( catalog && !catalog->temporalRefs.empty() )
+    {
+        state.hasTemporalRefs = true;
+        state.temporalRefs = catalog->temporalRefs;
+        if ( state.temporalRefs.size() > kMaxPassportTemporalRefs )
+        {
+            const std::size_t original = state.temporalRefs.size();
+            state.temporalRefs.resize( kMaxPassportTemporalRefs );
+            state.temporalRefsTruncated = true;
+            addNote( state, "temporal.truncated", "temporal.refs",
+                     "temporal refs truncated from " + std::to_string( original ) + " to " +
+                         std::to_string( kMaxPassportTemporalRefs ) );
+        }
+        MergedValue refs;
+        refs.present = true;
+        refs.kind = ClaimKind::Known;
+        refs.sources = { "catalog:collection" };
+        appendClaim( state, "temporal.refs", refs );
+    }
 
     state.notes.insert( state.notes.end(), notes.begin(), notes.end() );
     normalizeState( state );

@@ -22,6 +22,7 @@
 
 #include "scientific_state/asset_state_types.h"
 
+#include <array>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,6 +83,24 @@ struct BandFacts
     MetadataItems metadata;
 };
 
+/// Raw geometry facts as observed from one source (the file itself). No
+/// derivation here: pixel size and extent are the resolver's job.
+/// A size is considered present iff width > 0 && height > 0.
+struct GeometryFacts
+{
+    bool hasCrs = false;
+    std::string crsWkt;
+    std::string crsAuthid;
+    bool crsGeographic = false;
+    bool crsProjected = false;
+
+    bool hasGeoTransform = false;
+    std::array<double, 6> geoTransform {};  // traditional GIS order, GDAL convention
+
+    int width = 0;
+    int height = 0;
+};
+
 /// Dataset-level structural facts (single-source: the file itself).
 struct DatasetFacts
 {
@@ -90,6 +109,7 @@ struct DatasetFacts
     int bandCount = 0;
     MetadataItems metadata;  // dataset-level items (SICNU_* keys, acquisition, ...)
     std::vector<BandFacts> bands;
+    GeometryFacts geometry;
 };
 
 /// Band-level mirror as recorded in the catalog structure snapshot.
@@ -117,6 +137,8 @@ struct CatalogFacts
     int structureBandCount = 0;
     std::vector<CatalogBandFacts> bands;
     MetadataItems metadata;  // e.g. registered platform/sensor/product metadata
+    /// Temporal collection references recorded by the catalog (declarative).
+    std::vector<TemporalStateRef> temporalRefs;
 };
 
 /// One band axis entry of a sensor profile (INFERENTIAL for a given file).
