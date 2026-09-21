@@ -126,6 +126,7 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
     cancelSnapshotJobs();
     std::string tempDirectory;
     std::vector<std::string> liveIds;
+    std::vector<std::string> snapshotRoots;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         mOptions = options;
@@ -155,6 +156,7 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
             liveIds.push_back( id );
         for ( const auto &entry : mSnapshotJobs )
             liveIds.push_back( entry.first );
+        snapshotRoots = mOptions.roots;
     }
     // WP3: reconcile snapshot residue left by a crashed/killed PREVIOUS
     // process (and by reconfiguration): dead staging, parked dests,
@@ -162,7 +164,7 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
     // bounded tree delete never holds the registry mutex. Same-pid
     // artifacts (a live capture/upgrade of this process) are never
     // touched — sweepPluginSnapshots owns that distinction.
-    sweepPluginSnapshots( tempDirectory, liveIds );
+    sweepPluginSnapshots( tempDirectory, liveIds, snapshotRoots );
     // Same reconcile for the PACKAGE staging root (<userRoot>/.staging): a
     // crashed swap that left the install dir missing is restored from its
     // parked .old backup here at startup rather than waiting for the next
@@ -853,7 +855,19 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
                               pluginId );
             return false;
         }
-        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        // Revoke and host-unload with the registry mutex DROPPED (#1156):
+        // PluginRuntimeHost::bootstrap holds the host mutex across
+        // configure() (which takes the registry mutex), so revoking under
+        // both is the header-documented AB-BA. The bookkeeping transitions
+        // stay atomic under one short critical section.
+        {
+            std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+            mHostProcessLoaded.erase(
+                std::remove( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId ),
+                mHostProcessLoaded.end() );
+            if ( PluginRecord *entry = record( pluginId ) )
+                entry->state = PluginState::Unloaded;
+        }
         if ( mSink && !gDestructing )
             mSink->revokePlugin( pluginId );
         if ( mHostProcessRuntime && !gDestructing )
@@ -865,11 +879,6 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
                                   "process was killed",
                                   pluginId );
         }
-        mHostProcessLoaded.erase(
-            std::remove( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId ),
-            mHostProcessLoaded.end() );
-        if ( PluginRecord *entry = record( pluginId ) )
-            entry->state = PluginState::Unloaded;
         return true;
     }
 
@@ -932,26 +941,34 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
         return false;
     }
 
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
-                                  [&]( const LoadedPlugin &entry ) {
-                                      return entry.pluginId == pluginId;
-                                  } );
-    if ( iterator == mLoaded.end() )
-        return true; // drained, then unloaded by a concurrent caller
-    // Revoke host-side contributions BEFORE dlclose: std::function targets,
-    // executors and providers created by the plugin must be released while
-    // its code is still mapped. The host closes its barrier entry here so
-    // stale adapters fail with a typed refusal instead of calling into
-    // unmapped code.
+    // Publish the removal first under one short critical section, then
+    // revoke + dlclose with the registry mutex DROPPED (#1156): the sink's
+    // revokePlugin takes the runtime host mutex, and bootstrap holds that
+    // host mutex across configure() (which takes the registry mutex) — the
+    // header-documented AB-BA. Contributions are still revoked BEFORE
+    // dlclose: std::function targets, executors and providers created by
+    // the plugin must be released while its code is still mapped, and the
+    // host closes its barrier entry here so stale adapters fail with a
+    // typed refusal instead of calling into unmapped code.
+    LoadedPlugin unloaded;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                      [&]( const LoadedPlugin &entry ) {
+                                          return entry.pluginId == pluginId;
+                                      } );
+        if ( iterator == mLoaded.end() )
+            return true; // drained, then unloaded by a concurrent caller
+        unloaded = std::move( *iterator );
+        mLoaded.erase( iterator );
+        if ( PluginRecord *entry = record( pluginId ) )
+            entry->state = PluginState::Unloaded;
+    }
     if ( mSink )
         mSink->revokePlugin( pluginId );
     if ( !mLoader )
         mLoader = std::make_unique<PluginLoader>();
-    mLoader->unload( *iterator, mDiagnostics );
-    mLoaded.erase( iterator );
-    if ( PluginRecord *entry = record( pluginId ) )
-        entry->state = PluginState::Unloaded;
+    mLoader->unload( unloaded, mDiagnostics );
     return true;
 }
 
@@ -1908,51 +1925,72 @@ void PluginRegistry::unloadAll()
             break;
     }
 
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    if ( !mLoader )
+    // #1156: revoke legs run with the registry mutex DROPPED (the header
+    // lock contract — the host mutex held across bootstrap's configure()
+    // must never be taken under this mutex). The removal bookkeeping and
+    // the entry capture happen under one short critical section per
+    // plugin; contributions are still revoked before each dlclose.
+    std::vector<LoadedPlugin> toUnload;
     {
-        // No native load ever happened; manifest-kind bookkeeping entries
-        // have no library to unload, but their sink contributions still
-        // need the revoke pass for symmetry.
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        if ( !mLoader )
+        {
+            // No native load ever happened; manifest-kind bookkeeping entries
+            // have no library to unload, but their sink contributions still
+            // need the revoke pass for symmetry.
+            for ( const std::string &id : ids )
+            {
+                auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                              [&]( const LoadedPlugin &entry ) {
+                                                  return entry.pluginId == id;
+                                              } );
+                if ( iterator == mLoaded.end() )
+                    continue;
+                toUnload.push_back( std::move( *iterator ) );
+                mLoaded.erase( iterator );
+                if ( PluginRecord *entry = record( id ) )
+                    entry->state = PluginState::Unloaded;
+            }
+        }
+        else
+        {
+            for ( const std::string &id : drained )
+            {
+                auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
+                                              [&]( const LoadedPlugin &entry ) {
+                                                  return entry.pluginId == id;
+                                              } );
+                if ( iterator == mLoaded.end() )
+                    continue;
+                toUnload.push_back( std::move( *iterator ) );
+                mLoaded.erase( iterator );
+                if ( PluginRecord *entry = record( id ) )
+                    entry->state = PluginState::Unloaded;
+            }
+        }
+    }
+    for ( LoadedPlugin &entry : toUnload )
+    {
+        if ( mSink && !gDestructing )
+            mSink->revokePlugin( entry.pluginId );
+        if ( mLoader )
+            mLoader->unload( entry, mDiagnostics );
+    }
+    std::vector<std::string> busyIds;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         for ( const std::string &id : ids )
         {
-            auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
-                                          [&]( const LoadedPlugin &entry ) {
-                                              return entry.pluginId == id;
-                                          } );
-            if ( iterator == mLoaded.end() )
-                continue;
-            if ( mSink && !gDestructing )
-                mSink->revokePlugin( id );
-            mLoaded.erase( iterator );
-            if ( PluginRecord *entry = record( id ) )
-                entry->state = PluginState::Unloaded;
+            const bool stillLoaded =
+                std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &entry ) {
+                    return entry.pluginId == id;
+                } ) != mLoaded.end();
+            if ( stillLoaded )
+                busyIds.push_back( id );
         }
-        return;
     }
-    for ( const std::string &id : drained )
+    for ( const std::string &id : busyIds )
     {
-        auto iterator = std::find_if( mLoaded.begin(), mLoaded.end(),
-                                      [&]( const LoadedPlugin &entry ) {
-                                          return entry.pluginId == id;
-                                      } );
-        if ( iterator == mLoaded.end() )
-            continue;
-        if ( mSink && !gDestructing )
-            mSink->revokePlugin( id );
-        mLoader->unload( *iterator, mDiagnostics );
-        mLoaded.erase( iterator );
-        if ( PluginRecord *entry = record( id ) )
-            entry->state = PluginState::Unloaded;
-    }
-    for ( const std::string &id : ids )
-    {
-        const bool stillLoaded =
-            std::find_if( mLoaded.begin(), mLoaded.end(), [&]( const LoadedPlugin &entry ) {
-                return entry.pluginId == id;
-            } ) != mLoaded.end();
-        if ( !stillLoaded )
-            continue;
         if ( mSink )
             mSink->cancelPluginDrain( id );
         if ( PluginRecord *entry = record( id ) )
