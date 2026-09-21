@@ -20,6 +20,8 @@ add_library( sicnu_agentbench STATIC
     invariants.h
     json_writer.cpp
     json_writer.h
+    report.cpp
+    report.h
     trace.cpp
     trace.h
     version.h

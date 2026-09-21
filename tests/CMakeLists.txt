@@ -11973,3 +11973,19 @@ set_target_properties(test_agentbench_evaluator PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_evaluator TEST_PREFIX "test_agentbench_evaluator::")
+
+# RS14 agent-benchmark Slice G: JSON + Markdown reports.
+add_executable(test_agentbench_report test_agentbench_report.cpp)
+target_link_libraries(test_agentbench_report PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_report)
+target_include_directories(test_agentbench_report PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_report PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_report TEST_PREFIX "test_agentbench_report::")
