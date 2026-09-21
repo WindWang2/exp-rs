@@ -210,6 +210,13 @@ class CacheStore
     std::atomic<std::uint64_t> diskHits{ 0 };
     std::atomic<std::uint64_t> retriedFetches{ 0 };
     std::atomic<std::uint64_t> maxCachedBytes{ 0 };
+    // 13.0 maintenance telemetry (see RangeCacheTelemetry).
+    std::atomic<std::uint64_t> fetchAttempts{ 0 };
+    std::atomic<std::uint64_t> backoffWaits{ 0 };
+    std::atomic<std::uint64_t> admissionWaits{ 0 };
+    std::atomic<std::uint64_t> cancelledFetches{ 0 };
+    std::atomic<std::uint64_t> ttlExpirations{ 0 };
+    std::atomic<std::uint64_t> ttlRefreshes{ 0 };
 
     // ── 9.0 global fetch admission ─────────────────────────────────────────
     // Bounds the bytes concurrently in flight across all ranged GETs. The
@@ -218,13 +225,22 @@ class CacheStore
     // only until other resources' fetches drain. A request larger than the
     // cap is admitted when NOTHING else is in flight (head-of-line, no
     // starvation).
+    // 13.0: the admission scope is ONE ORIGIN TRANSFER (one attempt of a
+    // ranged GET) — a retry's backoff sleep runs with the slot released,
+    // so the cap bounds bytes on the wire, never patience.
     void admitFetch( std::uint64_t requestedBytes, std::uint64_t cap )
     {
       if ( cap == 0 )
         return; // unlimited
       std::unique_lock<std::mutex> lock( mAdmissionMutex );
+      bool waited = false;
       while ( mInFlightBytes > 0 && mInFlightBytes + requestedBytes > cap )
+      {
+        waited = true;
         mAdmissionCv.wait( lock );
+      }
+      if ( waited )
+        admissionWaits.fetch_add( 1 );
       mInFlightBytes += requestedBytes;
       // Track the observed peak against the declared bound.
       std::uint64_t current = mInFlightBytes;
@@ -260,10 +276,13 @@ class CacheStore
     /// True when the entry's identity proof is older than the TTL (seconds;
     /// 0 = never expires). Read under the store lock for a consistent
     /// decision against a concurrent re-probe.
-    /// 12.0: refreshes the TTL basis after a successful revalidation.
+    /// 12.0: refreshes the TTL basis after a successful revalidation (13.0:
+    /// counted — the refresh rate is the observable cost of the stat/read
+    /// trust horizon).
     void touchEntryProven( const std::shared_ptr<ResourceEntry> &entry )
     {
       entry->provenAtMs.store( steadyNowMs() );
+      ttlRefreshes.fetch_add( 1 );
     }
 
     bool entryExpired( const std::shared_ptr<ResourceEntry> &entry, int ttlSeconds )
@@ -272,7 +291,10 @@ class CacheStore
         return false;
       std::lock_guard<std::mutex> lock( mMutex );
       const std::int64_t ageMs = steadyNowMs() - entry->provenAtMs.load();
-      return ageMs > static_cast<std::int64_t>( ttlSeconds ) * 1000;
+      const bool expired = ageMs > static_cast<std::int64_t>( ttlSeconds ) * 1000;
+      if ( expired )
+        ttlExpirations.fetch_add( 1 );
+      return expired;
     }
 
     std::shared_ptr<ResourceEntry> findResource( const std::string &key )
@@ -375,19 +397,32 @@ class CacheStore
     /// inherits it. Unknown resources are a no-op only for resume.
     void setFetchCancelled( const std::string &key, bool cancelled )
     {
-      std::lock_guard<std::mutex> lock( mMutex );
+      {
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( cancelled )
+        {
+          mCancelledFetches.insert( key );
+          const auto it = mResources.find( key );
+          if ( it != mResources.end() )
+            it->second->fetchCancelled.store( true );
+        }
+        else
+        {
+          mCancelledFetches.erase( key );
+          const auto it = mResources.find( key );
+          if ( it != mResources.end() )
+            it->second->fetchCancelled.store( false );
+        }
+      }
       if ( cancelled )
       {
-        mCancelledFetches.insert( key );
-        const auto it = mResources.find( key );
-        if ( it != mResources.end() )
-          it->second->fetchCancelled.store( true );
-        return;
+        // 13.0: wake every backoff sleeper — each rechecks its own entry's
+        // flag. The backoff mutex is held across the notify so a sleeper's
+        // predicate-check → wait transition cannot miss the wake (the flag
+        // store above already happened; the notify is what it waits for).
+        std::lock_guard<std::mutex> lock( mBackoffMutex );
+        mBackoffCv.notify_all();
       }
-      mCancelledFetches.erase( key );
-      const auto it = mResources.find( key );
-      if ( it != mResources.end() )
-        it->second->fetchCancelled.store( false );
     }
 
     bool fetchCancelled( const std::shared_ptr<ResourceEntry> &entry )
@@ -395,6 +430,22 @@ class CacheStore
       // The flag lives on the entry (shared ownership keeps it alive); the
       // store lock is not needed for an atomic load.
       return entry->fetchCancelled.load();
+    }
+
+    /// 13.0 retry backoff: sleeps up to \a delayMs with NO admission slot
+    /// held, waking early when the entry's cancel veto lands. Returns true
+    /// when the veto fired (the caller aborts the retry into the fallback).
+    /// One CV serves every entry: a cancel of any resource wakes all
+    /// sleepers and each rechecks its own flag — spurious wakes are cheap
+    /// and rare (sleeps are short, cancels rarer).
+    bool waitBackoffOrCancelled( const std::shared_ptr<ResourceEntry> &entry,
+                                 std::uint64_t delayMs )
+    {
+      if ( entry->fetchCancelled.load() )
+        return true;
+      std::unique_lock<std::mutex> lock( mBackoffMutex );
+      return mBackoffCv.wait_for( lock, std::chrono::milliseconds( delayMs ),
+                                  [ &entry ] { return entry->fetchCancelled.load(); } );
     }
 
     void dropAll()
@@ -778,6 +829,12 @@ class CacheStore
     std::mutex mAdmissionMutex;
     std::condition_variable mAdmissionCv;
     std::uint64_t mInFlightBytes = 0;
+
+    // 13.0 cancel-aware backoff: a dedicated mutex for the sleep CV so the
+    // notifier can hold it across notify_all() (closing the predicate-check
+    // → wait race) without touching the store/admission lock order.
+    std::mutex mBackoffMutex;
+    std::condition_variable mBackoffCv;
   };
 
 std::unique_ptr<CacheStore> g_store;
@@ -792,6 +849,24 @@ CacheStore &store()
     g_store = std::make_unique<CacheStore>();
   return *g_store;
 }
+
+/// RAII for the global in-flight byte admission (9.0 gate). The slot
+/// covers exactly ONE origin transfer — a retry's backoff sleep runs with
+/// nothing held so other fetches can be admitted (13.0 D-1301).
+struct InFlightAdmission
+{
+  CacheStore &cache;
+  std::uint64_t bytes;
+  std::uint64_t cap;
+  InFlightAdmission( CacheStore &c, std::uint64_t b, std::uint64_t cp )
+    : cache( c ), bytes( b ), cap( cp )
+  {
+    cache.admitFetch( bytes, cap );
+  }
+  ~InFlightAdmission() { cache.completeFetch( bytes, cap ); }
+  InFlightAdmission( const InFlightAdmission & ) = delete;
+  InFlightAdmission &operator=( const InFlightAdmission & ) = delete;
+};
 
 /// Coalesced ranged fetch of [start,end) — a SINGLE attempt. Returns the
 /// bytes actually read (may be shorter at EOF). Throws GeoError on
@@ -902,16 +977,33 @@ std::vector<unsigned char> fetchRangeOnce( const std::string &requestUrl, std::u
 /// refused or unsupported answer would fail identically on every attempt.
 /// The sleep is bounded (base << attempt, capped) and the attempt count is
 /// clamped, so a hostile origin cannot pin a reader forever.
+/// 13.0: the in-flight admission covers ONE attempt — it is released
+/// BEFORE the backoff sleep, so the global byte cap bounds wire bytes and
+/// a sleeping retry blocks nobody (fairness: re-admission queues through
+/// the same gate). The sleep itself is cancel-aware: a veto that lands
+/// during backoff wakes the retry promptly instead of waiting it out.
 std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint64_t start,
                                        std::uint64_t endExclusive, const RangeCacheConfig &config,
-                                       CacheStore *telemetryStore = nullptr )
+                                       CacheStore &cache,
+                                       const std::shared_ptr<ResourceEntry> &entry )
 {
   const int attempts =
     config.fetchAttempts < 1 ? 1 : ( config.fetchAttempts > 8 ? 8 : config.fetchAttempts );
   for ( int attempt = 1;; ++attempt )
   {
+    // A veto that landed between attempts starts no new origin fetch —
+    // the read degrades to the fallback exactly like a pre-fetch veto.
+    if ( cache.fetchCancelled( entry ) )
+    {
+      cache.cancelledFetches.fetch_add( 1 );
+      throw GeoError( ErrorCode::Cancelled,
+                      "range_cache: fetch vetoed before an attempt" );
+    }
     try
     {
+      InFlightAdmission admission( cache, endExclusive - start,
+                                   config.maxConcurrentFetchBytes );
+      cache.fetchAttempts.fetch_add( 1 );
       return fetchRangeOnce( requestUrl, start, endExclusive, config );
     }
     catch ( const GeoError &error )
@@ -932,8 +1024,7 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
                              !refused4xx;
       if ( !retryable || attempt >= attempts )
         throw;
-      if ( telemetryStore != nullptr )
-        telemetryStore->retriedFetches.fetch_add( 1 );
+      cache.retriedFetches.fetch_add( 1 );
       const int baseMs = config.retryBackoffBaseMs > 0 ? config.retryBackoffBaseMs : 0;
       const int capMs = config.retryBackoffMaxMs > 0 ? config.retryBackoffMaxMs : 0;
       std::uint64_t delayMs = 0;
@@ -945,7 +1036,17 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
           delayMs = static_cast<std::uint64_t>( capMs );
       }
       if ( delayMs > 0 )
-        std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
+      {
+        // The admission from the failed attempt is already released (its
+        // RAII ended with the catch) — the sleep holds no origin slot.
+        cache.backoffWaits.fetch_add( 1 );
+        if ( cache.waitBackoffOrCancelled( entry, delayMs ) )
+        {
+          cache.cancelledFetches.fetch_add( 1 );
+          throw GeoError( ErrorCode::Cancelled,
+                          "range_cache: fetch cancelled during retry backoff" );
+        }
+      }
     }
   }
 }
@@ -1272,33 +1373,31 @@ class RangeCacheHandle final : public VSIVirtualHandle
       // fetch — the reader degrades to the direct fallback (the correctness
       // gate), and no cancelled bytes can ever be published.
       if ( cache.fetchCancelled( mEntry ) )
+      {
+        cache.cancelledFetches.fetch_add( 1 );
         return fallbackRead( destination, position, fetchEnd - position );
+      }
 
       std::vector<unsigned char> bytes;
       try
       {
-        // Global in-flight byte bound (9.0): admit before the ranged GET,
-        // release after — the gate never holds the store lock and waits
-        // only for other resources' fetches to drain. 12.0 note: the guard
-        // spans the WHOLE fetchRange call INCLUDING its backoff sleeps — a
-        // retrying fetch keeps its reservation (bounded by fetchAttempts ×
-        // backoff cap), trading admission fairness for simplicity.
-        struct InFlightAdmission
+        // 13.0: the in-flight byte admission covers ONE origin transfer.
+        // For the HTTP path the guard lives INSIDE fetchRange — per attempt,
+        // released before every backoff sleep — so a retrying fetch holds no
+        // origin slot while it waits (the byte cap bounds wire bytes, not
+        // patience; retry fairness stays bounded by fetchAttempts).
+        if ( mEntry->vsiObject )
         {
-          CacheStore &cache;
-          std::uint64_t bytes;
-          std::uint64_t cap;
-          InFlightAdmission( CacheStore &c, std::uint64_t b, std::uint64_t cp )
-            : cache( c ), bytes( b ), cap( cp )
-          {
-            cache.admitFetch( bytes, cap );
-          }
-          ~InFlightAdmission() { cache.completeFetch( bytes, cap ); }
-        } admission( cache, fetchEnd - fetchStart, config.maxConcurrentFetchBytes );
-
-        bytes = mEntry->vsiObject
-                  ? fetchRangeVsi( mEntry->vsiPath, fetchStart, fetchEnd )
-                  : fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config, &cache );
+          // The VSI path has no retry loop: its single transfer admits here.
+          InFlightAdmission admission( cache, fetchEnd - fetchStart,
+                                       config.maxConcurrentFetchBytes );
+          bytes = fetchRangeVsi( mEntry->vsiPath, fetchStart, fetchEnd );
+        }
+        else
+        {
+          bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config,
+                              cache, mEntry );
+        }
       }
       catch ( const GeoError & )
       {
@@ -1313,7 +1412,10 @@ class RangeCacheHandle final : public VSIVirtualHandle
       // fallback read answers this reader; a later resumeFetches()
       // re-enables caching honestly.
       if ( cache.fetchCancelled( mEntry ) )
+      {
+        cache.cancelledFetches.fetch_add( 1 );
         return fallbackRead( destination, position, fetchEnd - position );
+      }
       if ( bytes.empty() )
         return fallbackRead( destination, position, fetchEnd - position );
       cache.coalescedFetches.fetch_add( 1 );
@@ -1382,6 +1484,109 @@ class RangeCacheHandle final : public VSIVirtualHandle
 };
 
 // ---------------------------------------------------------------------------
+// applyTrustPolicy — the shared Open/Stat trust horizon (13.0).
+// ---------------------------------------------------------------------------
+//
+// One implementation answers both "open for read" and "stat for metadata",
+// so a cached entry can never be fresh enough to read yet stale enough to
+// misreport. Ordered contract:
+//   1. TTL: an entry past entryTtlSeconds is dropped first — the declared
+//      trust horizon applies regardless of the stale policy, and the
+//      caller re-proves the resource from scratch (fresh identity, fresh
+//      provenAtMs basis).
+//   2. Stale policy: RevalidateOnOpen re-proves against the ORIGIN (a VSI
+//      HEAD for object entries, a conditional request for http) — Changed
+//      invalidates and returns nullptr so the caller's normal probe path
+//      re-proves uniformly; Unchanged refreshes the size and the TTL
+//      basis; Inconclusive (offline, weak validators) keeps the entry —
+//      the caller's declared trust level. ValidateOnce / TrustForever
+//      add no origin traffic at all.
+// The Unchanged/Inconclusive arms cost at most ONE identity request per
+// call; a proven-Changed entry additionally re-probes once through the
+// caller's normal no-entry path — no storm beyond what a cold Open paid
+// (D-1303).
+std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::string &key,
+                                                 const std::string &requestUrl,
+                                                 const std::string &vsiPath,
+                                                 const std::string &credentialContext,
+                                                 const RangeCacheConfig &config )
+{
+  std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
+  if ( entry != nullptr && cache.entryExpired( entry, config.entryTtlSeconds ) )
+  {
+    cache.invalidate( key );
+    entry = nullptr;
+  }
+  if ( entry == nullptr || config.stalePolicy != RangeCacheStalePolicy::RevalidateOnOpen )
+    return entry;
+
+  if ( !vsiPath.empty() )
+  {
+    // Object entries revalidate through the same VSI-stack HEAD that
+    // created them: a strong-ETag mismatch drops the blocks, an
+    // unprovable answer (offline, weak) is inconclusive and keeps
+    // serving — the caller's declared trust level.
+    const VsiObjectIdentityFacts facts = probeVsiObjectIdentity( vsiPath );
+    // Identity fields are rewritten under the store lock by the probe
+    // paths — read them through the same snapshot discipline the http
+    // arm uses, or a racing getOrCreateVsiObject can tear a std::string
+    // read here into UB / a phantom etag mismatch.
+    const RemoteSourceIdentity storedIdentity = cache.snapshotIdentity( entry );
+    if ( facts.provable() && storedIdentity.validator.hasStrongEtag() &&
+         facts.etag != storedIdentity.validator.etag )
+    {
+      cache.invalidate( key );
+      entry = cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
+                                          vsiObjectIdentity( vsiPath, facts ) );
+    }
+    else
+    {
+      if ( facts.hasSize )
+        cache.updateEntrySize( entry, facts.sizeBytes );
+      // A provable HEAD with a matching strong ETag is the VSI
+      // equivalent of the http Unchanged outcome — refresh the TTL
+      // basis the same way, or an actively re-proven object still ages
+      // out on wall clock (entryTtlSeconds counts from last proof).
+      if ( facts.provable() && storedIdentity.validator.hasStrongEtag() )
+        cache.touchEntryProven( entry );
+    }
+    return entry;
+  }
+
+  // Revalidate against the ENTRY'S stored validators — a fresh probe
+  // would always compare equal to itself and never see a change.
+  cache.revalidations.fetch_add( 1 );
+  RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
+    cache.snapshotIdentity( entry ), requestUrl );
+  const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
+  if ( result.outcome == RevalidationOutcome::Changed )
+  {
+    // The cached identity is proven stale: invalidate and let the
+    // caller's normal no-entry path re-probe (identity, telemetry, and
+    // quiet-miss handling then live in exactly one place).
+    cache.invalidate( key );
+    return nullptr;
+  }
+  if ( result.outcome == RevalidationOutcome::Unchanged )
+  {
+    // Only refresh the size when the revalidation answer actually
+    // carried one: an Unchanged verdict never implies a known size
+    // (a 304 has no entity headers), and writing a fabricated size 0
+    // would collapse every later read to EOF.
+    if ( validator.identity().hasSize )
+      cache.updateEntrySize( entry, validator.identity().sizeBytes );
+    // The origin just re-proved the content (12.0): that refreshes
+    // the TTL basis too — an actively-revalidated resource is not
+    // aged out by wall-clock time alone.
+    cache.touchEntryProven( entry );
+  }
+  // Inconclusive (offline, size-only origins): keep serving — this is
+  // the caller's declared trust level, and the revalidation attempt is
+  // visible in telemetry.
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
 // RangeCacheFilesystemHandler — the /vsirangecache/ prefix.
 // ---------------------------------------------------------------------------
 
@@ -1428,67 +1633,11 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 
       // Identity: probe once, then revalidate per the declared policy. A
       // validator mismatch invalidates the resource's cached bytes.
-      // 12.0: an entry past its declared TTL is dropped FIRST — the trust
-      // horizon applies regardless of the stale policy, and the open
-      // re-proves the resource from scratch (fresh identity, fresh blocks).
-      std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
-      if ( entry != nullptr && cache.entryExpired( entry, config.entryTtlSeconds ) )
-      {
-        cache.invalidate( key );
-        entry = nullptr;
-      }
-      if ( entry != nullptr && config.stalePolicy == RangeCacheStalePolicy::RevalidateOnOpen )
-      {
-        if ( vsiObject )
-        {
-          // Object entries revalidate through the same VSI-stack HEAD that
-          // created them: a strong-ETag mismatch drops the blocks, an
-          // unprovable answer (offline, weak) is inconclusive and keeps
-          // serving — the caller's declared trust level.
-          const VsiObjectIdentityFacts facts = probeVsiObjectIdentity( vsiPath );
-          if ( facts.provable() && entry->identity.validator.hasStrongEtag() &&
-               facts.etag != entry->identity.validator.etag )
-          {
-            cache.invalidate( key );
-            entry = cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
-                                                vsiObjectIdentity( vsiPath, facts ) );
-          }
-          else if ( facts.hasSize )
-            cache.updateEntrySize( entry, facts.sizeBytes );
-        }
-        else
-        {
-          // Revalidate against the ENTRY'S stored validators — a fresh probe
-          // would always compare equal to itself and never see a change.
-          cache.revalidations.fetch_add( 1 );
-          RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
-            cache.snapshotIdentity( entry ), requestUrl );
-          const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
-          if ( result.outcome == RevalidationOutcome::Changed )
-          {
-            cache.invalidate( key );
-            entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
-            if ( entry == nullptr )
-              return nullptr;
-          }
-          else if ( result.outcome == RevalidationOutcome::Unchanged )
-          {
-            // Only refresh the size when the revalidation answer actually
-            // carried one: an Unchanged verdict never implies a known size
-            // (a 304 has no entity headers), and writing a fabricated size 0
-            // would collapse every later read to EOF.
-            if ( validator.identity().hasSize )
-              cache.updateEntrySize( entry, validator.identity().sizeBytes );
-            // The origin just re-proved the content (12.0): that refreshes
-            // the TTL basis too — an actively-revalidated resource is not
-            // aged out by wall-clock time alone.
-            cache.touchEntryProven( entry );
-          }
-          // Inconclusive (offline, size-only origins): keep serving — this is
-          // the caller's declared trust level, and the revalidation attempt is
-          // visible in telemetry.
-        }
-      }
+      // 12.0/13.0: the TTL horizon and the stale policy share ONE
+      // implementation with Stat (applyTrustPolicy) — an expired entry is
+      // dropped first and the open re-proves the resource from scratch.
+      std::shared_ptr<ResourceEntry> entry =
+        applyTrustPolicy( cache, key, requestUrl, vsiPath, credentialContext, config );
       if ( entry == nullptr )
       {
         if ( vsiObject )
@@ -1538,10 +1687,10 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       if ( !underlyingUrl( pszFilename, requestUrl, reason, &vsiPath ) )
         return -1;
       const bool vsiObject = !vsiPath.empty();
-      const std::string key = vsiObject
-                                ? objectResourceKey( vsiPath,
-                                                     currentRangeCacheCredentialContext() )
-                                : resourceKey( requestUrl );
+      const std::string credentialContext = vsiObject ? currentRangeCacheCredentialContext()
+                                                      : std::string();
+      const std::string key = vsiObject ? objectResourceKey( vsiPath, credentialContext )
+                                        : resourceKey( requestUrl );
       CacheStore &cache = store();
       // Config and entry size under the store lock (P1 remediation
       // discipline): updateConfig() / updateEntrySize() write these fields
@@ -1549,7 +1698,13 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       // copies so Stat never reads a racing live field.
       std::uint64_t statConfigGeneration = 0;
       const RangeCacheConfig config = cache.snapshotConfig( statConfigGeneration );
-      std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
+      // 13.0: Stat answers from the SAME trust horizon as Open — an entry
+      // past its TTL is re-proven, and RevalidateOnOpen revalidates
+      // (unchanged → refreshed horizon; changed → invalidate + the normal
+      // probe path; inconclusive → declared trust level). One conditional
+      // request per stat at most — no extra storm beyond what Open pays.
+      std::shared_ptr<ResourceEntry> entry =
+        applyTrustPolicy( cache, key, requestUrl, vsiPath, credentialContext, config );
       std::uint64_t sizeBytes = 0;
       bool haveSize = entry != nullptr && cache.entrySize( entry, sizeBytes );
       if ( entry == nullptr || !haveSize )
@@ -1567,7 +1722,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
             return -1;
           }
           entry = cache.getOrCreateVsiObject( key, vsiPath,
-                                              currentRangeCacheCredentialContext(),
+                                              credentialContext,
                                               vsiObjectIdentity( vsiPath, facts ) );
           haveSize = true;
           sizeBytes = facts.sizeBytes;
@@ -1689,6 +1844,14 @@ Json::Value RangeCacheTelemetry::toJson() const
   json["max_in_flight_fetch_bytes"] = static_cast<Json::UInt64>( maxInFlightFetchBytes );
   json["retried_fetches"] = static_cast<Json::UInt64>( retriedFetches );
   json["max_cached_bytes"] = static_cast<Json::UInt64>( maxCachedBytes );
+  // 13.0 maintenance observability: retry occupancy, admission contention,
+  // cancel-veto outcomes, and the TTL trust horizon.
+  json["fetch_attempts"] = static_cast<Json::UInt64>( fetchAttempts );
+  json["backoff_waits"] = static_cast<Json::UInt64>( backoffWaits );
+  json["admission_waits"] = static_cast<Json::UInt64>( admissionWaits );
+  json["cancelled_fetches"] = static_cast<Json::UInt64>( cancelledFetches );
+  json["ttl_expirations"] = static_cast<Json::UInt64>( ttlExpirations );
+  json["ttl_refreshes"] = static_cast<Json::UInt64>( ttlRefreshes );
   // 9.0 read amplification: origin bytes pulled per byte served. 0 when
   // nothing was served yet (no denominator — never fabricate a ratio).
   json["read_amplification"] =
@@ -1843,6 +2006,12 @@ Json::Value RemoteRangeCache::telemetryJson()
   telemetry.maxInFlightFetchBytes = g_store->maxInFlightBytes.load();
   telemetry.retriedFetches = g_store->retriedFetches.load();
   telemetry.maxCachedBytes = g_store->maxCachedBytes.load();
+  telemetry.fetchAttempts = g_store->fetchAttempts.load();
+  telemetry.backoffWaits = g_store->backoffWaits.load();
+  telemetry.admissionWaits = g_store->admissionWaits.load();
+  telemetry.cancelledFetches = g_store->cancelledFetches.load();
+  telemetry.ttlExpirations = g_store->ttlExpirations.load();
+  telemetry.ttlRefreshes = g_store->ttlRefreshes.load();
   Json::Value json = telemetry.toJson();
   json["cached_bytes"] = static_cast<Json::UInt64>( g_store->cachedBytes() );
   json["max_cached_bytes"] = static_cast<Json::UInt64>( g_store->maxCachedBytes.load() );

@@ -351,6 +351,36 @@ void WorkflowRun::setWorkflowId( const std::string &id )
   touchLocked();
 }
 
+int WorkflowRun::attempt() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_attempt;
+}
+
+void WorkflowRun::setAttempt( int attempt )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  if ( attempt < 1 || attempt > kMaxRunAttempt )
+    return; // a corrupt lineage counter is refused, never clamped into service
+  m_attempt = attempt;
+  touchLocked();
+}
+
+const std::string &WorkflowRun::resumeOf() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_resumeOf;
+}
+
+void WorkflowRun::setResumeOf( const std::string &runId )
+{
+  if ( !runId.empty() && !isValidRunId( runId ) )
+    return; // resumeOf names another run's checkpoint; keep it filename-safe
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_resumeOf = runId;
+  touchLocked();
+}
+
 WorkflowRunState WorkflowRun::state() const
 {
   std::lock_guard<std::mutex> lock( m_mutex );
@@ -571,6 +601,13 @@ Json::Value WorkflowRun::toJson() const
   root["version"] = kWorkflowRunSerializationVersion;
   root["runId"] = m_runId;
   root["workflowId"] = m_workflowId;
+  // Lineage envelope (Track 13): the user identity stays in runId, the
+  // system attempt lineage lives in explicit fields — never encoded into the
+  // id string. resumeOf is written only for a temporary resume submission so
+  // an ordinary run's payload stays free of the field.
+  root["attempt"] = m_attempt;
+  if ( !m_resumeOf.empty() )
+    root["resumeOf"] = m_resumeOf;
   root["state"] = workflowRunStateToString( m_state );
   root["errorMessage"] = m_errorMessage;
   root["progress"] = m_progress;
@@ -608,10 +645,13 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
     error = "Invalid checkpoint: missing serialization version";
     return nullptr;
   }
-  if ( json["version"].asInt() != kWorkflowRunSerializationVersion )
+  const int version = json["version"].asInt();
+  if ( version != kWorkflowRunSerializationVersionLegacy
+       && version != kWorkflowRunSerializationVersion )
   {
-    error = "Unsupported checkpoint version " + std::to_string( json["version"].asInt() )
-            + " (expected " + std::to_string( kWorkflowRunSerializationVersion ) + ")";
+    error = "Unsupported checkpoint version " + std::to_string( version )
+            + " (expected " + std::to_string( kWorkflowRunSerializationVersionLegacy )
+            + " or " + std::to_string( kWorkflowRunSerializationVersion ) + ")";
     return nullptr;
   }
 
@@ -637,6 +677,44 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
   auto run = std::make_unique<WorkflowRun>();
 
   run->m_runId = json["runId"].asString();
+
+  // Lineage envelope (Track 13): a version-1 payload carries none and
+  // migrates to attempt=1 with no resumeOf. A PRESENT attempt must be a
+  // sane positive integer and a present resumeOf must name a filename-safe
+  // run — anything else is corrupt and refused, because the election groups
+  // checkpoints by this declared lineage.
+  run->m_attempt = 1;
+  if ( json.isMember( "attempt" ) )
+  {
+    if ( !json["attempt"].isInt() )
+    {
+      error = "Invalid checkpoint: attempt must be an integer";
+      return nullptr;
+    }
+    const int attempt = json["attempt"].asInt();
+    if ( attempt < 1 || attempt > kMaxRunAttempt )
+    {
+      error = "Invalid checkpoint: attempt out of range (" + std::to_string( attempt ) + ")";
+      return nullptr;
+    }
+    run->m_attempt = attempt;
+  }
+  if ( json.isMember( "resumeOf" ) )
+  {
+    if ( !json["resumeOf"].isString() )
+    {
+      error = "Invalid checkpoint: resumeOf must be a string";
+      return nullptr;
+    }
+    const std::string resumeOf = json["resumeOf"].asString();
+    if ( !resumeOf.empty() && !isValidRunId( resumeOf ) )
+    {
+      error = "Invalid checkpoint: unsafe resumeOf '" + resumeOf + "'";
+      return nullptr;
+    }
+    run->m_resumeOf = resumeOf;
+  }
+
   if ( json.isMember( "workflowId" ) && json["workflowId"].isString() )
     run->m_workflowId = json["workflowId"].asString();
   if ( json.isMember( "state" ) && json["state"].isString() )

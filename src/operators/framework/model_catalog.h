@@ -396,12 +396,34 @@ struct ModelEnsembleMemberContract
   double weight = 1.0;    ///< Combination weight, finite and >= 0
 };
 
+/// Detection fusion contract (manifest `ensemble.detection`, Platform 13.0).
+/// Meaningful only under combination "wbf" (Weighted Boxes Fusion over the
+/// members' decoded boxes — see detection_fusion.h / ADR 0171).
+struct ModelEnsembleDetectionContract
+{
+  /// Cluster-match IoU in (0, 1]: a box joins the same-class cluster whose
+  /// current fused representative has the best IoU with it, when that IoU is
+  /// strictly greater than this threshold.
+  double iouThreshold = 0.55;
+  /// Raw-confidence gate in [0, 1) applied BEFORE fusion (the ensemble's
+  /// calibration knob — a box below it never enters a cluster).
+  double skipBoxThreshold = 0.0;
+
+  /// Range validation (empty = ok).
+  std::string validate() const;
+  /// True when every field still carries its documented default (a declared
+  /// block with only defaults is legal and silent).
+  bool isDefault() const;
+};
+
 /// Model ensemble contract (manifest `ensemble` section). A manifest that
 /// declares it IS an ensemble model: it has no weights of its own — the
 /// members' manifests carry the artifacts — and execution runs every member
-/// through the same tile inference engine, then combines their probability
-/// stacks into ONE product (raster tasks; detection/scene-classification
-/// ensembles are typed refusals, never silent misreads).
+/// through the same engine, then combines the member products into ONE
+/// product: raster probability stacks (weighted_mean / weighted_vote), scene
+/// classification probability vectors (weighted_mean / weighted_vote), or
+/// detection boxes (wbf — Weighted Boxes Fusion, ADR 0171). Temporal /
+/// multi-feed members stay typed refusals, never silent misreads.
 ///
 /// Combination vocabulary:
 ///  - "weighted_mean" (default): out_c = Σ w·p_c / Σ w — requires every
@@ -411,11 +433,16 @@ struct ModelEnsembleMemberContract
 ///    (ties resolve to the LOWEST class index — deterministic). Publishes a
 ///    label raster (Byte ≤255 classes, else UInt16), not a probability stack.
 ///  - "mean": equal-weight alias of "weighted_mean".
+///  - "wbf": detection ensembles only — Weighted Boxes Fusion over the
+///    members' decoded boxes (see ModelEnsembleDetectionContract). A "wbf"
+///    manifest on a non-detection request, and a detection request on a
+///    non-"wbf" ensemble, are both typed refusals.
 ///
 /// Uncertainty vocabulary (the extra band appended to the product):
 ///  - "auto" (default): "variance" under weighted_mean (weighted per-class
-///    variance of the members around the combined mean) or "agreement" under
-///    weighted_vote (the winning class' accumulated vote share in [0,1]).
+///    variance of the members around the combined mean), "agreement" under
+///    weighted_vote (the winning class' accumulated vote share in [0,1]), or
+///    no band under "wbf" (a fused box set carries no per-pixel uncertainty).
 ///  - "none": no extra band.
 ///  - "variance" / "agreement": explicit; a token that contradicts the
 ///    combination is a manifest error.
@@ -425,12 +452,29 @@ struct ModelEnsembleContract
   std::vector<ModelEnsembleMemberContract> members;
   std::string combination;     ///< "" = "weighted_mean"
   std::string uncertainty;     ///< "" = "auto"
+  /// Detection fusion contract (manifest `ensemble.detection`; meaningful only
+  /// under combination "wbf"). Declared with non-default values under another
+  /// combination is a manifest error — an ignored knob must be loud.
+  ModelEnsembleDetectionContract detection;
+  /// Bounded member-execution budget (manifest `ensemble.max_concurrent_members`,
+  /// 1..16). 0 = auto = min(memberCount, 4) — the budget bounds CONCURRENCY
+  /// only; the VRAM ledger stays the device-memory admission authority.
+  int maxConcurrentMembers = 0;
+  /// Staging compression for the ensemble's own combine stage (manifest
+  /// `ensemble.staging_compression`): "" = "deflate" (default — the published
+  /// product is what the user keeps), "none", "deflate". Member stacks keep
+  /// the tile engine's own writer.
+  std::string stagingCompression;
 
   /// Vocabulary + range validation (empty string = ok). Does NOT resolve
   /// member references — those are checked against the loaded catalog.
   std::string validate() const;
   /// Effective combination token ("" → "weighted_mean").
   std::string effectiveCombination() const;
+  /// Effective member-execution budget (0 → auto = min(members, 4)).
+  int effectiveMaxConcurrentMembers() const;
+  /// True when the combine stage is written compressed (default).
+  bool stagingCompressed() const;
 };
 
 /**

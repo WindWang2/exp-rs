@@ -463,9 +463,20 @@ long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPi
 
 long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad )
 {
+    return startTrackedPipeline( def, autoLoad, std::string() );
+}
+
+long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def, bool autoLoad,
+                                                   const std::string &resumeOf )
+{
     std::shared_ptr<WorkflowRun> run = WorkflowRun::createFromDefinition( def );
     if ( !run )
         return -1;
+    // Lineage envelope (Track 13): stamped BEFORE the first persist so even a
+    // crash right after that persist leaves a checkpoint whose declared
+    // lineage groups it with the run it resumes.
+    if ( !resumeOf.empty() )
+        run->setResumeOf( resumeOf );
     run->transitionTo( WorkflowRunState::Ready );
     run->transitionTo( WorkflowRunState::Running );
 
@@ -1134,7 +1145,9 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
 
     if ( !run->transitionTo( WorkflowRunState::Running ) )
         run->forceSetState( WorkflowRunState::Running );
-    const long pipelineId = startTrackedPipeline( remaining, /*autoLoad=*/true );
+    // The submission is a TEMPORARY run whose envelope names this run, so a
+    // crash-leftover ghost is elected against the original (Track 13).
+    const long pipelineId = startTrackedPipeline( remaining, /*autoLoad=*/true, runId );
     if ( pipelineId < 0 )
     {
         run->forceSetState( WorkflowRunState::Failed );
@@ -1286,6 +1299,11 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             }
         }
     }
+    // Lineage envelope (Track 13): the swapped-in original carries the whole
+    // lineage under one runId; the explicit attempt counter records how many
+    // resume attempts have run. Incremented BEFORE the persists below so the
+    // next checkpoint stamps the new attempt, not the resumed-from one.
+    run->setAttempt( run->attempt() + 1 );
     for ( PersistRequest &persist : swapPersists )
         persistRun( std::move( persist ) );
     return pipelineId;

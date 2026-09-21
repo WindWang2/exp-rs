@@ -692,7 +692,9 @@ void PluginHostProcessSession::killProcess( const char *reason )
             ::kill( static_cast<pid_t>( -mProcessGroupId ), SIGKILL );
         ::kill( pid, SIGKILL );
         int status = 0;
-        ::waitpid( pid, &status, 0 );
+        while ( ::waitpid( pid, &status, 0 ) < 0 && errno == EINTR )
+        {
+        }
         mProcessHandle = nullptr;
         mProcessGroupId = -1;
     }
@@ -799,6 +801,36 @@ IpcChannel::Outcome PluginHostProcessSession::channelClosedOutcome()
 
 IpcChannel::Outcome PluginHostProcessSession::request(
     const std::string &method, const Json::Value &params, int deadlineMs,
+    const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink ) noexcept
+{
+    // Typed boundary (track 13.0 WP4): every externally visible result of a
+    // request is a typed Outcome. An exception escaping the session body
+    // (historically: a std::system_error "no such process" from a racing
+    // channel close inside killProcess) must surface as E6005, never as an
+    // untyped throw through runOperator -> future::get().
+    try
+    {
+        return requestImpl( method, params, deadlineMs, cancelPredicate, progressSink );
+    }
+    catch ( const std::exception &exception )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message =
+            std::string( "session failure (E6005): " ) + exception.what();
+        recordLastFailure( outcome );
+        return outcome;
+    }
+    catch ( ... )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message = "session failure (E6005): unknown exception";
+        recordLastFailure( outcome );
+        return outcome;
+    }
+}
+
+IpcChannel::Outcome PluginHostProcessSession::requestImpl(
+    const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
 {
     // Quota authority: the ceiling applies regardless of the caller's ask.
@@ -851,6 +883,32 @@ IpcChannel::Outcome PluginHostProcessSession::request(
             mPeakInFlight = mInFlight;
     }
 
+    // The gate slot and the in-flight count return on EVERY exit path —
+    // an exception escaping mChannel->request / escalateTimeout / the
+    // death-confirm below must never leak a concurrency slot (permanent
+    // slot loss = eventual E6007 saturation for every later request).
+    struct RequestSlotGuard
+    {
+        PluginHostProcessSession *self;
+        ~RequestSlotGuard()
+        {
+            bool killDrained = false;
+            {
+                std::lock_guard<std::mutex> stateLock( self->mStateMutex );
+                --self->mInFlight;
+                if ( self->mInFlight == 0 && self->mPoisoned && self->mProcessAlive )
+                {
+                    self->mPoisoned = false;
+                    killDrained = true;
+                }
+            }
+            if ( killDrained )
+                self->killProcess( "poisoned worker drained" );
+            self->mGate.release();
+        }
+    };
+    const RequestSlotGuard slotGuard{ this };
+
     IpcChannel::Outcome outcome;
     outcome = mChannel->request( method, params, effectiveDeadline, cancelPredicate, progressSink );
     recordLastFailure( outcome );
@@ -860,27 +918,6 @@ IpcChannel::Outcome PluginHostProcessSession::request(
         // Per-id cancel already went out (channel); this waits the grace
         // window and then kills (sole request) or poisons (peers in flight).
         escalateTimeout( 0 );
-        outcome.error.message += "; the request was cancelled (worker killed or scheduled for kill)";
-    }
-
-    {
-        bool killDrained = false;
-        {
-            std::lock_guard<std::mutex> stateLock( mStateMutex );
-            --mInFlight;
-            if ( mInFlight == 0 && mPoisoned && mProcessAlive )
-            {
-                mPoisoned = false;
-                killDrained = true;
-            }
-        }
-        if ( killDrained )
-            killProcess( "poisoned worker drained" );
-        mGate.release();
-    }
-
-    if ( outcome.status == IpcChannel::Outcome::Status::Timeout )
-    {
         outcome.error.message += "; the request was cancelled and the worker was killed or poisoned";
     }
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
@@ -894,6 +931,32 @@ IpcChannel::Outcome PluginHostProcessSession::request(
 }
 
 IpcChannel::Outcome PluginHostProcessSession::requestControlRaw(
+    const std::string &method, const Json::Value &params, int deadlineMs,
+    const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink ) noexcept
+{
+    try
+    {
+        return requestControlRawImpl( method, params, deadlineMs, cancelPredicate,
+                                      progressSink );
+    }
+    catch ( const std::exception &exception )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message =
+            std::string( "session failure (E6005): " ) + exception.what();
+        recordLastFailure( outcome );
+        return outcome;
+    }
+    catch ( ... )
+    {
+        IpcChannel::Outcome outcome = channelClosedOutcome();
+        outcome.error.message = "session failure (E6005): unknown exception";
+        recordLastFailure( outcome );
+        return outcome;
+    }
+}
+
+IpcChannel::Outcome PluginHostProcessSession::requestControlRawImpl(
     const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
 {
@@ -933,7 +996,39 @@ IpcChannel::Outcome PluginHostProcessSession::requestControlRaw(
     return outcome;
 }
 
-bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &diagnostics )
+bool PluginHostProcessSession::shutdown( int timeoutMs,
+                                         PluginDiagnosticLog &diagnostics ) noexcept
+{
+    // Same typed-boundary contract as request()/requestControlRaw(): the
+    // channel request below and the kill ladder can surface
+    // std::system_error (historically the racing close() double-join);
+    // unloadPlugin callers must see a typed false + diagnostic, never an
+    // untyped exception escaping through PluginRegistry::unload().
+    try
+    {
+        return shutdownImpl( timeoutMs, diagnostics );
+    }
+    catch ( const std::exception &exception )
+    {
+        diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                         PluginDiagnosticSeverity::Warning,
+                         std::string( "session shutdown failed internally: " )
+                             + exception.what(),
+                         mOptions.pluginId );
+        return false;
+    }
+    catch ( ... )
+    {
+        diagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
+                         PluginDiagnosticSeverity::Warning,
+                         "session shutdown failed internally",
+                         mOptions.pluginId );
+        return false;
+    }
+}
+
+bool PluginHostProcessSession::shutdownImpl( int timeoutMs,
+                                             PluginDiagnosticLog &diagnostics )
 {
     if ( !mChannel || !mProcessAlive )
     {
@@ -958,9 +1053,10 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
             }
 #else
             int status = 0;
-            if ( ::waitpid( static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) ),
-                            &status, WNOHANG )
-                 != 0 )
+            const pid_t waited =
+                ::waitpid( static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) ),
+                           &status, WNOHANG );
+            if ( waited > 0 || ( waited < 0 && errno != EINTR ) )
             {
                 exited = true;
                 break;

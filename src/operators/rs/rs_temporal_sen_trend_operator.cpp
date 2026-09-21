@@ -74,14 +74,19 @@ Json::Value RsTemporalSenTrendOperator::schema() const
                "(the p-value band is always the full two-sided p)", kDefaultAlpha );
   setRange( alphaParam, 0.001, 0.5 );
   props["alpha"] = alphaParam;
+  props["compute_ci"] = makeBooleanParam(
+      "compute_ci", "Append slope_ci_lo / slope_ci_hi bands: the Gilbert "
+                    "order-statistic confidence interval on the Sen slope at "
+                    "level 1 − alpha (Temporal Phenology 12.0)", false );
   props["output"] = makeOutputParam( "output",
-                                     "Sen trend GeoTIFF (bands: slope, intercept, z, p_value, n)",
+                                     "Sen trend GeoTIFF (bands: slope, intercept, z, p_value, n "
+                                     "[, slope_ci_lo, slope_ci_hi])",
                                      "tif" );
 
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Sen trend GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Dates in the series", 0 );
-  outputs["bands"] = makeIntegerParam( "bands", "Output band count (5)", 0 );
+  outputs["bands"] = makeIntegerParam( "bands", "Output band count (5, or 7 with compute_ci)", 0 );
   outputs["significantPixelFraction"] = makeNumberParam(
       "significantPixelFraction", "Pixels with a significant monotonic trend "
       "(p < alpha and >= 3 valid observations) / total pixels", 0.0 );
@@ -158,6 +163,8 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
   const QString bandRole = QString::fromStdString( getString( params, "band_role", "" ) );
   const int bandOverride = getInt( params, "band", 0 );
   const double alpha = std::clamp( getDouble( params, "alpha", kDefaultAlpha ), 0.001, 0.5 );
+  const bool computeCi = getBool( params, "compute_ci", false );
+  const int bandCount = kSenOutputBands + ( computeCi ? 2 : 0 );
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -210,17 +217,22 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
   QString outErr;
   temporal_output::TemporalOutputGuard guard;
   guard.manage( &out, QString::fromStdString( outputPath ) );
-  if ( !out.create( QString::fromStdString( outputPath ), width, height, kSenOutputBands,
+  if ( !out.create( QString::fromStdString( outputPath ), width, height, bandCount,
                     static_cast<int>( GDT_Float32 ), reader.geoTransform(), reader.projection(),
                     &outErr ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to create output: " + outErr.toStdString() );
-  const char *const bandNames[kSenOutputBands] = { "slope", "intercept", "z", "p_value", "n" };
-  for ( int b = 1; b <= kSenOutputBands; ++b )
+  std::vector<const char *> bandNames = { "slope", "intercept", "z", "p_value", "n" };
+  if ( computeCi )
+  {
+    bandNames.push_back( "slope_ci_lo" );
+    bandNames.push_back( "slope_ci_hi" );
+  }
+  for ( int b = 1; b <= bandCount; ++b )
   {
     out.setBandNoDataValue( b, std::numeric_limits<double>::quiet_NaN() );
     GDALSetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( out.dataset() ), b ),
-                        bandNames[b - 1] );
+                        bandNames[static_cast<size_t>( b - 1 )] );
   }
 
   // OOM guard: the per-pixel series gather must stay bounded (same contract
@@ -240,7 +252,7 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
 
   std::vector<float> tile( tilePixels );
   std::vector<float> series( static_cast<size_t>( sceneCount ) * tilePixels );
-  std::vector<float> bandBufs( static_cast<size_t>( kSenOutputBands ) * tilePixels );
+  std::vector<float> bandBufs( static_cast<size_t>( bandCount ) * tilePixels );
   std::vector<float> pixSeries( sceneCount );
   std::uint64_t significantPixels = 0;
   int tileDone = 0;
@@ -265,12 +277,18 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
     {
       for ( int s = 0; s < sceneCount; ++s )
         pixSeries[s] = series[s * tilePixels + i];
-      const sicnu::temporal::SenTrendResult tr = sicnu::temporal::mannKendallSenSlope( pixSeries, tDays );
+      const sicnu::temporal::SenTrendResult tr = sicnu::temporal::mannKendallSenSlope(
+          pixSeries, tDays, computeCi ? 1.0 - alpha : 0.0 );
       bandBufs[0 * tilePixels + i] = static_cast<float>( tr.slope );
       bandBufs[1 * tilePixels + i] = static_cast<float>( tr.intercept );
       bandBufs[2 * tilePixels + i] = static_cast<float>( tr.z );
       bandBufs[3 * tilePixels + i] = static_cast<float>( tr.pValue );
       bandBufs[4 * tilePixels + i] = static_cast<float>( tr.validCount );
+      if ( computeCi )
+      {
+        bandBufs[5 * tilePixels + i] = static_cast<float>( tr.slopeCiLo );
+        bandBufs[6 * tilePixels + i] = static_cast<float>( tr.slopeCiHi );
+      }
       if ( tr.validCount >= 3 && tr.pValue < alpha )
         ++significantPixels;
     }
@@ -280,7 +298,7 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
       if ( !out.writeBandWindow( band, x, y, w, h, src ) )
         throw RSOperatorError( ErrorCode::GdalError, "failed writing Sen trend band" );
     };
-    for ( int b = 1; b <= kSenOutputBands; ++b )
+    for ( int b = 1; b <= bandCount; ++b )
       writeBand( b, bandBufs.data() + static_cast<size_t>( b - 1 ) * tilePixels );
 
     ++tileDone;
@@ -308,7 +326,8 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
   Json::Value result( Json::objectValue );
   result["output"] = outputPath;
   result["sceneCount"] = sceneCount;
-  result["bands"] = kSenOutputBands;
+  result["bands"] = bandCount;
+  result["computeCi"] = computeCi;
   if ( !prepared.collection.timeRangeStartIso().isEmpty() )
   {
     result["timeStart"] = prepared.collection.timeRangeStartIso().toStdString();

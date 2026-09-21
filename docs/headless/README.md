@@ -9,7 +9,7 @@ command layer below is additive.
 
 | command | sub-commands |
 |---|---|
-| `algorithms` | `list`, `search <text>`, `schema <id>` |
+| `algorithms` | `list`, `search [text] [--group g] [--tag a,b] [--purpose p] [--task f] [--modality m] [--input-type T] [--output-type T] [--large-raster-safe] [--limit n] [--cursor n]`, `schema <id>` |
 | `run` | `run <operator-id> [--param k=v ...] [--params-file f]` |
 | `pipeline` | `run <file>`, `validate <file>`, `resume <run_id>` |
 | `workflow` | `run <file>`, `validate <file>`, `list-runs`, `resume <id>` |
@@ -30,6 +30,13 @@ command layer below is additive.
 
 stdout carries only the final envelope in `--json` mode; diagnostics and
 progress go to stderr, so `| jq` pipelines are safe.
+
+`algorithms search` runs the same authoritative engine as MCP
+`search_algorithms`: all filters match declared descriptor metadata (AND
+across fields, comma lists are ANY-of, case-insensitive), results share one
+deterministic ranking, and `data` is `{algorithms, count, total, limit,
+cursor, next_cursor, hints?}` — `hints` (zero hits only) carries the declared
+filter vocabulary and closest id suggestions.
 
 ## Exit codes (stable contract)
 

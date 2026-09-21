@@ -9,6 +9,7 @@
 #include "operators/rs/rs_temporal_output.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
 #include "processing/algorithms/temporal/temporal_gapfill.h"
+#include "processing/algorithms/temporal/temporal_irregular.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -86,6 +87,11 @@ Json::Value RsTemporalGapFillOperator::schema() const
   setRange( maxGap, 0.0, 3650.0 );
   props["max_gap_days"] = maxGap;
   props["tile_size"] = makeIntegerParam( "tile_size", "Streaming tile size (pixels)", kDefaultTileSize );
+  props["provenance_output"] = makeStringParam(
+      "provenance_output",
+      "Optional path for a per-date provenance GeoTIFF (UInt8, one prov_<date> "
+      "band per scene): 0=unavailable (NaN in and out), 1=observed, "
+      "2=interpolated (Temporal Phenology 12.0 QA contract)", "" );
   props["output"] = makeOutputParam(
       "output",
       "Gap-filled GeoTIFF (one band per scene date: filled_<date>, plus filled_count)",
@@ -94,6 +100,8 @@ Json::Value RsTemporalGapFillOperator::schema() const
   Json::Value outputs( Json::objectValue );
   outputs["output"] = makeOutputParam( "output", "Gap-filled GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes in the series", 0 );
+  outputs["provenanceOutput"] = makeStringParam( "provenanceOutput",
+      "Provenance raster path actually written (empty when not requested)", "" );
   outputs["filledFraction"] = makeNumberParam( "filledFraction",
                                                "Filled positions / fillable positions", 0.0 );
   outputs["bands"] = makeIntegerParam( "bands", "Output band count (= sceneCount + 1)", 0 );
@@ -151,15 +159,21 @@ Json::Value RsTemporalGapFillOperator::estimateExecution( const Json::Value &par
   int scenes = kTypicalSceneEstimate;
   if ( params.isMember( "scenes" ) && params["scenes"].isArray() )
     scenes = std::max<int>( 1, static_cast<int>( params["scenes"].size() ) );
-  // 1 read tile + one series tile per scene date + filled_count tile.
-  return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4,
-                                                   2 + static_cast<std::uint64_t>( scenes ), 0,
-                                                   2 * 1024 * 1024 );
+  // 1 read tile + one series tile per scene date + filled_count tile; the
+  // optional provenance raster doubles the per-scene output tiles.
+  const bool withProvenance =
+    params.isMember( "provenance_output" ) && params["provenance_output"].isString() &&
+    !params["provenance_output"].asString().empty();
+  return sicnu::processing::makeStreamingEstimate(
+      tileSize, tileSize, 1, 4,
+      2 + static_cast<std::uint64_t>( scenes ) * ( withProvenance ? 2 : 1 ), 0,
+      2 * 1024 * 1024 );
 }
 
 Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   const std::string outputPath = requireString( params, "output" );
+  const std::string provenancePath = getString( params, "provenance_output", "" );
   const QString methodToken =
       QString::fromStdString( getEnum( params, "method", { "linear", "nearest" }, "linear" ) );
   const GapFillMethod method = methodToken == QLatin1String( "nearest" )
@@ -247,6 +261,36 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
                         bandNames[static_cast<size_t>( b - 1 )].toUtf8().constData() );
   }
 
+  // Optional per-date provenance raster (WP2 QA contract): UInt8 codes
+  // sicnu::temporal::SampleProvenance — 0 unavailable, 1 observed,
+  // 2 interpolated. Same grid/scene order as the filled bands.
+  const bool writeProvenance = !provenancePath.empty();
+  GdalDatasetWrapper prov;
+  temporal_output::TemporalOutputGuard provGuard;
+  if ( writeProvenance )
+  {
+    provGuard.manage( &prov, QString::fromStdString( provenancePath ) );
+    if ( !prov.create( QString::fromStdString( provenancePath ), width, height,
+                       sceneCount, static_cast<int>( GDT_Byte ),
+                       reader.geoTransform(), reader.projection(), &outErr ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "failed to create provenance output: " +
+                                 outErr.toStdString() );
+    for ( int s = 1; s <= sceneCount; ++s )
+    {
+      prov.setBandNoDataValue( s, 255.0 );
+      GDALSetDescription(
+          GDALGetRasterBand( static_cast<GDALDatasetH>( prov.dataset() ), s ),
+          QStringLiteral( "prov_%1" )
+              .arg( sceneTag( prepared.collection.scenes().at( s - 1 ), s - 1 ) )
+              .toUtf8()
+              .constData() );
+    }
+    GDALSetMetadataItem( static_cast<GDALDatasetH>( prov.dataset() ),
+                         "SICNU_PROVENANCE_CODES",
+                         "0=unavailable;1=observed;2=interpolated", nullptr );
+  }
+
   const int tiles = reader.totalTileCount();
   // Guard against a nominal tile_size parameter pretending the working set is
   // bounded: allocations size the LARGEST CLAMPED tile rect (edge tiles are
@@ -272,6 +316,11 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
   std::vector<float> tile( tilePixels );
   std::vector<float> filledCount( tilePixels );
   std::vector<float> pixelSeries( static_cast<size_t>( sceneCount ) );
+  // Provenance path state: the pre-fill copy and the per-scene code tile.
+  std::vector<float> origSeries( writeProvenance ? sceneCount : 0 );
+  std::vector<float> provBuf( writeProvenance
+                                  ? tilePixels * static_cast<size_t>( sceneCount )
+                                  : 0 );
 
   std::uint64_t filledPositions = 0;
   std::uint64_t fillablePositions = 0;
@@ -303,11 +352,28 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
 
       // The interpolation math is the shared kernel (known-answer tested);
       // the operator only gathers, calls, and writes back.
+      if ( writeProvenance )
+        origSeries = pixelSeries;
       temporal::GapFillCounts counts;
       temporal::gapFillSeries( pixelSeries.data(), sceneCount, tDays.data(),
                                method, maxGapDays, pixelSeries.data(), &counts );
       for ( int s = 0; s < sceneCount; ++s )
+      {
         series[s * tilePixels + i] = pixelSeries[static_cast<size_t>( s )];
+        if ( writeProvenance )
+        {
+          // Same mapping as temporal::gapFillProvenance, inlined into the
+          // hot loop to keep it allocation-free.
+          const float inV = origSeries[static_cast<size_t>( s )];
+          const float outV = pixelSeries[static_cast<size_t>( s )];
+          provBuf[s * tilePixels + i] = static_cast<float>(
+              std::isfinite( inV ) && std::isfinite( outV )
+                  ? temporal::SampleProvenance::Observed
+              : !std::isfinite( inV ) && std::isfinite( outV )
+                  ? temporal::SampleProvenance::Interpolated
+                  : temporal::SampleProvenance::Unavailable );
+        }
+      }
 
       filledCount[i] = static_cast<float>( counts.filled );
       tileFilled += static_cast<std::uint64_t>( counts.filled );
@@ -323,6 +389,16 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
     }
     if ( !out.writeBandWindow( bandCount, x, y, w, h, filledCount.data() ) )
       throw RSOperatorError( ErrorCode::GdalError, "failed writing filled_count band" );
+    if ( writeProvenance )
+    {
+      for ( int s = 0; s < sceneCount; ++s )
+      {
+        if ( !prov.writeBandWindow( s + 1, x, y, w, h,
+                                    provBuf.data() + s * tilePixels ) )
+          throw RSOperatorError( ErrorCode::GdalError,
+                                 "failed writing provenance band" );
+      }
+    }
 
     ++tileDone;
     context.reportProgress( 0.05 + 0.93 * ( static_cast<double>( tileDone ) / tiles ),
@@ -347,14 +423,34 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
     GDALSetMetadataItem( static_cast<GDALDatasetH>( out.dataset() ), "SICNU_RADIOMETRIC_STATE",
                          prepared.preflight.commonRadiometricState.toUtf8().constData(), nullptr );
 
+  if ( writeProvenance )
+  {
+    temporal_output::writeTemporalDatasetMetadata(
+        prov, prepared.collection, "rs:temporal_gap_fill.provenance",
+        QStringLiteral( "method=%1 max_gap_days=%2 codes=0:unavailable,1:observed,"
+                        "2:interpolated" )
+            .arg( methodToken )
+            .arg( maxGapDays ) );
+  }
+
+  // Atomic dual-output publication: both datasets must flush successfully
+  // before EITHER guard commits, so a provenance-side failure cannot leak a
+  // committed primary output from a failed run.
   QString closeErr;
   if ( !out.closeWithError( &closeErr ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "output flush failed (disk full?): " + closeErr.toStdString() );
+  if ( writeProvenance && !prov.closeWithError( &closeErr ) )
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "provenance flush failed (disk full?): " +
+                               closeErr.toStdString() );
   guard.commit();
+  if ( writeProvenance )
+    provGuard.commit();
 
   Json::Value result( Json::objectValue );
   result["output"] = outputPath;
+  result["provenanceOutput"] = writeProvenance ? provenancePath : "";
   result["sceneCount"] = sceneCount;
   result["filledFraction"] =
       fillablePositions > 0
@@ -369,11 +465,14 @@ Json::Value RsTemporalGapFillOperator::run( const Json::Value &params, RSOperato
   Json::Value memory( Json::objectValue );
   memory["tileWidth"] = tileSize;
   memory["tileHeight"] = tileSize;
-  // 1 read tile + one column-major series tile per scene date + filled_count.
+  // 1 read tile + one column-major series tile per scene date + filled_count
+  // (+ one provenance tile per scene when provenance_output is set).
   memory["workingSetEstimateBytes"] = Json::Value::UInt64(
-    TemporalTileReader::estimateWorkingSetBytes( tileSize, tileSize,
-                                                 2 + static_cast<std::uint64_t>( sceneCount ),
-                                                 0 ) );
+    TemporalTileReader::estimateWorkingSetBytes(
+        tileSize, tileSize,
+        2 + static_cast<std::uint64_t>( sceneCount ) *
+                ( writeProvenance ? 2 : 1 ),
+        0 ) );
   result["memory"] = memory;
   context.reportProgress( 1.0, "Temporal gap fill complete" );
   return result;

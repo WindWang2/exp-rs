@@ -269,4 +269,28 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, con
   boxes = nonMaxSuppression( collapsed, iouThreshold, cancelled );
 }
 
+// --- Cancellation-aware overloads (declared in the header; the probe form
+// above throws through the caller's probe, the predicate form aborts itself).
+// Kept-set semantics are IDENTICAL to the two-argument form — the probe only
+// decides WHEN the pass stops, never WHAT it keeps.
+
+std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes,
+                                             double iouThreshold,
+                                             const std::function<bool()> &cancelled )
+{
+  return nonMaxSuppression( boxes, iouThreshold, CancelProbe( [ &cancelled ]() {
+    if ( cancelled && cancelled() )
+      throw RSOperatorError( ErrorCode::Cancelled, "detection NMS cancelled" );
+  } ) );
+}
+
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
+                      const std::function<bool()> &cancelled )
+{
+  dedupDetections( boxes, iouThreshold, CancelProbe( [ &cancelled ]() {
+    if ( cancelled && cancelled() )
+      throw RSOperatorError( ErrorCode::Cancelled, "detection dedup cancelled" );
+  } ) );
+}
+
 } // namespace sicnu::operators::runtime

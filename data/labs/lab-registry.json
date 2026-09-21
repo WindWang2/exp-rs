@@ -1,0 +1,66 @@
+{
+  "schema": "sicnu.lab-registry/1",
+  "note_zh": "lab 注册表的唯一权威。解析链：lab 文档 id → 本表 canonical（含别名）→ pack 文件名。任何改名都必须先落到这里，再让脚本投影出去；不得直接重命名 data/labs 下的文档或 pack。",
+  "authority": [
+    "data/labs/*.lab.json 与 *.labspec.json 的 id 字段是本表的输入",
+    "data/labs/packs/*.pack.json 的文件名是本表的投影，由 scripts/gen_lab_packs.py 生成",
+    "scripts/check_lab_registry.py 是这张表的强制门禁"
+  ],
+  "canonical": {
+    "lab12_sar_processing": {
+      "course_index": 9,
+      "title": "SAR Processing",
+      "title_zh": "实验9：SAR 相干斑抑制与变化检测",
+      "source": "data/labs/lab9_sar_processing.labspec.json",
+      "aliases": [
+        "sar_processing",
+        "lab9_sar_processing"
+      ],
+      "grading_rules": "data/labs/grading/sar_processing.rules.json",
+      "pipeline": "data/labs/pipelines/lab9_sar_processing.pipeline.json",
+      "data_spec": "data/labs/data-specs/lab9_sar_processing.json"
+    },
+    "lab13_hyperspectral_analysis": {
+      "course_index": 10,
+      "title": "Hyperspectral Analysis",
+      "title_zh": "实验10：高光谱分析——MNF 降维、PPI 端元提取、SAM/SID 匹配与线性解混",
+      "source": "data/labs/lab10_hyperspectral_analysis.labspec.json",
+      "aliases": [
+        "hyperspectral_analysis",
+        "lab10_hyperspectral_analysis"
+      ],
+      "grading_rules": "data/labs/grading/hyperspectral_analysis.rules.json",
+      "pipeline": "data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json",
+      "data_spec": "data/labs/data-specs/lab10_hyperspectral_analysis.json"
+    },
+    "lab14_cartographic_mapping": {
+      "course_index": 11,
+      "title": "Cartographic Mapping",
+      "title_zh": "实验11：制图出图——专题数据生产与合规地图排版",
+      "source": "data/labs/lab11_cartographic_mapping.labspec.json",
+      "aliases": [
+        "cartographic_mapping",
+        "lab11_cartographic_mapping"
+      ],
+      "grading_rules": "data/labs/grading/cartographic_mapping.rules.json",
+      "pipeline": "data/labs/pipelines/lab11_cartographic_mapping.pipeline.json",
+      "data_spec": "data/labs/data-specs/lab11_cartographic_mapping.json"
+    }
+  },
+  "alias_packs": {
+    "sar_processing": "lab12_sar_processing",
+    "hyperspectral_analysis": "lab13_hyperspectral_analysis",
+    "cartographic_mapping": "lab14_cartographic_mapping",
+    "temporal_phenology_timeline": "temporal_analysis"
+  },
+  "non_lab_packs": {
+    "grading_corpus": "deployment unit of the grading corpus, not a lab"
+  },
+  "out_of_scope": {
+    "lab8_temporal_analysis": "temporal track (PR #1135) owns it; its own DECISIONS D16 says the labspec stays untouched",
+    "temporal_phenology_timeline": "content owned by the temporal track; registered here only so pack parity resolves"
+  },
+  "legacy_paths": {
+    "data/labs/legacy/lab8_temporal_analysis.lab.json": "superseded alias copy; data/labs is globbed non-recursively so it is never loaded"
+  }
+}
