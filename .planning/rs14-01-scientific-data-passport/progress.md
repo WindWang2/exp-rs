@@ -87,3 +87,40 @@
   empty; byte determinism; JSON round-trip; typed rejections.
 - Result: test_scientific_state_diff 41 assertions / 12 cases green; core
   76/12, resolver 78/18, geo 96/22, provenance 71/15 all unchanged green.
+
+## Slice F1 — teaching view-model (6b273a637)
+- RED: teaching test file built against missing header; then value-rendering
+  oracle exposed a real P1: claim paths vs document paths (band index base,
+  logical field names) rendered resolved facts as "(not resolved)"; an
+  exact-match collision rendered the SECOND band's role for band 1. Fixed by
+  mapping claim→document paths with the band branch running before any
+  exact-match shortcut; flatten now recurses arrays.
+- GREEN: test_scientific_state_teaching 31 assertions / 8 cases.
+
+## Slice F2 — GDAL facts collector (bc1f35bbf)
+- io-lane; synthesized declared + bare GTiffs; one read-only open, metadata
+  only. 58 assertions / 3 cases. Modern-GDAL const-correctness (CSLConstList,
+  const SRS, std::string exportToWkt).
+
+## Slice F3 — CLI passport command (38bbe0e0c)
+- `passport --path <file> [--json|--teaching] [--diff <passport.json>]`
+  registered in kCommands + dispatch + CLI CMake; typed exit codes.
+- End-to-end smoke: teaching output on the io-test GTiff; --json envelope.
+- 595 total assertions across the 7 sdk/io targets at commit time.
+
+## Slice F4 — catalog adapter (9f08f493d)
+- Qt lane against REAL DataManager: register synthesized GTiff → snapshot →
+  facts → resolver; DerivationRecord → provenance; catalog+dataset merge.
+- 42 assertions / 3 cases. Catalog lib pinned to C++20 (data headers need
+  defaulted ==). MCP agent tool intentionally deferred (see docs/integration.md).
+
+## Slice G — cross-asset fixture contracts (179372c8b)
+- 5 families + variants; 102 assertions / 9 cases: vocabulary pins,
+  teaching/agent parity per family, deterministic replay + round-trip,
+  DN→SR calibration diff touching only radiometric fields, confidence
+  ordering (declared > assumed).
+
+## Final state
+- 9 test targets green (76+78+96+71+41+31+102+58+42 = 595 assertions).
+- Docs: docs/scientific-state/{overview,schema}.md + examples/*.json (real
+  CLI output) + docs/integration.md (wiring points incl. deferred MCP tool).
