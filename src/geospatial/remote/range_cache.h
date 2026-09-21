@@ -140,6 +140,25 @@ struct RangeCacheTelemetry
     /// against maxCacheBytes. A gauge of the current population: a full
     /// drop (clearEntries/uninstall) resets it, counters never reset.
     std::uint64_t maxCachedBytes = 0;
+    /// 13.0: origin GET attempts issued (first tries + retries) — the wire
+    /// count behind coalescedFetches/retriedFetches.
+    std::uint64_t fetchAttempts = 0;
+    /// 13.0: retry backoff sleeps entered — each ran with its admission
+    /// slot RELEASED, so this is also the count of slot releases during
+    /// backoff (the WP1 occupancy oracle).
+    std::uint64_t backoffWaits = 0;
+    /// 13.0: fetch admissions that had to wait for in-flight capacity —
+    /// observed contention at the global byte gate.
+    std::uint64_t admissionWaits = 0;
+    /// 13.0: origin fetches refused or discarded by the cancel veto
+    /// (before start, in flight, or during backoff).
+    std::uint64_t cancelledFetches = 0;
+    /// 13.0: entries dropped by the entry-TTL trust horizon (Open and
+    /// Stat share the horizon — a stat re-prove counts here too).
+    std::uint64_t ttlExpirations = 0;
+    /// 13.0: TTL basis refreshes after a successful revalidation (an
+    /// actively-proven resource is not aged out by wall-clock alone).
+    std::uint64_t ttlRefreshes = 0;
 
     Json::Value toJson() const;
 };
