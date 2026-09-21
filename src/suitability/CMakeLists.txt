@@ -20,6 +20,8 @@ qt_add_library(sicnu_suitability STATIC
   criteria_spectral.h
   criteria_temporal.cpp
   criteria_temporal.h
+  criteria_uncertainty.cpp
+  criteria_uncertainty.h
   dataset_facts.cpp
   dataset_facts.h
   scene_candidate.cpp

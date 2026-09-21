@@ -453,19 +453,33 @@ TEST_CASE( "an empty-requirement goal never launders the overall to suitable",
 
     const auto result = SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->overallLevel() == SuitabilityLevel::Unknown );
+    // Slice H semantics (deliberate change, stance preserved and sharpened):
+    // before the uncertainty roll-up this subject graded overall Unknown —
+    // "nothing was asked, nothing asserted". Now spatial.coverage's "AOI not
+    // specified" and temporal.coverage's "no time window" notes are listed as
+    // non-blocking uncertainty sources, so uncertainty.sources grades
+    // Marginal, and Marginal outranks Unknown in the severity lattice. A
+    // subject with undigested assumptions reads Marginal, never a clean
+    // Suitable — the fail-closed posture, one step stronger.
+    REQUIRE( result->overallLevel() == SuitabilityLevel::Marginal );
 
     // The washout is prevented by the two unconditionally-applicable
     // criteria: spatial.coverage (no AOI) and temporal.coverage (no window)
-    // both resolve to Unknown, and Unknown ranks above Suitable.
+    // both resolve to Unknown, and the uncertainty roll-up carries their
+    // notes as non-blocking sources.
     const SuitabilityCriterion *coverage = findCriterion( *result, QStringLiteral( "spatial.coverage" ) );
     const SuitabilityCriterion *temporal = findCriterion( *result, QStringLiteral( "temporal.coverage" ) );
+    const SuitabilityCriterion *uncertainty =
+        findCriterion( *result, QStringLiteral( "uncertainty.sources" ) );
     REQUIRE( coverage != nullptr );
     REQUIRE( coverage->applicable );
     REQUIRE( coverage->level == SuitabilityLevel::Unknown );
     REQUIRE( temporal != nullptr );
     REQUIRE( temporal->applicable );
     REQUIRE( temporal->level == SuitabilityLevel::Unknown );
+    REQUIRE( uncertainty != nullptr );
+    REQUIRE( uncertainty->applicable );
+    REQUIRE( uncertainty->level == SuitabilityLevel::Marginal );
 
     // Everything the goal declined is honestly not-applicable (and fully
     // measured criteria like grid.compatibility may still be Suitable —

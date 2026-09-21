@@ -700,7 +700,10 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     REQUIRE( report.sceneIds() == QStringList{ QStringLiteral( "s1" ) } );
     REQUIRE( report.goalDigest() == inputs.goal.contentDigest() );
 
-    REQUIRE( report.criteria().size() == 10 );
+    // Slice H added the uncertainty roll-up criterion (last in canonical
+    // order): a fully-answered subject carries no sources, so the report
+    // shape grows by exactly one criterion.
+    REQUIRE( report.criteria().size() == 11 );
     QStringList ids;
     for ( const auto &criterion : report.criteria() )
         ids.append( criterion.id );
@@ -713,7 +716,10 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
                                  QStringLiteral( "spectral.bands" ),
                                  QStringLiteral( "temporal.coverage" ),
                                  QStringLiteral( "temporal.density" ),
-                                 QStringLiteral( "temporal.seasonality" ) } );
+                                 QStringLiteral( "temporal.seasonality" ),
+                                 QStringLiteral( "uncertainty.sources" ) } );
+    // The subject answers every question, so the roll-up finds no sources
+    // and the overall keeps its clean Suitable.
     REQUIRE( report.overallLevel() == SuitabilityLevel::Suitable );
 
     // Deterministic replay: same inputs, same digest.

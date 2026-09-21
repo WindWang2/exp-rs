@@ -396,7 +396,10 @@ TEST_CASE( "assessor emits the full ten-criteria report in canonical order", "[s
     inputs.datasetVersionId = QStringLiteral( "dv-1" );
     const auto result = sicnu::suitability::SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->criteria().size() == 10 );
+    // Slice H added the uncertainty roll-up criterion (last in canonical
+    // order); this subject carries no notes/diagnostics/truncation, so it
+    // grades Suitable and the overall keeps its clean Suitable.
+    REQUIRE( result->criteria().size() == 11 );
     QStringList ids;
     for ( const auto &criterion : result->criteria() )
         ids.append( criterion.id );
@@ -409,6 +412,7 @@ TEST_CASE( "assessor emits the full ten-criteria report in canonical order", "[s
                                  QStringLiteral( "spectral.bands" ),
                                  QStringLiteral( "temporal.coverage" ),
                                  QStringLiteral( "temporal.density" ),
-                                 QStringLiteral( "temporal.seasonality" ) } );
+                                 QStringLiteral( "temporal.seasonality" ),
+                                 QStringLiteral( "uncertainty.sources" ) } );
     REQUIRE( result->overallLevel() == SuitabilityLevel::Suitable );
 }

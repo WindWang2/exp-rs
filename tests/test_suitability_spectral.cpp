@@ -343,7 +343,10 @@ TEST_CASE( "assessor integrates spectral and cloud criteria with facts", "[suita
     // A facts-only subject is legal (no empty-subject refusal).
     const auto result = SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->criteria().size() == 10 );
+    // Slice H added the uncertainty roll-up criterion (last in canonical
+    // order); this facts-only subject declares its missing AOI/window as
+    // notes, which the roll-up lists as non-blocking sources.
+    REQUIRE( result->criteria().size() == 11 );
     QStringList ids;
     for ( const auto &criterion : result->criteria() )
         ids.append( criterion.id );
@@ -356,7 +359,8 @@ TEST_CASE( "assessor integrates spectral and cloud criteria with facts", "[suita
                                  QStringLiteral( "spectral.bands" ),
                                  QStringLiteral( "temporal.coverage" ),
                                  QStringLiteral( "temporal.density" ),
-                                 QStringLiteral( "temporal.seasonality" ) } );
+                                 QStringLiteral( "temporal.seasonality" ),
+                                 QStringLiteral( "uncertainty.sources" ) } );
     const SuitabilityCriterion *spectral = nullptr;
     for ( const auto &criterion : result->criteria() )
         if ( criterion.id == QLatin1String( "spectral.bands" ) )

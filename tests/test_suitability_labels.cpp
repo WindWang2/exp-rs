@@ -538,7 +538,8 @@ TEST_CASE( "assessor consults the provider when facts are absent", "[suitability
 
     const auto result = SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->criteria().size() == 10 );
+    // Slice H added the uncertainty roll-up criterion: 10 -> 11 criteria.
+    REQUIRE( result->criteria().size() == 11 );
     const SuitabilityCriterion *labels = findCriterion( *result, QStringLiteral( "labels.availability" ) );
     REQUIRE( labels != nullptr );
     REQUIRE( labels->level == SuitabilityLevel::Suitable );

@@ -6,6 +6,7 @@
 #include "criteria_spatial.h"
 #include "criteria_spectral.h"
 #include "criteria_temporal.h"
+#include "criteria_uncertainty.h"
 #include "suitability_provider.h"
 
 namespace sicnu::suitability
@@ -72,6 +73,12 @@ sicnu::data::Result<SuitabilityReport> SuitabilityAssessor::assess( const Inputs
     report.addCriterion( assessLabelAvailability( *resolved, facts ) );
     report.addCriterion( assessGridCompatibility( *resolved, inputs.scenes ) );
     report.addCriterion( assessModelCompatibility( *resolved, inputs.scenes, facts ) );
+    // Last, so it sees every other criterion: the uncertainty roll-up turns
+    // the notes, diagnostics, truncation and measurement conflicts above
+    // into one machine-readable source list that participates in the overall
+    // grade (an undigested assumption holds the report below a clean
+    // Suitable — deliberate semantics, locked in test_suitability_uncertainty).
+    report.addCriterion( assessUncertaintySources( report.criteria(), facts ) );
     return sicnu::data::Result<SuitabilityReport>::success( report );
 }
 
