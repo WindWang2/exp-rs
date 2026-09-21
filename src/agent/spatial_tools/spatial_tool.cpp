@@ -22,6 +22,7 @@
 #include "../symbology/symbology_tools.h"
 #include "../commands/workspace_commands.h"
 #include "../harness/harness_tools.h"
+#include "../harness/autonomy_tools.h"
 #include "../harness/lab_tools.h"
 #include "../harness/capability_graph.h"
 #include "../harness/grounding_tools.h"
@@ -109,6 +110,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerRunLoopTools();
   // D9: lab copilot (teaching mode) — student-safe ask + teacher reference.
   harness::registerLabTools();
+  // RS14-12: teaching autonomy ladder — read-only policy status projection.
+  harness::registerAutonomyTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
   // Compiler 10.0 (ADR 0149): typed WorkflowIR compiler, harness session

@@ -98,6 +98,16 @@ const struct Entry {
     { "NUMERIC_DOMAIN_CHAIN",    { "validation", RetryClass::None } },
     { "BAND_IDENTITY_MISMATCH",  { "validation", RetryClass::None } },
     { "OUTPUT_IDENTITY_MISMATCH", { "validation", RetryClass::None } },
+    // RS14-12 teaching autonomy ladder (append-only): policy-gate refusals.
+    // AUTONOMY_ALLOWED is a decision, not an error, so it is not listed.
+    { "AUTONOMY_UNKNOWN_CAPABILITY", { "validation", RetryClass::None } },
+    { "AUTONOMY_LEVEL_TOO_LOW", { "validation", RetryClass::None } },
+    { "AUTONOMY_DOWNGRADED",    { "validation", RetryClass::None } },
+    { "AUTONOMY_MODE_CEILING",  { "validation", RetryClass::None } },
+    { "AUTONOMY_COURSE_CAP",    { "validation", RetryClass::None } },
+    { "AUTONOMY_OVERRIDE_DENIED", { "validation", RetryClass::None } },
+    { "AUTONOMY_LAB_STUDENT_EXECUTION", { "validation", RetryClass::None } },
+    { "AUTONOMY_AGENT_MODE_REQUIRED", { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

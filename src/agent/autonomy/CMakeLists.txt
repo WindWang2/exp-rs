@@ -21,6 +21,15 @@ add_library(sicnu_autonomy STATIC
   autonomy_classification.h
   autonomy_policy.cpp
   autonomy_policy.h
+  autonomy_decision.cpp
+  autonomy_decision.h
+  autonomy_audit.cpp
+  autonomy_audit.h
+  autonomy_projection.cpp
+  autonomy_projection.h
+  autonomy_holder.cpp
+  autonomy_holder.h
+  fake_action_provider.h
 )
 
 add_library(Sicnu::autonomy ALIAS sicnu_autonomy)

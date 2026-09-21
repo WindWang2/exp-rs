@@ -9756,6 +9756,17 @@ endfunction()
 
 sicnu_add_autonomy_test(test_autonomy_policy)
 sicnu_add_autonomy_test(test_autonomy_classification)
+sicnu_add_autonomy_test(test_autonomy_decision)
+sicnu_add_autonomy_test(test_autonomy_precedence)
+sicnu_add_autonomy_test(test_autonomy_audit)
+sicnu_add_autonomy_test(test_autonomy_projection)
+sicnu_add_autonomy_test(test_autonomy_holder)
+
+# Gate wiring: exercises the real seams (lab copilot entry point, the
+# SpatialToolRegistry execute path for harness:execute_plan), so it uses the
+# standard heavy helper.
+sicnu_add_test(test_autonomy_gate)
+sicnu_link_jsoncpp(test_autonomy_gate)
 
 # Coverage & drift contracts against the LIVE operator registry + harness
 # taxonomy: reuses the standard heavy test helper (sicnu_operators +
