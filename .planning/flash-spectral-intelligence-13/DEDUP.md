@@ -68,3 +68,25 @@ already ships, what is a real gap, and the pivot rules if a new PR preempts.
   regenerate-wholesale at PR time from the union tree (never hand-merge JSON).
 - If another track lands TCIMF/OSP first: this track pivots to background raster +
   edge-preserving fusion + library consolidation (the remaining gaps) and records it.
+
+## Dynamic dedup — milestone checks during the track
+
+- After WP-C/D (mid-implementation): origin/master unchanged (79adfe78); new open
+  PR #1138 (plugin lifecycle) — zero spectral overlap (only src/sdk/CMakeLists.txt).
+- Before independent review: master unchanged; PRs #1139-#1143 opened — overlap scan
+  on this track's source files reports 0 hits; #1140 (capability-search-13)
+  regenerates the same capability sidecars/knowledge pages → union-regeneration
+  rule recorded.
+- Before PR (final): origin/master moved to d7f99fb5b with #1140 MERGED. The union
+  was taken (merge commit 335b41eb0) and ALL machine surfaces regenerated from the
+  merged tree with the repo tools (export-catalog, gen-meta, gen-pages,
+  contract_inventory). #1140's authored sidecar enrichment was adopted into this
+  branch's superset versions of rs-cem-detection.json / rs-spectral-spatial-fuse.json
+  (updating the fuse failure mode for the 13.0 Streaming policy) so no authored
+  content is lost by regeneration.
+- Master defect found while merging: origin/master does not configure
+  (sicnu_add_mission_runtime_test references mission-runtime-gate/tests/ sources via
+  a bare ${NAME}.cpp). Repaired minimally in tests/CMakeLists.txt so this branch's
+  union tree builds; flagged for the mission-runtime owner in the PR body.
+- No pivot was needed: no open PR or merged PR implements TCIMF/OSP, the background
+  raster, edge-preserving fusion, or the library consolidation.
