@@ -6,6 +6,8 @@
 qt_add_library(sicnu_study STATIC
   study_spec.cpp
   study_spec.h
+  study_sampling.cpp
+  study_sampling.h
 )
 
 add_library(Sicnu::study ALIAS sicnu_study)

@@ -289,6 +289,7 @@ sicnu_add_io_test(test_io_canonical_metadata)
 
 # RS14-07 Parameter Sensitivity & Uncertainty Studio (light study targets).
 sicnu_add_study_test(test_study_spec)
+sicnu_add_study_test(test_study_sampling)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)
