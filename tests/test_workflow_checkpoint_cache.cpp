@@ -161,7 +161,7 @@ TEST_CASE( "Failure at node 5 skips the downstream cascade", "[d17][workflow][en
     QString error;
     // Bind BEFORE startRun: the coordinator has no implicit synthetic default
     // (#1006) — a post-startRun bind raced the first dispatched node.
-    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
         NodeExecutionResult result;
         if ( node.nodeId == QLatin1String( "node_5" ) )
         {
@@ -207,7 +207,7 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
     {
         PipelineRunCoordinator coordinator;
         // Bind BEFORE startRun (#1006: no implicit synthetic default).
-        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
             NodeExecutionResult result;
             if ( node.nodeId == QLatin1String( "node_5" ) )
             {
@@ -231,7 +231,7 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
     // Run 2: fresh coordinator, "environment fixed" (no failing node), resume.
     PipelineRunCoordinator resumeCoordinator;
     QString error;
-    resumeCoordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+    resumeCoordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
         NodeExecutionResult result;
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
         QFile f( artifact );
@@ -362,6 +362,138 @@ TEST_CASE( "Cancel before dispatch marks everything Cancelled", "[d17][workflow]
                    || snapshot.state == ExecutionState::Succeeded || snapshot.state == ExecutionState::Failed ) );
 }
 
+TEST_CASE( "#1158: a cancel racing a resume is never swallowed into Succeeded nodes",
+           "[d17][workflow][engine][cancel][issue1158]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "cancel-race" ) );
+    QString checkpointFile;
+
+    // Run 1 completes cleanly; its checkpoint is the resume source.
+    {
+        PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &,
+                                     const QString &dir, const std::atomic<bool> * ) {
+            NodeExecutionResult result;
+            const QString artifact =
+                QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+            QFile f( artifact );
+            f.open( QIODevice::WriteOnly );
+            f.write( QByteArrayLiteral( "ok" ) );
+            result.success = true;
+            result.artifactPath = artifact;
+            return result;
+        } );
+        REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpointFile = coordinator.checkpointPath();
+        REQUIRE( QFile::exists( checkpointFile ) );
+    }
+
+    // Same coordinator, still holding the terminal run: a FOREIGN thread
+    // trips requestCancel (phase 1 sets the atomic; phase 2 queues behind
+    // this thread's affinity work), then the affinity thread resumes.
+    // Pre-#1158 the resume's stale-flag clear wiped the cancel and every
+    // cache-hit node recorded Succeeded with full artifact identity.
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &,
+                                 const QString &dir, const std::atomic<bool> * ) {
+        NodeExecutionResult result;
+        const QString artifact =
+            QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        QFile f( artifact );
+        f.open( QIODevice::WriteOnly );
+        f.write( QByteArrayLiteral( "ok" ) );
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    } );
+    REQUIRE( coordinator.startRun( chain( 3 ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    std::thread canceler( [&coordinator] { coordinator.requestCancel(); } );
+    QThread::msleep( 50 ); // phase 1 lands; phase 2 waits for the pump
+    QString error;
+    REQUIRE_FALSE( coordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) );
+    // Pump so the queued phase-2 hop completes (terminal path clears the flag).
+    {
+        QEventLoop pump;
+        QTimer::singleShot( 100, &pump, &QEventLoop::quit );
+        pump.exec();
+    }
+    canceler.join();
+
+    // The refused cancel did not poison the coordinator: a later resume
+    // still works and produces cache hits.
+    REQUIRE( coordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+    int cacheHits = 0;
+    for ( const NodeStatusSnapshot &snapshot : coordinator.getAllStatuses() )
+        if ( snapshot.state == ExecutionState::Succeeded && snapshot.isCacheHit )
+            ++cacheHits;
+    REQUIRE( cacheHits == 3 );
+}
+
+TEST_CASE( "#1152: requestCancel reaches the node executor's cancel flag promptly",
+           "[d17][workflow][engine][cancel]" )
+{
+    ensureApp();
+    PipelineRunCoordinator coordinator;
+    // Cooperative executor modelling a registry operator that polls the
+    // context's cancel flag in its tile loop: it PARKS on the flag until the
+    // run requests cancellation (pre-#1152 the flag was never handed to the
+    // executor, so a cancel could not interrupt the node at all).
+    std::atomic<bool> observedCancel{ false };
+    coordinator.setExecutor(
+        [&observedCancel]( const NodeFact &node, const QHash<QString, QString> &,
+                           const QString &dir, const std::atomic<bool> *cancelRequested ) -> NodeExecutionResult {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 15 );
+            while ( std::chrono::steady_clock::now() < deadline )
+            {
+                if ( cancelRequested && cancelRequested->load( std::memory_order_relaxed ) )
+                {
+                    observedCancel.store( true );
+                    NodeExecutionResult cancelled;
+                    cancelled.errorMessage = QStringLiteral( "node %1 interrupted by cancel" ).arg( node.nodeId );
+                    return cancelled;
+                }
+                QThread::msleep( 5 );
+            }
+            NodeExecutionResult result;
+            const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+            QFile f( artifact );
+            f.open( QIODevice::WriteOnly );
+            f.write( QByteArrayLiteral( "late" ) );
+            result.success = true;
+            result.artifactPath = artifact;
+            return result;
+        } );
+    const QString dir = scratchDir( QStringLiteral( "cancel-flag" ) );
+
+    REQUIRE( coordinator.startRun( chain( 2 ), dir ) );
+    QEventLoop loop;
+    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop, &QEventLoop::quit );
+    QTimer::singleShot( 100, &coordinator, [ &coordinator ]() { coordinator.requestCancel(); } );
+    QTimer::singleShot( 20000, &loop, &QEventLoop::quit );
+    loop.exec();
+
+    // The flag reached the executor (wiring), the run terminated, and the
+    // node is Cancelled — not a completed-then-discarded artifact.
+    REQUIRE( observedCancel.load() );
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 2 );
+    bool sawCancelled = false;
+    for ( const NodeStatusSnapshot &snapshot : statuses )
+    {
+        if ( snapshot.state == ExecutionState::Cancelled )
+            sawCancelled = true;
+        REQUIRE_FALSE( snapshot.state == ExecutionState::Succeeded
+                       && snapshot.outputArtifactPath.endsWith( QStringLiteral( ".artifact" ) ) );
+    }
+    REQUIRE( sawCancelled );
+}
+
 TEST_CASE( "Diamond workflow executes the converging node once", "[d17][workflow][engine]" )
 {
     ensureApp();
@@ -448,7 +580,7 @@ TEST_CASE( "Cross-thread accessors read a consistent run state", "[d17][workflow
     // Slow executor: keeps the run in flight long enough for a foreign thread
     // to read the state onNodeFinished is mutating on the affinity thread
     // (#1056: unprotected cross-thread reads of the same fields).
-    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+    coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
         QThread::msleep( 10 );
         NodeExecutionResult result;
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
@@ -555,7 +687,7 @@ bool writeJsonObject( const QString &path, const QJsonObject &object )
 /// invocations so tests can assert WHICH nodes recomputed.
 NodeExecutor countingExecutor( std::atomic<int> *count )
 {
-    return [count]( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+    return [count]( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
         count->fetch_add( 1 );
         NodeExecutionResult result;
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
@@ -892,7 +1024,7 @@ TEST_CASE( "An executor artifact outside the run directory fails the node", "[d1
     const QString runDir = scratchDir( QStringLiteral( "outside-run" ) );
     const QString foreignDir = scratchDir( QStringLiteral( "outside-foreign" ) );
 
-    coordinator.setExecutor( [&]( const NodeFact &, const QHash<QString, QString> &, const QString & ) {
+    coordinator.setExecutor( [&]( const NodeFact &, const QHash<QString, QString> &, const QString &, const std::atomic<bool> * ) {
         NodeExecutionResult result;
         const QString artifact = QDir( foreignDir ).filePath( QStringLiteral( "escape.bin" ) );
         QFile f( artifact );
@@ -996,7 +1128,7 @@ TEST_CASE( "A cancelled run resumes to full success", "[d17][workflow][engine]" 
     {
         PipelineRunCoordinator coordinator;
         // Slow executor: keeps the run in flight so the cancel lands mid-run.
-        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
+        coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir, const std::atomic<bool> * ) {
             QThread::msleep( 15 );
             NodeExecutionResult result;
             const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
