@@ -2,6 +2,8 @@
 #include "rs_temporal_collection_input.h"
 
 #include "operators/framework/rs_json_params.h"
+#include "processing/algorithms/temporal/temporal_irregular.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/framework/rs_operator_context.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 
@@ -184,6 +186,69 @@ PreparedTemporalRun prepareTemporalRun( const Json::Value &params, RSOperatorCon
   // re-opening every scene here would double the metadata pass.
   (void)analysisBandOverride;
   return run;
+}
+
+
+// ---- #1167: provenance channel -------------------------------------------
+
+struct ProvenanceChannel::Impl
+{
+  std::vector<GdalDatasetWrapper> datasets;
+};
+
+ProvenanceChannel::~ProvenanceChannel() = default;
+
+std::unique_ptr<ProvenanceChannel> ProvenanceChannel::parse(
+  const Json::Value &params, const temporal::TemporalCollection &collection,
+  int referenceWidth, int referenceHeight )
+{
+  if ( !params.isMember( "provenance" ) || params["provenance"].isNull() )
+    return nullptr;
+  const Json::Value &declared = params["provenance"];
+  if ( !declared.isArray() )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "'provenance' must be an array of raster paths, one per scene "
+                           "(acquisition-time-sorted order, matching the collection)" );
+  const int sceneCount = static_cast<int>( collection.scenes().size() );
+  if ( static_cast<int>( declared.size() ) != sceneCount )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "'provenance' declares " + std::to_string( declared.size() ) +
+                               " rasters but the collection has " + std::to_string( sceneCount ) +
+                               " scenes (one provenance raster per scene, "
+                               "acquisition-time-sorted order)" );
+  auto channel = std::unique_ptr<ProvenanceChannel>( new ProvenanceChannel );
+  channel->m_impl = std::make_unique<Impl>();
+  channel->m_impl->datasets.resize( declared.size() );
+  for ( Json::ArrayIndex i = 0; i < declared.size(); ++i )
+  {
+    if ( !declared[i].isString() || declared[i].asString().empty() )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "'provenance[" + std::to_string( i ) + "]' must be a raster path" );
+    const QString path = QString::fromStdString( declared[i].asString() );
+    if ( !channel->m_impl->datasets[i].open( path ) )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "cannot open provenance raster: " + declared[i].asString() );
+    if ( channel->m_impl->datasets[i].width() != referenceWidth ||
+         channel->m_impl->datasets[i].height() != referenceHeight )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "provenance raster '" + declared[i].asString() +
+                                 "' does not share the collection grid" );
+  }
+  return channel;
+}
+
+bool ProvenanceChannel::readKeepMask( int sceneIndex, int x, int y, int w, int h,
+                                      std::uint8_t *keep )
+{
+  if ( !m_impl || sceneIndex < 0
+       || sceneIndex >= static_cast<int>( m_impl->datasets.size() ) )
+    return false;
+  std::vector<float> codes( static_cast<size_t>( w ) * h );
+  if ( !m_impl->datasets[sceneIndex].readBandWindow( 1, x, y, w, h, codes.data() ) )
+    return false;
+  for ( size_t i = 0; i < codes.size(); ++i )
+    keep[i] = codes[i] == static_cast<float>( temporal::SampleProvenance::Observed ) ? 1 : 0;
+  return true;
 }
 
 } // namespace sicnu::operators::rs::temporal_input

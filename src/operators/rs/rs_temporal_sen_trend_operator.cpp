@@ -78,6 +78,13 @@ Json::Value RsTemporalSenTrendOperator::schema() const
       "compute_ci", "Append slope_ci_lo / slope_ci_hi bands: the Gilbert "
                     "order-statistic confidence interval on the Sen slope at "
                     "level 1 − alpha (Temporal Phenology 12.0)", false );
+  // #1167: gap-fill provenance channel — code-2 (interpolated) samples are
+  // excluded from the statistics (n, CIs, MK S never see synthetic samples).
+  Json::Value provenanceParam = makeStringParam(
+      "provenance",
+      "Per-scene provenance rasters from rs:temporal_gap_fill (array, one per scene, acquisition-time-sorted order; pixel 1 = observed keeps the sample, 0/2 = excluded)", "" );
+  provenanceParam["type"] = "array";
+  props["provenance"] = provenanceParam;
   props["output"] = makeOutputParam( "output",
                                      "Sen trend GeoTIFF (bands: slope, intercept, z, p_value, n "
                                      "[, slope_ci_lo, slope_ci_hi])",
@@ -183,6 +190,13 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
   if ( !readerError.isEmpty() )
     throw RSOperatorError( ErrorCode::GdalError, readerError.toStdString() );
 
+  // #1167: optional per-scene provenance channel (rs:temporal_gap_fill's
+  // provenance output) — interpolated/unavailable samples are EXCLUDED from
+  // the statistics instead of inflating n and tightening the CIs.
+  std::unique_ptr<temporal_input::ProvenanceChannel> provenance =
+      temporal_input::ProvenanceChannel::parse(
+          params, prepared.collection, reader.width(), reader.height() );
+
   std::vector<int> analysisBands( sceneCount, 1 );
   bool anyFallback = false;
   for ( int s = 0; s < sceneCount; ++s )
@@ -252,6 +266,7 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
 
   std::vector<float> tile( tilePixels );
   std::vector<float> series( static_cast<size_t>( sceneCount ) * tilePixels );
+  std::vector<std::uint8_t> keepMask;  // #1167 provenance keep-mask tile
   std::vector<float> bandBufs( static_cast<size_t>( bandCount ) * tilePixels );
   std::vector<float> pixSeries( sceneCount );
   std::uint64_t significantPixels = 0;
@@ -262,6 +277,8 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
     int x = 0, y = 0, w = 0, h = 0;
     reader.tileRect( t, &x, &y, &w, &h );
     const size_t pixels = static_cast<size_t>( w ) * h;
+    if ( provenance )
+      keepMask.assign( pixels, 1 );
 
     for ( int s = 0; s < sceneCount; ++s )
     {
@@ -269,6 +286,16 @@ Json::Value RsTemporalSenTrendOperator::run( const Json::Value &params, RSOperat
         throw RSOperatorError( ErrorCode::GdalError,
                                "failed reading scene " +
                                    prepared.collection.scenes().at( s ).path.toStdString() );
+      if ( provenance )
+      {
+        if ( !provenance->readKeepMask( s, x, y, w, h, keepMask.data() ) )
+          throw RSOperatorError( ErrorCode::GdalError,
+                                 "failed reading provenance mask for scene " +
+                                     std::to_string( s ) );
+        for ( size_t i = 0; i < pixels; ++i )
+          if ( !keepMask[i] )
+            tile[i] = std::numeric_limits<float>::quiet_NaN();
+      }
       std::copy( tile.data(), tile.data() + pixels, series.data() + s * tilePixels );
       context.throwIfCancelled();
     }
