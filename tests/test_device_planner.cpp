@@ -182,18 +182,89 @@ TEST_CASE( "registry admission reserves the ledger and evicts under pressure", "
   REQUIRE( sessionB );
   CHECK( registry.vramLedger().reservedMb( 1 ) == 60 );
 
-  // An explicit cuda:0 acquisition of B must evict A (pressure valve, one
-  // bounded pass) to admit — never an over-commit of the card.
+  // #1160: reservations follow the SESSION, not the cache entry. While the
+  // caller still holds sessionA, an explicit cuda:0 acquisition of B2
+  // cannot admit — evicting A's cache entry frees nothing (the model is
+  // still loaded and physically occupying the card), and the ledger must
+  // refuse rather than over-commit. The typed refusal is the honest answer.
   const ModelInfo bigB2 = makeModel( dir, "big-b2", 60 );
+  CHECK_FALSE( registry.acquire( bigB2, RequestedDevice::cuda( 0 ), &error ) );
+  CHECK( error.find( "device unavailable" ) != std::string::npos );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 60 ); // A's occupancy counted
+
+  // Dropping the last reference releases the reservation (session lifetime
+  // is the reservation lifetime) — the retry then evicts the idle entry
+  // and admits.
+  sessionA.reset();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
   auto sessionC = registry.acquire( bigB2, RequestedDevice::cuda( 0 ), &error );
   REQUIRE( sessionC );
   CHECK( registry.vramLedger().reservedMb( 0 ) == 60 );
   CHECK( registry.cachedSessionCount() == 2 ); // A evicted, B(cuda:1)+C(cuda:0) cached
   CHECK( registry.poolStats().evictions >= 1 );
 
+  sessionB.reset();
+  sessionC.reset();
   registry.releaseAll();
   CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
   CHECK( registry.vramLedger().reservedMb( 1 ) == 0 );
+}
+
+TEST_CASE( "#1160: an externally held session keeps its ledger reservation past eviction",
+           "[models][planner][issue1160]" )
+{
+  // The ensemble pre-acquisition shape: more live member sessions than the
+  // default pool (2). Evicting a member's CACHE entry while its session is
+  // still held must NOT release the reservation — the GPU memory is still
+  // occupied and a concurrent acquire must be refused against it.
+  QTemporaryDir dir;
+  RegistryGuard guard;
+  auto &registry = ModelRuntimeRegistry::instance();
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 1;
+  hw.vramBudgetMb = 200;
+  registry.setHardwareForTest( hw );
+  registry.registerProvider(
+    "planner7",
+    []( const ModelInfo &, const ModelHardwareCapabilities &, std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<FakeSession>( "cuda" );
+    },
+    ProviderTraits{} );
+  registry.vramLedger().setCapacity( 0, 200 );
+
+  // Default pool size: 2 sessions.
+  std::string error;
+  const ModelInfo mA = makeModel( dir, "member-a", 40 );
+  const ModelInfo mB = makeModel( dir, "member-b", 40 );
+  const ModelInfo mC = makeModel( dir, "member-c", 40 );
+  auto heldA = registry.acquire( mA, RequestedDevice::cuda( 0 ), &error );
+  auto heldB = registry.acquire( mB, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( heldA );
+  REQUIRE( heldB );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 80 );
+
+  // Third member fits the ledger (120 of 200) but not the pool: the LRU
+  // invariant drops A's ENTRY; the held session keeps its 40 MiB counted —
+  // exactly the occupancy that must block a concurrent acquire.
+  auto heldC = registry.acquire( mC, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( heldC );
+  CHECK( registry.cachedSessionCount() == 2 );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 120 );
+
+  // Concurrent acquire during member execution: 100 more never fits 200
+  // with three live reservations — refused, never over-committed.
+  const ModelInfo outsider = makeModel( dir, "outsider", 100 );
+  CHECK_FALSE( registry.acquire( outsider, RequestedDevice::cuda( 0 ), &error ) );
+  CHECK( error.find( "device unavailable" ) != std::string::npos );
+
+  // Releasing a held session releases its reservation promptly.
+  heldA.reset();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 80 );
+  heldB.reset();
+  heldC.reset();
+  registry.releaseAll();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
 }
 
 TEST_CASE( "registry refusal is typed when pressure eviction cannot admit", "[models][planner]" )
