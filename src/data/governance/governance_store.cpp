@@ -1,6 +1,9 @@
 // governance_store.cpp — see governance_store.h for the contract.
 #include "governance_store.h"
 
+#include "data/query_cursor.h"
+
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QJsonArray>
@@ -21,6 +24,49 @@ namespace
 {
 
 #define SICNU_GOVERNANCE_SCHEMA_VERSION "1"
+
+/// Cursor payload parts are joined with the QueryCursor field separator, so a
+/// free-text sort key (a display name) that contains it would corrupt the
+/// framing. Percent-escape the separator (and the escape itself) on the way in
+/// and out: an escaped part always round-trips to exactly one field.
+QString escapeCursorPart( const QString &part )
+{
+    QString escaped;
+    escaped.reserve( part.size() );
+    for ( const QChar ch : part )
+    {
+        if ( ch == QChar( 0x1f ) )
+            escaped += QStringLiteral( "%1F" );
+        else if ( ch == QLatin1Char( '%' ) )
+            escaped += QStringLiteral( "%25" );
+        else
+            escaped += ch;
+    }
+    return escaped;
+}
+
+QString unescapeCursorPart( const QString &part )
+{
+    QString plain;
+    plain.reserve( part.size() );
+    for ( int i = 0; i < part.size(); ++i )
+    {
+        if ( part.at( i ) == QLatin1Char( '%' ) && i + 2 < part.size() )
+        {
+            const QString hex = part.mid( i + 1, 2 );
+            bool ok = false;
+            const int code = hex.toInt( &ok, 16 );
+            if ( ok && code >= 0 && code <= 0xff )
+            {
+                plain += QChar( code );
+                i += 2;
+                continue;
+            }
+        }
+        plain += part.at( i );
+    }
+    return plain;
+}
 
 // Column lists kept in one place so SELECTs and UPSERTs never drift.
 #define GOV_ASSET_COLS \
@@ -237,6 +283,15 @@ struct GovernanceStore::Impl
             "CREATE INDEX IF NOT EXISTS idx_gov_assets_crs ON assets(crs);"
             "CREATE INDEX IF NOT EXISTS idx_gov_assets_source ON assets(canonical_source);"
             "CREATE INDEX IF NOT EXISTS idx_gov_assets_fingerprint ON assets(content_fingerprint);"
+            // Sort-support indexes (Data Scale 13.0): every query() ORDER BY
+            // variant is (sort key, primary key) so the paged SELECT is
+            // index-driven (no sorter, no full-table scan) and the keyset seek
+            // of the cursor continuation is an index range scan instead of an
+            // OFFSET walk. Additive IF NOT EXISTS: existing stores gain them on
+            // open; the logical schema is unchanged, so schema_version stays.
+            "CREATE INDEX IF NOT EXISTS idx_gov_assets_updated ON assets(updated_ms, asset_id);"
+            "CREATE INDEX IF NOT EXISTS idx_gov_assets_name ON assets(display_name COLLATE NOCASE, asset_id);"
+            "CREATE INDEX IF NOT EXISTS idx_gov_assets_acq ON assets(acquisition_ms, asset_id);"
             "CREATE TABLE IF NOT EXISTS aliases("
             "  path TEXT PRIMARY KEY,"
             "  asset_id TEXT NOT NULL);"
@@ -258,6 +313,7 @@ struct GovernanceStore::Impl
             "  metadata_json TEXT NOT NULL DEFAULT '',"
             "  created_ms INTEGER NOT NULL DEFAULT 0,"
             "  updated_ms INTEGER NOT NULL DEFAULT 0);"
+            "CREATE INDEX IF NOT EXISTS idx_gov_datasets_updated ON datasets(updated_ms, dataset_id);"
             "CREATE TABLE IF NOT EXISTS dataset_members("
             "  dataset_id TEXT NOT NULL,"
             "  asset_id TEXT NOT NULL,"
@@ -284,6 +340,7 @@ struct GovernanceStore::Impl
             "CREATE INDEX IF NOT EXISTS idx_gov_results_status ON results(status);"
             "CREATE INDEX IF NOT EXISTS idx_gov_results_semantic ON results(semantic_type);"
             "CREATE INDEX IF NOT EXISTS idx_gov_results_run ON results(run_id);"
+            "CREATE INDEX IF NOT EXISTS idx_gov_results_updated ON results(updated_ms, result_id);"
             "CREATE TABLE IF NOT EXISTS result_inputs("
             "  result_id TEXT NOT NULL,"
             "  asset_id TEXT NOT NULL,"
@@ -312,6 +369,7 @@ struct GovernanceStore::Impl
             "  tags_json TEXT NOT NULL DEFAULT '',"
             "  updated_ms INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS idx_gov_runs_workflow ON runs(workflow_id);"
+            "CREATE INDEX IF NOT EXISTS idx_gov_runs_updated ON runs(updated_ms, run_id);"
             "CREATE TABLE IF NOT EXISTS run_outputs("
             "  run_id TEXT NOT NULL,"
             "  asset_id TEXT NOT NULL,"
@@ -2466,7 +2524,19 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
         }
     }
 
-    QString orderBy = QStringLiteral( "updated_ms DESC" );  // per-entity default; entity-specific keys below
+    // ORDER BY with a unique tiebreak. Every sort key gets its primary key as
+    // the tiebreak: without it, rows sharing a sort key (a whole upsert batch
+    // shares one updated_ms stamp) come back in an unspecified order SQLite
+    // may change between queries — exactly the skip/duplicate hazard under
+    // paging. Each (sort key, pk) pair is backed by a composite index created
+    // in createSchema(), so the paged SELECT is index-driven and the keyset
+    // seek below is a range scan rather than an OFFSET walk.
+    QString orderBy;
+    QString sortKeyColumn;  ///< qualified leading sort column
+    QString sortKeyName;    ///< result column name of the sort key
+    QString idName;         ///< result column name of the primary key
+    bool sortKeyNumeric = true;
+    bool sortDescending = true;
 
     QString from;
     QString cols;
@@ -2479,28 +2549,104 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
                                    " a.modality, a.crs, a.acquisition_ms, a.revision, a.size_bytes, a.format,"
                                    " a.content_fingerprint, a.availability, a.updated_ms" );
             idCol = QStringLiteral( "a.asset_id" );
-            orderBy = query.sortBy == QLatin1String( "name" ) ? QStringLiteral( "a.display_name COLLATE NOCASE ASC" )
-                      : query.sortBy == QLatin1String( "acquisition" ) ? QStringLiteral( "a.acquisition_ms DESC" )
-                      : QStringLiteral( "a.updated_ms DESC" );
+            idName = QStringLiteral( "asset_id" );
+            if ( query.sortBy == QLatin1String( "name" ) )
+            {
+                orderBy = QStringLiteral( "a.display_name COLLATE NOCASE ASC, a.asset_id ASC" );
+                sortKeyColumn = QStringLiteral( "a.display_name" );
+                sortKeyName = QStringLiteral( "display_name" );
+                sortKeyNumeric = false;
+                sortDescending = false;
+            }
+            else if ( query.sortBy == QLatin1String( "acquisition" ) )
+            {
+                orderBy = QStringLiteral( "a.acquisition_ms DESC, a.asset_id DESC" );
+                sortKeyColumn = QStringLiteral( "a.acquisition_ms" );
+                sortKeyName = QStringLiteral( "acquisition_ms" );
+            }
+            else
+            {
+                orderBy = QStringLiteral( "a.updated_ms DESC, a.asset_id DESC" );
+                sortKeyColumn = QStringLiteral( "a.updated_ms" );
+                sortKeyName = QStringLiteral( "updated_ms" );
+            }
             break;
         case EntitySet::Results:
             from = QStringLiteral( "results r" );
             cols = QStringLiteral( "r.result_id, r.semantic_type, r.status, r.name, r.run_id, r.revision,"
                                    " r.updated_ms, r.metrics_json" );
             idCol = QStringLiteral( "r.result_id" );
+            idName = QStringLiteral( "result_id" );
+            orderBy = QStringLiteral( "r.updated_ms DESC, r.result_id DESC" );
+            sortKeyColumn = QStringLiteral( "r.updated_ms" );
+            sortKeyName = QStringLiteral( "updated_ms" );
             break;
         case EntitySet::Runs:
             from = QStringLiteral( "runs ru" );
             cols = QStringLiteral( "ru.run_id, ru.workflow_id, ru.state, ru.name, ru.started_ms, ru.finished_ms, ru.updated_ms" );
             idCol = QStringLiteral( "ru.run_id" );
+            idName = QStringLiteral( "run_id" );
+            orderBy = QStringLiteral( "ru.updated_ms DESC, ru.run_id DESC" );
+            sortKeyColumn = QStringLiteral( "ru.updated_ms" );
+            sortKeyName = QStringLiteral( "updated_ms" );
             break;
         case EntitySet::Datasets:
             from = QStringLiteral( "datasets d" );
             cols = QStringLiteral( "d.dataset_id, d.kind, d.name, d.revision, d.updated_ms" );
             idCol = QStringLiteral( "d.dataset_id" );
+            idName = QStringLiteral( "dataset_id" );
+            orderBy = QStringLiteral( "d.updated_ms DESC, d.dataset_id DESC" );
+            sortKeyColumn = QStringLiteral( "d.updated_ms" );
+            sortKeyName = QStringLiteral( "updated_ms" );
             break;
     }
 
+    // Filter echo carried inside the cursor: the same filters, sort and entity
+    // set must reproduce it, so a cursor replayed under different filters is
+    // refused instead of resuming from a misinterpreted tuple. Digested so the
+    // cursor stays short regardless of filter count.
+    QString echoSource = QStringLiteral( "gov1|%1|%2|%3" )
+                             .arg( static_cast<int>( query.set ) )
+                             .arg( query.sortBy, whereSql );
+    for ( const QString &bind : textBinds )
+        echoSource += QChar( 0x1f ) + bind;
+    for ( const qint64 bind : intBinds )
+        echoSource += QChar( 0x1f ) + QString::number( bind );
+    const QString filterEcho = QString::fromUtf8(
+        QCryptographicHash::hash( echoSource.toUtf8(), QCryptographicHash::Sha256 ).toHex() );
+
+    // --- cursor decode -------------------------------------------------------
+    QString cursorError;
+    QString afterSortKey;
+    QString afterId;
+    bool haveCursor = false;
+    if ( !query.cursor.isEmpty() )
+    {
+        const auto decoded = sicnu::data::QueryCursor::decode( query.cursor );
+        if ( !decoded )
+        {
+            out.cursorError = QStringLiteral( "governance.cursor_invalid" );
+            return out;
+        }
+        const QStringList parts = decoded.value();
+        if ( parts.size() != 3 || parts.at( 0 ) != filterEcho || parts.at( 2 ).isEmpty() )
+        {
+            out.cursorError = QStringLiteral( "governance.cursor_mismatch" );
+            return out;
+        }
+        afterSortKey = unescapeCursorPart( parts.at( 1 ) );
+        afterId = parts.at( 2 );
+        haveCursor = true;
+    }
+
+    // --- count semantics -----------------------------------------------------
+    // `total` is the real COUNT(*) of the filtered set and is computed for
+    // every non-cursor query, so the legacy offset walk and its single-page
+    // callers (project:search, CLI, smart collections) keep exact behaviour.
+    // Cursor continuations do NOT rescan for a count: a deep walk would
+    // otherwise pay O(rows) per page. They terminate on an empty nextCursor
+    // instead and report total = 0.
+    if ( !haveCursor )
     {
         Stmt s( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM %1%2" ).arg( from, whereSql ) );
         if ( !s )
@@ -2509,15 +2655,89 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
         if ( s.stepRow() )
             out.total = s.i64( 0 );
     }
+
+    // --- page ----------------------------------------------------------------
+    // Fetch one row beyond the page so "a further row exists" is observable
+    // without a second query: the continuation cursor is only minted when the
+    // probe row exists, so the walk ends exactly at the last row (no trailing
+    // empty fetch, and the page count stays ceil(rows / pageSize)).
+    const qint64 fetchLimit = clampedLimit + 1;
+    QString sql;
+    if ( !haveCursor )
     {
-        const QString sql = QStringLiteral( "SELECT %1 FROM %2%3 ORDER BY %4 LIMIT ? OFFSET ?" )
-                                .arg( cols, from, whereSql, orderBy );
+        sql = QStringLiteral( "SELECT %1 FROM %2%3 ORDER BY %4 LIMIT ? OFFSET ?" )
+                  .arg( cols, from, whereSql, orderBy );
+    }
+    else
+    {
+        // Keyset seek as a ROW-VALUE comparison: "(sort key, pk) < (?, ?)"
+        // for a descending order (">" for ascending). The tiebreak shares the
+        // sort key's direction, which is what lets one index walk serve both
+        // the ORDER BY and the seek — a mixed-direction tiebreak forces a temp
+        // B-tree sort per page, and the OR spelling of the same predicate
+        // degrades to a multi-index scan.
+        //
+        // NUMERIC sorts: EXPLAIN QUERY PLAN on the store's own DB (the paged
+        // SELECT's 15 columns over the 2-column index, so NOT covering) reports
+        //   SEARCH a USING INDEX idx_gov_assets_updated
+        //     ((updated_ms,asset_id)<(?,?))
+        // with no sorter, so a page costs one index range scan plus its row
+        // lookups. The composite (sort key, pk) indexes are what make that
+        // possible; tests/test_data_scale.cpp asserts this exact plan.
+        //
+        // TEXT (name) sort: COLLATE NOCASE is kept inside the row value so the
+        // seek orders exactly like the ORDER BY (case-variant names tiebreak
+        // by id), but SQLite will not turn that comparison into an index range
+        // — the plan is an ordered index scan with the predicate applied as a
+        // filter, i.e. O(position) per page. Acceptable because no production caller pages deeply by
+        // name (the workspace browser uses the default sort; project:search is
+        // single-page); tests/test_data_scale.cpp pins the walk's correctness.
+        const QString seek = sortKeyNumeric
+                                 ? QStringLiteral( "(%1, %2) %3 (?, ?)" )
+                                       .arg( sortKeyColumn, idCol,
+                                             sortDescending ? QStringLiteral( "<" )
+                                                            : QStringLiteral( ">" ) )
+                                 : QStringLiteral( "(%1 COLLATE NOCASE, %2) %3 (?, ?)" )
+                                       .arg( sortKeyColumn, idCol,
+                                             sortDescending ? QStringLiteral( "<" )
+                                                            : QStringLiteral( ">" ) );
+        sql = QStringLiteral( "SELECT %1 FROM %2%3%4 ORDER BY %5 LIMIT ?" )
+                  .arg( cols, from,
+                        whereSql.isEmpty() ? QStringLiteral( " WHERE " )
+                                           : whereSql + QStringLiteral( " AND " ),
+                        seek, orderBy );
+    }
+    {
         Stmt s( m_impl->db, sql );
         if ( !s )
             return out;
         int idx = bindAll( s );
-        s.bind( idx++, clampedLimit );
-        s.bind( idx++, clampedOffset );
+        if ( haveCursor )
+        {
+            if ( sortKeyNumeric )
+            {
+                bool ok = false;
+                const qint64 key = afterSortKey.toLongLong( &ok );
+                if ( !ok )
+                {
+                    out.items.clear();
+                    out.cursorError = QStringLiteral( "governance.cursor_invalid" );
+                    return out;
+                }
+                s.bind( idx++, key );
+            }
+            else
+            {
+                s.bind( idx++, afterSortKey );
+            }
+            // The id is escaped on mint for symmetry with the sort key: an id
+            // containing the framing separator would otherwise decode to extra
+            // parts and read as a filter mismatch (a silently truncated walk).
+            s.bind( idx++, unescapeCursorPart( afterId ) );
+        }
+        s.bind( idx++, fetchLimit );
+        if ( !haveCursor )
+            s.bind( idx++, clampedOffset );
         while ( s.stepRow() )
         {
             QVariantMap row;
@@ -2536,7 +2756,20 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             }
             out.items.append( row );
         }
-        Q_UNUSED( idCol );
+    }
+
+    if ( static_cast<qint64>( out.items.size() ) > clampedLimit )
+    {
+        // The probe row exists: drop it and mint the continuation cursor from
+        // the last kept row.
+        out.items.resize( static_cast<int>( clampedLimit ) );
+        const QVariantMap &last = out.items.last();
+        const QString keyPart = sortKeyNumeric
+                                    ? QString::number( last.value( sortKeyName ).toLongLong() )
+                                    : last.value( sortKeyName ).toString();
+        out.nextCursor = sicnu::data::QueryCursor::encode(
+            { filterEcho, escapeCursorPart( keyPart ),
+              escapeCursorPart( last.value( idName ).toString() ) } );
     }
     return out;
 }

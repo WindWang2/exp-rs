@@ -112,12 +112,20 @@ Json::Value RsSarGeocodeOperator::metadata() const {
                                   "SICNU_SAR_PRF, SICNU_SAR_RANGE_WINDOW, "
                                   "SICNU_SAR_RANGE_RATE) - missing declarations are typed "
                                   "refusals, never approximations." );
-    meta["prerequisites"].append( "Calibrate first: rs:sar_calibrate -> rs:sar_geocode." );
+    meta["prerequisites"].append( "Calibrate first: rs:sar_calibrate -> rs:sar_geocode. The "
+                                  "input must declare SICNU_SAR_CALIBRATION=sigma0 (a legacy "
+                                  "undeclared scene is accepted under the documented sigma0 "
+                                  "assumption; gamma0/beta0/DN/derived declarations are typed "
+                                  "refusals)." );
     meta["prerequisites"].append( "DEM carries a CRS and a north-up geotransform; the DEM defines the output grid." );
     meta["limitations"].append( "gamma0 applies the per-pixel radiometric-terrain factor "
                                 "sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from "
                                 "REAL geometry - distinct from the constant-geometry plane-fit "
                                 "model of rs:sar_terrain_flatten." );
+    meta["limitations"].append( "The product is mixed: band 1 sigma0 backscatter, band 2 gamma0, "
+                                "bands 3-5 geometry. The dataset-level token names the "
+                                "radiometric input state (sigma0); SICNU_SAR_GEOCODE_BAND_STATES "
+                                "spells out every band." );
     meta["limitations"].append( "Rotated DEM grids are refused (terrain-family north-up contract)." );
     meta["limitations"].append( "No antenna pattern or fading-noise correction is applied." );
     return meta;
@@ -163,6 +171,30 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     const int sarH = sarDs.height();
     if ( sarW <= 0 || sarH <= 0 )
         throw RSOperatorError( ErrorCode::InvalidInputData, "SAR raster is empty: " + inputPath );
+
+    // Declared-state preflight: the gamma0 product band applies the
+    // radiometric-terrain factor sin(θL)/sin(θ0), which is only lawful for
+    // sigma0 input. A declared gamma0/beta0 would be double-corrected, a
+    // derived product carries no backscatter, and a conflicting or unreadable
+    // declaration is never guessed. Legacy products that declare nothing are
+    // accepted with a warning (documented sigma0 assumption).
+    QString stateReason;
+    const sicnu::sar::SarStateCheck stateCheck =
+        sicnu::sar::checkDeclaredState( sarDs, QLatin1String( "sigma0" ), &stateReason );
+    if ( stateCheck == sicnu::sar::SarStateCheck::Refused )
+        throw RSOperatorError( ErrorCode::InvalidParameter, stateReason.toStdString() );
+    if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
+        context.logWarning( "input declares no SICNU_SAR_CALIBRATION; geocoding under the "
+                            "documented sigma0 assumption (rs:sar_calibrate first)" );
+
+    // The products are linear power (the gamma0 band multiplies by a factor,
+    // which is only lawful in the linear domain): a declared dB scene must be
+    // converted first, exactly like the terrain family.
+    if ( sicnu::sar::readDomain( sarDs ) == QLatin1String( "db" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "input declares SICNU_SAR_DOMAIN=db; these products are linear "
+                               "power — convert with rs:sar_backscatter (or rs:sar_calibrate) "
+                               "first" );
 
     GdalDatasetWrapper demDs;
     if ( !demDs.open( QString::fromStdString( demPath ) ) )
@@ -563,18 +595,29 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     }
 
     // Provenance: the geocoded products carry the SAR scene's radiometric
-    // declarations plus the geocoding band order.
+    // declarations plus the geocoding band order and the per-band state map.
+    // The product is inherently mixed — band 1 is the resampled sigma0
+    // backscatter, band 2 the gamma0 RTC product, bands 3-5 geometry — so the
+    // dataset-level token names the radiometric input band's state (sigma0,
+    // the state the RTC factor assumes) and the additive per-band key spells
+    // out every band instead of overloading one token.
     out.setMetadataItem( QLatin1String( sicnu::sar::kModalityKey ), QLatin1String( "sar" ) );
     out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOMETRY_PRODUCT" ), QLatin1String( "geocoded_rd" ) );
     out.setMetadataItem( QLatin1String( "SICNU_SAR_ORBIT_GEOMETRY" ), QLatin1String( "declared" ) );
     out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOCODE_BANDS" ),
                          QLatin1String( "backscatter,gamma0,incidence,local_incidence,layover_shadow" ) );
-    if ( const char *cal = GDALGetMetadataItem( static_cast<GDALDatasetH>( sarDs.dataset() ),
-                                                sicnu::sar::kCalibrationKey, nullptr ) )
-        out.setMetadataItem( QLatin1String( sicnu::sar::kCalibrationKey ), QLatin1String( cal ) );
-    if ( const char *domain = GDALGetMetadataItem( static_cast<GDALDatasetH>( sarDs.dataset() ),
-                                                   sicnu::sar::kDomainKey, nullptr ) )
-        out.setMetadataItem( QLatin1String( sicnu::sar::kDomainKey ), QLatin1String( domain ) );
+    out.setMetadataItem( QLatin1String( "SICNU_SAR_GEOCODE_BAND_STATES" ),
+                         QLatin1String( "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class" ) );
+    out.setMetadataItem( QLatin1String( sicnu::sar::kCalibrationKey ), QLatin1String( "sigma0" ) );
+    out.setMetadataItem( QLatin1String( sicnu::sar::kDomainKey ),
+                         QLatin1String( "linear_power" ) );
+    out.setMetadataItem( QLatin1String( sicnu::sar::kRadiometricStateKey ), QLatin1String( "sigma0" ) );
+    // When the input declared nothing, the sigma0 assumption is persisted as
+    // machine-readable provenance so downstream guards can see it (a log line
+    // does not travel with the artifact).
+    if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
+        out.setMetadataItem( QLatin1String( "SICNU_SAR_STATE_ASSUMED" ),
+                             QLatin1String( "sigma0_legacy_undeclared" ) );
 
     QString closeError;
     if ( !out.closeWithError( &closeError ) )
@@ -588,6 +631,8 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     result["height"] = height;
     result["bands"] = kProductCount;
     result["bandOrder"] = "backscatter,gamma0,incidence,local_incidence,layover_shadow";
+    result["bandStates"] = "sigma0,gamma0,incidence_deg,local_incidence_deg,mask_class";
+    result["calibration"] = "sigma0";
     result["sampledPixels"] = Json::Value::UInt64( sampled );
     result["perPixelFallbackPixels"] = Json::Value::UInt64( perPixelFallback );
     result["demNoDataPixels"] = Json::Value::UInt64( demNoData );

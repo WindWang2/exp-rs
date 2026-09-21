@@ -2,7 +2,13 @@
 #include "operators/runtime/model_ensemble.h"
 
 #include "operators/framework/rs_operator_error.h"
+#include "runtime/observability/fault_point.h"
+
+#include "operators/runtime/detection_fusion.h"
+#include "operators/runtime/detection_tile_engine.h"
 #include "operators/runtime/model_runtime.h"
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <gdal.h>
 
@@ -12,12 +18,17 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <semaphore>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace sicnu::operators::runtime {
@@ -40,11 +51,17 @@ std::int64_t combineBlockValues()
   return overridden > 0 ? overridden : 16LL * 1024 * 1024;
 }
 
+/// Member-execution admission: the manifest budget is bounded by the catalog
+/// ceiling; the semaphore type needs a compile-time bound.
+constexpr int kMaxMemberConcurrency = 16;
+
 /// Removes every staged path on scope exit unless disarmed (the final
 /// product was published). Guarantees "no partial output" even when the
 /// combine pass throws or the run is cancelled. Paths may be added as the
 /// run stages them; removal happens on destruction, after every writer is
-/// closed.
+/// closed. Member sidecars (`<stack>.prov.json`) are tracked too — a member
+/// engine publishes one next to its staged stack (Platform 13.0 residue fix:
+/// 12.0 tracked only the stack itself).
 class StagedFileGuard
 {
   public:
@@ -72,6 +89,14 @@ class StagedFileGuard
 /// only ever leave a DETECTABLE absence).
 bool publishSidecar( const QString &finalPath, const Json::Value &provenance, std::string *error )
 {
+  // Test-only fault injection (Verification Platform 8.0 pattern): routes
+  // through the REAL failure branch so the publish rollback is provable.
+  if ( SICNU_FAULT_POINT( "ensemble.publish_sidecar" ) )
+  {
+    if ( error )
+      *error = "failed to publish the provenance sidecar: fault-injected failure";
+    return false;
+  }
   const QString sidecarPath = finalPath + QStringLiteral( ".prov.json" );
   const QString stagePath = sidecarPath + QStringLiteral( ".stage~" );
   QFile stage( stagePath );
@@ -104,18 +129,117 @@ bool publishSidecar( const QString &finalPath, const Json::Value &provenance, st
   return true;
 }
 
-/// Per-member execution record for the payload and the provenance sidecar.
+/// Shapefile companions for a vector output (empty for GPKG/GeoJSON) — the
+/// same set the detection writer publishes and must roll back atomically.
+QStringList detectionSidecars( const QString &main )
+{
+  const QFileInfo fi( main );
+  if ( fi.suffix().toLower() != QLatin1String( "shp" ) )
+    return {};
+  const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
+  return { base + QStringLiteral( ".dbf" ), base + QStringLiteral( ".shx" ),
+           base + QStringLiteral( ".prj" ), base + QStringLiteral( ".cpg" ) };
+}
+
+void removeWithSidecars( const QString &main )
+{
+  QFile::remove( main );
+  for ( const QString &sidecar : detectionSidecars( main ) )
+    QFile::remove( sidecar );
+}
+
+/// Owns the PREVIOUS detection product across the vector publish and the
+/// sidecar write: the previous product (main + shapefile sidecars + provenance
+/// sidecar) is moved aside on construction and restored on unwind — a throw
+/// from the writer OR the sidecar publish leaves the previous product exactly
+/// as it was, never a torn one and never a hidden backup. Disarmed after a
+/// successful sidecar publish (the backup is then removed).
+///
+/// The backup suffix is deliberately NOT the vector writer's own ".prev~"
+/// (which it unconditionally cleans up at the end of a successful publish,
+/// sidecars included): a shared name would have the writer delete this
+/// guard's backup. ".ensemble-prev~" is unique to this guard.
+class DetectionPublishGuard
+{
+  public:
+    explicit DetectionPublishGuard( const QString &finalPath )
+        : m_final( finalPath ),
+          m_backup( finalPath + QStringLiteral( ".ensemble-prev~" ) )
+    {
+      m_hadExisting = QFile::exists( m_final );
+      if ( !m_hadExisting )
+        return;
+      removeWithSidecars( m_backup );
+      if ( !QFile::rename( m_final, m_backup ) )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "detection ensemble could not back up the previous product: "
+                                 + finalPath.toStdString() );
+      for ( const QString &sidecar : detectionSidecars( m_final ) )
+        if ( QFile::exists( sidecar ) )
+          QFile::rename( sidecar, sidecar + QStringLiteral( ".ensemble-prev~" ) );
+      if ( QFile::exists( m_final + QStringLiteral( ".prov.json" ) ) )
+        QFile::rename( m_final + QStringLiteral( ".prov.json" ),
+                       m_backup + QStringLiteral( ".prov.json" ) );
+    }
+    ~DetectionPublishGuard()
+    {
+      if ( m_disarmed )
+        return;
+      removeWithSidecars( m_final );
+      if ( !m_hadExisting )
+        return;
+      QFile::rename( m_backup, m_final );
+      for ( const QString &sidecar : detectionSidecars( m_final ) )
+      {
+        const QString backupSidecar = sidecar + QStringLiteral( ".ensemble-prev~" );
+        if ( QFile::exists( backupSidecar ) )
+          QFile::rename( backupSidecar, sidecar );
+      }
+      const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+      if ( QFile::exists( backupProv ) )
+        QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+    }
+    void disarm()
+    {
+      m_disarmed = true;
+      if ( m_hadExisting )
+      {
+        removeWithSidecars( m_backup );
+        QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+      }
+    }
+
+    DetectionPublishGuard( const DetectionPublishGuard & ) = delete;
+    DetectionPublishGuard &operator=( const DetectionPublishGuard & ) = delete;
+
+  private:
+    QString m_final;
+    QString m_backup;
+    bool m_hadExisting = false;
+    bool m_disarmed = false;
+};
+
+/// Per-member execution record for the payload, the provenance sidecar and
+/// the parallel worker bookkeeping. Worker-owned fields (failure/aborted) are
+/// written by exactly one worker thread each; the main thread reads them only
+/// AFTER joining every worker.
 struct MemberRun
 {
   ModelInfo model;
   double weight = 1.0;   ///< ensemble weight from the ensemble contract
   ModelRuntimePtr session;
-  TileInferenceStats stats;
-  QString stagedPath;
-  ProviderSelectionReport selection;  ///< provider chain trace for this member
+  TileInferenceStats stats;          ///< raster path
+  DetectionTileStats detectionStats; ///< detection path
+  SceneClassificationResult scene;   ///< scene path
+  std::vector<DetectionBox> boxes;   ///< detection path (raster pixels)
+  QString stagedPath;                ///< raster path stack (empty otherwise)
+  ProviderSelectionReport selection; ///< provider chain trace for this member
+  std::exception_ptr failure;        ///< worker failure (lowest index wins)
+  bool failureAfterStop = false;     ///< failure raised after a sibling already failed
+  bool aborted = false;              ///< worker stopped by fail-fast
 };
 
-/// Builds the shared provenance document for the ensemble product (schema
+/// Builds the shared provenance document for an ensemble product (schema
 /// exp-rs-prov/1; the `ensemble` member block is additive — historical /1
 /// consumers ignore unknown blocks, and verifyProductProvenance validates
 /// the shared model/execution/inputs surface unchanged).
@@ -123,7 +247,10 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
                                      const std::vector<MemberRun> &runs,
                                      const TileInferenceStats &combined,
                                      const std::string &combination,
-                                     const std::string &uncertaintyNote )
+                                     const std::string &uncertaintyNote,
+                                     int memberConcurrency,
+                                     bool stagingCompressed,
+                                     bool detectionPath )
 {
   Json::Value prov( Json::objectValue );
   prov["schema"] = "exp-rs-prov/1";
@@ -150,6 +277,8 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
   ensembleJson["combination"] = combination;
   if ( !uncertaintyNote.empty() )
     ensembleJson["uncertainty"] = uncertaintyNote;
+  ensembleJson["member_concurrency"] = memberConcurrency;
+  ensembleJson["staging_compression"] = stagingCompressed ? "deflate" : "none";
   Json::Value membersJson( Json::arrayValue );
   for ( const MemberRun &run : runs )
   {
@@ -157,7 +286,8 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
     member["identity_tag"] = run.model.identityTag();
     if ( !run.model.contentDigest.empty() )
       member["content_digest"] = run.model.contentDigest;
-    member["framework"] = run.model.framework;
+    member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                  : run.selection.resolvedFramework;
     member["weight"] = run.weight;
     if ( run.session )
     {
@@ -169,11 +299,28 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
       if ( !details.runtimeVersion.empty() )
         member["runtime_version"] = details.runtimeVersion;
     }
+    // Provider strategy: a fallback that fired is never silent — the sidecar
+    // records the full attempt trail when the chain walked past the primary.
+    if ( run.selection.attempts.size() > 1 )
+      member["provider_selection"] = run.selection.toJson();
     Json::Value execution( Json::objectValue );
-    execution["tiles_processed"] = run.stats.tilesProcessed;
-    execution["tiles_skipped_nodata"] = run.stats.tilesSkippedNoData;
-    if ( run.stats.batchReductions > 0 )
-      execution["batch_reductions"] = run.stats.batchReductions;
+    // The stats struct that THIS path filled (a detection member never runs
+    // the raster engine — reporting raster zeros would make the sidecar lie).
+    if ( detectionPath )
+    {
+      execution["tiles_processed"] = run.detectionStats.tilesProcessed;
+      execution["tiles_planned"] = run.detectionStats.tilesPlanned;
+      execution["detections_kept"] = run.detectionStats.detectionsKept;
+      if ( run.detectionStats.batchReductions > 0 )
+        execution["batch_reductions"] = run.detectionStats.batchReductions;
+    }
+    else
+    {
+      execution["tiles_processed"] = run.stats.tilesProcessed;
+      execution["tiles_skipped_nodata"] = run.stats.tilesSkippedNoData;
+      if ( run.stats.batchReductions > 0 )
+        execution["batch_reductions"] = run.stats.batchReductions;
+    }
     member["execution"] = execution;
     membersJson.append( member );
   }
@@ -273,39 +420,285 @@ bool readBlock( GDALDatasetH ds, int band, int y, int rows, float *buffer )
                        width, rows, GDT_Float32, 0, 0 ) == CE_None;
 }
 
+/// Resolves and gates every ensemble member BEFORE anything is acquired: a
+/// broken member is a manifest-level failure, not a mid-run one. Applies the
+/// SAME contract gates the single-model service applies (Platform 12.0
+/// review P1-2) — a member is never silently under-fed.
+std::vector<ModelInfo> resolveEnsembleMembers( const ModelInfo &ensembleModel,
+                                               const ModelExecutionRequest &request )
+{
+  std::vector<ModelInfo> members;
+  members.reserve( ensembleModel.ensemble.members.size() );
+  for ( const ModelEnsembleMemberContract &entry : ensembleModel.ensemble.members )
+  {
+    std::string errorDetail;
+    const ModelInfo member = resolveModelReference( entry.model, &errorDetail );
+    if ( member.readiness != ModelReadiness::Ready )
+      throw RSOperatorError( member.readiness == ModelReadiness::MissingArtifact
+                               ? ErrorCode::FileNotFound
+                               : ErrorCode::InvalidInputData,
+                             "ensemble member '" + entry.model + "' is not ready: "
+                               + ( errorDetail.empty() ? std::string( "unavailable" ) : errorDetail ) );
+    if ( member.ensemble.declared )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "ensemble member '" + entry.model
+                               + "' is itself an ensemble - nesting is not supported" );
+    // Members run through the SINGLE-INPUT engine: a member whose manifest
+    // demands temporal frames or several named inputs would be silently
+    // under-fed (the #646 failure class) — the same loud refusal the service
+    // applies to single-model runs.
+    rejectUnwiredContracts( member, {} );
+    preflightFeatureCube( member, request.inputPath );
+    members.push_back( member );
+  }
+  return members;
+}
+
+/// Acquires one session per member through its own provider fallback chain.
+/// Serial by construction: the registry serializes admission itself, and the
+/// acquisition order (member order) is what the ledger and the provenance
+/// record. The request's explicit device token overrides every member.
+std::vector<MemberRun> acquireEnsembleSessions( const ModelInfo &ensembleModel,
+                                                const std::vector<ModelInfo> &members,
+                                                const bool hasDeviceOverride,
+                                                const RequestedDevice &deviceRequest,
+                                                RSOperatorContext &context )
+{
+  auto &registry = ModelRuntimeRegistry::instance();
+  std::vector<MemberRun> runs;
+  runs.reserve( members.size() );
+  for ( std::size_t i = 0; i < members.size(); ++i )
+  {
+    MemberRun run;
+    run.model = members[i];
+    run.weight = ensembleModel.ensemble.members[i].weight;
+
+    context.reportProgress( 0.05, "Acquiring ensemble member " + std::to_string( i + 1 ) + "/"
+                                     + std::to_string( members.size() ) + " ("
+                                     + members[i].stableId() + ")" );
+    std::string loadError;
+    run.session =
+      hasDeviceOverride
+        ? registry.acquireWithFallback( run.model, &deviceRequest, &loadError, &run.selection )
+        : registry.acquireWithFallback( run.model, nullptr, &loadError, &run.selection );
+    if ( !run.session )
+      throw RSOperatorError( ErrorCode::ComputationError,
+                             "Failed to load ensemble member '" + run.model.stableId()
+                               + "': " + loadError );
+    runs.push_back( std::move( run ) );
+  }
+  return runs;
+}
+
+/// Runs every member body under the bounded admission budget, one worker
+/// thread per member. THE concurrency contract (Platform 13.0):
+///   - admission: at most @p budget members execute at any instant (a
+///     counting semaphore acquired INSIDE the worker — "parallel" never
+///     means "start everything").
+///   - fail-fast: the first worker failure (or a parent cancellation) raises
+///     a shared stop flag; every other worker observes it at its next check
+///     point and exits WITHOUT publishing anything.
+///   - isolation: exceptions never escape a worker (no terminate); each
+///     worker captures its own exception_ptr. The main thread joins all
+///     workers and rethrows the LOWEST-INDEX real failure, so the surfaced
+///     error is a deterministic function of the failure set, never of
+///     scheduling.
+///   - determinism: the caller assembles results strictly in member order
+///     afterwards; completion order never reaches the product.
+void runMembersBounded( std::vector<MemberRun> &runs, int budget,
+                        const RSOperatorContext &parent,
+                        const std::function<void( std::size_t, MemberRun &, RSOperatorContext & )>
+                          &body )
+{
+  budget = std::clamp( budget, 1, kMaxMemberConcurrency );
+  std::counting_semaphore<kMaxMemberConcurrency> admission(
+    static_cast<std::ptrdiff_t>( budget ) );
+  std::atomic<bool> stopWorkers{ false };
+
+  auto worker = [ & ]( std::size_t index ) {
+    // Bounded admission: the slot is taken FIRST, then guarded — a throwing
+    // acquire must not release a slot it never held. Every exit path (abort,
+    // failure, success) returns the slot through the guard.
+    admission.acquire();
+    struct AdmissionRelease
+    {
+      std::counting_semaphore<kMaxMemberConcurrency> &semaphore;
+      ~AdmissionRelease() { semaphore.release(); }
+    } release{ admission };
+
+    MemberRun &run = runs[index];
+    if ( stopWorkers.load( std::memory_order_acquire ) || parent.isCancelled() )
+    {
+      run.aborted = true;
+      return;
+    }
+    try
+    {
+      // Child context: the worker polls the parent's cancellation AND the
+      // fail-fast flag, so a sibling failure stops this member at its next
+      // tile boundary instead of running the whole raster.
+      RSOperatorContext child( parent.workDir() );
+      child.setCancelCallback( [ &parent, &stopWorkers ]() {
+        return parent.isCancelled() || stopWorkers.load( std::memory_order_acquire );
+      } );
+      body( index, run, child );
+      if ( stopWorkers.load( std::memory_order_acquire ) )
+        run.aborted = true; // finished alongside a sibling failure: discard
+    }
+    catch ( const RSOperatorError &error )
+    {
+      // A cancellation raised by the FAIL-FAST flag (a sibling failed) is an
+      // abort of THIS worker, not this member's failure — recording it as a
+      // failure would let the abort mask the real error. A cancellation the
+      // PARENT asked for is a real outcome and stays a failure.
+      if ( error.code() == ErrorCode::Cancelled && !parent.isCancelled()
+           && stopWorkers.load( std::memory_order_acquire ) )
+      {
+        run.aborted = true;
+        return;
+      }
+      // Any other error is this member's failure. When the stop flag was
+      // ALREADY set, the error is (or may be) a consequence of a sibling's
+      // failure unwinding through this worker — recorded, but flagged so the
+      // surfaced error stays the deterministic lowest-index REAL failure
+      // (a failure recorded before any sibling failed).
+      run.failure = std::current_exception();
+      run.failureAfterStop = stopWorkers.load( std::memory_order_acquire );
+      stopWorkers.store( true, std::memory_order_release );
+    }
+    catch ( ... )
+    {
+      run.failure = std::current_exception();
+      run.failureAfterStop = stopWorkers.load( std::memory_order_acquire );
+      stopWorkers.store( true, std::memory_order_release );
+    }
+  };
+
+  std::vector<std::thread> workers;
+  workers.reserve( runs.size() );
+  try
+  {
+    for ( std::size_t i = 0; i < runs.size(); ++i )
+      workers.emplace_back( worker, i );
+  }
+  catch ( const std::system_error & )
+  {
+    // Thread creation failed (RLIMIT_NPROC / address space): stop the workers
+    // already running and join them — a joinable std::thread destroyed by the
+    // vector would terminate the process.
+    stopWorkers.store( true, std::memory_order_release );
+    for ( std::thread &thread : workers )
+      thread.join();
+    throw;
+  }
+  for ( std::thread &thread : workers )
+    thread.join();
+
+  // Deterministic surfaced error: the lowest-index REAL failure (recorded
+  // before any sibling failed). When every failure is a consequence of an
+  // abort, the lowest-index one is surfaced — still deterministic.
+  const MemberRun *surfaced = nullptr;
+  for ( const MemberRun &run : runs )
+  {
+    if ( !run.failure )
+      continue;
+    if ( !run.failureAfterStop )
+    {
+      surfaced = &run;
+      break; // lowest-index real failure
+    }
+    if ( !surfaced )
+      surfaced = &run; // first consequence-only failure (fallback)
+  }
+  if ( surfaced )
+    std::rethrow_exception( surfaced->failure );
+}
+
+/// Member bodies ------------------------------------------------------------
+
+/// Raster member: one probability stack into the member's staged path.
+/// Members always produce probability stacks — the combination owns the
+/// product semantics; a member applying its own derived collapse would
+/// destroy the probabilities the vote/mean needs.
+void runRasterMember( std::size_t index, MemberRun &run, RSOperatorContext &context,
+                      const ModelExecutionRequest &request, const std::vector<int> &bands )
+{
+  TileInferenceRunOptions memberOptions;
+  memberOptions.tta = TtaMode::None;
+  memberOptions.batchSizeOverride = std::max( 0, request.batchSizeOverride );
+  memberOptions.outputMode = RasterOutputMode::Probability;
+  memberOptions.blend = request.blend;
+  memberOptions.computeFeedFingerprints = index == 0; // grid provenance from the primary member
+  TileInferenceEngine engine( run.model, run.session );
+  run.stats = engine.run( request.inputPath, bands, run.stagedPath.toStdString(), context,
+                          memberOptions );
+}
+
+/// Detection member: boxes collected in memory, nothing published. Request-
+/// level knob overrides apply to EVERY member's decode gate (what a caller
+/// forcing conf=0.5 means); the fusion thresholds stay the ensemble
+/// manifest's (the combination owns the product semantics).
+void runDetectionMember( MemberRun &run, RSOperatorContext &context,
+                         const ModelExecutionRequest &request, const std::vector<int> &bands )
+{
+  ModelInfo effective = run.model;
+  if ( request.confOverride >= 0.0 )
+    effective.output.detection.confThreshold = request.confOverride;
+  if ( request.nmsIouOverride >= 0.0 )
+    effective.output.detection.nmsIou = request.nmsIouOverride;
+  TileInferenceRunOptions memberOptions;
+  memberOptions.batchSizeOverride = std::max( 0, request.batchSizeOverride );
+  DetectionTileEngine engine( effective, run.session );
+  run.detectionStats =
+    engine.run( request.inputPath, bands, run.stagedPath.toStdString(), context, memberOptions,
+                &run.boxes );
+}
+
+/// Scene-classification member: one probability vector, nothing published.
+void runSceneMember( MemberRun &run, RSOperatorContext &context,
+                     const ModelExecutionRequest &request, const std::vector<int> &bands )
+{
+  TileInferenceRunOptions memberOptions;
+  memberOptions.batchSizeOverride = std::max( 0, request.batchSizeOverride );
+  TileInferenceEngine engine( run.model, run.session );
+  run.scene = engine.classifyScene( request.inputPath, bands, context, memberOptions );
+}
+
+/// Rethrows the lowest-index worker failure (the deterministic surfaced
+/// error) and refuses to continue on a cancelled/aborted run.
+void collectMemberOutcomes( const std::vector<MemberRun> &runs, RSOperatorContext &context )
+{
+  for ( const MemberRun &run : runs )
+  {
+    if ( run.failure )
+      std::rethrow_exception( run.failure );
+  }
+  context.throwIfCancelled();
+  for ( const MemberRun &run : runs )
+  {
+    if ( run.aborted )
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "ensemble member run stopped before completing" );
+  }
+}
+
 } // namespace
 
 ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                            const ModelExecutionRequest &request,
                                            RSOperatorContext &context )
 {
-  // Surface exclusions: the ensemble combines RASTER probability products.
-  // Detection decode (boxes, NMS) and single-forward scene classification
-  // have no defined combination here — a typed refusal, never a silent
-  // misread. Multi-feed temporal ensembles and request-level derived output
-  // modes are refused for the same honesty.
-  if ( request.asDetection )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "model '" + ensembleModel.name
-                             + "' is an ensemble: detection decode cannot be combined yet "
-                               "(weighted_mean / weighted_vote raster products only)" );
-  if ( request.asSceneClassification )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "model '" + ensembleModel.name
-                             + "' is an ensemble: scene classification (single-forward artifacts) "
-                               "cannot be combined yet" );
+  // Surface routing. The ensemble combines member products: raster
+  // probability stacks (weighted_mean / weighted_vote), detection boxes
+  // (wbf — Weighted Boxes Fusion, ADR 0171), or scene-classification
+  // probability vectors (weighted_mean / weighted_vote). Multi-feed temporal
+  // ensembles and request-level TTA stay refusals for the same honesty.
   if ( !request.namedInputs.empty() )
     throw RSOperatorError( ErrorCode::InvalidInputData,
                            "model '" + ensembleModel.name
                              + "' is an ensemble: multi-feed requests are not wired for "
                                "ensembles yet — run the members' contracts through a "
                                "non-ensemble model" );
-  if ( request.outputMode != RasterOutputMode::Probability )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "model '" + ensembleModel.name
-                             + "' is an ensemble: derived output modes (labels/mask/confidence) "
-                               "apply to single-model runs only; the ensemble publishes its "
-                               "combined probability stack" );
   if ( request.tta != TtaMode::None )
     throw RSOperatorError( ErrorCode::InvalidInputData,
                            "model '" + ensembleModel.name
@@ -322,32 +715,22 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
 
   const std::string combination = ensembleModel.ensemble.effectiveCombination();
 
-  // Resolve + gate every member BEFORE acquiring anything: a broken member
-  // is a manifest-level failure, not a mid-run one.
-  std::vector<ModelInfo> members;
-  members.reserve( ensembleModel.ensemble.members.size() );
-  for ( const ModelEnsembleMemberContract &entry : ensembleModel.ensemble.members )
-  {
-    std::string errorDetail;
-    const ModelInfo member = resolveModelReference( entry.model, &errorDetail );
-    if ( member.readiness != ModelReadiness::Ready )
-      throw RSOperatorError( member.readiness == ModelReadiness::MissingArtifact
-                                 ? ErrorCode::FileNotFound
-                                 : ErrorCode::InvalidInputData,
-                             "ensemble member '" + entry.model + "' is not ready: "
-                               + ( errorDetail.empty() ? std::string( "unavailable" ) : errorDetail ) );
-    if ( member.ensemble.declared )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "ensemble member '" + entry.model
-                               + "' is itself an ensemble - nesting is not supported" );
-    // Members run through the SINGLE-INPUT engine: a member whose manifest
-    // demands temporal frames or several named inputs would be silently
-    // under-fed (the #646 failure class) — the same loud refusal the service
-    // applies to single-model runs.
-    rejectUnwiredContracts( member, {} );
-    preflightFeatureCube( member, request.inputPath );
-    members.push_back( member );
-  }
+  // Detection routing: the manifest must declare the box-fusion combination,
+  // and a wbf manifest never serves a raster/scene request.
+  if ( request.asDetection && combination != "wbf" )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "model '" + ensembleModel.name
+                             + "' is an ensemble: detection decode requires combination 'wbf' "
+                               "(Weighted Boxes Fusion); this manifest declares '"
+                             + combination + "'" );
+  if ( combination == "wbf" && !request.asDetection )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "model '" + ensembleModel.name
+                             + "' declares combination 'wbf' (detection box fusion) but the "
+                               "request is not a detection run — use the detection operator or "
+                               "a raster/scene combination" );
+  // Resolve + gate every member BEFORE acquiring anything.
+  const std::vector<ModelInfo> members = resolveEnsembleMembers( ensembleModel, request );
 
   // Device override: the request's token applies to EVERY member (what a
   // caller forcing `cpu` means); without it each member resolves its own
@@ -360,75 +743,452 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                            "device '" + request.deviceToken
                              + "' is not parsable (supported: cpu, cuda, cuda:N, auto)" );
 
-  // Acquire each member through its own provider fallback chain.
-  auto &registry = ModelRuntimeRegistry::instance();
-  const QFileInfo outputInfo( QString::fromStdString( request.outputPath ) );
-  std::vector<MemberRun> runs;
-  runs.reserve( members.size() );
-  for ( std::size_t i = 0; i < members.size(); ++i )
-  {
-    MemberRun run;
-    run.model = members[i];
-    run.weight = ensembleModel.ensemble.members[i].weight;
-    run.stagedPath = QDir( outputInfo.absolutePath() ).filePath(
-      QString( ".%1.ensemble-member%2.tmp~" ).arg( outputInfo.fileName(), QString::number( i ) ) );
+  std::vector<MemberRun> runs =
+    acquireEnsembleSessions( ensembleModel, members, hasDeviceOverride, deviceRequest, context );
 
-    context.reportProgress( 0.05, "Acquiring ensemble member " + std::to_string( i + 1 ) + "/"
-                                     + std::to_string( members.size() ) + " ("
-                                     + members[i].stableId() + ")" );
-    std::string loadError;
-    run.session =
-      hasDeviceOverride
-        ? registry.acquireWithFallback( run.model, &deviceRequest, &loadError, &run.selection )
-        : registry.acquireWithFallback( run.model, nullptr, &loadError, &run.selection );
-    if ( !run.session )
-      throw RSOperatorError( ErrorCode::ComputationError,
-                             "Failed to load ensemble member '" + run.model.stableId()
-                               + "': " + loadError );
-    runs.push_back( std::move( run ) );
+  const int budget = ensembleModel.ensemble.effectiveMaxConcurrentMembers();
+
+  if ( request.asDetection )
+  {
+    // ===================== Detection ensemble (WBF) =====================
+    // Every member must be detection-executable and share ONE class
+    // vocabulary (names AND order): classId indexes the vocabulary, so a
+    // mismatch would silently relabel the product — typed refusal instead.
+    for ( const MemberRun &run : runs )
+    {
+      if ( const std::string contractError = DetectionTileEngine::checkContract( run.model );
+           !contractError.empty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "ensemble member '" + run.model.stableId()
+                                 + "' cannot run as a detection member: " + contractError );
+    }
+    const std::vector<std::string> &vocabulary = runs.front().model.output.detection.classes;
+    for ( std::size_t i = 1; i < runs.size(); ++i )
+    {
+      if ( runs[i].model.output.detection.classes != vocabulary )
+        throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "ensemble member '" + runs[i].model.stableId()
+            + "' declares a different detection class vocabulary than the primary member '"
+            + runs.front().model.stableId()
+            + "' — box fusion requires one shared class map (names and order); "
+              "a silent remap would relabel the product" );
+    }
+
+    // Detection members publish nothing: the boxes are fused in memory and
+    // the ensemble writes ONE product, so there is no member residue to
+    // clean by construction.
+    runMembersBounded(
+      runs, budget, context,
+      [ & ]( std::size_t index, MemberRun &run, RSOperatorContext &child ) {
+        context.reportProgressForced(
+          static_cast<double>( index ) / static_cast<double>( runs.size() + 1 ),
+          "Running detection ensemble member " + std::to_string( index + 1 ) + "/"
+            + std::to_string( runs.size() ) + " (" + run.model.stableId() + ")" );
+        runDetectionMember( run, child, request, request.bands );
+      } );
+    collectMemberOutcomes( runs, context );
+
+    // Fuse in the ONE frame every member already shares: raster pixels (each
+    // member engine mapped its own letterbox/tiling reverse transform back
+    // to raster coordinates; the ensemble never re-derives coordinates).
+    std::vector<DetectionMemberBoxes> contributions;
+    contributions.reserve( runs.size() );
+    for ( MemberRun &run : runs )
+      contributions.push_back( DetectionMemberBoxes{ run.weight, std::move( run.boxes ) } );
+    DetectionFusionContract fusion;
+    fusion.iouThreshold = ensembleModel.ensemble.detection.iouThreshold;
+    fusion.skipBoxThreshold = ensembleModel.ensemble.detection.skipBoxThreshold;
+    const DetectionFusionResult fused = fuseDetectionsWbf( contributions, fusion );
+
+    // The final writer applies the INPUT raster's geotransform once.
+    GdalDatasetWrapper input;
+    if ( !input.open( QString::fromStdString( request.inputPath ) ) )
+      throw RSOperatorError( ErrorCode::GdalError,
+                             "failed to open input raster: " + request.inputPath );
+    // The publish guard owns the previous product across the vector publish
+    // AND the sidecar write: any failure (including a throw from the writer)
+    // restores it exactly — main file, shapefile sidecars and provenance.
+    const QString detectionFinal = QString::fromStdString( request.outputPath );
+    DetectionPublishGuard publishGuard( detectionFinal );
+    writeDetectionVector( fused.boxes, vocabulary, input.geoTransform(), input.projection(),
+                          request.outputPath );
+
+    // Provenance sidecar: the fusion block records WHY the product looks the
+    // way it does (algorithm, thresholds, pooled/fused counts) next to the
+    // member identities — the product must be explainable after the fact.
+    TileInferenceStats combined;
+    for ( const MemberRun &run : runs )
+    {
+      combined.tilesPlanned += run.detectionStats.tilesPlanned;
+      combined.tilesProcessed += run.detectionStats.tilesProcessed;
+    }
+    Json::Value provenance =
+      buildEnsembleProvenance( ensembleModel, runs, combined, combination, std::string(), budget,
+                               ensembleModel.ensemble.stagingCompressed(), true );
+    Json::Value fusionJson( Json::objectValue );
+    fusionJson["algorithm"] = "wbf";
+    fusionJson["iou_threshold"] = fusion.iouThreshold;
+    fusionJson["skip_box_threshold"] = fusion.skipBoxThreshold;
+    fusionJson["boxes_pooled"] = static_cast<Json::UInt64>( fused.boxesPooled );
+    fusionJson["boxes_gated"] = static_cast<Json::UInt64>( fused.boxesGated );
+    fusionJson["boxes_clustered"] = static_cast<Json::UInt64>( fused.boxesClustered );
+    fusionJson["boxes_merged"] = static_cast<Json::UInt64>( fused.boxesMerged );
+    fusionJson["detections"] = static_cast<Json::UInt64>( fused.clusters );
+    provenance["fusion"] = fusionJson;
+    // A vector product: the output block describes features, not a grid.
+    provenance["output"]["format"] = "vector";
+    provenance["output"]["features"] = static_cast<Json::UInt64>( fused.clusters );
+    std::string sidecarError;
+    if ( !publishSidecar( detectionFinal, provenance, &sidecarError ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
+    publishGuard.disarm();
+
+    ModelExecutionResult result;
+    result.identityTag = ensembleModel.identityTag();
+    result.backend = "ensemble(wbf)";
+    QString devices;
+    for ( const MemberRun &run : runs )
+    {
+      if ( !devices.isEmpty() )
+        devices += QLatin1Char( ',' );
+      devices += QString::fromStdString( run.session->deviceName() );
+    }
+    result.device = devices.toStdString();
+
+    Json::Value payload( Json::objectValue );
+    payload["output"] = request.outputPath;
+    payload["backend"] = result.backend;
+    payload["device"] = result.device;
+    payload["model"] = ensembleModel.stableId();
+    payload["combination"] = combination;
+    payload["detections"] = static_cast<Json::UInt64>( fused.clusters );
+    payload["rawDetections"] = static_cast<Json::UInt64>( fused.boxesPooled );
+    Json::Value classes( Json::arrayValue );
+    for ( const std::string &cls : vocabulary )
+      classes.append( cls );
+    payload["classes"] = classes;
+    Json::Value fusionPayload( Json::objectValue );
+    fusionPayload["algorithm"] = "wbf";
+    fusionPayload["iou_threshold"] = fusion.iouThreshold;
+    fusionPayload["skip_box_threshold"] = fusion.skipBoxThreshold;
+    fusionPayload["detections"] = static_cast<Json::UInt64>( fused.clusters );
+    payload["fusion"] = fusionPayload;
+    Json::Value membersPayload( Json::arrayValue );
+    for ( const MemberRun &run : runs )
+    {
+      Json::Value member( Json::objectValue );
+      member["model"] = run.model.stableId();
+      member["identity_tag"] = run.model.identityTag();
+      member["weight"] = run.weight;
+      member["backend"] = run.session->backendName();
+      member["device"] = run.session->deviceName();
+      member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                   : run.selection.resolvedFramework;
+      if ( !run.selection.resolvedFramework.empty() && run.selection.attempts.size() > 1 )
+        member["provider_selection"] = run.selection.toJson();
+      member["tiles"] = run.detectionStats.tilesProcessed;
+      member["detections"] = run.detectionStats.detectionsKept;
+      membersPayload.append( member );
+    }
+    payload["ensemble_members"] = membersPayload;
+    result.payload = std::move( payload );
+    return result;
   }
 
-  // RAII: every staged path (members + final stage) is removed unless the
-  // final product was published. A member failure, a combine failure, a
-  // cancellation — none of them may leave an output behind.
-  StagedFileGuard stagedGuard;
-  for ( const MemberRun &run : runs )
-    stagedGuard.addPath( run.stagedPath );
+  if ( request.asSceneClassification )
+  {
+    // ================= Scene-classification ensemble ====================
+    // Every member must declare the SAME class vocabulary (names and order):
+    // the combination is defined over aligned per-class probability vectors,
+    // and an implicit reorder would silently relabel the product.
+    for ( const MemberRun &run : runs )
+    {
+      if ( run.model.output.classes.empty() )
+        throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "ensemble member '" + run.model.stableId()
+            + "' declares no output.classes — scene classification combines per-class "
+              "probability vectors over a shared vocabulary" );
+    }
+    const std::vector<std::string> &vocabulary = runs.front().model.output.classes;
+    for ( std::size_t i = 1; i < runs.size(); ++i )
+    {
+      if ( runs[i].model.output.classes != vocabulary )
+        throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "ensemble member '" + runs[i].model.stableId()
+            + "' declares a different class vocabulary than the primary member '"
+            + runs.front().model.stableId()
+            + "' — scene-classification fusion requires one shared vocabulary "
+              "(names and order); a silent remap would relabel the product" );
+    }
+    const int classCount = static_cast<int>( vocabulary.size() );
 
-  TileInferenceStats combined;
-  const std::vector<int> bands = request.bands;
+    runMembersBounded(
+      runs, budget, context,
+      [ & ]( std::size_t index, MemberRun &run, RSOperatorContext &child ) {
+        context.reportProgressForced(
+          static_cast<double>( index ) / static_cast<double>( runs.size() + 1 ),
+          "Running scene-classification ensemble member " + std::to_string( index + 1 ) + "/"
+            + std::to_string( runs.size() ) + " (" + run.model.stableId() + ")" );
+        runSceneMember( run, child, request, request.bands );
+      } );
+    collectMemberOutcomes( runs, context );
+
+    // Combine. weighted_mean: combined_c = Σ w·p_c / Σ w (a proper
+    // distribution when every member is logit-semantics; otherwise the
+    // weighted mean of the members' clamped scores — never renormalized
+    // silently). weighted_vote: each member votes its argmax (ties lowest
+    // index) with its weight; the winner is the highest accumulated vote,
+    // ties to the lowest class index; agreement = winner vote share.
+    double weightSum = 0.0;
+    for ( const MemberRun &run : runs )
+      weightSum += run.weight;
+    if ( !( weightSum > 0.0 ) )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "ensemble weights sum to zero - the combination is undefined "
+                               "(declare at least one positive weight)" );
+
+    std::vector<double> combined( static_cast<std::size_t>( classCount ), 0.0 );
+    std::vector<double> votes( static_cast<std::size_t>( classCount ), 0.0 );
+    for ( const MemberRun &run : runs )
+    {
+      if ( static_cast<int>( run.scene.probabilities.size() ) != classCount )
+        throw RSOperatorError( ErrorCode::ComputationError,
+                               "ensemble member '" + run.model.stableId()
+                                 + "' produced " + std::to_string( run.scene.probabilities.size() )
+                                 + " class scores but the shared vocabulary declares "
+                                 + std::to_string( classCount ) );
+      for ( int c = 0; c < classCount; ++c )
+        combined[static_cast<std::size_t>( c )] +=
+          run.weight * run.scene.probabilities[static_cast<std::size_t>( c )];
+      int best = 0;
+      for ( int c = 1; c < classCount; ++c )
+        if ( run.scene.probabilities[static_cast<std::size_t>( c )]
+             > run.scene.probabilities[static_cast<std::size_t>( best )] )
+          best = c;
+      votes[static_cast<std::size_t>( best )] += run.weight;
+    }
+    for ( double &value : combined )
+      value /= weightSum;
+
+    int predicted = 0;
+    double agreement = 0.0;
+    if ( combination == "weighted_vote" )
+    {
+      for ( int c = 1; c < classCount; ++c )
+        if ( votes[static_cast<std::size_t>( c )] > votes[static_cast<std::size_t>( predicted )] )
+          predicted = c; // strict > keeps the LOWEST index on ties
+      agreement = votes[static_cast<std::size_t>( predicted )] / weightSum;
+    }
+    else
+    {
+      for ( int c = 1; c < classCount; ++c )
+        if ( combined[static_cast<std::size_t>( c )] > combined[static_cast<std::size_t>( predicted )] )
+          predicted = c; // ties keep the lowest index (deterministic)
+    }
+
+    // Typed classification artifact (exp-rs-classification/1 + the additive
+    // `ensemble` block). `probabilities` carries the weighted mean of the
+    // member vectors under BOTH combinations; `predicted_index` follows the
+    // combination (argmax of the mean / vote winner).
+    Json::Value doc( Json::objectValue );
+    doc["schema"] = "exp-rs-classification/1";
+    Json::Value artifact( Json::objectValue );
+    artifact["kind"] = "classification";
+    artifact["path"] = request.outputPath;
+    artifact["schema_version"] = 1;
+    doc["artifact"] = artifact;
+    doc["predicted_index"] = predicted;
+    doc["predicted_class"] = vocabulary[static_cast<std::size_t>( predicted )];
+    Json::Value probabilitiesJson( Json::objectValue );
+    for ( int c = 0; c < classCount; ++c )
+      probabilitiesJson[vocabulary[static_cast<std::size_t>( c )].c_str()] =
+        combined[static_cast<std::size_t>( c )];
+    doc["probabilities"] = probabilitiesJson;
+    doc["score_semantics"] = combination == "weighted_vote" ? "ensemble_weighted_vote"
+                                                            : "ensemble_weighted_mean";
+    if ( combination == "weighted_vote" )
+      doc["agreement"] = agreement;
+    Json::Value scene( Json::objectValue );
+    scene["width"] = runs.front().scene.width;
+    scene["height"] = runs.front().scene.height;
+    scene["bands"] = runs.front().scene.bands;
+    scene["valid_fraction"] = runs.front().scene.totalSamples > 0
+                                ? static_cast<double>( runs.front().scene.validSamples )
+                                    / static_cast<double>( runs.front().scene.totalSamples )
+                                : 0.0;
+    doc["scene"] = scene;
+    Json::Value modelJson( Json::objectValue );
+    modelJson["name"] = ensembleModel.name;
+    modelJson["identity_tag"] = ensembleModel.identityTag();
+    modelJson["task"] = ensembleModel.task;
+    doc["model"] = modelJson;
+    // The ensemble block: members, weights, execution identity and the
+    // per-member score semantics (the combined vector's meaning depends on
+    // them — recorded, never inferred).
+    Json::Value ensembleJson( Json::objectValue );
+    ensembleJson["combination"] = combination;
+    ensembleJson["member_concurrency"] = budget;
+    Json::Value membersJson( Json::arrayValue );
+    for ( const MemberRun &run : runs )
+    {
+      Json::Value member( Json::objectValue );
+      member["identity_tag"] = run.model.identityTag();
+      if ( !run.model.contentDigest.empty() )
+        member["content_digest"] = run.model.contentDigest;
+      member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                    : run.selection.resolvedFramework;
+      member["weight"] = run.weight;
+      member["score_semantics"] = run.scene.scoreSemantics;
+      if ( run.session )
+      {
+        member["backend"] = run.session->backendName();
+        member["device"] = run.session->deviceName();
+        const ProviderRuntimeDetails details = run.session->providerDetails();
+        if ( !details.executionProvider.empty() )
+          member["execution_provider"] = details.executionProvider;
+        if ( !details.runtimeVersion.empty() )
+          member["runtime_version"] = details.runtimeVersion;
+      }
+      if ( run.selection.attempts.size() > 1 )
+        member["provider_selection"] = run.selection.toJson();
+      membersJson.append( member );
+    }
+    ensembleJson["members"] = membersJson;
+    doc["ensemble"] = ensembleJson;
+    Json::Value inputJson( Json::objectValue );
+    inputJson["path"] = request.inputPath;
+    inputJson["fingerprint"] = runs.front().scene.inputFingerprint;
+    doc["input"] = inputJson;
+    TileInferenceEngine::publishClassificationArtifact( doc, request.outputPath );
+
+    ModelExecutionResult result;
+    result.identityTag = ensembleModel.identityTag();
+    result.backend = "ensemble(" + combination + ")";
+    QString devices;
+    for ( const MemberRun &run : runs )
+    {
+      if ( !devices.isEmpty() )
+        devices += QLatin1Char( ',' );
+      devices += QString::fromStdString( run.session->deviceName() );
+    }
+    result.device = devices.toStdString();
+    doc["backend"] = result.backend;
+    doc["device"] = result.device;
+    doc["model_ref"] = ensembleModel.stableId();
+    Json::Value membersPayload( Json::arrayValue );
+    for ( const MemberRun &run : runs )
+    {
+      Json::Value member( Json::objectValue );
+      member["model"] = run.model.stableId();
+      member["identity_tag"] = run.model.identityTag();
+      member["weight"] = run.weight;
+      member["backend"] = run.session->backendName();
+      member["device"] = run.session->deviceName();
+      member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
+                                                                   : run.selection.resolvedFramework;
+      if ( !run.selection.resolvedFramework.empty() && run.selection.attempts.size() > 1 )
+        member["provider_selection"] = run.selection.toJson();
+      membersPayload.append( member );
+    }
+    doc["ensemble_members"] = membersPayload;
+    result.payload = std::move( doc );
+    return result;
+  }
+
+  // ========================= Raster ensemble ==============================
+  // Derived output modes (Platform 13.0): the request-level collapse is
+  // defined ONLY over the weighted mean of member probabilities. weighted_vote
+  // publishes its own label+agreement product (requesting Labels on it is the
+  // identity; mask/confidence are undefined over hard votes).
+  const RasterOutputMode mode = request.outputMode;
+  if ( mode != RasterOutputMode::Probability && combination == "weighted_vote"
+       && mode != RasterOutputMode::Labels )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "model '" + ensembleModel.name
+                             + "' is an ensemble: derived output mode '"
+                             + ( mode == RasterOutputMode::Mask ? std::string( "mask" )
+                                                                : std::string( "confidence" ) )
+                             + "' is undefined over weighted votes — the vote product IS the "
+                               "label product (with its agreement band)" );
+  const bool derived = mode != RasterOutputMode::Probability && combination != "weighted_vote";
+  const std::string uncertaintyToken =
+    ensembleModel.ensemble.uncertainty.empty() ? "auto" : ensembleModel.ensemble.uncertainty;
+  if ( derived )
+  {
+    // Under a derived request the natural uncertainty band IS the derived
+    // collapse (auto resolves to none); an explicit variance band cannot
+    // share one GDAL dataset dtype with a Byte product — the same refusal
+    // the single-model engine makes.
+    if ( uncertaintyToken == "variance" )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "model '" + ensembleModel.name
+                               + "' is an ensemble: the variance uncertainty band requires the "
+                                 "combined probability stack; a derived output mode publishes "
+                                 "its own single-band product" );
+    if ( mode == RasterOutputMode::Labels && ensembleModel.postprocess.maskThreshold >= 0.0 )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "postprocess.mask_threshold is meaningless with labels output "
+                               "(argmax never thresholds) — remove one of the two" );
+    if ( !ensembleModel.postprocess.classMapping.empty()
+         || !ensembleModel.postprocess.morphology.empty() )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "model '" + ensembleModel.name
+                               + "' is an ensemble: class remapping and morphology are "
+                                 "single-model product knobs — the ensemble publishes the "
+                                 "combination's product" );
+  }
+
+  const QFileInfo outputInfo( QString::fromStdString( request.outputPath ) );
   for ( std::size_t i = 0; i < runs.size(); ++i )
   {
-    context.throwIfCancelled();
-    MemberRun &run = runs[i];
-    context.reportProgressForced(
-      static_cast<double>( i ) / static_cast<double>( runs.size() + 1 ),
-      "Running ensemble member " + std::to_string( i + 1 ) + "/" + std::to_string( runs.size() )
-        + " (" + run.model.stableId() + ")" );
-    // Members always produce probability stacks — the combination owns the
-    // product semantics; a member applying its own derived collapse would
-    // destroy the probabilities the vote/mean needs.
-    TileInferenceRunOptions memberOptions;
-    memberOptions.tta = TtaMode::None;
-    memberOptions.batchSizeOverride = std::max( 0, request.batchSizeOverride );
-    memberOptions.outputMode = RasterOutputMode::Probability;
-    memberOptions.blend = request.blend;
-    memberOptions.computeFeedFingerprints = i == 0; // grid provenance from the primary member
-    TileInferenceEngine engine( run.model, run.session );
-    run.stats = engine.run( request.inputPath, bands, run.stagedPath.toStdString(), context,
-                            memberOptions );
+    runs[i].stagedPath = QDir( outputInfo.absolutePath() ).filePath(
+      QString( ".%1.ensemble-member%2.tmp~" ).arg( outputInfo.fileName(), QString::number( i ) ) );
+  }
+
+  // RAII: every staged path (members + sidecars + final stage) is removed
+  // unless the final product was published. A member failure, a combine
+  // failure, a cancellation — none of them may leave an output behind.
+  StagedFileGuard stagedGuard;
+  for ( const MemberRun &run : runs )
+  {
+    stagedGuard.addPath( run.stagedPath );
+    stagedGuard.addPath( run.stagedPath + QStringLiteral( ".prov.json" ) );
+    // The member engine's own streaming stage (its writer closes and renames
+    // it, but a cancelled member can leave it behind).
+    stagedGuard.addPath( run.stagedPath + QStringLiteral( ".tmp~" ) );
+  }
+
+  const std::vector<int> bands = request.bands;
+  runMembersBounded( runs, budget, context,
+                     [ & ]( std::size_t index, MemberRun &run, RSOperatorContext &child ) {
+                       context.reportProgressForced(
+                         static_cast<double>( index ) / static_cast<double>( runs.size() + 1 ),
+                         "Running ensemble member " + std::to_string( index + 1 ) + "/"
+                           + std::to_string( runs.size() ) + " (" + run.model.stableId() + ")" );
+                       runRasterMember( index, run, child, request, bands );
+                     } );
+  collectMemberOutcomes( runs, context );
+
+  // Aggregate stats in member order (completion order never mattered).
+  TileInferenceStats combined;
+  for ( std::size_t i = 0; i < runs.size(); ++i )
+  {
+    const TileInferenceStats &stats = runs[i].stats;
     if ( i == 0 )
     {
-      combined.tileSize = run.stats.tileSize;
-      combined.halo = run.stats.halo;
-      combined.batchSize = run.stats.batchSize;
-      combined.inputGrids = run.stats.inputGrids;
-      combined.eoPreflight = run.stats.eoPreflight;
+      combined.tileSize = stats.tileSize;
+      combined.halo = stats.halo;
+      combined.batchSize = stats.batchSize;
+      combined.inputGrids = stats.inputGrids;
+      combined.eoPreflight = stats.eoPreflight;
     }
-    combined.tilesPlanned += run.stats.tilesPlanned;
-    combined.tilesProcessed += run.stats.tilesProcessed;
-    combined.tilesSkippedNoData += run.stats.tilesSkippedNoData;
-    combined.batchReductions += run.stats.batchReductions;
+    combined.tilesPlanned += stats.tilesPlanned;
+    combined.tilesProcessed += stats.tilesProcessed;
+    combined.tilesSkippedNoData += stats.tilesSkippedNoData;
+    combined.batchReductions += stats.batchReductions;
   }
 
   // Grid + channel agreement. Members ran the SAME windowed input on the
@@ -487,11 +1247,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
 
   // Uncertainty plan (the vocabulary and the combination/uncertainty
   // agreement are validated at manifest parse; "auto" resolves by mode).
-  const std::string uncertaintyToken =
-    ensembleModel.ensemble.uncertainty.empty() ? "auto" : ensembleModel.ensemble.uncertainty;
   bool withUncertainty = true;
   std::string uncertaintyNote;
-  if ( uncertaintyToken == "none" )
+  if ( uncertaintyToken == "none" || ( derived && uncertaintyToken == "auto" ) )
   {
     withUncertainty = false;
   }
@@ -566,12 +1324,39 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   if ( !driver )
     throw RSOperatorError( ErrorCode::GdalError, "GDAL GTiff driver is unavailable" );
-  const int outBands = vote ? 1 : channels;
+  const int outBands = vote || derived ? 1 : channels;
   const int totalBands = outBands + ( withUncertainty ? 1 : 0 );
-  const GDALDataType writeType = vote ? ( channels <= 255 ? GDT_Byte : GDT_UInt16 )
-                                      : GDT_Float32;
-  dst =
-    GDALCreate( driver, stagePath.toUtf8().constData(), width, height, totalBands, writeType, nullptr );
+  // Derived collapses mirror the single-model engine's product domains:
+  // labels Byte/UInt16 with the sentinel-excluded domain, mask Byte,
+  // confidence float32. The probability stack stays float32.
+  int labelDomain = 0;
+  if ( mode == RasterOutputMode::Labels && !vote )
+  {
+    // The writable domain is the combined class (channel) count; a declared
+    // vocabulary is used for the NAMES metadata only when it matches that
+    // count (checked below) — never to renumber the domain.
+    labelDomain = channels;
+    if ( labelDomain > 65535 )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "ensemble product declares a label domain of "
+                               + std::to_string( labelDomain )
+                               + " classes; the maximum encodable domain is 65535 "
+                                 "(NoData sentinel excluded)" );
+  }
+  const GDALDataType writeType =
+    vote ? ( channels <= 255 ? GDT_Byte : GDT_UInt16 )
+          : ( mode == RasterOutputMode::Labels
+                ? ( labelDomain <= 255 ? GDT_Byte : GDT_UInt16 )
+                : ( mode == RasterOutputMode::Mask ? GDT_Byte : GDT_Float32 ) );
+  // Platform 13.0 staging: the combine stage is compressed+tiled by default
+  // (the published product is what the user keeps; the 12.0 uncompressed
+  // stage was a known disk-cost limitation). The knob is the manifest's
+  // `ensemble.staging_compression`; "none" reproduces the historical bytes.
+  const bool stagingCompressed = ensembleModel.ensemble.stagingCompressed();
+  const char *createOptions[] = { "TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256",
+                                  "COMPRESS=DEFLATE", nullptr };
+  dst = GDALCreate( driver, stagePath.toUtf8().constData(), width, height, totalBands, writeType,
+                    stagingCompressed ? const_cast<char **>( createOptions ) : nullptr );
   if ( !dst )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "ensemble combine pass could not create the staged output: "
@@ -582,7 +1367,12 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   // dtype, so the agreement band is quantized into the label raster's dtype
   // with the encoding recorded in the payload/sidecar. The quantized range
   // excludes the NoData sentinel (share 1.0 must not encode as NoData).
-  const double writeNoData = vote ? ( channels <= 255 ? 255.0 : 65535.0 ) : static_cast<double>( kStackNoData );
+  const int labelDomainForNoData = vote ? channels : labelDomain;
+  const double writeNoData = ( vote || mode == RasterOutputMode::Labels )
+                               ? ( labelDomainForNoData <= 255 ? 255.0 : 65535.0 )
+                               : ( mode == RasterOutputMode::Mask
+                                     ? 255.0
+                                     : static_cast<double>( kStackNoData ) );
   const double agreementQuant = vote ? writeNoData - 1.0 : 0.0;
   const std::string agreementEncoding =
     vote ? ( "round(share*" + std::to_string( static_cast<long long>( agreementQuant ) ) + ")"
@@ -594,9 +1384,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   for ( int b = 1; b <= totalBands; ++b )
     GDALSetRasterNoDataValue( GDALGetRasterBand( dst, b ), writeNoData );
 
-  // Shared class schema metadata for vote products (all members must agree;
+  // Shared class schema metadata for label products (all members must agree;
   // disagreement degrades to no metadata, never to wrong names).
-  if ( vote )
+  if ( vote || mode == RasterOutputMode::Labels )
   {
     const std::vector<std::string> &schema = runs.front().model.output.classes;
     const bool agree =
@@ -606,7 +1396,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       std::all_of( schema.begin(), schema.end(), []( const std::string &cls ) {
         return cls.find( ';' ) == std::string::npos;
       } );
-    if ( agree && namesClean && !schema.empty() && static_cast<int>( schema.size() ) == channels )
+    if ( agree && namesClean && !schema.empty()
+         && static_cast<int>( schema.size() ) == ( vote ? channels : labelDomain ) )
     {
       QString names;
       for ( const std::string &cls : schema )
@@ -635,6 +1426,18 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     memberBuffers[i].assign( planeSize * static_cast<std::size_t>( channels ), 0.0f );
   std::vector<float> productPlane( planeSize * static_cast<std::size_t>( channels ), 0.0f );
   std::vector<float> uncertaintyPlane( planeSize, 0.0f );
+  // Row-loop scratch, allocated once (not per block).
+  std::vector<float> collapsedScratch( planeSize, 0.0f );
+  std::vector<float> scaledScratch( planeSize, 0.0f );
+  std::vector<double> voteScratch( static_cast<std::size_t>( channels ), 0.0 );
+  std::vector<float> labelScratch( planeSize, 0.0f );
+  std::vector<float> agreementScratch( planeSize, 0.0f );
+  // Derived-mode product tally (parity with the single-model payload).
+  std::vector<long long> classPixelCounts;
+  if ( mode == RasterOutputMode::Labels )
+    classPixelCounts.assign( static_cast<std::size_t>( std::max( 1, labelDomain ) ), 0 );
+  if ( mode == RasterOutputMode::Mask )
+    classPixelCounts.assign( 2, 0 );
 
   // Typed loop failure: cleanup is delegated to the RAII guards below (the
   // members guard and the writer guard), which cover BOTH fail() throws and
@@ -719,20 +1522,87 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
           if ( !std::isnan( uncertaintyPlane[p] ) )
             uncertaintyPlane[p] = static_cast<float>( uncertaintyPlane[p] / channels );
       }
-      for ( int c = 1; c <= channels; ++c )
+      if ( !derived )
       {
-        const float *meanPlane = productPlane.data() + static_cast<std::size_t>( c - 1 ) * blockPlane;
-        if ( GDALRasterIO( GDALGetRasterBand( dst, c ), GF_Write, 0, y, width, rows,
-                           const_cast<float *>( meanPlane ), width, rows, GDT_Float32, 0, 0 )
-             != CE_None )
-          fail( "ensemble combine pass failed to write band " + std::to_string( c ) );
+        for ( int c = 1; c <= channels; ++c )
+        {
+          const float *meanPlane = productPlane.data() + static_cast<std::size_t>( c - 1 ) * blockPlane;
+          if ( GDALRasterIO( GDALGetRasterBand( dst, c ), GF_Write, 0, y, width, rows,
+                             const_cast<float *>( meanPlane ), width, rows, GDT_Float32, 0, 0 )
+               != CE_None )
+            fail( "ensemble combine pass failed to write band " + std::to_string( c ) );
+        }
+        if ( varianceMode )
+        {
+          if ( GDALRasterIO( GDALGetRasterBand( dst, totalBands ), GF_Write, 0, y, width, rows,
+                             uncertaintyPlane.data(), width, rows, GDT_Float32, 0, 0 )
+               != CE_None )
+            fail( "ensemble combine pass failed to write the variance band" );
+        }
       }
-      if ( varianceMode )
+      else
       {
-        if ( GDALRasterIO( GDALGetRasterBand( dst, totalBands ), GF_Write, 0, y, width, rows,
-                           uncertaintyPlane.data(), width, rows, GDT_Float32, 0, 0 )
+        // Request-level derived collapse of the COMBINED mean (Platform 13.0):
+        // the member preprocessing/task contracts were already enforced per
+        // member; this collapse owns the product semantics only.
+        //   labels     — argmax over the combined classes, ties → lowest index
+        //   confidence — top-1 combined probability
+        //   mask       — 1-class: mean >= threshold; else argmax != 0
+        const float maskThreshold = ensembleModel.postprocess.maskThreshold >= 0.0
+                                      ? static_cast<float>( ensembleModel.postprocess.maskThreshold )
+                                      : 0.5f;
+        std::vector<float> &collapsed = collapsedScratch;
+        std::fill( collapsed.begin(), collapsed.begin() + static_cast<std::ptrdiff_t>( blockPlane ),
+                   static_cast<float>( writeNoData ) );
+        for ( std::size_t p = 0; p < blockPlane; ++p )
+        {
+          bool valid = true;
+          int best = 0;
+          float bestValue = 0.0f;
+          for ( int c = 1; c <= channels; ++c )
+          {
+            const float v = productPlane[static_cast<std::size_t>( c - 1 ) * blockPlane + p];
+            if ( std::isnan( v ) )
+            {
+              valid = false;
+              break;
+            }
+            if ( c == 1 || v > bestValue )
+            {
+              bestValue = v;
+              best = c - 1;
+            }
+          }
+          if ( !valid )
+            continue; // NoData sentinel: one member's skipped tile poisons
+          switch ( mode )
+          {
+            case RasterOutputMode::Labels:
+              collapsed[p] = static_cast<float>( best );
+              if ( best >= 0 && static_cast<std::size_t>( best ) < classPixelCounts.size() )
+                classPixelCounts[static_cast<std::size_t>( best )]++;
+              break;
+            case RasterOutputMode::Confidence:
+              collapsed[p] = bestValue;
+              break;
+            case RasterOutputMode::Mask:
+            {
+              const float maskValue =
+                ( channels == 1 ) ? ( bestValue >= maskThreshold ? 1.0f : 0.0f )
+                                  : ( best != 0 ? 1.0f : 0.0f );
+              collapsed[p] = maskValue;
+              if ( static_cast<std::size_t>( maskValue ) < classPixelCounts.size() )
+                classPixelCounts[static_cast<std::size_t>( maskValue )]++;
+              break;
+            }
+            default:
+              break;
+          }
+        }
+        if ( GDALRasterIO( GDALGetRasterBand( dst, 1 ), GF_Write, 0, y, width, rows,
+                           collapsed.data(), width, rows, GDT_Float32, 0, 0 )
              != CE_None )
-          fail( "ensemble combine pass failed to write the variance band" );
+          fail( "ensemble combine pass failed to write the derived product band" );
       }
     }
     else
@@ -741,9 +1611,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       // its weight; winner = highest accumulated vote, ties → LOWEST class
       // index (deterministic). agreement = winning vote share, quantized to
       // the label dtype (encoding recorded in the payload/sidecar).
-      std::vector<double> votes( static_cast<std::size_t>( channels ), 0.0 );
-      std::vector<float> labels( blockPlane );
-      std::vector<float> agreement( blockPlane );
+      std::vector<double> &votes = voteScratch;
+      std::vector<float> &labels = labelScratch;
+      std::vector<float> &agreement = agreementScratch;
       for ( std::size_t p = 0; p < blockPlane; ++p )
       {
         labels[p] = static_cast<float>( writeNoData );
@@ -789,7 +1659,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
         fail( "ensemble combine pass failed to write the label band" );
       if ( withUncertainty )
       {
-        std::vector<float> scaled( blockPlane );
+        std::vector<float> &scaled = scaledScratch;
         for ( std::size_t p = 0; p < blockPlane; ++p )
           scaled[p] = std::isnan( agreement[p] )
                         ? static_cast<float>( writeNoData )
@@ -840,8 +1710,6 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                            "ensemble combine pass could not publish the product: "
                              + finalPath.toStdString() );
   }
-  if ( hadExisting )
-    QFile::remove( backupPath );
   QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
   const Json::Value provenance =
     buildEnsembleProvenance( ensembleModel, runs, combined, combination,
@@ -849,15 +1717,30 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                ? ( uncertaintyNote
                                      + ( vote && !agreementEncoding.empty()
                                            ? " (" + agreementEncoding + ")" : std::string() ) )
-                               : std::string() );
+                               : std::string(),
+                             budget, stagingCompressed, false );
   std::string sidecarError;
   if ( !publishSidecar( finalPath, provenance, &sidecarError ) )
+  {
+    // The previous product's backup is kept until the new sidecar is in: a
+    // sidecar failure restores the previous product instead of destroying it
+    // (same invariant as the single-model engine's writer).
+    QFile::remove( finalPath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath );
     throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
+  }
+  if ( hadExisting )
+    QFile::remove( backupPath );
 
-  // Success: release the member stacks explicitly (the staged guard stays
-  // as a safety net until the very end — its paths no longer exist).
+  // Success: release the member stacks and their sidecars explicitly (the
+  // staged guard stays as a safety net until the very end — its paths no
+  // longer exist).
   for ( const MemberRun &run : runs )
+  {
     QFile::remove( run.stagedPath );
+    QFile::remove( run.stagedPath + QStringLiteral( ".prov.json" ) );
+  }
   stagedGuard.disarm();
 
   ModelExecutionResult result;
@@ -890,6 +1773,22 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   if ( withUncertainty )
     payload["uncertainty_band"] =
       vote ? "agreement (" + agreementEncoding + ")" : uncertaintyNote;
+  if ( !classPixelCounts.empty() )
+  {
+    Json::Value counts( Json::arrayValue );
+    for ( long long pixels : classPixelCounts )
+      counts.append( static_cast<Json::Int64>( pixels ) );
+    payload["classPixelCounts"] = counts;
+    // Names index the counts only when the vocabulary matches the domain.
+    if ( mode == RasterOutputMode::Labels && !runs.front().model.output.classes.empty()
+         && static_cast<int>( runs.front().model.output.classes.size() ) == labelDomain )
+    {
+      Json::Value names( Json::arrayValue );
+      for ( const std::string &cls : runs.front().model.output.classes )
+        names.append( cls );
+      payload["classes"] = names;
+    }
+  }
   Json::Value membersPayload( Json::arrayValue );
   for ( const MemberRun &run : runs )
   {

@@ -3804,6 +3804,27 @@
     {
       "exempted" : false,
       "hasScientificContract" : true,
+      "operatorId" : "rs:temporal_sar_fusion",
+      "prefix" : "rs:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
+      "seedPolicy" : "none",
+      "sidecarGrade" : "bit_exact",
+      "sidecarStochastic" : "false",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "RsTemporalSarFusionOperator",
+        "classFound" : true,
+        "file" : "operators/rs/rs_temporal_sar_fusion_operator.h",
+        "gradeLiteral" : "bit-exact",
+        "gradeOverride" : true,
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : false,
+      "hasScientificContract" : true,
       "operatorId" : "rs:temporal_seasonal_breaks",
       "prefix" : "rs:",
       "runtimeGrade" : "bit_exact",
@@ -4097,6 +4118,6 @@
       }
     }
   ],
-  "entryCount" : 194,
+  "entryCount" : 195,
   "schema" : "exp.determinism_census.v1"
 }

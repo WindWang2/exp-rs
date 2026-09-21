@@ -234,6 +234,7 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:temporal_phenology", "temporal" },
     { "rs:temporal_phenology_multi", "temporal" },
     { "rs:temporal_seasonal_breaks", "temporal" },
+    { "rs:temporal_sar_fusion", "temporal" },
     { "rs:temporal_sen_trend", "temporal" },
     { "rs:temporal_smooth", "temporal" },
     { "rs:temporal_summary", "temporal" },

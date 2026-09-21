@@ -181,6 +181,15 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "input declares SICNU_SAR_DOMAIN=db; these filters operate on "
                                "linear power — convert with rs:sar_backscatter (or rs:sar_calibrate) first" );
+    // A conflicting radiometric-state declaration is unreadable input: the
+    // kernel would propagate an ambiguous token, so refuse here.
+    const sicnu::sar::SarStateRead declaredState = sicnu::sar::readDeclaredSarState( src );
+    if ( declaredState.conflict )
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares conflicting SICNU_SAR_CALIBRATION='" +
+                declaredState.calibration.toStdString() + "' and SICNU_RADIOMETRIC_STATE='" +
+                declaredState.state.toStdString() + "'; refusing to guess the radiometric state" );
     const int bandCount = band > 0 ? 1 : src.bandCount();
     const int firstBand = band > 0 ? band : 1;
     if (firstBand < 1 || firstBand > src.bandCount()) {

@@ -89,6 +89,11 @@ Json::Value RsTemporalBreakpointsOperator::schema() const
                                                 "Write one break_date_k band per allowed break "
                                                 "(day offsets; NoData beyond a pixel's break count)",
                                                 true );
+  props["compute_ci"] = makeBooleanParam(
+      "compute_ci", "Append slope_se_seg_k bands: OLS standard error of each "
+                    "segment slope, σ̂²=RSS/(n−2), se=√(σ̂²/Sxx) — NoData for "
+                    "segments a pixel does not have (Temporal Phenology 12.0)",
+      false );
   props["output"] = makeOutputParam( "output",
                                      "Breakpoints GeoTIFF (bands: break_count"
                                      "[, break_date_1..k,] slope_seg_1..k+1, rmse)",
@@ -98,7 +103,7 @@ Json::Value RsTemporalBreakpointsOperator::schema() const
   outputs["output"] = makeOutputParam( "output", "Breakpoints GeoTIFF", "tif" );
   outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Dates in the series", 0 );
   outputs["maxBreaks"] = makeIntegerParam( "maxBreaks", "Maximum breaks allowed in the segmentation", 0 );
-  outputs["bands"] = makeIntegerParam( "bands", "Output band count (break_count [, break dates,] slopes, rmse)", 0 );
+  outputs["bands"] = makeIntegerParam( "bands", "Output band count (break_count [, break dates,] slopes, rmse [, slope SEs])", 0 );
   outputs["brokenPixelFraction"] = makeNumberParam( "brokenPixelFraction",
                                                     "Pixels with at least one detected break / total pixels", 0.0 );
   outputs["timeStart"] = makeStringParam( "timeStart", "First acquisition date in the series (ISO)", "" );
@@ -158,7 +163,9 @@ Json::Value RsTemporalBreakpointsOperator::estimateExecution( const Json::Value 
   const bool outputBreakDates = getBool( params, "outputBreakDates", true );
   int scenes = params["scenes"].isArray() ? params["scenes"].size() : kTypicalSceneCount;
   scenes = std::max( scenes, 1 );
-  const int metricBuffers = 1 + ( outputBreakDates ? maxBreaks : 0 ) + ( maxBreaks + 1 ) + 1;
+  const int metricBuffers = 1 + ( outputBreakDates ? maxBreaks : 0 ) +
+                            ( maxBreaks + 1 ) + 1 +
+                            ( getBool( params, "compute_ci", false ) ? maxBreaks + 1 : 0 );
   // series per scene + metric tile buffers + per-pixel series gather + read tile.
   const int buffers = scenes + metricBuffers + 2;
   return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, buffers, 0, 2 * 1024 * 1024 );
@@ -177,6 +184,7 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
     minSegmentDays = 90.0;
   const double minImprovement = std::clamp( getDouble( params, "minImprovement", 0.1 ), 0.01, 1.0 );
   const bool outputBreakDates = getBool( params, "outputBreakDates", true );
+  const bool computeCi = getBool( params, "compute_ci", false );
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -256,7 +264,8 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   }
 
   const int dateBands = outputBreakDates ? maxBreaks : 0;
-  const int bandCount = 1 + dateBands + ( maxBreaks + 1 ) + 1; // default 2 breaks + dates → 7
+  const int seBands = computeCi ? maxBreaks + 1 : 0;
+  const int bandCount = 1 + dateBands + ( maxBreaks + 1 ) + 1 + seBands;
   const int width = reader.width();
   const int height = reader.height();
 
@@ -288,6 +297,12 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   }
   out.setBandNoDataValue( b, std::numeric_limits<double>::quiet_NaN() );
   GDALSetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( out.dataset() ), b++ ), "rmse" );
+  for ( int j = 1; j <= seBands; ++j )
+  {
+    out.setBandNoDataValue( b, std::numeric_limits<double>::quiet_NaN() );
+    GDALSetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( out.dataset() ), b++ ),
+                        QStringLiteral( "slope_se_seg_%1" ).arg( j ).toUtf8().constData() );
+  }
 
   const int tiles = reader.totalTileCount();
   // Guard against a nominal tile_size parameter pretending the working set is
@@ -314,6 +329,7 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   std::vector<float> dateBufs( static_cast<size_t>( dateBands ) * tilePixels );
   std::vector<float> slopeBufs( static_cast<size_t>( maxBreaks + 1 ) * tilePixels );
   std::vector<float> rmseBuf( tilePixels );
+  std::vector<float> seBufs( static_cast<size_t>( seBands ) * tilePixels );
   std::vector<float> pixSeries( sceneCount );
   std::uint64_t brokenPixels = 0;
   int tileDone = 0;
@@ -352,6 +368,11 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
         slopeBufs[static_cast<size_t>( j ) * tilePixels + i] =
           j < segments ? static_cast<float>( br.slopes[j] ) : kNan;
       rmseBuf[i] = static_cast<float>( br.rmse );
+      for ( int j = 0; j < seBands; ++j )
+        seBufs[static_cast<size_t>( j ) * tilePixels + i] =
+          j < static_cast<int>( br.slopeStdErrors.size() )
+            ? static_cast<float>( br.slopeStdErrors[static_cast<size_t>( j )] )
+            : kNan;
       if ( breaks >= 1 )
         ++brokenPixels;
     }
@@ -368,6 +389,8 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
     for ( int j = 0; j <= maxBreaks; ++j )
       writeBand( band++, slopeBufs.data() + static_cast<size_t>( j ) * tilePixels );
     writeBand( band++, rmseBuf.data() );
+    for ( int j = 0; j < seBands; ++j )
+      writeBand( band++, seBufs.data() + static_cast<size_t>( j ) * tilePixels );
 
     ++tileDone;
     context.reportProgress( 0.05 + 0.93 * ( static_cast<double>( tileDone ) / tiles ),
@@ -399,6 +422,7 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   result["sceneCount"] = sceneCount;
   result["maxBreaks"] = maxBreaks;
   result["bands"] = bandCount;
+  result["computeCi"] = computeCi;
   if ( !prepared.collection.timeRangeStartIso().isEmpty() )
   {
     result["timeStart"] = prepared.collection.timeRangeStartIso().toStdString();
@@ -409,10 +433,12 @@ Json::Value RsTemporalBreakpointsOperator::run( const Json::Value &params, RSOpe
   Json::Value memory( Json::objectValue );
   memory["tileWidth"] = tileSize;
   memory["tileHeight"] = tileSize;
-  // series per scene + count/date/slope/RMSE buffers + gather/tile buffers.
+  // series per scene + count/date/slope/RMSE/SE buffers + gather/tile buffers.
   memory["workingSetEstimateBytes"] = Json::Value::UInt64(
     TemporalTileReader::estimateWorkingSetBytes( tileSize, tileSize,
-                                                 sceneCount + 1 + dateBands + ( maxBreaks + 1 ) + 1 + 2,
+                                                 sceneCount + 1 + dateBands +
+                                                     ( maxBreaks + 1 ) + 1 +
+                                                     seBands + 2,
                                                  0 ) );
   result["memory"] = memory;
   context.reportProgress( 1.0, "Temporal breakpoints complete" );

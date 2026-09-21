@@ -31,9 +31,9 @@ SAR 辐射定标：把 SAR L1 数据的 DN 转换为定标后向散射系数（s
 - 模态：sar
 - 输入：input（raster）
 - 输出：bands（integer）、calibration（string）、domain（string）、output（raster）
-- 参数：band（integer）、calibrationA（numeric）、incidenceDeg（numeric）、noiseLinear（numeric）、output（string）、outputDomain（enum）、polarizations（string）、sensor（string）
-- 前置条件：SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run).
-- 局限：LUT-based calibration (per-block/per-pixel annotation LUTs) is not applied; use a constant A or pre-calibrated input.
+- 参数：band（integer）、calibrationA（numeric）、calibrationLut（string）、incidenceDeg（numeric）、noiseLinear（numeric）、output（string）、outputDomain（enum）、polarizations（string）、sensor（string）
+- 前置条件：SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run), or a per-row calibration LUT sidecar (one constant per input row).；SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run).
+- 局限：LUT calibration reads a per-row sidecar (one constant per input row, no interpolation); annotation-XML LUTs are not parsed and a missing LUT is a typed refusal, never a constant-A fallback.；LUT-based calibration (per-block/per-pixel annotation LUTs) is not applied; use a constant A or pre-calibrated input.
 - 适用地物：任意地物（SAR）
 - 适用场景：SAR 处理链第一步、多景 SAR 数据辐射统一
 - 失败模式：
@@ -150,8 +150,8 @@ SAR 地理编码（Range-Doppler 正射校正）：把 SAR 影像从斜距/地�
 - 输入：dem（raster）、input（raster）
 - 输出：output（raster）
 - 参数：band（numeric）、output（string）、resampling（enum）
-- 前置条件：The SAR scene must declare the orbit contract (SICNU_SAR_ORBIT_STATES, SICNU_SAR_AZIMUTH_START_UTC, SICNU_SAR_PRF, SICNU_SAR_RANGE_WINDOW, SICNU_SAR_RANGE_RATE) - missing declarations are typed refusals, never approximations.；Calibrate first: rs:sar_calibrate -> rs:sar_geocode.；DEM carries a CRS and a north-up geotransform; the DEM defines the output grid.；需要覆盖研究区的 DEM；与光学联合分析时统一到同一 CRS。
-- 局限：gamma0 applies the per-pixel radiometric-terrain factor sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from REAL geometry - distinct from the constant-geometry plane-fit model of rs:sar_terrain_flatten.；Rotated DEM grids are refused (terrain-family north-up contract).；No antenna pattern or fading-noise correction is applied.
+- 前置条件：The SAR scene must declare the orbit contract (SICNU_SAR_ORBIT_STATES, SICNU_SAR_AZIMUTH_START_UTC, SICNU_SAR_PRF, SICNU_SAR_RANGE_WINDOW, SICNU_SAR_RANGE_RATE) - missing declarations are typed refusals, never approximations.；Calibrate first: rs:sar_calibrate -> rs:sar_geocode. The input must declare SICNU_SAR_CALIBRATION=sigma0 (a legacy undeclared scene is accepted under the documented sigma0 assumption; gamma0/beta0/DN/derived declarations are typed refusals).；DEM carries a CRS and a north-up geotransform; the DEM defines the output grid.；Calibrate first: rs:sar_calibrate -> rs:sar_geocode.；需要覆盖研究区的 DEM；与光学联合分析时统一到同一 CRS。
+- 局限：gamma0 applies the per-pixel radiometric-terrain factor sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from REAL geometry - distinct from the constant-geometry plane-fit model of rs:sar_terrain_flatten.；The product is mixed: band 1 sigma0 backscatter, band 2 gamma0, bands 3-5 geometry. The dataset-level token names the radiometric input state (sigma0); SICNU_SAR_GEOCODE_BAND_STATES spells out every band.；Rotated DEM grids are refused (terrain-family north-up contract).；No antenna pattern or fading-noise correction is applied.
 - 适用地物：任意地物（SAR）
 - 适用场景：SAR 与光学数据联合分析前的正射化、多时相 SAR 叠加
 - 失败模式：
@@ -260,9 +260,9 @@ SAR 双通道或多时相比值运算：突出散射机制差异，常用于水�
 - 模态：sar
 - 波段角色要求：vh×1、vv×1
 - 输入：inputA（raster）、inputB（raster）
-- 输出：bands（integer）、output（raster）、outputType（string）
+- 输出：bands（integer）、output（raster）、outputType（string）、radiometricState（string）
 - 参数：bandA（integer）、bandB（integer）、inputDomain（enum）、output（string）、outputType（enum）、polarizations（string）、sensor（string）
-- 局限：Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.；If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first).；Nonpositive power becomes NoData (NaN) for the log-domain outputs; B == 0 is NoData for ratio.
+- 局限：Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.；Both inputs must declare the same recognized radiometric state (or nothing); a sigma0/gamma0 mix or a derived input is a typed refusal.；The output is a derived pair metric (SICNU_RADIOMETRIC_STATE=sar_pair_metric), not a backscatter calibration; rs:sar_calibrate and rs:sar_backscatter refuse it.；If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first).；Nonpositive power becomes NoData (NaN) for the log-domain outputs; B == 0 is NoData for ratio.
 - 适用地物：水体、植被（SAR）
 - 适用场景：快速 SAR 判别图生产、教学演示散射机制差异
 - 失败模式：

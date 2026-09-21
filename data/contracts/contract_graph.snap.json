@@ -2930,6 +2930,12 @@
       "to" : "rs:temporal_regularize"
     },
     {
+      "from" : "rs:temporal_sar_fusion",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_sar_fusion"
+    },
+    {
       "from" : "rs:temporal_seasonal_breaks",
       "kind" : "scientific_contract_for",
       "origin" : "src/contracts/scientific_contract.cpp",
@@ -3016,8 +3022,14 @@
     {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
-      "origin" : "main_window_workbench.cpp:400",
+      "origin" : "main_window_workbench.cpp:407",
       "to" : "app.commandPalette"
+    },
+    {
+      "from" : "mission.timeline.show",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:767",
+      "to" : "mission.timeline.show"
     },
     {
       "from" : "workbench.cartography",
@@ -4322,7 +4334,7 @@
     {
       "id" : "app.commandPalette",
       "kind" : "command",
-      "origin" : "main_window_workbench.cpp:400"
+      "origin" : "main_window_workbench.cpp:407"
     },
     {
       "id" : "cartography.compose",
@@ -4438,6 +4450,21 @@
       "id" : "map.zoomOut",
       "kind" : "command",
       "origin" : "command_defs.cpp:209"
+    },
+    {
+      "id" : "mission.task.resume",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:785"
+    },
+    {
+      "id" : "mission.task.retry",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:774"
+    },
+    {
+      "id" : "mission.timeline.show",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:767"
     },
     {
       "id" : "project.exit",
@@ -8863,6 +8890,7 @@
       [
         "band",
         "calibrationA",
+        "calibrationLut",
         "incidenceDeg",
         "input",
         "noiseLinear",
@@ -9504,6 +9532,7 @@
         "band",
         "band_role",
         "collection",
+        "compute_ci",
         "duplicate_policy",
         "maxBreaks",
         "minImprovement",
@@ -9604,6 +9633,7 @@
         "max_gap_days",
         "method",
         "output",
+        "provenance_output",
         "scenes",
         "tile_size"
       ],
@@ -9641,7 +9671,9 @@
         "apply_qa_masking",
         "band",
         "band_role",
+        "ci_level",
         "collection",
+        "compute_ci",
         "duplicate_policy",
         "harmonics",
         "minObservations",
@@ -9808,6 +9840,19 @@
     {
       "attributes" : 
       [
+        "grid_tolerance",
+        "optical",
+        "output",
+        "sar",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_sar_fusion",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "alpha",
         "apply_qa_masking",
         "band",
@@ -9839,6 +9884,7 @@
         "band",
         "band_role",
         "collection",
+        "compute_ci",
         "duplicate_policy",
         "output",
         "scenes",
@@ -9864,7 +9910,8 @@
         "robust_iterations",
         "scenes",
         "tile_size",
-        "window"
+        "window",
+        "window_days"
       ],
       "id" : "rs:temporal_smooth",
       "kind" : "operator",
@@ -10148,7 +10195,7 @@
     {
       "attributes" : 
       [
-        "family:cartography + schema read (cartography_tools.cpp: one-call governed production chain, atomic publish with manifest sidecar) \u2014 master drift at adf8f989"
+        "family:cartography + schema read (cartography_operators.cpp: staged produce, cancelled delivery leaves directory untouched)"
       ],
       "id" : "cartography:produce",
       "kind" : "scientific_contract",
@@ -10265,7 +10312,7 @@
     {
       "attributes" : 
       [
-        "family:io + schema read (io metadata/subdataset/verify kernels; master drift at adf8f989)"
+        "family:io + schema read (io_operators.h: whitelist write-back + read-back verification)"
       ],
       "id" : "io:metadata_patch",
       "kind" : "scientific_contract",
@@ -10283,7 +10330,7 @@
     {
       "attributes" : 
       [
-        "family:io + schema read (io metadata/subdataset/verify kernels; master drift at adf8f989)"
+        "family:io + schema read (io_operators.h: redacted subdataset inventory)"
       ],
       "id" : "io:subdatasets",
       "kind" : "scientific_contract",
@@ -10310,7 +10357,7 @@
     {
       "attributes" : 
       [
-        "family:io + schema read (io metadata/subdataset/verify kernels; master drift at adf8f989)"
+        "family:io + schema read (io_operators.h: digest recompute integrity gate, fails closed)"
       ],
       "id" : "io:verify_dataset",
       "kind" : "scientific_contract",
@@ -10409,7 +10456,7 @@
     {
       "attributes" : 
       [
-        "family:radiometric + schema read (BRDF-adjusted reflectance)"
+        "family:radiometric + schema read (sun/view geometry normalization to a reference geometry)"
       ],
       "id" : "rs:brdf_normalization",
       "kind" : "scientific_contract",
@@ -11030,7 +11077,7 @@
     {
       "attributes" : 
       [
-        "family:radiometric + schema read (QA planes over declared domains; master drift at adf8f989)"
+        "family:radiometric + schema read (per-band QA flag raster)"
       ],
       "id" : "rs:radiometric_qa",
       "kind" : "scientific_contract",
@@ -11057,7 +11104,7 @@
     {
       "attributes" : 
       [
-        "family:registration + schema read (F13 registration products; master drift at adf8f989)"
+        "family:registration + schema read (cross-modal optical-SAR alignment with refusal semantics)"
       ],
       "id" : "rs:register_images",
       "kind" : "scientific_contract",
@@ -11138,7 +11185,7 @@
     {
       "attributes" : 
       [
-        "family:sar + schema read (InSAR package headers)"
+        "family:sar + schema read (same-grid SLC offset field)"
       ],
       "id" : "rs:sar_coregister_local",
       "kind" : "scientific_contract",
@@ -11183,7 +11230,7 @@
     {
       "attributes" : 
       [
-        "family:sar + schema read (InSAR package headers)"
+        "family:sar + schema read (network inversion for epoch displacement and linear velocity)"
       ],
       "id" : "rs:sar_network_inversion",
       "kind" : "scientific_contract",
@@ -11192,7 +11239,7 @@
     {
       "attributes" : 
       [
-        "family:sar + schema read (InSAR package headers)"
+        "family:sar + schema read (baseline-constrained pair plan)"
       ],
       "id" : "rs:sar_pair_network",
       "kind" : "scientific_contract",
@@ -11228,7 +11275,7 @@
     {
       "attributes" : 
       [
-        "family:sar + schema read (InSAR package headers)"
+        "family:sar + schema read (DEM/orbit topo phase removal)"
       ],
       "id" : "rs:sar_remove_topographic_phase",
       "kind" : "scientific_contract",
@@ -11354,7 +11401,7 @@
     {
       "attributes" : 
       [
-        "family:radiometric + schema read (geometry rasters from product metadata; master drift at adf8f989)"
+        "family:radiometric + schema read (ephemeris feature bands)"
       ],
       "id" : "rs:solar_geometry",
       "kind" : "scientific_contract",
@@ -11435,7 +11482,7 @@
     {
       "attributes" : 
       [
-        "family:registration + schema read (F13 registration products; master drift at adf8f989)"
+        "family:registration + schema read (multi-scene translation least squares)"
       ],
       "id" : "rs:stack_register",
       "kind" : "scientific_contract",
@@ -11552,7 +11599,7 @@
     {
       "attributes" : 
       [
-        "family:temporal + schema read"
+        "family:temporal + schema read (AICc/BIC/CV model grid)"
       ],
       "id" : "rs:temporal_model_select",
       "kind" : "scientific_contract",
@@ -11606,7 +11653,16 @@
     {
       "attributes" : 
       [
-        "family:temporal + schema read (master drift at adf8f989)"
+        "checkGridCompatibility + schema read"
+      ],
+      "id" : "rs:temporal_sar_fusion",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
       ],
       "id" : "rs:temporal_seasonal_breaks",
       "kind" : "scientific_contract",
@@ -11687,7 +11743,7 @@
     {
       "attributes" : 
       [
-        "family:terrain + schema read"
+        "family:terrain + schema read (viewshed mask)"
       ],
       "id" : "rs:terrain_viewshed",
       "kind" : "scientific_contract",

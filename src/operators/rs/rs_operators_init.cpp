@@ -84,6 +84,7 @@
 #include "rs_temporal_anomaly_operator.h"
 #include "rs_temporal_breakpoints_operator.h"
 #include "rs_temporal_sen_trend_operator.h"
+#include "rs_temporal_sar_fusion_operator.h"
 #include "rs_temporal_decompose_operator.h"
 #include "rs_temporal_gap_fill_operator.h"
 #include "rs_temporal_harmonic_fit_operator.h"
@@ -248,6 +249,7 @@ REGISTER_RS_OPERATOR(RsTemporalHarmonicFitOperator, "rs:temporal_harmonic_fit")
 REGISTER_RS_OPERATOR(RsTemporalPhenologyOperator, "rs:temporal_phenology")
 REGISTER_RS_OPERATOR(RsTemporalBreakpointsOperator, "rs:temporal_breakpoints")
 REGISTER_RS_OPERATOR(RsTemporalSenTrendOperator, "rs:temporal_sen_trend")
+REGISTER_RS_OPERATOR(RsTemporalSarFusionOperator, "rs:temporal_sar_fusion")
 REGISTER_RS_OPERATOR(RsTemporalDecomposeOperator, "rs:temporal_decompose")
 REGISTER_RS_OPERATOR(RsTemporalAnomalyOperator, "rs:temporal_anomaly")
 REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_series")

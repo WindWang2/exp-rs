@@ -93,6 +93,7 @@
     "limitations" : 
     [
       "gamma0 applies the per-pixel radiometric-terrain factor sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from REAL geometry - distinct from the constant-geometry plane-fit model of rs:sar_terrain_flatten.",
+      "The product is mixed: band 1 sigma0 backscatter, band 2 gamma0, bands 3-5 geometry. The dataset-level token names the radiometric input state (sigma0); SICNU_SAR_GEOCODE_BAND_STATES spells out every band.",
       "Rotated DEM grids are refused (terrain-family north-up contract).",
       "No antenna pattern or fading-noise correction is applied."
     ],
@@ -104,8 +105,9 @@
     "prerequisites" : 
     [
       "The SAR scene must declare the orbit contract (SICNU_SAR_ORBIT_STATES, SICNU_SAR_AZIMUTH_START_UTC, SICNU_SAR_PRF, SICNU_SAR_RANGE_WINDOW, SICNU_SAR_RANGE_RATE) - missing declarations are typed refusals, never approximations.",
-      "Calibrate first: rs:sar_calibrate -> rs:sar_geocode.",
+      "Calibrate first: rs:sar_calibrate -> rs:sar_geocode. The input must declare SICNU_SAR_CALIBRATION=sigma0 (a legacy undeclared scene is accepted under the documented sigma0 assumption; gamma0/beta0/DN/derived declarations are typed refusals).",
       "DEM carries a CRS and a north-up geotransform; the DEM defines the output grid.",
+      "Calibrate first: rs:sar_calibrate -> rs:sar_geocode.",
       "\u9700\u8981\u8986\u76d6\u7814\u7a76\u533a\u7684 DEM\uff1b\u4e0e\u5149\u5b66\u8054\u5408\u5206\u6790\u65f6\u7edf\u4e00\u5230\u540c\u4e00 CRS\u3002"
     ],
     "schema_version" : 2,

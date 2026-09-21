@@ -37,6 +37,7 @@ class QPainter;
 
 #include "display/qgis_display_manager.h"
 #include "app/workbench/mission_context.h"
+#include "app/workbench/mission_runtime_store.h"
 class QTextBrowser;
 class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
@@ -151,6 +152,10 @@ namespace va
 class VaWorkbenchPanel;
 class VaSelectionHub;
 } // namespace va
+namespace sicnu::app
+{
+class MissionTimelinePanel;
+}
 class ViewLinkController;
 class VaLayerLinkController;
 class RsOperatorCatalogPanel;
@@ -368,6 +373,19 @@ public:
     const sicnu::app::MissionContext &missionContext() const { return m_mission; }
     sicnu::app::MissionContext &missionContext() { return m_mission; }
 
+    // ── Mission Runtime 13.0 — mission task space surface ────────────────
+    /// Live mission runtime (context + timeline); reloaded from the single
+    /// authority on project open and after every mission mutation.
+    const sicnu::app::MissionRuntimeState &missionRuntime() const { return m_missionRuntime; }
+    /// Reload the runtime from the authority and re-project the panel.
+    void refreshMissionRuntime();
+    /// Show / raise the mission timeline dock.
+    void showMissionTimelinePanel();
+    /// Retry the selected mission task (same action the agent surface uses).
+    void retrySelectedMissionTask();
+    /// Resume the selected stale/canceled mission task (reconcile + retry).
+    void resumeSelectedMissionTask();
+
     /// Publish a studio output into the mission and optionally load it as a layer.
     /// Returns the published Result ref (null if path empty).
     sicnu::app::WorkbenchObjectRef publishStudioResultToMission( const QString &path,
@@ -417,6 +435,8 @@ private slots:
     void setProjectCrs();
 
 private:
+    void reconcileMissionRuntimeAfterLayerChange();
+    void syncMissionLayerDisplayNames();
     /**
      * Allocate the CommandRegistry and register the shell commands.
      * MUST run before setupMenu(): the menu builds registry-backed items
@@ -633,6 +653,10 @@ private:
 
     /// D18 mission session (persisted via sidecar + sicnuMissionContext XML on project save).
     sicnu::app::MissionContext m_mission;
+    /// Mission Runtime 13.0 runtime (context + task space timeline).
+    sicnu::app::MissionRuntimeState m_missionRuntime;
+    /// Mission timeline dock (created lazily with the workbench infrastructure).
+    sicnu::app::MissionTimelinePanel *m_missionPanel = nullptr;
 
     // OBIA window (lazy-constructed) — Phase 10B Task 10B.5
     QMainWindow *m_obiaWindow = nullptr;

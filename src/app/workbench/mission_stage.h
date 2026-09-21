@@ -88,8 +88,15 @@ QString missionTaskStatusLabel( MissionTaskStatus status );
 
 /// True when the task is not in flight (UI may offer retry/resume).
 bool missionTaskStatusIsSettled( MissionTaskStatus status );
-/// True when the task can be handed to a runner again.
-bool missionTaskStatusIsRetryable( MissionTaskStatus status );
+/// True when the task can be handed to a runner again. Inline: pure
+/// status-classification rule shared by the state machine, the shell's
+/// command predicates and the mission tools — no translation unit should
+/// have to link the state machine just to classify a status.
+inline bool missionTaskStatusIsRetryable( MissionTaskStatus status )
+{
+    return status == MissionTaskStatus::Failed || status == MissionTaskStatus::Canceled
+           || status == MissionTaskStatus::Stale;
+}
 
 // ---------------------------------------------------------------------------
 // Task / event records
@@ -202,11 +209,15 @@ public:
     QVector<MissionTask> tasksForStage( MissionStage stage ) const;
 
     /// Fail-closed status transition. Rejects unknown tasks, illegal pairs and
-    /// transitions that would resurrect a stale run reference.
+    /// transitions that would resurrect a stale run reference. @p errorCode /
+    /// @p errorMessage are recorded on the task when @p to is Failed (the
+    /// latest failure wins; empty values clear a previous one).
     MissionOutcome transition( const QString &taskId,
                                MissionTaskStatus to,
                                const QString &iso,
-                               const QString &note = {} );
+                               const QString &note = {},
+                               const QString &errorCode = {},
+                               const QString &errorMessage = {} );
 
     /// Failed/Canceled/Stale -> Pending, keeping the retry lineage. Does NOT
     /// bump `attempts` by itself: an attempt is counted when the task is handed
@@ -324,3 +335,8 @@ int applyRenames( MissionTimeline &timeline,
                   const QString &iso );
 
 } // namespace sicnu::app
+
+// The desktop panel emits the selected task's status in a signal; the
+// metatype must be declared at global scope (Q_DECLARE_METATYPE specializes
+// QMetaTypeId there) so that connection may become queued.
+Q_DECLARE_METATYPE( sicnu::app::MissionTaskStatus )

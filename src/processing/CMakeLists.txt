@@ -137,6 +137,8 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_workspace.cpp
     algorithms/temporal/temporal_stac_adapter.cpp
     algorithms/temporal/temporal_fit.cpp
+    algorithms/temporal/temporal_fusion.cpp
+    algorithms/temporal/temporal_irregular.cpp
     algorithms/temporal/temporal_gapfill.cpp
     algorithms/temporal/temporal_calendar.cpp
     algorithms/temporal/temporal_change.cpp
@@ -168,6 +170,7 @@ add_library(sicnu_processing SHARED
     framework/atomic_algorithm_adapter.cpp
     framework/provider_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
+    framework/algorithm_search.cpp
     framework/json_params_converter.h
     framework/tool_call_dispatcher.cpp
     framework/python_algorithm_adapter.cpp
