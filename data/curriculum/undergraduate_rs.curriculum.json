@@ -1,0 +1,90 @@
+{
+  "schema": "sicnu.curriculum/1",
+  "id": "undergraduate_rs",
+  "title": "Remote Sensing Undergraduate Course Pack",
+  "title_zh": "遥感科学与技术本科实验课程",
+  "audience_zh": "遥感科学与技术/地理信息科学本科三四年级；已完成测量学与程序设计基础。每个模块按先修顺序递进，全部实验数据离线可取。",
+  "note_zh": "本清单是 LabSpec/lab-registry/packs/grading 契约链之上的教学组织层：只引用、不复制实验内容；lab 内容、判分与数据部署仍以各自契约文件为唯一权威。temporal 模块引用 temporal track 拥有的外部实验，只读。",
+  "modules": [
+    {
+      "id": "m04_enhancement_filtering",
+      "index": 4,
+      "title": "Image Enhancement and Filtering",
+      "title_zh": "图像增强与滤波",
+      "summary_zh": "从辐射与几何都可信的影像出发，掌握点域拉伸、空间域卷积（平滑/锐化）与融合增强的原理和适用边界，理解『增强是为了人眼判读，不是为了让结果好看』。",
+      "learning_outcomes": [
+        "能为给定判读任务选择并论证拉伸/滤波组合，说出每种方法的辐射语义代价",
+        "能解释卷积核尺寸与边缘保持/噪声压制之间的权衡，并用直方图证据支撑判断",
+        "能说明融合增强中空间与光谱分辨率交换关系，识别光谱失真的典型症状"
+      ],
+      "prerequisite_modules": [],
+      "estimated_effort_minutes": 220,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab01_image_enhancement",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [ "lab01_image_enhancement" ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握线性/非线性灰度拉伸对直方图形态的改变，并能预测其效果",
+              "掌握均值/高斯平滑与 Sobel 梯度算子的卷积语义",
+              "建立『增强改变辐射语义，分类前慎用』的判断习惯"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "拉伸后直接把输出当作反射率影像继续做指数计算",
+                "why_zh": "对比度拉伸破坏了 DN→辐亮度的线性关系，NDVI 等指数的物理意义失效",
+                "check_zh": "对拉伸影像与原影像分别计算 NDVI，观察值域差异并解释来源"
+              },
+              {
+                "mistake_zh": "滤波核越大越好，一路调到 15×15",
+                "why_zh": "大核在压噪的同时把道路、田坎等细线性地物抹掉，信息损失不可逆",
+                "check_zh": "对比 3×3 与 9×9 高斯结果中线性地物的边缘宽度"
+              },
+              {
+                "mistake_zh": "把 Sobel 输出当灰度影像看而不做梯度方向解释",
+                "why_zh": "Sobel 给的是梯度幅值，亮处=边缘，均匀区域≈0，不是『更亮的地物』",
+                "check_zh": "在水体内部与田块边界各取一个均匀窗口，比较均值差异"
+              }
+            ],
+            "grading_hook_zh": "判分读取 output/labs/lab01 下的拉伸与滤波产物，检查值域、边缘保持与直方图形态三类断言（见 lab01 判分规则）。"
+          }
+        },
+        {
+          "lab_id": "lab07_image_fusion",
+          "role": "core",
+          "estimated_effort_minutes": 100,
+          "required_data_packs": [ "lab07_image_fusion" ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "理解全色与多光谱的分辨率互补关系及配准前提",
+              "掌握融合的『空间注入』本质，能比较融合前后的光谱保真度"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "跳过配准直接融合",
+                "why_zh": "亚像素级错位会在融合结果里产生彩色镶边，被误认为『细节增强』",
+                "check_zh": "在融合结果的高对比边缘处放大 8 倍检查彩色镶边"
+              },
+              {
+                "mistake_zh": "用融合影像的光谱值做定量反演",
+                "why_zh": "多数融合方法不保证光谱保真，反演结果系统性偏移",
+                "check_zh": "对同一植被区比较融合前后 NDVI 直方图"
+              }
+            ],
+            "grading_hook_zh": "判分检查融合产物的波段数、空间尺寸与光谱保真断言。"
+          }
+        }
+      ]
+    }
+  ],
+  "forward_references": [
+    {
+      "capability": "rs:infer",
+      "reason_zh": "深度模型推理需要 ONNX 权重；仓库遵循离线约束不提交模型文件，故不在本课程承诺可用。",
+      "wiring": "docs/integration.md#model-inference"
+    }
+  ]
+}
