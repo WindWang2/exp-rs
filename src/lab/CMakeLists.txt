@@ -3,6 +3,8 @@
 # the student lab-session state machine and its durable store. Metadata layer:
 # no raster IO, no operator execution, no network. ADR 0174.
 add_library(sicnu_lab_runtime STATIC
+  checkpoint_verify.cpp
+  hint_policy.cpp
   sha256.cpp
   session_state.cpp
   session_store.cpp

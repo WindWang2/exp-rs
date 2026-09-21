@@ -779,3 +779,367 @@ TEST_CASE( "session store failures are typed", "[lab_runtime][store][negative]" 
 
   std::filesystem::remove_all( root );
 }
+
+// ---------------------------------------------------------------------------
+// Slice C: checkpoint contract / artifact references
+// ---------------------------------------------------------------------------
+
+#include "lab/checkpoint_verify.h"
+#include "lab/hint_policy.h"
+
+namespace
+{
+
+/// Fake filesystem: in-memory file table shared by the C tests.
+struct FakeProbe final : public sicnu::lab::FileProbe
+{
+  std::map<std::string, std::string> files;
+
+  bool exists( const std::string &path ) override { return files.count( path ) != 0; }
+  long long fileSize( const std::string &path ) override
+  {
+    const auto it = files.find( path );
+    return it == files.end() ? -1 : static_cast<long long>( it->second.size() );
+  }
+  bool readFile( const std::string &path, std::string &out, long long budgetBytes ) override
+  {
+    const auto it = files.find( path );
+    if ( it == files.end() )
+      return false;
+    if ( static_cast<long long>( it->second.size() ) > budgetBytes )
+      return false; // budget refusal
+    out = it->second;
+    return true;
+  }
+};
+
+sicnu::lab::CheckpointResult *latestResult( sicnu::lab::LabSession &session,
+                                            const std::string &checkpointId )
+{
+  sicnu::lab::CheckpointResult *latest = nullptr;
+  for ( sicnu::lab::CheckpointResult &result : session.checkpointResults )
+  {
+    if ( result.checkpointId != checkpointId )
+      continue;
+    if ( !latest || result.seq > latest->seq )
+      latest = &result;
+  }
+  return latest;
+}
+
+} // namespace
+
+TEST_CASE( "artifact_present checks verify against the injected filesystem",
+           "[lab_runtime][checkpoint]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+  FakeProbe probe;
+
+  SECTION( "missing artifact fails with evidence" )
+  {
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+    REQUIRE( report.ok );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Fail );
+    REQUIRE( report.value.evidence[0].ok == false );
+    REQUIRE( report.value.evidence[0].observed == "missing" );
+  }
+  SECTION( "undersized artifact fails" )
+  {
+    sicnu::lab::LabRuntimePlan local = plan;
+    local.stages[0].checkpoints[0].checks[0].minBytes = 2;
+    probe.files[ "outputs/labs/lab90/clip.tif" ] = "x";
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_clip", probe );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Fail );
+    REQUIRE( report.value.evidence[0].observed == "1 bytes" );
+  }
+  SECTION( "content drift from the pinned sha256 fails with both hashes" )
+  {
+    probe.files[ "outputs/labs/lab90/clip.tif" ] = "different bytes than pinned";
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Fail );
+    REQUIRE( report.value.evidence[0].observed ==
+             sicnu::lab::specFingerprint( "different bytes than pinned" ) );
+    REQUIRE( report.value.evidence[0].expected ==
+             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
+  }
+  SECTION( "exact pinned content passes" )
+  {
+    // sha256("pinned content") computed at runtime: the fixture pins a digest
+    // we cannot know offline, so re-pin via a dedicated plan below.
+    sicnu::lab::LabRuntimePlan local = plan;
+    local.stages[0].checkpoints[0].checks[0].sha256 = sicnu::lab::specFingerprint( "pinned content" );
+    probe.files[ "outputs/labs/lab90/clip.tif" ] = "pinned content";
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_clip", probe );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Fail ); // operator check still open
+    REQUIRE( report.value.evidence[0].ok );
+  }
+  SECTION( "over-budget read is unverifiable, never silently skipped" )
+  {
+    sicnu::lab::LabRuntimePlan local = plan;
+    local.stages[0].checkpoints[0].checks[0].sha256 = sicnu::lab::specFingerprint( "big" );
+    FakeProbe tinyBudget;
+    tinyBudget.files[ "outputs/labs/lab90/clip.tif" ] = "big";
+    // readFile refuses above budget; drive it through a 2-byte budget probe.
+    struct Tiny final : public sicnu::lab::FileProbe
+    {
+      bool exists( const std::string & ) override { return true; }
+      long long fileSize( const std::string & ) override { return 3; }
+      bool readFile( const std::string &, std::string &, long long budget ) override { return false; }
+    } probe2;
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_clip", probe2 );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Unverifiable );
+    REQUIRE( report.value.evidence[0].observed == "unreadable_or_over_budget" );
+  }
+}
+
+TEST_CASE( "operator_invoked checks read the recorded tool choices", "[lab_runtime][checkpoint]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+  FakeProbe probe;
+
+  // artifact + question must still be satisfied before the gate can pass.
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "done", std::nullopt ).ok );
+
+  SECTION( "no invocation recorded: operator check fails" )
+  {
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+    REQUIRE( report.value.evidence[1].ok == false );
+    REQUIRE( report.value.evidence[1].observed == "no recorded invocation" );
+  }
+  SECTION( "recorded invocation with matching params satisfies the check" )
+  {
+    sicnu::lab::ToolChoice choice;
+    choice.stageId = "s1_preprocess";
+    choice.operatorId = "rs:clip";
+    choice.paramsSubset = { { "bands", "3" }, { "extra", "ignored" } };
+    REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+    REQUIRE( report.value.evidence[1].ok );
+  }
+  SECTION("params subset mismatch fails")
+  {
+    sicnu::lab::ToolChoice choice;
+    choice.stageId = "s1_preprocess";
+    choice.operatorId = "rs:clip";
+    choice.paramsSubset = { { "bands", "4" } };
+    REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+    REQUIRE( report.value.evidence[1].ok == false );
+  }
+  SECTION( "any-of checkpoint passes with the second alternative" )
+  {
+    sicnu::lab::ToolChoice choice;
+    choice.stageId = "s2_index";
+    choice.operatorId = "opencv:ndvi";
+    REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_ndvi", probe );
+    REQUIRE( report.value.verdict == sicnu::lab::Verdict::Pass );
+  }
+}
+
+TEST_CASE( "question_answered checks evaluate the numeric expectation", "[lab_runtime][checkpoint]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+  FakeProbe probe;
+
+  sicnu::lab::Checkpoint ckptQuestion;
+  ckptQuestion.id = "ckpt_probe";
+  ckptQuestion.title = "probe";
+  ckptQuestion.titleZh = "probe";
+  sicnu::lab::CheckpointCheck check;
+  check.kind = sicnu::lab::CheckKind::QuestionAnswered;
+  check.questionId = "q_ndvi";
+  ckptQuestion.checks.push_back( check );
+  sicnu::lab::LabRuntimePlan local = plan;
+  local.stages[0].checkpoints.push_back( ckptQuestion );
+
+  SECTION( "unanswered fails" )
+  {
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_probe", probe );
+    REQUIRE( report.value.evidence[0].ok == false );
+    REQUIRE( report.value.evidence[0].observed == "unanswered" );
+  }
+  SECTION( "answer within expected range passes" )
+  {
+    REQUIRE( sicnu::lab::recordAnswer( session, local, "q_ndvi", "", 0.4 ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_probe", probe );
+    REQUIRE( report.value.evidence[0].ok );
+  }
+  SECTION( "answer outside expected range fails with both sides" )
+  {
+    REQUIRE( sicnu::lab::recordAnswer( session, local, "q_ndvi", "", 2.5 ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_probe", probe );
+    REQUIRE( report.value.evidence[0].ok == false );
+    REQUIRE( report.value.evidence[0].observed == "2.5" );
+    REQUIRE( report.value.evidence[0].expected == "[-1, 1]" );
+  }
+}
+
+TEST_CASE( "verify appends monotonic results and drives stage statuses", "[lab_runtime][checkpoint]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+  FakeProbe probe;
+
+  const auto first = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( first.ok );
+  REQUIRE( first.value.attempt == 1 );
+  REQUIRE( latestResult( session, "ckpt_clip" )->seq == session.lastSeq );
+  // Gate failed (nothing recorded) → advisory blocked_advance on the stage.
+  REQUIRE( session.stages[0].status == sicnu::lab::StageStatus::BlockedAdvance );
+  REQUIRE( session.stages[1].status == sicnu::lab::StageStatus::Active );
+
+  // Satisfy everything the gate demands, then pass it. The fixture pins
+  // sha256("abc") on the artifact, so the content must be exactly that.
+  probe.files[ "outputs/labs/lab90/clip.tif" ] = "abc";
+  sicnu::lab::ToolChoice choice;
+  choice.stageId = "s1_preprocess";
+  choice.operatorId = "rs:clip";
+  choice.paramsSubset = { { "bands", "3" } };
+  REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "done", std::nullopt ).ok );
+
+  const auto second = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( second.ok );
+  REQUIRE( second.value.attempt == 2 );
+  REQUIRE( second.value.verdict == sicnu::lab::Verdict::Pass );
+  REQUIRE( session.stages[0].status == sicnu::lab::StageStatus::Advanced );
+}
+
+TEST_CASE( "checkpoint attempts budget is enforced as unverifiable, not silently ignored",
+           "[lab_runtime][checkpoint]" )
+{
+  sicnu::lab::LabRuntimePlan plan = probePlan();
+  plan.stages[0].checkpoints[0].attemptsAllowed = 1;
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+  FakeProbe probe;
+
+  const auto first = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( first.value.attempt == 1 );
+  REQUIRE( first.value.verdict == sicnu::lab::Verdict::Fail );
+
+  const auto over = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( over.value.attempt == 2 );
+  REQUIRE( over.value.verdict == sicnu::lab::Verdict::Unverifiable );
+  REQUIRE( !over.value.evidence.empty() );
+  REQUIRE( over.value.evidence.back().observed == "attempt_over_budget" );
+}
+
+TEST_CASE( "verifying an unknown checkpoint is a typed refusal", "[lab_runtime][checkpoint]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  FakeProbe probe;
+  const auto ghost = sicnu::lab::verifyCheckpoint( started.value, plan, "ckpt_ghost", probe );
+  REQUIRE( !ghost.ok );
+  REQUIRE( ghost.diagnostics.front().code == "lab.session.unknown_checkpoint" );
+}
+
+// ---------------------------------------------------------------------------
+// Slice D: hint policy
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "hints reveal in escalation order per target and respect the budget",
+           "[lab_runtime][hints]" )
+{
+  const sicnu::lab::LabRuntimePlan base = probePlan();
+  sicnu::lab::LabRuntimePlan plan = base;
+  plan.hints.entries.clear();
+  auto addEntry = [ &plan ]( int level, const std::string &text, bool hasStep, int step,
+                             const std::string &ckpt ) {
+    sicnu::lab::HintEntry entry;
+    entry.level = level;
+    entry.text = text;
+    entry.hasStep = hasStep;
+    entry.targetStep = step;
+    entry.hasCheckpoint = !hasStep;
+    entry.targetCheckpoint = ckpt;
+    plan.hints.entries.push_back( entry );
+  };
+  addEntry( 1, "look at extent", true, 1, "" );
+  addEntry( 1, "bands first", false, 0, "ckpt_clip" );
+  addEntry( 2, "compare histograms", false, 0, "ckpt_clip" );
+  addEntry( 3, "worked example", false, 0, "ckpt_clip" );
+
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+
+  const std::string stepTarget = "step:1";
+  const std::string ckptTarget = "checkpoint:ckpt_clip";
+
+  // Skipping levels is refused: escalation is the teaching discipline.
+  const auto skip = sicnu::lab::revealHint( session, plan, stepTarget, 2 );
+  REQUIRE( !skip.ok );
+  REQUIRE( skip.diagnostics.front().code == "lab.session.hint_level_gap" );
+
+  auto l1 = sicnu::lab::revealHint( session, plan, stepTarget, 1 );
+  REQUIRE( l1.ok );
+  REQUIRE( l1.value.level == 1 );
+  REQUIRE( l1.value.text == "look at extent" );
+
+  // Unknown target is typed.
+  const auto ghost = sicnu::lab::revealHint( session, plan, "checkpoint:ckpt_ghost", 1 );
+  REQUIRE( !ghost.ok );
+  REQUIRE( ghost.diagnostics.front().code == "lab.session.hint_unknown_target" );
+  const auto outOfRange = sicnu::lab::revealHint( session, plan, "step:99", 1 );
+  REQUIRE( !outOfRange.ok );
+
+  // Budgets are per target — the checkpoint target starts fresh at level 1.
+  auto ckpt1 = sicnu::lab::revealHint( session, plan, ckptTarget, 1 );
+  REQUIRE( ckpt1.ok );
+  REQUIRE( ckpt1.value.text == "bands first" );
+
+  auto l2 = sicnu::lab::revealHint( session, plan, stepTarget, 2 );
+  REQUIRE( !l2.ok ); // step:1 has only a level-1 entry
+  REQUIRE( l2.diagnostics.front().code == "lab.session.hint_exhausted" );
+
+  auto ckpt2 = sicnu::lab::revealHint( session, plan, ckptTarget, 2 );
+  REQUIRE( ckpt2.ok );
+  REQUIRE( ckpt2.value.text == "compare histograms" );
+
+  // Budget: max_reveals_per_target = 3 in the probe plan.
+  auto ckpt3 = sicnu::lab::revealHint( session, plan, ckptTarget, 3 );
+  REQUIRE( ckpt3.ok );
+  const auto overBudget = sicnu::lab::revealHint( session, plan, ckptTarget, 3 );
+  REQUIRE( !overBudget.ok );
+  REQUIRE( overBudget.diagnostics.front().code == "lab.session.hint_budget" );
+
+  REQUIRE( session.hintEvents.size() == 4 );
+  REQUIRE( session.hintEvents.front().target == stepTarget );
+
+  // The hint ledger survives persistence (count continuity across restart).
+  const std::string bytes = sicnu::lab::sessionToCanonicalBytes( session );
+  const auto back = sicnu::lab::sessionFromJson( parseJson( bytes ) );
+  REQUIRE( back.ok );
+  REQUIRE( back.value.hintEvents.size() == 4 );
+}
+
+TEST_CASE( "revealHint appends monotonic seqs on an active session only",
+           "[lab_runtime][hints]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession session = started.value;
+
+  REQUIRE( sicnu::lab::revealHint( session, plan, "step:1", 1 ).ok );
+  REQUIRE( sicnu::lab::abandonSession( session ).ok );
+  const auto refused = sicnu::lab::revealHint( session, plan, "step:1", 1 );
+  REQUIRE( !refused.ok );
+  REQUIRE( refused.diagnostics.front().code == "lab.session.bad_transition" );
+}
