@@ -587,6 +587,53 @@ bool ScientificAgentSession::stageDiagnose()
                                                 : mLastFailureCode );
     }
 
+    // The repair-approval policy gates EVERY repair insertion, whoever
+    // proposed it: a diagnosis that suggests a radiometric or
+    // science-changing repair is withheld here exactly as at preflight —
+    // no repair ever enters a plan without a recorded approval.
+    std::vector< std::string > approved;
+    bool anyWithheld = false;
+    for ( const RepairProposal &proposal : mDiagnosis.proposals )
+    {
+        if ( mPolicy.repairApproval.classAutoApproved( proposal.riskClass ) )
+        {
+            approved.push_back( proposal.ruleId );
+            continue;
+        }
+        anyWithheld = true;
+        DecisionRecord withheld;
+        withheld.inputs[ "rule_id" ] = proposal.ruleId;
+        withheld.inputs[ "risk_class" ] = proposal.riskClass;
+        withheld.inputs[ "root_cause_code" ] = mDiagnosis.rootCauseCode;
+        withheld.evidence.push_back( evidence( "diagnosis", "proposal:" + proposal.ruleId ) );
+        withheld.evidence.push_back( evidence( "policy",
+                                               "auto_approve:" + proposal.riskClass ) );
+        DecisionAlternative approve;
+        approve.id = "approve";
+        approve.description = "apply the repair";
+        approve.whyNot = "risk class '" + proposal.riskClass +
+                         "' is not auto-approved; it requires an explicit decision";
+        withheld.alternatives.push_back( approve );
+        withheld.selected[ "action" ] = "withhold_repair";
+        withheld.selected[ "rule_id" ] = proposal.ruleId;
+        withheld.reason = "diagnosed repair '" + proposal.ruleId + "' has risk class '" +
+                          proposal.riskClass + "'; policy does not auto-approve it";
+        recordDecision( stages::kDiagnose, std::move( withheld ) );
+    }
+
+    if ( approved.empty() && anyWithheld && !mPolicy.repairApproval.allowUnapprovedFixable )
+    {
+        DecisionRecord decision;
+        decision.inputs[ "root_cause_code" ] = mDiagnosis.rootCauseCode;
+        decision.selected[ "action" ] = "refuse";
+        decision.reason = "diagnosis proposed only non-auto-approvable repairs and the "
+                          "policy forbids proceeding without them";
+        decision.evidence.push_back( evidence( "policy", "allow_unapproved_fixable" ) );
+        recordDecision( stages::kDiagnose, std::move( decision ) );
+        return refuse( mLastFailureCode.empty() ? stop_reasons::kExecutionFailed
+                                                : mLastFailureCode );
+    }
+
     DecisionRecord decision;
     decision.inputs[ "root_cause_code" ] = mDiagnosis.rootCauseCode;
     for ( const RepairProposal &proposal : mDiagnosis.proposals )
@@ -603,6 +650,12 @@ bool ScientificAgentSession::stageDiagnose()
                       std::to_string( mDiagnosis.proposals.size() ) +
                       " repair proposal(s); the session replans within its budget";
     recordDecision( stages::kDiagnose, std::move( decision ) );
+
+    for ( const std::string &ruleId : approved )
+        if ( std::find( mApprovedRepairs.begin(), mApprovedRepairs.end(), ruleId ) ==
+             mApprovedRepairs.end() )
+            mApprovedRepairs.push_back( ruleId );
+
     return enterStage( stages::kReplan );
 }
 

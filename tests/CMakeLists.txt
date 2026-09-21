@@ -9598,6 +9598,14 @@ target_link_libraries(test_agent_loop_modes PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_modes)
 
+# RS14-11: full-loop E2E on deterministic offline doubles (slices D/E/F).
+add_executable(test_agent_loop_e2e test_agent_loop_e2e.cpp)
+target_link_libraries(test_agent_loop_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_e2e)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
