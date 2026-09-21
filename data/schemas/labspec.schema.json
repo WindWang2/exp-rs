@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sicnu-geo-rs/schemas/labspec.schema.json",
   "title": "SICNU GEO RS LabSpec",
-  "description": "Declarative specification of an undergraduate remote-sensing lab exercise. One file drives the guided workflow UI, headless execution (operator_id + params), auto-grading (grading_ref / grading_rules) and generated documentation (scripts/gen_lab_docs.py). LabSpec 2 (spec_version 2, lab platform 12.0) is a strict superset of v1: it adds structured Chinese teaching content (objective_zh, glossary), expected artifacts, pedagogical parameter allow-ranges and an explicit grading_rules pointer. The C++ loader (src/app/widgets/lab_spec_loader.cpp) is authoritative; it accepts 1 and 2 and rejects v2-only keys in v1 documents. Authoring guide: docs/labs/LABSPEC.md.",
+  "description": "Declarative specification of an undergraduate remote-sensing lab exercise. One file drives the guided workflow UI, headless execution (operator_id + params), auto-grading (grading_ref / grading_rules) and generated documentation (scripts/gen_lab_docs.py). LabSpec 2 (spec_version 2, lab platform 12.0) is a strict superset of v1: it adds structured Chinese teaching content (objective_zh, glossary), expected artifacts, pedagogical parameter allow-ranges and an explicit grading_rules pointer. LabSpec 3 (spec_version 3, ADR 0174) is a strict superset of v2 and adds one optional runtime block that makes a lab machine-executable as a teaching session: stages with allowed tools, machine-verifiable checkpoints, structured questions, a budgeted hint policy and reproducibility requirements. The C++ loader (src/app/widgets/lab_spec_loader.cpp) is authoritative; it accepts 1, 2 and 3 and rejects newer-generation keys in older documents. Authoring guide: docs/labs/LABSPEC.md.",
   "type": "object",
   "required": [
     "spec_version",
@@ -18,9 +18,10 @@
       "type": "integer",
       "enum": [
         1,
-        2
+        2,
+        3
       ],
-      "description": "LabSpec contract version; 2 is the strict superset (see ADR 0146 and docs/labs/LABSPEC.md)."
+      "description": "LabSpec contract version; append-only (a version number is never reused): 2 is the static-content superset (ADR 0146), 3 adds the optional runtime block (ADR 0174). See docs/labs/LABSPEC.md."
     },
     "id": {
       "type": "string",
@@ -228,9 +229,326 @@
         "minLength": 1
       },
       "description": "Prior labs/concepts the student needs, as free strings — prerequisites[] remains the data-ref list; v2 only."
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime",
+      "description": "Runtime teaching contract (ADR 0174); v3 only. Makes the lab machine-executable as a session: stages with allowed tools, machine-verifiable checkpoints, structured questions, a budgeted hint policy and reproducibility requirements. Deep validation lives in src/lab (sicnu_lab_runtime); this schema carries the structural shape."
     }
   },
   "$defs": {
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stages"
+      ],
+      "properties": {
+        "data_packs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "description": "sicnu.lab-pack ids the student must have deployed before starting (pack files remain the authority; tests drift-guard the reference)."
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/runtime_stage"
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtime_question"
+          }
+        },
+        "hints": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_reveals_per_target": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "0 = unlimited."
+                },
+                "escalation": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Escalation vocabulary; hint levels index into it."
+                }
+              }
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/runtime_hint_entry"
+              }
+            }
+          }
+        },
+        "reproducibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_seed": {
+              "type": "boolean"
+            },
+            "deterministic_operators_only": {
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "runtime_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "title_zh",
+        "objective",
+        "objective_zh",
+        "step_indices"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title_zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objective_zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_indices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Strictly ascending indices into the document's steps[]; disjoint across stages."
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]+:[a-z0-9_*]+$"
+          },
+          "description": "Operator whitelist for the stage: exact ids or trailing-'*' prefixes; absent = unrestricted (free exploration is never blocked, choices are recorded)."
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtime_checkpoint"
+          }
+        }
+      }
+    },
+    "runtime_checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "title_zh",
+        "checks"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Unique across the whole lab (sessions reference it)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title_zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/runtime_check"
+          }
+        },
+        "attempts_allowed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 = unlimited."
+        },
+        "advance": {
+          "enum": [
+            "observe",
+            "gate"
+          ],
+          "description": "observe (default) = verify and record only; gate = the session reports blocked_advance until the checkpoint passes. The runtime never blocks operator execution either way."
+        }
+      }
+    },
+    "runtime_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "artifact_present",
+            "operator_invoked",
+            "question_answered"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./-]+$",
+          "description": "artifact_present: project-root-relative; no '..' escapes, not absolute."
+        },
+        "min_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operator_id": {
+          "type": "string",
+          "pattern": "^(rs|opencv):[a-z0-9_]+$",
+          "description": "operator_invoked: exactly one of operator_id|operator_id_any."
+        },
+        "operator_id_any": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^(rs|opencv):[a-z0-9_]+$"
+          }
+        },
+        "params_subset": {
+          "type": "object",
+          "description": "operator_invoked: recorded tool use must carry these params (subset match, scalar values)."
+        },
+        "question_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "question_answered: must reference a question in runtime.questions."
+        }
+      }
+    },
+    "runtime_question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "prompt",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "free_text",
+            "numeric",
+            "choice"
+          ]
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "choice questions only."
+        },
+        "expected_numeric": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          },
+          "description": "numeric questions only; min <= max."
+        }
+      }
+    },
+    "runtime_hint_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "text"
+      ],
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based index into hints.policy.escalation."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text_zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_step": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Exactly one of target_step|target_checkpoint."
+        },
+        "target_checkpoint": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      }
+    },
     "data_ref": {
       "type": "object",
       "required": [
@@ -349,7 +667,25 @@
           "param_ranges": false,
           "grading_rules": false,
           "principles": false,
-          "prerequisite_knowledge": false
+          "prerequisite_knowledge": false,
+          "runtime": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "spec_version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "spec_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "runtime": false
         }
       }
     }

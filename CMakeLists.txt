@@ -803,6 +803,9 @@ add_subdirectory(src/workflow)
 # src/workflow: the adapter links the sicnu_workflow target.
 add_subdirectory(src/experiment/bridge)
 add_subdirectory(src/jobs)
+# LabSpec v3 lab runtime (rs14-labspec2-runtime, ADR 0174). Qt-free metadata
+# layer; depends on jsoncpp only.
+add_subdirectory(src/lab)
 add_subdirectory(src/python/isolated)
 add_subdirectory(src/python/sdk)
 # ExpRS Developer Platform public SDK (plugin infrastructure + install/export)
