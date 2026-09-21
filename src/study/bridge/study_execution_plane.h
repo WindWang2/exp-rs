@@ -12,6 +12,14 @@
 // stable "output" path. NO catalog asset is registered — a 100-point sweep
 // must not flood the catalog; the experiment run record (parameters, seed,
 // artifacts, executionRef) plus the study report are the provenance surface.
+//
+// Ordering assumption: the study submission is the ONLY surface that builds
+// the committed payload for its task ids (the runner awaits each submission
+// it owns; ExecutionPlane's commit is once-per-task, first builder wins).
+// A foreign surface that snipes a study task's payload build would commit
+// with the default catalog committer instead — the runner's output-path
+// guard (study.run_output_mismatch) turns that into a typed failure, not a
+// silently poisoned artifact.
 #pragma once
 
 #include "study/study_execution.h"
