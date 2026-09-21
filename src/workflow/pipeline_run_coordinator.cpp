@@ -7,6 +7,8 @@
 #include "workflow/workflow_limits.h"
 #include "workflow/workflow_provenance.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -30,6 +32,7 @@
 #include <atomic>
 #include <functional>
 #include <optional>
+#include <type_traits>
 
 #ifdef Q_OS_WIN
 // _O_WRONLY/_O_BINARY for fsyncFile's Win32 branch live in fcntl.h (MSVC);
@@ -80,7 +83,7 @@ const QString kCheckpointVersionLegacy = QStringLiteral( "1.0" );
 /// sha256fl: SHA-256 over [8-byte LE size][first <=1MiB][last <=1MiB] — an
 /// O(2 MiB) deterministic identity for arbitrarily large artifacts (whole
 /// file when <= 2 MiB). Empty string when the file cannot be read.
-QString computeArtifactFingerprint( const QString &path, qint64 size )
+QString computeArtifactFingerprintFast( const QString &path, qint64 size )
 {
     QFile file( path );
     if ( size < 0 || !file.open( QIODevice::ReadOnly ) )
@@ -117,6 +120,101 @@ QString computeArtifactFingerprint( const QString &path, qint64 size )
         hash.addData( tail );
     }
     return QStringLiteral( "sha256fl:%1" ).arg( QString::fromLatin1( hash.result().toHex() ) );
+}
+
+/// Chunk granularity for the whole-file hash — also the cancel latency: the
+/// loop polls @p cancel once per chunk, so a cancel observed mid-hash aborts
+/// within one chunk (≤ 1 MiB of reading) instead of after the whole file.
+constexpr qint64 kFullHashChunkBytes = 1024 * 1024;
+
+/// sha256full: SHA-256 over [8-byte LE size][whole file streamed in
+/// kFullHashChunkBytes chunks]. Bounded memory for arbitrarily large
+/// artifacts; @p cancel (may be null) aborts the computation. Returns
+/// cancelled=true when the caller aborted, an empty digest with
+/// cancelled=false when the file cannot be read.
+struct FingerprintResult
+{
+    QString digest;
+    bool cancelled = false;
+};
+
+FingerprintResult computeArtifactFingerprintFull( const QString &path, qint64 size,
+                                                  const std::atomic<bool> *cancel )
+{
+    const auto aborted = [cancel] {
+        return cancel && cancel->load( std::memory_order_relaxed );
+    };
+    if ( aborted() )
+        return { {}, true };
+    QFile file( path );
+    if ( size < 0 || !file.open( QIODevice::ReadOnly ) )
+        return {};
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    QByteArray sizeLE( 8, '\0' );
+    qToLittleEndian<qint64>( size, sizeLE.data() );
+    hash.addData( sizeLE );
+    qint64 remaining = size;
+    while ( remaining > 0 )
+    {
+        if ( aborted() )
+            return { {}, true };
+        const QByteArray chunk = file.read( qMin( kFullHashChunkBytes, remaining ) );
+        if ( chunk.isEmpty() )
+            return {}; // short read: the file shrank under us — unverifiable
+        hash.addData( chunk );
+        remaining -= chunk.size();
+    }
+    return { QStringLiteral( "sha256full:%1" ).arg( QString::fromLatin1( hash.result().toHex() ) ),
+             false };
+}
+
+/// Effective scheme for one artifact under @p mode: Full exactly when the
+/// artifact is larger than the fast window (where sha256fl stops covering
+/// the middle of the file), Fast otherwise.
+bool useFullIdentity( ArtifactIdentityMode mode, qint64 size )
+{
+    switch ( mode )
+    {
+        case ArtifactIdentityMode::Fast:
+            return false;
+        case ArtifactIdentityMode::Full:
+            return true;
+        case ArtifactIdentityMode::Auto:
+            return size > 2 * kFullHashChunkBytes;
+    }
+    return false;
+}
+
+FingerprintResult computeArtifactFingerprint( const QString &path, qint64 size,
+                                              ArtifactIdentityMode mode,
+                                              const std::atomic<bool> *cancel )
+{
+    if ( useFullIdentity( mode, size ) )
+        return computeArtifactFingerprintFull( path, size, cancel );
+    const QString digest = computeArtifactFingerprintFast( path, size );
+    return { digest, false };
+}
+
+/// Re-verifies a RECORDED fingerprint against the live file. The recorded
+/// tag selects the algorithm — a legacy "sha256fl:" record verifies with the
+/// fast scheme, a "sha256full:" record with the whole-file hash — so mixed
+/// and pre-1.1 checkpoints never need migration. An unknown scheme, an
+/// unreadable file, or a caller abort fails closed (not verified).
+bool verifyRecordedFingerprint( const QString &recordedTag, const QString &path, qint64 size,
+                                const std::atomic<bool> *cancel, bool *cancelled = nullptr )
+{
+    if ( cancelled )
+        *cancelled = false;
+    if ( recordedTag.startsWith( QLatin1String( "sha256fl:" ) ) )
+        return computeArtifactFingerprintFast( path, size ) == recordedTag;
+    if ( recordedTag.startsWith( QLatin1String( "sha256full:" ) ) )
+    {
+        const FingerprintResult full = computeArtifactFingerprintFull( path, size, cancel );
+        if ( cancelled )
+            *cancelled = full.cancelled;
+        return !full.cancelled && full.digest == recordedTag;
+    }
+    return false; // unknown scheme: never served
 }
 
 /// Canonical-path containment: the artifact must resolve (symlinks included)
@@ -190,12 +288,55 @@ bool runOnCoordinatorThread( PipelineRunCoordinator *self, const std::function<v
     return QMetaObject::invokeMethod( self, body, Qt::BlockingQueuedConnection );
 }
 
+/// Value-returning form of runOnCoordinatorThread — the ONE marshalling
+/// pattern every public entry point uses (Track 13, DECISIONS D7). The
+/// affinity thread never blocks on a foreign thread, so a blocking marshal
+/// cannot deadlock; a foreign caller simply waits for the owner's current
+/// unit of work to finish. A marshal that fails (dying object) yields a
+/// default-constructed result, never a torn read.
+template <typename F>
+auto invokeOnCoordinatorThread( const PipelineRunCoordinator *self, F &&body ) -> decltype( body() )
+{
+    using Result = decltype( body() );
+    auto *owner = const_cast<PipelineRunCoordinator *>( self );
+    if ( QThread::currentThread() == self->thread() )
+    {
+        if constexpr ( std::is_void_v<Result> )
+        {
+            body();
+            return;
+        }
+        else
+        {
+            return body();
+        }
+    }
+    if constexpr ( std::is_void_v<Result> )
+    {
+        if ( !runOnCoordinatorThread( owner, body ) )
+            body(); // marshal failed (dying object): run inline rather than drop the call
+        return;
+    }
+    else
+    {
+        Result result{};
+        // BlockingQueuedConnection keeps the caller's stack (and @p body's
+        // captured references) alive until the functor has run on the owner.
+        QMetaObject::invokeMethod( owner, [&result, &body] { result = body(); },
+                                   Qt::BlockingQueuedConnection );
+        return result;
+    }
+}
+
 /// Two-phase atomic write (DECISIONS D7): tmp -> flush -> fsync -> rename ->
 /// dir fsync. Returns the final path, empty on failure. The tmp name is
 /// unique per writer (pid + counter) so concurrent writes to the same target
 /// — e.g. two processes resuming one checkpoint path — cannot interleave
-/// their payloads on a shared tmp file.
-QString atomicWriteJson( const QString &path, const QJsonObject &document )
+/// their payloads on a shared tmp file. @p faultPoint (optional) arms the
+/// deterministic crash-between-write-and-rename injection: it routes through
+/// the REAL rename-failure branch (tmp removed, nothing promoted) exactly
+/// like a locked target or a cross-device rename error.
+QString atomicWriteJson( const QString &path, const QJsonObject &document, const char *faultPoint = nullptr )
 {
     static std::atomic<quint64> s_tmpCounter{ 0 };
     const QString tmp = path + QStringLiteral( ".tmp.%1.%2" )
@@ -216,6 +357,11 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
     }
     file.close();
     if ( !fsyncFile( tmp ) )
+    {
+        QFile::remove( tmp );
+        return {};
+    }
+    if ( faultPoint && SICNU_FAULT_POINT( faultPoint ) )
     {
         QFile::remove( tmp );
         return {};
@@ -306,15 +452,20 @@ struct PipelineRunCoordinator::RunState
     NodeExecutor executor;
     QThreadPool pool;
     int maxParallelism = 2;
+    ArtifactIdentityMode identityMode = ArtifactIdentityMode::Auto;
     QString provenancePath;
 
     QHash<QString, NodeStatusSnapshot> statuses;
     QHash<QString, int> remainingParents; // nodeId -> unfinished parent count
     std::atomic<bool> cancelRequested{ false };
+    // Set by the destructor's drain (on the affinity thread): stops dispatch
+    // and completion handling so a foreign-thread destruction cannot race
+    // onNodeFinished touching this state.
+    std::atomic<bool> shuttingDown{ false };
     bool finished = false;
     bool success = false;
     // Resume attempt counter: persisted in the checkpoint so each attempt's
-    // provenance file gets a distinct suffix — a resumed run must never
+    // provenance file gets a distinct location — a resumed run must never
     // overwrite the record of the attempt it reuses artifacts from.
     int attempt = 0;
 
@@ -329,76 +480,93 @@ PipelineRunCoordinator::PipelineRunCoordinator( QObject *parent )
     m_state->pool.setMaxThreadCount( m_state->maxParallelism );
 }
 
-PipelineRunCoordinator::~PipelineRunCoordinator() = default;
+PipelineRunCoordinator::~PipelineRunCoordinator()
+{
+    // Trip the cancel flag from ANY thread first: an artifact hash in flight
+    // on the affinity thread then aborts within one chunk, so the drain below
+    // never waits for a whole-file hash. Destroying on the affinity thread
+    // (the documented fast path) runs the drain inline.
+    m_state->cancelRequested.store( true, std::memory_order_relaxed );
+    invokeOnCoordinatorThread( this, [this] {
+        m_state->shuttingDown.store( true, std::memory_order_relaxed );
+        m_state->pool.clear();    // drop queued, not-yet-started node work
+        m_state->pool.waitForDone(); // drain the running workers
+        // Completions already posted to this thread must not be delivered to
+        // a dying object; the worker lambdas additionally hold a QPointer.
+        QCoreApplication::removePostedEvents( this );
+    } );
+}
 
 void PipelineRunCoordinator::setExecutor( NodeExecutor executor )
 {
-    m_state->executor = std::move( executor );
+    invokeOnCoordinatorThread( this, [this, executor = std::move( executor )]() mutable {
+        m_state->executor = std::move( executor );
+    } );
 }
 
 void PipelineRunCoordinator::setMaxParallelism( int workers )
 {
-    m_state->maxParallelism = std::clamp( workers, 1, kMaxPoolWorkers );
-    m_state->pool.setMaxThreadCount( m_state->maxParallelism );
+    invokeOnCoordinatorThread( this, [this, workers] {
+        m_state->maxParallelism = std::clamp( workers, 1, kMaxPoolWorkers );
+        m_state->pool.setMaxThreadCount( m_state->maxParallelism );
+    } );
+}
+
+void PipelineRunCoordinator::setArtifactIdentityMode( ArtifactIdentityMode mode )
+{
+    invokeOnCoordinatorThread( this, [this, mode] { m_state->identityMode = mode; } );
+}
+
+ArtifactIdentityMode PipelineRunCoordinator::artifactIdentityMode() const
+{
+    return invokeOnCoordinatorThread( this, [this] { return m_state->identityMode; } );
 }
 
 QString PipelineRunCoordinator::checkpointPath() const
 {
-    QString value;
-    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
-                                 [this, &value] { value = m_state->checkpointPath; } ) )
-        return value;
-    return m_state->checkpointPath;
+    return invokeOnCoordinatorThread( this, [this] { return m_state->checkpointPath; } );
 }
 
 QString PipelineRunCoordinator::provenancePath() const
 {
     // Written on the affinity thread during finalizeIfDone — an unmarshal'd
     // read from a UI thread races the QString assignment.
-    QString value;
-    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
-                                 [this, &value] { value = m_state->provenancePath; } ) )
-        return value;
-    return m_state->provenancePath;
+    return invokeOnCoordinatorThread( this, [this] { return m_state->provenancePath; } );
 }
 
 bool PipelineRunCoordinator::isRunning() const
 {
     // Marshal the read onto the affinity thread: onNodeFinished flips
     // m_state->finished there and an unsynchronised cross-thread read races.
-    bool value = false;
-    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
-                                 [this, &value] {
-                                     value = !m_state->finished && !m_state->def.nodes.isEmpty();
-                                 } ) )
-        return value;
-    return !m_state->finished && !m_state->def.nodes.isEmpty();
+    return invokeOnCoordinatorThread(
+        this, [this] { return !m_state->finished && !m_state->def.nodes.isEmpty(); } );
 }
 
 bool PipelineRunCoordinator::hasCompleted() const
 {
-    bool value = false;
-    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
-                                 [this, &value] { value = m_state->finished; } ) )
-        return value;
-    return m_state->finished;
+    return invokeOnCoordinatorThread( this, [this] { return m_state->finished; } );
 }
 
 QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
 {
-    QMap<QString, NodeStatusSnapshot> map;
-    const auto fill = [this]( QMap<QString, NodeStatusSnapshot> &out ) {
+    return invokeOnCoordinatorThread( this, [this] {
+        QMap<QString, NodeStatusSnapshot> map;
         for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
-            out.insert( it.key(), it.value() );
-    };
-    if ( runOnCoordinatorThread( const_cast<PipelineRunCoordinator *>( this ),
-                                 [&fill, &map] { fill( map ); } ) )
+            map.insert( it.key(), it.value() );
         return map;
-    fill( map );
-    return map;
+    } );
 }
 
 bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
+{
+    // Marshalled like every other public entry point (DECISIONS D7): the run
+    // state this body installs is also mutated by onNodeFinished on the
+    // affinity thread.
+    return invokeOnCoordinatorThread(
+        this, [&] { return startRunOnAffinity( def, runDirectory, outError ); } );
+}
+
+bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -470,18 +638,26 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
 
 void PipelineRunCoordinator::requestCancel()
 {
-    // Cancel mutates the run state (statuses, bookkeeping) that onNodeFinished
-    // also touches on the affinity thread: marshal the request there so the
-    // two can never interleave (#1056). Callers already on the affinity thread
-    // run inline, which keeps the synchronous pipelineCompleted behaviour.
-    if ( runOnCoordinatorThread( this, [this] { requestCancel(); } ) )
+    // Phase 1 — lock-free, callable from ANY thread: trip the atomic so a
+    // whole-file artifact hash in flight on the affinity thread aborts within
+    // one chunk. Phase 2 (status mutation) must never wait on that hash, so
+    // the flag is set BEFORE the blocking marshal, not inside it (Track 13).
+    m_state->cancelRequested.store( true, std::memory_order_relaxed );
+    // Phase 2 — affinity thread: mutate statuses/bookkeeping. Callers already
+    // on the affinity thread run inline, which keeps the synchronous
+    // pipelineCompleted behaviour.
+    if ( runOnCoordinatorThread( this, [this] { requestCancelOnAffinity(); } ) )
         return;
+    requestCancelOnAffinity();
+}
+
+void PipelineRunCoordinator::requestCancelOnAffinity()
+{
     // Cancelling an idle coordinator must not emit a phantom completion:
     // with no document loaded there is nothing to cancel and finalizeIfDone
     // would emit "0 succeeded" for a run that never existed.
     if ( m_state->def.nodes.isEmpty() )
         return;
-    m_state->cancelRequested = true;
     markRemaining( ExecutionState::Cancelled );
     dispatchReadyNodes(); // nothing will be dispatched; drive finalization
     finalizeIfDone();
@@ -501,7 +677,7 @@ void PipelineRunCoordinator::markRemaining( ExecutionState state )
 
 void PipelineRunCoordinator::dispatchReadyNodes()
 {
-    if ( m_state->finished )
+    if ( m_state->finished || m_state->shuttingDown.load( std::memory_order_relaxed ) )
         return;
 
     bool anySkipped = false;
@@ -624,11 +800,15 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
 {
     if ( !m_state->statuses.contains( nodeId ) )
         return;
+    // The destructor's drain stops completion handling: no state mutation may
+    // outlive the drain that precedes m_state's destruction.
+    if ( m_state->shuttingDown.load( std::memory_order_relaxed ) )
+        return;
 
     NodeStatusSnapshot &snapshot = m_state->statuses[nodeId];
     snapshot.elapsedMs = elapsedMs;
 
-    if ( m_state->cancelRequested )
+    if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
     {
         // A draining worker after a cancel request is Cancelled regardless
         // of its outcome — the run as a whole did not produce it.
@@ -650,23 +830,37 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
                 QStringLiteral( "ir2.artifact_outside_run: artifact '%1' is missing or resolves outside run directory '%2' (node '%3')" )
                     .arg( result.artifactPath, m_state->runDirectory, nodeId );
         }
-        else if ( ( snapshot.artifactFingerprint =
-                        computeArtifactFingerprint( artifactInfo.canonicalFilePath(), artifactInfo.size() ) )
-                      .isEmpty() )
-        {
-            snapshot.state = ExecutionState::Failed;
-            snapshot.errorMessage =
-                QStringLiteral( "ir2.artifact_unverifiable: cannot fingerprint artifact '%1' (node '%2')" )
-                    .arg( result.artifactPath, nodeId );
-        }
         else
         {
-            snapshot.state = ExecutionState::Succeeded;
-            snapshot.outputArtifactPath = result.artifactPath;
-            snapshot.artifactSizeBytes = artifactInfo.size();
-            snapshot.artifactLastModifiedMs =
-                artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
-            snapshot.progress = 1.0f;
+            // Track 13: the identity is computed here, on the affinity
+            // thread. A whole-file hash streams in bounded chunks and polls
+            // the cancel flag, so it never blocks unbounded and a cancel
+            // landing mid-hash marks the node Cancelled (the run did not
+            // produce it) instead of failing it.
+            const FingerprintResult fingerprint =
+                computeArtifactFingerprint( artifactInfo.canonicalFilePath(), artifactInfo.size(),
+                                            m_state->identityMode, &m_state->cancelRequested );
+            if ( fingerprint.cancelled )
+            {
+                snapshot.state = ExecutionState::Cancelled;
+            }
+            else if ( fingerprint.digest.isEmpty() )
+            {
+                snapshot.state = ExecutionState::Failed;
+                snapshot.errorMessage =
+                    QStringLiteral( "ir2.artifact_unverifiable: cannot fingerprint artifact '%1' (node '%2')" )
+                        .arg( result.artifactPath, nodeId );
+            }
+            else
+            {
+                snapshot.state = ExecutionState::Succeeded;
+                snapshot.outputArtifactPath = result.artifactPath;
+                snapshot.artifactSizeBytes = artifactInfo.size();
+                snapshot.artifactLastModifiedMs =
+                    artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+                snapshot.artifactFingerprint = fingerprint.digest;
+                snapshot.progress = 1.0f;
+            }
         }
     }
     else if ( result.success )
@@ -749,11 +943,23 @@ void PipelineRunCoordinator::finalizeIfDone()
         const ProvenanceGraph graph = ProvenanceGraph::fromRunState(
             m_state->runId, m_state->def, m_state->statuses,
             WorkflowPlanOptimizer::computePlanSignature( m_state->def ) );
-        const QString fileName = m_state->attempt <= 1
-            ? QStringLiteral( "provenance_%1.json" ).arg( m_state->runId )
-            : QStringLiteral( "provenance_%1.attempt%2.json" ).arg( m_state->runId ).arg( m_state->attempt );
-        const QString path = atomicWriteJson( QDir( m_state->runDirectory ).filePath( fileName ),
-                                              graph.toJson() );
+        // Attempt 1 keeps the canonical provenance_<runId>.json beside the
+        // checkpoint; later attempts live in attempt-<N>/ — the SYSTEM
+        // lineage in a path segment and the USER identity in the filename.
+        // A valid runId cannot contain '/', so no user-named runId can
+        // collide with the attempt encoding (DECISIONS D6); a single-segment
+        // suffix could not promise that.
+        QString provenanceTarget = QDir( m_state->runDirectory ).filePath(
+            QStringLiteral( "provenance_%1.json" ).arg( m_state->runId ) );
+        if ( m_state->attempt > 1 )
+        {
+            const QString attemptDir = QDir( m_state->runDirectory ).filePath(
+                QStringLiteral( "attempt-%1" ).arg( m_state->attempt ) );
+            QDir().mkpath( attemptDir );
+            provenanceTarget =
+                QDir( attemptDir ).filePath( QStringLiteral( "provenance_%1.json" ).arg( m_state->runId ) );
+        }
+        const QString path = atomicWriteJson( provenanceTarget, graph.toJson(), "d17_provenance.publish" );
         if ( !path.isEmpty() )
             m_state->provenancePath = path;
     }
@@ -804,12 +1010,20 @@ void PipelineRunCoordinator::persistCheckpoint()
     }
     document.insert( QLatin1String( "nodes" ), nodes );
 
-    const QString path = atomicWriteJson( m_state->checkpointPath, document );
+    const QString path = atomicWriteJson( m_state->checkpointPath, document, "d17_checkpoint.publish" );
     if ( !path.isEmpty() )
         emit checkpointPersisted( path );
 }
 
 bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFilePath, QString *outError )
+{
+    // Symmetric with startRun: a live run's queued completions must never
+    // mutate a resumed run's state, so the whole body runs on the owner.
+    return invokeOnCoordinatorThread(
+        this, [&] { return resumeOnAffinity( checkpointFilePath, outError ); } );
+}
+
+bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -821,6 +1035,14 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // mutate a resumed run's state.
     if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
+
+    // Clear any STALE cancel flag before the verification loop: an idle
+    // requestCancel (no run loaded) trips the atomic and returns without
+    // touching state, so without this reset the loop's cancel check would
+    // refuse a perfectly good resume (Track 13 review P1). A cancel that
+    // arrives DURING this resume still trips the flag via requestCancel's
+    // phase 1 and aborts at the loop checks below.
+    m_state->cancelRequested.store( false, std::memory_order_relaxed );
 
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
@@ -907,6 +1129,13 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         const QJsonObject entry = value.toObject();
         const QString nodeId = entry.value( QLatin1String( "nodeId" ) ).toString();
 
+        // A cancel requested while this (possibly whole-file) verification
+        // pass runs aborts the resume before anything is dispatched — no
+        // partial publish, no phantom run.
+        if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
+            return fail( QStringLiteral( "checkpoint '%1' verification cancelled" )
+                             .arg( checkpointFilePath ) );
+
         NodeStatusSnapshot snapshot;
         snapshot.nodeId = nodeId;
         snapshot.errorMessage = entry.value( QLatin1String( "errorMessage" ) ).toString();
@@ -927,7 +1156,10 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         // re-verifies — exists, resolves inside the recorded run directory,
         // and matches size / mtime / content fingerprint. Anything less
         // reverts to Pending and recomputes: a tampered, moved, or foreign
-        // artifact is never served (DECISIONS D3). Checkpoints written
+        // artifact is never served (DECISIONS D3). The recorded fingerprint
+        // TAG selects the verification algorithm, so legacy sha256fl records
+        // keep the fast scheme and sha256full records get the whole-file
+        // hash — mixed checkpoints need no migration. Checkpoints written
         // before format 1.1 carry no identity fields and degrade to a full
         // recompute — correct but cold.
         bool artifactVerified = false;
@@ -940,13 +1172,23 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
                 entry.value( QLatin1String( "artifactFingerprint" ) ).toString();
             const qint64 liveMtime =
                 artifactInfo.fileTime( QFileDevice::FileModificationTime ).toMSecsSinceEpoch();
+            bool hashCancelled = false;
+            bool identityMatches = false;
+            if ( artifactInfo.isFile() )
+            {
+                identityMatches =
+                    verifyRecordedFingerprint( recordedFingerprint, snapshot.outputArtifactPath,
+                                               artifactInfo.size(), &m_state->cancelRequested,
+                                               &hashCancelled );
+                if ( hashCancelled )
+                    return fail( QStringLiteral( "checkpoint '%1' verification cancelled at node '%2'" )
+                                     .arg( checkpointFilePath, nodeId ) );
+            }
             artifactVerified =
-                artifactInfo.isFile()
+                identityMatches
                 && isContainedInDirectory( snapshot.outputArtifactPath, canonicalRunDir )
                 && recordedSize >= 0 && recordedSize == artifactInfo.size() && recordedMtime >= 0
-                && recordedMtime == liveMtime && !recordedFingerprint.isEmpty()
-                && recordedFingerprint
-                       == computeArtifactFingerprint( snapshot.outputArtifactPath, artifactInfo.size() );
+                && recordedMtime == liveMtime && !recordedFingerprint.isEmpty();
             if ( artifactVerified )
             {
                 snapshot.artifactSizeBytes = artifactInfo.size();

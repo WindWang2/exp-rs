@@ -148,6 +148,7 @@ vendor/
 .planning/teaching-lab-platform-11/*
 !.planning/teaching-lab-platform-11/*.md
 !.planning/plugin-platform-9/
+!.planning/ds41-plugin-lifecycle-13/
 !.planning/geospatial-data-fabric-9/
 !.planning/lab-content-expansion/
 # Complete whitelist for older tracks present on disk but previously missing (#970).
@@ -364,6 +365,10 @@ data/labs/_tmp/
 !.planning/ds41-range-cache-msvc/
 .planning/ds41-range-cache-msvc/*
 !.planning/ds41-range-cache-msvc/*.md
+# flash-temporal-phenology-12: track planning notes (markdown only; logs stay local).
+!.planning/flash-temporal-phenology-12/
+.planning/flash-temporal-phenology-12/*
+!.planning/flash-temporal-phenology-12/*.md
 # flash-plugin-sdk-12 (Track 07): plugin SDK / capability negotiation / lifecycle 12.0 planning notes (markdown only; logs stay local).
 !.planning/flash-plugin-sdk-12/
 .planning/flash-plugin-sdk-12/*
@@ -405,3 +410,22 @@ data/labs/_tmp/
 !.planning/flash-workflow-engine-12/
 .planning/flash-workflow-engine-12/*
 !.planning/flash-workflow-engine-12/*.md
+# ds41-capability-search-13 (Track I): track planning notes (markdown only; logs stay local).
+!.planning/ds41-capability-search-13/
+.planning/ds41-capability-search-13/*
+!.planning/ds41-capability-search-13/*.md
+
+# glm53-mission-runtime-13 (Mission Runtime 13.0): track planning notes (markdown only; logs stay local).
+!.planning/glm53-mission-runtime-13/
+.planning/glm53-mission-runtime-13/*
+!.planning/glm53-mission-runtime-13/*.md
+
+# ds41-geospatial-maintenance-13 (Track H): track planning notes (markdown only; logs stay local).
+!.planning/ds41-geospatial-maintenance-13/
+.planning/ds41-geospatial-maintenance-13/*
+!.planning/ds41-geospatial-maintenance-13/*.md
+
+# ds41-workflow-durability-13 (Track 13): track planning notes (markdown only; logs stay local).
+!.planning/ds41-workflow-durability-13/
+.planning/ds41-workflow-durability-13/*
+!.planning/ds41-workflow-durability-13/*.md

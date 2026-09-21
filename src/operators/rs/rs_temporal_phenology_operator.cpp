@@ -35,11 +35,13 @@ namespace
 {
 constexpr int kDefaultTileSize = 256;
 constexpr int kTypicalSceneCount = 8;
-constexpr int kPhenologyBandCount = 7;
+constexpr int kPhenologyBandCount = 11;
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
-// Units: day-of-year for sos/pos/eos, days for los, index units otherwise.
+// Units: day-of-year for sos/pos/eos and the *_mid_doy bands, days for los,
+// index units/day for the limb rates, index units otherwise.
 const char *const kPhenologyBandNames[kPhenologyBandCount] = {
-  "sos", "pos", "eos", "los", "amplitude", "base", "integral"
+  "sos", "pos", "eos", "los", "amplitude", "base", "integral",
+  "greenup_rate", "senescence_rate", "greenup_mid_doy", "senescence_mid_doy"
 };
 } // namespace
 
@@ -47,8 +49,12 @@ std::string RsTemporalPhenologyOperator::description() const
 {
   return "Seasonal phenology metrics per pixel from a vegetation-index time "
          "series: start/peak/end of season (SOS/POS/EOS, day-of-year), season "
-         "length (LOS, days), amplitude, base level and the small integral of "
-         "the index over the season. Threshold method: SOS/EOS are the "
+         "length (LOS, days), amplitude, base level, the small integral of "
+         "the index over the season, and limb dynamics (WP4): green-up and "
+         "senescence rates (mean slope between the 20% and 80% amplitude "
+         "crossings, index units/day on the real day axis) plus the 50% "
+         "midpoint day-of-year per limb — NoData when a crossing is not "
+         "sampled inside the limb. Threshold method: SOS/EOS are the "
          "first/last crossings of base + crossingFraction·amplitude inside the "
          "season window [seasonStartDoy, seasonEndDoy] (a window that wraps "
          "the year end is supported). Metrics are computed once per pixel over "
@@ -113,7 +119,9 @@ Json::Value RsTemporalPhenologyOperator::schema() const
                                                  3 );
   props["output"] = makeOutputParam( "output",
                                      "Phenology GeoTIFF (bands: sos, pos, eos [day-of-year], "
-                                     "los [days], amplitude, base, integral [index units])",
+                                     "los [days], amplitude, base, integral [index units], "
+                                     "greenup_rate, senescence_rate [index units/day], "
+                                     "greenup_mid_doy, senescence_mid_doy [day-of-year])",
                                      "tif" );
 
   Json::Value outputs( Json::objectValue );
@@ -170,7 +178,7 @@ Json::Value RsTemporalPhenologyOperator::metadata() const
 
 Json::Value RsTemporalPhenologyOperator::executionEstimate() const
 {
-  // Typical 8-date collection: series per scene + 7 metric buffers + pixel
+  // Typical 8-date collection: series per scene + metric buffers + pixel
   // gather + read tile.
   const int buffers = kTypicalSceneCount + kPhenologyBandCount + 2;
   return sicnu::processing::makeStreamingEstimate( kDefaultTileSize, kDefaultTileSize, 1, 4, buffers, 0,
@@ -182,7 +190,7 @@ Json::Value RsTemporalPhenologyOperator::estimateExecution( const Json::Value &p
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
   int scenes = params["scenes"].isArray() ? params["scenes"].size() : kTypicalSceneCount;
   scenes = std::max( scenes, 1 );
-  // series per scene + 7 metric buffers + per-pixel series gather + read tile.
+  // series per scene + metric buffers + per-pixel series gather + read tile.
   const int buffers = scenes + kPhenologyBandCount + 2;
   return sicnu::processing::makeStreamingEstimate( tileSize, tileSize, 1, 4, buffers, 0, 2 * 1024 * 1024 );
 }
@@ -392,6 +400,10 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
           season[4] = static_cast<float>( m.amplitude );
           season[5] = static_cast<float>( m.base );
           season[6] = static_cast<float>( m.integral );
+          season[7] = static_cast<float>( m.greenUpRate );
+          season[8] = static_cast<float>( m.senescenceRate );
+          season[9] = static_cast<float>( m.greenUpMidDoy );
+          season[10] = static_cast<float>( m.senescenceMidDoy );
           values = season;
           ++validPixels;
         }
@@ -436,6 +448,10 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
             season2[4] = static_cast<float>( m2.amplitude );
             season2[5] = static_cast<float>( m2.base );
             season2[6] = static_cast<float>( m2.integral );
+            season2[7] = static_cast<float>( m2.greenUpRate );
+            season2[8] = static_cast<float>( m2.senescenceRate );
+            season2[9] = static_cast<float>( m2.greenUpMidDoy );
+            season2[10] = static_cast<float>( m2.senescenceMidDoy );
             values2 = season2;
           }
         }
@@ -500,7 +516,7 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
   Json::Value memory( Json::objectValue );
   memory["tileWidth"] = tileSize;
   memory["tileHeight"] = tileSize;
-  // series per scene + 7 metric buffers + gather/tile buffers.
+  // series per scene + metric buffers + gather/tile buffers.
   memory["workingSetEstimateBytes"] = Json::Value::UInt64(
     TemporalTileReader::estimateWorkingSetBytes( tileSize, tileSize,
                                                  sceneCount + kPhenologyBandCount + 2, 0 ) );

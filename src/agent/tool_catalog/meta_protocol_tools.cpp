@@ -24,13 +24,20 @@ const std::vector<MetaToolDef> &table()
           { { "limit", "integer", "Page size (1-500, default 50).", false },
             { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
         { "search_algorithms",
-          "Search/filter the canonical algorithm catalog by group, tag, purpose text, "
-          "input or output type, or large-raster safety. Returns the same compact "
-          "entries as list_algorithms.",
-          { { "query", "string", "Free-text filter matched against id, name, group and purpose (case-insensitive). Empty = no text filter.", false },
+          "Search/filter the canonical algorithm catalog by free text, group, tag, "
+          "purpose text, task family, modality, input or output type, or large-raster "
+          "safety. All filters match declared descriptor metadata (AND across fields, "
+          "comma lists are ANY-of, case-insensitive). Returns the same compact entries "
+          "as list_algorithms; on zero hits the result carries a 'hints' object with "
+          "the declared filter vocabulary and closest id suggestions.",
+          { { "query", "string", "Free-text filter; space-separated tokens are ANDed and matched (case-insensitive) against id, name, group, tags, purpose and description. Empty = no text filter.", false },
             { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional.", false },
-            { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
-            { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
+            { "tag", "string", "Tag filter, comma-separated for ANY-of (e.g. 'sar' or 'sar,insar'); matches declared algorithm tags exactly. Optional.", false },
+            { "purpose", "string", "Substring filter on the declared agent purpose text. Optional.", false },
+            { "task", "string", "Exact task-family filter (e.g. 'preprocess', 'spectral', 'temporal', 'classification'). Optional.", false },
+            { "modality", "string", "Modality filter, comma-separated for ANY-of (e.g. 'optical', 'sar', 'dem'); matches declared input-port contracts. Optional.", false },
+            { "input_type", "string", "Input data type filter — exact, case-insensitive (Raster/Vector/Table/Numeric/Integer/String/Boolean/Enum/BoundingBox/Crs/Json). Optional.", false },
+            { "output_type", "string", "Output data type filter — same vocabulary as input_type. Optional.", false },
             { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional.", false },
             { "limit", "integer", "Page size (1-500, default 50).", false },
             { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },

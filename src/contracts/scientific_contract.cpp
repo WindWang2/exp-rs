@@ -462,21 +462,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:brdf_normalization";
             c.inputDomain = "reflectance";
             c.outputDomain = "reflectance";
-            c.evidence = "family:radiometric + schema read (BRDF-adjusted reflectance)";
-            rows.push_back( c );
-        }
-        {
-            ScientificContract c = baseRecord();
-            c.operatorId = "rs:solar_geometry";
-            c.evidence = "family:radiometric + schema read (geometry rasters from "
-                         "product metadata; master drift at adf8f989)";
-            rows.push_back( c );
-        }
-        {
-            ScientificContract c = baseRecord();
-            c.operatorId = "rs:radiometric_qa";
-            c.evidence = "family:radiometric + schema read (QA planes over declared "
-                         "domains; master drift at adf8f989)";
+            c.evidence = "family:radiometric + schema read (sun/view geometry "
+                         "normalization to a reference geometry)";
             rows.push_back( c );
         }
         {
@@ -486,6 +473,23 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.outputDomain = "radiance";
             c.scaleOffset = "param_driven";
             c.evidence = "family:radiometric + schema read";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:radiometric_qa";
+            c.inputDomain = "any";
+            c.outputDomain = "mask"; // uint16 flag raster, 0 = clean
+            c.provenance = "output_metadata";
+            c.evidence = "family:radiometric + schema read (per-band QA flag raster)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:solar_geometry";
+            c.inputDomain = "any";
+            c.outputDomain = "features"; // sun elevation/azimuth, declination, distance
+            c.evidence = "family:radiometric + schema read (ephemeris feature bands)";
             rows.push_back( c );
         }
 
@@ -669,6 +673,27 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = id;
             rows.push_back( c );
         }
+        // Registration operators REWRITE the moving scene's grid onto the
+        // reference grid — geometric alignment, not spectral fusion.
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:register_images";
+            c.inputDomain = "any";
+            c.outputDomain = "any"; // moving scene resampled onto the reference grid
+            c.evidence = "family:registration + schema read (cross-modal "
+                         "optical-SAR alignment with refusal semantics)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:stack_register";
+            c.inputDomain = "any";
+            c.outputDomain = "any"; // globally-registered stack rasters
+            c.timeAlignment = "stack_dates";
+            c.evidence = "family:registration + schema read (multi-scene "
+                         "translation least squares)";
+            rows.push_back( c );
+        }
 
         // --- Feature engineering -----------------------------------------------------
         {
@@ -837,8 +862,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
 
         // --- Terrain ----------------------------------------------------------------------
         for ( const char *id : { "rs:terrain_analysis", "rs:terrain_flow",
-                                 "rs:terrain_landform", "rs:terrain_solar",
-                                 "rs:terrain_viewshed" } )
+                                 "rs:terrain_landform", "rs:terrain_solar" } )
         {
             ScientificContract c = baseRecord();
             c.operatorId = id;
@@ -861,6 +885,14 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.inputDomain = "dn";
             c.outputDomain = "dn";
             c.evidence = "family:import-georef + schema read";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:terrain_viewshed";
+            c.inputDomain = "any"; // DEM
+            c.outputDomain = "mask"; // line-of-sight visibility 0/1
+            c.evidence = "family:terrain + schema read (viewshed mask)";
             rows.push_back( c );
         }
 
@@ -895,26 +927,30 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
         {
-            // Model selection over time series (master drift at adf8f989: the
-            // census gate listed this id with no contract row).
-            ScientificContract c = temporalFamily( "increasing_dates" );
-            c.operatorId = "rs:temporal_model_select";
-            c.outputDomain = "features";
-            rows.push_back( c );
-        }
-        {
             // Phenology 2.0 (automatic cycles, cross-year, quality flags) —
             // same feature family as rs:temporal_phenology; the contract row
             // was missing at the adf8f989 baseline (census gate red).
+            // TI 11.0 phenology 2.0 operators (census coverage repair).
             ScientificContract c = temporalFamily( "increasing_dates" );
             c.operatorId = "rs:temporal_phenology_multi";
-            c.outputDomain = "features";
+            c.outputDomain = "features"; // per-cycle phenology metrics
             rows.push_back( c );
         }
         {
             ScientificContract c = temporalFamily( "increasing_dates" );
             c.operatorId = "rs:temporal_gap_fill";
             c.outputDomain = "features";
+            rows.push_back( c );
+        }
+        {
+            // Temporal Phenology 12.0: fuses two ALREADY-coregistered feature
+            // stacks on one verified pixel grid; provenance recorded on the
+            // output (SICNU_FUSION_* keys), never realigns.
+            ScientificContract c = temporalFamily( "matched_grid" );
+            c.operatorId = "rs:temporal_sar_fusion";
+            c.outputDomain = "features";
+            c.provenance = "output_metadata";
+            c.evidence = "checkGridCompatibility + schema read";
             rows.push_back( c );
         }
         {
@@ -928,6 +964,19 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:temporal_extract_series";
             c.outputDomain = "table";
             c.atomicPublication = "direct_write"; // CSV result file
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = temporalFamily( "increasing_dates" );
+            c.operatorId = "rs:temporal_seasonal_breaks";
+            c.outputDomain = "features";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = temporalFamily( "increasing_dates" );
+            c.operatorId = "rs:temporal_model_select";
+            c.outputDomain = "features"; // per-pixel winner model id + score bands
+            c.evidence = "family:temporal + schema read (AICc/BIC/CV model grid)";
             rows.push_back( c );
         }
 
@@ -1071,34 +1120,6 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                              "requires srf_or_center)";
                 rows.push_back( c );
             }
-            // SAR / InSAR family (Advanced SAR 10.0 package C headers):
-            for ( const char *id : { "rs:sar_coregister_local", "rs:sar_pair_network",
-                                     "rs:sar_network_inversion",
-                                     "rs:sar_remove_topographic_phase" } )
-            {
-                // Advanced InSAR 11.0 (master drift at adf8f989: no rows).
-                ScientificContract c = sarFamily();
-                c.operatorId = id;
-                c.evidence = "family:sar + schema read (InSAR package headers)";
-                rows.push_back( c );
-            }
-            for ( const char *id : { "rs:register_images", "rs:stack_register" } )
-            {
-                // Multimodal registration 11.0 (master drift at adf8f989).
-                ScientificContract c = baseRecord();
-                c.operatorId = id;
-                c.evidence = "family:registration + schema read (F13 registration "
-                             "products; master drift at adf8f989)";
-                rows.push_back( c );
-            }
-            for ( const char *id : { "rs:temporal_seasonal_breaks" } )
-            {
-                ScientificContract c = temporalFamily( "increasing_dates" );
-                c.operatorId = id;
-                c.outputDomain = "features";
-                c.evidence = "family:temporal + schema read (master drift at adf8f989)";
-                rows.push_back( c );
-            }
             {
                 ScientificContract c = sarFamily();
                 c.operatorId = "rs:sar_coregister";
@@ -1143,6 +1164,44 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                              "per-pixel change-event dating across N co-registered scenes)";
                 rows.push_back( c );
             }
+            // Advanced InSAR 11.0 quartet (census coverage repair).
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_coregister_local";
+                c.inputDomain = "phase";
+                c.outputDomain = "features"; // local offset field between SLC pair
+                c.timeAlignment = "matched_grid";
+                c.evidence = "family:sar + schema read (same-grid SLC offset field)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_remove_topographic_phase";
+                c.inputDomain = "phase";
+                c.outputDomain = "phase";
+                c.timeAlignment = "matched_grid";
+                c.evidence = "family:sar + schema read (DEM/orbit topo phase removal)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_pair_network";
+                c.inputDomain = "phase";
+                c.outputDomain = "table"; // pair-network JSON artifact
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (baseline-constrained pair plan)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_network_inversion";
+                c.inputDomain = "phase";
+                c.outputDomain = "displacement"; // per-epoch LOS displacement + velocity
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (network inversion for "
+                             "epoch displacement and linear velocity)";
+                rows.push_back( c );
+            }
             // Temporal family (Temporal Platform 10.0 operators):
             for ( const char *id : { "rs:temporal_extract_regions",
                                      "rs:temporal_harmonic_breaks",
@@ -1178,15 +1237,6 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = id;
             c.evidence = "family:io + schema read (io_operators.h: float resampling "
                          "through GDAL warp kernels)";
-            rows.push_back( c );
-        }
-        for ( const char *id : { "io:metadata_patch", "io:subdatasets",
-                                 "io:verify_dataset" } )
-        {
-            ScientificContract c = ioFamily();
-            c.operatorId = id;
-            c.evidence = "family:io + schema read (io metadata/subdataset/verify "
-                         "kernels; master drift at adf8f989)";
             rows.push_back( c );
         }
         {
@@ -1258,6 +1308,33 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.evidence = "family:io + schema read (io_fabric_operators.h)";
             rows.push_back( c );
         }
+        {
+            // Interchange 11.0 trio (census coverage repair).
+            ScientificContract c = ioFamily( "any", "table" );
+            c.operatorId = "io:subdatasets";
+            c.atomicPublication = "json_result_only"; // bounded inventory result
+            c.provenance = "none";
+            c.evidence = "family:io + schema read (io_operators.h: redacted "
+                         "subdataset inventory)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "any", "any" );
+            c.operatorId = "io:metadata_patch";
+            c.atomicPublication = "direct_write"; // in-place metadata write-back
+            c.evidence = "family:io + schema read (io_operators.h: whitelist "
+                         "write-back + read-back verification)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "any", "none" );
+            c.operatorId = "io:verify_dataset";
+            c.atomicPublication = "json_result_only"; // verdict JSON only
+            c.provenance = "none";
+            c.evidence = "family:io + schema read (io_operators.h: digest "
+                         "recompute integrity gate, fails closed)";
+            rows.push_back( c );
+        }
 
         // --- Cartography agents (census 2.0: first-party cartography:) ------
         for ( const char *id : { "cartography:compose", "cartography:validate",
@@ -1271,17 +1348,17 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         }
         {
             ScientificContract c = cartographyFamily( "staged_rename" );
-            c.operatorId = "cartography:produce";
-            c.evidence = "family:cartography + schema read (cartography_tools.cpp: "
-                         "one-call governed production chain, atomic publish with "
-                         "manifest sidecar) — master drift at adf8f989";
+            c.operatorId = "cartography:export";
+            c.evidence = "family:cartography + schema read (cartography_operators.cpp: "
+                         "writes temp → verifies → sha256 → renames)";
             rows.push_back( c );
         }
         {
             ScientificContract c = cartographyFamily( "staged_rename" );
-            c.operatorId = "cartography:export";
+            c.operatorId = "cartography:produce";
+            c.outputDomain = "features"; // rendered map artifact path delivered as "output"
             c.evidence = "family:cartography + schema read (cartography_operators.cpp: "
-                         "writes temp → verifies → sha256 → renames)";
+                         "staged produce, cancelled delivery leaves directory untouched)";
             rows.push_back( c );
         }
 

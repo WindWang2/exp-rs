@@ -13,6 +13,8 @@
  ***************************************************************************/
 #pragma once
 
+#include "app/workbench/mission_stage.h"
+
 #include <QList>
 #include <QObject>
 #include <QPointer>
@@ -64,6 +66,11 @@ struct SelectionContextSnapshot
     /// Workbench 8.0: true while any non-terminal TaskCenter task exists
     /// (injected predicate — the pure layer never touches TaskCenter).
     bool hasInFlightTask = false;
+    /// Mission Runtime 13.0: the mission timeline's selected task (id only —
+    /// the panel pushes it; the pure layer never owns mission state).
+    QString selectedMissionTaskId;
+    MissionTaskStatus selectedMissionTaskStatus = MissionTaskStatus::Pending;
+    bool hasMissionTaskSelection = false;
 
     bool hasLayerSelection() const { return activeLayer || !selectedLayers.isEmpty(); }
     bool hasGovernanceSelection() const
@@ -77,6 +84,8 @@ struct SelectionContextSnapshot
                || !selectedExperimentIds.isEmpty() || !selectedModelIds.isEmpty()
                || !selectedWorkflowRunIds.isEmpty();
     }
+    /// True when the mission timeline has a selected task.
+    bool hasMissionTask() const { return hasMissionTaskSelection; }
     /// The first selected vector layer, for edit-oriented commands.
     QgsVectorLayer *firstVectorLayer() const;
     /// The first selected raster layer, for band/style oriented commands.
@@ -148,6 +157,12 @@ bool experimentSelected( const SelectionContextSnapshot &s );
 bool datasetSelected( const SelectionContextSnapshot &s );
 bool modelSelected( const SelectionContextSnapshot &s );
 bool workflowRunSelected( const SelectionContextSnapshot &s );
+/// Mission Runtime 13.0: the mission timeline's selected task (id only).
+bool missionTaskSelected( const SelectionContextSnapshot &s );
+/// The selected mission task can be retried (failed / canceled).
+bool missionTaskRetryable( const SelectionContextSnapshot &s );
+/// The selected mission task can be resumed (stale / canceled).
+bool missionTaskResumable( const SelectionContextSnapshot &s );
 /// Stable wire ids of the currently selected/active layers (QgsMapLayer::id),
 /// selection order with the active layer first. Bounded by the selection.
 QStringList selectedLayerIds( const SelectionContextSnapshot &s );
@@ -198,6 +213,9 @@ class SelectionContext : public QObject
     void notifyExperimentSelection( const QStringList &runIds );
     void notifyModelSelection( const QStringList &modelNames );
     void notifyWorkflowSelection( const QStringList &runIds );
+    /// Mission Runtime 13.0: the mission panel's task selection push (id and
+    /// status only). An empty id clears the selection.
+    void notifyMissionTaskSelection( const QString &taskId, MissionTaskStatus status );
 
     /// Override the conservative SAR heuristic (product-token match).
     using SarPredicate = std::function<bool( QgsMapLayer * )>;
@@ -257,6 +275,9 @@ class SelectionContext : public QObject
     QStringList m_selectedExperimentIds;
     QStringList m_selectedModelIds;
     QStringList m_selectedWorkflowRunIds;
+    /// Mission Runtime 13.0: the mission panel's selected task (id + status).
+    QString m_missionTaskId;
+    MissionTaskStatus m_missionTaskStatus = MissionTaskStatus::Pending;
 };
 
 } // namespace sicnu::app

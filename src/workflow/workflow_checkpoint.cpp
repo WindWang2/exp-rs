@@ -11,9 +11,11 @@
 #include <QStandardPaths>
 #include <QtGlobal>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #if defined( Q_OS_UNIX )
@@ -235,15 +237,103 @@ bool WorkflowCheckpointManager::archiveCompletedRun( const QString &checkpointPa
   return true;
 }
 
+namespace
+{
+
+/// True for the states recoverInterruptedRuns reconciles and resubmits.
+/// Only these states make a checkpoint a duplicate-execution hazard worth
+/// electing against its lineage; a terminal checkpoint (e.g. the Canceled
+/// ghost a NORMAL resume swap leaves behind) is inert for recovery and must
+/// stay standalone so it is never quarantined by its original's election.
+bool isRecoveryCandidateState( const std::string &state )
+{
+  return state == "Running" || state == "Planning" || state == "WaitingResource"
+         || state == "Cancelling";
+}
+
+/// Election group of one checkpoint file (Track 13, DECISIONS D5). The group
+/// decides which files may represent the SAME run lineage and therefore which
+/// of them a crash could have left duplicated.
+///
+/// The lineage is read from the payload's ENVELOPE when the file carries one:
+/// a version-2+ checkpoint declaring `resumeOf: X` groups under X (the resume
+/// ghost joins its original whatever its filename), and a version-2+
+/// checkpoint WITHOUT resumeOf groups under its OWN runId — standalone, so a
+/// user-named run like "foo_resume" is never merged into an unrelated run
+/// "foo" and quarantined by its election.
+///
+/// Legacy (version-1) and unparseable payloads carry no envelope, so the
+/// historical filename-suffix rule remains their only evidence — that is the
+/// migration path that still recognizes legacy `_resume` ghosts.
+/// @p isResumeGhost reports whether the file's own envelope declares it a
+/// resume submission of another run (the derivative in a crash window).
+QString electionGroupFor( const QString &filePath, const QString &legacyGroup, bool *isResumeGhost )
+{
+  *isResumeGhost = false;
+  QFile file( filePath );
+  if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
+    return legacyGroup;
+  // Read cap+1 rather than size-then-readAll so a file growing between the
+  // two calls cannot bypass the bound (same idiom as loadCheckpoint).
+  const QByteArray data = file.read( kMaxCheckpointDocumentBytes + 1 );
+  file.close();
+  if ( data.size() > kMaxCheckpointDocumentBytes )
+    return legacyGroup; // oversized: same treatment as the corrupt case
+
+  Json::CharReaderBuilder readerBuilder;
+  Json::Value root;
+  std::string errs;
+  std::istringstream stream( data.toStdString() );
+  if ( !Json::parseFromStream( readerBuilder, stream, &root, &errs ) || !root.isObject() )
+    return legacyGroup;
+  if ( !root.isMember( "version" ) || !root["version"].isInt()
+       || root["version"].asInt() < 2 )
+    return legacyGroup; // no envelope: the filename suffix is the evidence
+  if ( !root.isMember( "runId" ) || !root["runId"].isString() )
+    return legacyGroup;
+  const std::string runId = root["runId"].asString();
+  if ( !isValidRunId( runId ) )
+    return legacyGroup;
+  const std::string state =
+      root.isMember( "state" ) && root["state"].isString() ? root["state"].asString() : "";
+  const bool declaredResume = root.isMember( "resumeOf" ) && root["resumeOf"].isString()
+                              && !root["resumeOf"].asString().empty();
+  // A non-recovery-candidate payload cannot be resurrected, so it never needs
+  // an election at all — it groups under its own identity.
+  if ( !state.empty() && !isRecoveryCandidateState( state ) )
+    return QString::fromStdString( runId );
+  if ( declaredResume )
+  {
+    const std::string resumeOf = root["resumeOf"].asString();
+    if ( isValidRunId( resumeOf ) )
+    {
+      *isResumeGhost = true;
+      return QString::fromStdString( resumeOf ); // declared lineage wins
+    }
+  }
+  return QString::fromStdString( runId ); // standalone user identity
+}
+
+} // namespace
+
 int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
 {
   QDir dir( directoryPath );
   if ( !dir.exists() )
     return 0;
-  // Group checkpoint files by runId; a runId appearing both as the original
-  // checkpoint and as a `_resume` ghost means a crash landed between the
+  // Group checkpoint files by lineage; a run appearing both as the original
+  // checkpoint and as a post-resume ghost means a crash landed between the
   // fresh submission's persist and the ghost delete. Exactly one may live.
-  QMultiMap<QString, QFileInfo> byRunId;
+  // Grouping follows the DECLARED lineage (resumeOf) for enveloped
+  // checkpoints and the legacy filename suffix only for legacy/corrupt ones —
+  // a user-named "*_resume" run can no longer be grouped with an unrelated
+  // run and quarantined by its election.
+  struct Candidate
+  {
+    QFileInfo info;
+    bool isResumeGhost = false;
+  };
+  QMultiMap<QString, Candidate> byLineage;
   const QStringList entries = dir.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) },
                                              QDir::Files );
   for ( const QString &entry : entries )
@@ -257,31 +347,49 @@ int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
     QString runId = entry.mid( QStringLiteral( "checkpoint_" ).size() );
     runId.chop( QStringLiteral( ".json" ).size() );
     QString canonical = runId;
-    if ( canonical.endsWith( QLatin1String( "_resume" ) ) )
+    if ( canonical.endsWith( QLatin1String( "_resume" ) )
+         && canonical.size() > QStringLiteral( "_resume" ).size() )
       canonical.chop( QStringLiteral( "_resume" ).size() );
-    byRunId.insert( canonical, QFileInfo( dir.filePath( entry ) ) );
+    Candidate candidate;
+    candidate.info = QFileInfo( dir.filePath( entry ) );
+    byLineage.insert( electionGroupFor( candidate.info.absoluteFilePath(), canonical,
+                                        &candidate.isResumeGhost ),
+                      candidate );
   }
   int quarantined = 0;
   // uniqueKeys(): QMultiMap iteration visits (key, value) PAIRS, so a plain
   // iterator would re-run the election once per file and double-count.
-  const QStringList canonicalRunIds = byRunId.uniqueKeys();
-  for ( const QString &canonical : canonicalRunIds )
+  const QStringList lineageKeys = byLineage.uniqueKeys();
+  for ( const QString &lineage : lineageKeys )
   {
-    const QList<QFileInfo> group = byRunId.values( canonical );
+    const QList<Candidate> group = byLineage.values( lineage );
     if ( group.size() < 2 )
       continue;
+    // Prefer the COMPLETE lineage: a resume ghost is derivable from its
+    // original, which also carries every earlier pass's completed plans, so
+    // when both survived a crash the original is the one worth keeping.
+    // Recency decides only among files of the same kind.
+    QList<Candidate> electable = group;
+    if ( std::any_of( group.cbegin(), group.cend(),
+                      []( const Candidate &c ) { return !c.isResumeGhost; } ) )
+    {
+      electable.clear();
+      for ( const Candidate &candidate : group )
+        if ( !candidate.isResumeGhost )
+          electable.append( candidate );
+    }
     // Keep the newest mtime; quarantine the rest (rename, never delete — the
     // bytes stay available for forensics and are outside checkpoint listing).
     QFileInfo newest;
-    for ( const QFileInfo &info : group )
-      if ( newest.filePath().isEmpty() || info.lastModified() > newest.lastModified() )
-        newest = info;
-    for ( const QFileInfo &info : group )
+    for ( const Candidate &candidate : electable )
+      if ( newest.filePath().isEmpty() || candidate.info.lastModified() > newest.lastModified() )
+        newest = candidate.info;
+    for ( const Candidate &candidate : group )
     {
-      if ( info.absoluteFilePath() == newest.absoluteFilePath() )
+      if ( candidate.info.absoluteFilePath() == newest.absoluteFilePath() )
         continue;
-      if ( QFile::rename( info.absoluteFilePath(),
-                          info.absoluteFilePath() + QLatin1String( ".orphaned" ) ) )
+      if ( QFile::rename( candidate.info.absoluteFilePath(),
+                          candidate.info.absoluteFilePath() + QLatin1String( ".orphaned" ) ) )
         ++quarantined;
     }
   }

@@ -117,8 +117,13 @@ public:
 
     // -- state ---------------------------------------------------------------
     /// Closes the stream and stops the reader. In-flight waiters are failed
-    /// with ChannelClosed. Idempotent.
-    void close();
+    /// with ChannelClosed. Idempotent, safe to call concurrently from any
+    /// number of threads, and never throws (the destructor calls it): the
+    /// reader join is serialized behind mJoinMutex so two racing closers
+    /// can never both observe joinable() and double-join (which is what
+    /// threw std::system_error "no such process" out of killProcess under
+    /// the timeout+crash+cancel stress — track 13.0 WP4).
+    void close() noexcept;
     bool isOpen() const;
     /// Last protocol-level failure description ("" when none).
     std::string protocolFailure() const;
@@ -178,6 +183,10 @@ private:
     std::function<void( long long )> mCancelSink;
     std::string mProtocolFailure;
 
+    /// Serializes the joinable()/join() pair in close() — mMutex is held
+    /// only for the state flip (the reader may be waiting on it on its way
+    /// out, so joining under it would deadlock).
+    std::mutex mJoinMutex;
     std::thread mReader;
     std::atomic<bool> mClosed{ false };
     std::atomic<long long> mNextId{ 1 };
