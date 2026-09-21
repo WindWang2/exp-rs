@@ -30,6 +30,11 @@ inline const char *kCalibrationKey = "SICNU_SAR_CALIBRATION"; // sigma0|gamma0|b
 // gamma, beta, digital_number onto the canonical tokens above); only the
 // canonical tokens are written.
 inline const char *kDomainKey = "SICNU_SAR_DOMAIN";           // linear_power|db
+/// #1165: assumption provenance written by the terrain/geocode family when
+/// a legacy undeclared input was processed under the documented
+/// sigma0/linear assumption — consumed by downstream family guards.
+inline const char *kRadiometricStateAssumedKey = "SICNU_SAR_STATE_ASSUMED";
+inline const char *kDomainAssumedKey = "SICNU_SAR_DOMAIN_ASSUMED";
 inline const char *kIncidenceKey = "SICNU_SAR_INCIDENCE_DEG"; // constant incidence angle
 inline const char *kHeadingKey = "SICNU_SAR_HEADING_DEG";     // platform flight heading
 // #785: the antenna look azimuth (boresight ground azimuth) is orthogonal to

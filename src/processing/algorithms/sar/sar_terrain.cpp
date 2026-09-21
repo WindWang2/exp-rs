@@ -186,7 +186,7 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
       std::vector<float> incidence( static_cast<size_t>( tile.width ) * tile.height );
       std::vector<uint8_t> validity( static_cast<size_t>( tile.width ) * tile.height, 1 );
 
-      const double cosTheta0 = std::cos( options.incidenceDeg * kDegToRad );
+      const double sinTheta0 = std::sin( options.incidenceDeg * kDegToRad );
       // The illumination azimuth every local-incidence computation consumes:
       // the antenna sits opposite the beam-travel look azimuth (#785). The
       // incidence product band and the flattening/shadow angle MUST agree —
@@ -238,14 +238,23 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
           }
           if ( options.applyFlattening )
           {
-            const double cosThetaI = std::cos( thetaI * kDegToRad );
-            if ( cosThetaI <= 0.0 )
+            // Radiometric-terrain-correction factor (Ulander 1996; Small
+            // 2011 eq. 5): gamma0 = sigma0 · sin θi / sin θ0. The area
+            // identity A_t·sinθi = A_el·sinθ0 makes this the factor that
+            // returns a homogeneous target to a slope-invariant value;
+            // the cosθ0/cosθi form previously applied here is the optical
+            // illumination correction and leaves a tanθ0/tanθi bias (up to
+            // ~4× on fore-slopes). Mirrors rs:sar_geocode's rtcFactor
+            // (sar_geocoding.cpp), so both paths stamp the same gamma0
+            // token with the same radiometry (#1146).
+            const double sinThetaI = std::sin( thetaI * kDegToRad );
+            if ( sinThetaI <= 0.0 || sinTheta0 <= 0.0 )
             {
               gamma[idx] = kNan;
               validity[idx] = 0;
               continue;
             }
-            gamma[idx] = static_cast<float>( v * cosTheta0 / cosThetaI );
+            gamma[idx] = static_cast<float>( v * sinThetaI / sinTheta0 );
           }
           else
           {

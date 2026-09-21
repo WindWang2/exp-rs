@@ -726,12 +726,16 @@ TEST_CASE( "rs:sar_terrain_flatten geometry consumes the look azimuth, not the f
     // = 0.03 per metre (the Horn denominator is metres).
     const double alpha = std::atan( 0.3 / 10.0 );
     const double theta0 = kIncidence * M_PI / 180.0;
-    const double expectedToward = kSigma0 * std::cos( theta0 ) / std::cos( theta0 - alpha );
-    const double expectedAway = kSigma0 * std::cos( theta0 ) / std::cos( theta0 + alpha );
+    // #1146: the terrain-flattening factor is the projected-area RTC ratio
+    // sinθi/sinθ0 (Ulander 1996 / Small 2011 eq. 5) — the same factor
+    // rs:sar_geocode stamps — NOT the optical cosθ0/cosθi illumination
+    // correction this oracle previously pinned.
+    const double expectedToward = kSigma0 * std::sin( theta0 - alpha ) / std::sin( theta0 );
+    const double expectedAway = kSigma0 * std::sin( theta0 + alpha ) / std::sin( theta0 );
     // The two flanks are physically distinct; a look/heading mixup collapses
-    // both to cos(β) = 0 (gain ≈ 1.042), between these two answers.
-    REQUIRE( expectedToward == Approx( 0.4917 ).margin( 1e-3 ) );
-    REQUIRE( expectedAway == Approx( 0.5092 ).margin( 1e-3 ) );
+    // both to cos(β) = 0 (gain ≈ 1.0), between these two answers.
+    REQUIRE( expectedToward == Approx( 0.4738 ).margin( 1e-3 ) );
+    REQUIRE( expectedAway == Approx( 0.5257 ).margin( 1e-3 ) );
 
     // Interior columns carry the exact Horn gradient; replicate-halo border
     // columns halve it, so only x ∈ [1, kW−2] is pinned.
@@ -748,6 +752,92 @@ TEST_CASE( "rs:sar_terrain_flatten geometry consumes the look azimuth, not the f
         for ( int x = 1; x < kW - 1; ++x )
             REQUIRE( gammaAway[static_cast<size_t>( y ) * kW + x] ==
                      Approx( expectedAway ).margin( 1e-4 ) );
+}
+
+TEST_CASE( "rs:sar_terrain_flatten returns a homogeneous sloped target to its flat value",
+           "[sar][rtc][regression]" )
+{
+    // #1146 slope-invariance oracle. A homogeneous distributed target over
+    // sloped terrain is DELIVERED over-bright/under-bright on the map grid:
+    // σ⁰_del = σ⁰_true·sinθ0/sinθi (same power packed into the facet's
+    // ellipsoid footprint; fore-slope θi<θ0 over-bright). Feeding exactly
+    // that, the RTC factor sinθi/sinθ0 must return σ⁰_true on every flank.
+    // The optical cosθ0/cosθi form previously applied returns
+    // σ⁰_true·(sinθ0/sinθi)·(cosθ0/cosθi) — 0.752·σ⁰_true on the 20°
+    // fore-slope at θ0=35° and 0.434·σ⁰_true on the 25° back flank (the
+    // forms coincide only at θi=θ0 and θi=90°−θ0, hence the asymmetric
+    // slopes: a 20° back flank would sit exactly on the 55° coincidence).
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    constexpr int kW = 12;
+    constexpr int kH = 10;
+    constexpr double kSigmaTrue = 0.4;
+    constexpr double kIncidence = 35.0;
+    constexpr double kSlopeTowardDeg = 20.0;
+    constexpr double kSlopeAwayDeg = 25.0;
+
+    const double theta0 = kIncidence * M_PI / 180.0;
+    const double thetaIn = ( kIncidence - kSlopeTowardDeg ) * M_PI / 180.0;
+    const double thetaOut = ( kIncidence + kSlopeAwayDeg ) * M_PI / 180.0;
+    const double sigmaToward = kSigmaTrue * std::sin( theta0 ) / std::sin( thetaIn );
+    const double sigmaAway = kSigmaTrue * std::sin( theta0 ) / std::sin( thetaOut );
+
+    auto runFlatten = [&]( const QString &demPath, double risePerPix, double sigma0,
+                           const QString &output ) {
+        std::vector<float> dem( static_cast<size_t>( kW ) * kH );
+        for ( int y = 0; y < kH; ++y )
+            for ( int x = 0; x < kW; ++x )
+                dem[static_cast<size_t>( y ) * kW + x] = static_cast<float>( risePerPix * x );
+        REQUIRE( writeRaster( demPath, dem, kW, kH ) );
+        REQUIRE( writeRaster( tmp.filePath( "sigma0.tif" ),
+                              std::vector<float>( static_cast<size_t>( kW ) * kH,
+                                                  static_cast<float>( sigma0 ) ),
+                              kW, kH ) );
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_terrain_flatten" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["input"] = tmp.filePath( "sigma0.tif" ).toStdString();
+        params["output"] = output.toStdString();
+        params["dem"] = demPath.toStdString();
+        params["incidenceDeg"] = kIncidence;
+        params["headingDeg"] = 0.0;
+        params["lookDirection"] = "right";
+        params["demUnit"] = "meters";
+        RSOperatorContext ctx;
+        REQUIRE_NOTHROW( op->run( params, ctx ) );
+    };
+
+    // East–west ramps, look azimuth 90° (antenna west; see the look-azimuth
+    // test above for the facet geometry derivation). 10 m cells: per-pixel
+    // rise realizes the ramp under Horn.
+    const double riseToward = std::tan( kSlopeTowardDeg * M_PI / 180.0 ) * 10.0;
+    const double riseAway = -std::tan( kSlopeAwayDeg * M_PI / 180.0 ) * 10.0;
+    runFlatten( tmp.filePath( "dem_toward20.tif" ), riseToward, sigmaToward,
+                tmp.filePath( "gamma_toward20.tif" ) );
+    runFlatten( tmp.filePath( "dem_away25.tif" ), riseAway, sigmaAway,
+                tmp.filePath( "gamma_away25.tif" ) );
+
+    // Both flanks must land on the SAME flat-area value σ⁰_true (the
+    // flat-DEM case is the identity, already pinned by the flat tests).
+    // Interior columns only (replicate-halo borders halve the gradient).
+    const auto gammaToward = readBand( tmp.filePath( "gamma_toward20.tif" ) );
+    const auto gammaAway = readBand( tmp.filePath( "gamma_away25.tif" ) );
+    REQUIRE( gammaToward.size() == static_cast<size_t>( kW ) * kH );
+    REQUIRE( gammaAway.size() == static_cast<size_t>( kW ) * kH );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 1; x < kW - 1; ++x )
+        {
+            INFO( "toward flank (" << x << "," << y << ") = "
+                  << gammaToward[static_cast<size_t>( y ) * kW + x] );
+            REQUIRE( gammaToward[static_cast<size_t>( y ) * kW + x] ==
+                     Approx( kSigmaTrue ).epsilon( 1e-4 ) );
+            INFO( "away flank (" << x << "," << y << ") = "
+                  << gammaAway[static_cast<size_t>( y ) * kW + x] );
+            REQUIRE( gammaAway[static_cast<size_t>( y ) * kW + x] ==
+                     Approx( kSigmaTrue ).epsilon( 1e-4 ) );
+        }
 }
 
 TEST_CASE( "rs:sar_terrain_flatten refuses mismatched DEM grids", "[sar][operator]" )
