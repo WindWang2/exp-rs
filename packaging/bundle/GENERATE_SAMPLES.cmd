@@ -32,7 +32,28 @@ if not "%RC%"=="0" (
   call :Pause
   exit /b %RC%
 )
-if not "%GEN_ARGS%"=="--out=data\samples" goto :done
+rem classroom-safety 13.0: the verify pass used to be gated on an exact string
+rem match against one spelling, so an explicit `--out data\samples` (documented
+rem and accepted by the generator) silently skipped verification. Normalize
+rem both spellings to the directory they name before deciding.
+set "GEN_OUT="
+for %%A in (%GEN_ARGS%) do (
+  if "%%A"=="--out" set "NEXT_IS_OUT=1"
+  if defined NEXT_IS_OUT (
+    if not "%%A"=="--out" (
+      set "GEN_OUT=%%A"
+      set "NEXT_IS_OUT="
+    )
+  )
+  set "CURRENT=%%A"
+  if defined CURRENT (
+    for /f "tokens=1,2 delims==" %%K in ("%%A") do (
+      if "%%K"=="--out" set "GEN_OUT=%%L"
+    )
+  )
+)
+if not defined GEN_OUT goto :done
+if /i not "%GEN_OUT%"=="data\samples" if /i not "%GEN_OUT%"=="data/samples" goto :done
 echo Verifying generated samples against the manifest ...
 bin\sicnu_generate_samples.exe --verify "--out=data\samples"
 set "RC=%errorlevel%"

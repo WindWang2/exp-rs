@@ -70,3 +70,14 @@ actively compiling `qgis_core`; the full heavy build tree is ~14 GB.
   `temporal_smoothing.h`); the header comment documents the include rule.
 - `data/labs/lab8_temporal_analysis.lab.json` uses a distinct lab id (`temporal_phenology_timeline`)
   alongside the existing `lab8_temporal_analysis.labspec.json` (id `temporal_analysis`).
+
+> **Superseding note (ADR 0166, classroom-safety 13.0).** The path above has
+> since moved: the file now lives at `data/labs/legacy/lab8_temporal_analysis.lab.json`,
+> and `data/labs/` is globbed non-recursively, so it is never loaded by the
+> strict loader. Lab identity is now resolved through
+> `data/labs/lab-registry.json`, where `temporal_phenology_timeline` is
+> registered as an **alias pack of `temporal_analysis`** (a second deployment
+> unit of the same temporal stack) rather than as a separate lab — that is what
+> makes `tests/test_lab_data_pack.cpp`'s pack/lab parity assertion hold. The
+> paragraphs above remain as history; this note supersedes only the path and
+> the identity claim.
