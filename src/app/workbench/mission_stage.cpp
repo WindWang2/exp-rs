@@ -259,7 +259,7 @@ MissionOutcome MissionTimeline::addTask( const MissionTask &task )
     ev.from = task.status;
     ev.to = task.status;
     ev.note = QStringLiteral( "task_added" );
-    mEvents.push_back( ev );
+    appendEventLocked( std::move( ev ) );
     ++mRevision;
     return MissionOutcome::ok( QLatin1String( kMissionOk ) );
 }
@@ -348,7 +348,7 @@ MissionOutcome MissionTimeline::transition( const QString &taskId,
     ev.to = to;
     ev.iso = iso;
     ev.note = noop ? QStringLiteral( "noop" ) : note;
-    mEvents.push_back( ev );
+    appendEventLocked( std::move( ev ) );
 
     if ( !noop )
         ++mRevision;
@@ -391,7 +391,7 @@ MissionOutcome MissionTimeline::retry( const QString &taskId,
     ev.to = MissionTaskStatus::Pending;
     ev.iso = iso;
     ev.note = note.isEmpty() ? QStringLiteral( "retry" ) : note;
-    mEvents.push_back( ev );
+    appendEventLocked( std::move( ev ) );
     ++mRevision;
     return MissionOutcome::ok( QLatin1String( kMissionOk ) );
 }
@@ -435,12 +435,12 @@ MissionStage MissionTimeline::currentStage() const
 
 QVector<MissionEvent> MissionTimeline::eventsSince( quint64 seq ) const
 {
-    QVector<MissionEvent> out;
-    for ( const MissionEvent &ev : mEvents )
-    {
-        if ( ev.seq > seq )
-            out.push_back( ev );
-    }
+    // #1170: ascending seq — the tail is one upper_bound away, not a scan.
+    const auto first = std::upper_bound( mEvents.cbegin(), mEvents.cend(), seq,
+                                         []( quint64 s, const MissionEvent &ev ) {
+                                             return s < ev.seq;
+                                         } );
+    QVector<MissionEvent> out( first, mEvents.cend() );
     return out;
 }
 
@@ -504,7 +504,7 @@ int MissionTimeline::rewriteReference( const QString &fromId,
         ev.to = t->status;
         ev.iso = iso;
         ev.note = eventNote;
-        mEvents.push_back( ev );
+        appendEventLocked( std::move( ev ) );
     }
     ++mRevision;
     return rewritten;
@@ -559,6 +559,11 @@ QJsonObject MissionTimeline::toJson() const
     root.insert( QStringLiteral( "last_event_seq" ), static_cast<qint64>( mSeq ) );
     root.insert( QStringLiteral( "tasks" ), tasks );
     root.insert( QStringLiteral( "events" ), events );
+    // #1170: the log is bounded — persist the truncation marker and the
+    // first retained seq so incremental consumers never read a silent gap.
+    root.insert( QStringLiteral( "events_truncated" ), mEventsTruncated );
+    root.insert( QStringLiteral( "first_event_seq" ),
+                 static_cast<qint64>( mFirstRetainedSeq ) );
     return root;
 }
 
@@ -650,9 +655,15 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
         e.to = *to;
         e.iso = eo.value( QStringLiteral( "iso" ) ).toString();
         e.note = eo.value( QStringLiteral( "note" ) ).toString();
-        decoded.mEvents.push_back( std::move( e ) );
+        decoded.appendEventLocked( std::move( e ) );
     }
 
+    decoded.mEventsTruncated =
+        obj.value( QStringLiteral( "events_truncated" ) ).toBool( false );
+    decoded.mFirstRetainedSeq = static_cast<quint64>( intFromJson(
+        obj.value( QStringLiteral( "first_event_seq" ) ) ) );
+    if ( decoded.mFirstRetainedSeq < 1 )
+        decoded.mFirstRetainedSeq = 1;
     decoded.mRevision = static_cast<quint64>(
         intFromJson( obj.value( QStringLiteral( "revision" ) ) ) );
     decoded.mSeq = static_cast<quint64>(

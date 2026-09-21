@@ -798,3 +798,34 @@ TEST_CASE( "deleting a referenced layer marks dependent tasks stale", "[mission]
     CHECK( after->status == MissionTaskStatus::Succeeded );
     CHECK( after->inputRefIds == QStringList { QStringLiteral( "layer-b-renamed" ) } );
 }
+
+TEST_CASE( "last-good recovers the authority when the sidecar is absent (#1169)",
+           "[mission][persistence][issue1169]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( uniqueStem() + QStringLiteral( ".qgz" ) );
+
+    MissionRuntimeState live = makeRuntime( QStringLiteral( "mission-lg" ) );
+    QDomDocument doc;
+    QString err;
+    REQUIRE( saveMissionRuntime( project, doc, live, &err ) );
+
+    // The removal paths leave last-good beside an ABSENT sidecar.
+    const QString sidecar = missionSidecarPathForProject( project );
+    const QString lastGood = missionRuntimeLastGoodPathForProject( project );
+    REQUIRE( QFileInfo::exists( lastGood ) );
+    REQUIRE( QFile::remove( sidecar ) );
+
+    // The #1149 first-publication reload: the fresh-doc load must recover
+    // the authority from last-good instead of answering "nothing there".
+    MissionRuntimeState recovered;
+    REQUIRE( loadMissionRuntime( project, QDomDocument(), recovered, &err ) );
+    CHECK( recovered.recoveredFromLastGood );
+    CHECK( recovered.authorityLoaded );
+    CHECK( recovered.timeline == live.timeline );
+    bool noticed = false;
+    for ( const QString &n : recovered.notices )
+        noticed = noticed || n.contains( QLatin1String( "last_good" ) );
+    CHECK( noticed );
+}

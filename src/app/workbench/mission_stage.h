@@ -254,6 +254,14 @@ public:
 
     // --- event log ---
     QVector<MissionEvent> events() const { return mEvents; }
+    /// #1170: the retained window bound and accessors for the truncation
+    /// facts (scale gate + incremental consumers).
+    static constexpr int kEventLogBound = 4096;
+    /// #1170: the retained window starts here once the log hit its bound;
+    /// 1 while nothing was truncated. Consumers holding older cursors see
+    /// the retained window (the projection layer truncates too).
+    quint64 firstRetainedEventSeq() const { return mFirstRetainedSeq; }
+    bool eventsTruncated() const { return mEventsTruncated; }
     QVector<MissionEvent> eventsSince( quint64 seq ) const;
     quint64 lastEventSeq() const { return mSeq; }
 
@@ -276,6 +284,24 @@ private:
     QVector<MissionEvent> mEvents;
     quint64 mSeq = 0;
     quint64 mRevision = 0;
+    /// #1170: the event log is bounded — a mission lives as long as its
+    /// project, and an unbounded log made every advance/save rewrite and
+    /// rotate the whole authority (seconds per action at 100k events).
+    /// The bound keeps the most recent window; consumers get the truncation
+    /// marker + first retained seq instead of a silent gap.
+    bool mEventsTruncated = false;
+    quint64 mFirstRetainedSeq = 1;
+
+    void appendEventLocked( MissionEvent ev )
+    {
+        mEvents.push_back( std::move( ev ) );
+        while ( mEvents.size() > kEventLogBound )
+        {
+            mEvents.removeFirst();
+            mEventsTruncated = true;
+            mFirstRetainedSeq = mEvents.isEmpty() ? mSeq : mEvents.first().seq;
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------

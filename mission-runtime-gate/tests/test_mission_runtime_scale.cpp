@@ -97,7 +97,16 @@ TEST_CASE( "a large mission stays incremental and bounded", "[mission][scale]" )
 
     const MissionTimeline timeline = buildLargeTimeline();
     REQUIRE( timeline.tasks().size() == kTasks );
-    REQUIRE( timeline.events().size() >= kMinEvents );
+    // #1170: the event log is bounded — the builder appends kMinEvents, the
+    // timeline retains the most recent kEventLogBound window with the
+    // truncation facts surfaced instead of an unbounded log.
+    REQUIRE( timeline.events().size() == MissionTimeline::kEventLogBound );
+    REQUIRE( timeline.eventsTruncated() );
+    REQUIRE( timeline.firstRetainedEventSeq() > 1 );
+    REQUIRE( timeline.lastEventSeq() >= static_cast<quint64>( kMinEvents ) );
+    // eventsSince is served from the retained window; a cursor before it
+    // gets exactly the window.
+    REQUIRE( timeline.eventsSince( 1 ).size() == MissionTimeline::kEventLogBound );
 
     // ── incremental UI updates: rows touched == rows the events carry ────
     MissionTimelineModel model;
@@ -110,7 +119,10 @@ TEST_CASE( "a large mission stays incremental and bounded", "[mission][scale]" )
     // never a full-range dataChanged.
     const int catchupTouched = model.applyEvents( timeline, 0 );
     CHECK( catchupTouched <= kTasks ); // rows, not events × tasks
-    CHECK( catchupTouched >= kTasks / 2 ); // every executing task's rows moved
+    // #1170: the log is bounded, so the catch-up window covers the most
+    // recent tasks only — the touched set is exactly the tasks the retained
+    // events name (the window is dense in seq, hence ~bound/2 tasks).
+    CHECK( catchupTouched >= MissionTimeline::kEventLogBound / 4 );
     CHECK( model.resetCount() == 1 );
     CHECK( model.fullRangeDataChangedCount() == 0 );
     CHECK( model.incrementalApplyCount() == 1 );
@@ -187,7 +199,9 @@ TEST_CASE( "a large mission round-trips through the single authority", "[mission
     REQUIRE( loadMissionRuntime( project, QDomDocument(), reopened, &err ) );
     CHECK( reopened.authorityLoaded );
     CHECK( reopened.timeline.tasks().size() == kTasks );
-    CHECK( reopened.timeline.events().size() >= kMinEvents );
+    CHECK( reopened.timeline.events().size() == MissionTimeline::kEventLogBound );
+    CHECK( reopened.timeline.eventsTruncated() );
+    CHECK( reopened.timeline.firstRetainedEventSeq() > 1 );
     CHECK( reopened.timeline == state.timeline );
     // Structural ceiling only (a shared machine may be slow); the equality
     // assertions above are the real gate.

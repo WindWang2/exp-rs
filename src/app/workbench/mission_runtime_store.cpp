@@ -177,6 +177,25 @@ bool loadMissionRuntime( const QString &projectFilePath, const QDomDocument &pro
         }
     }
 
+    // ── #1169: no sidecar at all — last-good still recovers the authority.
+    // The removal paths (failed-sidecar-write cleanup, the corrupt-authority
+    // dialog's own advice, a .qgz-only / Save-As project) all leave a good
+    // last-good beside an absent sidecar; keying recovery on sidecar
+    // PRESENCE made the channel unreachable for exactly those cases and the
+    // next save published an empty mission.
+    if ( !authorityDecoded && !projectFilePath.isEmpty() )
+    {
+        const QString lastGood = missionRuntimeLastGoodPathForProject( projectFilePath );
+        QString lgErr;
+        if ( !lastGood.isEmpty() && QFileInfo::exists( lastGood )
+             && readContextSidecarAt( lastGood, out.context, &lgErr ) )
+        {
+            authorityDecoded = true;
+            out.recoveredFromLastGood = true;
+            out.notices.append( QStringLiteral( "authority_recovered_from_last_good" ) );
+        }
+    }
+
     // ── authority channel 2: project XML (same authority, .qgz channel) ─
     const bool xmlArtifactPresent =
         !projectDocument.isNull()
