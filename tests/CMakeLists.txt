@@ -11876,3 +11876,17 @@ target_include_directories(test_spectral_background_raster PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_background_raster)
+
+# RS14 suitability assessor tests (pure science-core leaf; no qgis/gdal).
+qt_add_executable(test_suitability_core
+  test_suitability_core.cpp
+)
+target_link_libraries(test_suitability_core PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_core)

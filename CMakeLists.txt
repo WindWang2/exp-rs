@@ -744,6 +744,9 @@ add_subdirectory(src/data)
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
 # link Sicnu::dataset / Sicnu::experiment.
 add_subdirectory(src/dataset)
+# Scene/Dataset Suitability Assessor (RS14): goal-vs-data fit report before any
+# compute. Pure science-core leaf over Sicnu::data/Sicnu::dataset vocabulary.
+add_subdirectory(src/suitability)
 add_subdirectory(src/experiment)
 # Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
 # help/diagnostic knowledge (descriptor model, registry, search, JSON store,
