@@ -239,10 +239,61 @@ std::vector<std::string> validateSpec( const VerificationSpec &spec )
     return problems;
 }
 
+namespace
+{
+
+/// The digest must address the SET of expectations, not the order they happen
+/// to be written in. Two composition paths that yield the same checks are the
+/// same specification even if their arrays are ordered differently
+/// (pack A+B vs B+A), and a cache or a "did this spec change?" check that
+/// treated them as different would be wrong.
+///
+/// The declaration order is still preserved everywhere else — the report's
+/// results follow it — so this sort is a property of the DIGEST only.
+Json::Value canonicalProjection( const VerificationSpec &spec )
+{
+    Json::Value json = spec.toJson();
+    std::vector<Json::Value> checks;
+    if ( json.isMember( "checks" ) && json["checks"].isArray() )
+    {
+        for ( const Json::Value &entry : json["checks"] )
+        {
+            checks.push_back( entry );
+        }
+    }
+    std::sort( checks.begin(), checks.end(),
+               []( const Json::Value &left, const Json::Value &right )
+               {
+                   const std::string leftId = left.get( "id", "" ).asString();
+                   const std::string rightId = right.get( "id", "" ).asString();
+                   if ( leftId != rightId )
+                   {
+                       return leftId < rightId;
+                   }
+                   const std::string leftKind = left.get( "kind", "" ).asString();
+                   const std::string rightKind = right.get( "kind", "" ).asString();
+                   if ( leftKind != rightKind )
+                   {
+                       return leftKind < rightKind;
+                   }
+                   return left.get( "title", "" ).asString() < right.get( "title", "" ).asString();
+               } );
+
+    Json::Value sorted{ Json::arrayValue };
+    for ( const Json::Value &entry : checks )
+    {
+        sorted.append( entry );
+    }
+    json["checks"] = sorted;
+    return json;
+}
+
+} // namespace
+
 std::string specDigest( const VerificationSpec &spec )
 {
     std::string error;
-    return canonicalDigestSha256( spec.toJson(), error );
+    return canonicalDigestSha256( canonicalProjection( spec ), error );
 }
 
 } // namespace sicnu::verification
