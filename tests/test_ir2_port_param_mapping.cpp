@@ -187,6 +187,33 @@ class GhostArtifactOperator : public sicnu::operators::RSOperator
     }
 };
 
+// Polls the context's cooperative cancellation before doing any work —
+// the contract every streaming registry operator follows in its tile loop
+// (#1152 wiring oracle).
+class CancelPollingOperator : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "test:ir2_cancel_polling"; }
+    std::string group() const override { return "test"; }
+    std::string description() const override { return "refuses to run when the cancel flag is tripped"; }
+    Json::Value schema() const override { return Json::Value( Json::objectValue ); }
+    Json::Value run( const Json::Value &params,
+                     sicnu::operators::RSOperatorContext &context ) override
+    {
+        context.throwIfCancelled();
+        const std::string output = params.get( "output", "" ).asString();
+        QFile file( QString::fromStdString( output ) );
+        if ( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        {
+            file.write( "artifact" );
+            file.close();
+        }
+        Json::Value result( Json::objectValue );
+        result["output"] = output;
+        return result;
+    }
+};
+
 // Writes the declared output file — the honest bound-operator contract.
 class WritingOperator : public sicnu::operators::RSOperator
 {
@@ -288,7 +315,7 @@ TEST_CASE( "Registry executor fails closed when the declared artifact is absent"
     // not a Succeeded node publishing a phantom path (#1002).
     NodeFact ghost = makeNode( QStringLiteral( "ghost" ), { makePort( QStringLiteral( "input" ) ) } );
     ghost.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
-    const NodeExecutionResult ghostResult = executor( ghost, {}, runDir.path() );
+    const NodeExecutionResult ghostResult = executor( ghost, {}, runDir.path(), nullptr );
     REQUIRE_FALSE( ghostResult.success );
     REQUIRE( ghostResult.artifactPath.isEmpty() );
     REQUIRE( ghostResult.errorMessage.startsWith(
@@ -298,7 +325,7 @@ TEST_CASE( "Registry executor fails closed when the declared artifact is absent"
     // Bound operator whose artifact exists → success.
     NodeFact real = makeNode( QStringLiteral( "real" ), { makePort( QStringLiteral( "input" ) ) } );
     real.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
-    const NodeExecutionResult realResult = executor( real, {}, runDir.path() );
+    const NodeExecutionResult realResult = executor( real, {}, runDir.path(), nullptr );
     REQUIRE( realResult.success );
     REQUIRE( QFile::exists( realResult.artifactPath ) );
 
@@ -368,7 +395,7 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
     {
         NodeFact node = makeNode( QStringLiteral( "../escape" ), {} );
         node.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
-        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        const NodeExecutionResult result = executor( node, {}, runDir.path(), nullptr );
         REQUIRE_FALSE( result.success );
         REQUIRE( result.artifactPath.isEmpty() );
         REQUIRE( result.errorMessage.contains( QStringLiteral( "unsafe nodeId" ) ) );
@@ -388,7 +415,7 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
         NodeFact node = makeNode( QStringLiteral( "outside" ), {} );
         node.operatorId = QStringLiteral( "test:ir2_outside_artifact" );
         node.parameters = QJsonObject{ { QStringLiteral( "external_file" ), outsidePath } };
-        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        const NodeExecutionResult result = executor( node, {}, runDir.path(), nullptr );
         REQUIRE_FALSE( result.success );
         REQUIRE( result.artifactPath.isEmpty() );
         REQUIRE( result.errorMessage.contains( QStringLiteral( "escapes the run directory" ) ) );
@@ -408,7 +435,7 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
             staleFile.write( QByteArrayLiteral( "leftover" ) );
             staleFile.close();
         }
-        const NodeExecutionResult result = executor( ghost, {}, runDir.path() );
+        const NodeExecutionResult result = executor( ghost, {}, runDir.path(), nullptr );
         REQUIRE_FALSE( result.success );
         REQUIRE( result.errorMessage.startsWith(
             QLatin1String( "ir2.operator_failed: missing artifact" ) ) );
@@ -420,7 +447,7 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
         REQUIRE( QDir( runDir.path() ).mkdir( QStringLiteral( "dirnode.out.tif" ) ) );
         NodeFact node = makeNode( QStringLiteral( "dirnode" ), {} );
         node.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
-        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        const NodeExecutionResult result = executor( node, {}, runDir.path(), nullptr );
         REQUIRE_FALSE( result.success );
         REQUIRE( result.errorMessage.contains( QStringLiteral( "missing artifact" ) ) );
     }
@@ -431,7 +458,7 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
         node.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
         node.parameters = QJsonObject{ { QStringLiteral( "output" ),
                                         QStringLiteral( "relative.out.tif" ) } };
-        const NodeExecutionResult result = executor( node, {}, runDir.path() );
+        const NodeExecutionResult result = executor( node, {}, runDir.path(), nullptr );
         REQUIRE( result.success );
         const QString runRoot = QFileInfo( runDir.path() ).canonicalFilePath();
         const QString expected = QDir( runRoot ).filePath( "relative.out.tif" );
@@ -443,4 +470,39 @@ TEST_CASE( "Registry executor confines every artifact to the run directory",
     registry.unregisterOperator( "test:ir2_ghost_artifact" );
     registry.unregisterOperator( "test:ir2_writes_artifact" );
     registry.unregisterOperator( "test:ir2_outside_artifact" );
+}
+
+
+TEST_CASE( "#1152: the registry executor wires the run cancel flag into the operator context",
+           "[d18][ir2][executor][cancel]" )
+{
+    ensureApp();
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_cancel_polling" ) )
+        registry.registerOperator(
+            "test:ir2_cancel_polling", [] { return std::make_unique<CancelPollingOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+
+    NodeFact n = makeNode( QStringLiteral( "cancelme" ), { makePort( QStringLiteral( "input" ) ) } );
+    n.operatorId = QStringLiteral( "test:ir2_cancel_polling" );
+
+    // Flag already tripped: a wired context must make the operator refuse
+    // before writing anything (with the pre-#1152 executor the flag never
+    // reached the context and the operator ran to completion).
+    std::atomic<bool> cancelled{ true };
+    const NodeExecutionResult refused = executor( n, {}, runDir.path(), &cancelled );
+    REQUIRE_FALSE( refused.success );
+    REQUIRE( refused.errorMessage.contains( QStringLiteral( "cancel" ),
+                                            Qt::CaseInsensitive ) );
+
+    // Flag clear: the same operator runs normally.
+    std::atomic<bool> clear{ false };
+    const NodeExecutionResult ok = executor( n, {}, runDir.path(), &clear );
+    REQUIRE( ok.success );
+    REQUIRE( QFile::exists( ok.artifactPath ) );
+
+    registry.unregisterOperator( "test:ir2_cancel_polling" );
 }
