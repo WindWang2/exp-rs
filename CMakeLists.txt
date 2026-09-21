@@ -739,6 +739,9 @@ sicnu_write_feature_probes_header("${CMAKE_BINARY_DIR}/sicnu_feature_probes.h")
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# RS14-05 Process-aware Experiment Grader (ADR 0174): pure C++20 + jsoncpp
+# leaf library (sicnu_grader) — zero Qt/GDAL/sicnu dependencies, no I/O.
+add_subdirectory(src/grader)
 # Dataset, Experiment & Reproducibility Foundation 5.0 (ADR 0134-0138): the
 # science-core stores over sicnu_data (dataset identity/manifest/splits) and
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app

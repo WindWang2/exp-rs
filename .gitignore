@@ -125,6 +125,7 @@ vendor/
 .superpowers/
 .gstack/
 .planning/*
+!.planning/RS14-05-process-grader/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
 !.planning/cartography-platform-7/
