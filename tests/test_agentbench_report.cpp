@@ -84,7 +84,11 @@ World happyWorld( const Json::Value &caseExtra = Json::Value(), const Json::Valu
 	Json::Value step0{Json::objectValue};
 	step0["tool"] = "rs:ndvi";
 	step0["input"] = Json::Value( Json::objectValue );
-	step0["payload"] = Json::Value( Json::objectValue );
+	Json::Value payload0{Json::objectValue};
+	payload0["verdict"] = "PASS";
+	payload0["output_path"] = "work://case/ndvi.tif";
+	step0["payload"] = payload0;
+	step0["evidence"] = "ndvi";
 	steps.append( step0 );
 	if ( !scriptExtra.isNull() && scriptExtra.isObject() )
 	{

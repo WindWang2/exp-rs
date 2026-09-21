@@ -179,7 +179,7 @@ TEST_CASE( "pack digests are stable across double runs and pinned", "[agentbench
 
 	// Version pin: bump suite.json's version consciously when these change.
 	CHECK( suite().version == "1.0.0" );
-	CHECK( fnv1a64( first.report->packDigest ) == 0x2683e26879014084ull ); // rs14 starter pack v1.0.0
+	CHECK( fnv1a64( first.report->packDigest ) == 0xa553029dbbcc6d83ull ); // rs14 starter pack v1.0.0 (to_chars serializer)
 	for ( const SuiteCaseResult &entry : first.report->cases )
 	{
 		if ( entry.caseId == "optical/ndvi-basic" && entry.sourceKind == "script" )

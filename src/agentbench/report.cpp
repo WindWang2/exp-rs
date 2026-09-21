@@ -6,6 +6,7 @@
 #include <json/json.h>
 
 #include <filesystem>
+#include <charconv>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -25,9 +26,10 @@ std::string metricValueText( const MetricResult &metric )
 		out << metric.value.asInt64();
 		return out.str();
 	}
-	char buffer[40];
-	std::snprintf( buffer, sizeof( buffer ), "%.3f", metric.value.asDouble() );
-	return buffer;
+	// Shortest round-trip, locale-independent (matches json_writer).
+	char buffer[64];
+	const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), metric.value.asDouble() );
+	return std::string( buffer, written.ptr - buffer );
 }
 
 } // namespace

@@ -84,19 +84,9 @@ Json::Value minimalValidCaseDoc()
 	return doc;
 }
 
-std::string serialize( const Json::Value &doc )
-{
-	return deterministicSerialize( doc );
-}
-
 CaseParse parseDoc( const Json::Value &doc )
 {
 	return parseCase( deterministicSerialize( doc ) );
-}
-
-CaseParse parseText( const std::string &text )
-{
-	return parseCase( text );
 }
 
 } // namespace

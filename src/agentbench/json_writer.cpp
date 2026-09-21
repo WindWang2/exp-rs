@@ -1,6 +1,7 @@
 // src/agentbench/json_writer.cpp
 #include "json_writer.h"
 
+#include <charconv>
 #include <cmath>
 #include <sstream>
 
@@ -63,11 +64,12 @@ void writeValue( std::ostream &out, const Json::Value &value )
 				out << "null";
 				break;
 			}
-			// 17 significant digits round-trip every double; fixed locale
-			// independent formatting keeps bytes stable across hosts.
-			char buffer[40];
-			std::snprintf( buffer, sizeof( buffer ), "%.17g", number );
-			out << buffer;
+			// std::to_chars: shortest round-trip representation, independent
+			// of the global C locale (unlike snprintf %g) — digest bytes stay
+			// stable on any host.
+			char buffer[64];
+			const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), number );
+			out.write( buffer, written.ptr - buffer );
 			break;
 		}
 		case Json::stringValue:
