@@ -17,6 +17,8 @@ add_library(sicnu_autonomy STATIC
   autonomy_level.h
   autonomy_capability.cpp
   autonomy_capability.h
+  autonomy_classification.cpp
+  autonomy_classification.h
   autonomy_policy.cpp
   autonomy_policy.h
 )

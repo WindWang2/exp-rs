@@ -9755,6 +9755,7 @@ function(sicnu_add_autonomy_test NAME)
 endfunction()
 
 sicnu_add_autonomy_test(test_autonomy_policy)
+sicnu_add_autonomy_test(test_autonomy_classification)
 
 # Coverage & drift contracts against the LIVE operator registry + harness
 # taxonomy: reuses the standard heavy test helper (sicnu_operators +
