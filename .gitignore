@@ -135,6 +135,7 @@ vendor/
 .planning/lab-spec-data-driven/*
 !.planning/lab-spec-data-driven/*.md
 # RS14 scene-suitability track planning notes (markdown only).
+!.planning/RS14-16-scene-suitability/
 .planning/RS14-16-scene-suitability/*
 !.planning/RS14-16-scene-suitability/*.md
 !.planning/scientific-processing-8/
