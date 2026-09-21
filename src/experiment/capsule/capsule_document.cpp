@@ -76,10 +76,12 @@ QJsonObject capsuleDigestBody( const QJsonObject &root )
 
 QString capsuleDigest( const QJsonObject &digestBody )
 {
-    return QString::fromLatin1(
-        QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( digestBody ),
-                                  QCryptographicHash::Sha256 )
-            .toHex() );
+    return capsuleSha256Hex( sicnu::data::canonicalizeJsonRfc8785( digestBody ) );
+}
+
+QString capsuleSha256Hex( const QByteArray &bytes )
+{
+    return QString::fromLatin1( QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
 }
 
 CapsuleDocument CapsuleDocument::fromRoot( const QJsonObject &root )

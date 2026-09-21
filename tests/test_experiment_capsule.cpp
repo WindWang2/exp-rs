@@ -9,15 +9,34 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 
+#include "dataset/dataset_manifest.h"
+#include "dataset/dataset_store.h"
+#include "dataset/dataset_types.h"
+#include "experiment/capsule/capsule_builder.h"
 #include "experiment/capsule/capsule_document.h"
+#include "experiment/experiment_store.h"
+#include "experiment/experiment_types.h"
 
 namespace
 {
 
+using sicnu::dataset::DatasetId;
+using sicnu::dataset::DatasetManifest;
+using sicnu::dataset::DatasetStore;
+using sicnu::dataset::DatasetVersionId;
+using sicnu::experiment::Experiment;
+using sicnu::experiment::ExperimentRun;
+using sicnu::experiment::ExperimentStore;
+using sicnu::experiment::RunEnvironment;
+using sicnu::experiment::capsule::CapsuleBuilder;
 using sicnu::experiment::capsule::CapsuleDocument;
+using sicnu::experiment::capsule::CapsuleHooks;
+using sicnu::experiment::capsule::CapsuleOptions;
 using sicnu::experiment::capsule::CapsuleValidation;
 using sicnu::experiment::capsule::capsuleDigest;
+using sicnu::experiment::capsule::capsuleSha256Hex;
 using sicnu::experiment::capsule::capsuleDigestBody;
 using sicnu::experiment::capsule::validateShape;
 
@@ -273,4 +292,320 @@ TEST_CASE( "shape validation: a finalized minimal document passes", "[capsule][s
     }
     CHECK( validation.ok );
     CHECK( validation.issues.empty() );
+}
+
+// --- Slice B: builder projections ------------------------------------------
+
+namespace
+{
+
+/// Two open stores + one committed dataset version — the minimal recorded
+/// truth a capsule builds from.
+struct StoreFixture
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    QString versionId;
+    QString fingerprint;
+    QString manifestJson;
+
+    bool open()
+    {
+        if ( !datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) )
+            return false;
+        if ( !experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) )
+            return false;
+        const DatasetId datasetId = DatasetId::generate();
+        if ( !datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() )
+            return false;
+        DatasetManifest manifest;
+        manifest.setDatasetId( datasetId.toString() );
+        manifest.setVersionId( DatasetVersionId::generate().toString() );
+        const auto draft = datasets.createDraftVersion( manifest );
+        if ( !draft.has_value() )
+            return false;
+        const auto versionIdParsed =
+            DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+        if ( !datasets.stageVersion( versionIdParsed ).has_value() )
+            return false;
+        const auto committed = datasets.commitVersion( versionIdParsed );
+        if ( !committed.has_value() )
+            return false;
+        versionId = committed->versionId();
+        fingerprint = committed->fingerprint();
+        const auto version =
+            datasets.versionById(
+                DatasetVersionId::fromString( versionId ).value_or( DatasetVersionId{} ) );
+        if ( !version.has_value() )
+            return false;
+        manifestJson = version->manifestJson();
+        return true;
+    }
+
+    Experiment addExperiment( const QString &id = QStringLiteral( "exp-1" ) )
+    {
+        Experiment experiment;
+        experiment.setExperimentId( id );
+        experiment.setName( QStringLiteral( "land cover mapping" ) );
+        experiment.setObjective( QStringLiteral( "Map land cover for the study area" ) );
+        (void)experiments.upsertExperiment( experiment );
+        return experiment;
+    }
+
+    ExperimentRun addRun( const QString &runId = QStringLiteral( "run-1" ),
+                          const QString &experimentId = QStringLiteral( "exp-1" ),
+                          const QString &algorithmId = QStringLiteral( "rs:classify" ),
+                          const QString &datasetVersionOverride = QString(),
+                          const QString &datasetFingerprintOverride = QString() )
+    {
+        ExperimentRun run;
+        run.setRunId( runId );
+        run.setExperimentId( experimentId );
+        run.setAlgorithmId( algorithmId );
+        run.setAlgorithmVersion( QStringLiteral( "1.0" ) );
+        QJsonObject parameters;
+        parameters.insert( QStringLiteral( "bands" ), QJsonArray{ 1, 2, 3 } );
+        parameters.insert( QStringLiteral( "model" ), QStringLiteral( "rf" ) );
+        run.setParameters( parameters );
+        run.setDatasetVersionId( datasetVersionOverride.isEmpty() ? versionId
+                                                                  : datasetVersionOverride );
+        run.setDatasetFingerprint( datasetFingerprintOverride.isEmpty()
+                                       ? fingerprint
+                                       : datasetFingerprintOverride );
+        run.setSplitManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+        run.setSplitFingerprint( QStringLiteral( "sf1" ) );
+        run.setSeed( 42 );
+        run.setSoftwareRevision( QStringLiteral( "rev-123" ) );
+        QJsonObject envFields;
+        envFields.insert( QStringLiteral( "platform" ), QStringLiteral( "linux" ) );
+        envFields.insert( QStringLiteral( "qt_version" ), QStringLiteral( "6.8" ) );
+        run.setEnvironment( RunEnvironment::fromFields( envFields ) );
+        // The store only accepts truthful lifecycle transitions: record the
+        // run as Created first, then complete it (same pattern as the
+        // reproduction-bundle tests).
+        run.setStatus( sicnu::dataset::RunStatus::Created );
+        if ( !experiments.upsertRun( run ).has_value() )
+            return run;
+        run.setStatus( sicnu::dataset::RunStatus::Running );
+        if ( !experiments.upsertRun( run ).has_value() )
+            return run;
+        run.setStatus( sicnu::dataset::RunStatus::Completed );
+        (void)experiments.upsertRun( run );
+        return run;
+    }
+};
+
+CapsuleOptions fixedOptions()
+{
+    CapsuleOptions options;
+    options.createdUtc = QStringLiteral( "2026-09-21T00:00:00Z" );
+    return options;
+}
+
+} // namespace
+
+TEST_CASE( "builder projects a recorded run into a shape-valid capsule",
+           "[capsule][builder]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( built.has_value() );
+    const CapsuleDocument doc = built.take();
+
+    const CapsuleValidation validation = validateShape( doc.root() );
+    if ( !validation.ok )
+    {
+        for ( const auto &issue : validation.issues )
+            WARN( issue.code.toStdString() << ": " << issue.message.toStdString() );
+    }
+    CHECK( validation.ok );
+
+    const QJsonObject goal = doc.root().value( QStringLiteral( "goal" ) ).toObject();
+    CHECK( goal.value( QStringLiteral( "experiment_id" ) ).toString()
+           == QLatin1String( "exp-1" ) );
+    // Teaching labs join by id: lab_id mirrors experiment_id (lab_report.h).
+    CHECK( goal.value( QStringLiteral( "lab_id" ) ).toString() == QLatin1String( "exp-1" ) );
+    CHECK( goal.value( QStringLiteral( "objective" ) ).toString()
+           == QLatin1String( "Map land cover for the study area" ) );
+
+    CHECK( doc.root().value( QStringLiteral( "parameters" ) ) == run.parameters() );
+
+    const QJsonObject software = doc.root().value( QStringLiteral( "software" ) ).toObject();
+    CHECK( software.value( QStringLiteral( "revision" ) ).toString() == QLatin1String( "rev-123" ) );
+    CHECK( software.value( QStringLiteral( "platform" ) ).toString() == QLatin1String( "linux" ) );
+
+    CHECK( doc.capsuleId() == QLatin1String( "capsule-run-1" ) );
+    CHECK( doc.root().value( QStringLiteral( "created_utc" ) ).toString()
+           == QLatin1String( "2026-09-21T00:00:00Z" ) );
+}
+
+TEST_CASE( "builder refuses unknown runs with a typed error", "[capsule][builder]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( QStringLiteral( "nope" ), fixedOptions() );
+    REQUIRE( !built.has_value() );
+    bool sawCode = false;
+    for ( const auto &diagnostic : built.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "capsule.run-missing" ) )
+            sawCode = true;
+    CHECK( sawCode );
+}
+
+TEST_CASE( "wired capability hook pins the descriptor digest; changes move the capsule",
+           "[capsule][builder][capability]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    QJsonObject descriptor;
+    descriptor.insert( QStringLiteral( "id" ), QStringLiteral( "rs:classify" ) );
+    descriptor.insert( QStringLiteral( "family" ), QStringLiteral( "classify" ) );
+
+    CapsuleHooks hooks;
+    hooks.capabilityDescriptor = [&descriptor]( const QString & ) { return descriptor; };
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions(), hooks );
+    REQUIRE( built.has_value() );
+    const CapsuleDocument doc = built.take();
+
+    const QJsonArray capabilities =
+        doc.root().value( QStringLiteral( "capabilities" ) ).toArray();
+    REQUIRE( capabilities.size() == 1 );
+    const QJsonObject capability = capabilities.at( 0 ).toObject();
+    CHECK( capability.value( QStringLiteral( "id" ) ).toString() == QLatin1String( "rs:classify" ) );
+    CHECK( capability.value( QStringLiteral( "version" ) ).toString() == QLatin1String( "1.0" ) );
+    CHECK( capability.value( QStringLiteral( "source" ) ).toString() == QLatin1String( "hook" ) );
+    CHECK( capability.value( QStringLiteral( "digest" ) ).toString() == capsuleDigest( descriptor ) );
+
+    // A different installed capability ⇒ a different capsule identity.
+    QJsonObject changed = descriptor;
+    changed.insert( QStringLiteral( "family" ), QStringLiteral( "spectral" ) );
+    CapsuleHooks changedHooks;
+    changedHooks.capabilityDescriptor = [changed]( const QString & ) { return changed; };
+    auto rebuilt = builder.build( run.runId(), fixedOptions(), changedHooks );
+    REQUIRE( rebuilt.has_value() );
+    CHECK( rebuilt->digestValue() != doc.digestValue() );
+}
+
+TEST_CASE( "unwired capability hook records source=record and never fabricates a digest",
+           "[capsule][builder][capability]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( built.has_value() );
+
+    const QJsonArray capabilities =
+        built->root().value( QStringLiteral( "capabilities" ) ).toArray();
+    REQUIRE( capabilities.size() == 1 );
+    const QJsonObject capability = capabilities.at( 0 ).toObject();
+    CHECK( capability.value( QStringLiteral( "source" ) ).toString() == QLatin1String( "record" ) );
+    CHECK( capability.value( QStringLiteral( "digest" ) ).toString().isEmpty() );
+}
+
+TEST_CASE( "wired plan hook pins the workflow definition digest", "[capsule][builder][plan]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun( QStringLiteral( "run-1" ),
+                                              QStringLiteral( "exp-1" ),
+                                              QStringLiteral( "wf:landcover" ) );
+
+    CapsuleHooks hooks;
+    hooks.planDefinitionDigest = []( const QString &id ) {
+        return id == QLatin1String( "wf:landcover" ) ? QLatin1String( "plan-digest-abc" )
+                                                     : QString();
+    };
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions(), hooks );
+    REQUIRE( built.has_value() );
+    const QJsonObject plan = built->root().value( QStringLiteral( "plan" ) ).toObject();
+    CHECK( plan.value( QStringLiteral( "algorithm_id" ) ).toString()
+           == QLatin1String( "wf:landcover" ) );
+    CHECK( plan.value( QStringLiteral( "definition_digest" ) ).toString()
+           == QLatin1String( "plan-digest-abc" ) );
+}
+
+TEST_CASE( "dataset pin resolves the version and pins the manifest digest",
+           "[capsule][builder][inputs]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( built.has_value() );
+
+    const QJsonArray inputs = built->root().value( QStringLiteral( "inputs" ) ).toArray();
+    REQUIRE( inputs.size() >= 1 );
+    const QJsonObject datasetPin = inputs.at( 0 ).toObject();
+    CHECK( datasetPin.value( QStringLiteral( "kind" ) ).toString()
+           == QLatin1String( "dataset_version" ) );
+    CHECK( datasetPin.value( QStringLiteral( "id" ) ).toString() == fixture.versionId );
+    CHECK( datasetPin.value( QStringLiteral( "digest" ) ).toString() == fixture.fingerprint );
+    CHECK( datasetPin.value( QStringLiteral( "manifest_digest" ) ).toString()
+           == capsuleSha256Hex( fixture.manifestJson.toUtf8() ) );
+    CHECK( !datasetPin.value( QStringLiteral( "state" ) ).toString().isEmpty() );
+}
+
+TEST_CASE( "unresolvable dataset version is recorded as unresolved, never dropped",
+           "[capsule][builder][inputs]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun(
+        QStringLiteral( "run-1" ), QStringLiteral( "exp-1" ), QStringLiteral( "rs:classify" ),
+        QStringLiteral( "33333333-3333-4333-8333-333333333333" ), QStringLiteral( "ghost-fp" ) );
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto built = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( built.has_value() );
+
+    const QJsonArray inputs = built->root().value( QStringLiteral( "inputs" ) ).toArray();
+    REQUIRE( inputs.size() >= 1 );
+    const QJsonObject datasetPin = inputs.at( 0 ).toObject();
+    CHECK( datasetPin.value( QStringLiteral( "state" ) ).toString() == QLatin1String( "unresolved" ) );
+
+    bool sawWarning = false;
+    for ( const auto &diagnostic : built.diagnostics() )
+        if ( diagnostic.severity == sicnu::dataset::DiagnosticSeverity::Warning )
+            sawWarning = true;
+    CHECK( sawWarning );
+}
+
+TEST_CASE( "identical store content builds byte-identical capsules",
+           "[capsule][builder][determinism]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto first = builder.build( run.runId(), fixedOptions() );
+    auto second = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+    CHECK( first->canonicalBytes() == second->canonicalBytes() );
 }

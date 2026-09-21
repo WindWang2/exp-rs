@@ -4,6 +4,8 @@
 # store. Headers stay Qt-only; no GUI, no network, no src/agent dependency
 # (capability/verifier facts arrive through injected CapsuleHooks).
 qt_add_library(sicnu_experiment_capsule STATIC
+  capsule_builder.cpp
+  capsule_builder.h
   capsule_document.cpp
   capsule_document.h
 )

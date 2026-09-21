@@ -115,6 +115,10 @@ QJsonObject capsuleDigestBody( const QJsonObject &root );
 /// SHA-256 hex over canonicalizeJsonRfc8785( @p digestBody ).
 QString capsuleDigest( const QJsonObject &digestBody );
 
+/// SHA-256 hex over raw bytes (manifest payloads, artifact files) — the one
+/// hashing helper so every capsule digest names the same algorithm.
+QString capsuleSha256Hex( const QByteArray &bytes );
+
 /// Shape-level contract of a capsule document: schema known? identity
 /// present? digest present, well-formed and matching? Content-level gates
 /// (secret scan, portable-path scan, section semantics) live in
