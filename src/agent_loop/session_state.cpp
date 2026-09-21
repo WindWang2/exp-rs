@@ -25,15 +25,18 @@ struct Edge {
     std::string_view to;
 };
 
-constexpr std::array< Edge, 35 > kEdges = { {
+constexpr std::array< Edge, 38 > kEdges = { {
     // The happy chain.
     { stages::kGoalNormalization, stages::kDataStateSnapshot },
     { stages::kDataStateSnapshot, stages::kPlanRequest },
     { stages::kPlanRequest, stages::kPreflight },
     { stages::kPreflight, stages::kRepairApproval },
     { stages::kPreflight, stages::kExecute },
+    { stages::kPreflight, stages::kDelivery }, // dry_run reports and stops
     { stages::kRepairApproval, stages::kExecute },
     { stages::kRepairApproval, stages::kPlanRequest },
+    { stages::kRepairApproval, stages::kReplan }, // approved repairs re-plan
+    { stages::kRepairApproval, stages::kDelivery }, // plan_only: converged plan
     { stages::kExecute, stages::kVerify },
     { stages::kVerify, stages::kDelivery },
     { stages::kVerify, stages::kDiagnose },

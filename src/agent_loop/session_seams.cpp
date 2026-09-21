@@ -85,6 +85,7 @@ Json::Value PlanDraft::toJson() const
     doc[ "steps" ] = steps;
     doc[ "outputs" ] = outputs;
     doc[ "fingerprint" ] = fingerprint;
+    doc[ "identity" ] = identity;
     doc[ "missing_facts" ] = missingFacts;
     Json::Value estimatesDoc( Json::arrayValue );
     for ( const PlanEstimate &estimate : estimates )

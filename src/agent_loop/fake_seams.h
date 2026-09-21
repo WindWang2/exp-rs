@@ -71,8 +71,11 @@ class FakeDataStateProvider final : public IDataStateProvider {
 
     DataStateSnapshot snapshot( const std::string &goal, const Json::Value &refs ) override;
 
+    int snapshotCount() const { return mSnapshotCount; }
+
   private:
     const FakeScenario &mScenario;
+    int mSnapshotCount = 0;
 };
 
 class FakePlanner final : public IPlanner {
@@ -81,8 +84,11 @@ class FakePlanner final : public IPlanner {
 
     PlanDraft plan( const PlanRequest &request ) override;
 
+    int planCount() const { return mPlanCount; }
+
   private:
     const FakeScenario &mScenario;
+    int mPlanCount = 0;
 };
 
 class FakePreflight final : public IPreflight {
@@ -91,8 +97,11 @@ class FakePreflight final : public IPreflight {
 
     PreflightReport check( const PlanDraft &plan, const DataStateSnapshot &snapshot ) override;
 
+    int checkCount() const { return mCheckCount; }
+
   private:
     const FakeScenario &mScenario;
+    int mCheckCount = 0;
 };
 
 class FakeExecutor final : public IExecutor {
@@ -103,10 +112,15 @@ class FakeExecutor final : public IExecutor {
     ExecutionOutcome poll( const ExecutionStart &start, long long timeoutMs ) override;
     void cancel( const ExecutionStart &start ) override;
 
+    int beginCount() const { return mBeginCount; }
+    int cancelCount() const { return mCancelCount; }
+
   private:
     const FakeScenario &mScenario;
     std::map< std::string, int > mAttemptByRun;
     std::set< std::string > mCancelled;
+    int mBeginCount = 0;
+    int mCancelCount = 0;
 };
 
 class FakeVerifier final : public IVerifier {
@@ -116,8 +130,11 @@ class FakeVerifier final : public IVerifier {
     VerificationReport verify( const PlanDraft &plan,
                                const ExecutionOutcome &outcome ) override;
 
+    int verifyCount() const { return mVerifyCount; }
+
   private:
     const FakeScenario &mScenario;
+    int mVerifyCount = 0;
 };
 
 class FakeDiagnoser final : public IDiagnoser {
@@ -127,8 +144,11 @@ class FakeDiagnoser final : public IDiagnoser {
     Diagnosis diagnose( const PlanDraft &plan, const ExecutionOutcome &outcome,
                         const VerificationReport &verification ) override;
 
+    int diagnoseCount() const { return mDiagnoseCount; }
+
   private:
     const FakeScenario &mScenario;
+    int mDiagnoseCount = 0;
 };
 
 /// One configured bundle of the doubles.
@@ -146,6 +166,15 @@ class FakeSeams {
     IExecutor &executor() { return mExecutor; }
     IVerifier &verifier() { return mVerifier; }
     IDiagnoser &diagnoser() { return mDiagnoser; }
+
+    // Concrete accessors: call counters let tests assert that a seam was
+    // NEVER invoked (e.g. dry-run must not execute) as a real oracle.
+    FakeDataStateProvider &dataProviderFake() { return mData; }
+    FakePlanner &plannerFake() { return mPlanner; }
+    FakePreflight &preflightFake() { return mPreflight; }
+    FakeExecutor &executorFake() { return mExecutor; }
+    FakeVerifier &verifierFake() { return mVerifier; }
+    FakeDiagnoser &diagnoserFake() { return mDiagnoser; }
 
   private:
     FakeDataStateProvider mData;
@@ -179,6 +208,7 @@ inline DataStateSnapshot FakeDataStateProvider::snapshot( const std::string &goa
 {
     ( void )goal;
     ( void )refs;
+    ++mSnapshotCount;
     DataStateSnapshot snap;
     int resolvedCount = 0;
     for ( const SlotScript &slot : mScenario.slots )
@@ -203,6 +233,7 @@ inline DataStateSnapshot FakeDataStateProvider::snapshot( const std::string &goa
 
 inline PlanDraft FakePlanner::plan( const PlanRequest &request )
 {
+    ++mPlanCount;
     PlanDraft draft;
     draft.attempt = request.attempt;
     draft.intent = request.intent.empty() ? mScenario.intent : request.intent;
@@ -243,11 +274,15 @@ inline PlanDraft FakePlanner::plan( const PlanRequest &request )
     draft.estimates.push_back( PlanEstimate{ "step-1", 256 } );
 
     // Plan identity moves with the attempt and the approved repairs, so a
-    // genuine replan is distinguishable from a repeated failure.
-    std::string canonical = draft.intent + "|" + std::to_string( request.attempt );
+    // genuine replan is distinguishable from a repeated failure. The
+    // attempt-INDEPENDENT identity captures only the science (intent +
+    // repairs) — the no-progress detector keys on it.
+    std::string identitySeed = draft.intent;
     for ( const std::string &repair : request.approvedRepairs )
-        canonical += "|repair:" + repair;
-    draft.fingerprint = deterministicFingerprint( canonical );
+        identitySeed += "|repair:" + repair;
+    draft.identity = deterministicFingerprint( identitySeed );
+    draft.fingerprint =
+        deterministicFingerprint( draft.identity + "|" + std::to_string( request.attempt ) );
     draft.planId = "plan-" + draft.fingerprint;
     draft.valid = true;
     return draft;
@@ -257,6 +292,7 @@ inline PreflightReport FakePreflight::check( const PlanDraft &plan,
                                              const DataStateSnapshot &snapshot )
 {
     ( void )snapshot;
+    ++mCheckCount;
     const std::size_t index =
         plan.attempt >= 1 && static_cast< std::size_t >( plan.attempt ) <= mScenario.preflight.size()
             ? static_cast< std::size_t >( plan.attempt ) - 1
@@ -280,6 +316,7 @@ inline PreflightReport FakePreflight::check( const PlanDraft &plan,
 
 inline ExecutionStart FakeExecutor::begin( const PlanDraft &plan )
 {
+    ++mBeginCount;
     ExecutionStart start;
     if ( !plan.valid )
     {
@@ -336,6 +373,7 @@ inline ExecutionOutcome FakeExecutor::poll( const ExecutionStart &start, long lo
 
 inline void FakeExecutor::cancel( const ExecutionStart &start )
 {
+    ++mCancelCount;
     mCancelled.insert( start.runId );
 }
 
@@ -348,6 +386,7 @@ inline VerificationReport FakeVerifier::verify( const PlanDraft &plan,
             ? static_cast< std::size_t >( plan.attempt ) - 1
             : mScenario.verification.size() - 1;
     const VerifyScript &script = mScenario.verification[ index ];
+    ++mVerifyCount;
 
     VerificationReport report;
     std::vector< std::string > paths = outcome.artifacts;
@@ -384,6 +423,7 @@ inline Diagnosis FakeDiagnoser::diagnose( const PlanDraft &plan,
 {
     ( void )outcome;
     ( void )verification;
+    ++mDiagnoseCount;
     const std::size_t index =
         plan.attempt >= 1 && static_cast< std::size_t >( plan.attempt ) <=
                                   mScenario.diagnosis.size()

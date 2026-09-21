@@ -44,6 +44,7 @@ class SessionJournal {
     static constexpr std::size_t kMaxEntries = 4096;
     static constexpr long kMaxDocumentBytes = 1024 * 1024;
 
+    SessionJournal() = default;
     explicit SessionJournal( std::string sessionId,
                              std::size_t maxEntries = kMaxEntries );
 

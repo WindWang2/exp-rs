@@ -44,9 +44,13 @@ inline constexpr const char *kAborted = "aborted";
 /// OUTPUT_INVALID, RESOURCE_OVER_BUDGET, CANCELLED, TEACHING_REFUSAL);
 /// the SESSION_* codes are session-level policy stops owned here.
 namespace stop_reasons {
+inline constexpr const char *kInvalidGoal = "SESSION_INVALID_GOAL";
+inline constexpr const char *kInvalidPolicy = "SESSION_INVALID_POLICY";
+inline constexpr const char *kInternalError = "SESSION_INTERNAL_ERROR";
 inline constexpr const char *kNoProgress = "SESSION_NO_PROGRESS";
-inline constexpr const char *kBudgetExceeded = "SESSION_BUDGET_EXCEEDED";
 inline constexpr const char *kReplanLimit = "SESSION_REPLAN_LIMIT";
+inline constexpr const char *kStepLimit = "SESSION_STEP_LIMIT";
+inline constexpr const char *kExecutorTimeout = "SESSION_EXECUTOR_TIMEOUT";
 inline constexpr const char *kPreflightBlocked = "PREFLIGHT_BLOCKED";
 inline constexpr const char *kExecutionFailed = "EXECUTION_FAILED";
 inline constexpr const char *kOutputInvalid = "OUTPUT_INVALID";

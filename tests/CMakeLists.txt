@@ -9590,6 +9590,14 @@ target_link_libraries(test_agent_loop_seams PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_seams)
 
+# RS14-11: session driver — dry-run / plan-only / execute-with-verify modes.
+add_executable(test_agent_loop_modes test_agent_loop_modes.cpp)
+target_link_libraries(test_agent_loop_modes PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_modes)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)

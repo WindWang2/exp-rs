@@ -12,6 +12,7 @@ add_library( sicnu_agent_loop STATIC
     session_journal.cpp
     session_seams.cpp
     session_policy.cpp
+    scientific_agent_session.cpp
 )
 
 target_include_directories( sicnu_agent_loop PUBLIC ${CMAKE_SOURCE_DIR}/src )

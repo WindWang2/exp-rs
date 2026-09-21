@@ -87,7 +87,12 @@ struct PlanDraft {
     Json::Value steps{ Json::arrayValue };
     Json::Value outputs{ Json::arrayValue };
     std::vector< PlanEstimate > estimates;
-    std::string fingerprint; ///< stable identity of the scientific content
+    std::string fingerprint; ///< identity of this draft (attempt-sensitive)
+    /// Attempt-INDEPENDENT identity of the science the plan performs
+    /// (intent + operators + approved repairs). Two drafts with the same
+    /// identity do the same work — the no-progress detector keys on it:
+    /// repeating the same science and failing the same way is no progress.
+    std::string identity;
     Json::Value missingFacts{ Json::arrayValue };
     std::vector< DecisionAlternative > droppedAlternatives;
     bool valid = false;
