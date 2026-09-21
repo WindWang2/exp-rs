@@ -12,6 +12,8 @@ add_executable(sicnu_geo_rs_cli
     cli_env_doctor.cpp
     cli_tool_commands.cpp
     cli_tool_commands.h
+    cli_passport_commands.cpp
+    cli_passport_commands.h
     cli_dataset_commands.cpp
     cli_lab_commands.cpp
     cli_project_ops.cpp
@@ -117,6 +119,7 @@ set_target_properties(sicnu_geo_rs_cli PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN T
 # Unified Help 6.0 projections (--operator-help / --help-topic /
 # --list-topics / --export-help-docs).
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
+    Sicnu::ScientificStateGdal
     Sicnu::help
     Sicnu::help_adapters
     # cli_dataset_commands.cpp (Foundation 5.0) calls the dataset/experiment

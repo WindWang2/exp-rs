@@ -219,6 +219,43 @@ TEST_CASE( "conflicted claims surface verbatim with alternatives",
     REQUIRE( conflicted );
 }
 
+TEST_CASE( "teaching lines carry the resolved value for mapped claim paths",
+           "[scientific_state][slice_f]" )
+{
+    StateResolutionInput input;
+    input.dataset = makeLandsatLikeDataset();
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+    const TeachingSummary summary = renderTeachingSummary( state );
+
+    // Claim paths and document paths differ (band index base, logical field
+    // names). The rendered line must still carry the VALUE, never a false
+    // "(not resolved)" for a fact the passport knows.
+    const auto lineFor = []( const std::vector<std::string> &lines, const char *path )
+    {
+        for ( const std::string &line : lines )
+        {
+            if ( line.find( path ) == 0 )
+                return line;
+        }
+        return std::string();
+    };
+
+    REQUIRE( lineFor( summary.known, "radiometric.unit" ).find( "surface_reflectance" ) !=
+             std::string::npos );
+    REQUIRE( lineFor( summary.known, "acquisition.time" ).find( "2024-05-01T10:12:31Z" ) !=
+             std::string::npos );
+    REQUIRE( lineFor( summary.known, "bands[2].role" ).find( "nir" ) != std::string::npos );
+    REQUIRE( lineFor( summary.known, "geometry.crs" ).find( "EPSG:32650" ) !=
+             std::string::npos );
+    REQUIRE( lineFor( summary.inferred, "geometry.pixel_size" ).find( "30.0 x 30.0" ) !=
+             std::string::npos );
+    REQUIRE( lineFor( summary.known, "validity.cloud_cover" ).find( "12" ) !=
+             std::string::npos );
+    // A genuinely unresolvable field stays honest.
+    REQUIRE( lineFor( summary.missing, "sensor.instrument" ).find( "(not resolved)" ) !=
+             std::string::npos );
+}
+
 TEST_CASE( "plain text rendering has stable section headers", "[scientific_state][slice_f]" )
 {
     StateResolutionInput input;

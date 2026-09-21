@@ -11,6 +11,8 @@
 
 #include <functional>
 #include <map>
+#include <stdexcept>
+#include <system_error>
 
 namespace sicnu::state
 {
@@ -35,9 +37,10 @@ void flatten( const Json::Value &node, const std::string &prefix,
     }
     if ( node.isArray() )
     {
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
-        out[prefix] = Json::writeString( builder, node );
+        if ( node.empty() )
+            out[prefix] = "[]";
+        for ( Json::ArrayIndex i = 0; i < node.size(); ++i )
+            flatten( node[i], prefix + "[" + std::to_string( i ) + "]", out );
         return;
     }
     if ( node.isString() )
@@ -50,13 +53,87 @@ void flatten( const Json::Value &node, const std::string &prefix,
     }
 }
 
+/// Maps a claim path (resolver vocabulary) onto the serialized document
+/// paths (JSON vocabulary). Claims talk about logical fields that may map
+/// to several document keys or to a different index base (claims use the
+/// 1-based GDAL band index, the document array is 0-based).
+std::string valueForClaim( const ClaimRecord &claim,
+                           const std::map<std::string, std::string> &values )
+{
+    const auto lookup = [&values]( const std::string &path ) -> std::string
+    {
+        const auto it = values.find( path );
+        return it == values.end() ? std::string() : it->second;
+    };
+
+    // Band claims MUST be mapped before any exact-match shortcut: a claim
+    // path like "bands[1].role" (1-based GDAL index) collides with the
+    // 0-based document path of the SECOND band.
+    if ( claim.path.rfind( "bands[", 0 ) == 0 )
+    {
+        const std::size_t close = claim.path.find( ']' );
+        if ( close != std::string::npos )
+        {
+            int bandNumber = 0;
+            try
+            {
+                bandNumber = std::stoi( claim.path.substr( 6, close - 6 ) );
+            }
+            catch ( const std::exception & )
+            {
+                return std::string();
+            }
+            if ( bandNumber < 1 )
+                return std::string();
+            const std::string field = claim.path.substr( close + 2 );
+            std::string jsonField = field;
+            if ( field == "no_data" )
+                jsonField = "no_data_value";
+            return lookup( "bands[" + std::to_string( bandNumber - 1 ) + "]." + jsonField );
+        }
+    }
+
+    const auto exact = values.find( claim.path );
+    if ( exact != values.end() )
+        return exact->second;
+
+    if ( claim.path == "acquisition.time" )
+        return lookup( "acquisition.time_iso" );
+    if ( claim.path == "geometry.crs" )
+    {
+        const std::string authid = lookup( "geometry.crs_authid" );
+        return authid.empty() ? lookup( "geometry.crs_wkt" ) : authid;
+    }
+    if ( claim.path == "geometry.pixel_size" )
+    {
+        const std::string x = lookup( "geometry.pixel_size_x" );
+        const std::string y = lookup( "geometry.pixel_size_y" );
+        if ( x.empty() && y.empty() )
+            return std::string();
+        return x + " x " + y;
+    }
+    if ( claim.path == "geometry.extent" )
+    {
+        const std::string minX = lookup( "geometry.min_x" );
+        const std::string minY = lookup( "geometry.min_y" );
+        const std::string maxX = lookup( "geometry.max_x" );
+        const std::string maxY = lookup( "geometry.max_y" );
+        if ( minX.empty() )
+            return std::string();
+        return "(" + minX + "," + minY + ")-(" + maxX + "," + maxY + ")";
+    }
+    if ( claim.path == "validity.cloud_cover" )
+        return lookup( "validity.cloud_cover_percent" );
+    return std::string();
+}
+
 std::string claimLine( const ClaimRecord &claim,
                        const std::map<std::string, std::string> &values )
 {
     std::string line = claim.path + ": ";
-    const auto value = values.find( claim.path );
-    if ( value != values.end() && !value->second.empty() )
-        line += value->second;
+    const std::string value = valueForClaim( claim, values );
+    if ( !value.empty() )
+        line += value;
     else
         line += "(not resolved)";
     if ( claim.kind == ClaimKind::Conflicted && !claim.alternatives.empty() )
@@ -68,8 +145,8 @@ std::string claimLine( const ClaimRecord &claim,
     }
     if ( !claim.note.empty() && claim.kind != ClaimKind::Known )
         line += " — " + claim.note;
-    line += " (source: " + ( claim.sources.empty() ? std::string( "resolver" ) :
-                                                    claim.sources.front() ) + ")";
+    if ( !claim.sources.empty() )
+        line += " (source: " + claim.sources.front() + ")";
     return line;
 }
 
