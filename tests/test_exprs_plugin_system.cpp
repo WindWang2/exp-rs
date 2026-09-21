@@ -27,6 +27,7 @@ static void portableSetenv(const char *key, const char *value)
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <thread>
 
@@ -447,6 +448,98 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
     REQUIRE( installedManifest.id == "org.test.stale" );
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.stale", log ) );
     ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+}
+
+TEST_CASE( "crashed swap parks restore the missing install and live parks are kept",
+           "[plugin][package][p13]" )
+{
+    namespace fs = std::filesystem;
+    const std::string userRoot = exprs::PluginDiscovery::userPluginRoot();
+    const std::string staging = userRoot + "/.staging";
+    // A dead pid that cannot collide with a live process on any platform
+    // (exceeds every legal pid_max): the park is unambiguously crash residue.
+    const std::string deadPid = std::to_string( std::numeric_limits<int>::max() );
+    const std::string livePid = std::to_string( static_cast<long>(
+#ifdef _WIN32
+        ::GetCurrentProcessId()
+#else
+        ::getpid()
+#endif
+        ) );
+
+    // A parked backup holds the REAL manifest (the plugin's own id), only
+    // the directory name carries the ~old.<pid> suffix.
+    const auto plantPark = [&staging]( const std::string &parkName,
+                                       const std::string &pluginId ) {
+        const std::string dir = staging + "/" + parkName;
+        std::error_code ec;
+        std::filesystem::create_directories( dir, ec );
+        std::ofstream manifest( dir + "/plugin.json", std::ios::trunc );
+        manifest << "{\"manifest_version\":1,\"id\":\"" << pluginId
+                 << "\",\"version\":\"1.0.0\"}";
+    };
+
+    // Crash BETWEEN the two swap renames: the install dir is gone and the
+    // parked backup holds the only copy — reconcile must RESTORE it (and
+    // drop the unverified staging dir of the same aborted transaction).
+    const std::string lostId = "org.test.parklost";
+    const std::string parked = staging + "/" + lostId + "~old." + deadPid;
+    const std::string staleStaging = staging + "/" + lostId + "." + deadPid;
+    std::error_code ec;
+    fs::remove_all( userRoot + "/" + lostId, ec );
+    fs::remove_all( parked, ec );
+    fs::remove_all( staleStaging, ec );
+    plantPark( lostId + "~old." + deadPid, lostId );
+    fs::create_directories( staleStaging, ec );
+    {
+        std::ofstream partial( staleStaging + "/new.bin", std::ios::trunc );
+        partial << "unverified";
+    }
+    exprs::PluginPackage::reconcileStaging( userRoot );
+    REQUIRE( fs::exists( userRoot + "/" + lostId + "/plugin.json" ) );
+    REQUIRE_FALSE( fs::exists( parked ) );
+    REQUIRE_FALSE( fs::exists( staleStaging ) );
+
+    // Crash AFTER the swap committed: the install exists and the park is
+    // pure residue — reconcile removes the park, target untouched.
+    const std::string keptId = "org.test.parkkept";
+    const std::string keptPark = staging + "/" + keptId + "~old." + deadPid;
+    fs::remove_all( userRoot + "/" + keptId, ec );
+    fs::remove_all( keptPark, ec );
+    makePluginDir( userRoot, keptId, "parkkept:echo" );
+    plantPark( keptId + "~old." + deadPid, keptId );
+    exprs::PluginPackage::reconcileStaging( userRoot );
+    REQUIRE( fs::exists( userRoot + "/" + keptId + "/plugin.json" ) );
+    REQUIRE_FALSE( fs::exists( keptPark ) );
+
+    // A LIVE owner's park is an in-flight transaction — hands off even
+    // when the target looks missing right now.
+    const std::string liveId = "org.test.parklive";
+    const std::string livePark = staging + "/" + liveId + "~old." + livePid;
+    fs::remove_all( userRoot + "/" + liveId, ec );
+    fs::remove_all( livePark, ec );
+    plantPark( liveId + "~old." + livePid, liveId );
+    exprs::PluginPackage::reconcileStaging( userRoot );
+    REQUIRE( fs::exists( livePark ) );
+    REQUIRE_FALSE( fs::exists( userRoot + "/" + liveId ) );
+
+    // A planted park whose digit tail overflows long must not throw out of
+    // reconcile: the saturating parse lands on the dead-owner path, so a
+    // missing target is still restored (the tail is grammar-valid).
+    const std::string hugeId = "org.test.parkhuge";
+    const std::string hugePark =
+        staging + "/" + hugeId + "~old.999999999999999999999999999999";
+    fs::remove_all( userRoot + "/" + hugeId, ec );
+    fs::remove_all( hugePark, ec );
+    plantPark( hugeId + "~old.999999999999999999999999999999", hugeId );
+    exprs::PluginPackage::reconcileStaging( userRoot );
+    REQUIRE( fs::exists( userRoot + "/" + hugeId + "/plugin.json" ) );
+    REQUIRE_FALSE( fs::exists( hugePark ) );
+
+    fs::remove_all( userRoot + "/" + lostId, ec );
+    fs::remove_all( userRoot + "/" + keptId, ec );
+    fs::remove_all( userRoot + "/" + hugeId, ec );
+    fs::remove_all( livePark, ec );
 }
 
 TEST_CASE( "dependency constraints are probed at install time, warnings not blocks",
