@@ -1,6 +1,7 @@
 // src/processing/algorithms/temporal/temporal_fit.cpp
 #include "temporal_fit.h"
 
+#include "temporal_irregular.h"
 #include "temporal_linalg_detail.h"
 
 #include <algorithm>
@@ -713,8 +714,12 @@ DecompositionResult seasonalDecompose( const std::vector<float> &y,
        static_cast<int>( doyOf.size() ) != n )
     return out;
 
-  // Trend: Whittaker on the raw series (missing values weighted 0).
-  out.trend = whittakerSmooth( y, {}, trendLambda > 0.0 ? trendLambda : 1e4 );
+  // Trend: TIME-AWARE Whittaker on the day-offset axis (#1166). The D16
+  // kernel smoothed by sample index, so the effective trend bandwidth was
+  // cadence-dependent (cloud-clustered acquisitions under-smoothed dense
+  // stretches); the tDays parameter the operator accepts and documents is
+  // what the penalty must be regularized on.
+  out.trend = whittakerSmoothTime( y, tDays, {}, trendLambda > 0.0 ? trendLambda : 1e4 );
 
   // Seasonal: doy climatology of the detrended series, smoothed circularly.
   std::vector<double> sumByDoy( 366, 0.0 );
