@@ -10,3 +10,6 @@
 - Slice B (metadata/state faults): RED tests first, 21/21 green.
   - New: fault_transforms.{h,cpp} (band_role_swap, omit_quality_mask, wrong_scale_offset, nodata_as_data + closed param validation + typed refusals), fault_observables.{h,cpp} (band_count/band_roles/crs/grid/nodata+valid_fraction/per-band stats/index_mean/leakage/threshold+kappa/channel_order/model_output/provenance), fault_expectations.{h,cpp} (Changed/DeltaGe/DeltaLe/Equals/NotEquals/InRange/TruthIs with evidence + typed missing-observable failures).
   - Fixed during TDD: registry optional param metadata; mutations counts; index fixture design (constant bands so the swap delta is exact).
+- Slice C (geometry/temporal faults): RED tests first, 25/25 green.
+  - New transforms: grid_shift (image-space pixel offsets × pixel size, sign documented), crs_mismatch (closed CRS vocabulary, same-CRS refused as non-fault), temporal_shuffle (purpose-derived seed Fisher-Yates, identity-draw retry + rotate fallback so the fault always moves), temporal_gap (integer index, range-checked, date-carrying target).
+  - Uniform TransformFn signature (grid, params, seed) so stochastic and deterministic transforms share one dispatch table.

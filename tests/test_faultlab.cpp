@@ -655,3 +655,197 @@ TEST_CASE( "fault lab: expectation relations evaluate observables with evidence"
     CHECK_FALSE( results[3].passed );                               // channel_order never produced
     CHECK( results[3].note.find( "observable" ) != std::string::npos );
 }
+
+// ---------------------------------------------------------------------------
+// Slice C — geometry/temporal faults (grid shift, CRS mismatch, temporal
+// shuffle, temporal gap)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Four dated epochs (32x32, one value per epoch) for temporal faults.
+FaultGrid temporalGrid()
+{
+    FaultGrid grid;
+    grid.width = 4;
+    grid.height = 4;
+    grid.crsId = "EPSG:4326";
+    const char *dates[4] = { "2020-03-01", "2020-04-01", "2020-05-01", "2020-06-01" };
+    const char *roles[4] = { "epoch1", "epoch2", "epoch3", "epoch4" };
+    for ( int band = 0; band < 4; ++band )
+    {
+        BandSpec spec;
+        spec.role = roles[band];
+        spec.acquisitionDate = dates[band];
+        spec.samples.assign( 16, 0.1 * ( band + 1 ) );
+        grid.bands.push_back( spec );
+    }
+    return grid;
+}
+
+std::string datesOf( const FaultGrid &grid )
+{
+    std::string joined;
+    for ( const auto &band : grid.bands )
+    {
+        if ( !joined.empty() )
+        {
+            joined += ",";
+        }
+        joined += band.acquisitionDate;
+    }
+    return joined;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: grid shift moves only the grid origin", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+
+    FaultSpec spec;
+    spec.familyId = "grid_shift";
+    spec.params["dx"] = 0.5;
+    spec.params["dy"] = -0.5;
+    spec.seed = 3;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "geo_transform.origin_x" ).number ==
+           Catch::Approx( before.at( "geo_transform.origin_x" ).number + 0.5 ) );
+    // dx/dy are image-space pixel offsets: a north-up grid has pixelY < 0,
+    // so dy = -0.5 moves the origin NORTH by half a pixel.
+    CHECK( after.at( "geo_transform.origin_y" ).number ==
+           Catch::Approx( before.at( "geo_transform.origin_y" ).number + 0.5 ) );
+    // Pixel size and everything else must stay untouched.
+    CHECK( grid.geoTransform[1] == 1.0 );
+    CHECK( grid.geoTransform[5] == -1.0 );
+    CHECK( after.at( "band.mean.epoch1" ).number ==
+           before.at( "band.mean.epoch1" ).number );
+}
+
+TEST_CASE( "fault lab: CRS mismatch rewrites the CRS only", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "crs" ).text == "EPSG:4326" );
+
+    FaultSpec spec;
+    spec.familyId = "crs_mismatch";
+    spec.params["crs"] = "EPSG:3857";
+    spec.seed = 3;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( grid.crsId == "EPSG:3857" );
+    CHECK( measureObservables( grid ).at( "crs" ).text == "EPSG:3857" );
+
+    SECTION( "unknown CRS refused" )
+    {
+        FaultSpec bad = spec;
+        bad.params["crs"] = "EPSG:9999";
+        FaultGrid local = temporalGrid();
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( local.crsId == "EPSG:4326" );
+    }
+    SECTION( "declaring the fixture's own CRS is not a fault" )
+    {
+        FaultSpec same = spec;
+        same.params["crs"] = "EPSG:4326";
+        FaultGrid local = temporalGrid();
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: temporal shuffle permutes dated epochs deterministically", "[faultlab]" )
+{
+    const std::string original = "2020-03-01,2020-04-01,2020-05-01,2020-06-01";
+
+    SECTION( "same seed replays the same permutation" )
+    {
+        FaultGrid a = temporalGrid();
+        FaultGrid b = temporalGrid();
+        FaultSpec spec;
+        spec.familyId = "temporal_shuffle";
+        spec.seed = 42;
+        REQUIRE( applyFault( a, spec ).ok );
+        REQUIRE( applyFault( b, spec ).ok );
+        CHECK( datesOf( a ) == datesOf( b ) );
+        CHECK( datesOf( a ) != original );
+    }
+    SECTION( "the permutation always moves the epoch order" )
+    {
+        for ( std::uint32_t seed = 0; seed < 16; ++seed )
+        {
+            FaultGrid grid = temporalGrid();
+            FaultSpec spec;
+            spec.familyId = "temporal_shuffle";
+            spec.seed = seed;
+            const auto outcome = applyFault( grid, spec );
+            INFO( seed );
+            REQUIRE( outcome.ok );
+            CHECK( outcome.mutations == 1 );
+            CHECK( datesOf( grid ) != original );
+            // Same multiset of dates: a shuffle, not a rewrite.
+            CHECK( datesOf( grid ).size() == original.size() );
+        }
+    }
+    SECTION( "a grid without dated epochs refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "temporal_shuffle";
+        spec.seed = 1;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: temporal gap drops one dated epoch", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "acquisition_dates" ).text ==
+           "2020-03-01,2020-04-01,2020-05-01,2020-06-01" );
+
+    FaultSpec spec;
+    spec.familyId = "temporal_gap";
+    spec.params["epoch_index"] = 1;
+    spec.seed = 9;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands.size() == 3 );
+    CHECK( measureObservables( grid ).at( "acquisition_dates" ).text ==
+           "2020-03-01,2020-05-01,2020-06-01" );
+
+    SECTION( "out-of-range index refused" )
+    {
+        FaultGrid local = temporalGrid();
+        FaultSpec bad;
+        bad.familyId = "temporal_gap";
+        bad.params["epoch_index"] = 7;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( local.bands.size() == 4 );
+    }
+    SECTION( "a non-integer index refused" )
+    {
+        FaultGrid local = temporalGrid();
+        FaultSpec bad;
+        bad.familyId = "temporal_gap";
+        bad.params["epoch_index"] = 1.5;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
