@@ -10,6 +10,8 @@ add_library( sicnu_agent_loop STATIC
     session_state.cpp
     decision_record.cpp
     session_journal.cpp
+    session_seams.cpp
+    session_policy.cpp
 )
 
 target_include_directories( sicnu_agent_loop PUBLIC ${CMAKE_SOURCE_DIR}/src )

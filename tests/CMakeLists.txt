@@ -9582,6 +9582,14 @@ target_link_libraries(test_agent_loop_core PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_core)
 
+# RS14-11: seam interfaces, deterministic offline doubles, session policy.
+add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
+target_link_libraries(test_agent_loop_seams PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_seams)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
