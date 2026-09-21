@@ -6,17 +6,43 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include <cmath>
+#include <limits>
+
 namespace sicnu::suitability
 {
 
 namespace
 {
 
+/// Doubles below 2^53 represent integers exactly; anything beyond cannot be
+/// a faithful qint64 and a cast would be undefined behavior (e.g. JSON
+/// 1e300 or an infinity from 1e999).
+inline constexpr double kMaxExactIntegralDouble = 9007199254740992.0; // 2^53
+
 sicnu::data::Diagnostic invalidGoal( const QString &message )
 {
     return sicnu::data::Diagnostic{ QStringLiteral( "suitability.goal_invalid" ),
                                     message,
                                     sicnu::data::DiagnosticSeverity::Error };
+}
+
+/// Parses an integral goal field from JSON without UB: the value must be a
+/// finite double in exact-integer range. Missing fields keep their default.
+sicnu::data::Result<qint64> boundedIntegral( const QJsonObject &json, const QString &key,
+                                             qint64 defaultValue )
+{
+    const QJsonValue value = json.value( key );
+    if ( !value.isDouble() )
+        return sicnu::data::Result<qint64>::success( defaultValue );
+    const double raw = value.toDouble();
+    if ( !std::isfinite( raw ) || raw < -kMaxExactIntegralDouble
+         || raw > kMaxExactIntegralDouble )
+    {
+        return sicnu::data::Result<qint64>::failure( invalidGoal(
+            QStringLiteral( "%1 is not a representable integer" ).arg( key ) ) );
+    }
+    return sicnu::data::Result<qint64>::success( static_cast< qint64 >( raw ) );
 }
 
 /// The single validation gate for goal values. Both fromJson and
@@ -54,6 +80,21 @@ sicnu::data::Result<void> validateGoal( const SuitabilityGoal &goal )
     if ( goal.minGsdM > 0.0 && goal.maxGsdM > 0.0 && goal.minGsdM > goal.maxGsdM )
         return sicnu::data::Result<void>::failure(
             invalidGoal( QStringLiteral( "minGsdM must not exceed maxGsdM" ) ) );
+    // Absurd numbers are invalid goals, not "unset": NaN would silently pass
+    // every comparison downstream and a negative GSD bound is meaningless.
+    const double checkedDoubles[] = { goal.minGsdM,          goal.maxGsdM,
+                                      goal.maxCloudCoverPercent, goal.minCoverageFraction,
+                                      goal.modelMinGsdM,     goal.modelMaxGsdM };
+    for ( const double value : checkedDoubles )
+    {
+        if ( !std::isfinite( value ) )
+            return sicnu::data::Result<void>::failure( invalidGoal(
+                QStringLiteral( "goal carries a non-finite numeric value" ) ) );
+    }
+    if ( goal.minGsdM < 0.0 || goal.maxGsdM < 0.0 || goal.modelMinGsdM < 0.0
+         || goal.modelMaxGsdM < 0.0 )
+        return sicnu::data::Result<void>::failure(
+            invalidGoal( QStringLiteral( "GSD bounds must not be negative" ) ) );
     if ( goal.maxCloudCoverPercent < -1.0 || goal.maxCloudCoverPercent > 100.0 )
         return sicnu::data::Result<void>::failure(
             invalidGoal( QStringLiteral( "maxCloudCoverPercent must lie in [-1, 100]" ) ) );
@@ -199,8 +240,10 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
         goal.requiredBandRoles.append( role.toString() );
 
     goal.maxCloudCoverPercent = json.value( QStringLiteral( "max_cloud_cover_percent" ) ).toDouble( -1.0 );
-    goal.minSamples = static_cast< qint64 >(
-        json.value( QStringLiteral( "min_samples" ) ).toDouble( 0.0 ) );
+    const auto minSamples = boundedIntegral( json, QStringLiteral( "min_samples" ), 0 );
+    if ( !minSamples.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( minSamples.diagnostics() );
+    goal.minSamples = minSamples.value();
 
     const QJsonArray classesArray = json.value( QStringLiteral( "required_classes" ) ).toArray();
     for ( const QJsonValue &className : classesArray )
@@ -220,8 +263,10 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
     }
 
     goal.minCoverageFraction = json.value( QStringLiteral( "min_coverage_fraction" ) ).toDouble();
-    goal.minScenesInWindow = static_cast< qint64 >(
-        json.value( QStringLiteral( "min_scenes_in_window" ) ).toDouble( 0.0 ) );
+    const auto minScenes = boundedIntegral( json, QStringLiteral( "min_scenes_in_window" ), 0 );
+    if ( !minScenes.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( minScenes.diagnostics() );
+    goal.minScenesInWindow = minScenes.value();
 
     // Unknown fields are ignored (forward compatibility), but the values that
     // did parse obey the same contract as an in-memory goal.
