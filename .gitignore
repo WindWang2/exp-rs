@@ -440,3 +440,8 @@ data/labs/_tmp/
 !.planning/ds41-workflow-durability-13/
 .planning/ds41-workflow-durability-13/*
 !.planning/ds41-workflow-durability-13/*.md
+
+# rs14-labspec2-runtime (LabSpec 2.0 + lab runtime): track planning notes (markdown only; logs stay local).
+!.planning/rs14-labspec2-runtime/
+.planning/rs14-labspec2-runtime/*
+!.planning/rs14-labspec2-runtime/*.md
