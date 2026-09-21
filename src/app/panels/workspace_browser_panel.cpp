@@ -40,6 +40,7 @@ void WorkspaceGovernanceModel::setWorkspaceService( WorkspaceService *service )
     m_service = service;
     m_rows.clear();
     m_total = 0;
+    m_nextCursor.clear();
     endResetModel();
 }
 
@@ -68,11 +69,15 @@ void WorkspaceGovernanceModel::resetQuery()
     beginResetModel();
     m_rows.clear();
     m_total = 0;
+    m_nextCursor.clear();
     if ( m_service && m_service->isStoreOpen() )
     {
         const WorkspacePage page = m_service->query( m_query );
         m_total = page.total;
         m_rows = page.items;
+        m_nextCursor = page.nextCursor;
+        if ( m_nextCursor.isEmpty() )
+            m_total = m_rows.size();
     }
     endResetModel();
 }
@@ -159,19 +164,27 @@ bool WorkspaceGovernanceModel::canFetchMore( const QModelIndex &parent ) const
 {
     if ( parent.isValid() || !m_service )
         return false;
-    return m_rows.size() < m_total;
+    // Keyset walk: the continuation cursor is the termination signal — it is
+    // empty exactly when the walk is exhausted, so a view can never spin on a
+    // cursor that fetches nothing. (The total from the first page is kept for
+    // the status line only; a store that shrank mid-walk simply ends early.)
+    return !m_nextCursor.isEmpty();
 }
 
 void WorkspaceGovernanceModel::fetchMore( const QModelIndex &parent )
 {
-    if ( parent.isValid() || !m_service || m_rows.size() >= m_total )
+    if ( parent.isValid() || !m_service || m_nextCursor.isEmpty() )
         return;
     WorkspaceQuery query = m_query;
-    query.offset = m_rows.size();
+    query.offset = 0;
+    query.cursor = m_nextCursor;
     query.limit = kPageSize;
     const WorkspacePage page = m_service->query( query );
-    if ( page.items.isEmpty() )
+    if ( !page.cursorError.isEmpty() || page.items.isEmpty() )
     {
+        // Exhausted (or the cursor no longer matches the filters): terminate
+        // the walk rather than looping on a stale cursor.
+        m_nextCursor.clear();
         m_total = m_rows.size();
         return;
     }
@@ -180,6 +193,9 @@ void WorkspaceGovernanceModel::fetchMore( const QModelIndex &parent )
     for ( const QVariantMap &row : page.items )
         m_rows.append( row );
     endInsertRows();
+    m_nextCursor = page.nextCursor;
+    if ( m_nextCursor.isEmpty() )
+        m_total = m_rows.size();
 }
 
 QString WorkspaceGovernanceModel::entityId( int row ) const

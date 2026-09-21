@@ -41,6 +41,8 @@ qt_add_library(sicnu_data STATIC
   governance/workspace_lifecycle.cpp
   governance/workspace_lifecycle.h
   internal/source_provider.h
+  internal/catalog_record_store.cpp
+  internal/catalog_record_store.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h
   offline_mode.cpp

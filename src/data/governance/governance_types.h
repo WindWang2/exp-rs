@@ -269,6 +269,13 @@ struct WorkspaceQuery
     qint64 offset = 0;
     qint64 limit = 50;
     QString sortBy;               ///< "updated"|"name"|"acquisition" (default updated)
+    /// Keyset-pagination cursor (Data Scale 13.0). Opaque: callers carry it,
+    /// they never parse it (sicnu::data::QueryCursor). When set, the store
+    /// seeks directly to the first row after the cursor's (sort key, id)
+    /// tuple instead of walking `offset` rows — deep pages stay O(page).
+    /// Mutually exclusive with `offset` in practice: a cursor wins when both
+    /// are set. An empty string means "first page".
+    QString cursor;
 };
 
 struct FacetCount
@@ -283,6 +290,15 @@ struct WorkspacePage
     QVector<QVariantMap> items;   ///< row-shaped maps (bounded per page)
     QVector<FacetCount> facets;   ///< populated when query asks for one field
     QString facetField;
+    /// Continuation cursor for the NEXT page; empty when this page is the last
+    /// one. Only produced for first-page queries and cursor continuations —
+    /// the legacy `offset` walk keeps working unchanged for its callers.
+    QString nextCursor;
+    /// Set when `cursor` could not be honoured: "governance.cursor_invalid"
+    /// (undecodable/foreign encoding) or "governance.cursor_mismatch" (the
+    /// cursor's filter echo does not match this query's filters). The page is
+    /// then empty and `total` is 0 — never fabricated rows.
+    QString cursorError;
 };
 
 // ---------------------------------------------------------------------------

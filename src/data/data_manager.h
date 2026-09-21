@@ -105,6 +105,15 @@ class DataManager : public QObject
     /// the same asset). Remote http(s) hrefs also match the provider's
     /// `/vsicurl/` spelling (and vice versa). Read-only lookup over the catalog
     /// — the commit pipeline uses it to stamp derivation input lineage (#698).
+    ///
+    /// Contract note (Data Scale 13.0): the lookup is served by a
+    /// generation-scoped key index, so a record's canonical (symlink-resolved)
+    /// identity is resolved when the record ENTERS the catalog (or is
+    /// relocated), not per probe. A filesystem change that retargets a path
+    /// after registration (e.g. a symlink repointed) is therefore not observed
+    /// by the index; register/relocate again to refresh it. Providers already
+    /// canonicalize real files at registration, so the observable behaviour is
+    /// unchanged for every spelling the catalog was built with.
     std::optional<AssetSnapshot> findByPath( const QString &path ) const;
 
     /// Structured provenance attached to an asset, if any. Algorithm-produced

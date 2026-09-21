@@ -11662,6 +11662,31 @@ endif()
 # transitive edge in production CMake, not here.
 
 # ---------------------------------------------------------------------------
+# Data Scale 13.0 (Track C) — structural scale oracles for the DataManager
+# catalog (O(1) snapshot publication, generation-scoped path index) and the
+# GovernanceStore keyset pagination. Gates are structural counts and
+# equivalence checks against a verbatim copy of the pre-change lookup
+# algorithm; no absolute millisecond budgets. The 100k rungs are hermetic
+# (in-memory provider) and complete in seconds, so they run in the standard
+# lane; RUN_SERIAL keeps the shared build host quiet during the ladder.
+# ---------------------------------------------------------------------------
+qt_add_executable(test_data_scale
+  test_data_scale.cpp
+)
+target_link_libraries(test_data_scale PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  # The governance plan oracle asserts SQLite's own query plan for the paged
+  # SELECT, so the suite needs the SQLite C API directly (sicnu_data links it
+  # PRIVATE, which does not propagate to consumers).
+  SQLite::SQLite3
+)
+target_include_directories(test_data_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_scale TIMEOUT 600 RUN_SERIAL TRUE)
+
 # Platform 13.0: EO Model Runtime 13.0 ensemble execution (this track).
 # All three suites share the model-runtime closure; appended at the tail so
 # parallel tracks' append-only hunks stay conflict-free.
