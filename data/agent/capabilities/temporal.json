@@ -218,5 +218,17 @@
     "limitations": [
       "Nested-F attribution is asymptotic (Gaussian residuals); greedy segmentation, not a global optimum; kind band is a nominal code 0..4"
     ]
-  }
+  },
+{
+  "id": "rs:temporal_sar_fusion",
+  "family": "temporal",
+  "extends": "family:temporal",
+  "intents": ["temporal", "sar"],
+  "modality": ["optical", "sar"],
+  "resource": { "cost_class": "light", "large_raster_safe": true },
+  "crs": { "requires_projected": true },
+  "limitations": [
+    "Inputs must already be co-registered on the SAME pixel grid; the operator verifies the grid signature but never resamples"
+  ]
+}
 ]
