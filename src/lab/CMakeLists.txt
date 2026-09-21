@@ -4,6 +4,8 @@
 # no raster IO, no operator execution, no network. ADR 0174.
 add_library(sicnu_lab_runtime STATIC
   sha256.cpp
+  session_state.cpp
+  session_store.cpp
   spec_runtime.cpp
 )
 target_include_directories(sicnu_lab_runtime PUBLIC

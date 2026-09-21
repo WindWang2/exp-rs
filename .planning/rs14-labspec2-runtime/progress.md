@@ -11,3 +11,9 @@
   - `src/app/widgets/lab_spec_loader.cpp`: accepts spec_version 3 (shallow runtime-is-object check; deep validation stays in src/lab — single deep validator), rejects runtime key in v1/v2 ("requires spec_version 3"). NOT yet compiled (heavy app target) — exercised in Slice F heavy build.
   - Known follow-up: `tests/test_labspec.cpp:230` uses spec_version 3 as its unsupported-version negative probe; must be updated to probe 4/99 in Slice F (tracked below — do not forget).
 - Deferred to Slice F: check_lab_registry.py {1,2,3}; gen_lab_docs.py v3 rendering; test_labspec link sicnu_lab_runtime + v3 corpus cases; heavy build.
+
+## Slice B GREEN (2026-09-22)
+- session_state.{h,cpp}: LabSession value model, validated transitions (active/completed/abandoned, stage statuses), canonical key-sorted JSON (byte-stable, no timestamps), strict envelope parser (lab.session.schema|version).
+- session_store.{h,cpp}: atomic tmp+fsync+rename persistence (WorkflowCheckpointManager discipline), deterministic per-student sequence numbering from persisted files, spec-drift fail-closed load, typed store failures.
+- Test-fixed (not impl bugs): probe fixture needed seed (plan declares require_seed); manual checkpoint results must advance lastSeq; store numbering counts persisted files.
+- `test_lab_runtime`: **383 assertions / 13 cases green**.

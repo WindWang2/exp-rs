@@ -406,3 +406,376 @@ TEST_CASE( "spec fingerprint is sha256 hex and deterministic", "[lab_runtime][fi
   for ( const char ch : a )
     REQUIRE( ( ( ch >= '0' && ch <= '9' ) || ( ch >= 'a' && ch <= 'f' ) ) );
 }
+
+// ---------------------------------------------------------------------------
+// Slice B: session state machine + persistence
+// ---------------------------------------------------------------------------
+
+#include "lab/session_state.h"
+#include "lab/session_store.h"
+
+#include <filesystem>
+#include <fstream>
+#include <set>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
+
+namespace
+{
+
+sicnu::lab::LabRuntimePlan probePlan()
+{
+  const auto result = sicnu::lab::parseRuntimeBlock( parseJson( validV3Doc() ) );
+  REQUIRE( result.ok );
+  return result.value;
+}
+
+sicnu::lab::SessionMeta probeMeta()
+{
+  sicnu::lab::SessionMeta meta;
+  meta.labId = "lab90_runtime_probe";
+  meta.studentId = "student1";
+  meta.labSpecVersion = 3;
+  meta.planSource = "authored_v3";
+  // The probe plan declares require_seed — the default meta carries one.
+  meta.hasSeed = true;
+  meta.seed = 42;
+  return meta;
+}
+
+} // namespace
+
+TEST_CASE( "session starts deterministically and mirrors the plan", "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+
+  auto result = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( result.ok );
+  const sicnu::lab::LabSession &session = result.value;
+  REQUIRE( session.schemaId == "sicnu.lab-session/1" );
+  REQUIRE( session.sessionId == "lab90_runtime_probe/student1/1" );
+  REQUIRE( session.state == sicnu::lab::SessionState::Active );
+  REQUIRE( session.stages.size() == 2 );
+  REQUIRE( session.stages[0].stageId == "s1_preprocess" );
+  REQUIRE( session.stages[0].status == sicnu::lab::StageStatus::Active );
+  REQUIRE( session.lastSeq == 0 );
+  REQUIRE( session.hasSeed );
+  REQUIRE( session.seed == 42 );
+
+  // Session numbering is the store's / caller's decision — deterministic.
+  auto second = sicnu::lab::startSession( plan, probeMeta(), 2 );
+  REQUIRE( second.ok );
+  REQUIRE( second.value.sessionId == "lab90_runtime_probe/student1/2" );
+}
+
+TEST_CASE( "session start enforces the reproducibility seed contract", "[lab_runtime][session]" )
+{
+  sicnu::lab::LabRuntimePlan plan = probePlan();
+  plan.reproducibility.requireSeed = true;
+
+  sicnu::lab::SessionMeta meta = probeMeta();
+  meta.hasSeed = false;
+  const auto withoutSeed = sicnu::lab::startSession( plan, meta, 1 );
+  REQUIRE( !withoutSeed.ok );
+  REQUIRE( withoutSeed.diagnostics.front().code == "lab.session.seed_required" );
+
+  meta.hasSeed = true;
+  meta.seed = 42;
+  const auto withSeed = sicnu::lab::startSession( plan, meta, 1 );
+  REQUIRE( withSeed.ok );
+  REQUIRE( withSeed.value.hasSeed );
+  REQUIRE( withSeed.value.seed == 42 );
+}
+
+TEST_CASE( "session start rejects malformed identity metadata", "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+
+  sicnu::lab::SessionMeta meta = probeMeta();
+  meta.studentId = "";
+  REQUIRE( sicnu::lab::startSession( plan, meta, 1 ).diagnostics.front().code == "lab.session.field" );
+
+  meta = probeMeta();
+  meta.studentId = "../escape";
+  REQUIRE( sicnu::lab::startSession( plan, meta, 1 ).diagnostics.front().code == "lab.session.field" );
+
+  meta = probeMeta();
+  meta.planSource = "vibes";
+  REQUIRE( sicnu::lab::startSession( plan, meta, 1 ).diagnostics.front().code == "lab.session.field" );
+}
+
+TEST_CASE( "completion requires every gate checkpoint passed and every question answered",
+           "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto result = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( result.ok );
+  sicnu::lab::LabSession session = result.value;
+
+  // Nothing recorded yet: completion refused, listing what is missing.
+  auto early = sicnu::lab::completeSession( session, plan );
+  REQUIRE( !early.ok );
+  REQUIRE( early.diagnostics.front().code == "lab.session.incomplete" );
+  REQUIRE( early.diagnostics.size() >= 2 );
+
+  // Answer every question…
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "the clipped extent", std::nullopt ).ok );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_ndvi", "", 0.35 ).ok );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_choice", "a", std::nullopt ).ok );
+
+  // …but the gate checkpoint is still open.
+  auto noGate = sicnu::lab::completeSession( session, plan );
+  REQUIRE( !noGate.ok );
+  REQUIRE( noGate.diagnostics.front().code == "lab.session.incomplete" );
+
+  // Latest-wins: a failing result then a passing one for the gate checkpoint.
+  sicnu::lab::CheckpointResult failed;
+  failed.checkpointId = "ckpt_clip";
+  failed.verdict = sicnu::lab::Verdict::Fail;
+  failed.attempt = 1;
+  failed.seq = sicnu::lab::nextSeq( session );
+  session.checkpointResults.push_back( failed );
+
+  sicnu::lab::CheckpointResult passed = failed;
+  passed.verdict = sicnu::lab::Verdict::Pass;
+  passed.attempt = 2;
+  passed.seq = failed.seq + 1;
+  session.checkpointResults.push_back( passed );
+  session.lastSeq = passed.seq;
+
+  REQUIRE( sicnu::lab::completeSession( session, plan ).ok );
+  REQUIRE( session.state == sicnu::lab::SessionState::Completed );
+
+  // Terminal: completion/abandon after completion is a typed bad transition.
+  REQUIRE( !sicnu::lab::completeSession( session, plan ).ok );
+  REQUIRE( sicnu::lab::completeSession( session, plan ).diagnostics.front().code ==
+           "lab.session.bad_transition" );
+  REQUIRE( !sicnu::lab::abandonSession( session ).ok );
+}
+
+TEST_CASE( "choice answers must be one of the declared choices", "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto result = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( result.ok );
+  sicnu::lab::LabSession session = result.value;
+
+  const auto bad = sicnu::lab::recordAnswer( session, plan, "q_choice", "c", std::nullopt );
+  REQUIRE( !bad.ok );
+  REQUIRE( bad.diagnostics.front().code == "lab.session.field" );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_choice", "b", std::nullopt ).ok );
+
+  // Numeric questions require a numeric payload.
+  const auto nonNumeric = sicnu::lab::recordAnswer( session, plan, "q_ndvi", "0.3", std::nullopt );
+  REQUIRE( !nonNumeric.ok );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_ndvi", "", 0.3 ).ok );
+
+  // Unknown question id is a typed refusal, never a silent record.
+  REQUIRE( !sicnu::lab::recordAnswer( session, plan, "q_ghost", "x", std::nullopt ).ok );
+}
+
+TEST_CASE( "abandon and reopen keep the session restartable", "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto result = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( result.ok );
+  sicnu::lab::LabSession session = result.value;
+
+  REQUIRE( sicnu::lab::abandonSession( session ).ok );
+  REQUIRE( session.state == sicnu::lab::SessionState::Abandoned );
+
+  // Recording work while abandoned is refused: no zombie edits.
+  REQUIRE( !sicnu::lab::recordAnswer( session, plan, "q_extent", "x", std::nullopt ).ok );
+
+  REQUIRE( sicnu::lab::reopenSession( session ).ok );
+  REQUIRE( session.state == sicnu::lab::SessionState::Active );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "x", std::nullopt ).ok );
+}
+
+TEST_CASE( "canonical session JSON round-trips byte-stably", "[lab_runtime][session][persistence]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  sicnu::lab::SessionMeta meta = probeMeta();
+  meta.hasSeed = true;
+  meta.seed = 42;
+  auto result = sicnu::lab::startSession( plan, meta, 1 );
+  REQUIRE( result.ok );
+  sicnu::lab::LabSession session = result.value;
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "answer", std::nullopt ).ok );
+  sicnu::lab::ToolChoice choice;
+  choice.stageId = "s1_preprocess";
+  choice.operatorId = "rs:clip";
+  choice.paramsSubset = { { "bands", "3" } };
+  choice.allowed = true;
+  choice.seq = sicnu::lab::nextSeq( session );
+  REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+
+  const std::string bytesA = sicnu::lab::sessionToCanonicalBytes( session );
+  const std::string bytesB = sicnu::lab::sessionToCanonicalBytes( session );
+  REQUIRE( bytesA == bytesB );
+  REQUIRE( bytesA.find( "timestamp" ) == std::string::npos );
+
+  const Json::Value doc = parseJson( bytesA );
+  const auto back = sicnu::lab::sessionFromJson( doc );
+  REQUIRE( back.ok );
+  REQUIRE( back.value.sessionId == session.sessionId );
+  REQUIRE( back.value.state == session.state );
+  REQUIRE( back.value.lastSeq == session.lastSeq );
+  REQUIRE( back.value.questionAnswers.size() == session.questionAnswers.size() );
+  REQUIRE( back.value.toolChoices.size() == session.toolChoices.size() );
+  REQUIRE( back.value.toolChoices.back().paramsSubset.at( "bands" ) == "3" );
+  REQUIRE( back.value.seed == 42 );
+}
+
+TEST_CASE( "session JSON envelope is strictly versioned and shaped", "[lab_runtime][session][negative]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto result = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( result.ok );
+  std::string bytes = sicnu::lab::sessionToCanonicalBytes( result.value );
+
+  SECTION( "unknown schema generation is refused, not adopted" )
+  {
+    Json::Value doc = parseJson( bytes );
+    doc[ "schema" ] = "sicnu.lab-session/2";
+    REQUIRE( sicnu::lab::sessionFromJson( doc ).diagnostics.front().code == "lab.session.version" );
+  }
+  SECTION( "unknown key" )
+  {
+    Json::Value doc = parseJson( bytes );
+    doc[ "magic" ] = true;
+    REQUIRE( sicnu::lab::sessionFromJson( doc ).diagnostics.front().code == "lab.session.schema" );
+  }
+  SECTION( "missing session id" )
+  {
+    Json::Value doc = parseJson( bytes );
+    doc.removeMember( "session_id" );
+    REQUIRE( sicnu::lab::sessionFromJson( doc ).diagnostics.front().code == "lab.session.schema" );
+  }
+  SECTION( "bad state vocabulary" )
+  {
+    Json::Value doc = parseJson( bytes );
+    doc[ "state" ] = "finished";
+    REQUIRE( sicnu::lab::sessionFromJson( doc ).diagnostics.front().code == "lab.session.schema" );
+  }
+}
+
+namespace
+{
+
+std::string makeSessionDir()
+{
+  static unsigned counter = 0;
+  const std::string dir = ( std::filesystem::temp_directory_path() /
+                            ( "sicnu_lab_session_test_" + std::to_string( ++counter ) +
+                              "_" + std::to_string( ::getpid() ) ) )
+                             .string();
+  std::filesystem::create_directories( dir );
+  return dir;
+}
+
+} // namespace
+
+TEST_CASE( "session store persists atomically and resumes deterministically",
+           "[lab_runtime][store]" )
+{
+  const std::string root = makeSessionDir();
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  const std::string fingerprint = sicnu::lab::specFingerprint( "spec-bytes" );
+
+  sicnu::lab::LabSessionStore store( root );
+  auto created = store.create( plan, probeMeta(), fingerprint );
+  REQUIRE( created.ok );
+  REQUIRE( created.value.sessionId == "lab90_runtime_probe/student1/1" );
+
+  // Store numbering derives from persisted files: the first session only
+  // occupies sequence 1 once saved.
+  REQUIRE( store.save( created.value ).ok );
+  auto second = store.create( plan, probeMeta(), fingerprint );
+  REQUIRE( second.ok );
+  REQUIRE( second.value.sessionId == "lab90_runtime_probe/student1/2" );
+  REQUIRE( store.save( second.value ).ok );
+
+  // Deterministic bytes across independent saves of the same session.
+  REQUIRE( store.save( created.value ).ok );
+  const std::string path = root + "/lab90_runtime_probe/student1-1.session.json";
+  std::ifstream in( path, std::ios::binary );
+  REQUIRE( in.good() );
+  std::string diskBytes( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+  REQUIRE( diskBytes == sicnu::lab::sessionToCanonicalBytes( created.value ) );
+
+  // Resume with the matching spec fingerprint.
+  const auto loaded = store.load( created.value.sessionId, fingerprint );
+  REQUIRE( loaded.ok );
+  REQUIRE( loaded.value.sessionId == created.value.sessionId );
+  REQUIRE( loaded.value.labSpecFingerprint == fingerprint );
+
+  // Spec drift is fail-closed: no silent adoption of a changed lab.
+  const auto drifted = store.load( created.value.sessionId, "other-spec" );
+  REQUIRE( !drifted.ok );
+  REQUIRE( drifted.diagnostics.front().code == "lab.session.spec_drift" );
+
+  // Fingerprint-free read (future agent projection surface).
+  const auto raw = store.loadAny( created.value.sessionId );
+  REQUIRE( raw.ok );
+  REQUIRE( raw.value.sessionId == created.value.sessionId );
+
+  const auto ids = store.listSessionIds();
+  REQUIRE( ids.size() == 2 );
+  REQUIRE( ids[0] < ids[1] );
+  REQUIRE( store.listSessions().summaries.size() == 2 );
+
+  std::filesystem::remove_all( root );
+}
+
+TEST_CASE( "session store failures are typed", "[lab_runtime][store][negative]" )
+{
+  const std::string root = makeSessionDir();
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  sicnu::lab::LabSessionStore store( root );
+
+  SECTION( "missing session" )
+  {
+    const auto missing = store.load( "lab90_runtime_probe/student1/9", "fp" );
+    REQUIRE( !missing.ok );
+    REQUIRE( missing.diagnostics.front().code == "lab.session.not_found" );
+  }
+  SECTION( "corrupt payload" )
+  {
+    std::filesystem::create_directories( root + "/lab90_runtime_probe" );
+    std::ofstream out( root + "/lab90_runtime_probe/student1-1.session.json", std::ios::binary );
+    out << "{ not json";
+    out.close();
+    const auto corrupt = store.load( "lab90_runtime_probe/student1/1", "fp" );
+    REQUIRE( !corrupt.ok );
+    REQUIRE( corrupt.diagnostics.front().code == "lab.session.corrupt" );
+  }
+  SECTION( "future envelope generation" )
+  {
+    const auto created = store.create( plan, probeMeta(), "fp" );
+    REQUIRE( created.ok );
+    std::string bytes = sicnu::lab::sessionToCanonicalBytes( created.value );
+    const std::size_t pos = bytes.find( "sicnu.lab-session/1" );
+    REQUIRE( pos != std::string::npos );
+    bytes.replace( pos, 19, "sicnu.lab-session/9" );
+    std::filesystem::create_directories( root + "/lab90_runtime_probe" );
+    std::ofstream out( root + "/lab90_runtime_probe/student1-1.session.json", std::ios::binary );
+    out << bytes;
+    out.close();
+    const auto future = store.load( created.value.sessionId, "fp" );
+    REQUIRE( !future.ok );
+    REQUIRE( future.diagnostics.front().code == "lab.session.version" );
+  }
+  SECTION( "unsafe identity never reaches the filesystem" )
+  {
+    sicnu::lab::SessionMeta meta = probeMeta();
+    meta.studentId = "../../etc";
+    const auto unsafe = store.create( plan, meta, "fp" );
+    REQUIRE( !unsafe.ok );
+    REQUIRE( unsafe.diagnostics.front().code == "lab.session.field" );
+  }
+
+  std::filesystem::remove_all( root );
+}

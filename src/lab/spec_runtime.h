@@ -45,7 +45,8 @@ struct LabDiag
 
 /// Value-semantic result: `ok` mirrors sicnu::data::Result's operator bool;
 /// failures carry one or more diagnostics, never a fallback value.
-template <typename T>
+/// LabResult<> (T defaults to void) is the status-only form.
+template <typename T = void>
 struct LabResult
 {
   bool ok = false;
@@ -56,6 +57,21 @@ struct LabResult
   static LabResult failure( std::vector<LabDiag> diags )
   {
     return LabResult{ false, {}, std::move( diags ) };
+  }
+};
+
+/// Status-only result (LabResult<void>): mutations that only succeed or
+/// refuse with diagnostics.
+template <>
+struct LabResult<void>
+{
+  bool ok = false;
+  std::vector<LabDiag> diagnostics;
+
+  static LabResult success() { return LabResult{ true, {} }; }
+  static LabResult failure( std::vector<LabDiag> diags )
+  {
+    return LabResult{ false, std::move( diags ) };
   }
 };
 
