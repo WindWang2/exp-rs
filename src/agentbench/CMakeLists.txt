@@ -14,6 +14,8 @@ add_library( sicnu_agentbench STATIC
     failure_taxonomy.h
     json_writer.cpp
     json_writer.h
+    trace.cpp
+    trace.h
     version.h
 )
 

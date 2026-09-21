@@ -11909,3 +11909,19 @@ set_target_properties(test_agentbench_case PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_case TEST_PREFIX "test_agentbench_case::")
+
+# RS14 agent-benchmark Slice B: trace schema + replay validation.
+add_executable(test_agentbench_trace test_agentbench_trace.cpp)
+target_link_libraries(test_agentbench_trace PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_trace)
+target_include_directories(test_agentbench_trace PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_trace PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_trace TEST_PREFIX "test_agentbench_trace::")

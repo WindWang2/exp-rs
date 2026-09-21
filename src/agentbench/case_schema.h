@@ -160,4 +160,8 @@ CaseParse parseCase( const std::string &jsonText );
 /// fidelity for documents carrying only v1-known fields).
 Json::Value caseToJson( const AgentCase &caseValue );
 
+/// Declared workspace scope roots (`initial_state.workspace_roots`); empty
+/// when the case declares no path constraint.
+std::vector<std::string> caseScopeRoots( const AgentCase &caseValue );
+
 } // namespace sicnu::agentbench

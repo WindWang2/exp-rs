@@ -427,6 +427,16 @@ CaseParse parseCase( const std::string &jsonText )
 		result.error = invalidField( "initial_state", "initial_state must be an object" );
 		return result;
 	}
+	if ( root["initial_state"].isMember( "workspace_roots" ) )
+	{
+		std::string duplicate;
+		if ( !root["initial_state"]["workspace_roots"].isArray() ||
+		     !hasUniqueNonEmptyStrings( root["initial_state"]["workspace_roots"], duplicate ) )
+		{
+			result.error = invalidField( "initial_state.workspace_roots", "workspace_roots must be an array of unique non-empty strings" );
+			return result;
+		}
+	}
 	parsed.initialState = root["initial_state"];
 
 	const Json::Value &tools = root["allowed_tools"];
@@ -729,6 +739,19 @@ Json::Value caseToJson( const AgentCase &caseValue )
 		doc["failure_expectation"] = caseValue.failureExpectation;
 
 	return doc;
+}
+
+std::vector<std::string> caseScopeRoots( const AgentCase &caseValue )
+{
+	std::vector<std::string> roots;
+	const Json::Value &declared = caseValue.initialState["workspace_roots"];
+	if ( declared.isArray() )
+	{
+		for ( const Json::Value &root : declared )
+			if ( root.isString() )
+				roots.push_back( root.asString() );
+	}
+	return roots;
 }
 
 } // namespace sicnu::agentbench
