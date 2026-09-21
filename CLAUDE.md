@@ -33,6 +33,7 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).
 *   `data/samples/`: Lab / tutorial sample datasets.
 *   `docs/`: Design, architecture, ADR ledger (`docs/adr/0001`–`0145`, lazily created by domain-modeling skills), labs, agent notes, specs/plans (`docs/superpowers/` holds historical design docs).
+    *   **Superseding note (ADR 0166):** the ADR range above is stale — the ledger has grown past `0145` and the highest numbered ADR is `0165` (numbers are duplicated in a few places, so treat `ls docs/adr` as the authority, not any index). New ADRs start at `0166`.
 *   `refs/qgis/`, `refs/boost/`: Optional local reference trees (gitignored).
 *   `itk_ref/`, `otb_ref/`: ITK / OTB source at repo root (CMake-coupled).
 *   `src/app/`: Application shell — see [P0–P5 refactor spec](docs/superpowers/specs/2026-07-03-refactor-sprint-design.md) for module map:

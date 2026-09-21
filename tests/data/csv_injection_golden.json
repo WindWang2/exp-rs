@@ -1,0 +1,82 @@
+{
+  "schema": "sicnu.csv-injection-golden/1",
+  "source": "scripts/run_classroom_batch.py::csv_safe",
+  "cases": [
+    {
+      "input": "=cmd|'/c calc'!A1",
+      "output": "'=cmd|'/c calc'!A1"
+    },
+    {
+      "input": "=1+1",
+      "output": "'=1+1"
+    },
+    {
+      "input": "+SUM(A1:A9)",
+      "output": "'+SUM(A1:A9)"
+    },
+    {
+      "input": "-2+3+cmd|'/c calc'!A0",
+      "output": "'-2+3+cmd|'/c calc'!A0"
+    },
+    {
+      "input": "@SUM(1+9)*cmd",
+      "output": "'@SUM(1+9)*cmd"
+    },
+    {
+      "input": "=HYPERLINK(\"http://evil.example\",\"click\")",
+      "output": "'=HYPERLINK(\"http://evil.example\",\"click\")"
+    },
+    {
+      "input": "\t=tab-led",
+      "output": "'\t=tab-led"
+    },
+    {
+      "input": "\r=cr-led",
+      "output": "'\r=cr-led"
+    },
+    {
+      "input": "-12.5",
+      "output": "'-12.5"
+    },
+    {
+      "input": "+",
+      "output": "'+"
+    },
+    {
+      "input": "=",
+      "output": "'="
+    },
+    {
+      "input": "",
+      "output": ""
+    },
+    {
+      "input": "2024001",
+      "output": "2024001"
+    },
+    {
+      "input": "a=b",
+      "output": "a=b"
+    },
+    {
+      "input": "张=三",
+      "output": "张=三"
+    },
+    {
+      "input": "  =lead",
+      "output": "  =lead"
+    },
+    {
+      "input": "\n=x",
+      "output": "\n=x"
+    },
+    {
+      "input": "lab12_sar_processing",
+      "output": "lab12_sar_processing"
+    },
+    {
+      "input": "student_name (late)",
+      "output": "student_name (late)"
+    }
+  ]
+}

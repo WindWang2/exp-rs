@@ -146,7 +146,11 @@
             "savitzky_golay",
             "whittaker",
             "whittaker_robust",
-            "moving_average"
+            "moving_average",
+            "savitzky_golay_days",
+            "whittaker_days",
+            "whittaker_robust_days",
+            "moving_average_days"
           ],
           "name" : "method",
           "required" : false,
@@ -185,6 +189,12 @@
           "name" : "window",
           "required" : false,
           "type" : "integer"
+        },
+        {
+          "default" : "32",
+          "name" : "window_days",
+          "required" : false,
+          "type" : "numeric"
         }
       ]
     },

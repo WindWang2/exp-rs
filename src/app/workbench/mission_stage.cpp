@@ -182,21 +182,6 @@ bool missionTaskStatusIsSettled( MissionTaskStatus status )
     return false;
 }
 
-bool missionTaskStatusIsRetryable( MissionTaskStatus status )
-{
-    switch ( status )
-    {
-        case MissionTaskStatus::Failed:
-        case MissionTaskStatus::Canceled:
-        case MissionTaskStatus::Stale:
-            return true;
-        case MissionTaskStatus::Pending:
-        case MissionTaskStatus::Running:
-        case MissionTaskStatus::Succeeded:
-            return false;
-    }
-    return false;
-}
 
 bool missionTransitionAllowed( MissionTaskStatus from, MissionTaskStatus to )
 {
@@ -293,7 +278,9 @@ QVector<MissionTask> MissionTimeline::tasksForStage( MissionStage stage ) const
 MissionOutcome MissionTimeline::transition( const QString &taskId,
                                             MissionTaskStatus to,
                                             const QString &iso,
-                                            const QString &note )
+                                            const QString &note,
+                                            const QString &errorCode,
+                                            const QString &errorMessage )
 {
     MissionTask *t = mutableTask( taskId );
     if ( t == nullptr )
@@ -342,6 +329,11 @@ MissionOutcome MissionTimeline::transition( const QString &taskId,
                 t->errorMessage.clear();
                 break;
             case MissionTaskStatus::Failed:
+                t->endedIso = iso;
+                // The latest failure wins; an empty pair clears a previous one.
+                t->errorCode = errorCode;
+                t->errorMessage = errorMessage;
+                break;
             case MissionTaskStatus::Stale:
                 t->endedIso = iso;
                 break;
@@ -665,8 +657,11 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
         intFromJson( obj.value( QStringLiteral( "revision" ) ) ) );
     decoded.mSeq = static_cast<quint64>(
         intFromJson( obj.value( QStringLiteral( "last_event_seq" ) ) ) );
-    if ( decoded.mSeq == 0 && !decoded.mEvents.isEmpty() )
-        decoded.mSeq = decoded.mEvents.last().seq;
+    // Backfill from the log itself: a short or tampered last_event_seq must
+    // never make the next mutation mint a DUPLICATE seq — that would break
+    // eventsSince() for every incremental consumer (GUI model, agent cursor).
+    if ( !decoded.mEvents.isEmpty() )
+        decoded.mSeq = qMax( decoded.mSeq, decoded.mEvents.last().seq );
 
     *this = std::move( decoded );
     return true;

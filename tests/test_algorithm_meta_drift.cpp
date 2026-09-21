@@ -74,9 +74,9 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // rs:terrain_solar / rs:terrain_viewshed (F16) had no shipped sidecars,
     // and four rs:temporal_* sidecars whose operators no longer declare task
     // families were still on disk (the D16 removal never landed on disk).
-    REQUIRE( expectedCatalog.size() == 55 );
+    // Temporal Phenology 12.0 adds rs:temporal_sar_fusion (capability sidecar
+    // + contract row only — no task family, so it stays out of this catalog).
     REQUIRE( expectedCatalog.size() == 55 ); // 51 master-sidecar set at adf8f989 + 6 missing exports + 4 stale removals + 2 Spectral Intelligence 12.0
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -156,7 +156,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 55 );
+        REQUIRE( written == static_cast<int>( expectedCatalog.size() ) );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

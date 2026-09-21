@@ -41,8 +41,11 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     // here too (#1056). io:inspect/io:doctor are RSOperators, not registry
     // members, and stay on the operator surface.
     const bool isIo = ( spatial->name().rfind( "io:", 0 ) == 0 );
+    // Mission Runtime 13.0: the mission:* tools join the catalog surface.
+    const bool isMission = ( spatial->name().rfind( "mission:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
-         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo )
+         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo &&
+         !isMission )
       continue;
 
     AgentTool tool;
@@ -58,6 +61,7 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isHarness         ? "harness"
                  : isEditing         ? "editing"
                  : isIo              ? "io"
+                 : isMission         ? "mission"
                                      : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();

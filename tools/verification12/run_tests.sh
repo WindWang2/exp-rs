@@ -52,8 +52,22 @@ if [ $# -eq 0 ]; then
   exit 2
 fi
 
+# classroom-safety 13.0: the loop used to print each exit code and then let the
+# script fall off the end, so the script itself always exited 0 — a red suite
+# looked green to any caller. Aggregate and propagate.
+FAILED=0
 for t in "$@"; do
   echo "########## $t ##########"
   "$BUILD_DIR/$t" 2>&1
-  echo "exit=$?"
+  RC=$?
+  echo "exit=$RC"
+  if [ "$RC" -ne 0 ]; then
+    FAILED=1
+  fi
 done
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "run_tests: FAIL (at least one lane did not exit 0)"
+  exit 1
+fi
+echo "run_tests: all lanes passed"

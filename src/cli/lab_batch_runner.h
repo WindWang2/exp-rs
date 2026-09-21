@@ -43,18 +43,28 @@
 
 namespace sicnu::cli {
 
+/// Verdict for a submission that could not be graded **at all** — the lab's
+/// capability, fixture, rules or artifact is absent. It is deliberately
+/// distinct from "error" (the grader threw) and from a score of zero: an
+/// unavailable row carries no score, only a typed reason. Same vocabulary as
+/// `LabGradeEmbedding::unavailable()` (src/experiment/bridge/lab_report.h).
+constexpr const char *kUnavailableVerdict = "unavailable";
+
 struct LabBatchRow
 {
     QString studentId;
     QString labId;
-    double score = -1.0;      ///< < 0 when no score (error / unverifiable)
-    QString verdict;          ///< "pass" | "fail" | "unverifiable" | "error"
+    double score = -1.0;      ///< < 0 when no score (unavailable / error / unverifiable)
+    QString verdict;          ///< "pass" | "fail" | "unverifiable" | "error" | "unavailable"
     QString topDeduction;
     QString artifactPath;
     QString sha256;           ///< lowercase hex, empty when hashing failed
     qint64 bytes = -1;
     QString duplicateOf;      ///< student id of the first identical content
     bool rosterMatch = true;  ///< false when a roster exists and lacks this id
+    // classroom-safety 13.0
+    bool unavailable = false;       ///< grade could not be produced here
+    QString unavailableReason;      ///< mandatory when unavailable; never empty
 };
 
 struct LabBatchSummary
@@ -62,6 +72,7 @@ struct LabBatchSummary
     int total = 0;       ///< submissions discovered (CSV rows written)
     int graded = 0;      ///< graded == true (verdict pass/fail)
     int isolated = 0;    ///< grade callable threw; row carries verdict "error"
+    int unavailable = 0; ///< no grade could be produced; verdict "unavailable"
     bool usageError = false; ///< submissions directory missing/unreadable
     QString usageMessage;    ///< typed reason when usageError
     // v2
@@ -122,12 +133,27 @@ struct LabBatchRunner
     /// {"schema":"sicnu.lab.batch-summary/1", "lab_id", ..., "rows"}.
     static QJsonObject summaryBodyJson( const QString &labId, const QString &submissionsDir,
                                         const LabBatchSummary &summary );
+
+    /// Typed unavailable row: no score is ever fabricated. `reason` must be
+    /// non-empty — an unavailable row without a reason is a bug, not a grade.
+    static LabBatchRow unavailableRow( const QString &studentId, const QString &labId,
+                                       const QString &artifactPath, const QString &reason );
 };
+
+/// CSV formula-injection neutralizer — the in-process twin of
+/// `csv_safe()` in scripts/run_classroom_batch.py. A cell whose FIRST
+/// character is one of = + - @ TAB CR is prefixed with an apostrophe so a
+/// spreadsheet opens it as text instead of evaluating it. Applies to the CSV
+/// projection only: the JSON summary stays the canonical, unmodified truth.
+/// Kept public so the classroom-safety gate can assert it directly.
+QString csvSafeCell( const QString &field );
 
 /// Exit-code contract for `lab --batch` (exprs ExitCode values):
 ///   Ok               — every discovered submission graded (even all "fail")
 ///   GenericError     — run completed but isolated >= 1 error row, was
-///                      cancelled, or hit the submission cap
+///                      cancelled, hit the submission cap, or produced >= 1
+///                      unavailable row (a class that could not be graded is
+///                      not a silent success)
 ///   ValidationFailure — usage problems (missing dirs, bad roster/CSV target)
 int batchExitCodeFor( const LabBatchSummary &summary );
 

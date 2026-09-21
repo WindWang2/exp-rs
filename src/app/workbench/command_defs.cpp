@@ -759,4 +759,38 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         };
         registry->registerCommand( d );
     }
+
+    // ── Mission Runtime 13.0 — mission task space surface ────────────────
+    // The commands route through the same applyMissionAction the mission:*
+    // agent tools use, so the GUI and the agent surface cannot diverge.
+    {
+        RS_CMD( d, "mission.timeline.show", QObject::tr( "Mission Timeline" ),
+                QObject::tr( "Shows the mission task timeline dock." ),
+                "mission_timeline", QObject::tr( "Mission" ) );
+        d.handler = [window] { window->showMissionTimelinePanel(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "mission.task.retry", QObject::tr( "Retry Mission Task" ),
+                QObject::tr( "Retries the selected failed or canceled mission task." ),
+                "mission_retry", QObject::tr( "Mission" ) );
+        d.availability = ContextRules::missionTaskRetryable;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) {
+            return ContextRules::unavailabilityReason( s, id );
+        };
+        d.handler = [window] { window->retrySelectedMissionTask(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "mission.task.resume", QObject::tr( "Resume Mission Task" ),
+                QObject::tr( "Resumes the selected stale or canceled mission task after "
+                            "re-binding its references." ),
+                "mission_resume", QObject::tr( "Mission" ) );
+        d.availability = ContextRules::missionTaskResumable;
+        d.explain = [id = d.id]( const SelectionContextSnapshot &s ) {
+            return ContextRules::unavailabilityReason( s, id );
+        };
+        d.handler = [window] { window->resumeSelectedMissionTask(); };
+        registry->registerCommand( d );
+    }
 }

@@ -4,11 +4,15 @@
 #include "exprs/plugin_package.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <limits>
+#include <cstdlib>
 #include <chrono>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #ifndef _WIN32
+#include <signal.h>
 #include <unistd.h>
 #else
 #include <windows.h>
@@ -268,6 +272,38 @@ long currentProcessId()
 #endif
 }
 
+/// Liveness probe for a staging owner pid: distinguishes crash residue
+/// (collectible) from a CONCURRENT install's in-flight transaction (hands
+/// off). Same contract as the snapshot sweep's probe.
+bool pidAlive( long pid )
+{
+    // A pid outside int's range cannot name a live process on any
+    // platform — the static_cast below would TRUNCATE (LONG_MAX -> -1 ->
+    // kill() reports EPERM), so bound first and treat it as dead.
+    if ( pid <= 0
+         || static_cast<unsigned long>( pid )
+                > static_cast<unsigned long>(
+                    std::numeric_limits<int>::max() ) )
+        return false;
+#ifdef _WIN32
+    HANDLE handle = ::OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                   static_cast<DWORD>( pid ) );
+    if ( !handle )
+        // Access denied = the process EXISTS but belongs to a higher
+        // privilege level — it is alive, not collectible residue.
+        return ::GetLastError() == ERROR_ACCESS_DENIED;
+    DWORD exitCode = 0;
+    const bool alive = ::GetExitCodeProcess( handle, &exitCode )
+                       && exitCode == STILL_ACTIVE;
+    ::CloseHandle( handle );
+    return alive;
+#else
+    if ( ::kill( static_cast<pid_t>( pid ), 0 ) == 0 )
+        return true;
+    return errno == EPERM; // exists but owned by another user — still alive
+#endif
+}
+
 /// Verifies the declared "package.checksums" object against the staged
 /// copy. Declared files that are missing from the payload fail; files
 /// without a declaration pass unchecked (declared checksums are an
@@ -322,6 +358,92 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
 }
 
 } // namespace
+
+void PluginPackage::reconcileStaging( const std::string &userRoot )
+{
+    namespace fsn = std::filesystem;
+    const fs::path stagingRoot = fs::path( userRoot ) / ".staging";
+    std::error_code ec;
+    if ( !fsn::is_directory( stagingRoot, ec ) || ec )
+        return;
+    const long ownPid = currentProcessId();
+    const auto now = fs::file_time_type::clock::now();
+    for ( fsn::directory_iterator it( stagingRoot, ec ), end; !ec && it != end;
+          it.increment( ec ) )
+    {
+        const fs::path entry = it->path();
+        const std::string name = entry.filename().generic_string();
+        // <id>~old.<pid> — a previous install parked mid-swap ('~' can
+        // never appear in a plugin id, so this grammar cannot collide with
+        // a legal <id>.<pid> staging name even for ids containing ".old").
+        // A same-pid or live-owner park is a transaction IN FLIGHT (hands
+        // off). A dead owner's park is crash residue: restore it when the
+        // real install vanished (crash between the two renames), drop it
+        // when the install exists (post-swap cleanup never ran).
+        const std::string marker = "~old.";
+        const size_t markerPos = name.rfind( marker );
+        if ( markerPos != std::string::npos )
+        {
+            const std::string id = name.substr( 0, markerPos );
+            const std::string pidText = name.substr( markerPos + marker.size() );
+            // Strict grammar: a live transaction always writes a numeric
+            // tail and a valid plugin id — anything else is not a park and
+            // falls through to the age rule.
+            const bool strictPark =
+                !id.empty() && PluginManifestValidator::isValidPluginId( id )
+                && !pidText.empty()
+                && pidText.find_first_not_of( "0123456789" ) == std::string::npos;
+            if ( strictPark )
+            {
+                // strtol, never stol: a planted dir name can carry a digit
+                // tail that overflows long — saturate to LONG_MAX instead
+                // of throwing std::out_of_range through install/configure
+                // (fail-CLOSED convention; a pid that large cannot exist,
+                // so saturation lands on the dead-owner path).
+                errno = 0;
+                const long owner = std::strtol( pidText.c_str(), nullptr, 10 );
+                if ( owner == ownPid || pidAlive( owner ) )
+                    continue;
+                const fs::path target = fs::path( userRoot ) / id;
+                std::error_code targetError;
+                const bool targetPresent = fsn::exists( target, targetError );
+                if ( targetError )
+                    continue; // indeterminate — keep the only backup, retry next sweep
+                if ( !targetPresent
+                     && contained( userRoot, target.generic_string() ) )
+                {
+                    std::error_code renameError;
+                    fsn::rename( entry, target, renameError );
+                    if ( !renameError )
+                    {
+                        // The unverified staging dir for the same id is
+                        // residue of the same aborted transaction.
+                        std::error_code removeError;
+                        fsn::remove_all( stagingRoot / ( id + "." + pidText ),
+                                         removeError );
+                        continue;
+                    }
+                }
+                // Confirmed residue (target exists) or unrestorable — drop
+                // the park.
+                std::error_code removeError;
+                fsn::remove_all( entry, removeError );
+                continue;
+            }
+        }
+        // Everything else (<id>.<pid> staging trees, unparseable names):
+        // collectible by age — the original 24 h rule.
+        std::error_code timeError;
+        const auto lastWrite = fsn::last_write_time( entry, timeError );
+        if ( timeError )
+            continue;
+        if ( now - lastWrite > std::chrono::hours( 24 ) )
+        {
+            std::error_code removeError;
+            fsn::remove_all( entry, removeError );
+        }
+    }
+}
 
 bool PluginPackage::install( const std::string &sourceDir, std::string &installedDir,
                              PluginDiagnosticLog &log )
@@ -403,25 +525,10 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
         log.add( failure );
         return false;
     }
-    // Sweep staging leftovers of CRASHED installs (older than 24 h): only
-    // the current pid's own directory is otherwise removed.
-    {
-        std::error_code sweepError;
-        const auto now = fs::file_time_type::clock::now();
-        fs::directory_iterator stagingIterator( fs::path( stagingRoot ), sweepError );
-        if ( !sweepError )
-        {
-            for ( const fs::directory_entry &entry : stagingIterator )
-            {
-                std::error_code timeError;
-                const auto lastWrite = fs::last_write_time( entry.path(), timeError );
-                if ( timeError )
-                    continue;
-                if ( now - lastWrite > std::chrono::hours( 24 ) )
-                    fs::remove_all( entry.path(), sweepError );
-            }
-        }
-    }
+    // Sweep staging leftovers of CRASHED installs — restores a parked
+    // previous install whose target vanished mid-swap, drops dead-owner
+    // residue, and ages out abandoned staging trees (24 h).
+    reconcileStaging( userRoot );
     const std::string stagingDir =
         stagingRoot + "/" + manifest.id + "." + std::to_string( currentProcessId() );
     removeTree( stagingDir ); // stale staging from a crashed sibling run
@@ -543,14 +650,10 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     // Atomic swap with rollback: previous install moves aside, staging
     // takes its place, the aside copy is dropped; any failure puts the
     // previous install back.
-    const std::string backupDir = stagingRoot + "/" + manifest.id + ".old."
-                                  + std::to_string( static_cast<long>(
-#ifdef _WIN32
-        ::GetCurrentProcessId()
-#else
-        ::getpid()
-#endif
-        ) );
+    // "<id>~old.<pid>": '~' cannot appear in a plugin id, so the park
+    // grammar is unambiguous even for ids that themselves contain ".old".
+    const std::string backupDir = stagingRoot + "/" + manifest.id + "~old."
+                                  + std::to_string( currentProcessId() );
     removeTree( backupDir );
     const bool hadPrevious = isDirectory( target );
     if ( hadPrevious )
