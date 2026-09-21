@@ -21,6 +21,8 @@
 namespace sicnu::suitability
 {
 
+class SuitabilityDataProvider;
+
 class SuitabilityAssessor
 {
     public:
@@ -36,6 +38,11 @@ class SuitabilityAssessor
             std::optional<DatasetFacts> facts;
             /// Optional subject identifier when assessing a dataset version.
             QString datasetVersionId;
+            /// Optional facts channel. Consulted only when no explicit facts
+            /// were given and a dataset version names the subject; a provider
+            /// failure is typed upward — a named dataset is never silently
+            /// assessed without its facts. Not owned.
+            const SuitabilityDataProvider *provider = nullptr;
         };
 
         /// Typed failures: goal resolution failures pass through unchanged

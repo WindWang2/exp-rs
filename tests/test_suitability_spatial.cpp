@@ -692,14 +692,20 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     REQUIRE( report.sceneIds() == QStringList{ QStringLiteral( "s1" ) } );
     REQUIRE( report.goalDigest() == inputs.goal.contentDigest() );
 
-    REQUIRE( report.criteria().size() == 7 );
-    REQUIRE( report.criteria().at( 0 ).id == QStringLiteral( "quality.cloud" ) );
-    REQUIRE( report.criteria().at( 1 ).id == QStringLiteral( "spatial.coverage" ) );
-    REQUIRE( report.criteria().at( 2 ).id == QStringLiteral( "spatial.resolution" ) );
-    REQUIRE( report.criteria().at( 3 ).id == QStringLiteral( "spectral.bands" ) );
-    REQUIRE( report.criteria().at( 4 ).id == QStringLiteral( "temporal.coverage" ) );
-    REQUIRE( report.criteria().at( 5 ).id == QStringLiteral( "temporal.density" ) );
-    REQUIRE( report.criteria().at( 6 ).id == QStringLiteral( "temporal.seasonality" ) );
+    REQUIRE( report.criteria().size() == 10 );
+    QStringList ids;
+    for ( const auto &criterion : report.criteria() )
+        ids.append( criterion.id );
+    REQUIRE( ids == QStringList{ QStringLiteral( "grid.compatibility" ),
+                                 QStringLiteral( "labels.availability" ),
+                                 QStringLiteral( "model.compatibility" ),
+                                 QStringLiteral( "quality.cloud" ),
+                                 QStringLiteral( "spatial.coverage" ),
+                                 QStringLiteral( "spatial.resolution" ),
+                                 QStringLiteral( "spectral.bands" ),
+                                 QStringLiteral( "temporal.coverage" ),
+                                 QStringLiteral( "temporal.density" ),
+                                 QStringLiteral( "temporal.seasonality" ) } );
     // Every graded dimension is suitable or not-applicable (partial evidence
     // would hold the overall at Unknown).
     REQUIRE( report.overallLevel() == SuitabilityLevel::Suitable );

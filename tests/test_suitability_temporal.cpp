@@ -348,11 +348,13 @@ TEST_CASE( "temporal seasonality grades observed seasons from scenes and facts",
     REQUIRE( withUnknown.level == SuitabilityLevel::Unsuitable );
 }
 
-TEST_CASE( "assessor emits the full seven-criteria report in canonical order", "[suitability][temporal]" )
+TEST_CASE( "assessor emits the full ten-criteria report in canonical order", "[suitability][temporal]" )
 {
     // A fully-answered subject: AOI covered by two in-window summer scenes
-    // (density above the minimum, so nothing sits Marginal, and every
-    // applicable criterion grades Suitable).
+    // (density above the minimum, so nothing sits Marginal), carrying
+    // aligned grid snapshots so grid fit is judgeable, and dataset facts so
+    // label availability is judgeable; every applicable criterion grades
+    // Suitable.
     SuitabilityGoal goal;
     goal.hasAoi = true;
     goal.aoi = sicnu::data::SpatialExtent{ 0.0, 0.0, 100.0, 100.0, true };
@@ -365,6 +367,13 @@ TEST_CASE( "assessor emits the full seven-criteria report in canonical order", "
     const auto resolved = resolveRequirements( goal );
     REQUIRE( resolved.has_value() );
 
+    sicnu::data::RasterGrid grid;
+    grid.crsWkt = QStringLiteral( "scene-crs" );
+    grid.hasGeoTransform = true;
+    grid.geoTransform = { 0.0, 10.0, 0.0, 100.0, 0.0, -10.0 };
+    grid.width = 10;
+    grid.height = 10;
+
     QVector<SceneCandidate> scenes;
     scenes.append( makeScene( QStringLiteral( "jul" ), QStringLiteral( "2024-07-15T00:00:00Z" ) ) );
     scenes.append( makeScene( QStringLiteral( "aug" ), QStringLiteral( "2024-08-15T00:00:00Z" ) ) );
@@ -372,19 +381,29 @@ TEST_CASE( "assessor emits the full seven-criteria report in canonical order", "
     {
         scene.crsWkt = QStringLiteral( "scene-crs" );
         scene.extent = sicnu::data::SpatialExtent{ 0.0, 0.0, 100.0, 100.0, true };
+        scene.grid = grid;
     }
+
+    DatasetFacts facts;
+    facts.datasetVersionId = QStringLiteral( "dv-1" );
+    facts.hasLabelSchema = true;
+    facts.sampleCount = 1000;
 
     sicnu::suitability::SuitabilityAssessor::Inputs inputs;
     inputs.goal = goal;
     inputs.scenes = scenes;
+    inputs.facts = facts;
     inputs.datasetVersionId = QStringLiteral( "dv-1" );
     const auto result = sicnu::suitability::SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->criteria().size() == 7 );
+    REQUIRE( result->criteria().size() == 10 );
     QStringList ids;
     for ( const auto &criterion : result->criteria() )
         ids.append( criterion.id );
-    REQUIRE( ids == QStringList{ QStringLiteral( "quality.cloud" ),
+    REQUIRE( ids == QStringList{ QStringLiteral( "grid.compatibility" ),
+                                 QStringLiteral( "labels.availability" ),
+                                 QStringLiteral( "model.compatibility" ),
+                                 QStringLiteral( "quality.cloud" ),
                                  QStringLiteral( "spatial.coverage" ),
                                  QStringLiteral( "spatial.resolution" ),
                                  QStringLiteral( "spectral.bands" ),

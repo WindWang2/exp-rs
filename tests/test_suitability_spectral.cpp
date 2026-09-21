@@ -343,16 +343,27 @@ TEST_CASE( "assessor integrates spectral and cloud criteria with facts", "[suita
     // A facts-only subject is legal (no empty-subject refusal).
     const auto result = SuitabilityAssessor::assess( inputs );
     REQUIRE( result.has_value() );
-    REQUIRE( result->criteria().size() == 7 );
-    REQUIRE( result->criteria().at( 0 ).id == QStringLiteral( "quality.cloud" ) );
-    REQUIRE( result->criteria().at( 1 ).id == QStringLiteral( "spatial.coverage" ) );
-    REQUIRE( result->criteria().at( 2 ).id == QStringLiteral( "spatial.resolution" ) );
-    REQUIRE( result->criteria().at( 3 ).id == QStringLiteral( "spectral.bands" ) );
-    REQUIRE( result->criteria().at( 4 ).id == QStringLiteral( "temporal.coverage" ) );
-    REQUIRE( result->criteria().at( 5 ).id == QStringLiteral( "temporal.density" ) );
-    REQUIRE( result->criteria().at( 6 ).id == QStringLiteral( "temporal.seasonality" ) );
+    REQUIRE( result->criteria().size() == 10 );
+    QStringList ids;
+    for ( const auto &criterion : result->criteria() )
+        ids.append( criterion.id );
+    REQUIRE( ids == QStringList{ QStringLiteral( "grid.compatibility" ),
+                                 QStringLiteral( "labels.availability" ),
+                                 QStringLiteral( "model.compatibility" ),
+                                 QStringLiteral( "quality.cloud" ),
+                                 QStringLiteral( "spatial.coverage" ),
+                                 QStringLiteral( "spatial.resolution" ),
+                                 QStringLiteral( "spectral.bands" ),
+                                 QStringLiteral( "temporal.coverage" ),
+                                 QStringLiteral( "temporal.density" ),
+                                 QStringLiteral( "temporal.seasonality" ) } );
+    const SuitabilityCriterion *spectral = nullptr;
+    for ( const auto &criterion : result->criteria() )
+        if ( criterion.id == QLatin1String( "spectral.bands" ) )
+            spectral = &criterion;
+    REQUIRE( spectral != nullptr );
     // Facts carry the role, so spectral is judgeable even without scenes.
-    REQUIRE( result->criteria().at( 3 ).level == SuitabilityLevel::Suitable );
+    REQUIRE( spectral->level == SuitabilityLevel::Suitable );
 
     // Without facts and without scenes, the required-band requirement is
     // unknown, never silently suitable.
@@ -361,7 +372,12 @@ TEST_CASE( "assessor integrates spectral and cloud criteria with facts", "[suita
     bare.datasetVersionId = QStringLiteral( "dv-2" );
     const auto bareResult = SuitabilityAssessor::assess( bare );
     REQUIRE( bareResult.has_value() );
-    REQUIRE( bareResult->criteria().at( 3 ).level == SuitabilityLevel::Unknown );
+    const SuitabilityCriterion *bareSpectral = nullptr;
+    for ( const auto &criterion : bareResult->criteria() )
+        if ( criterion.id == QLatin1String( "spectral.bands" ) )
+            bareSpectral = &criterion;
+    REQUIRE( bareSpectral != nullptr );
+    REQUIRE( bareSpectral->level == SuitabilityLevel::Unknown );
 
     // Still refuses a subject that identifies nothing at all.
     SuitabilityAssessor::Inputs nothing;

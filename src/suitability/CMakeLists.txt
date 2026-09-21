@@ -8,6 +8,12 @@
 # BenchmarkTaskFamily; it never re-derives either.
 
 qt_add_library(sicnu_suitability STATIC
+  criteria_grid.cpp
+  criteria_grid.h
+  criteria_labels.cpp
+  criteria_labels.h
+  criteria_model.cpp
+  criteria_model.h
   criteria_spatial.cpp
   criteria_spatial.h
   criteria_spectral.cpp
@@ -20,12 +26,16 @@ qt_add_library(sicnu_suitability STATIC
   scene_candidate.h
   seasonality.cpp
   seasonality.h
+  store_data_provider.cpp
+  store_data_provider.h
   suitability_assessor.cpp
   suitability_assessor.h
   suitability_goal.cpp
   suitability_goal.h
   suitability_level.cpp
   suitability_level.h
+  suitability_provider.cpp
+  suitability_provider.h
   suitability_types.cpp
   suitability_types.h
   suitability_report.cpp

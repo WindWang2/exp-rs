@@ -11929,3 +11929,31 @@ target_include_directories(test_suitability_temporal PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_temporal)
+
+qt_add_executable(test_suitability_labels
+  test_suitability_labels.cpp
+)
+target_link_libraries(test_suitability_labels PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_labels PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_labels)
+
+qt_add_executable(test_suitability_store_provider
+  test_suitability_store_provider.cpp
+)
+target_link_libraries(test_suitability_store_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_suitability_store_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_store_provider)

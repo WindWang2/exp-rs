@@ -251,6 +251,16 @@ sicnu::data::Result<ResolvedRequirements> resolveRequirements( const Suitability
     resolved.windowEndUtc = goal.windowEndUtc;
     resolved.requiredSeasons = goal.requiredSeasons;
     resolved.minScenesInWindow = goal.minScenesInWindow;
+    resolved.requireLabels = goal.requireLabels;
+    resolved.requiredClasses = goal.requiredClasses;
+    resolved.minSamples = goal.minSamples;
+    resolved.hasModel = goal.hasModel;
+    resolved.modelRequiredBandRoles = goal.modelRequiredBandRoles;
+    resolved.modelMinGsdM = goal.modelMinGsdM;
+    resolved.modelMaxGsdM = goal.modelMaxGsdM;
+    resolved.modelModality = goal.modelModality;
+    // pseudoLabelsAllowed / gridStrict carry no goal field; their defaults
+    // (permissive, lenient) hold until the profile table overrides them.
     return sicnu::data::Result<ResolvedRequirements>::success( resolved );
 }
 

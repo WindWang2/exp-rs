@@ -105,6 +105,26 @@ struct ResolvedRequirements
     QDateTime windowEndUtc;
     QStringList requiredSeasons;
     qint64 minScenesInWindow = 0;
+
+    // labels.availability
+    bool requireLabels = false;
+    QStringList requiredClasses;
+    qint64 minSamples = 0;
+    /// Profile-level policy (no goal field): true unless a profile forbids
+    /// pseudo labels (benchmark semantics — change_detection).
+    bool pseudoLabelsAllowed = true;
+
+    // grid.compatibility
+    /// Profile-level strictness (no goal field): blocking grid mismatches
+    /// grade Unsuitable when strict, Marginal otherwise.
+    bool gridStrict = false;
+
+    // model.compatibility
+    bool hasModel = false;
+    QStringList modelRequiredBandRoles;
+    double modelMinGsdM = 0.0;
+    double modelMaxGsdM = 0.0;
+    QString modelModality;
 };
 
 /// Validates the goal (typed failure "suitability.profile_unknown" for an
