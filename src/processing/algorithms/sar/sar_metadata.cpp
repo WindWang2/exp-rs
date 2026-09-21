@@ -6,6 +6,9 @@
 
 #include <gdal.h>
 
+#include <QFile>
+#include <QTextStream>
+
 #include <cmath>
 
 namespace sicnu::sar
@@ -17,6 +20,13 @@ bool isSarRadiometricState( const QString &state )
   return s == QLatin1String( "sigma0" ) || s == QLatin1String( "gamma0" ) ||
          s == QLatin1String( "beta0" ) || s == QLatin1String( "dn" ) ||
          s == QLatin1String( "digital_number" );
+}
+
+bool isSarDerivedState( const QString &state )
+{
+  const QString s = state.trimmed().toLower();
+  return s == QLatin1String( kDerivedPairMetricState ) ||
+         s == QLatin1String( kDerivedTextureState );
 }
 
 QString datasetMeta( const GdalDatasetWrapper &ds, const char *key )
@@ -115,6 +125,181 @@ QString readCalibration( const GdalDatasetWrapper &ds )
 QString declaredCalibrationToken( const GdalDatasetWrapper &ds )
 {
   return datasetMeta( ds, kCalibrationKey ).trimmed().toLower();
+}
+
+SarStateRead readDeclaredSarState( const GdalDatasetWrapper &ds )
+{
+  SarStateRead read;
+  read.calibration = datasetMeta( ds, kCalibrationKey ).trimmed().toLower();
+  read.state = datasetMeta( ds, kRadiometricStateKey ).trimmed().toLower();
+  if ( !read.calibration.isEmpty() && !read.state.isEmpty() )
+  {
+    read.conflict = read.calibration != read.state;
+    read.token = read.calibration;
+    return read;
+  }
+  read.token = read.calibration.isEmpty() ? read.state : read.calibration;
+  return read;
+}
+
+QString recognizedSarState( const GdalDatasetWrapper &ds )
+{
+  const SarStateRead read = readDeclaredSarState( ds );
+  if ( read.conflict || read.token.isEmpty() )
+    return QString();
+  const QString canonical = normalizeCalibration( read.token );
+  if ( !canonical.isEmpty() )
+    return canonical;
+  if ( isSarDerivedState( read.token ) )
+    return read.token;
+  return QString();
+}
+
+SarStateCheck checkDeclaredState( const GdalDatasetWrapper &ds, const QString &required,
+                                  QString *reason )
+{
+  const SarStateRead read = readDeclaredSarState( ds );
+  if ( read.conflict )
+  {
+    if ( reason )
+      *reason = QStringLiteral(
+                    "input declares conflicting SICNU_SAR_CALIBRATION='%1' and "
+                    "SICNU_RADIOMETRIC_STATE='%2'; refusing to guess the radiometric state" )
+                    .arg( read.calibration, read.state );
+    return SarStateCheck::Refused;
+  }
+  if ( read.token.isEmpty() )
+    return SarStateCheck::OkUndeclared;
+
+  const QString canonical = normalizeCalibration( read.token );
+  if ( canonical.isEmpty() )
+  {
+    if ( reason )
+    {
+      if ( isSarDerivedState( read.token ) )
+        *reason = QStringLiteral(
+                      "input declares the derived SAR product '%1' (pair metric / texture), "
+                      "which carries no backscatter calibration; this operator requires %2 "
+                      "linear power" )
+                      .arg( read.token, required );
+      else
+        *reason = QStringLiteral(
+                      "input declares the unrecognized radiometric state token '%1' "
+                      "(SICNU_SAR_CALIBRATION / SICNU_RADIOMETRIC_STATE); refusing to "
+                      "guess the radiometric state" )
+                      .arg( read.token );
+    }
+    return SarStateCheck::Refused;
+  }
+  if ( canonical != required )
+  {
+    if ( reason )
+      *reason = QStringLiteral(
+                    "input declares SICNU_SAR_CALIBRATION=%1 but this operator requires %2 "
+                    "linear power; convert with rs:sar_backscatter (or re-run "
+                    "rs:sar_calibrate on the DN product) first" )
+                    .arg( canonical, required );
+    return SarStateCheck::Refused;
+  }
+  return SarStateCheck::Ok;
+}
+
+bool parseCalibrationLut( const QString &path, int expectedRows, std::vector<double> *values,
+                          QString *error )
+{
+  if ( expectedRows <= 0 )
+  {
+    if ( error )
+      *error = QStringLiteral( "calibration LUT check: raster has no rows" );
+    return false;
+  }
+  QFile file( path );
+  if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
+  {
+    if ( error )
+      *error = QStringLiteral( "cannot open calibration LUT '%1'" ).arg( path );
+    return false;
+  }
+  // The sidecar is data-controlled (declared metadata), so bound the work
+  // before reading anything: one value per row, and a generous per-value
+  // budget. A file that cannot possibly be a row-exact LUT is refused on its
+  // size, never materialized.
+  const qint64 maxBytes = static_cast<qint64>( expectedRows ) * 256 + 4096;
+  if ( file.size() > maxBytes )
+  {
+    if ( error )
+      *error = QStringLiteral(
+                   "calibration LUT '%1' is %2 bytes, beyond the %3-row per-row byte budget" )
+                   .arg( path )
+                   .arg( file.size() )
+                   .arg( expectedRows );
+    return false;
+  }
+
+  // Streamed line-by-line with an early exit: the count must match exactly,
+  // so a surplus row is knowable before the whole file is parsed.
+  values->clear();
+  values->reserve( static_cast<size_t>( expectedRows ) );
+  QTextStream stream( &file );
+  int lineNumber = 0;
+  while ( stream.atEnd() == false )
+  {
+    const QString line = stream.readLine().trimmed();
+    ++lineNumber;
+    if ( values->size() >= static_cast<size_t>( expectedRows ) )
+    {
+      if ( error )
+        *error = QStringLiteral(
+                     "calibration LUT '%1' declares more than %2 values; one value per input "
+                     "row is required (no interpolation is applied)" )
+                     .arg( path )
+                     .arg( expectedRows );
+      return false;
+    }
+    if ( line.isEmpty() )
+    {
+      // A trailing newline is the only tolerated blank.
+      if ( lineNumber == 1 && stream.atEnd() )
+        break;
+      if ( error )
+        *error = QStringLiteral( "calibration LUT '%1' has an empty line at row %2" )
+                     .arg( path )
+                     .arg( lineNumber );
+      return false;
+    }
+    bool ok = false;
+    const double value = line.toDouble( &ok );
+    if ( !ok || !std::isfinite( value ) || value <= 0.0 )
+    {
+      if ( error )
+        *error = QStringLiteral( "calibration LUT '%1' row %2 is not a finite positive number: '%3'" )
+                     .arg( path )
+                     .arg( lineNumber )
+                     .arg( line );
+      return false;
+    }
+    values->push_back( value );
+  }
+  if ( stream.status() != QTextStream::Ok )
+  {
+    if ( error )
+      *error = QStringLiteral( "calibration LUT '%1' could not be read (I/O error at row %2)" )
+                   .arg( path )
+                   .arg( lineNumber );
+    return false;
+  }
+  if ( static_cast<int>( values->size() ) != expectedRows )
+  {
+    if ( error )
+      *error = QStringLiteral(
+                   "calibration LUT '%1' declares %2 values but the raster has %3 rows; one "
+                   "value per input row is required (no interpolation is applied)" )
+                   .arg( path )
+                   .arg( static_cast<int>( values->size() ) )
+                   .arg( expectedRows );
+    return false;
+  }
+  return true;
 }
 
 QString readDomain( const GdalDatasetWrapper &ds )

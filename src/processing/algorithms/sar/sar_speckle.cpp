@@ -355,13 +355,14 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
       }
     }
     // Speckle filtering preserves the radiometric quantity: propagate the
-    // declared calibration state so the output still re-ingests as the same
-    // product (and the re-calibration guard keeps protecting it).
-    const QString declaredCalibration = readCalibration( src );
-    writeSarOutputMetadata( dst, declaredCalibration, QStringLiteral( "linear_power" ),
+    // declared state so the output still re-ingests as the same product (and
+    // the re-calibration guard keeps protecting it). Derived products keep
+    // their derived token — a filtered pair metric is still a pair metric.
+    const QString declaredState = recognizedSarState( src );
+    writeSarOutputMetadata( dst, declaredState, QStringLiteral( "linear_power" ),
                             polarizations, sensor, 0.0, 0.0 );
-    if ( !declaredCalibration.isEmpty() )
-      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredCalibration );
+    if ( !declaredState.isEmpty() )
+      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredState );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_SPECKLE" ), QStringLiteral( "multitemporal" ) );
     return true;
   }
@@ -427,11 +428,13 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
   } );
   if ( ok )
   {
-    const QString declaredCalibration = readCalibration( src );
-    writeSarOutputMetadata( dst, declaredCalibration, QStringLiteral( "linear_power" ),
+    // State propagation (canonical calibration tokens and derived product
+    // tokens alike — a filtered pair metric is still a pair metric).
+    const QString declaredState = recognizedSarState( src );
+    writeSarOutputMetadata( dst, declaredState, QStringLiteral( "linear_power" ),
                             polarizations, sensor, 0.0, 0.0 );
-    if ( !declaredCalibration.isEmpty() )
-      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredCalibration );
+    if ( !declaredState.isEmpty() )
+      dst.setMetadataItem( QString::fromLatin1( kRadiometricStateKey ), declaredState );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_SPECKLE" ),
                          speckleMethodToString( params.method ) );
   }

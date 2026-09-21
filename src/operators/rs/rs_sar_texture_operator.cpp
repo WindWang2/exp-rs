@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_texture.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -200,6 +201,17 @@ Json::Value RsSarTextureOperator::run(const Json::Value& params,
                               "band out of range: " + std::to_string(band));
     }
 
+    // A conflicting declaration (SICNU_SAR_CALIBRATION vs
+    // SICNU_RADIOMETRIC_STATE) is never interpreted, even by a state-agnostic
+    // operator: the input's declared contract is unreadable, so refuse.
+    const sicnu::sar::SarStateRead declaredState = sicnu::sar::readDeclaredSarState( src );
+    if ( declaredState.conflict )
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares conflicting SICNU_SAR_CALIBRATION='" +
+                declaredState.calibration.toStdString() + "' and SICNU_RADIOMETRIC_STATE='" +
+                declaredState.state.toStdString() + "'; refusing to guess the radiometric state" );
+
     // Sentinel declared on the analysis band (NaN when undeclared).
     const float nodata = sicnu::rs::bandNoDataSentinel(src, band);
 
@@ -222,6 +234,15 @@ Json::Value RsSarTextureOperator::run(const Json::Value& params,
                               "SAR texture computation failed while streaming");
     }
 
+    // Derived-product semantics (Radiometric State 13.0): GLCM measures are
+    // window statistics, not a backscatter calibration. Declaring the derived
+    // token keeps the product out of the calibration/backscatter family
+    // instead of letting it re-ingest as undeclared DN.
+    dst.setMetadataItem("SICNU_RADIOMETRIC_STATE",
+                        QString::fromLatin1(sicnu::sar::kDerivedTextureState));
+    dst.setMetadataItem(sicnu::sar::kCalibrationKey,
+                        QString::fromLatin1(sicnu::sar::kDerivedTextureState));
+
     QString error;
     if (!dst.closeWithError(&error)) {
         throw RSOperatorError(ErrorCode::GdalError, "Failed to finalize output: " +
@@ -230,6 +251,7 @@ Json::Value RsSarTextureOperator::run(const Json::Value& params,
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
+    result["radiometricState"] = sicnu::sar::kDerivedTextureState;
     Json::Value measuresOut(Json::arrayValue);
     for (const auto& label : measureLabels) {
         measuresOut.append(label);
