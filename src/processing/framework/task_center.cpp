@@ -3394,6 +3394,11 @@ bool isTransientExecutionError( const QString &error )
 
 bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
 {
+    // #1182: the user's cancel intent lives in TaskCenter (cancelReason +
+    // the Cancelling status); auto-retry must never resurrect a task the
+    // user asked to cancel, whatever the engine-side error class says.
+    if ( task.status == TaskStatus::Cancelling || task.cancelReason != TaskCancelReason::None )
+        return false;
     if ( m_maxAutoRetries <= 0 )
         return false;
     if ( task.autoRetryAttempts >= m_maxAutoRetries )

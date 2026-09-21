@@ -1399,7 +1399,15 @@ int commandPlugin( QStringList args, const CliIO &io )
         {
             const std::string target = conformance["concurrencyTarget"].asString();
             constexpr int kParallel = 3;
-            std::vector<std::future<Json::Value>> runs;
+            // #1185: the probe used to launch raw std::async futures — an
+            // unretrieved future's destructor BLOCKS until the task returns,
+            // so the diagnostic hung on exactly the wedged target it exists
+            // to detect (the policy the bounded helpers implement 200 lines
+            // up). Route the probe through executeBounded like PT_QUOTA.
+            std::vector<Json::Value> results( static_cast<size_t>( kParallel ) );
+            std::vector<bool> boundedOk( static_cast<size_t>( kParallel ), false );
+            std::vector<std::thread> probes;
+            probes.reserve( static_cast<size_t>( kParallel ) );
             const auto start = std::chrono::steady_clock::now();
             {
                 const auto adapter =
@@ -1407,21 +1415,28 @@ int commandPlugin( QStringList args, const CliIO &io )
                 if ( adapter )
                 {
                     for ( int i = 0; i < kParallel; ++i )
-                        runs.push_back( std::async( std::launch::async, [&adapter] {
-                            return adapter->execute( Json::Value( Json::objectValue ), nullptr,
-                                                     nullptr );
-                        } ) );
+                    {
+                        probes.emplace_back( [ &executeBounded, target, i, &results, &boundedOk ] {
+                            boundedOk[ static_cast<size_t>( i ) ] = executeBounded(
+                                target, Json::Value( Json::objectValue ), 30000, false,
+                                results[ static_cast<size_t>( i ) ] );
+                        } );
+                    }
                 }
             }
-            bool allReady = runs.size() == kParallel;
-            for ( auto &run : runs )
-            {
-                if ( run.wait_for( std::chrono::seconds( 30 ) ) != std::future_status::ready )
-                {
-                    allReady = false;
-                    break;
-                }
-            }
+            // executeBounded returns within its 30 s budget by contract
+            // (it detaches its own runner on timeout), so joining the probe
+            // threads is bounded too — never the raw-future hang.
+            bool allReady = boundedOk.size() == static_cast<size_t>( kParallel );
+            for ( auto &probe : probes )
+                probe.join();
+            if ( allReady )
+                for ( int i = 0; i < kParallel; ++i )
+                    if ( !boundedOk[ static_cast<size_t>( i ) ] )
+                    {
+                        allReady = false;
+                        break;
+                    }
             const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                        std::chrono::steady_clock::now() - start )
                                        .count();

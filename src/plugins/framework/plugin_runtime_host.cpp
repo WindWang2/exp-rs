@@ -238,6 +238,12 @@ PluginRuntimeHost::resolveOperatorFactory( const std::string &operatorId ) const
 
 void PluginRuntimeHost::installPluginAgentTools( const exprs::PluginRecord &record )
 {
+    // #1181: an operator-only plugin never reaches the agent-tool provider
+    // below, so the tool catalog kept serving its pre-install snapshot —
+    // the new operators' algorithm tools were invisible to discovery and
+    // the OpenAI/MCP exports until restart. Operator registration changes
+    // the algorithm tool universe too: invalidate unconditionally.
+    sicnu::agent::tool_catalog::AgentToolCatalog::instance().invalidateCache();
     if ( record.manifest.agentTools.empty() )
         return;
     if ( !mRegisteredAgentToolIds.empty()
