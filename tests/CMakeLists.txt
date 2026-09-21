@@ -11892,3 +11892,6 @@ sicnu_add_sdk_test(test_scientific_state_provenance)
 target_link_libraries(test_scientific_state_provenance PRIVATE Sicnu::ScientificState)
 sicnu_add_sdk_test(test_scientific_state_diff)
 target_link_libraries(test_scientific_state_diff PRIVATE Sicnu::ScientificState)
+
+sicnu_add_sdk_test(test_scientific_state_teaching)
+target_link_libraries(test_scientific_state_teaching PRIVATE Sicnu::ScientificState)
