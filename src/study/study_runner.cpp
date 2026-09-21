@@ -214,7 +214,8 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
                                               .arg( point.replicateIndex );
             const std::chrono::milliseconds timeout( spec.budget.perRunTimeoutMs );
 
-            auto submission = m_backend->submit( pointParameters, correlationId, timeout );
+            auto submission = m_backend->submit( spec.algorithmId, pointParameters,
+                                                 correlationId, timeout );
             if ( !submission )
             {
                 if ( !recordSubmitRefusal( point, submission.diagnostics() ) )

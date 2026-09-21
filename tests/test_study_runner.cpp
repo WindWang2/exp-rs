@@ -77,15 +77,18 @@ class FakeBackend : public IStudyExecutionBackend
 
     // Observation surface.
     int submissions = 0;
+    QStringList algorithmIds;
     int maxObservedInFlight = 0;
     QVector<QJsonObject> submittedParameters;
     QStringList correlationIds;
 
-    Result<std::unique_ptr<StudySubmission>> submit( const QJsonObject &pointParameters,
+    Result<std::unique_ptr<StudySubmission>> submit( const QString &algorithmId,
+                                                    const QJsonObject &pointParameters,
                                                     const QString &correlationId,
                                                     std::chrono::milliseconds ) override
     {
         ++submissions;
+        algorithmIds.append( algorithmId );
         correlationIds.append( correlationId );
         submittedParameters.append( pointParameters );
         if ( refuseAll )

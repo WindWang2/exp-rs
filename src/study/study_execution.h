@@ -66,7 +66,8 @@ class IStudyExecutionBackend
   public:
     virtual ~IStudyExecutionBackend() = default;
 
-    virtual Result<std::unique_ptr<StudySubmission>> submit( const QJsonObject &pointParameters,
+    virtual Result<std::unique_ptr<StudySubmission>> submit( const QString &algorithmId,
+                                                            const QJsonObject &pointParameters,
                                                             const QString &correlationId,
                                                             std::chrono::milliseconds timeout ) = 0;
 };
