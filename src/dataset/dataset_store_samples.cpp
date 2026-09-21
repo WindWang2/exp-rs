@@ -428,6 +428,21 @@ sicnu::data::Result<void> DatasetStore::removeSample( const DatasetVersionId &ve
     if ( *status != DatasetVersionStatus::Draft )
         return Result::failure( notDraft( versionId.toString() ) );
 
+    // #1171: the delete must take the sample's facet rows with it — every
+    // facet query reads sample_facets with no join to samples, so orphaned
+    // rows kept counting ghosts in facetDistribution / crossCounts / names
+    // forever (the write side guards orphans in setSampleFacets; the delete
+    // side never mirrored that).
+    StoreStmt facetStmt( m_impl->db, QStringLiteral(
+        "DELETE FROM sample_facets WHERE dataset_version_id=? AND sample_id=?" ) );
+    if ( !facetStmt )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                           facetStmt.error( m_impl->db ) ) );
+    facetStmt.bind( 1, versionId.toString() );
+    facetStmt.bind( 2, sampleId.toString() );
+    if ( !facetStmt.step() )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           facetStmt.error( m_impl->db ) ) );
     StoreStmt stmt( m_impl->db, QStringLiteral(
         "DELETE FROM samples WHERE dataset_version_id=? AND sample_id=?" ) );
     if ( !stmt )
