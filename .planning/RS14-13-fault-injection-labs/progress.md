@@ -23,3 +23,4 @@
   - fault_fixtures: 7 deterministic closed-form fixtures (seeded noise via PCG32; same seed → same bytes, different seed → different bytes for every fixture).
   - fault_diagnosis: teaching-side mirror of the six lab signatures on clean→faulted transitions (external binding test in slice G).
   - fault_runner: create sandbox → materialize → digest → budgeted copy → inject → measure/check/diagnose → replay digest → cleanup+residue verify → re-digest source → report; failed scenarios are honest reports (passed=false + typed diagnostics), never exceptions.
+- Slice F refinement (amended): diagnosis mirror aligned rule-for-rule with the lab brain (all_negative_index = index_max<0; scale_stripes = pixel-size ratio >1%); grid_shift's default expected signature is the typed diagnostic.unmatched — the origin-delta observable is its detection; index_min/index_max observables added.
