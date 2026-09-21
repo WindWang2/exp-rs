@@ -11957,3 +11957,16 @@ target_include_directories(test_suitability_store_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_store_provider)
+
+qt_add_executable(test_suitability_profiles
+  test_suitability_profiles.cpp
+)
+target_link_libraries(test_suitability_profiles PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_profiles PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_profiles)

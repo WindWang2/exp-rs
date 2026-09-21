@@ -34,6 +34,8 @@ qt_add_library(sicnu_suitability STATIC
   suitability_goal.h
   suitability_level.cpp
   suitability_level.h
+  suitability_profiles.cpp
+  suitability_profiles.h
   suitability_provider.cpp
   suitability_provider.h
   suitability_types.cpp

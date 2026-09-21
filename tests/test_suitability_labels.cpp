@@ -29,6 +29,8 @@
 #include "suitability/suitability_provider.h"
 #include "suitability/suitability_types.h"
 
+#include "dataset/dataset_types.h"
+
 #include "data/data_asset.h"
 #include "data/raster_grid_compat.h"
 
@@ -65,12 +67,16 @@ SceneCandidate makeScene( const QString &id )
 
 ResolvedRequirements emptyRequirements()
 {
-    const auto resolved = resolveRequirements( SuitabilityGoal{} );
+    // temporal_prediction carries no label/volume/coverage defaults, so the
+    // criterion-level fixtures here stay profile-independent.
+    SuitabilityGoal goal;
+    goal.taskFamily = sicnu::dataset::BenchmarkTaskFamily::TemporalPrediction;
+    const auto resolved = resolveRequirements( goal );
     REQUIRE( resolved.has_value() );
     return resolved.value();
 }
 
-ResolvedRequirements labelRequirements( qint64 minSamples = 0 )
+ResolvedRequirements labelRequirements( qint64 minSamples = 200 )
 {
     SuitabilityGoal goal;
     goal.requireLabels = true;
@@ -200,9 +206,13 @@ TEST_CASE( "sample volume grades against minSamples with unknown kept unknown",
     REQUIRE( atMinimum.level == SuitabilityLevel::Suitable );
     REQUIRE( atMinimum.gaps.isEmpty() );
 
-    // Without a minimum there is nothing to grade and a known count suffices.
-    const ResolvedRequirements noMinimum = labelRequirements( 0 );
-    DatasetFacts counted = thin;
+    // Without a minimum there is nothing to grade and a known count suffices
+    // (direct requirement: a goal would inherit the classification profile's
+    // 200-sample default).
+    ResolvedRequirements noMinimum;
+    noMinimum.requireLabels = true;
+    DatasetFacts counted = exact;
+    counted.sampleCount = 199;
     const SuitabilityCriterion unconstrained = assessLabelAvailability( noMinimum, counted );
     REQUIRE( unconstrained.level == SuitabilityLevel::Suitable );
 }
@@ -215,6 +225,7 @@ TEST_CASE( "pseudo labels against a forbidding policy grade marginal",
 
     DatasetFacts facts = identifiedFacts();
     facts.hasLabelSchema = true;
+    facts.sampleCount = 500;
     facts.pseudoLabelCount = 12;
 
     const SuitabilityCriterion criterion = assessLabelAvailability( req, facts );

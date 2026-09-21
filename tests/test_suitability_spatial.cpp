@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "suitability/criteria_spatial.h"
+#include "suitability/dataset_facts.h"
 #include "suitability/scene_candidate.h"
 #include "suitability/suitability_assessor.h"
 #include "suitability/suitability_goal.h"
@@ -680,6 +681,13 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     inputs.goal.windowStartUtc = QDateTime::fromString( QStringLiteral( "2024-01-01T00:00:00Z" ), Qt::ISODate );
     inputs.goal.windowEndUtc = QDateTime::fromString( QStringLiteral( "2025-01-01T00:00:00Z" ), Qt::ISODate );
     inputs.datasetVersionId = QStringLiteral( "dv-1" );
+    // The classification profile (empty key + default family) requires
+    // labels, so a fully-answered subject carries label facts too.
+    sicnu::suitability::DatasetFacts facts;
+    facts.datasetVersionId = QStringLiteral( "dv-1" );
+    facts.hasLabelSchema = true;
+    facts.sampleCount = 1000;
+    inputs.facts = facts;
     SceneCandidate scene = makeScene( QStringLiteral( "s1" ), 0, 0, 100, 100, QStringLiteral( "aoi-crs" ) );
     scene.acquisitionTimeUtc =
         QDateTime::fromString( QStringLiteral( "2024-06-01T00:00:00Z" ), Qt::ISODate );
@@ -706,8 +714,6 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
                                  QStringLiteral( "temporal.coverage" ),
                                  QStringLiteral( "temporal.density" ),
                                  QStringLiteral( "temporal.seasonality" ) } );
-    // Every graded dimension is suitable or not-applicable (partial evidence
-    // would hold the overall at Unknown).
     REQUIRE( report.overallLevel() == SuitabilityLevel::Suitable );
 
     // Deterministic replay: same inputs, same digest.

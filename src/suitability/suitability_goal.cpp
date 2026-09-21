@@ -1,5 +1,7 @@
 #include "suitability_goal.h"
 
+#include "suitability_profiles.h"
+
 #include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -24,12 +26,21 @@ sicnu::data::Result<void> validateGoal( const SuitabilityGoal &goal )
 {
     if ( !goal.profileKey.isEmpty() )
     {
-        // The named-profile table is a later slice; refuse instead of
-        // pretending the default profile matches the requested one.
-        return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
-            QStringLiteral( "suitability.profile_unknown" ),
-            QStringLiteral( "unknown suitability profile '%1'" ).arg( goal.profileKey ),
-            sicnu::data::DiagnosticSeverity::Error } );
+        // A profileKey must name a built-in profile; "phenology" is an
+        // extra profile that only exists under the TemporalPrediction
+        // family. Anything else is refused instead of pretending the
+        // default profile matches the requested one.
+        const bool selectable =
+            isBuiltinProfile( goal.profileKey )
+            && ( goal.profileKey != QLatin1String( "phenology" )
+                 || goal.taskFamily == sicnu::dataset::BenchmarkTaskFamily::TemporalPrediction );
+        if ( !selectable )
+        {
+            return sicnu::data::Result<void>::failure( sicnu::data::Diagnostic{
+                QStringLiteral( "suitability.profile_unknown" ),
+                QStringLiteral( "unknown suitability profile '%1'" ).arg( goal.profileKey ),
+                sicnu::data::DiagnosticSeverity::Error } );
+        }
     }
     if ( goal.hasTimeWindow )
     {
@@ -235,32 +246,56 @@ sicnu::data::Result<ResolvedRequirements> resolveRequirements( const Suitability
     if ( !validated.has_value() )
         return sicnu::data::Result<ResolvedRequirements>::failure( validated.diagnostics() );
 
+    // Profile selection: an empty key picks the task family's default
+    // profile; a non-empty key passed validation (built-in, and phenology
+    // only under TemporalPrediction).
+    const QString profileKey = !goal.profileKey.isEmpty()
+                                   ? goal.profileKey
+                                   : defaultProfileKeyForFamily( goal.taskFamily );
+    const auto profile = builtinProfile( profileKey );
+    if ( !profile.has_value() )
+    {
+        // Defensive: validation above already made this unreachable.
+        return sicnu::data::Result<ResolvedRequirements>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.profile_unknown" ),
+            QStringLiteral( "unknown suitability profile '%1'" ).arg( profileKey ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+
+    // Overlay: the profile fills defaults, the explicit goal value always
+    // wins. Unset goal scalars are 0 / empty / false / <0 by schema; a
+    // false boolean therefore cannot suppress a profile default (the goal
+    // schema has no tri-state) — declared in the profile documentation.
     ResolvedRequirements resolved;
     resolved.hasAoi = goal.hasAoi;
     resolved.aoi = goal.aoi;
     resolved.aoiCrsWkt = goal.aoiCrsWkt;
-    resolved.minCoverageFractionResolved = goal.minCoverageFraction > 0.0
-                                               ? goal.minCoverageFraction
-                                               : kDefaultMinCoverageFraction;
-    resolved.minGsdM = goal.minGsdM;
-    resolved.maxGsdM = goal.maxGsdM;
+    resolved.minCoverageFractionResolved =
+        goal.minCoverageFraction > 0.0
+            ? goal.minCoverageFraction
+            : profile->minCoverageFraction.value_or( kDefaultMinCoverageFraction );
+    resolved.minGsdM = goal.minGsdM > 0.0 ? goal.minGsdM : profile->minGsdM.value_or( 0.0 );
+    resolved.maxGsdM = goal.maxGsdM > 0.0 ? goal.maxGsdM : profile->maxGsdM.value_or( 0.0 );
     resolved.requiredBandRoles = goal.requiredBandRoles;
     resolved.maxCloudCoverPercent = goal.maxCloudCoverPercent;
     resolved.hasTimeWindow = goal.hasTimeWindow;
     resolved.windowStartUtc = goal.windowStartUtc;
     resolved.windowEndUtc = goal.windowEndUtc;
-    resolved.requiredSeasons = goal.requiredSeasons;
-    resolved.minScenesInWindow = goal.minScenesInWindow;
-    resolved.requireLabels = goal.requireLabels;
+    resolved.requiredSeasons =
+        !goal.requiredSeasons.isEmpty() ? goal.requiredSeasons : profile->requiredSeasons;
+    resolved.minScenesInWindow = goal.minScenesInWindow > 0
+                                     ? goal.minScenesInWindow
+                                     : profile->minScenesInWindow.value_or( 0 );
+    resolved.requireLabels = goal.requireLabels || profile->requireLabels.value_or( false );
     resolved.requiredClasses = goal.requiredClasses;
-    resolved.minSamples = goal.minSamples;
+    resolved.minSamples = goal.minSamples > 0 ? goal.minSamples : profile->minSamples.value_or( 0 );
+    resolved.pseudoLabelsAllowed = profile->pseudoLabelsAllowed.value_or( true );
+    resolved.gridStrict = profile->gridStrict.value_or( false );
     resolved.hasModel = goal.hasModel;
     resolved.modelRequiredBandRoles = goal.modelRequiredBandRoles;
     resolved.modelMinGsdM = goal.modelMinGsdM;
     resolved.modelMaxGsdM = goal.modelMaxGsdM;
     resolved.modelModality = goal.modelModality;
-    // pseudoLabelsAllowed / gridStrict carry no goal field; their defaults
-    // (permissive, lenient) hold until the profile table overrides them.
     return sicnu::data::Result<ResolvedRequirements>::success( resolved );
 }
 
