@@ -1,0 +1,141 @@
+{
+  "spec_version": 2,
+  "id": "lab16_accuracy_assessment",
+  "title": "Classification Accuracy Assessment",
+  "title_zh": "分类精度评价：从不一致图到混淆矩阵",
+  "objective": "Quantify classification quality with a disagreement map, a hand-derived confusion matrix, OA and kappa.",
+  "objective_zh": "分类不是终点，回答『分得有多准』才是。本实验把分类图与真值图堆叠成特征立方体，用波段运算 abs(b1-b2) 生成不一致图，用 io:inspect 读总体误差强度，再手工推导 4×4 混淆矩阵并计算总体精度 OA 与 Kappa 系数。全部结论有闭式已知答案，判分逐像素对账。",
+  "prerequisites": [
+    {
+      "path": "data/labs/_tmp/landcover/landcover_classified.tif",
+      "note": "待评价的分类图（32×32 Byte，类别 1..4；运行 python3 scripts/gen_lab_fixtures.py landcover --out data/labs/_tmp 生成）"
+    },
+    {
+      "path": "data/labs/_tmp/landcover/landcover_truth.tif",
+      "note": "真值图（同一场景代数；行带 1/2/3/4，行 16–17 × 列 0–15 为 NoData）"
+    }
+  ],
+  "prerequisite_knowledge": [
+    "lab03_classification（监督分类流程）",
+    "lab15_data_inspection（元数据核对习惯）"
+  ],
+  "principles": [
+    {
+      "heading": "不一致图：误差的空间证据",
+      "body": "把分类图 C 与真值 T 逐像元对比，|C−T|=0 即一致、非 0 即错，且差值本身携带『错成哪一类』的信息。本场景代数中分类图把真值的第 3 类行带（行 24–27）并入第 2 类——典型的『光谱相近类合并』错误，因此不一致图上恰好 128 个有效像元取值 1，其余 864 个有效像元为 0。",
+      "formulas": [
+        "D = |C − T|（逐像元）",
+        "OA = 一致像元数 / 有效像元数 = 864 / 992 ≈ 0.871"
+      ]
+    },
+    {
+      "heading": "混淆矩阵、OA 与 Kappa",
+      "body": "混淆矩阵的行是真值、列是分类。本场景有效像元 992（1024 − 32 个 NoData）：行边际 (256, 480, 128, 128)，列边际 (256, 608, 0, 128)。OA = 864/992 ≈ 0.871；期望一致率 pe = (256·256 + 480·608 + 128·0 + 128·128)/992² ≈ 0.380；Kappa = (OA − pe)/(1 − pe) ≈ 0.792。第 3 类的生产者精度为 0——OA 看不见的类别级灾难，混淆矩阵一眼看穿。",
+      "formulas": [
+        "κ = (OA − pe)/(1 − pe)，pe = Σ_i (行_i · 列_i)/n²",
+        "生产者精度_i = 对角_i / 行_i；用户精度_i = 对角_i / 列_i"
+      ]
+    }
+  ],
+  "glossary": [
+    {
+      "term": "confusion matrix",
+      "term_zh": "混淆矩阵",
+      "definition_zh": "真值类别 × 分类类别的像元数交叉表。"
+    },
+    {
+      "term": "overall accuracy",
+      "term_zh": "总体精度",
+      "definition_zh": "一致像元数占有效像元数的比例。"
+    },
+    {
+      "term": "kappa coefficient",
+      "term_zh": "Kappa 系数",
+      "definition_zh": "扣除随机一致后的精度度量。"
+    },
+    {
+      "term": "producer's / user's accuracy",
+      "term_zh": "生产者/用户精度",
+      "definition_zh": "类别级的漏分/错分精度视角。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load classified map and truth",
+      "title_zh": "加载分类图与真值图",
+      "description_zh": "生成并加载实验数据：python3 scripts/gen_lab_fixtures.py landcover --out data/labs/_tmp，然后在地图画布中同时加载 landcover_classified.tif 与 landcover_truth.tif。目视对比：错在哪里？",
+      "action": "addRasterLayer",
+      "teaching_note": "真值是场景代数给出的封闭事实（行带 1..4，行 16–17 × 列 0–15 为 NoData），与判分fixture 完全一致。",
+      "completion_hint": "两幅图都已显示，肉眼可见第 3 类行带被并入第 2 类。"
+    },
+    {
+      "title": "Stack the pair into a feature cube",
+      "title_zh": "堆叠双图层",
+      "description_zh": "执行 rs:feature_stack，把分类图与真值图作为两个 feature 依（band=1）堆叠为 outputs/lab16_pair_stack.tif。堆叠是逐像元对比的前提：两条输入必须在同一网格上（ rs:feature_stack 会强制校验网格一致）。",
+      "operator_id": "rs:feature_stack",
+      "params": {
+        "features": [
+          {
+            "input": "data/labs/_tmp/landcover/landcover_classified.tif",
+            "band": 1,
+            "id": "classified"
+          },
+          {
+            "input": "data/labs/_tmp/landcover/landcover_truth.tif",
+            "band": 1,
+            "id": "truth"
+          }
+        ],
+        "output": "outputs/lab16_pair_stack.tif"
+      },
+      "teaching_note": "feature 的 id 会写进输出特征合同——给波段起语义名是可解释处理链的习惯。",
+      "completion_hint": "outputs/lab16_pair_stack.tif 生成，应为 2 波段。"
+    },
+    {
+      "title": "Compute the disagreement map",
+      "title_zh": "计算不一致图",
+      "description_zh": "对堆叠结果执行 rs:band_math，表达式 abs(b1-b2)，输出 outputs/lab16_disagreement.tif。0 = 一致；非 0 = 错，且差值告诉你『错成哪一类』。",
+      "operator_id": "rs:band_math",
+      "params": {
+        "input": "outputs/lab16_pair_stack.tif",
+        "expression": "abs(b1-b2)",
+        "output": "outputs/lab16_disagreement.tif"
+      },
+      "teaching_note": "本场景闭式答案：864 个有效像元为 0，128 个为 1（第 3 类行带并入第 2 类），32 个 NoData。",
+      "completion_hint": "outputs/lab16_disagreement.tif 生成。"
+    },
+    {
+      "title": "Quantify with statistics",
+      "title_zh": "用统计量化总体误差",
+      "description_zh": "不运行算子：打开 outputs/lab16_disagreement.tif 的数据源属性统计（或 gdalinfo -stats / io:inspect 工具），读出三个数并与闭式答案对账——有效像元数 992、均值 ≈ 128/992 ≈ 0.129、最大值 1。统计是最廉价的正确性证据；任何偏离先查 NoData 与网格，再谈结论。",
+      "teaching_note": "mean = 误差率只在本场景（差值恒为 1）巧合成立；多类混淆时均值会混入「错了几类」的信息，需要混淆矩阵分解。",
+      "completion_hint": "有效像元 992、均值 ≈0.129、最大 1 全部对上。"
+    },
+    {
+      "title": "Derive the confusion matrix by hand",
+      "title_zh": "手工推导混淆矩阵与 OA/Kappa",
+      "description_zh": "按行带代数手工填写 4×4 混淆矩阵（行=真值，列=分类），计算 OA 与 Kappa，并与第 4 步的统计对账。回答思考题：为什么 OA ≈ 0.871 听起来不错，第 3 类却全军覆没？",
+      "teaching_note": "闭式答案：混淆矩阵对角 (256, 480, 0, 128)，行边际 (256, 480, 128, 128)，列边际 (256, 608, 0, 128)；OA=864/992≈0.871，pe≈0.380，κ≈0.792。",
+      "completion_hint": "混淆矩阵、OA≈0.871、κ≈0.792 完成并与统计对账。"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "path": "outputs/lab16_pair_stack.tif",
+      "kind": "raster",
+      "note_zh": "2 波段堆叠（classified, truth）"
+    },
+    {
+      "path": "outputs/lab16_disagreement.tif",
+      "kind": "raster",
+      "note_zh": "不一致图（判分 artifact）"
+    }
+  ],
+  "grading_rules": "data/labs/grading/accuracy_agreement.rules.json",
+  "thinking_questions": [
+    "OA 高但某一类生产者精度为 0，这样的分类图能用于该类别的制图任务吗？为什么？",
+    "Kappa 扣除了『随机一致』。在类别面积极不均衡的场景，OA 与 κ 谁更容易被多数类抬高？",
+    "如果真值本身有 5% 标注误差，你计算的 OA 应该如何解释？（精度评价的上限是真值质量）",
+    "不一致图的差值携带『错成哪一类』的信息；什么情况下差值会误导（提示：类别编码顺序无序）？"
+  ]
+}

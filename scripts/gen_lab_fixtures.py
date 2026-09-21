@@ -363,9 +363,71 @@ def gen_temporal(out_dir, seed):
     print(f"wrote {zones_path}")
 
 
+# -------------------------------------------------------------- landcover
+# RS16 accuracy-assessment chain: 32x32 Byte class maps with the SAME
+# closed-form scene algebra as the committed grading fixtures
+# (tests/fixtures/lab/generate_fixtures.py::gen_landcover):
+#   classes 1..4 by row bands (rows 0-7 / 8-23 / 24-27 / 28-31),
+#   truth-NoData block rows 16-17 x cols 0-15 (32 px),
+#   EPSG:4326, 0.001 deg pixels, origin (100, 40), nodata 0.
+# The classified stand-in merges the class-3 rows into class 2 — the classic
+# "spectrally similar class absorbed" confusion — giving the closed form
+# OA = 864/992 ≈ 0.871 documented in accuracy_agreement.rules.json.
+
+LC_WIDTH = LC_HEIGHT = 32
+LC_GT = (100.0, 0.001, 0.0, 40.0, 0.0, -0.001)
+
+
+def _lc_class(r, _c):
+    if r <= 7:
+        return 1
+    if r <= 23:
+        return 2
+    if r <= 27:
+        return 3
+    return 4
+
+
+def _lc_invalid(r, c):
+    return 16 <= r <= 17 and 0 <= c <= 15
+
+
+def gen_landcover(out_dir, seed):
+    del seed  # pure scene algebra — deterministic, no RNG involved
+
+    truth = np.zeros((LC_HEIGHT, LC_WIDTH), dtype=np.uint8)
+    classified = np.zeros((LC_HEIGHT, LC_WIDTH), dtype=np.uint8)
+    for r in range(LC_HEIGHT):
+        for c in range(LC_WIDTH):
+            if _lc_invalid(r, c):
+                continue
+            truth[r, c] = _lc_class(r, c)
+            classified[r, c] = 2 if _lc_class(r, c) == 3 else _lc_class(r, c)
+
+    d = os.path.join(out_dir, "landcover")
+    os.makedirs(d, exist_ok=True)
+    drv = gdal.GetDriverByName("GTiff")
+    for name, plane in (("landcover_truth.tif", truth),
+                        ("landcover_classified.tif", classified)):
+        path = os.path.join(d, name)
+        ds = drv.Create(path, LC_WIDTH, LC_HEIGHT, 1, gdal.GDT_Byte,
+                        options=["COMPRESS=DEFLATE", "TILED=NO"])
+        ds.SetGeoTransform(LC_GT)
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(4326)
+        ds.SetProjection(srs.ExportToWkt())
+        band = ds.GetRasterBand(1)
+        band.SetNoDataValue(0)
+        band.WriteArray(plane)
+        ds.SetMetadataItem("SICNU_MODALITY", "optical")
+        ds.FlushCache()
+        ds = None
+        print(f"wrote {path}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("lab", choices=["temporal", "sar", "hyperspectral"])
+    ap.add_argument("lab", choices=["temporal", "sar", "hyperspectral", "landcover"])
     ap.add_argument("--out", required=True, help="output dir (must end in data/labs/_tmp)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
@@ -383,6 +445,8 @@ def main():
         lib = os.path.join(repo, "data", "labs", "spectral-library",
                            "lab10_sicnu_library.json")
         gen_hyperspectral(norm, lib, args.seed)
+    elif args.lab == "landcover":
+        gen_landcover(norm, args.seed)
     else:
         sys.exit(f"lab '{args.lab}' generator lands with its authoring phase")
 

@@ -579,7 +579,8 @@ TEST_CASE( "curriculum: shipped manifest loads against the real repo data",
   CHECK( catalog.moduleIds().size() >= 8 );
   const auto labs = catalog.labIds();
   CHECK( labs.size() >= 12 );
-  CHECK( labs.size() <= 16 );
+  // 16 owned labs + 1 read-only external reference (temporal track).
+  CHECK( labs.size() <= 17 );
 
   int externalCount = 0;
   for ( const auto &labId : labs )

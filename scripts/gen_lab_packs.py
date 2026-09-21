@@ -33,6 +33,15 @@ CHANGE_TRUTH = (
     "synthetic before/after pair 256x256; one added dark region in 'after' "
     "is the change signal"
 )
+LANDCOVER_TRUTH = (
+    "32x32 Byte class map, classes 1..4 by row bands (rows 0-7/8-23/24-27/"
+    "28-31), truth-NoData block rows 16-17 x cols 0-15; EPSG:4326, 0.001 deg "
+    "pixels, origin (100, 40), nodata 0; classified stand-in merges class 3 "
+    "into class 2 (closed-form OA 864/992)"
+)
+LANDCOVER_GENERATOR = (
+    "python3 scripts/gen_lab_fixtures.py landcover --out data/labs/_tmp --seed 42"
+)
 
 
 def sha256_file(path):
@@ -202,6 +211,21 @@ def main():
             "lab09_pca_analysis": classic_lab("lab09_pca_analysis", landsat),
             "lab10_mosaic": classic_lab("lab10_mosaic", change_pair),
             "lab11_obia_classification": classic_lab("lab11_obia_classification", landsat),
+            # RS14 curriculum additions.
+            "lab15_data_inspection": classic_lab("lab15_data_inspection", landsat),
+            "lab16_accuracy_assessment": base_pack(
+                "lab16_accuracy_assessment",
+                [
+                    generated_tmp(
+                        "data/labs/_tmp/landcover/landcover_classified.tif",
+                        "sample", LANDCOVER_TRUTH, LANDCOVER_GENERATOR),
+                    generated_tmp(
+                        "data/labs/_tmp/landcover/landcover_truth.tif",
+                        "truth", LANDCOVER_TRUTH, LANDCOVER_GENERATOR,
+                        "grading-adjacent truth twin; the pinned grading oracle "
+                        "is the committed tests/fixtures/lab/landcover_truth.tif"),
+                ],
+            ),
         }
     )
 
