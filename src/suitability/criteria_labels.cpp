@@ -37,6 +37,14 @@ SuitabilityCriterion assessLabelAvailability( const ResolvedRequirements &req,
         criterion.level = SuitabilityLevel::Unknown;
         criterion.summary = QStringLiteral( "No label requirement; label availability is not assessed." );
         criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "not_applicable" ) );
+        // Truncation stays visible even where it cannot downgrade a verdict:
+        // every other facts consumer of this report is reading partial data.
+        if ( facts.has_value() && facts->factsTruncated )
+        {
+            criterion.notes.append( QStringLiteral(
+                "dataset facts were truncated by the provider; unassessed dimensions may hide gaps" ) );
+            criterion.evidence.insert( QStringLiteral( "facts_truncated" ), true );
+        }
         return criterion;
     }
 
@@ -57,10 +65,26 @@ SuitabilityCriterion assessLabelAvailability( const ResolvedRequirements &req,
     criterion.evidence.insert( QStringLiteral( "pseudo_label_count" ),
                                static_cast< qint64 >( facts->pseudoLabelCount ) );
     criterion.evidence.insert( QStringLiteral( "facts_truncated" ), facts->factsTruncated );
+    if ( facts->factsTruncated )
+    {
+        criterion.notes.append( QStringLiteral(
+            "dataset facts were truncated by the provider; verdicts rest on partial evidence" ) );
+    }
     QJsonArray requiredClassesArray;
     for ( const QString &code : req.requiredClasses )
         requiredClassesArray.append( code );
     criterion.evidence.insert( QStringLiteral( "required_classes" ), requiredClassesArray );
+
+    // Duplicate or blank class codes are goal noise: deduplicated/ignored for
+    // gap generation (same posture as the spectral criterion's roles) while
+    // the evidence above keeps the raw list.
+    QStringList checkedClasses;
+    for ( const QString &code : req.requiredClasses )
+    {
+        if ( code.trimmed().isEmpty() || checkedClasses.contains( code ) )
+            continue;
+        checkedClasses.append( code );
+    }
 
     bool unsuitable = false;
 
@@ -77,7 +101,7 @@ SuitabilityCriterion assessLabelAvailability( const ResolvedRequirements &req,
     // Class coverage against the observed vocabulary; class codes match
     // exactly (they are store vocabulary, not free-form band text).
     qint64 missingClassCount = 0;
-    for ( const QString &code : req.requiredClasses )
+    for ( const QString &code : checkedClasses )
     {
         if ( facts->labelClasses.contains( code ) )
             continue;
@@ -146,6 +170,20 @@ SuitabilityCriterion assessLabelAvailability( const ResolvedRequirements &req,
         criterion.summary = QStringLiteral( "The sample volume is unknown; the minimum cannot be checked." );
         criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "unknown" ) );
         criterion.evidence.insert( QStringLiteral( "reason" ), QStringLiteral( "sample_count_unknown" ) );
+        return criterion;
+    }
+
+    if ( facts->factsTruncated )
+    {
+        // Truncated facts mean every passing verdict derived from them is
+        // provisional: the fold bucket can hide vocabulary and the caps can
+        // hide volumes we never saw. A pass therefore degrades to Marginal
+        // (failures already fail; unknown stays unknown).
+        criterion.level = SuitabilityLevel::Marginal;
+        criterion.summary = QStringLiteral(
+            "Label evidence satisfies the requirement, but the dataset facts were truncated; the pass is provisional." );
+        criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "marginal" ) );
+        criterion.evidence.insert( QStringLiteral( "truncation_downgraded" ), true );
         return criterion;
     }
 

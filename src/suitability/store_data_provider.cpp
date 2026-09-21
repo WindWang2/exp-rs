@@ -176,6 +176,11 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
             facts.factsTruncated = true;
         else
             facts.pseudoLabelCount = pseudo;
+        // A folded tail hides source values we never saw: the cap was
+        // reached and must be reported even when the pseudo entry itself
+        // survived (silent truncation is a bug).
+        if ( folded )
+            facts.factsTruncated = true;
     }
     else if ( facetNames.contains( QStringLiteral( "pseudo_label" ) ) )
     {
@@ -203,6 +208,10 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
             facts.factsTruncated = true;
         else
             facts.pseudoLabelCount = pseudo;
+        // The folded tail may hide further truthy spellings: the reported
+        // count is a lower bound, so the cap must be reported.
+        if ( folded )
+            facts.factsTruncated = true;
     }
 
     // Missing observation time: measured by a bounded keyset scan over the
@@ -234,6 +243,10 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
             facts.factsTruncated = true;
         else
             facts.missingTimeCount = missing;
+        // A folded missing_time tail may hide further truthy values: the
+        // count is a lower bound, so the cap must be reported.
+        if ( folded )
+            facts.factsTruncated = true;
     }
     else
     {

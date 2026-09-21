@@ -51,7 +51,8 @@ class SuitabilityReport
         /// claims "suitable".
         SuitabilityLevel overallLevel() const;
 
-        /// Every gap from every criterion, sorted by gap id.
+        /// Every gap from every criterion, sorted by gap id; exact duplicate
+        /// gaps (same id, criterion, description and evidence) collapse.
         QVector<SuitabilityGap> allGaps() const;
 
         /// SHA-256 over the canonical compact JSON. Never serializes the

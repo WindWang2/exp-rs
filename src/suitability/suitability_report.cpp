@@ -47,6 +47,16 @@ QVector<SuitabilityGap> SuitabilityReport::allGaps() const
 
     std::sort( gaps.begin(), gaps.end(),
                []( const SuitabilityGap &a, const SuitabilityGap &b ) { return a.id < b.id; } );
+    // Exact duplicates (same id, criterion, description and evidence)
+    // collapse: a repeated input line must not read as two findings.
+    gaps.erase( std::unique( gaps.begin(), gaps.end(),
+                             []( const SuitabilityGap &a, const SuitabilityGap &b )
+                             {
+                                 return a.id == b.id && a.criterionId == b.criterionId
+                                        && a.description == b.description
+                                        && a.evidence == b.evidence;
+                             } ),
+                gaps.end() );
     return gaps;
 }
 
