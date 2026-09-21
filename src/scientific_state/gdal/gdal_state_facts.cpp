@@ -56,8 +56,10 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
     GDALDriver *driver = GDALDataset::FromHandle( dataset )->GetDriver();
     facts.driverName = driver ? driver->GetDescription() : std::string();
 
+    facts.metadata.setCap( kMaxCollectedMetadataItems );
     collectMetadataItems( GDALDataset::FromHandle( dataset )->GetMetadata( nullptr ),
                           "gdal:", facts.metadata );
+    facts.droppedMetadataItems += facts.metadata.dropped();
 
     facts.bandCount = GDALDataset::FromHandle( dataset )->GetRasterCount();
     for ( int index = 1; index <= facts.bandCount; ++index )
@@ -66,12 +68,14 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
         if ( !band )
             continue;
         BandFacts bandFacts;
+        bandFacts.metadata.setCap( kMaxCollectedMetadataItems );
         bandFacts.index = index;
         const char *description = band->GetDescription();
         if ( description && *description )
             bandFacts.name = description;
         bandFacts.dataType = bandDataTypeName( band );
         collectMetadataItems( band->GetMetadata( nullptr ), "gdal:", bandFacts.metadata );
+        facts.droppedMetadataItems += bandFacts.metadata.dropped();
 
         // Native GDAL nodata declaration, projected under the GDAL term the
         // resolver keys on (see Slice C: band item "NO_DATA_VALUE").

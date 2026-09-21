@@ -38,13 +38,27 @@ struct RawObservation
 };
 
 /// Multimap of metadata key → observations, preserving insertion order.
+/// An optional cap bounds memory on pathological files; items beyond the cap
+/// are COUNTED (dropped()) so the resolver can raise an explicit note —
+/// truncation is never silent.
 class MetadataItems
 {
   public:
     void add( const std::string &key, const std::string &value, const std::string &source )
     {
+        if ( cap_ > 0 && items_.size() >= cap_ )
+        {
+            ++dropped_;
+            return;
+        }
         items_.emplace_back( key, RawObservation{ value, source } );
     }
+
+    /// Bounds the number of retained observations (0 = unbounded).
+    void setCap( std::size_t cap ) { cap_ = cap; }
+
+    /// Observations dropped by the cap, if any.
+    std::size_t dropped() const { return dropped_; }
 
     /// All observations recorded for @p key, in insertion order.
     std::vector<RawObservation> find( const std::string &key ) const
@@ -72,6 +86,8 @@ class MetadataItems
 
   private:
     std::vector<std::pair<std::string, RawObservation>> items_;
+    std::size_t cap_ = 0;
+    std::size_t dropped_ = 0;
 };
 
 /// Per-band raw facts as observed from one source (file or catalog mirror).
@@ -110,6 +126,8 @@ struct DatasetFacts
     MetadataItems metadata;  // dataset-level items (SICNU_* keys, acquisition, ...)
     std::vector<BandFacts> bands;
     GeometryFacts geometry;
+    /// Total observations dropped by metadata caps (dataset + all bands).
+    std::size_t droppedMetadataItems = 0;
 };
 
 /// Band-level mirror as recorded in the catalog structure snapshot.

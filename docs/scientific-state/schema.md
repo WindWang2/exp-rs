@@ -101,9 +101,11 @@ the special path `claims[<claim path>]`). Byte-deterministic, round-trips.
 
 ## Bounds
 
-Bands 4096, claims 1024, temporal refs 256, notes 1024, metadata items 512
-per scope. Overflows truncate with an explicit note (`bands.truncated`,
-`temporal.truncated`) — never silently.
+Bands 4096, temporal refs 256, metadata items 512 per scope (dataset and
+per band). Claim and note counts are structurally bounded by these (see
+asset_state_schema.h); they are not independently capped. Overflows
+truncate with an explicit note (`bands.truncated`, `temporal.truncated`,
+`facts.metadata_truncated`) — never silently.
 
 ## Input safety
 

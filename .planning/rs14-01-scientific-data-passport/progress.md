@@ -124,3 +124,22 @@
 - 9 test targets green (76+78+96+71+41+31+102+58+42 = 595 assertions).
 - Docs: docs/scientific-state/{overview,schema}.md + examples/*.json (real
   CLI output) + docs/integration.md (wiring points incl. deferred MCP tool).
+
+## Review Gate round 1 (adversarial-reviewer) + fixes
+Verdict was "fix before PR": 2 P1 (uncaught Json::Exception in assetStateFromJson
+text overload — CLI abort exit 134 on over-deep --diff doc; 4 enum fields
+asString() without isString → LogicError), 5 P2, several P3. Mutation testing:
+7/8 killed, 1 survivor analyzed as redundant double-sort (behavior still
+pinned through normalizeState).
+
+Fixes (test_scientific_state_review.cpp = 21 assertions / 5 cases, new):
+- P1-1 try/catch Json::Exception; P1-2 isString guards (identity.kind/lifecycle,
+  sensor.modality, claims[].kind); P2-1 drop early-returns on
+  is_derived/present false; P2-2 remove never-enforced kMaxPassportClaims/
+  Notes, document the derived structural bound; P2-3 confidence now uses a
+  path→kind map (O(bands+claims), not O(bands×claims)); P2-4 MetadataItems
+  cap + dropped() counter + facts.metadata_truncated note; P2-5
+  radiometric.unit carries an unknown claim when no dataset (confidence
+  symmetry). CLI --diff with empty value now InvalidInput. Docs updated.
+- P1-1 verified end-to-end: deep --diff doc now exits 2 (ValidationFailure).
+- Full regression: 10 targets, 616 assertions, all green.

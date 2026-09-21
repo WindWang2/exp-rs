@@ -63,8 +63,9 @@ Planner 在生成 ScientificPlan 前可用护照做前置条件检查:
 |---|---|---|
 | 资产身份/结构 | `CatalogRecordStore` / `AssetSnapshot` | 投影(source tag `catalog:*`) |
 | 文件元数据 | GDAL `SICNU_*` 键 | 投影(source tag `gdal:*`) |
-| 传感器波段轴 | `data/products/sensor_profiles/*.json` | 投影(inferred claims) |
+| 传感器波段轴 | `data/products/sensor_profiles/*.json` | 投影(inferred claims;本 track 定义了 `SensorProfileFacts` 接缝与解析器语义,真实注册表加载器的适配器是留给接线的休眠接缝,见 integration 顶部模式) |
 | 谱系 | `DerivationRecord` | 投影(`provenance` section) |
 | 模型 sidecar | `<model>.meta.json` | 投影(`model_derived` section) |
 
-护照不缓存、不写回、不替代上述任何来源;解析永远按需进行,O(bands + facts)。
+护照不缓存、不写回、不替代上述任何来源;解析永远按需进行,复杂度
+O(bands + facts + claims)(confidence 经 path→kind 索引,无 bands×claims 项)。

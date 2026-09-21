@@ -45,14 +45,13 @@ inline constexpr const char *kAssetStateDiffSchemaId = "sicnu.asset_state_diff.v
 /// are truncated with an explicit note, never silently.
 inline constexpr std::size_t kMaxPassportBands = 4096;
 
-/// Hard upper bound on explicit claim records kept in one passport.
-inline constexpr std::size_t kMaxPassportClaims = 1024;
-
 /// Hard upper bound on projected temporal collection references.
 inline constexpr std::size_t kMaxPassportTemporalRefs = 256;
 
-/// Hard upper bound on resolution notes attached to one passport.
-inline constexpr std::size_t kMaxPassportNotes = 1024;
+/// Claim and note counts are not independently capped: they are structurally
+/// bounded by the input bounds above (≤ 2 claims per projected band plus a
+/// fixed set of section claims; ≤ 1 note per observation anomaly), so no
+/// pathological input can inflate them beyond O(kMaxPassportBands).
 
 } // namespace sicnu::state
 

@@ -1004,10 +1004,16 @@ void resolveValidity( RemoteSensingAssetState &state, const StateResolutionInput
 } // namespace
 
 /// Score of one key claim path in the confidence lattice (see
-/// asset_state_schema.h for the full contract).
-double claimPathScore( const RemoteSensingAssetState &state, const std::string &path )
+/// asset_state_schema.h for the full contract). Takes a prebuilt
+/// path → kind map: claims are looked up once, keeping confidence
+/// O(bands + claims) rather than O(bands × claims).
+double claimPathScore( const std::map<std::string, ClaimKind> &kinds,
+                       const std::string &path )
 {
-    switch ( claimFor( state, path ).kind )
+    const auto it = kinds.find( path );
+    if ( it == kinds.end() )
+        return 0.0;
+    switch ( it->second )
     {
         case ClaimKind::Known: return 1.0;
         case ClaimKind::Inferred: return 0.75;
@@ -1024,6 +1030,10 @@ double claimPathScore( const RemoteSensingAssetState &state, const std::string &
 double computeConfidence( const RemoteSensingAssetState &state,
                           const StateResolutionInput &input )
 {
+    std::map<std::string, ClaimKind> kinds;
+    for ( const ClaimRecord &claim : state.claims )
+        kinds.emplace( claim.path, claim.kind );
+
     double total = 0.0;
     std::size_t denominator = 0;
     const auto consider = [&]( double score )
@@ -1033,8 +1043,8 @@ double computeConfidence( const RemoteSensingAssetState &state,
     };
 
     if ( input.catalog )
-        consider( claimPathScore( state, "identity.asset_id" ) );
-    consider( claimPathScore( state, "sensor.modality" ) );
+        consider( claimPathScore( kinds, "identity.asset_id" ) );
+    consider( claimPathScore( kinds, "sensor.modality" ) );
 
     if ( !state.bands.empty() )
     {
@@ -1043,21 +1053,21 @@ double computeConfidence( const RemoteSensingAssetState &state,
         for ( const BandState &band : state.bands )
         {
             worst = std::min(
-                worst, claimPathScore( state,
+                worst, claimPathScore( kinds,
                                        "bands[" + std::to_string( band.index ) + "].role" ) );
         }
         consider( worst );
     }
 
-    consider( claimPathScore( state, "radiometric.unit" ) );
-    consider( claimPathScore( state, "acquisition.time" ) );
+    consider( claimPathScore( kinds, "radiometric.unit" ) );
+    consider( claimPathScore( kinds, "acquisition.time" ) );
 
     if ( input.dataset )
-        consider( claimPathScore( state, "geometry.crs" ) );
+        consider( claimPathScore( kinds, "geometry.crs" ) );
     if ( input.derivation )
-        consider( claimPathScore( state, "provenance.algorithm" ) );
+        consider( claimPathScore( kinds, "provenance.algorithm" ) );
     if ( !state.bands.empty() )
-        consider( claimPathScore( state, "validity.no_data_policy" ) );
+        consider( claimPathScore( kinds, "validity.no_data_policy" ) );
 
     if ( denominator == 0 )
         return 0.0;
@@ -1158,9 +1168,23 @@ ResolveOutcome resolveAssetState( const StateResolutionInput &input )
     // ---- Bands ----
     resolveBands( state, input, dataset, notes );
 
+    // ---- Facts-level truncation is surfaced, never silent ----
+    if ( dataset && dataset->droppedMetadataItems > 0 )
+    {
+        addNote( state, "facts.metadata_truncated", "facts",
+                 "metadata observations dropped by the collection cap: " +
+                     std::to_string( dataset->droppedMetadataItems ) );
+    }
+
     // ---- Radiometric ----
     if ( dataset )
         resolveRadiometric( state, *dataset, notes );
+    else
+    {
+        // Keep the evidence contract symmetric: a path counted in the
+        // confidence lattice must also carry a typed claim.
+        addUnknown( state, "radiometric.unit" );
+    }
 
     // ---- Geometry ----
     if ( dataset )

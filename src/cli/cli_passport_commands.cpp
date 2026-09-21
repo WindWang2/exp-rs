@@ -107,6 +107,10 @@ int commandPassport( QStringList args, const CliIO &io )
         sicnu::state::resolveAssetState( input ).state;
 
     std::optional<sicnu::state::StateDiff> diff;
+    if ( diffPresent && diffPath.isEmpty() )
+        return io.finish( false, "passport", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, "--diff requires a passport document path" );
     if ( diffPresent )
     {
         std::string readError;

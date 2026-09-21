@@ -573,6 +573,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
             return false;
         if ( identity.isMember( "kind" ) )
         {
+            if ( !identity["kind"].isString() )
+            {
+                error.code = StateErrorCode::InvalidField;
+                error.message = "field 'identity.kind' must be a string";
+                return false;
+            }
             if ( !assetKindFromString( identity["kind"].asString(), state.kind ) )
             {
                 error.code = StateErrorCode::InvalidField;
@@ -582,6 +588,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
         }
         if ( identity.isMember( "lifecycle" ) )
         {
+            if ( !identity["lifecycle"].isString() )
+            {
+                error.code = StateErrorCode::InvalidField;
+                error.message = "field 'identity.lifecycle' must be a string";
+                return false;
+            }
             if ( !assetLifecycleFromString( identity["lifecycle"].asString(), state.lifecycle ) )
             {
                 error.code = StateErrorCode::InvalidField;
@@ -607,6 +619,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
              !readString( sensor, "product_id", state.sensor.productId, error ) ||
              !readString( sensor, "processing_level", state.sensor.processingLevel, error ) )
             return false;
+        if ( sensor.isMember( "modality" ) && !sensor["modality"].isString() )
+        {
+            error.code = StateErrorCode::InvalidField;
+            error.message = "field 'sensor.modality' must be a string";
+            return false;
+        }
         if ( sensor.isMember( "modality" ) &&
              !modalityFromString( sensor["modality"].asString(), state.sensor.modality ) )
         {
@@ -822,8 +840,6 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
         {
             if ( !readBool( provenance, "is_derived", state.provenance.isDerived, error ) )
                 return false;
-            if ( !state.provenance.isDerived )
-                return true;
             if ( !readString( provenance, "algorithm_id", state.provenance.algorithmId, error ) ||
                  !readString( provenance, "algorithm_version", state.provenance.algorithmVersion,
                               error ) ||
@@ -872,8 +888,6 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
         {
             if ( !readBool( modelDerived, "present", state.modelDerived.present, error ) )
                 return false;
-            if ( !state.modelDerived.present )
-                return true;
             if ( !readString( modelDerived, "model_kind", state.modelDerived.modelKind, error ) ||
                  !readString( modelDerived, "sidecar_path", state.modelDerived.sidecarPath,
                               error ) ||
@@ -913,6 +927,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
                 return false;
             if ( node.isMember( "kind" ) )
             {
+                if ( !node["kind"].isString() )
+                {
+                    error.code = StateErrorCode::InvalidField;
+                    error.message = "field 'claims[].kind' must be a string";
+                    return false;
+                }
                 if ( !claimKindFromString( node["kind"].asString(), claim.kind ) )
                 {
                     error.code = StateErrorCode::InvalidField;
@@ -962,8 +982,17 @@ bool assetStateFromJson( const std::string &text, RemoteSensingAssetState &out,
     // and surface jsoncpp exceptions as typed errors.
     builder["stackLimit"] = 128;
     Json::CharReader *reader = builder.newCharReader();
-    const std::string parseErrors;
-    const bool parsed = reader->parse( text.data(), text.data() + text.size(), &doc, nullptr );
+    bool parsed = false;
+    // jsoncpp throws (rather than returning false) on over-deep documents;
+    // untrusted input must surface as a typed error, never an exception.
+    try
+    {
+        parsed = reader->parse( text.data(), text.data() + text.size(), &doc, nullptr );
+    }
+    catch ( const Json::Exception & )
+    {
+        parsed = false;
+    }
     delete reader;
     if ( !parsed )
     {
