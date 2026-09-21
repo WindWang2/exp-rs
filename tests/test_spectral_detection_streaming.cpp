@@ -98,6 +98,26 @@ std::vector<float> referenceScores( const std::string &kind,
     const size_t count = static_cast<size_t>( W ) * H;
     std::vector<float> noData( static_cast<size_t>( B ), -9999.0f );
     std::vector<uint8_t> hasNoData( static_cast<size_t>( B ), withNoData ? 1 : 0 );
+    // #1150: the reference applies the validity predicate ITSELF — the
+    // kernels only check isfinite, so without this post-mask a finite
+    // sentinel pixel would compare its bogus finite score as "expected" and
+    // codify the driver's omission as the oracle.
+    const auto maskInvalid = [&]( std::vector<float> &s ) {
+        for ( size_t p = 0; p < count; ++p )
+        {
+            const float *x = bip.data() + p * B;
+            for ( int b = 0; b < B; ++b )
+            {
+                if ( !std::isfinite( x[b] )
+                     || ( hasNoData[static_cast<size_t>( b )]
+                          && x[b] == noData[static_cast<size_t>( b )] ) )
+                {
+                    s[p] = std::numeric_limits<float>::quiet_NaN();
+                    break;
+                }
+            }
+        }
+    };
 
     std::vector<float> scores( count );
     std::vector<float> target( static_cast<size_t>( B ) );
@@ -112,6 +132,7 @@ std::vector<float> referenceScores( const std::string &kind,
         std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
         for ( size_t p = 0; p < count; ++p )
             scores[p] = SpectralOsp::ospScore( bip.data() + p * B, filter, B, &scratch );
+        maskInvalid( scores );
         return scores;
     }
 
@@ -128,6 +149,7 @@ std::vector<float> referenceScores( const std::string &kind,
             std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
             for ( size_t p = 0; p < count; ++p )
                 scores[p] = SpectralCem::cemScore( bip.data() + p * B, filter, B, &scratch );
+            maskInvalid( scores );
             return scores;
         }
         SpectralTcimf::Filter filter;
@@ -136,6 +158,7 @@ std::vector<float> referenceScores( const std::string &kind,
         std::vector<double> scratch( static_cast<size_t>( B ), 0.0 );
         for ( size_t p = 0; p < count; ++p )
             scores[p] = SpectralTcimf::tcimfScore( bip.data() + p * B, filter, B, &scratch );
+        maskInvalid( scores );
         return scores;
     }
 
@@ -158,6 +181,7 @@ std::vector<float> referenceScores( const std::string &kind,
                                                                      stats.mean, B, &scratch )
                             : SpectralDetection::aceScore( bip.data() + p * B, model, stats.mean,
                                                            invCov, B, &scratch );
+        maskInvalid( scores );
     }
     return scores;
 }
@@ -235,12 +259,17 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
             referenceScores( kind, bip, W, H, kB, withNoData, interferenceSpectra );
 
         double maxRelErr = 0.0;
+        size_t plantedNoData = 0;
         for ( size_t p = 0; p < ref.size(); ++p )
         {
             const bool refNaN = std::isnan( ref[p] );
             REQUIRE( std::isnan( streamed[p] ) == refNaN );
             if ( refNaN )
+            {
+                if ( withNoData )
+                    ++plantedNoData;
                 continue;
+            }
             if ( exact )
             {
                 CHECK( streamed[p] == ref[p] );
@@ -257,6 +286,27 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
         }
         if ( !exact )
             INFO( "max relative error: " << maxRelErr );
+        // #1150: with a declared NoData the scene must actually plant
+        // sentinel pixels, and every one of them must come out NaN in the
+        // streamed output (the driver's own validity predicate).
+        if ( withNoData )
+        {
+            REQUIRE( plantedNoData > 0 );
+            for ( size_t p = 0; p < bip.size(); p = p + kB )
+            {
+                bool sentinel = false;
+                for ( int b = 0; b < kB; ++b )
+                    if ( bip[p + static_cast<size_t>( b )] == -9999.0f )
+                        sentinel = true;
+                if ( sentinel )
+                {
+                    const size_t pixel = p / static_cast<size_t>( kB );
+                    INFO( "planted -9999 pixel " << pixel << " must score NaN, got "
+                          << streamed[pixel] );
+                    REQUIRE( std::isnan( streamed[pixel] ) );
+                }
+            }
+        }
     };
 
     // Interference spectrum for the TCIMF/OSP kinds: linearly independent of
