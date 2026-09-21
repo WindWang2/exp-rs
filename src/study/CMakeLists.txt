@@ -8,6 +8,9 @@ qt_add_library(sicnu_study STATIC
   study_spec.h
   study_sampling.cpp
   study_sampling.h
+  study_execution.h
+  study_runner.cpp
+  study_runner.h
 )
 
 add_library(Sicnu::study ALIAS sicnu_study)
