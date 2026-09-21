@@ -106,6 +106,34 @@ TEST_CASE( "ParameterStudySpec refuses unknown fields (a mistyped spec must not 
     REQUIRE( found );
 }
 
+TEST_CASE( "nested spec objects refuse unknown fields too", "[study][spec]" )
+{
+    SECTION( "unknown key inside budget" )
+    {
+        auto json = validSpec().toJson();
+        QJsonObject budget = json.value( QStringLiteral( "budget" ) ).toObject();
+        budget.insert( QStringLiteral( "maxRüns" ), 5 ); // typo'd nested key
+        json.insert( QStringLiteral( "budget" ), budget );
+        const auto parsed = ParameterStudySpec::fromJson( json );
+        REQUIRE( !parsed.has_value() );
+        bool found = false;
+        for ( const auto &d : parsed.diagnostics() )
+            found = found || d.code == QStringLiteral( "study.spec_unknown_field" );
+        REQUIRE( found );
+    }
+    SECTION( "unknown key inside a dimension" )
+    {
+        auto json = validSpec().toJson();
+        QJsonArray dims = json.value( QStringLiteral( "dimensions" ) ).toArray();
+        QJsonObject dim = dims.at( 0 ).toObject();
+        dim.insert( QStringLiteral( "step_cout" ), 5 );
+        dims.replace( 0, dim );
+        json.insert( QStringLiteral( "dimensions" ), dims );
+        const auto parsed = ParameterStudySpec::fromJson( json );
+        REQUIRE( !parsed.has_value() );
+    }
+}
+
 TEST_CASE( "ParameterStudySpec validation refusals are typed", "[study][spec]" )
 {
     SECTION( "missing study id" )
@@ -186,6 +214,24 @@ TEST_CASE( "ParameterStudySpec validation refusals are typed", "[study][spec]" )
         auto spec = validSpec();
         spec.spatialEpsilon = -1.0;
         REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_invalid_epsilon" ) ) );
+    }
+    SECTION( "\"seed\" is a reserved dimension path" )
+    {
+        auto spec = validSpec();
+        spec.dimensions[0].parameterPath = QStringLiteral( "seed" );
+        REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_reserved_dimension" ) ) );
+    }
+    SECTION( "unbounded step counts are capped (no overflow, no megamillion ladder)" )
+    {
+        auto spec = validSpec();
+        spec.dimensions[0].stepCount = 2147483647;
+        REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_invalid_dimension_steps" ) ) );
+    }
+    SECTION( "seeds beyond JSON number fidelity are refused" )
+    {
+        auto spec = validSpec();
+        spec.budget.seed = ( Q_UINT64_C( 1 ) << 53 ); // 2^53 — would not roundtrip
+        REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_invalid_budget" ) ) );
     }
 }
 

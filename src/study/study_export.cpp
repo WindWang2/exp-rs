@@ -3,6 +3,9 @@
 
 #include "experiment/experiment_store.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -338,7 +341,7 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
 
     // Error evidence per point: failed/cancelled runs self-describe through
     // the recorder's metrics["error"] / cancel_reason.
-    QHash<QString, QPair<QString, QString>> errorEvidence; // runId → (summary, output)
+    QHash<QString, QString> errorEvidence; // runId → human-readable summary
     for ( const PointAggregate &aggregate : analysis.points )
     {
         for ( const QString &runId : aggregate.runIds )
@@ -357,9 +360,7 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
                 metrics.value( QStringLiteral( "cancel_reason" ) ).toString();
             if ( summary.isEmpty() && !cancel.isEmpty() )
                 summary = QStringLiteral( "cancelled: %1" ).arg( cancel );
-            errorEvidence.insert( runId,
-                                  { summary, metrics.value( QStringLiteral( "output" ) )
-                                                 .toString() } );
+            errorEvidence.insert( runId, summary );
         }
     }
 
@@ -402,10 +403,7 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
             return metrics;
         }();
         if ( !row.runId.isEmpty() )
-        {
-            const auto evidence = errorEvidence.value( row.runId );
-            row.errorSummary = evidence.first;
-        }
+            row.errorSummary = errorEvidence.value( row.runId );
         // Output path from the run's recorded parameter ("output") — the
         // runner-assigned stable location.
         if ( point != points.cend() )
@@ -498,6 +496,93 @@ Result<void> writeStudyReport( const StudyReport &report, const QString &path )
             QStringLiteral( "study.report_write_failed" ),
             QStringLiteral( "cannot commit %1: %2" ).arg( path, file.errorString() ) ) );
     return Result<void>::success();
+}
+
+Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
+    experiment::ExperimentStore &store, experiment::MatrixLedger &ledger,
+    const ParameterStudySpec &spec, const QVector<StudyPoint> &points,
+    const QString &studyOutputDir, const ISpatialDifferenceSummarizer &summarizer )
+{
+    // The spec field is the DECLARATION; composition is this explicit call so
+    // the report builder stays a pure projection of what it is handed.
+    if ( !spec.spatialComparison )
+        return Result<QVector<SpatialDifferenceSummary>>::success( {} );
+
+    const QDir outputDir( studyOutputDir );
+    const auto outputOf = [&outputDir]( const StudyPoint &point ) {
+        return outputDir.filePath( point.pointId + QStringLiteral( "/output.tif" ) );
+    };
+    const auto hasRecordedOutput = [&]( const StudyPoint &point ) {
+        const QStringList runs = ledger.runsForCell( point.pointId );
+        for ( const QString &runId : runs )
+        {
+            const auto run = store.runById( runId );
+            if ( run && run.value().status() == dataset::RunStatus::Completed
+                 && QFile::exists( outputOf( point ) ) )
+                return true;
+        }
+        return false;
+    };
+
+    // Baseline: the reference point (every dimension at its reference ladder
+    // value — the same median rule as the OAT sampler); for LHS, the first
+    // recorded output in sample order.
+    QString baselineOutput;
+    if ( spec.strategy != SamplingStrategy::LatinHypercube )
+    {
+        for ( const StudyPoint &point : points )
+        {
+            bool atReference = true;
+            for ( const ParameterDimension &dimension : spec.dimensions )
+            {
+                const auto ladder = dimensionLadder( dimension );
+                const QString referenceText =
+                    canonicalValueText( ladder.at( ( dimension.stepCount - 1 ) / 2 ) );
+                if ( point.assignments.value( dimension.parameterPath ) != referenceText )
+                {
+                    atReference = false;
+                    break;
+                }
+            }
+            if ( atReference && hasRecordedOutput( point ) )
+            {
+                baselineOutput = outputOf( point );
+                break;
+            }
+        }
+    }
+    if ( baselineOutput.isEmpty() )
+    {
+        for ( const StudyPoint &point : points )
+        {
+            if ( hasRecordedOutput( point ) )
+            {
+                baselineOutput = outputOf( point );
+                break;
+            }
+        }
+    }
+    if ( baselineOutput.isEmpty() )
+        return Result<QVector<SpatialDifferenceSummary>>::failure( exportError(
+            QStringLiteral( "study.spatial_no_baseline" ),
+            QStringLiteral( "spatial comparison declared but no recorded output exists "
+                             "to serve as the baseline" ) ) );
+
+    QVector<SpatialDifferenceSummary> summaries;
+    for ( const StudyPoint &point : points )
+    {
+        const QString output = outputOf( point );
+        if ( QFileInfo( output ).absoluteFilePath()
+             == QFileInfo( baselineOutput ).absoluteFilePath() )
+            continue;
+        if ( !hasRecordedOutput( point ) )
+            continue; // no evidence to compare — never fabricated
+        const auto summary = summarizer.summarize( baselineOutput, output );
+        if ( !summary )
+            return Result<QVector<SpatialDifferenceSummary>>::failure( summary.diagnostics() );
+        summaries.append( summary.value() );
+    }
+    return Result<QVector<SpatialDifferenceSummary>>::success( summaries );
 }
 
 } // namespace sicnu::study

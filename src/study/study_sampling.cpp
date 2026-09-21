@@ -262,19 +262,21 @@ Result<QVector<StudyPoint>> sampleStudyPoints( const ParameterStudySpec &spec )
     if ( spec.strategy == SamplingStrategy::Grid || spec.strategy == SamplingStrategy::OneAtATime )
     {
         // Point count is knowable up front — refuse over-budget studies
-        // instead of sampling and truncating.
-        qint64 parameterSets = 0;
-        if ( spec.strategy == SamplingStrategy::Grid )
+        // instead of sampling and truncating. The accumulation SATURATES at
+        // the cap: a hostile spec with enormous step counts must produce a
+        // typed refusal, not signed overflow.
+        qint64 parameterSets = spec.strategy == SamplingStrategy::Grid ? 1 : 0;
+        for ( const ParameterDimension &dim : spec.dimensions )
         {
-            parameterSets = 1;
-            for ( const ParameterDimension &dim : spec.dimensions )
+            if ( spec.strategy == SamplingStrategy::Grid )
                 parameterSets *= dim.stepCount;
-        }
-        else
-        {
-            parameterSets = 1;
-            for ( const ParameterDimension &dim : spec.dimensions )
+            else
                 parameterSets += dim.stepCount - 1;
+            if ( parameterSets > experiment::kMaxMatrixCells )
+            {
+                parameterSets = experiment::kMaxMatrixCells + 1;
+                break;
+            }
         }
         const qint64 total = parameterSets * spec.budget.seedReplicates;
         if ( total > spec.budget.maxRuns )

@@ -90,11 +90,18 @@ Result<void> ParameterStudySpec::validate() const
                 specError( QStringLiteral( "study.spec_invalid_dimension_range" ),
                            QStringLiteral( "dimension %1 requires min < max (finite)" )
                                .arg( dim.parameterPath ) ) );
-        if ( dim.stepCount < 2 )
+        if ( dim.stepCount < 2 || dim.stepCount > experiment::kMaxMatrixCells )
             return Result<void>::failure(
                 specError( QStringLiteral( "study.spec_invalid_dimension_steps" ),
-                           QStringLiteral( "dimension %1 requires at least two ladder values" )
-                               .arg( dim.parameterPath ) ) );
+                           QStringLiteral( "dimension %1 requires a ladder of 2..%2 values" )
+                               .arg( dim.parameterPath )
+                               .arg( experiment::kMaxMatrixCells ) ) );
+        if ( dim.parameterPath == QStringLiteral( "seed" ) )
+            return Result<void>::failure(
+                specError( QStringLiteral( "study.spec_reserved_dimension" ),
+                           QStringLiteral( "\"seed\" is a reserved dimension path — replicate "
+                                            "seeds are part of the budget, not a swept "
+                                            "parameter" ) ) );
         if ( paths.contains( dim.parameterPath ) )
             return Result<void>::failure(
                 specError( QStringLiteral( "study.spec_duplicate_dimension" ),
@@ -154,12 +161,15 @@ Result<void> ParameterStudySpec::validate() const
                        QStringLiteral( "spatial epsilon must be a finite value >= 0" ) ) );
 
     const StudyBudget &b = budget;
+    // The seed rides the JSON document as a number; beyond 2^53-1 it would
+    // silently change on a save/load roundtrip and fork the sampler stream.
     if ( b.maxRuns < 1 || b.maxInFlight < 1 || b.maxInFlight > kStudyMaxInFlightBound
-         || b.seedReplicates < 1 || b.perRunTimeoutMs < 1 )
+         || b.seedReplicates < 1 || b.perRunTimeoutMs < 1 || b.seed > ( Q_UINT64_C( 1 ) << 53 ) - 1 )
         return Result<void>::failure(
             specError( QStringLiteral( "study.spec_invalid_budget" ),
                        QStringLiteral( "budget requires maxRuns >= 1, 1 <= maxInFlight <= %1, "
-                                        "seedReplicates >= 1 and perRunTimeoutMs >= 1" )
+                                        "seedReplicates >= 1, perRunTimeoutMs >= 1 and "
+                                        "seed <= 2^53-1 (JSON number fidelity)" )
                            .arg( kStudyMaxInFlightBound ) ) );
     if ( b.maxRuns > experiment::kMaxMatrixCells )
         return Result<void>::failure(
@@ -252,6 +262,56 @@ Result<ParameterStudySpec> ParameterStudySpec::fromJson( const QJsonObject &json
             return Result<ParameterStudySpec>::failure(
                 specError( QStringLiteral( "study.spec_unknown_field" ),
                            QStringLiteral( "unknown study spec field %1" ).arg( it.key() ) ) );
+    }
+    // Nested objects get the same treatment — a typo'd key inside "budget"
+    // would otherwise silently mean "default".
+    const auto refuseUnknownIn = []( const QJsonObject &object,
+                                     const QSet<QString> &allowed,
+                                     const QString &context ) -> Result<ParameterStudySpec> {
+        for ( auto nested = object.constBegin(); nested != object.constEnd(); ++nested )
+        {
+            if ( !allowed.contains( nested.key() ) )
+                return Result<ParameterStudySpec>::failure(
+                    specError( QStringLiteral( "study.spec_unknown_field" ),
+                               QStringLiteral( "unknown field %1 in %2" )
+                                   .arg( nested.key(), context ) ) );
+        }
+        return Result<ParameterStudySpec>::success( ParameterStudySpec{} );
+    };
+    if ( auto result = refuseUnknownIn(
+             json.value( QStringLiteral( "sampling" ) ).toObject(),
+             { QStringLiteral( "strategy" ) }, QStringLiteral( "sampling" ) );
+         !result )
+        return result;
+    if ( auto result = refuseUnknownIn(
+             json.value( QStringLiteral( "budget" ) ).toObject(),
+             { QStringLiteral( "max_runs" ), QStringLiteral( "max_in_flight" ),
+               QStringLiteral( "per_run_timeout_ms" ), QStringLiteral( "seed_replicates" ),
+               QStringLiteral( "seed" ) },
+             QStringLiteral( "budget" ) );
+         !result )
+        return result;
+    const QJsonArray checkingDimensions = json.value( QStringLiteral( "dimensions" ) ).toArray();
+    for ( const auto &entry : checkingDimensions )
+    {
+        if ( auto result = refuseUnknownIn(
+                 entry.toObject(),
+                 { QStringLiteral( "parameter_path" ), QStringLiteral( "min_value" ),
+                   QStringLiteral( "max_value" ), QStringLiteral( "step_count" ) },
+                 QStringLiteral( "dimensions" ) );
+             !result )
+            return result;
+    }
+    const QJsonArray checkingObjectives =
+        json.value( QStringLiteral( "objective_metrics" ) ).toArray();
+    for ( const auto &entry : checkingObjectives )
+    {
+        if ( auto result = refuseUnknownIn( entry.toObject(),
+                                            { QStringLiteral( "name" ),
+                                              QStringLiteral( "maximize" ) },
+                                            QStringLiteral( "objective_metrics" ) );
+             !result )
+            return result;
     }
 
     ParameterStudySpec spec;

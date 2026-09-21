@@ -66,6 +66,7 @@ enum class Script
     Fail,
     Timeout,
     SucceedWithoutOutput,
+    SucceedWithWrongOutput,
 };
 
 class FakeBackend : public IStudyExecutionBackend
@@ -100,7 +101,10 @@ class FakeBackend : public IStudyExecutionBackend
         Script entry = script.size() > 0
             ? script.at( std::min<int>( submissions - 1, script.size() - 1 ) )
             : fallback;
-        StudyExecutionOutcome outcome = outcomeFor( entry );
+        // A faithful backend reports the path it actually committed — the
+        // runner-assigned "output" from the submitted parameters.
+        StudyExecutionOutcome outcome =
+            outcomeFor( entry, pointParameters.value( QStringLiteral( "output" ) ).toString() );
         return Result<std::unique_ptr<StudySubmission>>::success(
             std::make_unique<FakeSubmission>( QString::number( 1000 + submissions ),
                                               std::move( outcome ), m_inFlight ) );
@@ -118,7 +122,7 @@ class FakeBackend : public IStudyExecutionBackend
         return d;
     }
 
-    static StudyExecutionOutcome outcomeFor( Script entry )
+    static StudyExecutionOutcome outcomeFor( Script entry, const QString &committedOutput )
     {
         StudyExecutionOutcome outcome;
         switch ( entry )
@@ -127,10 +131,20 @@ class FakeBackend : public IStudyExecutionBackend
             {
                 outcome.status = StudyExecutionOutcome::Status::Succeeded;
                 outcome.payload = QJsonObject{
-                    { QStringLiteral( "output" ), QStringLiteral( "/committed/output.tif" ) },
+                    { QStringLiteral( "output" ), committedOutput },
                     { QStringLiteral( "maskedPercent" ), 42.5 },
                     { QStringLiteral( "maskedPixels" ), 425 },
                     { QStringLiteral( "taskId" ), QStringLiteral( "t" ) },
+                };
+                break;
+            }
+            case Script::SucceedWithWrongOutput:
+            {
+                // Violates the commit contract: a path the runner never assigned.
+                outcome.status = StudyExecutionOutcome::Status::Succeeded;
+                outcome.payload = QJsonObject{
+                    { QStringLiteral( "output" ), QStringLiteral( "/elsewhere/uncommitted.tif" ) },
+                    { QStringLiteral( "maskedPercent" ), 42.5 },
                 };
                 break;
             }
@@ -336,6 +350,26 @@ TEST_CASE( "timed-out executions are recorded as deadline failures",
              == QStringLiteral( "study.run_timeout" ) );
 }
 
+TEST_CASE( "an output outside the runner-assigned path is a typed failure",
+           "[study][runner]" )
+{
+    Fixture fix;
+    fix.backend.fallback = Script::SucceedWithWrongOutput;
+    StudyRunner runner( fix.store, fix.ledger, fix.backend );
+    const auto spec = specFor( 2 );
+    std::atomic<bool> cancel{ false };
+
+    const auto result = runner.run( spec, cancel, fix.outputDir() );
+    REQUIRE( result.has_value() );
+    REQUIRE( result.value().recordedCount == 0 );
+    REQUIRE( result.value().failedCount == 2 );
+    const auto run = fix.store.runById( result.value().runIds.at( 0 ) );
+    const QJsonObject error =
+        run.value().metrics().value( QStringLiteral( "error" ) ).toObject();
+    REQUIRE( error.value( QStringLiteral( "error_code" ) ).toString()
+             == QStringLiteral( "study.run_output_mismatch" ) );
+}
+
 TEST_CASE( "a success without a committed output is not a success", "[study][runner]" )
 {
     Fixture fix;
@@ -374,8 +408,10 @@ TEST_CASE( "caller cancellation stops submissions and records in-flight points a
     const auto &summary = result.value();
     REQUIRE( summary.stoppedReason == QStringLiteral( "cancelled" ) );
     REQUIRE( summary.cancelledCount >= 1 );
-    // No further submissions after the cancel: at most 2 happened.
+    // No further submissions after the cancel: at most 2 happened, and every
+    // submitted point produced exactly one run (runIds == submissions).
     REQUIRE( fix.backend.submissions <= 2 );
+    REQUIRE( summary.runIds.size() == fix.backend.submissions );
     // Every created run is terminal (no dangling non-terminal states).
     qint64 terminal = 0;
     for ( const QString &runId : summary.runIds )

@@ -112,4 +112,16 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
 /// Atomic write (temp + rename). Typed failures: study.report_write_failed.
 Result<void> writeStudyReport( const StudyReport &report, const QString &path );
 
+/// Composes run-vs-baseline spatial summaries for a study. Honours
+/// `spec.spatialComparison` (the DECLARATION; this explicit call is the
+/// composition, so the report stays a pure projection of what it is handed).
+/// Baseline: the reference point's output (dimensions at reference ladder
+/// values; LHS: first recorded output). Points without committed outputs are
+/// skipped, never fabricated. Typed failures: study.spatial_no_baseline and
+/// the summarizer's own codes (study.spatial_mismatch / _unreadable).
+Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
+    experiment::ExperimentStore &store, experiment::MatrixLedger &ledger,
+    const ParameterStudySpec &spec, const QVector<StudyPoint> &points,
+    const QString &studyOutputDir, const ISpatialDifferenceSummarizer &summarizer );
+
 } // namespace sicnu::study

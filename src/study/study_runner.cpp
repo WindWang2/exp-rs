@@ -42,6 +42,13 @@ QJsonObject selectMetrics( const QStringList &metricNames, const QJsonObject &pa
     return metrics;
 }
 
+/// The single output location contract: every point writes exactly here and
+/// every recorded artifact must be exactly this path.
+QString expectedOutputPath( const QDir &outputDir, const QString &pointId )
+{
+    return outputDir.filePath( pointId + QStringLiteral( "/output.tif" ) );
+}
+
 } // namespace
 
 StudyRunner::StudyRunner( experiment::ExperimentStore &store, experiment::MatrixLedger &ledger,
@@ -149,9 +156,8 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
             "study sweep: replicate seed recorded; operator determinism is not "
             "asserted by the study layer" );
         request.executionRef = QString(); // truthful: no execution ever existed
-        request.parameters.insert( QStringLiteral( "output" ),
-                                   outputDir.filePath( point.pointId
-                                                       + QStringLiteral( "/output.tif" ) ) );
+        request.parameters.insert(
+            QStringLiteral( "output" ), expectedOutputPath( outputDir, point.pointId ) );
         const auto runId = recorder.startRun( request );
         if ( !runId )
         {
@@ -205,8 +211,7 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
             const StudyPoint &point = points.at( nextIndex );
             ++nextIndex;
 
-            const QString outputPath =
-                outputDir.filePath( point.pointId + QStringLiteral( "/output.tif" ) );
+            const QString outputPath = expectedOutputPath( outputDir, point.pointId );
             QJsonObject pointParameters = point.parameters;
             pointParameters.insert( QStringLiteral( "output" ), outputPath );
             const QString correlationId = QStringLiteral( "%1/%2#%3" )
@@ -263,76 +268,148 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
         const StudyExecutionOutcome outcome =
             front.submission->wait( std::chrono::milliseconds( spec.budget.perRunTimeoutMs ) );
 
+        // The store must accept the truthful terminal transition; a refusal
+        // means we can no longer record honestly, so the study aborts (see
+        // the drain below) instead of reporting success with silent gaps.
+        const auto requireRecorded = [&]( bool recorded ) {
+            if ( !recorded )
+            {
+                aborted = true;
+                abortCode = QStringLiteral( "study.store_unavailable" );
+            }
+            return recorded;
+        };
+
         QString finishMessage;
         if ( outcome.status == StudyExecutionOutcome::Status::Succeeded )
         {
             const QString output = outcome.payload.value( QStringLiteral( "output" ) ).toString();
             if ( output.isEmpty() )
             {
-                recorder.markFailed( front.runId, QStringLiteral( "study.run_missing_output" ),
-                                     QStringLiteral( "succeeded execution reported no committed "
-                                                      "output path" ) );
-                ++summary.failedCount;
-                finishMessage = QStringLiteral( "missing committed output" );
+                if ( requireRecorded( recorder.markFailed(
+                         front.runId, QStringLiteral( "study.run_missing_output" ),
+                         QStringLiteral( "succeeded execution reported no committed "
+                                          "output path" ) )
+                         .has_value() ) )
+                {
+                    ++summary.failedCount;
+                    finishMessage = QStringLiteral( "missing committed output" );
+                }
+            }
+            else if ( QFileInfo( output ).absoluteFilePath()
+                      != QFileInfo( expectedOutputPath( outputDir, front.point.pointId ) )
+                             .absoluteFilePath() )
+            {
+                // The backend must commit to the runner-assigned stable path;
+                // anything else would put an unmanaged file into the evidence.
+                if ( requireRecorded( recorder.markFailed(
+                         front.runId, QStringLiteral( "study.run_output_mismatch" ),
+                         QStringLiteral( "execution reported output %1, expected %2" )
+                             .arg( output,
+                                   expectedOutputPath( outputDir, front.point.pointId ) ) )
+                         .has_value() ) )
+                {
+                    ++summary.failedCount;
+                    finishMessage = QStringLiteral( "output path mismatch" );
+                }
             }
             else
             {
                 experiment::ExperimentRun::Artifact artifact;
                 artifact.path = output;
                 artifact.role = QStringLiteral( "output" );
-                recorder.markSucceeded( front.runId, { artifact },
-                                        selectMetrics( spec.metricNames, outcome.payload ) );
-                ++summary.recordedCount;
-                finishMessage = QStringLiteral( "recorded" );
+                if ( requireRecorded( recorder
+                                          .markSucceeded( front.runId, { artifact },
+                                                         selectMetrics( spec.metricNames,
+                                                                        outcome.payload ) )
+                                          .has_value() ) )
+                {
+                    ++summary.recordedCount;
+                    finishMessage = QStringLiteral( "recorded" );
+                }
             }
         }
         else if ( outcome.status == StudyExecutionOutcome::Status::Cancelled )
         {
-            recorder.markCancelled( front.runId,
-                                    QStringLiteral( "cancelled: %1" )
-                                        .arg( outcome.errorMessage.isEmpty()
-                                                  ? QStringLiteral( "external cancel" )
-                                                  : outcome.errorMessage ) );
-            ++summary.cancelledCount;
-            finishMessage = QStringLiteral( "cancelled" );
+            if ( requireRecorded( recorder
+                                      .markCancelled( front.runId,
+                                                      QStringLiteral( "cancelled: %1" )
+                                                          .arg( outcome.errorMessage.isEmpty()
+                                                                    ? QStringLiteral(
+                                                                        "external cancel" )
+                                                                    : outcome.errorMessage ) )
+                                      .has_value() ) )
+            {
+                ++summary.cancelledCount;
+                finishMessage = QStringLiteral( "cancelled" );
+            }
         }
         else if ( outcome.status == StudyExecutionOutcome::Status::TimedOut )
         {
-            recorder.markFailed( front.runId, QStringLiteral( "study.run_timeout" ),
-                                 QStringLiteral( "per-run deadline (%1 ms) expired; the "
-                                                  "execution was cancelled" )
-                                     .arg( spec.budget.perRunTimeoutMs ) );
-            ++summary.failedCount;
-            finishMessage = QStringLiteral( "timeout" );
+            // Port contract enforcement: the deadline must end the execution,
+            // regardless of backend behavior.
+            front.submission->cancel();
+            if ( requireRecorded( recorder
+                                      .markFailed( front.runId,
+                                                   QStringLiteral( "study.run_timeout" ),
+                                                   QStringLiteral( "per-run deadline (%1 ms) "
+                                                                    "expired; the execution "
+                                                                    "was cancelled" )
+                                                       .arg( spec.budget.perRunTimeoutMs ) )
+                                      .has_value() ) )
+            {
+                ++summary.failedCount;
+                finishMessage = QStringLiteral( "timeout" );
+            }
         }
         else
         {
-            recorder.markFailed( front.runId,
-                                 outcome.errorCode.isEmpty()
-                                     ? QStringLiteral( "study.operator_failed" )
-                                     : outcome.errorCode,
-                                 outcome.errorMessage );
-            ++summary.failedCount;
-            finishMessage = QStringLiteral( "failed" );
+            if ( requireRecorded(
+                     recorder
+                         .markFailed( front.runId,
+                                      outcome.errorCode.isEmpty()
+                                          ? QStringLiteral( "study.operator_failed" )
+                                          : outcome.errorCode,
+                                      outcome.errorMessage )
+                         .has_value() ) )
+            {
+                ++summary.failedCount;
+                finishMessage = QStringLiteral( "failed" );
+            }
         }
+
+        if ( aborted )
+            break;
 
         // Every terminal run is linked to its point identity — failed and
         // cancelled runs too, so aggregates report them truthfully.
-        m_ledger->link( front.point.pointId, front.runId );
-        summary.runIds.append( front.runId );
-        emitProgress( StudyProgress::Phase::PointFinished, front.point.pointId, finishMessage,
-                      static_cast<int>( inFlight.size() ) - 1 );
+        if ( requireRecorded( m_ledger->link( front.point.pointId, front.runId ).has_value() ) )
+        {
+            summary.runIds.append( front.runId );
+            emitProgress( StudyProgress::Phase::PointFinished, front.point.pointId,
+                          finishMessage, static_cast<int>( inFlight.size() ) - 1 );
+        }
         inFlight.pop_front();
+        if ( aborted )
+            break;
     }
 
-    // Abort drain: no truthful record path exists (the store refused), so
-    // stop the executions and surface the reason — no fake terminal states.
+    // Abort drain: no further truthful record path exists for NEW runs (the
+    // store refused), but runs already opened in the store must not be left
+    // non-terminal — cancel the executions and close them as cancelled
+    // (best effort; a refusal here is already covered by stoppedReason).
     if ( aborted )
     {
         for ( InFlight &pending : inFlight )
+        {
             pending.submission->cancel();
-        for ( InFlight &pending : inFlight )
             pending.submission->wait( std::chrono::milliseconds( spec.budget.perRunTimeoutMs ) );
+            recorder.markCancelled( pending.runId,
+                                    QStringLiteral( "study aborted: %1" ).arg( abortCode ) );
+            m_ledger->link( pending.point.pointId, pending.runId );
+            summary.runIds.append( pending.runId );
+            ++summary.cancelledCount;
+        }
         summary.stoppedReason = QStringLiteral( "aborted:%1" ).arg( abortCode );
         emitProgress( StudyProgress::Phase::Aborted, QString(), summary.stoppedReason, 0 );
     }

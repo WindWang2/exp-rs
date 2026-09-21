@@ -32,7 +32,7 @@
 4. **Analysis projections** — sensitivity curves (dimension value → aggregate), uncertainty envelope (min/max + mean±σ across seed replicates), Pareto comparison (reuses `paretoCellIds` dominance logic).
 5. **Spatial difference summaries** — run output vs baseline raster: `SpatialDifferenceSummary` value object; production GDAL summarizer reusing `ChangeDetection` kernels; interface-injected so pure tests use fakes.
 6. **Versioned export (`sicnu.study.v1`)** — machine-readable study report (run table, curves, envelope, Pareto, spatial summaries, explicit status accounting: recorded/missing/failed/in_progress) + teaching narrative fields (parameter → result → interpretation triple). Atomic write.
-7. **Exemplars** — NDVI threshold (`rs:threshold_raster.threshold`), classification (`rs:kmeans_classification.k`), change threshold (`rs:change_detection.threshold`) spec files + tests.
+7. **Exemplars** — NDVI threshold (`rs:threshold_raster.threshold`), classification (`rs:supervised_classification.rejectThreshold` — kmeans exposes no accuracy metric, so the supervised path carries the teaching signal), change threshold (`rs:change_detection.threshold`) spec files + tests.
 
 ## 3. Interfaces to the other 19 concurrent tracks (no cross-PR dependency)
 

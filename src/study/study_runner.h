@@ -7,13 +7,16 @@
 // its own beyond the in-flight submission window — admission stays with
 // TaskCenter; run truth stays with the store.
 //
-// Truthful-state contract (ADR 0130): every point ends as exactly one of
+// Truthful-state contract (ADR 0130): every SUBMITTED point ends as exactly
+// one of
 //   recorded  (operator metrics + output artifact on the run)
 //   failed    (typed error evidence under the run's metrics["error"])
 //   cancelled (cancellation reason recorded)
 // A point is never silently dropped, retried behind the caller's back, or
 // reported as success without committed output. Submit refusals become
-// failed runs ("study.run_submit_refused") so the run table stays complete.
+// failed runs ("study.run_submit_refused") so the submitted set stays
+// complete. Points a cancellation prevented from submitting are NOT given
+// fake runs — they surface as "missing" in the report's status accounting.
 #pragma once
 
 #include "study/study_execution.h"
@@ -63,7 +66,12 @@ struct StudyRunSummary
     int recordedCount = 0;
     int failedCount = 0;
     int cancelledCount = 0;
-    QStringList runIds;     ///< store order: one entry per point (complete accounting)
+    /// One entry per point that REACHED a run record — i.e. every submitted
+    /// point. Points a cancellation prevented from ever being submitted have
+    /// no run (there is no execution to lie about); the report accounts them
+    /// as "missing" (totalPoints − terminalCount − neverSubmitted = 0 when
+    /// the study was not cancelled early).
+    QStringList runIds;
     QString stoppedReason;  ///< "" on natural completion, else "cancelled"/"aborted:<code>"
     qint64 elapsedMs = 0;
 
