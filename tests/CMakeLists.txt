@@ -11998,3 +11998,16 @@ target_include_directories(test_suitability_uncertainty PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_uncertainty)
+
+qt_add_executable(test_suitability_teaching
+  test_suitability_teaching.cpp
+)
+target_link_libraries(test_suitability_teaching PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_teaching PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_teaching)

@@ -44,6 +44,8 @@ qt_add_library(sicnu_suitability STATIC
   suitability_types.h
   suitability_report.cpp
   suitability_report.h
+  suitability_teaching.cpp
+  suitability_teaching.h
 )
 
 add_library(Sicnu::suitability ALIAS sicnu_suitability)
