@@ -3,6 +3,7 @@
 #include <QJsonArray>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace sicnu::suitability
@@ -67,6 +68,7 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
     QStringList bandPool;
     QStringList modalityPool;
     QVector<double> gsds;
+    int invalidGsdCount = 0;
     for ( const SceneCandidate &scene : scenes )
     {
         if ( !scene.usable() )
@@ -80,7 +82,15 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
         if ( !modality.isEmpty() && !modalityPool.contains( modality ) )
             modalityPool.append( modality );
         if ( scene.gsdM.has_value() )
-            gsds.append( *scene.gsdM );
+        {
+            // Broken GSD metadata (non-finite/non-positive) never becomes
+            // model-fit evidence: NaN would silently satisfy every range
+            // comparison below.
+            if ( std::isfinite( *scene.gsdM ) && *scene.gsdM > 0.0 )
+                gsds.append( *scene.gsdM );
+            else
+                ++invalidGsdCount;
+        }
     }
     if ( facts.has_value() )
     {
@@ -108,6 +118,7 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
     criterion.evidence.insert( QStringLiteral( "modality_pool" ),
                                QJsonArray::fromStringList( modalityPool ) );
     criterion.evidence.insert( QStringLiteral( "gsd_sample_count" ), gsds.size() );
+    criterion.evidence.insert( QStringLiteral( "gsd_invalid_count" ), invalidGsdCount );
 
     if ( bandPool.isEmpty() && modalityPool.isEmpty() && gsds.isEmpty() )
     {
@@ -137,56 +148,66 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
     }
 
     bool partialGsd = false;
-    if ( !gsds.isEmpty() && ( req.modelMinGsdM > 0.0 || req.modelMaxGsdM > 0.0 ) )
+    bool gsdUnverifiable = false;
+    if ( req.modelMinGsdM > 0.0 || req.modelMaxGsdM > 0.0 )
     {
-        const double sceneMin = *std::min_element( gsds.cbegin(), gsds.cend() );
-        const double sceneMax = *std::max_element( gsds.cbegin(), gsds.cend() );
-        const bool entirelyTooFine =
-            req.modelMaxGsdM > 0.0 && sceneMin > req.modelMaxGsdM;
-        const bool entirelyTooCoarse =
-            req.modelMinGsdM > 0.0 && sceneMax < req.modelMinGsdM;
-        if ( entirelyTooFine || entirelyTooCoarse )
+        if ( gsds.isEmpty() )
         {
-            unsuitable = true;
-            SuitabilityGap gap = makeGap(
-                criterion.id, QStringLiteral( "model.resolution_out_of_range" ),
-                QStringLiteral( "The model's GSD range [%1, %2] m does not intersect the scenes' measured GSD range [%3, %4] m." )
-                    .arg( req.modelMinGsdM, 0, 'g', 4 )
-                    .arg( req.modelMaxGsdM, 0, 'g', 4 )
-                    .arg( sceneMin, 0, 'g', 4 )
-                    .arg( sceneMax, 0, 'g', 4 ) );
-            gap.evidence.insert( QStringLiteral( "model_min_gsd_m" ), req.modelMinGsdM );
-            gap.evidence.insert( QStringLiteral( "model_max_gsd_m" ), req.modelMaxGsdM );
-            gap.evidence.insert( QStringLiteral( "scene_min_gsd_m" ), sceneMin );
-            gap.evidence.insert( QStringLiteral( "scene_max_gsd_m" ), sceneMax );
-            criterion.gaps.append( gap );
+            // The model pins a resolution range but no valid GSD evidence
+            // exists (none carried, or every value was broken): unknown,
+            // never a silent pass on missing metadata.
+            gsdUnverifiable = true;
         }
         else
         {
-            const auto withinModel = [ &req ]( double gsd )
+            const double sceneMin = *std::min_element( gsds.cbegin(), gsds.cend() );
+            const double sceneMax = *std::max_element( gsds.cbegin(), gsds.cend() );
+            const bool entirelyTooFine =
+                req.modelMaxGsdM > 0.0 && sceneMin > req.modelMaxGsdM;
+            const bool entirelyTooCoarse =
+                req.modelMinGsdM > 0.0 && sceneMax < req.modelMinGsdM;
+            if ( entirelyTooFine || entirelyTooCoarse )
             {
-                if ( req.modelMinGsdM > 0.0 && gsd < req.modelMinGsdM )
-                    return false;
-                if ( req.modelMaxGsdM > 0.0 && gsd > req.modelMaxGsdM )
-                    return false;
-                return true;
-            };
-            int inRange = 0;
-            int outOfRange = 0;
-            for ( const double gsd : gsds )
-            {
-                if ( withinModel( gsd ) )
-                    ++inRange;
-                else
-                    ++outOfRange;
+                unsuitable = true;
+                SuitabilityGap gap = makeGap(
+                    criterion.id, QStringLiteral( "model.resolution_out_of_range" ),
+                    QStringLiteral( "The model's GSD range [%1, %2] m does not intersect the scenes' measured GSD range [%3, %4] m." )
+                        .arg( req.modelMinGsdM, 0, 'g', 4 )
+                        .arg( req.modelMaxGsdM, 0, 'g', 4 )
+                        .arg( sceneMin, 0, 'g', 4 )
+                        .arg( sceneMax, 0, 'g', 4 ) );
+                gap.evidence.insert( QStringLiteral( "model_min_gsd_m" ), req.modelMinGsdM );
+                gap.evidence.insert( QStringLiteral( "model_max_gsd_m" ), req.modelMaxGsdM );
+                gap.evidence.insert( QStringLiteral( "scene_min_gsd_m" ), sceneMin );
+                gap.evidence.insert( QStringLiteral( "scene_max_gsd_m" ), sceneMax );
+                criterion.gaps.append( gap );
             }
-            criterion.evidence.insert( QStringLiteral( "gsd_in_model_range_count" ), inRange );
-            criterion.evidence.insert( QStringLiteral( "gsd_out_of_model_range_count" ),
-                                       outOfRange );
-            partialGsd = inRange > 0 && outOfRange > 0;
+            else
+            {
+                const auto withinModel = [ &req ]( double gsd )
+                {
+                    if ( req.modelMinGsdM > 0.0 && gsd < req.modelMinGsdM )
+                        return false;
+                    if ( req.modelMaxGsdM > 0.0 && gsd > req.modelMaxGsdM )
+                        return false;
+                    return true;
+                };
+                int inRange = 0;
+                int outOfRange = 0;
+                for ( const double gsd : gsds )
+                {
+                    if ( withinModel( gsd ) )
+                        ++inRange;
+                    else
+                        ++outOfRange;
+                }
+                criterion.evidence.insert( QStringLiteral( "gsd_in_model_range_count" ), inRange );
+                criterion.evidence.insert( QStringLiteral( "gsd_out_of_model_range_count" ),
+                                           outOfRange );
+                partialGsd = inRange > 0 && outOfRange > 0;
+            }
         }
     }
-
     const QString modelModality = normalizedToken( req.modelModality );
     if ( !modelModality.isEmpty() && !modalityPool.isEmpty()
          && !modalityPool.contains( modelModality ) )
@@ -219,6 +240,22 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
         criterion.notes.append( QStringLiteral(
             "some scenes fall outside the model's GSD range" ) );
         criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "marginal" ) );
+        return criterion;
+    }
+
+    if ( gsdUnverifiable )
+    {
+        criterion.level = SuitabilityLevel::Unknown;
+        criterion.summary = QStringLiteral(
+            "The model pins a GSD range but no valid GSD evidence exists; resolution fit is unmeasured." );
+        criterion.notes.append( invalidGsdCount > 0
+                                     ? QStringLiteral( "GSD metadata present but invalid (non-finite or non-positive)" )
+                                     : QStringLiteral( "no scene carries a meter GSD" ) );
+        criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "unknown" ) );
+        criterion.evidence.insert(
+            QStringLiteral( "reason" ),
+            invalidGsdCount > 0 ? QStringLiteral( "gsd_evidence_invalid" )
+                                : QStringLiteral( "gsd_evidence_absent" ) );
         return criterion;
     }
 

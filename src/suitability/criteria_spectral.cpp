@@ -188,7 +188,10 @@ SuitabilityCriterion assessCloudCover( const ResolvedRequirements &req,
             continue;
         }
         const double cloud = *scene.cloudCoverPercent;
-        if ( cloud < 0.0 || cloud > 100.0 )
+        // The negated form also catches NaN: a non-numeric cloud value is
+        // broken metadata and joins the out-of-range unknowns (clamping or
+        // "known" classification would fabricate evidence).
+        if ( !( cloud >= 0.0 && cloud <= 100.0 ) )
         {
             ++unknownCount;
             ++outOfRangeCount;

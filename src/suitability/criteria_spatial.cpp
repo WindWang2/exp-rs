@@ -143,6 +143,15 @@ SuitabilityCriterion assessSpatialCoverage( const ResolvedRequirements &req,
         return criterion;
     }
 
+    // A usable coverage extent is declared AND representable: NaN/inf corners
+    // are broken metadata that would poison the rectangle union (NaN poisons
+    // the coordinate sort), so they fold into the unknown-extent count.
+    const auto extentFinite = []( const sicnu::data::SpatialExtent &extent )
+    {
+        return std::isfinite( extent.minimumX ) && std::isfinite( extent.minimumY )
+               && std::isfinite( extent.maximumX ) && std::isfinite( extent.maximumY );
+    };
+
     int notReadyCount = 0;
     int extentUnknownCount = 0;
     QVector<SceneCandidate> coverageScenes;
@@ -153,7 +162,7 @@ SuitabilityCriterion assessSpatialCoverage( const ResolvedRequirements &req,
             ++notReadyCount;
             continue;
         }
-        if ( !scene.extent.valid )
+        if ( !scene.extent.valid || !extentFinite( scene.extent ) )
         {
             ++extentUnknownCount;
             continue;
@@ -233,6 +242,23 @@ SuitabilityCriterion assessSpatialCoverage( const ResolvedRequirements &req,
 
     const double aoiArea = aoiWidth * aoiHeight;
     const double measuredFraction = clippedUnionArea( sameCrsScenes, req.aoi ) / aoiArea;
+    // A ratio the double range cannot represent (area under-/overflowed to
+    // 0/inf, e.g. a 1e-300 m AOI) is not a measurement: honest unknown instead
+    // of a garbage verdict, and non-finite numbers never enter the evidence.
+    if ( !std::isfinite( measuredFraction ) )
+    {
+        criterion.level = SuitabilityLevel::Unknown;
+        criterion.summary = QStringLiteral(
+            "The AOI area is too extreme to measure coverage against; coverage is undefined." );
+        criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "unknown" ) );
+        criterion.evidence.insert( QStringLiteral( "reason" ),
+                                   QStringLiteral( "aoi_area_not_representable" ) );
+        criterion.diagnostics.append( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.aoi_area_not_representable" ),
+            QStringLiteral( "AOI area or coverage ratio overflowed/underflowed the double range" ),
+            sicnu::data::DiagnosticSeverity::Warning } );
+        return criterion;
+    }
     criterion.evidence.insert( QStringLiteral( "measured_fraction" ), measuredFraction );
     criterion.evidence.insert( QStringLiteral( "required_fraction" ),
                                req.minCoverageFractionResolved );
@@ -299,16 +325,41 @@ SuitabilityCriterion assessResolution( const ResolvedRequirements &req,
     }
 
     int unknownCount = 0;
+    int invalidGsdCount = 0;
     QVector<const SceneCandidate *> knownScenes;
     for ( const SceneCandidate &scene : usableScenes )
     {
         if ( scene.gsdM.has_value() )
+        {
+            // Non-finite or non-positive GSD is broken metadata, not a range
+            // verdict: NaN would silently satisfy every comparison below, so
+            // such values count as unknown evidence with a diagnostic (same
+            // posture as cloud cover outside [0, 100]).
+            const double gsd = *scene.gsdM;
+            if ( !std::isfinite( gsd ) || gsd <= 0.0 )
+            {
+                ++invalidGsdCount;
+                ++unknownCount;
+                continue;
+            }
             knownScenes.append( &scene );
+        }
         else
+        {
             ++unknownCount;
+        }
+    }
+    if ( invalidGsdCount > 0 )
+    {
+        criterion.diagnostics.append( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.gsd_invalid" ),
+            QStringLiteral( "%1 scene(s) carry a non-finite or non-positive GSD; treated as unknown" )
+                .arg( invalidGsdCount ),
+            sicnu::data::DiagnosticSeverity::Warning } );
     }
     criterion.evidence.insert( QStringLiteral( "usable_scene_count" ), usableScenes.size() );
     criterion.evidence.insert( QStringLiteral( "gsd_unknown_count" ), unknownCount );
+    criterion.evidence.insert( QStringLiteral( "gsd_invalid_count" ), invalidGsdCount );
     if ( req.minGsdM > 0.0 )
         criterion.evidence.insert( QStringLiteral( "required_min_gsd_m" ), req.minGsdM );
     if ( req.maxGsdM > 0.0 )
