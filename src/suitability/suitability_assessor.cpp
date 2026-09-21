@@ -1,6 +1,7 @@
 #include "suitability_assessor.h"
 
 #include "criteria_spatial.h"
+#include "criteria_spectral.h"
 
 namespace sicnu::suitability
 {
@@ -21,16 +22,21 @@ sicnu::data::Result<SuitabilityReport> SuitabilityAssessor::assess( const Inputs
             sicnu::data::DiagnosticSeverity::Error } );
     }
 
-    if ( inputs.scenes.isEmpty() && inputs.datasetVersionId.isEmpty() && !inputs.goal.hasAoi )
+    const bool factsIdentified = inputs.facts.has_value()
+                                     && !inputs.facts->datasetVersionId.isEmpty();
+    if ( inputs.scenes.isEmpty() && inputs.datasetVersionId.isEmpty() && !factsIdentified
+         && !inputs.goal.hasAoi )
     {
         return sicnu::data::Result<SuitabilityReport>::failure( sicnu::data::Diagnostic{
             QStringLiteral( "suitability.empty_subject" ),
-            QStringLiteral( "nothing to assess: no scenes, no dataset version, no AOI" ),
+            QStringLiteral( "nothing to assess: no scenes, no dataset version, no facts, no AOI" ),
             sicnu::data::DiagnosticSeverity::Error } );
     }
 
     SuitabilityReport report;
-    report.setDatasetVersionId( inputs.datasetVersionId );
+    report.setDatasetVersionId(
+        inputs.datasetVersionId.isEmpty() && factsIdentified ? inputs.facts->datasetVersionId
+                                                             : inputs.datasetVersionId );
     QStringList sceneIds;
     sceneIds.reserve( inputs.scenes.size() );
     for ( const SceneCandidate &scene : inputs.scenes )
@@ -40,6 +46,8 @@ sicnu::data::Result<SuitabilityReport> SuitabilityAssessor::assess( const Inputs
 
     report.addCriterion( assessSpatialCoverage( *resolved, inputs.scenes ) );
     report.addCriterion( assessResolution( *resolved, inputs.scenes ) );
+    report.addCriterion( assessSpectralBands( *resolved, inputs.scenes, inputs.facts ) );
+    report.addCriterion( assessCloudCover( *resolved, inputs.scenes ) );
     return sicnu::data::Result<SuitabilityReport>::success( report );
 }
 

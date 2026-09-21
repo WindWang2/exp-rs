@@ -8,12 +8,15 @@
 // guessed subject).
 
 #include "../data/data_result.h"
+#include "dataset_facts.h"
 #include "scene_candidate.h"
 #include "suitability_goal.h"
 #include "suitability_report.h"
 
 #include <QString>
 #include <QVector>
+
+#include <optional>
 
 namespace sicnu::suitability
 {
@@ -29,6 +32,8 @@ class SuitabilityAssessor
         {
             SuitabilityGoal goal;
             QVector<SceneCandidate> scenes;
+            /// Optional dataset statistics; fuses with @p scenes as evidence.
+            std::optional<DatasetFacts> facts;
             /// Optional subject identifier when assessing a dataset version.
             QString datasetVersionId;
         };
@@ -37,7 +42,8 @@ class SuitabilityAssessor
         /// ("suitability.goal_invalid"/"suitability.profile_unknown"),
         /// "suitability.too_many_scenes" above kMaxScenes, and
         /// "suitability.empty_subject" when neither scenes nor a
-        /// datasetVersionId nor an AOI identifies anything to assess.
+        /// datasetVersionId nor dataset facts (with identity) nor an AOI
+        /// identifies anything to assess.
         static sicnu::data::Result<SuitabilityReport> assess( const Inputs &inputs );
 };
 

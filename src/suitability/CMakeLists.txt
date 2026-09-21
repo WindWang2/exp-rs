@@ -12,6 +12,10 @@ qt_add_library(sicnu_suitability STATIC
   criteria_spatial.h
   scene_candidate.cpp
   scene_candidate.h
+  criteria_spectral.cpp
+  criteria_spectral.h
+  dataset_facts.cpp
+  dataset_facts.h
   suitability_assessor.cpp
   suitability_assessor.h
   suitability_goal.cpp
