@@ -46,4 +46,11 @@ Json::Value labReference( const Json::Value &input );
 /// surfaces. Kept next to the gate so the policy reads in one place.
 bool labRoleMayUseTeacherSurfaces( const std::string &role );
 
+/// RS14-12: true when `input` carries the host-injected teacher credential
+/// (SICNU_LAB_TEACHER_TOKEN, injected only into authenticated teacher
+/// sessions — a value a model composing tool arguments cannot know). The
+/// same gate guards the teacher surfaces and the privileged autonomy
+/// session layer, so a self-injected policy block cannot escalate a session.
+bool teacherCredentialValid( const Json::Value &input );
+
 } // namespace sicnu::agent::harness

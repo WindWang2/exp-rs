@@ -23,7 +23,6 @@
 #include "agent/autonomy/autonomy_classification.h"
 #include "agent/autonomy/autonomy_decision.h"
 #include "agent/autonomy/autonomy_policy.h"
-#include "agent/autonomy/autonomy_projection.h"
 
 namespace sicnu::agent::autonomy {
 

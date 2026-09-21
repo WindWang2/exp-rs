@@ -1,11 +1,10 @@
 // src/agent/harness/autonomy_tools.cpp
 #include "autonomy_tools.h"
 
-#include "agent/autonomy/autonomy_capability.h"
-#include "agent/autonomy/autonomy_decision.h"
 #include "agent/autonomy/autonomy_holder.h"
 #include "agent/autonomy/autonomy_policy.h"
 #include "agent/autonomy/autonomy_projection.h"
+#include "lab_copilot.h"
 #include "spatial_tools/spatial_tool.h"
 
 #include <string>
@@ -40,16 +39,10 @@ class AutonomyStatusTool final : public SpatialTool
 
     Json::Value inputSchema() const override
     {
-      Json::Value props( Json::objectValue );
-      Json::Value role( Json::objectValue );
-      role["type"] = "string";
-      role["description"] = "Session role (host-injected; student by default).";
-      props["role"] = role;
-      Json::Value domain( Json::objectValue );
-      domain["type"] = "string";
-      domain["description"] = "Surface domain: \"lab\" (teaching) or a research domain.";
-      props["domain"] = domain;
-      return objectSchema( std::move( props ), Json::Value() );
+      // Authority-bearing fields (role / domain / session policy) are
+      // deliberately OMITTED — same rule as the lab tools: the composing
+      // model is never invited to claim them. The host injects them.
+      return objectSchema( Json::Value( Json::objectValue ), Json::Value() );
     }
 
     Json::Value outputSchema() const override
@@ -71,7 +64,10 @@ class AutonomyStatusTool final : public SpatialTool
 
       std::vector<sicnu::agent::autonomy::AutonomyPolicyLayer> layers;
       const Json::Value &session = input[ "autonomy" ];
-      if ( session.isObject() )
+      // The session layer is privileged (it can raise a level) and follows
+      // the teacher-credential gate; a forged block cannot inflate the
+      // projection the UI renders.
+      if ( session.isObject() && teacherCredentialValid( input ) )
       {
         const sicnu::agent::autonomy::AutonomyPolicyParseResult parsed =
             sicnu::agent::autonomy::parseAutonomyPolicy( session );
