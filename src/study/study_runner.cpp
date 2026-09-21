@@ -212,6 +212,13 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
             ++nextIndex;
 
             const QString outputPath = expectedOutputPath( outputDir, point.pointId );
+            // The runner OWNS the per-point path, so it also owns creating the
+            // per-point directory the operator/commit writes into.
+            if ( !QDir().mkpath( QFileInfo( outputPath ).absolutePath() ) )
+                return Result<StudyRunSummary>::failure( runnerError(
+                    QStringLiteral( "study.output_dir_invalid" ),
+                    QStringLiteral( "cannot create output directory for point %1" )
+                        .arg( point.pointId ) ) );
             QJsonObject pointParameters = point.parameters;
             pointParameters.insert( QStringLiteral( "output" ), outputPath );
             const QString correlationId = QStringLiteral( "%1/%2#%3" )

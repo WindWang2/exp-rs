@@ -1,5 +1,5 @@
 // study_execution_plane.cpp — ExecutionPlane adapter implementation.
-#include "study/study_execution_plane.h"
+#include "study_execution_plane.h"
 
 #include "framework/execution_plane.h"
 #include "framework/task_center.h"
@@ -20,9 +20,9 @@ namespace sicnu::study
 namespace
 {
 
-Diagnostic bridgeError( const QString &code, const QString &message )
+sicnu::data::Diagnostic bridgeError( const QString &code, const QString &message )
 {
-    Diagnostic d;
+    sicnu::data::Diagnostic d;
     d.code = code;
     d.message = message;
     d.severity = sicnu::data::DiagnosticSeverity::Error;

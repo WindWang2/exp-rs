@@ -29,6 +29,7 @@
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
+#include "qgsapplication.h"
 #include "study/bridge/study_execution_plane.h"
 #include "study/study_export.h"
 #include "study/study_runner.h"
@@ -40,16 +41,19 @@ using namespace sicnu::study;
 namespace
 {
 
-// One QCoreApplication for the whole binary, never exec'd (house pattern,
-// test_execution_plane.cpp; #568 forbids per-TEST_CASE instances).
+// One QGIS application for the whole binary (house pattern: real operators
+// touch QgsSettings/QGIS paths, which a bare QCoreApplication does not
+// provide — see test_asset_preview_service). Never exec'd; #568 forbids
+// per-TEST_CASE app instances.
 QCoreApplication *ensureCoreApp()
 {
-    static QCoreApplication *app = [] {
-        int argc = 1;
-        static char arg0[] = "test_study_e2e";
-        char *argv[] = { arg0, nullptr };
-        return new QCoreApplication( argc, argv );
-    }();
+    if ( QCoreApplication::instance() )
+        return QCoreApplication::instance();
+    static int argc = 1;
+    static char arg0[] = "test_study_e2e";
+    char *argv[] = { arg0, nullptr };
+    auto *app = new QgsApplication( argc, argv, true );
+    QgsApplication::initQgis();
     return app;
 }
 
@@ -141,6 +145,23 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
     REQUIRE( result.has_value() );
     const auto &summary = result.value();
     REQUIRE( summary.totalPoints == 9 );
+    if ( summary.recordedCount != 9 )
+    {
+        for ( const QString &runId : summary.runIds )
+        {
+            const auto run = store.runById( runId );
+            if ( run && run.value().status() != sicnu::experiment::RunStatus::Completed )
+                WARN( QStringLiteral( "run %1 status %2 error: %3" )
+                          .arg( runId )
+                          .arg( sicnu::experiment::runStatusToString( run.value().status() ),
+                                run.value()
+                                    .metrics()
+                                    .value( QStringLiteral( "error" ) )
+                                    .toObject()
+                                    .value( QStringLiteral( "message" ) )
+                                    .toString() ) );
+        }
+    }
     REQUIRE( summary.recordedCount == 9 );
     REQUIRE( summary.failedCount == 0 );
     REQUIRE( summary.cancelledCount == 0 );
