@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 
+#include "workbench/mission_tool_host_install.h"
 #include "data/data_manager.h"
 #include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"
@@ -311,6 +312,10 @@ int main(int argc, char *argv[])
         // new work is accepted. No silent auto-resume headlessly — an agent
         // can resume explicitly once it discovers the runs.
         sicnu::workflow::WorkflowRunCoordinator::instance().recoverAtStartup( /*autoResume=*/false );
+        // Mission Runtime 13.0: the same host wiring the desktop shell
+        // installs, so the mission:* tools work headless (fail closed when
+        // no project is open rather than guessing).
+        sicnu::app::installMissionToolHost();
         McpServer server;
         server.setDataManager( mcpDataManager.get() );
         server.start(app);

@@ -200,6 +200,25 @@ bool workflowRunSelected( const SelectionContextSnapshot &s )
     return !s.selectedWorkflowRunIds.isEmpty();
 }
 
+bool missionTaskSelected( const SelectionContextSnapshot &s )
+{
+    return s.hasMissionTaskSelection && !s.selectedMissionTaskId.isEmpty();
+}
+
+bool missionTaskRetryable( const SelectionContextSnapshot &s )
+{
+    return missionTaskSelected( s )
+           && missionTaskStatusIsRetryable( s.selectedMissionTaskStatus );
+}
+
+bool missionTaskResumable( const SelectionContextSnapshot &s )
+{
+    // Stale work must be re-bound and re-verified; a canceled task resumes.
+    return missionTaskSelected( s )
+           && ( s.selectedMissionTaskStatus == MissionTaskStatus::Stale
+                || s.selectedMissionTaskStatus == MissionTaskStatus::Canceled );
+}
+
 QStringList selectedLayerIds( const SelectionContextSnapshot &s )
 {
     QStringList ids;
@@ -297,6 +316,20 @@ QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s, co
     else if ( commandId.startsWith( QLatin1String( "workflowrun." ) ) )
     {
         specs.append( { "workflowrun.selected", QT_TR_NOOP( "A workflow run must be selected" ), &workflowRunSelected } );
+    }
+    else if ( commandId == QLatin1String( "mission.task.retry" ) )
+    {
+        specs.append( { "mission.task.selected", QT_TR_NOOP( "Select a mission task first" ), &missionTaskSelected } );
+        specs.append( { "mission.task.retryable", QT_TR_NOOP( "The selected mission task cannot be retried" ), &missionTaskRetryable } );
+    }
+    else if ( commandId == QLatin1String( "mission.task.resume" ) )
+    {
+        specs.append( { "mission.task.selected", QT_TR_NOOP( "Select a mission task first" ), &missionTaskSelected } );
+        specs.append( { "mission.task.resumable", QT_TR_NOOP( "The selected mission task has nothing to resume" ), &missionTaskResumable } );
+    }
+    else if ( commandId.startsWith( QLatin1String( "mission." ) ) )
+    {
+        // mission.timeline.show is always available — no requirements.
     }
 
     QVector<RequirementFact> facts;
@@ -503,6 +536,27 @@ void SelectionContext::notifyWorkflowSelection( const QStringList &runIds )
     scheduleRefresh();
 }
 
+void SelectionContext::notifyMissionTaskSelection( const QString &taskId, MissionTaskStatus status )
+{
+    const QString trimmed = taskId.trimmed();
+    if ( trimmed.isEmpty() )
+    {
+        if ( m_missionTaskId.isEmpty() )
+            return;
+        m_missionTaskId.clear();
+    }
+    else if ( m_missionTaskId == trimmed && m_missionTaskStatus == status )
+    {
+        return; // idempotent re-announce
+    }
+    else
+    {
+        m_missionTaskId = trimmed;
+    }
+    m_missionTaskStatus = status;
+    scheduleRefresh();
+}
+
 void SelectionContext::setSarPredicate( SarPredicate predicate )
 {
     m_sarPredicate = std::move( predicate );
@@ -687,6 +741,10 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
     snap.selectedWorkflowRunIds = m_selectedWorkflowRunIds;
     // Workbench 8.0: injected in-flight fact (shell binds TaskCenter).
     snap.hasInFlightTask = m_inFlightPredicate && m_inFlightPredicate();
+    // Mission Runtime 13.0: the mission panel's task selection.
+    snap.selectedMissionTaskId = m_missionTaskId;
+    snap.selectedMissionTaskStatus = m_missionTaskStatus;
+    snap.hasMissionTaskSelection = !m_missionTaskId.isEmpty();
     return snap;
 }
 

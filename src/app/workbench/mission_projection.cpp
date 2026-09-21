@@ -97,9 +97,16 @@ QJsonObject missionTimelineProjectionJson( const MissionTimeline &timeline,
     for ( int i = 0; i < shown; ++i )
         tasks.push_back( missionTaskProjectionJson( all.at( i ) ) );
 
+    // Events are capped by the same max_items budget as task rows: an
+    // unbounded event array would make the payload grow with the whole log
+    // (and be silently compacted by the registry's output meter instead of
+    // declared). Truncation is declared, never inferred.
+    const QVector<MissionEvent> pending = timeline.eventsSince( sinceSeq );
+    const int eventsShown = qMax( 0, qMin( maxItems, pending.size() ) );
     QJsonArray events;
-    for ( const MissionEvent &ev : timeline.eventsSince( sinceSeq ) )
+    for ( int i = 0; i < eventsShown; ++i )
     {
+        const MissionEvent &ev = pending.at( i );
         QJsonObject obj;
         obj.insert( QStringLiteral( "seq" ), static_cast<qint64>( ev.seq ) );
         obj.insert( QStringLiteral( "task_id" ), ev.taskId );
@@ -121,6 +128,8 @@ QJsonObject missionTimelineProjectionJson( const MissionTimeline &timeline,
     obj.insert( QStringLiteral( "last_event_seq" ), static_cast<qint64>( timeline.lastEventSeq() ) );
     obj.insert( QStringLiteral( "task_count" ), all.size() );
     obj.insert( QStringLiteral( "task_truncated" ), shown < all.size() );
+    obj.insert( QStringLiteral( "events_total" ), pending.size() );
+    obj.insert( QStringLiteral( "events_truncated" ), eventsShown < pending.size() );
     obj.insert( QStringLiteral( "stages" ), stageSummary );
     obj.insert( QStringLiteral( "tasks" ), tasks );
     obj.insert( QStringLiteral( "events" ), events );
@@ -171,14 +180,21 @@ const QVector<MissionSurfaceEntry> &missionSurfaceRegistry()
         // --- MCP / Agent tool ids (family "mission", allowed in
         //     surface_registry.cpp kAllowed and Pi EXP_RS_TOOL_CATEGORIES) ---
         { QStringLiteral( "mission:context" ), MissionSurface::AgentTool,
-          QStringLiteral( "Read the current mission context projection: layers, selection, "
-                          "extent, CRS, temporal window, current run and recent artifacts." ) },
+          QStringLiteral( "Read the current mission snapshot: identity, project reference, "
+                          "stage summary, task counts and the bounded object lists (layers, "
+                          "results, …)." ) },
         { QStringLiteral( "mission:timeline" ), MissionSurface::AgentTool,
           QStringLiteral( "Read the mission task timeline: stage summary, tasks and events "
                           "after an optional cursor (since_seq)." ) },
         { QStringLiteral( "mission:advance" ), MissionSurface::AgentTool,
-          QStringLiteral( "Request a mission task transition (start/cancel/retry). Routes "
-                          "through TaskCenter; rejects illegal transitions without mutating." ) },
+          QStringLiteral( "Request a mission task transition (start/succeed/fail/cancel/"
+                          "retry), bind or unbind its run authority, or reconcile "
+                          "references. Rejects illegal transitions without mutating; start "
+                          "requires a verifiable run authority (no fake Running). succeed/"
+                          "fail/cancel are assertions on the mission ledger (the caller "
+                          "states the outcome); only start is verified against the "
+                          "execution authority, and reconciliation maps terminal "
+                          "execution states onto tasks left Running." ) },
 
         // --- CommandRegistry ids (desktop shell) ---
         { QStringLiteral( "mission.timeline.show" ), MissionSurface::AppCommand,

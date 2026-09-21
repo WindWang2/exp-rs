@@ -130,10 +130,21 @@ add_executable(sicnu_geo_rs
     # D18 mission / scientific workspace context
     workbench/mission_context.cpp
     workbench/mission_context_store.cpp
-    # Unified Mission Workbench 12.0 — mission task space, projection, paged model
-    workbench/mission_stage.cpp
-    workbench/mission_projection.cpp
+    # Unified Mission Workbench 12.0 — mission task space, projection, paged model.
+    # mission_stage.cpp / mission_projection.cpp / mission_run_authority.cpp
+    # are NOT compiled here: sicnu_agent owns them (the mission:* tools need
+    # them) and this executable links sicnu_agent, so a second copy would be a
+    # duplicate-definition hazard across the exe and the DLL on Windows.
     workbench/mission_timeline_model.cpp
+    workbench/mission_timeline_store.cpp
+    # Mission Runtime 13.0 — single-authority persistence, run resolution,
+    # tool host wiring, timeline dock
+    workbench/mission_timeline_bridge.cpp
+    workbench/mission_runtime_store.cpp
+    workbench/mission_run_resolver.cpp
+    workbench/mission_tool_authority.cpp
+    workbench/mission_tool_host_install.cpp
+    workbench/mission_timeline_panel.cpp
     # D15 classification-change-studio studio seam
     workbench/classification_studio_widget.cpp
     workbench/agent_context_tool.cpp
