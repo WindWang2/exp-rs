@@ -33,3 +33,9 @@
   Exact); unwired hooks never fake Exact. Fix found by tests: the report
   struct defaults to Impossible — rollup must roll DOWN from Exact.
   40 cases / 180 assertions pass.
+- 2026-09-21 Slice F GREEN: CapsuleDiffReport::diff — fast-path digest
+  equality, depth-first section diffs with stable paths, identity vs
+  reported classification (ADR 0137). Levels: Identical /
+  EquivalentRerun (environment, evidence, created_utc, capsule_id only) /
+  IdentityBreak (any pin section). Direction only swaps left/right.
+  45 cases / 210 assertions pass.

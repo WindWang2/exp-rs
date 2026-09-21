@@ -6,6 +6,8 @@
 qt_add_library(sicnu_experiment_capsule STATIC
   capsule_builder.cpp
   capsule_builder.h
+  capsule_diff.cpp
+  capsule_diff.h
   capsule_document.cpp
   capsule_document.h
   capsule_io.cpp

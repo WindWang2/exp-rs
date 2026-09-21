@@ -15,6 +15,7 @@
 #include "dataset/dataset_store.h"
 #include "dataset/dataset_types.h"
 #include "experiment/capsule/capsule_builder.h"
+#include "experiment/capsule/capsule_diff.h"
 #include "experiment/capsule/capsule_document.h"
 #include "experiment/capsule/capsule_io.h"
 #include "experiment/capsule/capsule_readiness.h"
@@ -35,6 +36,7 @@ using sicnu::experiment::ExperimentRun;
 using sicnu::experiment::ExperimentStore;
 using sicnu::experiment::RunEnvironment;
 using sicnu::experiment::capsule::CapsuleBuilder;
+using sicnu::experiment::capsule::CapsuleDiffReport;
 using sicnu::experiment::capsule::CapsuleDocument;
 using sicnu::experiment::capsule::CapsuleIO;
 using sicnu::experiment::capsule::CapsuleReadiness;
@@ -366,7 +368,8 @@ struct StoreFixture
                           const QString &algorithmId = QStringLiteral( "rs:classify" ),
                           const QString &datasetVersionOverride = QString(),
                           const QString &datasetFingerprintOverride = QString(),
-                          const QVector<ExperimentRun::Artifact> &artifacts = {} )
+                          const QVector<ExperimentRun::Artifact> &artifacts = {},
+                          const QString &platform = QStringLiteral( "linux" ) )
     {
         ExperimentRun run;
         run.setRunId( runId );
@@ -387,7 +390,7 @@ struct StoreFixture
         run.setSeed( 42 );
         run.setSoftwareRevision( QStringLiteral( "rev-123" ) );
         QJsonObject envFields;
-        envFields.insert( QStringLiteral( "platform" ), QStringLiteral( "linux" ) );
+        envFields.insert( QStringLiteral( "platform" ), platform );
         envFields.insert( QStringLiteral( "qt_version" ), QStringLiteral( "6.8" ) );
         run.setEnvironment( RunEnvironment::fromFields( envFields ) );
         run.artifacts() = artifacts;
@@ -1262,4 +1265,140 @@ TEST_CASE( "software revision drift is reported as a Mismatched pin",
              && check.status == sicnu::experiment::ReplayCheckStatus::Mismatched )
             sawSoftwareMismatch = true;
     CHECK( sawSoftwareMismatch );
+}
+
+// --- Slice F: capsule diff ----------------------------------------------------
+
+TEST_CASE( "diff of two builds of the same recorded content is Identical",
+           "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto first = builder.build( run.runId(), fixedOptions() );
+    auto second = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+
+    const CapsuleDiffReport report = CapsuleDiffReport::diff( first.take(), second.take() );
+    CHECK( report.level == CapsuleDiffReport::Level::Identical );
+    CHECK( report.sections.isEmpty() );
+}
+
+TEST_CASE( "parameter change is an IdentityBreak naming the section",
+           "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto first = builder.build( run.runId(), fixedOptions() );
+    auto second = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+    CapsuleDocument unchanged = first.take();
+
+    // Change a recorded parameter of the second document (post-build,
+    // re-stamped — diff works on documents, not stores).
+    QJsonObject root = second->root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonObject parameters = root.value( QStringLiteral( "parameters" ) ).toObject();
+    parameters.insert( QStringLiteral( "model" ), QStringLiteral( "svm" ) );
+    root.insert( QStringLiteral( "parameters" ), parameters );
+    auto changed = CapsuleDocument::finalize( root );
+    REQUIRE( changed.has_value() );
+
+    const CapsuleDiffReport report = CapsuleDiffReport::diff( unchanged, changed.take() );
+    CHECK( report.level == CapsuleDiffReport::Level::IdentityBreak );
+    bool sawParameterPath = false;
+    for ( const auto &section : report.sections )
+        if ( section.section.startsWith( QLatin1String( "parameters." ) )
+             && section.kind == QLatin1String( "identity" ) )
+            sawParameterPath = true;
+    CHECK( sawParameterPath );
+}
+
+TEST_CASE( "environment-only drift is EquivalentRerun — reported, not punished",
+           "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun linuxRun = fixture.addRun( QStringLiteral( "run-1" ) );
+    const ExperimentRun windowsRun =
+        fixture.addRun( QStringLiteral( "run-2" ), QStringLiteral( "exp-1" ),
+                        QStringLiteral( "rs:classify" ), QString(), QString(), {},
+                        QStringLiteral( "windows" ) );
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto linuxCapsule = builder.build( linuxRun.runId(), fixedOptions() );
+    auto windowsCapsule = builder.build( windowsRun.runId(), fixedOptions() );
+    REQUIRE( linuxCapsule.has_value() );
+    REQUIRE( windowsCapsule.has_value() );
+
+    const CapsuleDiffReport report =
+        CapsuleDiffReport::diff( linuxCapsule.take(), windowsCapsule.take() );
+    CHECK( report.level == CapsuleDiffReport::Level::EquivalentRerun );
+    REQUIRE( !report.sections.isEmpty() );
+    for ( const auto &section : report.sections )
+    {
+        INFO( section.section.toStdString() );
+        CHECK( section.kind == QLatin1String( "reported" ) );
+    }
+    bool sawEnvironment = false;
+    for ( const auto &section : report.sections )
+        if ( section.section.startsWith( QLatin1String( "environment" ) ) )
+            sawEnvironment = true;
+    CHECK( sawEnvironment );
+}
+
+TEST_CASE( "creation instant drift alone is EquivalentRerun", "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    CapsuleOptions earlyOptions = fixedOptions();
+    CapsuleOptions lateOptions = fixedOptions();
+    lateOptions.createdUtc = QStringLiteral( "2026-09-22T00:00:00Z" );
+    auto early = builder.build( run.runId(), earlyOptions );
+    auto late = builder.build( run.runId(), lateOptions );
+    REQUIRE( early.has_value() );
+    REQUIRE( late.has_value() );
+
+    const CapsuleDiffReport report = CapsuleDiffReport::diff( early.take(), late.take() );
+    CHECK( report.level == CapsuleDiffReport::Level::EquivalentRerun );
+    bool sawCreated = false;
+    for ( const auto &section : report.sections )
+        if ( section.section == QLatin1String( "created_utc" ) )
+            sawCreated = true;
+    CHECK( sawCreated );
+}
+
+TEST_CASE( "diff direction only swaps left/right, never the verdict",
+           "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun linuxRun = fixture.addRun( QStringLiteral( "run-1" ) );
+    const ExperimentRun windowsRun =
+        fixture.addRun( QStringLiteral( "run-2" ), QStringLiteral( "exp-1" ),
+                        QStringLiteral( "rs:classify" ), QString(), QString(), {},
+                        QStringLiteral( "windows" ) );
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto linuxCapsule = builder.build( linuxRun.runId(), fixedOptions() );
+    auto windowsCapsule = builder.build( windowsRun.runId(), fixedOptions() );
+    REQUIRE( linuxCapsule.has_value() );
+    REQUIRE( windowsCapsule.has_value() );
+    CapsuleDocument linuxDoc = linuxCapsule.take();
+    CapsuleDocument windowsDoc = windowsCapsule.take();
+
+    const CapsuleDiffReport forward = CapsuleDiffReport::diff( linuxDoc, windowsDoc );
+    const CapsuleDiffReport reverse = CapsuleDiffReport::diff( windowsDoc, linuxDoc );
+    CHECK( forward.level == reverse.level );
+    CHECK( forward.sections.size() == reverse.sections.size() );
 }
