@@ -3254,6 +3254,25 @@ target_link_libraries(test_d19_foundry_benchmark_chain PRIVATE Sicnu::experiment
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
 target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# RS14-17 reproducibility capsule: LIGHT executable on purpose — links only
+# the capsule projection module + experiment/dataset (Qt/Core level). The
+# default sicnu_add_test chain would drag QGIS/agent/operators into a
+# pure-document contract suite.
+qt_add_executable(test_experiment_capsule test_experiment_capsule.cpp)
+target_link_libraries(test_experiment_capsule PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment_capsule
+)
+target_include_directories(test_experiment_capsule PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_experiment_capsule PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_experiment_capsule TIMEOUT 120)
+
 # Foundation 5.0 dataset composition/label QA + the 100k metadata scale
 # contract (goal §20/§37/§46/§52). RUN_SERIAL: the 100k benchmark should not
 # compete with other tests for memory.
