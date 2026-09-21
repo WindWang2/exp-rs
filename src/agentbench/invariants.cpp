@@ -1,6 +1,8 @@
 // src/agentbench/invariants.cpp
 #include "invariants.h"
 
+#include "json_numbers.h"
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -16,25 +18,6 @@ const TraceEvidence *findEvidence( const AgentTrace &trace, const std::string &i
 		if ( item.id == id )
 			return &item;
 	return nullptr;
-}
-
-/// Resolves a dotted path ("stats.mean") inside an evidence fields object.
-const Json::Value *resolveField( const Json::Value &fields, const std::string &dotted )
-{
-	const Json::Value *current = &fields;
-	size_t start = 0;
-	while ( start <= dotted.size() )
-	{
-		const size_t dot = dotted.find( '.', start );
-		const std::string segment = dot == std::string::npos ? dotted.substr( start ) : dotted.substr( start, dot - start );
-		if ( segment.empty() || !current->isObject() || !current->isMember( segment ) )
-			return nullptr;
-		current = &( *current )[segment];
-		if ( dot == std::string::npos )
-			break;
-		start = dot + 1;
-	}
-	return current;
 }
 
 bool jsonValuesEqual( const Json::Value &left, const Json::Value &right )
@@ -58,6 +41,11 @@ bool isStringOrArray( const Json::Value &value )
 bool paramsContain( const Json::Value &params, const char *key )
 {
 	return params.isObject() && params.isMember( key );
+}
+
+bool paramsContainString( const Json::Value &params, const char *key )
+{
+	return params.isObject() && params.isMember( key ) && params[key].isString();
 }
 
 InvariantResult invalidParams( const Invariant &invariant )
@@ -92,7 +80,7 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 		case InvariantKind::ToolUsed:
 		case InvariantKind::ToolNotUsed:
 		{
-			if ( !paramsContain( params, "tool" ) )
+			if ( !paramsContainString( params, "tool" ) )
 				return invalidParams( invariant );
 			const std::string tool = params["tool"].asString();
 			int uses = 0;
@@ -131,7 +119,9 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 		{
 			if ( !paramsContain( params, "step_index" ) )
 				return invalidParams( invariant );
-			const int index = params["step_index"].asInt();
+			if ( !isIntInRange( params["step_index"], 0, 2147483647ll ) )
+				return invalidParams( invariant );
+			const int index = static_cast<int>( params["step_index"].asInt64() );
 			if ( index < 0 || static_cast<size_t>( index ) >= trace.steps.size() )
 			{
 				Json::Value evidence{Json::objectValue};
@@ -146,7 +136,7 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 				evidence["observed_success"] = step.success;
 				return buildResult( invariant, step.success, std::move( evidence ) );
 			}
-			if ( !paramsContain( params, "error_code" ) )
+			if ( !paramsContainString( params, "error_code" ) )
 				return invalidParams( invariant );
 			Json::Value evidence{Json::objectValue};
 			evidence["observed_error_code"] = step.errorCode;
@@ -161,7 +151,7 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 		case InvariantKind::NumericGe:
 		case InvariantKind::VerdictIs:
 		{
-			if ( !paramsContain( params, "evidence_id" ) )
+			if ( !paramsContainString( params, "evidence_id" ) )
 				return invalidParams( invariant );
 			const TraceEvidence *item = findEvidence( trace, params["evidence_id"].asString() );
 			if ( item == nullptr )
@@ -180,15 +170,15 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 			}
 			if ( invariant.kind == InvariantKind::VerdictIs )
 			{
-				if ( !paramsContain( params, "verdict" ) )
+				if ( !paramsContainString( params, "verdict" ) )
 					return invalidParams( invariant );
 				Json::Value evidence{Json::objectValue};
 				evidence["observed_verdict"] = item->verdict;
 				return buildResult( invariant, item->verdict == params["verdict"].asString(), std::move( evidence ) );
 			}
-			if ( !paramsContain( params, "field" ) )
+			if ( !paramsContainString( params, "field" ) )
 				return invalidParams( invariant );
-			const Json::Value *observed = resolveField( item->fields, params["field"].asString() );
+			const Json::Value *observed = resolveDottedPath( item->fields, params["field"].asString() );
 			if ( observed == nullptr )
 			{
 				Json::Value evidence{Json::objectValue};
@@ -210,6 +200,13 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 				case InvariantKind::FieldContains:
 					if ( !paramsContain( params, "value" ) || !isStringOrArray( params["value"] ) )
 						return invalidParams( invariant );
+					if ( !observed->isString() && !observed->isArray() )
+					{
+						Json::Value evidence{Json::objectValue};
+						evidence["reason"] = "field_not_containable";
+						evidence["field"] = params["field"];
+						return buildResult( invariant, false, std::move( evidence ) );
+					}
 				{
 					bool contains = false;
 					if ( observed->isString() && params["value"].isString() )
@@ -225,8 +222,15 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 					return buildResult( invariant, contains, std::move( evidence ) );
 				}
 				case InvariantKind::NumericLe:
-					if ( !paramsContain( params, "max" ) || !params["max"].isNumeric() || !observed->isNumeric() )
+					if ( !paramsContain( params, "max" ) || !params["max"].isNumeric() )
 						return invalidParams( invariant );
+					if ( !observed->isNumeric() )
+					{
+						Json::Value evidence{Json::objectValue};
+						evidence["reason"] = "field_not_numeric";
+						evidence["field"] = params["field"];
+						return buildResult( invariant, false, std::move( evidence ) );
+					}
 				{
 					Json::Value evidence{Json::objectValue};
 					evidence["observed"] = *observed;
@@ -234,8 +238,15 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 					return buildResult( invariant, observed->asDouble() <= params["max"].asDouble(), std::move( evidence ) );
 				}
 				case InvariantKind::NumericGe:
-					if ( !paramsContain( params, "min" ) || !params["min"].isNumeric() || !observed->isNumeric() )
+					if ( !paramsContain( params, "min" ) || !params["min"].isNumeric() )
 						return invalidParams( invariant );
+					if ( !observed->isNumeric() )
+					{
+						Json::Value evidence{Json::objectValue};
+						evidence["reason"] = "field_not_numeric";
+						evidence["field"] = params["field"];
+						return buildResult( invariant, false, std::move( evidence ) );
+					}
 				{
 					Json::Value evidence{Json::objectValue};
 					evidence["observed"] = *observed;
@@ -249,7 +260,7 @@ InvariantResult evaluateOne( const Invariant &invariant, const InvariantContext 
 
 		case InvariantKind::ExplanationMentions:
 		{
-			if ( !paramsContain( params, "phrase" ) )
+			if ( !paramsContainString( params, "phrase" ) )
 				return invalidParams( invariant );
 			Json::Value evidence{Json::objectValue};
 			evidence["phrase"] = params["phrase"];

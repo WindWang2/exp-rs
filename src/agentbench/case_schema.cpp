@@ -2,6 +2,7 @@
 #include "case_schema.h"
 
 #include "failure_taxonomy.h"
+#include "json_numbers.h"
 
 #include <memory>
 #include <string>
@@ -27,11 +28,6 @@ BenchError invalidField( std::string field, const std::string &why )
 bool isNonEmptyString( const Json::Value &value )
 {
 	return value.isString() && !value.asString().empty();
-}
-
-bool isIntegral( const Json::Value &value )
-{
-	return value.isIntegral();
 }
 
 struct EnumTable
@@ -192,7 +188,7 @@ BenchError validateInvariant( const Json::Value &entry, size_t index, const Json
 		return BenchError{};
 	};
 	const auto requireStepIndex = [&]( const char *key ) -> BenchError {
-		if ( !isIntegral( params[key] ) || params[key].asInt() < 0 )
+		if ( !isIntInRange( params[key], 0, 2147483647ll ) )
 			return invalidField( at + ".params." + key, std::string( key ) + " must be a non-negative integer" );
 		return BenchError{};
 	};
@@ -560,34 +556,34 @@ CaseParse parseCase( const std::string &jsonText )
 		result.error = invalidField( "resource_budget", "resource_budget must be an object" );
 		return result;
 	}
-	if ( !isIntegral( budget["max_tool_calls"] ) || budget["max_tool_calls"].asInt() < 1 )
+	if ( !isIntInRange( budget["max_tool_calls"], 1, 2147483647ll ) )
 	{
 		result.error = invalidField( "resource_budget.max_tool_calls", "max_tool_calls must be a positive integer" );
 		return result;
 	}
-	parsed.budget.maxToolCalls = budget["max_tool_calls"].asInt();
-	if ( !isIntegral( budget["max_tokens"] ) || budget["max_tokens"].asInt() < 1 )
+	parsed.budget.maxToolCalls = static_cast<int>( budget["max_tool_calls"].asInt64() );
+	if ( !isIntInRange( budget["max_tokens"], 1, 2147483647ll ) )
 	{
 		result.error = invalidField( "resource_budget.max_tokens", "max_tokens must be a positive integer" );
 		return result;
 	}
-	parsed.budget.maxTokens = budget["max_tokens"].asInt();
+	parsed.budget.maxTokens = static_cast<int>( budget["max_tokens"].asInt64() );
 	if ( budget.isMember( "max_retries" ) )
 	{
-		if ( !isIntegral( budget["max_retries"] ) || budget["max_retries"].asInt() < 0 )
+		if ( !isIntInRange( budget["max_retries"], 0, 2147483647ll ) )
 		{
 			result.error = invalidField( "resource_budget.max_retries", "max_retries must be a non-negative integer" );
 			return result;
 		}
-		parsed.budget.maxRetries = budget["max_retries"].asInt();
+		parsed.budget.maxRetries = static_cast<int>( budget["max_retries"].asInt64() );
 	}
 
-	if ( !isIntegral( root["minimal_steps"] ) || root["minimal_steps"].asInt() < 1 )
+	if ( !isIntInRange( root["minimal_steps"], 1, 2147483647ll ) )
 	{
 		result.error = invalidField( "minimal_steps", "minimal_steps must be a positive integer" );
 		return result;
 	}
-	parsed.minimalSteps = root["minimal_steps"].asInt();
+	parsed.minimalSteps = static_cast<int>( root["minimal_steps"].asInt64() );
 
 	if ( root.isMember( "redundant_tools" ) )
 	{
@@ -623,12 +619,12 @@ CaseParse parseCase( const std::string &jsonText )
 				result.error = invalidField( at + ".kind", "fault kind must be one of transient_failure|corrupted_result|tool_unavailable" );
 				return result;
 			}
-			if ( !isIntegral( entry["at_step"] ) || entry["at_step"].asInt() < 0 )
+			if ( !isIntInRange( entry["at_step"], 0, 2147483647ll ) )
 			{
 				result.error = invalidField( at + ".at_step", "at_step must be a non-negative integer" );
 				return result;
 			}
-			fault.atStep = entry["at_step"].asInt();
+			fault.atStep = static_cast<int>( entry["at_step"].asInt64() );
 			if ( entry.isMember( "tool" ) )
 			{
 				if ( !isNonEmptyString( entry["tool"] ) )

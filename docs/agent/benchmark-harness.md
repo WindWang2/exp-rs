@@ -47,9 +47,12 @@ claim_mismatch, impossible_task` — classification priority documented in
 ## Verdicts
 
 `PASS | PASS_WITH_WARNINGS | FAIL` (wire strings aligned with the platform
-harness tri-state). A missing deliverable, a scope violation, or any
-error-severity invariant failure is a FAIL — silent fallback is impossible by
-construction.
+harness tri-state). A missing deliverable, a scope violation, a mispaired
+case/trace, or any error-severity invariant failure is a FAIL — silent
+fallback is impossible by construction. `claim_mismatch` flags a completed
+passing run the agent itself denies; `impossible_task` is reserved for the
+live-capture seam. Case-declared `failure_expectation` is advisory and
+surfaced in every evaluation document.
 
 ## Usage
 

@@ -344,3 +344,21 @@ TEST_CASE( "all invariants are evaluated in case order", "[agentbench][invariant
 	CHECK( results[0].invariantId == "b-second" );
 	CHECK( results[1].invariantId == "a-first" );
 }
+
+TEST_CASE( "wrong-typed params degrade to typed not-passed results (review pass 1)", "[agentbench][invariants]" )
+{
+	Json::Value params{Json::objectValue};
+	params["tool"] = Json::Value( Json::objectValue ); // right key, wrong type
+	const InvariantResult result = soleResult(
+		evalOne( makeInvariant( "i", InvariantKind::ToolUsed, params ) ) );
+	CHECK( result.passed == false );
+	CHECK( result.evidence["reason"].asString() == "invalid_params" );
+
+	Json::Value verdictParams{Json::objectValue};
+	verdictParams["evidence_id"] = "ndvi-raster";
+	verdictParams["verdict"] = 42;
+	const InvariantResult verdictResult = soleResult(
+		evalOne( makeInvariant( "i", InvariantKind::VerdictIs, verdictParams ) ) );
+	CHECK( verdictResult.passed == false );
+	CHECK( verdictResult.evidence["reason"].asString() == "invalid_params" );
+}

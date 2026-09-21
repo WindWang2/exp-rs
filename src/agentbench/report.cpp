@@ -77,14 +77,10 @@ std::string renderReportMarkdown( const CaseEvaluation &evaluation )
 
 std::string renderReportJson( const CaseEvaluation &evaluation )
 {
-	const Json::Value document = evaluationToJson( evaluation );
-	Json::StreamWriterBuilder builder;
-	builder["indentation"] = "  ";
-	builder["commentStyle"] = "None";
-	builder["enableYAMLCompatibility"] = false;
-	builder["precision"] = 17;
-	builder["precisionType"] = "significant";
-	return Json::writeString( builder, document );
+	// Deterministic serializer only: jsoncpp's stream writer formats reals
+	// via the C locale, which would make the written artifact host-dependent
+	// under a non-C global locale. Compact, sorted, byte-stable.
+	return deterministicSerialize( evaluationToJson( evaluation ) );
 }
 
 ReportResult writeReport( const CaseEvaluation &evaluation, const std::string &outputDir, const std::string &baseName )

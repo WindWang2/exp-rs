@@ -159,6 +159,18 @@ SuiteRun runSuite( const SuiteDoc &suite, const Loader &loader )
 {
 	SuiteRun result;
 
+	// Corpus bound (mirrors the Tier A eval corpus): a suite may not grow
+	// unbounded — beyond this it is a generator bug, not a benchmark.
+	if ( suite.entries.size() > 400 )
+	{
+		Json::Value details{Json::objectValue};
+		details["field"] = "cases";
+		details["reason"] = "suite exceeds the 400-entry corpus bound";
+		details["count"] = Json::Value( Json::Int64( suite.entries.size() ) );
+		result.error = suiteInvalid( std::move( details ), "suite exceeds the corpus bound" );
+		return result;
+	}
+
 	// Sorted (casePath → digests) map so the pack digest is order-insensitive
 	// over entries while remaining sensitive to every byte of content.
 	std::map<std::string, Json::Value> packPins;

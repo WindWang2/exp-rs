@@ -1,6 +1,8 @@
 // src/agentbench/trace.cpp
 #include "trace.h"
 
+#include "json_numbers.h"
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -88,11 +90,16 @@ bool isKnownVerdict( const std::string &verdict )
 
 bool pathInsideRoot( const std::string &path, const std::string &root )
 {
-	if ( path == root )
+	// Roots may carry a trailing slash; normalize so containment is judged on
+	// the meaningful prefix.
+	std::string normalized = root;
+	while ( normalized.size() > 1 && normalized.back() == '/' )
+		normalized.pop_back();
+	if ( path == normalized )
 		return true;
-	if ( path.size() <= root.size() || path.compare( 0, root.size(), root ) != 0 )
+	if ( path.size() <= normalized.size() || path.compare( 0, normalized.size(), normalized ) != 0 )
 		return false;
-	return path[root.size()] == '/';
+	return path[normalized.size()] == '/';
 }
 
 /// Top-level path-typed members of an object: key == "path" or key ends with
@@ -229,7 +236,7 @@ TraceParse parseTrace( const std::string &jsonText )
 
 	if ( root.isMember( "seed" ) )
 	{
-		if ( !root["seed"].isIntegral() || root["seed"].asInt64() < 0 )
+		if ( !isIntInRange( root["seed"], 0, 9223372036854775807ll ) )
 		{
 			result.error = traceInvalid( "seed", "seed must be a non-negative integer" );
 			return result;
@@ -253,7 +260,7 @@ TraceParse parseTrace( const std::string &jsonText )
 		}
 		TraceStep step;
 		step.index = static_cast<int>( trace.steps.size() );
-		if ( !entry["index"].isIntegral() || entry["index"].asInt() != step.index )
+		if ( !isIntInRange( entry["index"], 0, 2147483647ll ) || static_cast<int>( entry["index"].asInt64() ) != step.index )
 		{
 			result.error = traceInvalid( at + ".index", "step index must equal the array position (canonical form)" );
 			return result;
@@ -304,12 +311,12 @@ TraceParse parseTrace( const std::string &jsonText )
 		}
 		if ( entry.isMember( "tokens" ) )
 		{
-			if ( !entry["tokens"].isIntegral() || entry["tokens"].asInt() < 0 )
+			if ( !isIntInRange( entry["tokens"], 0, 2147483647ll ) )
 			{
 				result.error = traceInvalid( at + ".tokens", "tokens must be a non-negative integer" );
 				return result;
 			}
-			step.tokens = entry["tokens"].asInt();
+			step.tokens = static_cast<int>( entry["tokens"].asInt64() );
 		}
 		trace.steps.push_back( std::move( step ) );
 	}

@@ -1,6 +1,8 @@
 // src/agentbench/fake_agent.cpp
 #include "fake_agent.h"
 
+#include "json_numbers.h"
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -148,7 +150,7 @@ ScriptParse parseScript( const std::string &jsonText )
 
 	if ( root.isMember( "seed" ) )
 	{
-		if ( !root["seed"].isIntegral() || root["seed"].asInt64() < 0 )
+		if ( !isIntInRange( root["seed"], 0, 9223372036854775807ll ) )
 		{
 			result.error = scriptInvalid( "seed", "seed must be a non-negative integer" );
 			return result;
@@ -214,12 +216,12 @@ ScriptParse parseScript( const std::string &jsonText )
 		}
 		if ( entry.isMember( "tokens" ) )
 		{
-			if ( !entry["tokens"].isIntegral() || entry["tokens"].asInt() < 0 )
+			if ( !isIntInRange( entry["tokens"], 0, 2147483647ll ) )
 			{
 				result.error = scriptInvalid( at + ".tokens", "tokens must be a non-negative integer" );
 				return result;
 			}
-			step.tokens = entry["tokens"].asInt();
+			step.tokens = static_cast<int>( entry["tokens"].asInt64() );
 		}
 		script.steps.push_back( std::move( step ) );
 	}

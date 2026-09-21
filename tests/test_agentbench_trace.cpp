@@ -445,3 +445,21 @@ TEST_CASE( "double replay validation is deterministic", "[agentbench][trace]" )
 	CHECK( first.usage.tokens == second.usage.tokens );
 	CHECK( first.usage.retries == second.usage.retries );
 }
+
+TEST_CASE( "out-of-int64-range and trailing-slash probes (review pass 1)", "[agentbench][trace]" )
+{
+	// Seed beyond int64 → typed rejection, never a jsoncpp LogicError.
+	Json::Value doc = traceDoc();
+	doc["seed"] = Json::Value( Json::Value::maxLargestUInt ); // 2^64-1
+	TraceParse result = parseDoc( doc );
+	CHECK( result.parsed == std::nullopt );
+	REQUIRE( result.error.code == "agentbench.trace_invalid" );
+	CHECK( result.error.details["field"].asString() == "seed" );
+
+	// Negative-int32 tokens stay rejected; huge-but-int64 tokens rejected too.
+	doc = traceDoc();
+	doc["steps"][0]["tokens"] = Json::Value( Json::Int64( 2147483648ll ) );
+	result = parseDoc( doc );
+	REQUIRE( result.error.code == "agentbench.trace_invalid" );
+	CHECK( result.error.details["field"].asString() == "steps[0].tokens" );
+}

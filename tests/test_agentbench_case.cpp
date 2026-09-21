@@ -338,3 +338,21 @@ TEST_CASE( "failure expectation must name a class from the closed taxonomy", "[a
 	REQUIRE( result.parsed.has_value() );
 	CHECK( result.parsed->failureExpectation["failure_class"].asString() == "impossible_task" );
 }
+
+TEST_CASE( "integer range violations are typed rejections (review pass 1)", "[agentbench][case]" )
+{
+	Json::Value doc = minimalValidCaseDoc();
+	doc["resource_budget"]["max_tokens"] = Json::Value( Json::Int64( 9999999999ll ) );
+	CaseParse result = parseDoc( doc );
+	CHECK( result.parsed == std::nullopt );
+	REQUIRE( result.error.code == "agentbench.case_invalid" );
+	CHECK( result.error.details["field"].asString() == "resource_budget.max_tokens" );
+
+	doc = minimalValidCaseDoc();
+	Json::Value params = doc["invariants"][0]["params"];
+	doc = minimalValidCaseDoc();
+	doc["minimal_steps"] = Json::Value( Json::Int64( 4294967296ll ) );
+	result = parseDoc( doc );
+	REQUIRE( result.error.code == "agentbench.case_invalid" );
+	CHECK( result.error.details["field"].asString() == "minimal_steps" );
+}

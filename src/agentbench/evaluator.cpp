@@ -3,6 +3,7 @@
 
 #include "failure_taxonomy.h"
 #include "json_writer.h"
+#include "json_numbers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,6 +69,7 @@ struct Derived
 	int scientificPassed = 0;
 	bool claimHonest = true;
 	bool scopeViolation = false;
+	bool pairingBroken = false; // case/trace pairing gate fired — refuse a pass
 	bool verifierAllDelivered = true;
 	int verifierDelivered = 0;
 };
@@ -76,6 +78,11 @@ Derived derive( const AgentCase &caseValue, const AgentTrace &trace, const Repla
                 const std::vector<InvariantResult> &invariants, int &verifierTotal )
 {
 	Derived derived;
+	for ( const ReplayViolation &violation : replay.violations )
+	{
+		if ( violation.code == error_codes::kTraceInvalid )
+			derived.pairingBroken = true;
+	}
 	for ( const InvariantResult &result : invariants )
 	{
 		if ( result.severity == Severity::Error )
@@ -121,27 +128,18 @@ Derived derive( const AgentCase &caseValue, const AgentTrace &trace, const Repla
 		bool fieldsPresent = true;
 		for ( const std::string &field : expectation.requiredFields )
 		{
-			const Json::Value *resolved = nullptr;
-			const Json::Value *current = &delivered->fields;
-			size_t start = 0;
-			while ( start <= field.size() )
+			if ( resolveDottedPath( delivered->fields, field ) == nullptr )
 			{
-				const size_t dot = field.find( '.', start );
-				const std::string segment = dot == std::string::npos ? field.substr( start ) : field.substr( start, dot - start );
-				if ( segment.empty() || !current->isObject() || !current->isMember( segment ) )
-				{
-					fieldsPresent = false;
-					break;
-				}
-				current = &( *current )[segment];
-				if ( dot == std::string::npos )
-					break;
-				start = dot + 1;
-			}
-			(void)resolved;
-			if ( !fieldsPresent )
+				fieldsPresent = false;
 				break;
+			}
 		}
+		// Declared kind and path are part of the oracle: a delivery of the
+		// wrong kind, or at the wrong in-scope path, is not a delivery.
+		if ( !expectation.kind.empty() && delivered->kind != expectation.kind )
+			fieldsPresent = false;
+		if ( !expectation.path.empty() && delivered->path != expectation.path )
+			fieldsPresent = false;
 		if ( fieldsPresent )
 			derived.verifierDelivered++;
 		else
@@ -150,9 +148,10 @@ Derived derive( const AgentCase &caseValue, const AgentTrace &trace, const Repla
 	return derived;
 }
 
-/// A fault is "observable" when the trace carries its marker; handled when
-/// the trajectory recovered (successful repeat) or still reached a decisive
-/// terminal state (completed/blocked) instead of giving up.
+/// A fault is "observable" when the trace carries its marker; handled only
+/// when the run demonstrably routed around it — some later step succeeded
+/// (a retried call or any subsequent progress). A bare terminal state is not
+/// evidence of recovery.
 void assessRecovery( const AgentCase &caseValue, const AgentTrace &trace, int &observable, int &handled )
 {
 	observable = 0;
@@ -169,16 +168,13 @@ void assessRecovery( const AgentCase &caseValue, const AgentTrace &trace, int &o
 			if ( !marker.isString() || marker.asString() != expectedKind )
 				continue;
 			seen = true;
-			// Recovery probe: any later successful repeat of this call, or a
-			// decisive (non-gave-up) terminal state afterwards.
+			// Recovery probe: some later step of the run must have succeeded —
+			// a successful repeat of this call, or any subsequent progress.
 			for ( size_t j = i + 1; j < trace.steps.size() && !handledHere; ++j )
 			{
-				if ( trace.steps[j].success && trace.steps[j].tool == step.tool &&
-				     deterministicSerialize( trace.steps[j].input ) == deterministicSerialize( step.input ) )
+				if ( trace.steps[j].success )
 					handledHere = true;
 			}
-			if ( !handledHere && ( trace.stopReason == StopReason::Completed || trace.stopReason == StopReason::Blocked ) )
-				handledHere = true;
 		}
 		if ( seen )
 		{
@@ -193,7 +189,7 @@ std::string classifyFailure( const Derived &derived, BenchVerdict verdict, const
                              double verifierRate, int faultsObservable, int faultsHandled )
 {
 	using namespace failure_classes;
-	if ( derived.scopeViolation )
+	if ( derived.pairingBroken || derived.scopeViolation )
 		return kScopeViolation;
 	if ( trace.steps.empty() )
 		return kNotStarted;
@@ -207,12 +203,14 @@ std::string classifyFailure( const Derived &derived, BenchVerdict verdict, const
 			return kVerificationFailed;
 		if ( derived.scientificTotal > 0 && derived.scientificPassed < derived.scientificTotal )
 			return kInvalidScience;
-		if ( !derived.claimHonest )
-			return kClaimMismatch;
 		return kIncomplete;
 	}
 	if ( faultsObservable > 0 && faultsHandled < faultsObservable )
 		return kRecoveryFailed;
+	// A completed, passing run the agent itself denies — claim contradicts
+	// the recorded evidence in the other direction.
+	if ( verdict == BenchVerdict::Pass && !trace.outcomeClaimSuccess && trace.stopReason == StopReason::Completed )
+		return kClaimMismatch;
 	return kNone;
 }
 
@@ -288,6 +286,9 @@ Json::Value evaluationShellToJson( const CaseEvaluation &evaluation )
 	usage["retries"] = evaluation.usage.retries;
 	document["usage"] = usage;
 
+	document["replay_violations"] = evaluation.replayViolations;
+	document["failure_expectation"] = evaluation.failureExpectation;
+
 	return document;
 }
 
@@ -307,6 +308,15 @@ CaseEvaluation evaluateCore( const AgentCase &caseValue, const AgentTrace &trace
 	evaluation.caseDigest = caseValue.digest();
 	evaluation.usage = replay.usage;
 	evaluation.invariants = invariants;
+	for ( const ReplayViolation &violation : replay.violations )
+	{
+		Json::Value entry{Json::objectValue};
+		entry["code"] = violation.code;
+		entry["summary"] = violation.summary;
+		entry["details"] = violation.details;
+		evaluation.replayViolations.append( entry );
+	}
+	evaluation.failureExpectation = caseValue.failureExpectation;
 
 	// Metrics, fixed order.
 	double fraction = 0.0;
@@ -385,7 +395,8 @@ CaseEvaluation evaluateCore( const AgentCase &caseValue, const AgentTrace &trace
 
 	// Verdict. Undelivered expected evidence fails the run even when the
 	// declared invariants happen to pass: a missing deliverable is not a pass.
-	if ( derived.scopeViolation || derived.anyErrorFailed ||
+	// A mispaired case/trace is likewise never graded as a pass.
+	if ( derived.pairingBroken || derived.scopeViolation || derived.anyErrorFailed ||
 	     ( verifierTotal > 0 && derived.verifierDelivered < verifierTotal ) )
 		evaluation.verdict = BenchVerdict::Fail;
 	else if ( derived.anyWarningFailed )

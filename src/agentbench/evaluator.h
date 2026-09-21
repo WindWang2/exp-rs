@@ -23,16 +23,22 @@
 //   recovery_quality           handled / observable injected faults; null
 //                              when the case injects no faults; a fault with
 //                              no observable trace marker makes the metric
-//                              null ("faults_not_observable_in_trace")
+//                              null ("faults_not_observable_in_trace").
+//                              Handled = a later step of the run succeeded
+//                              after the fault (retry or route-around).
 //   reproducibility            1.0 iff double evaluation is digest-identical
 //   explanation_completeness   non-empty explanation + evidence explicitly
 //                              required in the explanation + honest outcome
 //                              claim, over that requirement total
 //
-// Classification priority (first match wins): scope_violation, not_started,
-// silent_failure, budget_exhausted, then (on FAIL) verification_failed /
-// invalid_science / claim_mismatch / incomplete, then recovery_failed, else
-// none.
+// Classification priority (first match wins): scope_violation (which also
+// covers a mispaired case/trace — the pairing gate refuses to grade across
+// cases), not_started, silent_failure, budget_exhausted, then (on FAIL)
+// verification_failed / invalid_science / incomplete, then recovery_failed,
+// then claim_mismatch (a completed run whose agent denies success), else
+// none. `impossible_task` is reserved for the live-harness capture seam,
+// which can mark refusal intent directly; scripted/recorded inputs cannot
+// emit it.
 //
 
 #include "case_schema.h"
@@ -77,6 +83,8 @@ struct CaseEvaluation
 	std::vector<InvariantResult> invariants;
 	std::vector<MetricResult> metrics; ///< exactly the 8 metric names, fixed order
 	ResourceUsage usage;
+	Json::Value replayViolations{Json::arrayValue}; ///< typed replay findings surfaced for observability
+	Json::Value failureExpectation{Json::nullValue}; ///< case-declared advisory expectation (may be null)
 	std::string digest; ///< digest of the canonical evaluation document
 
 	/// Lookup helper; nullptr when the name is unknown.

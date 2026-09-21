@@ -33,18 +33,20 @@ data/agent/bench/                     corpus (data, versioned)
   cases/*.json                        sicnu.agentbench.case/v1
   traces/*.json                       sicnu.agentbench.trace/v1 (recorded examples)
 
-src/agentbench/                       pure C++20 + jsoncpp, no Qt
+src/agentbench/                       pure C++20 + jsoncpp, no Qt (shipped)
   case_schema.{h,cpp}                 AgentCase parse/validate/version/digest
   trace.{h,cpp}                       AgentTrace parse/validate/scope/budget accounting
   fake_agent.{h,cpp}                  deterministic scripted agent → trace
+                                      (fault application + failure policy live here)
   invariants.{h,cpp}                  hidden-invariant checker (closed kinds)
-  faults.{h,cpp}                      fault schedule + application to scripted runs
-  metrics.{h,cpp}                     8 metric evaluators (null-with-reason)
   failure_taxonomy.{h,cpp}            closed outcome-failure classification
-  evaluator.{h,cpp}                   case + trace → CaseEvaluation (verdict, metrics, invariants)
-  report.{h,cpp}                      sicnu.agentbench.report/v1 JSON + Markdown writer
-  suite.{h,cpp}                       suite runner: N cases × trace bindings → suite report
-  json_writer.{h,cpp}                 local deterministic serializer (report digests only)
+  evaluator.{h,cpp}                   case + trace → CaseEvaluation (verdict, 8 metrics,
+                                      invariants, taxonomy; recovery scoring lives here)
+  report.{h,cpp}                      evaluation JSON + Markdown writers
+  suite.{h,cpp}                       suite runner: N cases × (script|trace) → suite report
+  json_writer.{h,cpp}                 local deterministic serializer (to_chars, locale-free)
+  json_numbers.h                      shared dotted-path + int-range helpers
+  errors.h / version.h                typed agentbench.* codes; framework version
 
 tests/test_agentbench_*.cpp           Catch2, TEST_PREFIX "test_agentbench_…::"
 ```
@@ -73,11 +75,13 @@ machine-readable reason — never zero-filled.
   {name, value|null, reason?, notes}`; `CaseEvaluation {verdict, metrics[8],
   invariants[], failureClass, resourceUsage, digest}`; `SuiteReport`.
 - Error codes (`agentbench.*`): `agentbench.schema_version_unknown`,
-  `agentbench.case_invalid`, `agentbench.trace_invalid`,
-  `agentbench.tool_not_allowed`, `agentbench.path_outside_scope`,
-  `agentbench.budget_exceeded`, `agentbench.invariant_unknown_kind`,
-  `agentbench.fault_invalid`, `agentbench.suite_invalid`,
-  `agentbench.report_write_failed`.
+  `agentbench.case_malformed`, `agentbench.case_invalid`,
+  `agentbench.trace_malformed`, `agentbench.trace_invalid`,
+  `agentbench.script_invalid`, `agentbench.tool_not_allowed`,
+  `agentbench.path_outside_scope`, `agentbench.budget_exceeded`,
+  `agentbench.suite_invalid`, `agentbench.report_write_failed`.
+  (Invariant-kind and fault-kind unknowns fold into `case_invalid` /
+  `script_invalid` at parse time with field-level details.)
 
 ## Closed invariant kinds (Slice D, extensible via version bump)
 
@@ -94,20 +98,25 @@ machine-readable reason — never zero-filled.
    identical successful (tool,input) pair, or `redundantTools` hits).
 4. `plan_efficiency` — `minimalSteps / stepsUsed`, clamped to [0,1].
 5. `verifier_pass_rate` — expected-evidence entries satisfied / total.
-6. `recovery_quality` — handled faults / injected faults (handled = post-fault
-   recovery step exists AND no silent success claim over the fault). Null when
-   the case injects no faults.
-7. `reproducibility` — 1.0 iff double evaluation of the same trace yields
-   identical evaluation digests, else 0.0 (harness-side determinism oracle).
-8. `explanation_completeness` — explanation requirements satisfied / required
-   (non-empty explanation, required evidence fields present in explanation or
-   evidence, outcome claim consistent with error-severity invariants).
+6. `recovery_quality` — handled / observable injected faults. Observable =
+   the trace carries the fault marker (`payload.fault`); handled = some later
+   step succeeded (a retried call or any subsequent progress). Null when the
+   case injects no faults or marks are unobservable.
+7. `reproducibility` — 1.0 iff double evaluation of the same inputs yields
+   identical canonical documents, else 0.0 (harness-side determinism canary;
+   unfailable for a correct evaluator by construction).
+8. `explanation_completeness` — non-empty explanation + evidence explicitly
+   required in the explanation (its id must appear) + honest outcome claim,
+   over that requirement total.
 
 ## Failure taxonomy (closed, classified by evaluator)
 
-`not_started`, `incomplete`, `scope_violation`, `budget_exhausted`,
-`invalid_science`, `verification_failed`, `silent_failure`,
-`recovery_failed`, `claim_mismatch`, `none` (passing run).
+`none`, `not_started`, `incomplete`, `scope_violation` (including mispaired
+case/trace), `budget_exhausted`, `invalid_science`, `verification_failed`,
+`silent_failure`, `recovery_failed`, `claim_mismatch` (a completed passing run
+the agent denies), `impossible_task` (reserved for the live-capture seam).
+Priority order documented in `evaluator.h`; `failure_expectation` in a case
+is advisory and surfaced in the evaluation document, not enforced.
 
 ## Migration / compatibility
 
@@ -131,9 +140,10 @@ paths outside the case scope are typed errors, not silently graded).
 
 ## Performance budget
 
-Evaluation is O(steps + invariants + evidence) per case — microseconds at
-starter-pack scale. Corpus bound: suite refuses > 400 expanded cases (mirrors
-Tier A corpus bound). Tests must run in seconds, no engine, no GDAL.
+Evaluation is O(steps × invariants + evidence) per case — microseconds at
+starter-pack scale. Corpus bound: `runSuite` refuses suites with more than
+400 entries (mirrors the Tier A corpus bound). Tests run in seconds; no
+engine, no GDAL.
 
 ## Test strategy
 

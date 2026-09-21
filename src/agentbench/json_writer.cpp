@@ -51,11 +51,19 @@ void writeValue( std::ostream &out, const Json::Value &value )
 			out << "null";
 			break;
 		case Json::intValue:
-			out << value.asInt64();
+		{
+			char buffer[32];
+			const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), value.asInt64() );
+			out.write( buffer, written.ptr - buffer );
 			break;
+		}
 		case Json::uintValue:
-			out << value.asUInt64();
+		{
+			char buffer[32];
+			const std::to_chars_result written = std::to_chars( buffer, buffer + sizeof( buffer ), value.asUInt64() );
+			out.write( buffer, written.ptr - buffer );
 			break;
+		}
 		case Json::realValue:
 		{
 			const double number = value.asDouble();

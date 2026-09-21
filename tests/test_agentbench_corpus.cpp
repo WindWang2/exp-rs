@@ -183,7 +183,7 @@ TEST_CASE( "pack digests are stable across double runs and pinned", "[agentbench
 	for ( const SuiteCaseResult &entry : first.report->cases )
 	{
 		if ( entry.caseId == "optical/ndvi-basic" && entry.sourceKind == "script" )
-			CHECK( fnv1a64( entry.evaluationDigest ) == 0x292b6d667bff3760ull ); // optical/ndvi-basic reference evaluation v1.0.0
+			CHECK( fnv1a64( entry.evaluationDigest ) == 0xb7d5b3a1b0b86c1eull ); // optical/ndvi-basic reference evaluation v1.0.0
 	}
 }
 

@@ -375,3 +375,137 @@ TEST_CASE( "evaluation json is versioned and digest-stable", "[agentbench][evalu
 	CHECK( evaluation.digest == again.digest );
 	CHECK( !evaluation.digest.empty() );
 }
+
+// ------------------------------------------------------------------
+// Review-pass-1 probes: pairing gate, claim_mismatch reachability,
+// verifier kind/path oracle, recovery_failed / incomplete fixtures.
+// ------------------------------------------------------------------
+
+TEST_CASE( "a mispaired case/trace is never graded as a pass", "[agentbench][evaluator]" )
+{
+	World world = happyWorld();
+	const ScriptRun scriptRun = runScript( world.agentCase, world.script );
+	REQUIRE( scriptRun.trace.has_value() );
+	AgentTrace trace = *scriptRun.trace; // fully passing trajectory…
+	trace.caseId = "other/case";         // …bound to the wrong case
+
+	const CaseEvaluation evaluation = evaluateCase( world.agentCase, trace );
+	CHECK( evaluation.verdict == BenchVerdict::Fail );
+	CHECK( evaluation.failureClass == "scope_violation" );
+	REQUIRE( evaluation.replayViolations.size() == 1 );
+	CHECK( evaluation.replayViolations[0]["code"].asString() == "agentbench.trace_invalid" );
+}
+
+TEST_CASE( "denying a completed passing run is a claim_mismatch", "[agentbench][evaluator]" )
+{
+	World world = happyWorld();
+	const ScriptRun scriptRun = runScript( world.agentCase, world.script );
+	REQUIRE( scriptRun.trace.has_value() );
+	AgentTrace trace = *scriptRun.trace; // fully passing…
+	trace.outcomeClaimSuccess = false;   // …but the agent denies it
+	const CaseEvaluation evaluation = evaluateCase( world.agentCase, trace );
+	CHECK( evaluation.verdict == BenchVerdict::Pass );
+	CHECK( evaluation.failureClass == "claim_mismatch" );
+}
+
+TEST_CASE( "verifier rejects deliveries of the wrong kind or path", "[agentbench][evaluator]" )
+{
+	// Case whose evidence declares kind and path; script delivers both.
+	Json::Value caseExtra{Json::objectValue};
+	// baseCaseDoc cannot reach into expected_evidence via the merge, so swap
+	// the whole expected_evidence through a targeted doc edit.
+	Json::Value doc = baseCaseDoc();
+	doc["expected_evidence"] = Json::Value( Json::arrayValue );
+	Json::Value entry{Json::objectValue};
+	entry["id"] = "ndvi";
+	entry["kind"] = "raster";
+	entry["path"] = "work://c/ndvi.tif";
+	entry["required_fields"] = Json::Value( Json::arrayValue );
+	doc["expected_evidence"].append( entry );
+
+	World world;
+	world.agentCase = parseCase( deterministicSerialize( doc ) ).parsed.value();
+	world.script = happyWorld().script; // delivers id ndvi, kind raster, path work://c/ndvi.tif
+	const ScriptRun scriptRun = runScript( world.agentCase, world.script );
+	REQUIRE( scriptRun.trace.has_value() );
+
+	CHECK( evaluateCase( world.agentCase, *scriptRun.trace ).verdict == BenchVerdict::Pass );
+
+	AgentTrace wrongKind = *scriptRun.trace;
+	wrongKind.evidence[0].kind = "table";
+	CHECK( evaluateCase( world.agentCase, wrongKind ).verdict == BenchVerdict::Fail );
+
+	AgentTrace wrongPath = *scriptRun.trace;
+	wrongPath.evidence[0].path = "work://c/other.tif";
+	const CaseEvaluation evaluation = evaluateCase( world.agentCase, wrongPath );
+	CHECK( evaluation.verdict == BenchVerdict::Fail );
+	CHECK( metric( evaluation, "verifier_pass_rate" ).value.asDouble() == 0.0 );
+}
+
+TEST_CASE( "an unhandled fault on the final step fails recovery while passing", "[agentbench][evaluator]" )
+{
+	// Evidence comes from step 0; the fault hits the final step and the
+	// script routes around it (skip) — the run passes, but the fault was
+	// never recovered: recovery_failed.
+	Json::Value caseExtra{Json::objectValue};
+	caseExtra["faults"] = faultList( "transient_failure", 1 );
+	Json::Value steps{Json::arrayValue};
+	Json::Value step0{Json::objectValue};
+	step0["tool"] = "rs:ndvi";
+	step0["input"] = Json::Value( Json::objectValue );
+	Json::Value payload0{Json::objectValue};
+	payload0["verdict"] = "PASS";
+	payload0["output_path"] = "work://c/ndvi.tif";
+	step0["payload"] = payload0;
+	step0["evidence"] = "ndvi";
+	steps.append( step0 );
+	Json::Value step1{Json::objectValue};
+	step1["tool"] = "harness:verify";
+	step1["input"] = Json::Value( Json::objectValue );
+	step1["payload"] = Json::Value( Json::objectValue );
+	step1["on_failure"] = "skip";
+	steps.append( step1 );
+	Json::Value scriptExtra{Json::objectValue};
+	scriptExtra["steps"] = steps;
+
+	World world = happyWorld( caseExtra, scriptExtra );
+	const CaseEvaluation evaluation = world.run();
+	CHECK( evaluation.verdict == BenchVerdict::Pass );
+	CHECK( metric( evaluation, "recovery_quality" ).value.asDouble() == 0.0 );
+	CHECK( evaluation.failureClass == "recovery_failed" );
+}
+
+TEST_CASE( "an honest failed run with delivered evidence classifies incomplete", "[agentbench][evaluator]" )
+{
+	// Hand-built: evidence delivered (verifier + science fine), a process
+	// error invariant fails, claim honest, stopped early.
+	AgentCase agentCase = parseCase( deterministicSerialize( baseCaseDoc() ) ).parsed.value();
+	Json::Value inv{Json::objectValue};
+	Json::Value params{Json::objectValue};
+	params["step_index"] = 0;
+	inv["id"] = "proc-step0";
+	inv["kind"] = "result_success";
+	inv["dimension"] = "process";
+	inv["severity"] = "error";
+	inv["params"] = params;
+	// Inject via case doc re-parse to keep parse-time validation in the loop.
+	Json::Value doc = baseCaseDoc();
+	doc["invariants"].append( inv );
+	agentCase = parseCase( deterministicSerialize( doc ) ).parsed.value();
+
+	World world = happyWorld();
+	const ScriptRun scriptRun = runScript( world.agentCase, world.script );
+	REQUIRE( scriptRun.trace.has_value() );
+	AgentTrace trace = *scriptRun.trace;
+	trace.caseId = agentCase.caseId;
+	trace.steps[0].success = false; // proc-step0 fails
+	trace.steps[0].errorCode = "EXECUTION_FAILED";
+	trace.stopReason = StopReason::GaveUp;
+	trace.outcomeClaimSuccess = false;
+
+	const CaseEvaluation evaluation = evaluateCase( agentCase, trace );
+	CHECK( evaluation.verdict == BenchVerdict::Fail );
+	CHECK( metric( evaluation, "verifier_pass_rate" ).value.asDouble() == 1.0 );
+	CHECK( metric( evaluation, "scientific_validity" ).value.asDouble() == 1.0 );
+	CHECK( evaluation.failureClass == "incomplete" );
+}

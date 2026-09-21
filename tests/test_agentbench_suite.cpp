@@ -223,3 +223,22 @@ TEST_CASE( "suite report renders to the versioned json document", "[agentbench][
 	CHECK( json["cases"].size() == 2 );
 	CHECK( json["digest"].asString() == run.report->digest );
 }
+
+TEST_CASE( "suites above the 400-entry corpus bound are typed rejections (review pass 1)", "[agentbench][suite]" )
+{
+	Json::Value doc = suiteDoc();
+	Json::Value cases{Json::arrayValue};
+	for ( int i = 0; i < 401; ++i )
+	{
+		Json::Value entry{Json::objectValue};
+		entry["case"] = "cases/a.json";
+		entry["script"] = "scripts/a.json";
+		cases.append( entry );
+	}
+	doc["cases"] = cases;
+	const SuiteDoc bloated = parseSuite( deterministicSerialize( doc ) ).parsed.value();
+	const SuiteRun run = runSuite( bloated, makeLoader( caseDoc( "suite/a", "optical" ), caseDoc( "suite/b", "change" ) ) );
+	CHECK( run.report == std::nullopt );
+	REQUIRE( run.error.code == "agentbench.suite_invalid" );
+	CHECK( run.error.details["reason"].asString().find( "400" ) != std::string::npos );
+}
