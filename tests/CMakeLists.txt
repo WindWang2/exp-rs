@@ -11957,3 +11957,19 @@ set_target_properties(test_agentbench_invariants PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_invariants TEST_PREFIX "test_agentbench_invariants::")
+
+# RS14 agent-benchmark Slice E: 8-metric evaluator + failure taxonomy.
+add_executable(test_agentbench_evaluator test_agentbench_evaluator.cpp)
+target_link_libraries(test_agentbench_evaluator PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_evaluator)
+target_include_directories(test_agentbench_evaluator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_evaluator PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_evaluator TEST_PREFIX "test_agentbench_evaluator::")

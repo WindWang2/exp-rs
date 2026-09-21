@@ -10,6 +10,8 @@ add_library( sicnu_agentbench STATIC
     case_schema.cpp
     case_schema.h
     errors.h
+    evaluator.cpp
+    evaluator.h
     failure_taxonomy.cpp
     failure_taxonomy.h
     fake_agent.cpp
