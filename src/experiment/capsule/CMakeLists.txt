@@ -12,6 +12,8 @@ qt_add_library(sicnu_experiment_capsule STATIC
   capsule_io.h
   capsule_portability.cpp
   capsule_portability.h
+  capsule_readiness.cpp
+  capsule_readiness.h
 )
 
 add_library(Sicnu::experiment_capsule ALIAS sicnu_experiment_capsule)

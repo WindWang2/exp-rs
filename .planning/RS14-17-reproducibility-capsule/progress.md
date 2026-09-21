@@ -25,3 +25,11 @@
   absolute-path scan, fail closed with typed codes). RunEnvironment
   denylist matchers exposed additively (single source of truth, no second
   pattern list). 34 cases / 158 assertions pass.
+- 2026-09-21 Slice E GREEN: CapsuleReadiness::assess replays the document
+  against the LOCAL machine (dataset/split store lookups, capability
+  descriptor digest match, plan definition digest, software revision, model
+  + output availability hooks). Rollup mirrors ReplayReadiness (Impossible
+  on missing/mismatched REQUIRED pins, else BestEffort on Unknown, else
+  Exact); unwired hooks never fake Exact. Fix found by tests: the report
+  struct defaults to Impossible — rollup must roll DOWN from Exact.
+  40 cases / 180 assertions pass.

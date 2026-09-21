@@ -17,6 +17,7 @@
 #include "experiment/capsule/capsule_builder.h"
 #include "experiment/capsule/capsule_document.h"
 #include "experiment/capsule/capsule_io.h"
+#include "experiment/capsule/capsule_readiness.h"
 #include "experiment/evidence.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
@@ -36,6 +37,8 @@ using sicnu::experiment::RunEnvironment;
 using sicnu::experiment::capsule::CapsuleBuilder;
 using sicnu::experiment::capsule::CapsuleDocument;
 using sicnu::experiment::capsule::CapsuleIO;
+using sicnu::experiment::capsule::CapsuleReadiness;
+using sicnu::experiment::capsule::CapsuleReadinessHooks;
 using sicnu::experiment::capsule::CapsuleHooks;
 using sicnu::experiment::capsule::CapsuleOptions;
 using sicnu::experiment::capsule::CapsuleValidation;
@@ -313,6 +316,7 @@ struct StoreFixture
     QString versionId;
     QString fingerprint;
     QString manifestJson;
+    QString splitFingerprint = QStringLiteral( "sf1" );
 
     bool open()
     {
@@ -379,7 +383,7 @@ struct StoreFixture
                                        ? fingerprint
                                        : datasetFingerprintOverride );
         run.setSplitManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
-        run.setSplitFingerprint( QStringLiteral( "sf1" ) );
+        run.setSplitFingerprint( splitFingerprint );
         run.setSeed( 42 );
         run.setSoftwareRevision( QStringLiteral( "rev-123" ) );
         QJsonObject envFields;
@@ -1041,4 +1045,221 @@ TEST_CASE( "validate passes a clean capsule with per-gate evidence",
     }
     CHECK( validation.ok );
     CHECK( !validation.checks.isEmpty() );
+}
+
+// --- Slice E: replay readiness from a capsule --------------------------------
+
+namespace
+{
+
+/// A fixture whose run carries a REAL split manifest (config + assignments —
+/// SplitManifest::fromJson refuses degenerate documents) and whose capsule
+/// pins capability descriptor + plan definition digests, so a fully wired
+/// readiness assessment can reach Exact.
+struct ReadyFixture
+{
+    StoreFixture fixture;
+    sicnu::experiment::capsule::CapsuleDocument doc;
+    QJsonObject descriptor;
+
+    bool build()
+    {
+        if ( !fixture.open() )
+            return false;
+        fixture.addExperiment();
+
+        // A split manifest that round-trips, saved first so the run can pin
+        // the STORE-DERIVED fingerprint.
+        sicnu::dataset::SplitManifest manifest;
+        manifest.setManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+        manifest.setDatasetVersionId( fixture.versionId );
+        sicnu::dataset::SplitConfig config;
+        config.method = sicnu::dataset::SplitMethod::Random;
+        config.seed = 7;
+        manifest.setConfig( config );
+        sicnu::dataset::SplitAssignment assignment;
+        assignment.sampleId = QStringLiteral( "sample-1" );
+        assignment.role = sicnu::dataset::SplitRole::Train;
+        manifest.assignments().append( assignment );
+        if ( !fixture.datasets.saveSplitManifest( manifest ).has_value() )
+            return false;
+        const auto saved = fixture.datasets.splitManifestById( manifest.manifestId() );
+        if ( !saved.has_value() )
+            return false;
+        fixture.splitFingerprint = saved->fingerprint();
+
+        const ExperimentRun run = fixture.addRun();
+
+        // Build with hooks pinning the capability descriptor + plan digest.
+        descriptor.insert( QStringLiteral( "id" ), QStringLiteral( "rs:classify" ) );
+        descriptor.insert( QStringLiteral( "family" ), QStringLiteral( "classify" ) );
+        CapsuleHooks buildHooks;
+        buildHooks.capabilityDescriptor = [this]( const QString & ) { return descriptor; };
+        buildHooks.planDefinitionDigest = []( const QString & ) {
+            return QLatin1String( "plan-digest-abc" );
+        };
+        CapsuleOptions options = fixedOptions();
+        options.workspaceRoot = fixture.dir.path();
+        const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+        auto built = builder.build( run.runId(), options, buildHooks );
+        if ( !built.has_value() )
+            return false;
+        doc = built.take();
+        return true;
+    }
+};
+
+/// Hooks matching what the fixture pinned — the "same machine" case.
+CapsuleHooks matchingHooks( const QJsonObject &descriptor )
+{
+    CapsuleHooks hooks;
+    hooks.capabilityDescriptor = [descriptor]( const QString & ) { return descriptor; };
+    hooks.planDefinitionDigest = []( const QString & ) {
+        return QLatin1String( "plan-digest-abc" );
+    };
+    return hooks;
+}
+
+CapsuleReadinessHooks matchingReadinessHooks()
+{
+    CapsuleReadinessHooks hooks;
+    hooks.currentSoftwareRevision = [] { return QStringLiteral( "rev-123" ); };
+    hooks.outputAvailable = []( const QString &, const QString &, qint64 ) { return true; };
+    return hooks;
+}
+
+} // namespace
+
+TEST_CASE( "fully resolvable capsule assesses Exact", "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+
+    const auto report = CapsuleReadiness::assess( ready.doc, &ready.fixture.datasets,
+                                                  matchingHooks( ready.descriptor ),
+                                                  matchingReadinessHooks() );
+    if ( report.level != sicnu::dataset::ReproductionLevel::Exact )
+    {
+        for ( const auto &check : report.checks )
+            WARN( check.dependency.toStdString() << " -> "
+                  << replayCheckStatusToString( check.status ).toStdString() << " ("
+                  << check.detail.toStdString() << ")" );
+    }
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::Exact );
+    CHECK( report.missingDependencyDiagnostics().isEmpty() );
+}
+
+TEST_CASE( "missing dataset version blocks replay with a diagnostic",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+    StoreFixture emptyFixture;
+    REQUIRE( emptyFixture.open() );
+
+    const auto report = CapsuleReadiness::assess( ready.doc, &emptyFixture.datasets,
+                                                  matchingHooks( ready.descriptor ),
+                                                  matchingReadinessHooks() );
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::Impossible );
+    CHECK( !report.missingDependencyDiagnostics().isEmpty() );
+}
+
+TEST_CASE( "dataset fingerprint drift is a Mismatched, not a silent pass",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+    // A different store whose version carries DIFFERENT content under the
+    // id the capsule will be pointed at.
+    StoreFixture drifted;
+    REQUIRE( drifted.open() );
+    drifted.addExperiment();
+    sicnu::dataset::SplitManifest manifest;
+    manifest.setManifestId( QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+    manifest.setDatasetVersionId( drifted.versionId );
+    sicnu::dataset::SplitConfig config;
+    config.method = sicnu::dataset::SplitMethod::Random;
+    config.seed = 7;
+    manifest.setConfig( config );
+    sicnu::dataset::SplitAssignment assignment;
+    assignment.sampleId = QStringLiteral( "sample-1" );
+    assignment.role = sicnu::dataset::SplitRole::Train;
+    manifest.assignments().append( assignment );
+    REQUIRE( drifted.datasets.saveSplitManifest( manifest ).has_value() );
+    // Point the capsule's dataset pin at the drifted store's version id but
+    // keep the ORIGINAL fingerprint: same id, changed content.
+    QJsonObject root = ready.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonArray inputs = root.value( QStringLiteral( "inputs" ) ).toArray();
+    QJsonObject pin = inputs.at( 0 ).toObject();
+    pin.insert( QStringLiteral( "id" ), drifted.versionId );
+    inputs.replace( 0, pin );
+    root.insert( QStringLiteral( "inputs" ), inputs );
+    auto replanted = CapsuleDocument::finalize( root );
+    REQUIRE( replanted.has_value() );
+
+    const auto report = CapsuleReadiness::assess( replanted.take(), &drifted.datasets,
+                                                  matchingHooks( ready.descriptor ),
+                                                  matchingReadinessHooks() );
+    bool sawMismatch = false;
+    for ( const auto &check : report.checks )
+        if ( check.dependency == QLatin1String( "dataset_version" )
+             && check.status == sicnu::experiment::ReplayCheckStatus::Mismatched )
+            sawMismatch = true;
+    CHECK( sawMismatch );
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::Impossible );
+}
+
+TEST_CASE( "unwired hooks downgrade to BestEffort, never a fake Exact",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+
+    const auto report = CapsuleReadiness::assess( ready.doc, &ready.fixture.datasets, {}, {} );
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::BestEffort );
+    bool sawUnknown = false;
+    for ( const auto &check : report.checks )
+        if ( check.status == sicnu::experiment::ReplayCheckStatus::Unknown )
+            sawUnknown = true;
+    CHECK( sawUnknown );
+}
+
+TEST_CASE( "capability descriptor changed since capture is a Mismatched",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+    QJsonObject changed = ready.descriptor;
+    changed.insert( QStringLiteral( "family" ), QStringLiteral( "spectral" ) );
+    CapsuleHooks hooks = matchingHooks( changed );
+
+    const auto report = CapsuleReadiness::assess( ready.doc, &ready.fixture.datasets, hooks,
+                                                  matchingReadinessHooks() );
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::Impossible );
+    bool sawCapabilityMismatch = false;
+    for ( const auto &check : report.checks )
+        if ( check.dependency.startsWith( QLatin1String( "capability:" ) )
+             && check.status == sicnu::experiment::ReplayCheckStatus::Mismatched )
+            sawCapabilityMismatch = true;
+    CHECK( sawCapabilityMismatch );
+}
+
+TEST_CASE( "software revision drift is reported as a Mismatched pin",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+    CapsuleReadinessHooks hooks = matchingReadinessHooks();
+    hooks.currentSoftwareRevision = [] { return QStringLiteral( "OTHER-REV" ); };
+
+    const auto report = CapsuleReadiness::assess( ready.doc, &ready.fixture.datasets,
+                                                  matchingHooks( ready.descriptor ), hooks );
+    CHECK( report.level == sicnu::dataset::ReproductionLevel::Impossible );
+    bool sawSoftwareMismatch = false;
+    for ( const auto &check : report.checks )
+        if ( check.dependency == QLatin1String( "software_revision" )
+             && check.status == sicnu::experiment::ReplayCheckStatus::Mismatched )
+            sawSoftwareMismatch = true;
+    CHECK( sawSoftwareMismatch );
 }
