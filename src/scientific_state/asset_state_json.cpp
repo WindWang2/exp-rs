@@ -925,6 +925,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
             ClaimRecord claim;
             if ( !readString( node, "path", claim.path, error ) )
                 return false;
+            if ( claim.path.empty() )
+            {
+                error.code = StateErrorCode::InvalidField;
+                error.message = "field 'claims[].path' must be non-empty";
+                return false;
+            }
             if ( node.isMember( "kind" ) )
             {
                 if ( !node["kind"].isString() )
@@ -964,6 +970,12 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
                  !readString( node, "path", note.path, error ) ||
                  !readString( node, "detail", note.detail, error ) )
                 return false;
+            if ( note.code.empty() )
+            {
+                error.code = StateErrorCode::InvalidField;
+                error.message = "field 'notes[].code' must be non-empty";
+                return false;
+            }
             state.notes.push_back( note );
         }
     }

@@ -86,7 +86,7 @@ int commandPassport( QStringList args, const CliIO &io )
         return io.finish( false, "passport", {},
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, "usage: passport --path <file> [--json] [--teaching] "
-                              "[--diff <passport.json>]" );
+                              "[--diff <passport.json>] (--json wins over --teaching)" );
     if ( !args.isEmpty() )
         return io.finish( false, "passport", {},
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),

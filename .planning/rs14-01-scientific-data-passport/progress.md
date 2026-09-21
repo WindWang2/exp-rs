@@ -143,3 +143,11 @@ Fixes (test_scientific_state_review.cpp = 21 assertions / 5 cases, new):
   symmetry). CLI --diff with empty value now InvalidInput. Docs updated.
 - P1-1 verified end-to-end: deep --diff doc now exits 2 (ValidationFailure).
 - Full regression: 10 targets, 616 assertions, all green.
+
+## Review Gate round 2 (re-review) — verdict: 可进 PR
+All round-1 P1/P2 independently verified fixed (CLI deep-doc exit 134→2,
+confidence values pinned with zero drift, cap default-unbounded = zero
+regression). Remaining 4 P3s fixed in-place: schema.h claim-count comment
+(2→3), GDAL nodata fallback ordered before the drop harvest, parser now
+requires non-empty claims[].path and notes[].code, usage notes --json
+priority. All 10 targets green after the P3 fixes.

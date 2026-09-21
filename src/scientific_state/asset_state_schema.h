@@ -49,7 +49,7 @@ inline constexpr std::size_t kMaxPassportBands = 4096;
 inline constexpr std::size_t kMaxPassportTemporalRefs = 256;
 
 /// Claim and note counts are not independently capped: they are structurally
-/// bounded by the input bounds above (≤ 2 claims per projected band plus a
+/// bounded by the input bounds above (≤ 3 claims per projected band plus a
 /// fixed set of section claims; ≤ 1 note per observation anomaly), so no
 /// pathological input can inflate them beyond O(kMaxPassportBands).
 

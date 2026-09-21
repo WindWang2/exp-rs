@@ -75,10 +75,11 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
             bandFacts.name = description;
         bandFacts.dataType = bandDataTypeName( band );
         collectMetadataItems( band->GetMetadata( nullptr ), "gdal:", bandFacts.metadata );
-        facts.droppedMetadataItems += bandFacts.metadata.dropped();
 
         // Native GDAL nodata declaration, projected under the GDAL term the
-        // resolver keys on (see Slice C: band item "NO_DATA_VALUE").
+        // resolver keys on (see Slice C: band item "NO_DATA_VALUE"). Added
+        // BEFORE the drop count is harvested so a full cap can never
+        // silently swallow this item.
         int hasNoData = FALSE;
         const double noDataValue = band->GetNoDataValue( &hasNoData );
         if ( hasNoData && !bandFacts.metadata.contains( "NO_DATA_VALUE" ) )
@@ -86,6 +87,7 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
             bandFacts.metadata.add( "NO_DATA_VALUE", std::to_string( noDataValue ),
                                     "gdal:NO_DATA_VALUE" );
         }
+        facts.droppedMetadataItems += bandFacts.metadata.dropped();
 
         facts.bands.push_back( bandFacts );
     }
