@@ -794,6 +794,7 @@ add_subdirectory(src/contracts)
 # state layer (Qt-free, jsoncpp-only core).
 add_subdirectory(src/scientific_state)
 add_subdirectory(src/scientific_state/gdal)
+add_subdirectory(src/scientific_state/catalog)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)

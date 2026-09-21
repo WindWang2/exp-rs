@@ -11898,3 +11898,12 @@ target_link_libraries(test_scientific_state_teaching PRIVATE Sicnu::ScientificSt
 
 sicnu_add_io_test(test_scientific_state_gdal)
 target_link_libraries(test_scientific_state_gdal PRIVATE Sicnu::ScientificStateGdal)
+
+# RS14-01 Slice F4: catalog adapter — Qt lane (real DataManager + GDAL).
+sicnu_add_test(test_scientific_state_catalog)
+target_link_libraries(test_scientific_state_catalog PRIVATE
+  Sicnu::ScientificState
+  Sicnu::ScientificStateCatalog
+  Sicnu::ScientificStateGdal
+)
+set_target_properties(test_scientific_state_catalog PROPERTIES AUTOMOC ON)
