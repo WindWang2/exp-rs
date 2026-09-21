@@ -147,6 +147,8 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
                 const auto &num = grid.bands[static_cast<std::size_t>( numerator )];
                 const auto &den = grid.bands[static_cast<std::size_t>( denominator )];
                 double sum = 0.0;
+                double min = 0.0;
+                double max = 0.0;
                 std::uint32_t count = 0;
                 const std::size_t samples = std::min( num.samples.size(), den.samples.size() );
                 for ( std::size_t i = 0; i < samples; ++i )
@@ -155,7 +157,18 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
                     const double d = den.samples[i];
                     if ( std::isfinite( n ) && std::isfinite( d ) && ( n + d ) != 0.0 )
                     {
-                        sum += ( n - d ) / ( n + d );
+                        const double value = ( n - d ) / ( n + d );
+                        sum += value;
+                        if ( count == 0 )
+                        {
+                            min = value;
+                            max = value;
+                        }
+                        else
+                        {
+                            min = std::min( min, value );
+                            max = std::max( max, value );
+                        }
                         ++count;
                     }
                 }
@@ -165,6 +178,8 @@ void measureExtras( const FaultGrid &grid, ObservableSet &out )
                                                ? pair["id"].asString()
                                                : "index_mean";
                     out.insert( { id, numberObservable( id, sum / double( count ) ) } );
+                    out.insert( { "index_min", numberObservable( "index_min", min ) } );
+                    out.insert( { "index_max", numberObservable( "index_max", max ) } );
                 }
             }
         }
@@ -377,6 +392,10 @@ ObservableSet measureObservables( const FaultGrid &grid )
                   numberObservable( "geo_transform.origin_x", grid.geoTransform[0] ) } );
     out.insert( { "geo_transform.origin_y",
                   numberObservable( "geo_transform.origin_y", grid.geoTransform[3] ) } );
+    out.insert( { "geo_transform.pixel_x",
+                  numberObservable( "geo_transform.pixel_x", grid.geoTransform[1] ) } );
+    out.insert( { "geo_transform.pixel_y",
+                  numberObservable( "geo_transform.pixel_y", grid.geoTransform[5] ) } );
 
     const int qaBand = grid.bandIndexByRole( "qa" );
     std::uint64_t samples = 0;

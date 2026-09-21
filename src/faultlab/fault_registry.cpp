@@ -102,7 +102,9 @@ const std::vector<FaultFamilyInfo> &faultFamilyCatalog()
           FaultDomain::Geometry,
           "major",
           { "LO-08" },
-          "scale_stripes",
+          kDiagnosisUnmatched, // stripes are a resampling symptom the
+                               // observation level cannot see; the origin
+                               // delta observable is the detection
           { "geo_transform.origin_x", "geo_transform.origin_y" },
           { "dx", "dy" },
           {},

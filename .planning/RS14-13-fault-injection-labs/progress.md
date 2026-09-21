@@ -19,3 +19,7 @@
 - Slice E (artifact/provenance fault + report schema): RED tests first, 30/30 green.
   - provenance_removal: scope generator (blanks generator+seed, observable flips true→false) / all (block removed, observable disappears as typed absence); refusals for unknown scope and provenance-free fixtures.
   - fault_report.{h,cpp}: sicnu.faultlab.report/1 canonical body (no timestamps/paths), digest-stable across runs, parseable, verdict + evidence + diagnostics sections.
+- Slice F (fixtures + diagnosis mirror + runner): RED tests first, 37/37 green.
+  - fault_fixtures: 7 deterministic closed-form fixtures (seeded noise via PCG32; same seed → same bytes, different seed → different bytes for every fixture).
+  - fault_diagnosis: teaching-side mirror of the six lab signatures on clean→faulted transitions (external binding test in slice G).
+  - fault_runner: create sandbox → materialize → digest → budgeted copy → inject → measure/check/diagnose → replay digest → cleanup+residue verify → re-digest source → report; failed scenarios are honest reports (passed=false + typed diagnostics), never exceptions.

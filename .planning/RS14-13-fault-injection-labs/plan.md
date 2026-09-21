@@ -52,7 +52,7 @@ Raster-agnostic value object: `width/height`, `crsId`, `geoTransform[6]`, `noDat
 |---|---|---|---|
 | `band_role_swap` | metadata | `all_negative_index` (role-resolved index mean flips) | `band_roles`, `index_mean{num,den}` |
 | `omit_quality_mask` | metadata | `diagnostic.unmatched` (no canonical signature; typed, honest) | `band_count`, `band_roles`, `valid_fraction` |
-| `grid_shift` | geometry | `scale_stripes` → `diagnostic.harness.grid_mismatch` | `geo_transform.origin_x/y` |
+| `grid_shift` | geometry | `diagnostic.unmatched` (stripes are a resampling symptom the observation level cannot see; the origin-delta observable is the detection; `scale_stripes` fires on pixel-size ratio > 1%, matching the lab brain) | `geo_transform.origin_x/y` |
 | `crs_mismatch` | geometry | `crs_mismatch` → `diagnostic.harness.crs_mismatch` | `crs` |
 | `wrong_scale_offset` | metadata | `diagnostic.unmatched` | `band.mean/min/max`, `scale`, `offset` |
 | `temporal_shuffle` | temporal | `diagnostic.unmatched` | `acquisition_dates`, `band_roles` |

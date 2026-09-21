@@ -7,9 +7,12 @@
 
 add_library( sicnu_faultlab STATIC
     deterministic.cpp
+    fault_diagnosis.cpp
     fault_expectations.cpp
+    fault_fixtures.cpp
     fault_observables.cpp
     fault_report.cpp
+    fault_runner.cpp
     fault_registry.cpp
     fault_sandbox.cpp
     fault_transforms.cpp

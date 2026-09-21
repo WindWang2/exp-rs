@@ -5,9 +5,13 @@
 #pragma once
 
 #include "deterministic.h"
+#include "fault_diagnosis.h"
 #include "fault_expectations.h"
+#include "fault_fixtures.h"
 #include "fault_observables.h"
 #include "fault_registry.h"
+#include "fault_report.h"
+#include "fault_runner.h"
 #include "fault_report.h"
 #include "fault_sandbox.h"
 #include "fault_transforms.h"
