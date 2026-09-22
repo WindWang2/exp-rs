@@ -1,0 +1,59 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 256,
+    "tasks_dispatched" : 4
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "tiles" : 4,
+    "working_bytes_per_tile" : 524288.0
+  },
+  "generated_at" : "2026-09-20T22:28:44Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 47.79000000000002,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 231,
+    "peak_rss_mb" : 3,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 34,
+    "wall_ms" : 47.131425999999998,
+    "write_bytes" : 0,
+    "write_ops" : 26
+  },
+  "scale" : 
+  {
+    "items" : 4,
+    "kind" : "small",
+    "probes" : 4
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "memory_unit" : "tile",
+    "tile_pixels" : 65536,
+    "tiles_expected" : 4,
+    "tiles_observed" : 4,
+    "working_bytes_per_tile" : 524288,
+    "working_set_unit" : "tile"
+  },
+  "workload" : "obs_tiled_inference"
+}

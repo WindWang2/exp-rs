@@ -1,0 +1,74 @@
+{
+  "complexity" : 
+  {
+    "exponent" : 0.0,
+    "model" : "sub-linear",
+    "points" : 
+    [
+      {
+        "ms" : 2.491822,
+        "n" : 2000
+      },
+      {
+        "ms" : 2.3612920000000002,
+        "n" : 4000
+      }
+    ]
+  },
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 0,
+    "pages_requested" : 64,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "assets" : 4000,
+    "found" : 64,
+    "probes" : 64
+  },
+  "generated_at" : "2026-09-20T22:28:40Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 1.5,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 222,
+    "peak_rss_mb" : null,
+    "peak_rss_unavailable_reason" : "watermark never rose above the 1 MiB / 2 ms sample resolution; see docs/perf-observatory.md",
+    "read_bytes" : 0,
+    "read_ops" : 3,
+    "wall_ms" : 2.3612920000000002,
+    "write_bytes" : 0,
+    "write_ops" : 0
+  },
+  "scale" : 
+  {
+    "items" : 4000,
+    "kind" : "small",
+    "probes" : 64
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "assets_2n" : 4000,
+    "assets_n" : 2000,
+    "exponent" : 0.0,
+    "probes" : 64
+  },
+  "workload" : "obs_dataset_find_by_path_scaling"
+}
