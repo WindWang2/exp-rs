@@ -11,7 +11,7 @@ Nothing here executes on its own or stores a second copy of the truth:
 
 ```
 ParameterStudySpec ──► samplers ──► StudyRunner ──► ExecutionPlane / TaskCenter
-  (sicnu.studyspec.v1)   grid/OAT/LHS   (bounded        (admission, RAM, lanes
+  (schema_version 1)    grid/OAT/LHS   (bounded        (admission, RAM, lanes
                          └ identity =     in-flight       stay with TaskCenter)
                            matrix cellId) window)
                                 │
@@ -26,12 +26,14 @@ Module: `src/study` (`Sicnu::study`, Qt Core only) + `src/study/bridge`
 `test_study_spec|sampling|runner|analysis|spatial|export|exemplars` (light,
 offline) and `test_study_e2e` (full stack).
 
-## The study spec (`sicnu.studyspec.v1`)
+## The study spec
 
 A spec is a value object: it describes a bounded sensitivity experiment and
-never executes anything. Serialized form (all keys known — the reader REFUSES
-unknown fields and foreign `schema_version`, because a typo'd spec must never
-silently change a study's meaning):
+never executes anything. The serialized document is versioned
+(`"schema_version": 1` — unlike the report, the spec carries no
+`document_type` marker; readers refuse foreign versions) and every key is
+known — the reader REFUSES unknown fields, because a typo'd spec must never
+silently change a study's meaning:
 
 | Field | Meaning |
 |---|---|
@@ -50,17 +52,19 @@ through the production reader (`test_study_exemplars`):
 | File | Sweep | Teaching point |
 |---|---|---|
 | `ndvi-threshold.sicnu-study.json` | `rs:threshold_raster.threshold`, OAT, 9 runs | the canonical parameter → mask → trend chain; spatial differences ON; **no** declared best |
-| `classification-reject-threshold.sicnu-study.json` | `rs:supervised_classification.rejectThreshold`, grid, 5×3 replicates | uncertainty across seeds; the ONE exemplar that declares an objective metric (`overallAccuracy`, maximize) so the report may name a `declared_best` |
+| `classification-reject-threshold.sicnu-study.json` | `rs:supervised_classification.rejectThreshold`, grid, 5×3 replicates | uncertainty across seeds; held-out accuracy pair (`testSplit: 0.3` makes the operator emit `overallAccuracy`/`kappa`); the ONE exemplar that declares an objective metric (`overallAccuracy`, maximize) so the report may name a `declared_best` |
 | `change-threshold.sicnu-study.json` | `rs:change_detection.threshold`, seeded LHS, 6×2 runs | controlled-scale sampling: same seed replays, different seed explores |
 
 ## Running a study
 
-The runner is invoked with an `IStudyExecutionBackend`; production wires
+The runner is invoked with an `IStudyExecutionBackend`; the e2e test wires
 `ExecutionPlaneStudyBackend` (from `Sicnu::study_bridge`), which submits each
 point as an ExecutionPlane request with source tag `"study"` and commits the
 operator output atomically (staged rename) into
-`<studyOutputDir>/<pointId>/output.tif`. No catalog asset is registered — a
-sweep must not flood the catalog; the run records + report are the provenance.
+`<studyOutputDir>/<pointId>/output.tif`. Production surfaces (CLI/GUI/agent)
+are future wiring — see [integration.md](../integration.md). No catalog asset
+is registered — a sweep must not flood the catalog; the run records + report
+are the provenance.
 
 Every submitted point becomes exactly one of (all recorded in the existing
 `ExperimentStore`, linked to its matrix-cell identity via `MatrixLedger`):

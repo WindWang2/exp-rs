@@ -6,7 +6,8 @@
   "base_parameters": {
     "input": "my_image.tif",
     "training": "training_sites.geojson",
-    "method": "svm"
+    "method": "svm",
+    "testSplit": 0.3
   },
   "sampling": {
     "strategy": "grid"
@@ -26,7 +27,7 @@
     "seed_replicates": 3,
     "seed": 42
   },
-  "metrics": ["overallAccuracy", "meanConfidence"],
+  "metrics": ["overallAccuracy", "kappa"],
   "objective_metrics": [
     { "name": "overallAccuracy", "maximize": true }
   ],

@@ -198,7 +198,8 @@ NOT a planning engine — scripts are explicit policies, not intelligence.
 
 The study layer (`src/study`, `Sicnu::study`) is complete and offline: specs,
 samplers, runner, analysis and the versioned report
-(`sicnu.studyspec.v1` / `sicnu.studyreport.v1`, see
+(`sicnu.studyreport.v1`; the spec document is versioned by its
+`schema_version` field, see
 [experiments/parameter-studio.md](experiments/parameter-studio.md)). The
 production execution adapter (`src/study/bridge`, `Sicnu::study_bridge`) is
 wired into the build and consumed by the full-stack e2e test. The surfaces
@@ -241,9 +242,10 @@ bridge rather than re-implementing a backend.
 
 A study report is a projection of `ExperimentStore` truth, so a capsule can
 wrap the report + the referenced runs without a new exporter: the report
-echoes the full spec (`spec_json`) and per-point parameters, which is the
-replay contract (same spec+seed ⇒ same pointIds). LabSpec labs can embed an
-exemplar spec (`examples/studies/*.sicnu-study.json`) as a lab step template.
+echoes the full spec (the serialized `"spec"` object) and per-point
+parameters, which is the replay contract (same spec+seed ⇒ same pointIds).
+LabSpec labs can embed an exemplar spec
+(`examples/studies/*.sicnu-study.json`) as a lab step template.
 
 ## Boundary rules honored by this track
 

@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include "study/study_sampling.h"
 #include "study/study_spec.h"
@@ -67,7 +68,10 @@ TEST_CASE( "ndvi threshold exemplar: OAT shape, baseline at 0.5, deterministic r
     REQUIRE( spec.value().spatialComparison );
     REQUIRE( spec.value().objectiveMetric.isEmpty() );
     REQUIRE( spec.value().objectiveMetrics.isEmpty() );
+    // Exact metric set: each declared metric becomes one report curve.
+    REQUIRE( spec.value().metricNames.size() == 2 );
     REQUIRE( spec.value().metricNames.contains( QStringLiteral( "maskedPercent" ) ) );
+    REQUIRE( spec.value().metricNames.contains( QStringLiteral( "thresholdUsed" ) ) );
 
     const auto points = sampleStudyPoints( spec.value() );
     REQUIRE( points.has_value() );
@@ -105,10 +109,17 @@ TEST_CASE( "classification exemplar: grid with replicates and a declared objecti
     REQUIRE( spec.value().algorithmId == QStringLiteral( "rs:supervised_classification" ) );
     REQUIRE( spec.value().strategy == SamplingStrategy::Grid );
     // This exemplar declares an explicit task metric with its direction — the
-    // one shipped study where the report MAY name a declaredBest.
+    // one shipped study where the report MAY name a declaredBest. The
+    // metrics are the operator's held-out evaluation pair (testSplit > 0 in
+    // base_parameters is what makes the operator emit them at all).
     REQUIRE( spec.value().objectiveMetric == QStringLiteral( "overallAccuracy" ) );
     REQUIRE( spec.value().objectiveMetrics.size() == 1 );
     REQUIRE( spec.value().objectiveMetrics.first().maximize );
+    REQUIRE( spec.value().metricNames.size() == 2 );
+    REQUIRE( spec.value().metricNames.contains( QStringLiteral( "overallAccuracy" ) ) );
+    REQUIRE( spec.value().metricNames.contains( QStringLiteral( "kappa" ) ) );
+    REQUIRE( spec.value().baseParameters.value( QStringLiteral( "testSplit" ) ).toDouble()
+             > 0.0 );
 
     const auto points = sampleStudyPoints( spec.value() );
     REQUIRE( points.has_value() );
@@ -170,13 +181,19 @@ TEST_CASE( "change threshold exemplar: LHS budget shape and seeded variability",
 
     // …and a different seed samples a DIFFERENT space (the teaching point of
     // the seeded sampler: variability is a budget decision, not noise).
+    // Compare the SAMPLED VALUES, not the pointIds — a pointId embeds the
+    // replicate seed, so it differs even if the parameter sets repeated.
     ParameterStudySpec otherSeed = spec.value();
     otherSeed.budget.seed = spec.value().budget.seed + 1;
     const auto varied = sampleStudyPoints( otherSeed );
     REQUIRE( varied.has_value() );
-    bool differs = false;
-    for ( int i = 0; i < points.value().size(); ++i )
-        if ( varied.value().at( i ).pointId != points.value().at( i ).pointId )
-            differs = true;
-    REQUIRE( differs );
+    QSet<QString> sampledValues;
+    for ( const StudyPoint &point : points.value() )
+        sampledValues.insert( point.assignments.value( QStringLiteral( "threshold" ) ) );
+    int foreignValues = 0;
+    for ( const StudyPoint &point : varied.value() )
+        if ( !sampledValues.contains(
+                 point.assignments.value( QStringLiteral( "threshold" ) ) ) )
+            ++foreignValues;
+    REQUIRE( foreignValues > 0 );
 }
