@@ -463,36 +463,54 @@ sicnu::data::Result<void> DatasetStore::deleteDataset( const DatasetId &datasetI
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
-        // Draft rows of this dataset may carry samples and annotations; a
-        // header-only delete would strand them forever (no FKs by design).
+        // Draft rows of this dataset may carry samples/annotations and the
+        // later facet/quality/split tables (#1173); a header-only delete would
+        // strand them forever (no FKs by design). Cascade order: dependents of
+        // split_manifests first, then version-scoped rows, then versions/header.
+        const QString versionSub = QStringLiteral(
+            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" );
+        Stmt leakage( m_impl->db, QStringLiteral(
+            "DELETE FROM leakage_reports WHERE split_manifest_id IN"
+            " (SELECT manifest_id FROM split_manifests WHERE dataset_version_id IN" )
+            + versionSub + QStringLiteral( ")" ) );
+        Stmt splits( m_impl->db, QStringLiteral(
+            "DELETE FROM split_manifests WHERE dataset_version_id IN" ) + versionSub );
+        Stmt facets( m_impl->db, QStringLiteral(
+            "DELETE FROM sample_facets WHERE dataset_version_id IN" ) + versionSub );
+        Stmt quality( m_impl->db, QStringLiteral(
+            "DELETE FROM quality_summaries WHERE dataset_version_id IN" ) + versionSub );
         Stmt samples( m_impl->db, QStringLiteral(
-            "DELETE FROM samples WHERE dataset_version_id IN"
-            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
+            "DELETE FROM samples WHERE dataset_version_id IN" ) + versionSub );
         Stmt annotations( m_impl->db, QStringLiteral(
-            "DELETE FROM annotations WHERE dataset_version_id IN"
-            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
+            "DELETE FROM annotations WHERE dataset_version_id IN" ) + versionSub );
+        Stmt qaReports( m_impl->db, QStringLiteral(
+            "DELETE FROM qa_reports WHERE dataset_version_id IN" ) + versionSub );
         Stmt versions( m_impl->db, QStringLiteral(
             "DELETE FROM dataset_versions WHERE dataset_id=?" ) );
         Stmt header( m_impl->db, QStringLiteral( "DELETE FROM datasets WHERE id=?" ) );
         Stmt tags( m_impl->db, QStringLiteral(
             "DELETE FROM version_tags WHERE dataset_id=?" ) );
-        Stmt qaReports( m_impl->db, QStringLiteral(
-            "DELETE FROM qa_reports WHERE dataset_version_id IN"
-            " (SELECT id FROM dataset_versions WHERE dataset_id=?)" ) );
-        if ( !samples || !annotations || !versions || !header || !tags || !qaReports )
+        if ( !leakage || !splits || !facets || !quality || !samples || !annotations
+             || !versions || !header || !tags || !qaReports )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                                QStringLiteral( "statement prepare failed" ) ) );
         }
-        samples.bind( 1, datasetId.toString() );
-        annotations.bind( 1, datasetId.toString() );
-        versions.bind( 1, datasetId.toString() );
-        header.bind( 1, datasetId.toString() );
-        tags.bind( 1, datasetId.toString() );
-        qaReports.bind( 1, datasetId.toString() );
-        if ( !samples.step() || !annotations.step() || !versions.step() || !header.step() ||
-             !tags.step() || !qaReports.step() )
+        const QString id = datasetId.toString();
+        leakage.bind( 1, id );
+        splits.bind( 1, id );
+        facets.bind( 1, id );
+        quality.bind( 1, id );
+        samples.bind( 1, id );
+        annotations.bind( 1, id );
+        versions.bind( 1, id );
+        header.bind( 1, id );
+        tags.bind( 1, id );
+        qaReports.bind( 1, id );
+        if ( !leakage.step() || !splits.step() || !facets.step() || !quality.step()
+             || !samples.step() || !annotations.step() || !qaReports.step()
+             || !versions.step() || !header.step() || !tags.step() )
         {
             m_impl->rollback();
             return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
