@@ -555,7 +555,7 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
           static_cast<std::size_t>( sy - sourceReadWindow.yOff ) * sourceReadWindow.width +
           ( sx - sourceReadWindow.xOff );
         const double value = sourceValues[sourceIndex];
-        if ( bandInfo.hasNoData && value == bandInfo.noDataValue )
+        if ( bandInfo.hasNoData && bandSentinelMatches( bandInfo, value ) )
           continue;
         result.values[static_cast<std::size_t>( ty ) * width + tx] = value;
         filled[static_cast<std::size_t>( ty ) * width + tx] = 1;

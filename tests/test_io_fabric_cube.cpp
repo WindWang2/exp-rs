@@ -12,8 +12,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -330,6 +332,75 @@ TEST_CASE( "declared NoData loses the FirstWins contest — later scenes fill th
   const VirtualCube cube = VirtualCube::build( assets, grid, OverlapPolicy::FirstWins, {} );
   const VirtualCubeWindowResult window = cube.readWindow( 0, 0, 32, 32 );
   REQUIRE( window.values.size() == 32ull * 32 );
+  std::size_t filledBySecondary = 0;
+  for ( int y = 8; y < 24; ++y )
+    for ( int x = 8; x < 24; ++x )
+      if ( window.values[static_cast<std::size_t>( y ) * 32 + x] == 7.0 )
+        ++filledBySecondary;
+  CHECK( filledBySecondary == 16ull * 16 );   // every hole got the secondary's 7
+  std::size_t stillPrimary = 0;
+  for ( const double value : window.values )
+    if ( value == 1.0 )
+      ++stillPrimary;
+  CHECK( stillPrimary == 32ull * 32 - 16ull * 16 );
+  CHECK( window.provenance[1].contributed );   // the secondary DID contribute
+}
+
+TEST_CASE( "NaN-declared NoData loses the FirstWins contest — NaN == NaN never wins",
+           "[io][fabric][cube][mask]" )
+{
+  const std::string dir = scratchDir( "mask_nan" );
+  // Same doctrine as the declared-NoData case above, but the sentinel is NaN
+  // (Float32): `NaN == NaN` is false, so a raw comparison in the scatter lets
+  // NaN pixels WIN the contest and block the later scene. The reader's
+  // sentinel authority (bandSentinelMatches) is NaN-exact; the cube must use
+  // it or the hole silently bakes NaN in as "data".
+  {
+    RasterWriter writer = RasterWriter::create(
+      dir + "/declared_nan.tif", 32, 32,
+      { [] {
+        RasterBandSpec band;
+        band.dtype = "Float32";
+        band.hasNoData = true;
+        band.noDataIsNaN = true;
+        return band;
+      }() },
+      { "GTiff", { "TILED=YES", "BLOCKXSIZE=32", "BLOCKYSIZE=32" }, true } );
+    writer.setGeotransform( geotransformFor( 0.0, 0.0, 1.0 ) );
+    std::vector<double> raster( 32ull * 32, 1.0 );
+    for ( int y = 8; y < 24; ++y )
+      for ( int x = 8; x < 24; ++x )
+        raster[static_cast<std::size_t>( y ) * 32 + x] = std::numeric_limits<double>::quiet_NaN();
+    writer.writeWindow( 1, { 0, 0, 32, 32 }, raster.data() );
+    writer.finalize();
+  }
+  const std::string secondary = writeScene( dir, { "secondary", 0.0, 0.0, 1.0,
+                                                   [] ( int, int ) { return 7.0; } } );
+
+  VirtualCubeGrid grid;
+  grid.explicitGrid = true;
+  grid.crs.valid = true;
+  grid.crs.authid = "EPSG:4326";
+  grid.scaleX = 1.0;
+  grid.scaleY = 1.0;
+  grid.minX = 0.0;
+  grid.minY = 0.0;
+  grid.maxX = 32.0;
+  grid.maxY = 32.0;
+
+  std::vector<AssetRecord> assets;
+  assets.push_back( recordFor( "declared_nan", dir + "/declared_nan.tif", 0.0, 0.0, 32.0, 32.0,
+                               "2024-01-01T00:00:00Z", 1.0 ) );
+  assets.push_back( recordFor( "secondary", secondary, 0.0, 0.0, 32.0, 32.0,
+                               "2024-01-02T00:00:00Z", 90.0 ) );
+  const VirtualCube cube = VirtualCube::build( assets, grid, OverlapPolicy::FirstWins, {} );
+  const VirtualCubeWindowResult window = cube.readWindow( 0, 0, 32, 32 );
+  REQUIRE( window.values.size() == 32ull * 32 );
+  std::size_t nanPixels = 0;
+  for ( const double value : window.values )
+    if ( std::isnan( value ) )
+      ++nanPixels;
+  CHECK( nanPixels == 0 );   // no declared-NaN pixel may survive as data
   std::size_t filledBySecondary = 0;
   for ( int y = 8; y < 24; ++y )
     for ( int x = 8; x < 24; ++x )
