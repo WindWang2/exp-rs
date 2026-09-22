@@ -237,6 +237,7 @@ void RangeDiskBlockStore::configure( const std::string &directory, std::uint64_t
   state.maxBytes = maxBytes;
   state.enabled = !directory.empty();
   state.stats = RangeDiskCacheStats{};
+  state.approxBytes = 0; // never carry put-accounting across reconfigure
   if ( state.enabled )
   {
     std::error_code ec;
@@ -244,6 +245,28 @@ void RangeDiskBlockStore::configure( const std::string &directory, std::uint64_t
     // An unusable directory disables the layer (an optimization, never a
     // correctness gate): reads/writes become honest no-op misses.
     state.enabled = !ec || fs::is_directory( fs::u8path( directory ) );
+    if ( state.enabled )
+    {
+      // Recount existing .blk files so approxBytes matches the directory we
+      // just attached (a prior configure/put cycle must not drift forever).
+      std::uint64_t bytesOnDisk = 0;
+      for ( const fs::directory_entry &entry :
+            fs::directory_iterator( fs::u8path( directory ), ec ) )
+      {
+        if ( ec )
+          break;
+        const std::string name = entry.path().filename().string();
+        if ( name.size() >= 4 && name.substr( name.size() - 4 ) == ".blk" )
+        {
+          std::error_code sizeEc;
+          const auto sz = entry.file_size( sizeEc );
+          if ( !sizeEc )
+            bytesOnDisk += static_cast<std::uint64_t>( sz );
+        }
+      }
+      state.approxBytes = bytesOnDisk;
+      state.stats.bytesStored = bytesOnDisk;
+    }
   }
 }
 
@@ -291,13 +314,17 @@ std::string RangeDiskBlockStore::identityBasis( const std::string &requestUrl, b
                                                 std::uint64_t sizeBytes,
                                                 const std::string &lastModified )
 {
-  // Strong ETag first (byte-level provability). Without one, size +
-  // Last-Modified is the declared trust basis; with neither, the resource is
-  // NOT disk-cacheable — unprovable identity never masquerades as cacheable.
+  // Strong ETag only (byte-level provability). Size + Last-Modified is NOT
+  // accepted for the disk layer (#1228 / #1186): HTTP Last-Modified is
+  // second-resolution, so a same-second same-size rewrite would keep serving
+  // the previous object's bytes under the old basis. Unprovable identity
+  // never masquerades as disk-cacheable. (hasSize/lastModified retained in
+  // the signature for call-site stability; unused.)
+  (void) hasSize;
+  (void) sizeBytes;
+  (void) lastModified;
   if ( hasStrongEtag && !etag.empty() )
     return "etag\n" + requestUrl + "\n" + etag;
-  if ( hasSize && !lastModified.empty() )
-    return "lm\n" + requestUrl + "\n" + std::to_string( sizeBytes ) + "\n" + lastModified;
   return std::string();
 }
 
@@ -353,6 +380,12 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
     return false;
   }
   outData = std::move( parsed.data );
+  // Refresh mtime on read so LRU eviction sees true recency (a never-touched
+  // hit would otherwise look as cold as its publish time forever).
+  {
+    std::error_code touchEc;
+    fs::last_write_time( fs::u8path( path ), fs::file_time_type::clock::now(), touchEc );
+  }
   {
     std::lock_guard<std::mutex> lock( state.mutex );
     state.stats.hits += 1;
@@ -401,6 +434,18 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
     return;
   }
   fsyncPath( fs::u8path( tempPath ) );
+  // Re-put of the same block index replaces the file: subtract the old size
+  // before adding the new one so approxBytes cannot drift upward forever.
+  std::uint64_t replacedBytes = 0;
+  {
+    std::error_code sizeEc;
+    if ( fs::exists( fs::u8path( finalPath ), sizeEc ) && !sizeEc )
+    {
+      const auto oldSize = fs::file_size( fs::u8path( finalPath ), sizeEc );
+      if ( !sizeEc )
+        replacedBytes = static_cast<std::uint64_t>( oldSize );
+    }
+  }
   std::error_code ec;
   fs::rename( fs::u8path( tempPath ), fs::u8path( finalPath ), ec );
   if ( ec )
@@ -412,6 +457,13 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
   {
     std::lock_guard<std::mutex> lock( state.mutex );
     state.stats.puts += 1;
+    if ( replacedBytes > 0 )
+    {
+      if ( state.approxBytes >= replacedBytes )
+        state.approxBytes -= replacedBytes;
+      else
+        state.approxBytes = 0;
+    }
     state.approxBytes += serialized.size();
     // Full directory walk only when the put-accounted estimate says we are
     // over the cap — amortized instead of per-put.

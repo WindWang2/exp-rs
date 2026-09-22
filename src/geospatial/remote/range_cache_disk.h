@@ -8,9 +8,10 @@
 
   Contract:
     * blocks are content-addressed by the RESOURCE's provable identity
-      (strong ETag basis, else size+Last-Modified basis) + block index. A
-      resource with NO provable identity is never disk-cached (fail-closed,
-      same doctrine as the memory layer's identity contract).
+      (strong ETag basis only — size+Last-Modified is second-resolution and
+      unsafe against same-second rewrites) + block index. A resource with
+      NO strong ETag is never disk-cached (fail-closed, same doctrine as
+      the memory layer's identity contract).
     * every block file carries a SHA-256 integrity trailer; a corrupt or
       torn file reads as a MISS and is unlinked — never served.
     * publication is temp-file → fsync → rename (a crash leaves either the
@@ -66,8 +67,9 @@ class RangeDiskBlockStore
     static RangeDiskCacheStats stats();
 
     /// The canonical content identity basis for a resource: strong ETag when
-    /// provable, else size+Last-Modified, else "" (not disk-cacheable).
-    /// Callers pass the captured identity fields; the store never probes.
+    /// provable, else "" (not disk-cacheable). Size+Last-Modified is rejected
+    /// (second-resolution race). Callers pass the captured identity fields;
+    /// the store never probes.
     static std::string identityBasis( const std::string &requestUrl, bool hasStrongEtag,
                                       const std::string &etag, bool hasSize, std::uint64_t sizeBytes,
                                       const std::string &lastModified );
