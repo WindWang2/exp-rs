@@ -751,6 +751,10 @@ add_subdirectory(src/experiment)
 # Parameter Sensitivity & Uncertainty Studio (RS14-07): studies the existing
 # experiment/execution authorities — never a second store or scheduler.
 add_subdirectory(src/study)
+# RS14-06 Experiment Debugger (ADR 0174): read-only first-divergence
+# projection over recorded run evidence. Leaf over Sicnu::experiment +
+# sicnu_workflow read surfaces; consumers are opt-in (tests, future CLI/GUI).
+add_subdirectory(src/experiment/debugger)
 # Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
 # help/diagnostic knowledge (descriptor model, registry, search, JSON store,
 # projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
