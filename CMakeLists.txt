@@ -862,6 +862,8 @@ add_subdirectory(src/science_context)
 # RS14 agent-benchmark: offline traces-in agent trajectory benchmark.
 # Plain C++20 + jsoncpp, no Qt (headless harness; see docs/agent/benchmark-harness.md).
 add_subdirectory(src/agentbench)
+# Agent Operations & Recovery Control Center (compose authorities only).
+add_subdirectory(src/agent_ops)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
@@ -882,6 +884,10 @@ if(TARGET sicnu_operators)
   add_subdirectory(src/cli)
 endif()
 add_subdirectory(src/app)
+# Agent Ops Control Center UI + Qt benchmark store writer (after app/Qt).
+if(TARGET sicnu_experiment AND TARGET Qt6::Widgets)
+  add_subdirectory(src/app/agent_ops)
+endif()
 # Lab Sample Data Foundry (D1) + offline classroom bundle (D7): standalone
 # deterministic sample-data generator (tools/sicnu_generate_samples).
 # Qt-free — GDAL + jsoncpp only — so it configures unconditionally on every

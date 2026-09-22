@@ -9694,6 +9694,25 @@ target_link_libraries(test_agent_loop_resume PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_resume)
 
+# Agent Operations & Recovery Control Center (Qt-free core).
+add_executable(test_agent_ops_core test_agent_ops_core.cpp)
+target_link_libraries(test_agent_ops_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_agent_ops_core)
+
+# Agent Ops Control Center UI offscreen smoke (optional when UI lib present).
+if(TARGET sicnu_agent_ops_ui)
+  add_executable(test_agent_ops_ui_smoke test_agent_ops_ui_smoke.cpp)
+  target_link_libraries(test_agent_ops_ui_smoke PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_agent_ops_ui
+    Qt6::Widgets
+  )
+  sicnu_discover_tests(test_agent_ops_ui_smoke)
+endif()
+
 # Unified Scientific Verifier Slice A (#1191): status lattice, versioned
 # spec/report serde, error codes, sha256 (pure C++; no Qt/GDAL link).
 add_executable(test_verifier_schema test_verifier_schema.cpp)
