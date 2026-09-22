@@ -366,7 +366,7 @@ void WorkflowRun::setAttempt( int attempt )
   touchLocked();
 }
 
-const std::string &WorkflowRun::resumeOf() const
+std::string WorkflowRun::resumeOf() const
 {
   std::lock_guard<std::mutex> lock( m_mutex );
   return m_resumeOf;
