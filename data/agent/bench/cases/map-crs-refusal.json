@@ -1,0 +1,46 @@
+{
+  "allowed_tools": [
+    "map:export_geotiff",
+    "harness:verify"
+  ],
+  "case_id": "map/crs-refusal",
+  "description": "Refuse delivery on a CRS mismatch",
+  "expected_evidence": [],
+  "failure_expectation": {
+    "failure_class": "invalid_science",
+    "note": "a bad agent exports anyway"
+  },
+  "goal": "Deliver the map in EPSG:32633. The declared scene CRS does not match; refusing is the correct behavior.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-verify",
+      "kind": "tool_used",
+      "params": {
+        "tool": "harness:verify"
+      },
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 1,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "map_delivery",
+  "title": "Refuse delivery on a CRS mismatch"
+}

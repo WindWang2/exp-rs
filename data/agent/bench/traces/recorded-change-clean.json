@@ -1,0 +1,60 @@
+{
+  "agent": {
+    "kind": "recorded",
+    "name": "field-recording-v2",
+    "version": "1.0.0"
+  },
+  "case_id": "change/bi-temporal-basic",
+  "explanation": "Co-registered and detected change.",
+  "final_evidence": [
+    {
+      "fields": {
+        "change_score": 0.31
+      },
+      "id": "change-map",
+      "kind": "raster",
+      "verdict": "PASS"
+    }
+  ],
+  "outcome_claim": {
+    "note": "",
+    "success": true
+  },
+  "schema": "sicnu.agentbench.trace/v1",
+  "seed": 0,
+  "steps": [
+    {
+      "index": 0,
+      "input": {},
+      "payload": {},
+      "success": true,
+      "tokens": 90,
+      "tool": "rs:co_register"
+    },
+    {
+      "index": 1,
+      "input": {},
+      "payload": {
+        "change_score": 0.31
+      },
+      "success": true,
+      "tokens": 90,
+      "tool": "rs:change_detect"
+    },
+    {
+      "index": 2,
+      "input": {},
+      "payload": {
+        "fields": {
+          "change_score": 0.31
+        },
+        "verdict": "PASS"
+      },
+      "success": true,
+      "tokens": 90,
+      "tool": "harness:verify"
+    }
+  ],
+  "stop_reason": "completed",
+  "trace_id": "rec-change-001"
+}

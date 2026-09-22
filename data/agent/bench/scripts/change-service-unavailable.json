@@ -1,0 +1,55 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "change/service-unavailable",
+  "explanation": "Co-registration failed persistently; refusing to fake a change map.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/service-unavailable",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "pair": [
+          "t1",
+          "t2"
+        ]
+      },
+      "on_failure": "retry_once",
+      "payload": {
+        "output_path": "work://case/aligned.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:co_register"
+    },
+    {
+      "input": {
+        "input": "work://case/aligned.tif"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "change_score": 0.31
+        },
+        "output_path": "work://case/change.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:change_detect"
+    },
+    {
+      "evidence": "change-map",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "change_score": 0.31
+        },
+        "output_path": "work://case/change.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

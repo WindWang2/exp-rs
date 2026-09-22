@@ -1,0 +1,50 @@
+{
+  "agent": {
+    "kind": "recorded",
+    "name": "field-recording-v2",
+    "version": "1.0.0"
+  },
+  "case_id": "model/inference-basic",
+  "explanation": "Ran inference and delivered.",
+  "final_evidence": [
+    {
+      "fields": {
+        "detections": 0
+      },
+      "id": "detections",
+      "kind": "raster",
+      "verdict": "FAIL"
+    }
+  ],
+  "outcome_claim": {
+    "note": "",
+    "success": true
+  },
+  "schema": "sicnu.agentbench.trace/v1",
+  "seed": 0,
+  "steps": [
+    {
+      "index": 0,
+      "input": {},
+      "payload": {
+        "output_path": "work://case/detect.tif",
+        "verdict": "FAIL"
+      },
+      "success": true,
+      "tokens": 90,
+      "tool": "model:run_inference"
+    },
+    {
+      "index": 1,
+      "input": {},
+      "payload": {
+        "verdict": "PASS"
+      },
+      "success": true,
+      "tokens": 90,
+      "tool": "harness:verify"
+    }
+  ],
+  "stop_reason": "completed",
+  "trace_id": "rec-silent-001"
+}

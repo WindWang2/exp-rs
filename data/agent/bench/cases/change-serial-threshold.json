@@ -1,0 +1,56 @@
+{
+  "allowed_tools": [
+    "rs:co_register",
+    "rs:change_detect",
+    "harness:verify"
+  ],
+  "case_id": "change/serial-threshold",
+  "description": "Change detection with a score bound",
+  "expected_evidence": [
+    {
+      "id": "change-map",
+      "kind": "raster",
+      "required_fields": [
+        "change_score"
+      ]
+    }
+  ],
+  "goal": "Deliver a change map whose normalized change score stays below 0.5.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "change-map",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "scientific",
+      "id": "sci-bound",
+      "kind": "numeric_le",
+      "params": {
+        "evidence_id": "change-map",
+        "field": "change_score",
+        "max": 0.5
+      },
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 8000,
+    "max_tool_calls": 10
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "change",
+  "title": "Change detection with a score bound"
+}

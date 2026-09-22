@@ -1,0 +1,41 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "map/publisher-transient",
+  "explanation": "Exported the GeoTIFF with legend metadata; evidence delivery.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/publisher-transient",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "product": "work://case/composite"
+      },
+      "on_failure": "retry_once",
+      "payload": {
+        "fields": {
+          "crs": "EPSG:32633"
+        },
+        "output_path": "work://case/delivery.tif"
+      },
+      "tokens": 120,
+      "tool": "map:export_geotiff"
+    },
+    {
+      "evidence": "delivery",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "crs": "EPSG:32633"
+        },
+        "output_path": "work://case/delivery.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

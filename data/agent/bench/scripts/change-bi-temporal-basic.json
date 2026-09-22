@@ -1,0 +1,55 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "change/bi-temporal-basic",
+  "explanation": "Co-registered the pair and detected change; evidence change-map.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/bi-temporal-basic",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "pair": [
+          "t1",
+          "t2"
+        ]
+      },
+      "on_failure": "abort",
+      "payload": {
+        "output_path": "work://case/aligned.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:co_register"
+    },
+    {
+      "input": {
+        "input": "work://case/aligned.tif"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "change_score": 0.31
+        },
+        "output_path": "work://case/change.tif"
+      },
+      "tokens": 120,
+      "tool": "rs:change_detect"
+    },
+    {
+      "evidence": "change-map",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "change_score": 0.31
+        },
+        "output_path": "work://case/change.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

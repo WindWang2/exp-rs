@@ -1,0 +1,51 @@
+{
+  "allowed_tools": [
+    "model:run_inference",
+    "harness:verify"
+  ],
+  "case_id": "model/inference-basic",
+  "description": "Object detection inference",
+  "expected_evidence": [
+    {
+      "id": "detections",
+      "kind": "raster",
+      "required_fields": [
+        "detections"
+      ]
+    }
+  ],
+  "goal": "Run the pinned detector over the scene and deliver the detection raster.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "detections",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "model",
+  "title": "Object detection inference"
+}
