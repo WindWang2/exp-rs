@@ -168,6 +168,12 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
     if ( QFile::exists( from ) )
       publishes.append( { from, stableBase + suffix } );
   }
+  // GDAL PAM rides the FULL name (out.tif.aux.xml), not the stem — statistics,
+  // masks and metadata must follow the dataset or the published raster loses
+  // them and the temp directory keeps an unconsumed sidecar (#462 family).
+  const QString tempPam = request.tempPath + QStringLiteral( ".aux.xml" );
+  if ( QFile::exists( tempPam ) )
+    publishes.append( { tempPam, request.stablePath + QStringLiteral( ".aux.xml" ) } );
   publishes.append( { request.tempPath, request.stablePath } );
 
   // Stage the move: stale targets away first, then move/copy each file.

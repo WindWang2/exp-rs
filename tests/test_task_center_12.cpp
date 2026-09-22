@@ -852,3 +852,226 @@ TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
     center.shutdownForTests();
     engine.shutdownForTests();
 }
+
+TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the ready heap",
+           "[tc12][admission][transient]" )
+{
+    // Regression oracle: the global-slot fast-path `break` (the !bypass-capacity
+    // branch) used to discard the popped heap head WITHOUT requeueing it. The
+    // stale serial stayed in m_readySerial, but the heap no longer held an
+    // entry, so nothing ever re-examined the candidate: once the transient
+    // budget (kMaxTransientChildren = 8) was exhausted and global slots were
+    // saturated, a High-priority candidate dropped out of scheduling forever —
+    // slots freed, heap empty for it, aging sweep unable to help (no promotion
+    // possible at top priority). Reachable whenever 8+ worker-originated
+    // children are active — the #862 agent/workflow scenario the bypass was
+    // built for.
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    engine.setMaxWorkers( 2 );
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setGlobalConcurrencyLimit( 2 );
+    center.setAgingIntervalMs( 0 ); // no promotion: only the heap can schedule
+
+    std::atomic<bool> releaseChildren{ false };
+    std::atomic<bool> releaseOwners{ false };
+    std::atomic<bool> lateSubmitted{ false };
+    std::atomic<bool> lateRan{ false };
+    // No Catch2 assertions off the test thread: failures ride this flag and
+    // the main thread turns them into REQUIREs.
+    std::atomic<int> setupStage{ 0 }; // 0 ok; >0 = stage that failed
+    QMutex setupMutex;
+    long lateTaskId = -1;
+
+    engine.clearExecutors();
+    engine.registerExecutor( "tc12:", [&]( const JobRequest &req,
+                                           sicnu::operators::RSOperatorContext & ) {
+        if ( req.algorithmId == "tc12:ownerA" )
+        {
+            // Worker thread: submit 8 blocking children. Each bypasses the
+            // saturated global gate while the transient budget lasts (#862).
+            for ( int i = 0; i < 8; ++i )
+            {
+                const long child = center.submitJob( tc12Request( "tc12:child" ), nullptr, {},
+                                                     true, TaskPriority::High, {} );
+                if ( child <= 0 )
+                {
+                    setupStage.store( 1 );
+                    return Json::Value();
+                }
+                if ( !waitForStatus( child, { TaskStatus::Dispatching, TaskStatus::Running },
+                                     10000 ) )
+                {
+                    setupStage.store( 2 );
+                    return Json::Value();
+                }
+            }
+            // 9th child: transient budget now full → its admission pass hits
+            // the saturated fast-path with no bypass capacity left.
+            const long late = center.submitJob( tc12Request( "tc12:late" ), nullptr, {},
+                                                true, TaskPriority::High, {} );
+            {
+                QMutexLocker lock( &setupMutex );
+                lateTaskId = late;
+            }
+            if ( late <= 0 )
+            {
+                setupStage.store( 3 );
+                return Json::Value();
+            }
+            lateSubmitted.store( true );
+            // With the fix the late child launches as soon as the budget
+            // frees; without it, it was dropped from the heap and never runs.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 5000 );
+            while ( !lateRan.load( std::memory_order_relaxed )
+                    && std::chrono::steady_clock::now() < deadline )
+                QThread::msleep( 10 );
+            return Json::Value();
+        }
+        if ( req.algorithmId == "tc12:ownerB" )
+        {
+            while ( !releaseOwners.load( std::memory_order_relaxed ) )
+                QThread::msleep( 10 );
+            return Json::Value();
+        }
+        if ( req.algorithmId == "tc12:child" )
+        {
+            while ( !releaseChildren.load( std::memory_order_relaxed ) )
+                QThread::msleep( 10 );
+            return Json::Value();
+        }
+        if ( req.algorithmId == "tc12:late" )
+        {
+            lateRan.store( true );
+            return Json::Value();
+        }
+        return Json::Value();
+    } );
+
+    const long ownerA = center.submitJob( tc12Request( "tc12:ownerA" ) );
+    REQUIRE( ownerA > 0 );
+    const long ownerB = center.submitJob( tc12Request( "tc12:ownerB" ) );
+    REQUIRE( ownerB > 0 );
+    REQUIRE( waitForStatus( ownerA, { TaskStatus::Running }, 10000 ) );
+    REQUIRE( waitForStatus( ownerB, { TaskStatus::Running }, 10000 ) );
+
+    // OwnerA staged the late child (and its admission pass already ran).
+    const auto submitted = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 20000 );
+        while ( !lateSubmitted.load( std::memory_order_relaxed )
+                && std::chrono::steady_clock::now() < deadline )
+            QThread::msleep( 10 );
+        return lateSubmitted.load();
+    }();
+    REQUIRE( setupStage.load() == 0 );
+    REQUIRE( submitted );
+    long lateTaskIdLocal = -1;
+    {
+        QMutexLocker lock( &setupMutex );
+        lateTaskIdLocal = lateTaskId;
+    }
+    REQUIRE( lateTaskIdLocal > 0 );
+
+    // Free the transient budget: with a healthy heap the late child launches
+    // on the very next admission pass; with the drop it can never run.
+    releaseChildren.store( true );
+
+    // ownerA returns after its bounded lateRan wait; both owners then finish.
+    REQUIRE( waitForStatus( ownerA, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+    releaseOwners.store( true );
+    REQUIRE( waitForStatus( ownerB, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
+
+    // The proof: the late child must have RUN. A join-cancel of a
+    // never-dispatched child (the drop's downstream effect) fails here.
+    REQUIRE( lateRan.load() );
+
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    center.setAgingIntervalMs( 5000 );
+    center.shutdownForTests();
+    engine.shutdownForTests();
+}
+
+TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double run)",
+           "[tc12][retry][transient]" )
+{
+    // Regression oracle for the #702 asymmetry: the NON-retry failure path
+    // hands the task's engine job to jobCancelTargets ("an externally-driven
+    // failure must kill the still-running engine job, or it keeps writing
+    // output while the task shows Failed"), but the auto-retry resurrection
+    // only cleared the mapping. markTaskFailed is a public API (GUI async
+    // runner): reporting a transient-class failure while the job still runs
+    // resurrected the task beside the LIVE job — two attempts producing into
+    // the same outputs, and the zombie's terminal record racing the retry.
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setMaxAutoRetries( 1 );
+
+    std::atomic<bool> finishAttempt{ false };
+    engine.clearExecutors();
+    engine.registerExecutor( "tc12:", [&]( const JobRequest &req,
+                                           sicnu::operators::RSOperatorContext &ctx ) {
+        Q_UNUSED( ctx );
+        if ( req.algorithmId == "tc12:zombie" )
+        {
+            // Deliberately ignores the cancel flag: the engine's cancel
+            // verdict must come from finishSuccess's flag check, not from
+            // cooperative exit.
+            while ( !finishAttempt.load( std::memory_order_relaxed ) )
+                QThread::msleep( 10 );
+        }
+        return Json::Value();
+    } );
+
+    const long task = center.submitJob( tc12Request( "tc12:zombie" ) );
+    REQUIRE( task > 0 );
+    REQUIRE( waitForStatus( task, { TaskStatus::Running }, 10000 ) );
+    const std::string deadJobId = center.getTaskInfo( task ).jobId;
+    REQUIRE( !deadJobId.empty() );
+
+    // External failure report with a transient-class message: the task must
+    // resurrect AND the dead job must be cancelled engine-side.
+    center.markTaskFailed( task, QStringLiteral( "worker crashed: injected" ) );
+
+    // The retry attempt is dispatched with a fresh job id.
+    REQUIRE( waitForStatus( task, { TaskStatus::Running, TaskStatus::Dispatching }, 10000 ) );
+    const std::string retryJobId = center.getTaskInfo( task ).jobId;
+    REQUIRE( !retryJobId.empty() );
+    REQUIRE( retryJobId != deadJobId );
+
+    finishAttempt.store( true );
+
+    // The retry attempt completes the task normally.
+    REQUIRE( waitForStatus( task, { TaskStatus::Completed }, 15000 ) );
+    REQUIRE( center.getTaskInfo( task ).autoRetryAttempts == 1 );
+
+    // The dead job must NOT report success: with the fix its cancel flag was
+    // armed at resurrection, so finishSuccess downgrades it to Cancelled.
+    const auto deadState = [&]( int timeoutMs ) -> std::string {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs );
+        for ( ;; )
+        {
+            const auto rec = engine.snapshot( deadJobId );
+            if ( rec && ( rec->state == sicnu::jobs::JobState::Succeeded
+                          || rec->state == sicnu::jobs::JobState::Failed
+                          || rec->state == sicnu::jobs::JobState::Cancelled ) )
+                return rec->state == sicnu::jobs::JobState::Succeeded ? "succeeded"
+                       : rec->state == sicnu::jobs::JobState::Failed  ? "failed"
+                                                                      : "cancelled";
+            if ( std::chrono::steady_clock::now() >= deadline )
+                return "running";
+            QThread::msleep( 10 );
+        }
+    }( 15000 );
+    REQUIRE( deadState == "cancelled" );
+
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    center.shutdownForTests();
+    engine.shutdownForTests();
+}
