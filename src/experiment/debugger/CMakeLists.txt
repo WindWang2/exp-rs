@@ -5,6 +5,8 @@ qt_add_library(sicnu_experiment_debugger STATIC
   evidence_source.h
   snapshot_builder.cpp
   snapshot_builder.h
+  step_aligner.cpp
+  step_aligner.h
   debugger_types.h
 )
 

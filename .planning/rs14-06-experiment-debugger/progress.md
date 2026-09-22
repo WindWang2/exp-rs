@@ -31,3 +31,15 @@
 - 9/9 pass (61 assertions). Note: ctest discovery needs LD_LIBRARY_PATH with the SDK lib dir
   (libodbc); direct binary execution used for the loop.
 - Commit: slice A.
+
+### Slice B — GREEN (2026-09-22)
+- StepAligner: same-signature exact-id pass; structural pass in topological order with
+  content-digest preference, budget counter, single-writer unmatched lists.
+- DESIGN CORRECTION (adversarial finding during RED-GREEN): bidirectional matched-parent
+  correspondence destroys missing-preprocessing localization (the consumer stops matching the
+  moment its producer set differs). Final rule: reference-side matched-parent consistency only;
+  student-side extra/absent producers are accepted but flagged via parentCoverageComplete=false.
+  Documented in code; Slice C coverage analysis consumes the flag.
+- Staging-helper bug fixed (chain-shape coverage test didn't express the mask scenario; rewritten
+  to the real mask topology).
+- 7/7 pass (53 assertions); Slice A regression 9/9.

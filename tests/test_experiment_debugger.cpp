@@ -17,6 +17,7 @@
 #include "experiment/debugger/evidence_source.h"
 #include "experiment/debugger/run_snapshot.h"
 #include "experiment/debugger/snapshot_builder.h"
+#include "experiment/debugger/step_aligner.h"
 
 #include "experiment_debugger_fixtures.h"
 
@@ -351,4 +352,222 @@ TEST_CASE( "Slice A: oversized evidence fails typed instead of truncating",
     auto snapshot = builder.build( QStringLiteral( "run-1" ) );
     REQUIRE( !snapshot.has_value() );
     REQUIRE( snapshot.diagnostics().front().code == QLatin1String( kCodeEvidenceTooLarge ) );
+}
+
+// ============================================================================
+// Slice B — deterministic step alignment
+// ============================================================================
+
+namespace
+{
+
+RunSnapshot snapshotFromEvidence( InMemoryEvidenceSource &source, const QString &runId,
+                                  const StepEvidence &evidence )
+{
+    source.insertRun( makeStoredRun( runId ) );
+    source.insertStepEvidence( runId, evidence );
+    RunSnapshotBuilder builder( source );
+    auto snapshot = builder.build( runId );
+    REQUIRE( snapshot.has_value() );
+    return snapshot.take();
+}
+
+StepEvidence threeStep( const QStringList &ids, const QStringList &operators,
+                        const QString &planSignature = QString() )
+{
+    StepEvidence evidence;
+    evidence.mode = StepEvidenceMode::CheckpointSteps;
+    evidence.planSignature = planSignature;
+    QString previous;
+    for ( int i = 0; i < ids.size(); ++i )
+    {
+        StepSnapshot step;
+        step.stepId = ids.at( i );
+        step.operatorId = operators.at( i );
+        step.status = QStringLiteral( "Completed" );
+        if ( !previous.isEmpty() )
+            step.dependencies = QStringList{ previous };
+        evidence.steps.append( step );
+        previous = ids.at( i );
+    }
+    return evidence;
+}
+
+} // namespace
+
+TEST_CASE( "Slice B: same plan signature aligns by step id", "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    StepEvidence evidence = threeStep( { QStringLiteral( "a" ), QStringLiteral( "b" ), QStringLiteral( "c" ) },
+                                       { QStringLiteral( "rs:one" ), QStringLiteral( "rs:two" ), QStringLiteral( "rs:three" ) } );
+    evidence.planSignature = QStringLiteral( "plan-777" );
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), evidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), evidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->planRelation == AlignmentResult::PlanRelation::SamePlanSignature );
+    REQUIRE( alignment->matches.size() == 3 );
+    for ( const StepMatch &match : alignment->matches )
+    {
+        REQUIRE( match.kind == StepMatch::Kind::ExactId );
+        REQUIRE( match.referenceStepId == match.studentStepId );
+    }
+    REQUIRE( alignment->unmatchedReference.isEmpty() );
+    REQUIRE( alignment->unmatchedStudent.isEmpty() );
+}
+
+TEST_CASE( "Slice B: different plans align structurally with honest unmatched",
+           "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence(
+        refSource, QStringLiteral( "run-ref" ),
+        threeStep( { QStringLiteral( "ndvi" ), QStringLiteral( "threshold" ), QStringLiteral( "area" ) },
+                   { QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:threshold" ), QStringLiteral( "rs:area" ) },
+                   QStringLiteral( "plan-reference" ) ) );
+    // Student renamed all steps and has no area step (different plan signature).
+    RunSnapshot stuSnap = snapshotFromEvidence(
+        stuSource, QStringLiteral( "run-stu" ),
+        threeStep( { QStringLiteral( "s1" ), QStringLiteral( "s2" ) },
+                   { QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:threshold" ) },
+                   QStringLiteral( "plan-student" ) ) );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->planRelation == AlignmentResult::PlanRelation::DifferentPlan );
+    REQUIRE( alignment->matches.size() == 2 );
+    REQUIRE( alignment->matches.at( 0 ).kind == StepMatch::Kind::Structural );
+    REQUIRE( alignment->matches.at( 0 ).referenceStepId == QStringLiteral( "ndvi" ) );
+    REQUIRE( alignment->matches.at( 0 ).studentStepId == QStringLiteral( "s1" ) );
+    REQUIRE( alignment->matches.at( 1 ).referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( alignment->matches.at( 1 ).studentStepId == QStringLiteral( "s2" ) );
+    REQUIRE( alignment->unmatchedReference == QStringList{ QStringLiteral( "area" ) } );
+    REQUIRE( alignment->unmatchedStudent.isEmpty() );
+}
+
+TEST_CASE( "Slice B: id equality never overrides operator mismatch",
+           "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence(
+        refSource, QStringLiteral( "run-ref" ),
+        threeStep( { QStringLiteral( "step" ) }, { QStringLiteral( "rs:ndvi" ) } ) );
+    RunSnapshot stuSnap = snapshotFromEvidence(
+        stuSource, QStringLiteral( "run-stu" ),
+        threeStep( { QStringLiteral( "step" ) }, { QStringLiteral( "rs:kmeans" ) } ) );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->matches.isEmpty() );
+    REQUIRE( alignment->unmatchedReference == QStringList{ QStringLiteral( "step" ) } );
+    REQUIRE( alignment->unmatchedStudent == QStringList{ QStringLiteral( "step" ) } );
+}
+
+TEST_CASE( "Slice B: content-identical output wins candidate choice",
+           "[debugger][sliceB]" )
+{
+    // Two same-operator siblings on the student side; only one produced the
+    // same digest as the reference step — that one must be chosen.
+    StepEvidence refEvidence;
+    refEvidence.mode = StepEvidenceMode::CheckpointSteps;
+    StepSnapshot refStep;
+    refStep.stepId = QStringLiteral( "stretch" );
+    refStep.operatorId = QStringLiteral( "rs:stretch" );
+    refStep.status = QStringLiteral( "Completed" );
+    refStep.outputDigest = QStringLiteral( "2222" );
+    refStep.digestMode = QLatin1String( kDigestModeSha256Hex );
+    refEvidence.steps.append( refStep );
+
+    StepEvidence studentEvidence = refEvidence;
+    StepSnapshot first = refStep;
+    first.stepId = QStringLiteral( "s1" );
+    first.outputDigest = QStringLiteral( "1111" );
+    StepSnapshot second = refStep;
+    second.stepId = QStringLiteral( "s2" );
+    second.outputDigest = QStringLiteral( "2222" );
+    studentEvidence.steps.clear();
+    studentEvidence.steps << first << second;
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->matches.size() == 1 );
+    REQUIRE( alignment->matches.front().studentStepId == QStringLiteral( "s2" ) );
+    REQUIRE( alignment->unmatchedStudent == QStringList{ QStringLiteral( "s1" ) } );
+}
+
+TEST_CASE( "Slice B: partial parent coverage is flagged, not hidden",
+           "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    // Reference: a -> m -> c (c consumes the mask-like producer m).
+    StepEvidence refEvidence = threeStep( { QStringLiteral( "a" ), QStringLiteral( "m" ), QStringLiteral( "c" ) },
+                                          { QStringLiteral( "rs:one" ), QStringLiteral( "rs:mask" ), QStringLiteral( "rs:three" ) } );
+    for ( StepSnapshot &step : refEvidence.steps )
+        if ( step.stepId == QStringLiteral( "c" ) )
+            step.dependencies = QStringList{ QStringLiteral( "m" ) };
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+
+    // Student skipped the mask step: c consumes a directly.
+    StepEvidence studentEvidence = threeStep( { QStringLiteral( "a" ), QStringLiteral( "c" ) },
+                                              { QStringLiteral( "rs:one" ), QStringLiteral( "rs:three" ) } );
+    for ( StepSnapshot &step : studentEvidence.steps )
+        if ( step.stepId == QStringLiteral( "c" ) )
+            step.dependencies = QStringList{ QStringLiteral( "a" ) };
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->matches.size() == 2 );
+    bool cMatchIncomplete = false;
+    for ( const StepMatch &match : alignment->matches )
+        if ( match.referenceStepId == QStringLiteral( "c" ) )
+            cMatchIncomplete = !match.parentCoverageComplete;
+    REQUIRE( cMatchIncomplete );
+    REQUIRE( alignment->unmatchedReference == QStringList{ QStringLiteral( "m" ) } );
+    REQUIRE( alignment->unmatchedStudent.isEmpty() );
+}
+
+TEST_CASE( "Slice B: alignment budget aborts typed instead of running forever",
+           "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence(
+        refSource, QStringLiteral( "run-ref" ),
+        threeStep( { QStringLiteral( "a" ), QStringLiteral( "b" ), QStringLiteral( "c" ) },
+                   { QStringLiteral( "rs:one" ), QStringLiteral( "rs:one" ), QStringLiteral( "rs:one" ) } ) );
+    RunSnapshot stuSnap = snapshotFromEvidence(
+        stuSource, QStringLiteral( "run-stu" ),
+        threeStep( { QStringLiteral( "x" ), QStringLiteral( "y" ), QStringLiteral( "z" ) },
+                   { QStringLiteral( "rs:one" ), QStringLiteral( "rs:one" ), QStringLiteral( "rs:one" ) } ) );
+
+    AlignmentBudget tiny;
+    tiny.maxComparisons = 2;
+    auto alignment = StepAligner::align( refSnap, stuSnap, tiny );
+    REQUIRE( !alignment.has_value() );
+    REQUIRE( alignment.diagnostics().front().code ==
+             QLatin1String( kCodeAlignmentBudgetExceeded ) );
+}
+
+TEST_CASE( "Slice B: alignment is deterministic across repeated runs",
+           "[debugger][sliceB]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence(
+        refSource, QStringLiteral( "run-ref" ),
+        threeStep( { QStringLiteral( "ndvi" ), QStringLiteral( "threshold" ) },
+                   { QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:threshold" ) } ) );
+    RunSnapshot stuSnap = snapshotFromEvidence(
+        stuSource, QStringLiteral( "run-stu" ),
+        threeStep( { QStringLiteral( "s1" ), QStringLiteral( "s2" ) },
+                   { QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:threshold" ) } ) );
+    auto first = StepAligner::align( refSnap, stuSnap );
+    auto second = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+    REQUIRE( first->toJson() == second->toJson() );
 }
