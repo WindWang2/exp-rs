@@ -205,3 +205,43 @@ TEST_CASE( "Constant series and NaN gaps are handled honestly", "[d16][bfast]" )
         REQUIRE( !BreakpointDetector::detectHarmonicBreaks( y, {}, 3, 2, 23 ).valid );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Hardening track temporal-change-phenology (19/20): BreakpointCandidate.index
+// is documented as the SERIES index of the segment boundary (first point of
+// the new segment). The detector compacts to finite pairs sorted by time, so
+// the internal split position must be mapped back through the original
+// positions — an off-by-k mapping previously passed because every test fed a
+// complete, ascending-time series.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Breakpoint index maps back to the caller's series under NaN gaps",
+           "[d16][bfast][hardening-tcp19]" )
+{
+    // Step at sample 46 (t = 736). Seven leading NaNs shift every later
+    // sample's sub-vector position by -7, so the UNMAPPED split position of
+    // the finite sub-vector is 39 while the true series index stays 46.
+    HarmonicSeries before;
+    HarmonicSeries after;
+    after.intercept = before.intercept - 0.35;
+
+    const auto t = fourYearAxis();
+    std::vector<float> y( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        y[i] = static_cast<float>( ( i < 46 ? before : after ).value( t[i] ) );
+    const std::size_t kLeadingNaNs = 7;
+    for ( std::size_t i = 0; i < kLeadingNaNs; ++i )
+        y[i] = kNan;
+
+    const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 2, 20 );
+    REQUIRE( result.valid );
+    REQUIRE( result.breakCount == 1 );
+    const auto &bp = result.breakpoints[0];
+    // The mapped index must carry the breakpoint's own time — an index into
+    // the caller's series, not into the compacted finite sub-vector.
+    REQUIRE( static_cast<std::size_t>( bp.index ) >= kLeadingNaNs );
+    REQUIRE( t[static_cast<std::size_t>( bp.index )] == Approx( bp.tDays ).margin( 1e-9 ) );
+    // And the sample it points at belongs to the new (post-step) segment.
+    REQUIRE( static_cast<double>( y[static_cast<std::size_t>( bp.index )] ) ==
+             Approx( after.value( bp.tDays ) ).margin( 1e-3 ) );
+}

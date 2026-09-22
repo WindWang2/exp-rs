@@ -373,7 +373,11 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
         bounds.insert( std::upper_bound( bounds.begin(), bounds.end(), best.split ),
                        best.split );
         BreakpointCandidate bp;
-        bp.index = static_cast<int>( best.split );
+        // Map the split back to the CALLER's series: best.split indexes the
+        // compacted finite sub-vector, while the contract ("series index of
+        // the segment boundary") indexes the input. Identity for complete
+        // ascending inputs — every prior expectation preserved.
+        bp.index = static_cast<int>( originSorted[best.split] );
         bp.tDays = ts[best.split];
         const double levelLeft =
             trendValue( best.leftCoef, ts[best.split] ) +
