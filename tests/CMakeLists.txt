@@ -12191,6 +12191,10 @@ sicnu_add_sdk_test(test_scientific_state_fixtures)
 target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificState)
 sicnu_add_sdk_test(test_scientific_state_review)
 target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)
+
+# Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
+sicnu_add_sdk_test(test_science_context_broker)
+target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)

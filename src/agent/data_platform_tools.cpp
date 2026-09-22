@@ -27,6 +27,11 @@
 // testable without linking the agent library; this file only registers and
 // dispatches (see suitability/suitability_agent_adapter.h for the contract).
 #include "suitability/suitability_agent_adapter.h"
+#include "science_context/agent_adapter.h"
+#include <json/json.h>
+#include <memory>
+#include <QJsonDocument>
+#include <QByteArray>
 
 #include <QDateTime>
 #include <QDir>
@@ -1345,6 +1350,34 @@ QVariantMap benchmarkCompare( const QVariantMap &args )
 
 } // namespace
 
+
+namespace {
+QVariantMap scienceContextJsonToVariant( const Json::Value &value )
+{
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    builder["emitUTF8"] = true;
+    const std::string raw = Json::writeString( builder, value );
+    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( raw ) );
+    if ( !doc.isObject() )
+        return {};
+    return doc.object().toVariantMap();
+}
+
+Json::Value variantArgsToJson( const QVariantMap &arguments )
+{
+    const QJsonDocument doc = QJsonDocument::fromVariant( arguments );
+    Json::Value root;
+    Json::CharReaderBuilder rb;
+    std::string errs;
+    const std::string raw = QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) ).toStdString();
+    std::unique_ptr<Json::CharReader> reader( rb.newCharReader() );
+    if ( !reader->parse( raw.data(), raw.data() + raw.size(), &root, &errs ) )
+        throw std::runtime_error( "invalid tool arguments JSON" );
+    return root;
+}
+} // namespace
+
 const QList<DataPlatformToolDef> &dataPlatformToolDefs()
 {
     static const QList<DataPlatformToolDef> defs = {
@@ -1486,6 +1519,33 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
         { "suitability:profiles",
           "List the built-in suitability task profiles and their default requirements (explicit goal values always override these).",
           { { "profile", "string", "one profile key; omit for all", false } } },
+        { "scientific:context",
+          "Synthesize a bounded exp.science_context.v1 bundle (passport + capabilities + recipes + planner projection). Read-only; never executes.",
+          { { "goal", "string", "Goal text", false },
+            { "intent", "string", "Closed intent override", false },
+            { "passport_json", "string", "sicnu.asset_state.v1 JSON document", false },
+            { "asset_id", "string", "Catalog asset id (requires resolver)", false },
+            { "autonomy_level", "string", "L0..L5 (default L2)", false },
+            { "offline", "boolean", "Offline constraints", false },
+            { "max_bytes", "integer", "Context budget bytes", false } } },
+        { "scientific:capabilities",
+          "Route structural capability candidates for a goal/intent against observed passport state. Structural only — does not bypass the planner.",
+          { { "goal", "string", "Goal text", false },
+            { "intent", "string", "Closed intent", false },
+            { "passport_json", "string", "sicnu.asset_state.v1 JSON", false },
+            { "limit", "integer", "Max candidates", false } } },
+        { "data:asset_passport",
+          "Project a scientific passport summary (evidence buckets, band roles, radiometry). Paths are basename hints only.",
+          { { "asset_id", "string", "Catalog asset id", false },
+            { "passport_json", "string", "Inline sicnu.asset_state.v1 JSON", false },
+            { "include_full", "boolean", "Include full passport document", false } } },
+        { "recipe:search",
+          "Deterministic top-K scientific recipe search by intent/modality. Never auto-executes.",
+          { { "intent", "string", "Intent facet", false },
+            { "modality", "string", "Modality filter", false },
+            { "text", "string", "Free-text keywords", false },
+            { "passport_json", "string", "Optional passport for modality filter", false },
+            { "limit", "integer", "Top-K (default 5)", false } } },
     };
     return defs;
 }
@@ -1496,7 +1556,10 @@ bool isDataPlatformTool( const QString &toolId )
            toolId.startsWith( QLatin1String( "experiment:" ) ) ||
            toolId.startsWith( QLatin1String( "reproducibility:" ) ) ||
            toolId.startsWith( QLatin1String( "benchmark:" ) ) ||
-           toolId.startsWith( QLatin1String( "suitability:" ) );
+           toolId.startsWith( QLatin1String( "suitability:" ) ) ||
+           toolId.startsWith( QLatin1String( "scientific:" ) ) ||
+           toolId.startsWith( QLatin1String( "recipe:" ) ) ||
+           toolId == QLatin1String( "data:asset_passport" );
 }
 
 QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &arguments )
@@ -1549,6 +1612,18 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
         return sicnu::suitability::agent_adapter::suitabilityAssess( arguments );
     if ( toolId == QLatin1String( "suitability:profiles" ) )
         return sicnu::suitability::agent_adapter::suitabilityProfiles( arguments );
+    if ( toolId == QLatin1String( "scientific:context" ) )
+        return scienceContextJsonToVariant(
+            sicnu::science_context::agent_adapter::scientificContext( variantArgsToJson( arguments ) ) );
+    if ( toolId == QLatin1String( "scientific:capabilities" ) )
+        return scienceContextJsonToVariant(
+            sicnu::science_context::agent_adapter::scientificCapabilities( variantArgsToJson( arguments ) ) );
+    if ( toolId == QLatin1String( "data:asset_passport" ) )
+        return scienceContextJsonToVariant(
+            sicnu::science_context::agent_adapter::dataAssetPassport( variantArgsToJson( arguments ) ) );
+    if ( toolId == QLatin1String( "recipe:search" ) )
+        return scienceContextJsonToVariant(
+            sicnu::science_context::agent_adapter::recipeSearch( variantArgsToJson( arguments ) ) );
     fail( QStringLiteral( "unknown data-platform tool: %1" ).arg( toolId ) );
 }
 
