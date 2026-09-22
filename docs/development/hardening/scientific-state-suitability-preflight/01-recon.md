@@ -37,6 +37,12 @@ schema layer are in this slice's scope.
    registers `test_preflight_report_schema` (the file's own header says it
    must fail until the module exists — it existed, uncompiled). The #1207
    "7 cases green" claim is unreproducible on master.
+   **Dedup outcome (PR time): open PR #1246
+   (`hardening/integration-build-contract-drift`) wires exactly this — same
+   `add_subdirectory`, the same test registered, plus a wiring drift
+   oracle. Per the conflict gate this branch DROPPED its own wiring commit
+   and leaves the shared central files to #1246; the finding is recorded
+   here as independent confirmation of #1246's recon.**
 2. **P1 — grid facts silently zero on the production shape.**
    `raster_inspect_tool.cpp:222,233` emits `size`/`pixelSize` as objects;
    `spatial_contracts.cpp` passes them through; `band_facts.cpp gridFacts`
