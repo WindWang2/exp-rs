@@ -74,6 +74,8 @@ class ExperimentStore
         const QString &experimentId = QString(), const QString &datasetVersionId = QString(),
         const QString &status = QString(), const QString &cursor = QString(),
         qint64 limit = kMaxPageSize ) const;
+    /// Total runs, or -1 when the store is closed / the COUNT query fails
+    /// (fail-closed; previously returned 0 on errors and looked empty).
     qint64 runCount() const;
     /// Run ids whose executionRef matches @p executionRef (store order, not
     /// recency). Bounded paged scan over the run JSON: a cold-path
