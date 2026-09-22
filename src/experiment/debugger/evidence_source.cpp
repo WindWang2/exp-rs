@@ -135,6 +135,9 @@ QJsonObject jsonCppToQJson( const Json::Value &value )
                 break;
             case Json::nullValue:
             default:
+                // Explicit null parameters are dropped: they carry no
+                // cross-run-comparable value, and this converter feeds only
+                // canonical hashing where absence is the honest identity.
                 break;
         }
     }
@@ -279,6 +282,11 @@ Result<StepEvidence> stepEvidenceFromProvenanceDoc( const QJsonObject &doc )
     const QString producedKind = QStringLiteral( "produced" );
     const QString consumedKind = QStringLiteral( "consumed" );
     const QString reusedKind = QStringLiteral( "reusedFrom" );
+    // PASS 1: collect producer relations from every produced/reusedFrom edge.
+    // The platform writer sorts edges by (from, to, kind), so a consumer's
+    // consumed edge can precede its producer's produced edge in the document
+    // whenever the consumer's node id sorts first — resolution must not
+    // depend on edge order.
     for ( const workflow::ProvenanceEdge &edge : graph.edges() )
     {
         if ( edge.kind == producedKind || edge.kind == reusedKind )
@@ -286,27 +294,30 @@ Result<StepEvidence> stepEvidenceFromProvenanceDoc( const QJsonObject &doc )
             producerOfArtifact.insert( edge.toId, edge.fromId );
             producedByExec.insert( edge.fromId, edge.toId );
         }
-        else if ( edge.kind == consumedKind )
+    }
+    // PASS 2: resolve consumers against the complete producer map.
+    for ( const workflow::ProvenanceEdge &edge : graph.edges() )
+    {
+        if ( edge.kind != consumedKind )
+            continue;
+        const auto consumer = stepIndexById.constFind( edge.fromId );
+        const auto artifact = artifactIndexById.constFind( edge.toId );
+        if ( consumer == stepIndexById.constEnd() || artifact == artifactIndexById.constEnd() )
+            continue; // strict parse already refused dangling edges
+        const QString producer = producerOfArtifact.value( edge.toId );
+        const auto producerIndex = producer.isEmpty()
+                                       ? stepIndexById.end()
+                                       : stepIndexById.constFind( producer );
+        if ( producerIndex != stepIndexById.constEnd() )
         {
-            const auto consumer = stepIndexById.constFind( edge.fromId );
-            const auto artifact = artifactIndexById.constFind( edge.toId );
-            if ( consumer == stepIndexById.constEnd() || artifact == artifactIndexById.constEnd() )
-                continue; // strict parse already refused dangling edges
-            const QString producer = producerOfArtifact.value( edge.toId );
-            const auto producerIndex = producer.isEmpty()
-                                           ? stepIndexById.end()
-                                           : stepIndexById.constFind( producer );
-            if ( producerIndex != stepIndexById.constEnd() )
-            {
-                StepSnapshot &step = evidence.steps[ *consumer ];
-                if ( !step.dependencies.contains( evidence.steps.at( *producerIndex ).stepId ) )
-                    step.dependencies.append( evidence.steps.at( *producerIndex ).stepId );
-            }
-            else
-            {
-                // Consumed with no in-run producer: external input state.
-                evidence.artifacts[ *artifact ].rootInput = true;
-            }
+            StepSnapshot &step = evidence.steps[ *consumer ];
+            if ( !step.dependencies.contains( evidence.steps.at( *producerIndex ).stepId ) )
+                step.dependencies.append( evidence.steps.at( *producerIndex ).stepId );
+        }
+        else
+        {
+            // Consumed with no in-run producer: external input state.
+            evidence.artifacts[ *artifact ].rootInput = true;
         }
     }
 
@@ -338,6 +349,14 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
 {
     StepEvidence evidence;
     evidence.mode = StepEvidenceMode::StepsEvidence;
+    // Writer-side truncation honesty: the bridge caps its step list; a
+    // truncated list is normalized as truncated, never as complete.
+    QVector<Diagnostic> diagnostics;
+    if ( workflow.value( QLatin1String( "steps_truncated" ) ).toBool( false ) )
+        diagnostics << typedFailure(
+            kCodeMalformedEvidence,
+            QStringLiteral( "bridge step evidence was truncated by the recorder — the snapshot covers only the reported prefix" ),
+            DiagnosticSeverity::Warning );
     const QJsonArray steps = workflow.value( QLatin1String( "steps" ) ).toArray();
     for ( const QJsonValue &value : steps )
     {
@@ -363,7 +382,8 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
         evidence.steps.append( step );
     }
     // Recorded order is the bridge's execution order — keep, never reorder.
-    return Result<StepEvidence>::success( evidence );
+    return diagnostics.isEmpty() ? Result<StepEvidence>::success( evidence )
+                                 : Result<StepEvidence>::success( evidence, diagnostics );
 }
 
 // --- InMemoryEvidenceSource ---------------------------------------------------
@@ -507,6 +527,10 @@ Result<StepEvidence> DirectoryEvidenceSource::steps( const QString &runId )
 {
     QVector<Diagnostic> warnings;
 
+    // One ladder policy: a stage that exists but cannot be used degrades
+    // openly — its diagnostics ride along as warnings on the next stage's
+    // result, and every diagnostic of a failed normalization is kept. A hard
+    // typed failure is returned only when NO stage yields usable evidence.
     // 1. Checkpoint step plans — the richest recorded per-step evidence.
     const QStringList checkpoints =
         candidatePaths( m_runDirectory, QStringLiteral( "checkpoint_%1.json" ).arg( runId ) );
@@ -520,8 +544,8 @@ Result<StepEvidence> DirectoryEvidenceSource::steps( const QString &runId )
             auto evidence = stepEvidenceFromCheckpointRun( *run );
             if ( evidence.has_value() )
                 return evidence;
-            // Fall through recorded-evidence ladder; keep the typed reason.
-            warnings << evidence.diagnostics().front();
+            for ( const Diagnostic &diagnostic : evidence.diagnostics() )
+                warnings << diagnostic;
         }
         else
         {
@@ -538,16 +562,23 @@ Result<StepEvidence> DirectoryEvidenceSource::steps( const QString &runId )
     if ( !provenanceFiles.isEmpty() )
     {
         auto document = readBoundedJsonDocument( provenanceFiles.front() );
-        if ( !document )
-            return Result<StepEvidence>::failure( document.diagnostics() );
-        auto evidence = stepEvidenceFromProvenanceDoc( document.value() );
-        if ( !evidence )
-            return evidence;
-        auto merged = evidence.take();
-        // Degrade-in-the-open: a corrupt checkpoint above is surfaced as a
-        // warning diagnostic on the successful provenance result.
-        auto withWarnings = Result<StepEvidence>::success( merged, warnings );
-        return withWarnings;
+        if ( document.has_value() )
+        {
+            auto evidence = stepEvidenceFromProvenanceDoc( document.value() );
+            if ( evidence.has_value() )
+            {
+                // Degrade-in-the-open: upstream stage failures surface as
+                // warning diagnostics on this successful result.
+                return Result<StepEvidence>::success( evidence.take(), warnings );
+            }
+            for ( const Diagnostic &diagnostic : evidence.diagnostics() )
+                warnings << diagnostic;
+        }
+        else
+        {
+            for ( const Diagnostic &diagnostic : document.diagnostics() )
+                warnings << diagnostic;
+        }
     }
 
     // 3. Bridge workflow evidence inside the run record.
@@ -561,9 +592,10 @@ Result<StepEvidence> DirectoryEvidenceSource::steps( const QString &runId )
             if ( !workflow.isEmpty() )
             {
                 auto evidence = stepEvidenceFromBridgeWorkflowMetrics( workflow );
-                if ( !evidence )
-                    return evidence;
-                return Result<StepEvidence>::success( evidence.take(), warnings );
+                if ( evidence.has_value() )
+                    return Result<StepEvidence>::success( evidence.take(), warnings );
+                for ( const Diagnostic &diagnostic : evidence.diagnostics() )
+                    warnings << diagnostic;
             }
         }
     }

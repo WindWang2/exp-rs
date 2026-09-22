@@ -110,7 +110,8 @@ void populateFromReport( AgentDiagnostic &diagnostic, const FirstDivergenceRepor
         case DivergenceKind::MissingPreprocessing:
             diagnostic.suggestedAction =
                 QStringLiteral( "add the reference preprocessing step(s) before '%1' — the student run skipped a producer the reference performs" )
-                    .arg( finding.studentStepId );
+                    .arg( finding.studentStepId.isEmpty() ? finding.referenceStepId
+                                                          : finding.studentStepId );
             break;
         case DivergenceKind::DifferentInputState:
             diagnostic.suggestedAction =
@@ -135,7 +136,8 @@ void populateFromReport( AgentDiagnostic &diagnostic, const FirstDivergenceRepor
             break;
     }
 
-    // Cause chain: the verified upstream up to the divergence point.
+    // Cause chain carries the analysis's named evidence gaps (what could not
+    // be verified), outermost first.
     for ( const QString &gap : report.evidenceGaps )
         diagnostic.causeChain << gap;
     diagnostic.details = details;
@@ -167,11 +169,15 @@ AgentDiagnostic AgentDiagnosticAdapter::forFailure(
         diagnostic.code = QLatin1String( kDiagUnknownRun );
     else if ( code == QLatin1String( kCodeEvidenceTooLarge ) )
         diagnostic.code = QLatin1String( kDiagEvidenceTooLarge );
+    else if ( code == QLatin1String( kCodeEvidenceAbsent ) )
+        diagnostic.code = QLatin1String( kDiagInsufficientEvidence );
     else
         diagnostic.code = QLatin1String( kDiagMalformedEvidence );
     diagnostic.recoverability =
-        code == QLatin1String( kCodeEvidenceTooLarge ) ? QStringLiteral( "manual" )
-                                                       : QStringLiteral( "unknown" );
+        code == QLatin1String( kCodeEvidenceTooLarge )
+                || code == QLatin1String( kCodeEvidenceAbsent )
+            ? QStringLiteral( "manual" )
+            : QStringLiteral( "unknown" );
     for ( const sicnu::data::Diagnostic &entry : diagnostics )
         diagnostic.causeChain << QStringLiteral( "%1: %2" ).arg( entry.code, entry.message );
     diagnostic.details.insert( QLatin1String( "origin_code" ), code );
@@ -181,6 +187,9 @@ AgentDiagnostic AgentDiagnosticAdapter::forFailure(
     else if ( diagnostic.code == QLatin1String( kDiagEvidenceTooLarge ) )
         diagnostic.suggestedAction =
             QStringLiteral( "the recorded evidence exceeds the analysis cap; export a narrower reference or raise the budget explicitly" );
+    else if ( diagnostic.code == QLatin1String( kDiagInsufficientEvidence ) )
+        diagnostic.suggestedAction =
+            QStringLiteral( "no step evidence was recorded for this run; re-record it with workflow evidence (checkpoint or bridge) and re-run" );
     else
         diagnostic.suggestedAction =
             QStringLiteral( "the recorded evidence is unreadable; re-export the run record" );

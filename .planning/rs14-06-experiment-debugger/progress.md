@@ -95,3 +95,38 @@
   parent experiment (experiment.not_found); pin rewrites on upsert are refused — the dataset
   fixture inserts the differing pin from the start.
 - 45/45 pass (410 assertions) — full suite green.
+
+### Deep review round 1 — FIX-FIRST verdict, all findings resolved (2026-09-22)
+Independent adversarial review (read all 32 changed files, built the branch, empirically
+reproduced findings #1 and #2). Findings and resolutions:
+- P0 #1 NotComparable gate tested detail-emptiness (always "identical") ⇒ every non-dataset
+  cause reported as data_subset_divergence/high. Fixed: test RunDiffItem.differs; new
+  model-only pin test pins UnknownNonComparable.
+- P1 #2 provenance normalizer was edge-order-dependent (writer sorts by from,to,to kind);
+  consumers sorting before producers lost dependencies. Fixed: two-pass resolution; new test
+  with writer-ordered edges.
+- P1 #3 findings cap could flip verdict divergent→equivalent. Fixed: first substantive finding
+  secured before capping; only the additional list is bounded; cuts named in evidenceGaps;
+  new cap test.
+- P1 #4 RDWPD High without any verified process dimension. Fixed: High requires
+  recorded-and-equal params or lineage + comparable cache + verified upstream; missing
+  dimensions named; new bridge-mode test.
+- P2 #5 MissingPreprocessing tri-state confidence (Unknown no longer High).
+- P2 #6 root handling: fires at any ref root consumer; incomparable recorded roots add a named
+  gap; identityDocument roots are content-identity (digest+mode, sorted by identity) consistent
+  with the analyzer.
+- P2 #7 timeline keep-first: co-located additional findings can no longer repaint the
+  first-divergence entry.
+- P2 #8 canonicalParamsHash replaced by sicnu::experiment::runConfigHash (SSOT).
+- P2 #9 ADR/debugging.md/integration.md statements aligned with the code (correspondence
+  direction, real evidence strings, analyze() signature, capsule stamp = identityDocument()).
+- P2 #10 evidence ladder: one policy — every stage failure degrades openly with FULL diagnostic
+  propagation; hard failure only when nothing succeeds.
+- P3 cluster: agent-diagnostic comment truth + missing-step fallback + evidence-absent mapping
+  (insufficient_evidence/manual); invariant findings capped, ledger carries its own schema kind;
+  bridge steps_truncated surfaced as a warning (propagated by the builder); duplicate artifact
+  ids rejected; children map hoisting noted (bounded U·V, nodes ≤4096 — accepted); test cruft
+  removed; jsonCppToQJson null-drop documented.
+- Deprecation warning in fixtures removed (zero new warnings).
+- Suites: test_experiment_debugger 49/49 (438), test_experiment_evaluation 20/20 (299),
+  test_mlops9_evidence 4/4 (94).

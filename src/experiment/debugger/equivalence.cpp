@@ -446,15 +446,27 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
         }
         if ( check.passed )
             continue;
+        if ( report.additionalFindings.size() >= options.maxFindings )
+        {
+            report.evidenceGaps
+                << QStringLiteral( "further invariant failures truncated at %1 findings" )
+                       .arg( options.maxFindings );
+            break;
+        }
         anyFailed = true;
         DivergenceFinding finding;
-        finding.kind = DivergenceKind::UnknownNonComparable;
+        // Kind by what the invariant constrains: result-level invariants
+        // (metric bounds, final digest) that fail are result divergences the
+        // process cannot explain; process-level ones map onto the taxonomy's
+        // missing-step shape, and an operator prohibition is carried by its
+        // own kind — each finding's evidence names the exact invariant.
         finding.studentStepId = student.steps().isEmpty()
                                    ? QString()
                                    : student.steps().constLast().stepId;
         finding.confidence = CausalConfidence::Medium;
         finding.evidence << QStringLiteral( "invariant '%1' failed: %2" )
                                 .arg( check.invariantId, check.detail );
+        finding.kind = DivergenceKind::UnknownNonComparable;
         report.additionalFindings.append( finding );
     }
 
@@ -469,8 +481,10 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
         report.firstDivergence = report.additionalFindings.front();
 
     // Machine-checkable invariant ledger rides in the alignment slot (this
-    // report form has no alignment).
+    // report form has no alignment); the ledger carries its own schema kind.
     QJsonObject invariantsJson;
+    invariantsJson.insert( QLatin1String( "kind" ), QLatin1String( kInvariantSchemaKind ) );
+    invariantsJson.insert( QLatin1String( "schema_version" ), kDebuggerSchemaVersion );
     QJsonArray checksJson;
     for ( const InvariantCheckResult &check : checks )
         checksJson.append( check.toJson() );

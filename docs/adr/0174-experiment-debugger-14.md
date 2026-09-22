@@ -37,9 +37,12 @@ WHERE the student's process went wrong without manually diffing logs.
    so the same execution always yields the same digest.
 
 3. **Deterministic alignment (`StepAligner`)**: same plan signature → exact-id matching;
-   different plans → structural matching in topological order (operator equality, matched-parent
-   correspondence both directions, content-digest preference), with partial parent coverage
-   flagged (`parentCoverageComplete=false`) instead of hidden. Budget-bounded; typed abort.
+   different plans → structural matching in topological order (operator equality or a declared
+   equivalence rule, REFERENCE-side matched-parent consistency, content-digest preference). The
+   reference side anchors the walk: student-side extra or missing producers are accepted but
+   flagged (`parentCoverageComplete=false`) instead of hidden — bidirectional strictness was
+   tried and destroys exactly the missing-preprocessing localization this module exists for.
+   Budget-bounded; typed abort.
 
 4. **Closed divergence taxonomy with causal confidence (`FirstDivergenceAnalyzer`)**: run-level
    comparability gate first (reusing `RunComparison` — the existing single truth), then a single

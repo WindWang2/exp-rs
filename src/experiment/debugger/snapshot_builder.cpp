@@ -10,7 +10,6 @@
 #include "../../dataset/dataset_types.h"
 #include "../../data/execution_fingerprint.h"
 
-#include <QCryptographicHash>
 
 namespace sicnu::experiment::debugger
 {
@@ -25,14 +24,6 @@ namespace
 Diagnostic typedFailure( const char *code, const QString &message )
 {
     return { QLatin1String( code ), message, DiagnosticSeverity::Error };
-}
-
-QString canonicalParamsHash( const QJsonObject &parameters )
-{
-    return QString::fromLatin1(
-        QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( parameters ),
-                                  QCryptographicHash::Sha256 )
-            .toHex() );
 }
 
 bool carriesCode( const QVector<Diagnostic> &diagnostics, const char *code )
@@ -63,6 +54,11 @@ Result<RunSnapshot> RunSnapshotBuilder::build( const QString &runId ) const
     auto evidence = m_source->steps( runId );
     if ( evidence.has_value() )
     {
+        // Normalizer warnings (e.g. recorder-side step truncation) ride into
+        // the report — degrade-in-the-open end to end.
+        for ( const Diagnostic &diagnostic : evidence.diagnostics() )
+            if ( diagnostic.code != QLatin1String( kCodeEvidenceAbsent ) )
+                warnings.append( diagnostic );
         StepEvidence steps = evidence.take();
         if ( steps.steps.size() > kMaxSnapshotSteps )
             return Result<RunSnapshot>::failure( typedFailure(
@@ -80,8 +76,10 @@ Result<RunSnapshot> RunSnapshotBuilder::build( const QString &runId ) const
         for ( StepSnapshot &step : steps.steps )
         {
             // Canonical parameter identity — key order must not matter.
+            // Single parameter-identity truth: the platform's canonical
+            // config hash (experiment_types.h), not a local re-implementation.
             if ( step.paramsHash.isEmpty() && !step.parameters.isEmpty() )
-                step.paramsHash = canonicalParamsHash( step.parameters );
+                step.paramsHash = sicnu::experiment::runConfigHash( step.parameters );
             normalized.append( step );
         }
         snapshot.setSteps( normalized );

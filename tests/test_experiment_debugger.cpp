@@ -1748,9 +1748,6 @@ TEST_CASE( "Slice G: teaching exemplar — human timeline and agent diagnostic a
     REQUIRE( QFileInfo::exists( reportPath ) );
 
     // The persisted report re-parses as the divergence schema document.
-    const auto reparsed = QJsonDocument::fromJson(
-        QFile( reportPath ).size() >= 0 ? QByteArray() : QByteArray() );
-    Q_UNUSED( reparsed );
     QFile readBack( reportPath );
     REQUIRE( readBack.open( QIODevice::ReadOnly ) );
     const QJsonDocument parsed = QJsonDocument::fromJson( readBack.readAll() );
@@ -1758,4 +1755,192 @@ TEST_CASE( "Slice G: teaching exemplar — human timeline and agent diagnostic a
              == QLatin1String( kDivergenceSchemaKind ) );
     REQUIRE( parsed.object().value( QLatin1String( "verdict" ) ).toString()
              == QStringLiteral( "divergent" ) );
+}
+
+// ============================================================================
+// Review-gate regression tests (round-1 findings #1/#2/#3/#4)
+// ============================================================================
+
+TEST_CASE( "Review: model-only pin difference is unknown-non-comparable, not subset divergence",
+           "[debugger][review]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    ExperimentRun refRun = makeStoredRun( QStringLiteral( "run-ref" ) );
+    ExperimentRun stuRun = makeStoredRun( QStringLiteral( "run-stu" ) );
+    // ONLY the model digest differs — dataset/split pins are identical.
+    stuRun.setModelDigest( QStringLiteral( "digest-other-model" ) );
+
+    auto report = FirstDivergenceAnalyzer::analyze( refRun, stuRun, refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "non_comparable" ) );
+    // The dataset/split narrative would be a lie here — the cause is unknown.
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::UnknownNonComparable );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::None );
+    bool namesModel = false;
+    for ( const QString &entry : report->firstDivergence.evidence )
+        if ( entry.contains( QStringLiteral( "model" ) ) )
+            namesModel = true;
+    REQUIRE( namesModel );
+}
+
+TEST_CASE( "Review: provenance edge order never hides dependencies",
+           "[debugger][review]" )
+{
+    // The platform writer sorts edges by (from, to, kind): a consumer whose
+    // node id sorts BEFORE its producer legitimately appears first. The
+    // normalizer must resolve dependencies regardless of edge order.
+    QJsonObject doc;
+    doc.insert( QLatin1String( "kind" ), QLatin1String( "d17_provenance" ) );
+    doc.insert( QLatin1String( "version" ), QLatin1String( "1.0" ) );
+
+    QJsonArray nodes;
+    QJsonObject runNode;
+    runNode.insert( QLatin1String( "id" ), QStringLiteral( "run:r1" ) );
+    runNode.insert( QLatin1String( "kind" ), QLatin1String( "run" ) );
+    runNode.insert( QLatin1String( "attributes" ), QJsonObject{} );
+    nodes.append( runNode );
+    // a_train (consumer, sorts first) and z_prep (producer, sorts last).
+    for ( const auto &entry : { qMakePair( QStringLiteral( "a_train" ), QStringLiteral( "rs:train" ) ),
+                                qMakePair( QStringLiteral( "z_prep" ), QStringLiteral( "rs:prep" ) ) } )
+    {
+        QJsonObject node;
+        node.insert( QLatin1String( "id" ), QStringLiteral( "node:%1" ).arg( entry.first ) );
+        node.insert( QLatin1String( "kind" ), QLatin1String( "nodeExec" ) );
+        node.insert( QLatin1String( "attributes" ),
+                     QJsonObject{ { QLatin1String( "nodeId" ), entry.first },
+                                  { QLatin1String( "operatorId" ), entry.second },
+                                  { QLatin1String( "state" ), QStringLiteral( "Succeeded" ) },
+                                  { QLatin1String( "lineageSignature" ), entry.first } } );
+        nodes.append( node );
+    }
+    QJsonObject artifact;
+    artifact.insert( QLatin1String( "id" ), QStringLiteral( "artifact:/lab/prep.tif" ) );
+    artifact.insert( QLatin1String( "kind" ), QLatin1String( "artifact" ) );
+    artifact.insert( QLatin1String( "attributes" ),
+                     QJsonObject{ { QLatin1String( "path" ), QStringLiteral( "/lab/prep.tif" ) },
+                                  { QLatin1String( "fingerprint" ), QStringLiteral( "sha256fl:aa" ) } } );
+    nodes.append( artifact );
+    doc.insert( QLatin1String( "nodes" ), nodes );
+
+    // WRITER ORDER: the consumer's consumed edge sorts before the producer's
+    // produced edge (a_train < z_prep).
+    QJsonArray edges;
+    QJsonObject consumedEdge;
+    consumedEdge.insert( QLatin1String( "from" ), QStringLiteral( "node:a_train" ) );
+    consumedEdge.insert( QLatin1String( "to" ), QStringLiteral( "artifact:/lab/prep.tif" ) );
+    consumedEdge.insert( QLatin1String( "kind" ), QLatin1String( "consumed" ) );
+    edges.append( consumedEdge );
+    QJsonObject producedEdge;
+    producedEdge.insert( QLatin1String( "from" ), QStringLiteral( "node:z_prep" ) );
+    producedEdge.insert( QLatin1String( "to" ), QStringLiteral( "artifact:/lab/prep.tif" ) );
+    producedEdge.insert( QLatin1String( "kind" ), QLatin1String( "produced" ) );
+    edges.append( producedEdge );
+    doc.insert( QLatin1String( "edges" ), edges );
+
+    auto evidence = stepEvidenceFromProvenanceDoc( doc );
+    REQUIRE( evidence.has_value() );
+    REQUIRE( evidence->steps.size() == 2 );
+    // Topological order: producer before consumer despite sort order.
+    REQUIRE( evidence->steps.at( 0 ).stepId == QStringLiteral( "z_prep" ) );
+    REQUIRE( evidence->steps.at( 1 ).stepId == QStringLiteral( "a_train" ) );
+    REQUIRE( evidence->steps.at( 1 ).dependencies == QStringList{ QStringLiteral( "z_prep" ) } );
+    // The intermediate artifact is NOT misreported as external input.
+    bool sawRoot = false;
+    for ( const ArtifactSnapshot &artifactSnapshot : evidence->artifacts )
+        sawRoot |= artifactSnapshot.rootInput;
+    REQUIRE( !sawRoot );
+}
+
+TEST_CASE( "Review: the findings cap never flips the verdict or drops the first divergence",
+           "[debugger][review]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    // Student: parameter divergence at threshold + a terminal additive step
+    // (alternative-path finding). With maxFindings = 1 only ONE additional
+    // entry fits — the parameter divergence must survive as firstDivergence.
+    StepEvidence student = checkpointPipeline( QStringLiteral( "eeee" ),
+                                               thresholdParams( 0.62 ) );
+    // Two additive terminal steps: with maxFindings=1 only one additional
+    // entry fits, so the cap genuinely cuts.
+    for ( const auto &name : { qMakePair( QStringLiteral( "histogram" ), QStringLiteral( "dddd" ) ),
+                               qMakePair( QStringLiteral( "histogram2" ), QStringLiteral( "abab" ) ) } )
+    {
+        StepSnapshot extra;
+        extra.stepId = name.first;
+        extra.operatorId = QStringLiteral( "rs:histogram" );
+        extra.status = QStringLiteral( "Completed" );
+        extra.outputDigest = name.second;
+        extra.digestMode = QLatin1String( kDigestModeSha256Hex );
+        student.steps.append( extra );
+    }
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ), student );
+
+    FirstDivergenceOptions tight;
+    tight.maxFindings = 1;
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap, tight );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->hasFirstDivergence );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+    REQUIRE( report->additionalFindings.size() == 1 );
+    // The cut is named, never silent.
+    bool cutNamed = false;
+    for ( const QString &gap : report->evidenceGaps )
+        if ( gap.contains( QStringLiteral( "truncated" ) ) )
+            cutNamed = true;
+    REQUIRE( cutNamed );
+}
+
+TEST_CASE( "Review: bridge-mode result divergence cannot claim high confidence",
+           "[debugger][review]" )
+{
+    // Bridge summaries record no parameters, no lineage, no cache flags:
+    // nothing about the process is verifiable, so High would be a lie.
+    auto bridgeEvidence = []( const QString &digest ) {
+        StepEvidence evidence;
+        evidence.mode = StepEvidenceMode::StepsEvidence;
+        StepSnapshot step;
+        step.stepId = QStringLiteral( "s1" );
+        step.operatorId = QStringLiteral( "rs:op" );
+        step.status = QStringLiteral( "Completed" );
+        step.outputDigest = digest;
+        step.digestMode = QLatin1String( kDigestModeSha256Hex );
+        evidence.steps.append( step );
+        return evidence;
+    };
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         bridgeEvidence( QStringLiteral( "1111" ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         bridgeEvidence( QStringLiteral( "2222" ) ) );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->firstDivergence.kind ==
+             DivergenceKind::ResultDivergenceWithoutProcessDivergence );
+    REQUIRE( report->firstDivergence.confidence != CausalConfidence::High );
+    // The missing dimensions are named, not just the cache.
+    bool namesParams = false;
+    bool namesLineage = false;
+    for ( const QString &entry : report->firstDivergence.missingEvidence )
+    {
+        namesParams |= entry.contains( QStringLiteral( "parameters" ) );
+        namesLineage |= entry.contains( QStringLiteral( "lineage" ) );
+    }
+    REQUIRE( namesParams );
+    REQUIRE( namesLineage );
 }

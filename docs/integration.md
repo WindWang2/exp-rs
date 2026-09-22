@@ -20,7 +20,9 @@ Sketch: `experiment debug --reference <runId> --student <runId> [--dir <runDirec
 1. `ExperimentStore store; store.open(dbPath)` read-only;
 2. `DirectoryEvidenceSource source(&store, runDir);`
 3. `RunSnapshotBuilder b(source); auto r = b.build(ref); auto s = b.build(stu);`
-4. `FirstDivergenceAnalyzer::analyze(*r, *s, *refRun, *stuRun)` (profile overload when given);
+4. `FirstDivergenceAnalyzer::analyze(refRun, stuRun, refSnap, stuSnap)` — signature order
+   `(referenceRun, studentRun, referenceSnapshot, studentSnapshot)`; the profile overload appends
+   `const EquivalenceProfile&` before the options;
 5. print `report.toJson()` (already human-readable), exit nonzero when `verdict == "divergent"`.
 
 ### GUI (workbench `dataset_experiment_panel`)
@@ -49,9 +51,11 @@ process"). The verifier may read reports produced elsewhere; the debugger never 
 verifier.
 
 ### RS14-17 Reproducibility Capsule (PR #1188)
-A capsule may embed `RunSnapshot::snapshotDigest()` as its identity stamp. The digest is
-canonical and versioned (`exp.debugger.snapshot.v1`); capsule-side validation compares digests,
-it does not recompute evidence.
+A capsule that wants a run-content stamp should embed the canonical
+`RunSnapshot::identityDocument()` (or its hash) — `snapshotDigest()` additionally covers the
+run id, so two records of the same execution compare equal via the identity document, not the
+per-run digest. Both are versioned (`exp.debugger.snapshot.v1`); capsule-side validation
+compares these, it does not recompute evidence.
 
 ## Evidence directory convention
 

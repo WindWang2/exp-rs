@@ -249,7 +249,7 @@ Result<AlignmentResult> alignImpl( const RunSnapshot &reference,
 
         const StepSnapshot *chosen = contentIdentical ? contentIdentical : firstAcceptable;
         if ( chosen == nullptr )
-            continue; // recorded by the single-writer leftover pass below
+            continue; // recorded once by the unmatched pass below
 
         const ParentCoverage refCoverage = parentCoverage( refStep, matchedRefIds );
         const ParentCoverage studentCoverage = parentCoverage( *chosen, matchedStudentIds );

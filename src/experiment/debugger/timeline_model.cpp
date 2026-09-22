@@ -59,8 +59,16 @@ QVector<TimelineEntry> TimelineDiffModel::build( const RunSnapshot &reference,
         if ( finding.referenceStepId.isEmpty() )
             return;
         if ( finding.kind == DivergenceKind::UnknownNonComparable )
+        {
             incomparablePairs.insert( finding.referenceStepId );
-        else if ( finding.kind != DivergenceKind::EquivalentAlternativePath )
+            return;
+        }
+        if ( finding.kind == DivergenceKind::EquivalentAlternativePath )
+            return;
+        // Keep-FIRST: report.firstDivergence is registered before the
+        // additional findings, and a co-located additional finding must not
+        // repaint the entry the report flagged as the first divergence.
+        if ( !divergentPairs.contains( finding.referenceStepId ) )
             divergentPairs.insert( finding.referenceStepId,
                                    { divergenceKindName( finding.kind ),
                                      finding.confidence, finding.equivalenceRuleId } );

@@ -215,23 +215,23 @@ Result<FirstDivergenceReport> analyzeImpl(
         sicnu::experiment::RunComparison::compare( referenceRun, studentRun );
     report.runLevelComparison = comparison.toJson();
 
-    const auto pinDetail = [ & ]( const QString &dimension ) -> QPair<QString, QString> {
+    // Returns whether the named pin genuinely differs (RunComparison marks
+    // the flag; its detail strings are present either way).
+    const auto pinDiffers = [ & ]( const QString &dimension ) {
         for ( const sicnu::experiment::RunDiffItem &item : comparison.dimensions )
             if ( item.dimension == dimension )
-                return { item.dimension, item.detail };
-        return {};
+                return item.differs;
+        return false;
     };
 
     if ( comparison.verdict == sicnu::experiment::RunComparison::Verdict::NotComparable )
     {
         report.verdict = QStringLiteral( "non_comparable" );
         DivergenceFinding finding;
-        const auto dataset = pinDetail( QStringLiteral( "dataset" ) );
-        const auto split = pinDetail( QStringLiteral( "split" ) );
-        // RunComparison details are non-empty exactly when a pin differs:
-        // dataset/split identity differences ARE subset divergence by
-        // definition; anything else (model identity) stays honestly unknown.
-        if ( !dataset.second.isEmpty() || !split.second.isEmpty() )
+        // Dataset/split identity differences ARE subset divergence by
+        // definition; any other identity cause (model digest) stays honestly
+        // unknown — the pin evidence below names the actual dimension.
+        if ( pinDiffers( QStringLiteral( "dataset" ) ) || pinDiffers( QStringLiteral( "split" ) ) )
         {
             finding.kind = DivergenceKind::DataSubsetDivergence;
             finding.confidence = CausalConfidence::High;
@@ -339,6 +339,13 @@ Result<FirstDivergenceReport> analyzeImpl(
         ( !rootInputsComparable || !studentRootsComparable || refRoots.isEmpty() != studentRoots.isEmpty() )
             ? Verify::Unknown
             : ( refRoots == studentRoots ? Verify::Equal : Verify::Different );
+    // Roots recorded on at least one side but not comparable ⇒ a named gap,
+    // never a silent skip (the run-level identity may already differ through
+    // them without a single walk finding).
+    const bool rootsRecorded = !refRoots.isEmpty() || !studentRoots.isEmpty();
+    if ( rootVerify == Verify::Unknown && rootsRecorded )
+        report.evidenceGaps
+            << QStringLiteral( "root input identities are recorded but not comparable (missing digests or mismatched digest modes) — input-state divergence cannot be verified" );
 
     QHash<QString, bool> upstreamVerified;   // ref step id → parents fully verified equal
     auto parentsVerified = [ & ]( const StepSnapshot &step ) {
@@ -422,14 +429,20 @@ Result<FirstDivergenceReport> analyzeImpl(
                 finding.studentStepId = studentId;
                 // A missing producer whose consumer output is byte-identical
                 // is immaterial for THIS input — say so, at low confidence.
-                const bool outputEqual = outputVerify.value( refStep.stepId ) == Verify::Equal;
-                finding.confidence = outputEqual ? CausalConfidence::Low : CausalConfidence::High;
+                const Verify consumerVerify = outputVerify.value( refStep.stepId, Verify::Unknown );
+                finding.confidence =
+                    consumerVerify == Verify::Equal ? CausalConfidence::Low
+                    : consumerVerify == Verify::Different ? CausalConfidence::High
+                                                          : CausalConfidence::Medium;
                 finding.evidence
                     << QStringLiteral( "reference producer(s) absent in student: %1" )
                            .arg( missingRefProducers.join( QLatin1String( ", " ) ) );
-                if ( outputEqual )
+                if ( consumerVerify == Verify::Equal )
                     finding.evidence
                         << QStringLiteral( "consumer output digests identical — the missing step appears immaterial for this input" );
+                else if ( consumerVerify == Verify::Unknown )
+                    finding.missingEvidence
+                        << QStringLiteral( "consumer output digest absent or incomparable — causal confidence cannot be raised" );
                 findings.append( { finding, { order, 1 } } );
             }
             if ( !extraStudentProducers.isEmpty() )
@@ -446,10 +459,10 @@ Result<FirstDivergenceReport> analyzeImpl(
             }
         }
 
-        // 2. Root input state at the first root-consuming pair (no parents
-        // on either side). Reported once — at the earliest root consumer.
-        if ( rootVerify == Verify::Different && refStep.dependencies.isEmpty()
-             && studentStep->dependencies.isEmpty() )
+        // 2. Root input state at the earliest reference root consumer
+        // (a matched pair whose reference step has no parents). Reported
+        // once — later root consumers inherit the resolved state.
+        if ( rootVerify == Verify::Different && refStep.dependencies.isEmpty() )
         {
             DivergenceFinding finding;
             finding.kind = DivergenceKind::DifferentInputState;
@@ -558,10 +571,17 @@ Result<FirstDivergenceReport> analyzeImpl(
         // params equal + lineage differ ⇒ upstream cascade; the walk has
         // already reported the true origin upstream. Deliberately silent.
 
-        // 4. Output identity under an identical process.
+        // 4. Output identity under an identical process. "Identical" must be
+        // EARNED by at least one verified process dimension (recorded and
+        // equal parameters, or recorded and equal lineage) — absence of
+        // evidence is not verification, so evidence-poor modes (bridge
+        // summaries) can never claim High confidence here.
         const Verify outVerify = outputVerify.value( refStep.stepId, Verify::Unknown );
-        const bool processIdentical = ( !paramsPresentBoth || paramsEqual )
-                                      && ( !lineagePresentBoth || lineageEqual );
+        const bool paramsVerifiedEqual = paramsPresentBoth && paramsEqual;
+        const bool lineageVerifiedEqual = lineagePresentBoth && lineageEqual;
+        const bool processIdentical =
+            ( !paramsPresentBoth || paramsEqual )
+            && ( !lineagePresentBoth || lineageEqual );
         if ( processIdentical && outVerify == Verify::Different )
         {
             DivergenceFinding finding;
@@ -570,12 +590,22 @@ Result<FirstDivergenceReport> analyzeImpl(
             finding.studentStepId = studentId;
             const bool cacheComparable =
                 refStep.cacheHitKnown && studentStep->cacheHitKnown;
-            const bool cacheEqual = !cacheComparable
-                                    || refStep.cacheHit == studentStep->cacheHit;
-            finding.confidence = cacheEqual ? CausalConfidence::High : CausalConfidence::Medium;
+            const bool cacheEqual = cacheComparable
+                                    && refStep.cacheHit == studentStep->cacheHit;
+            const bool verifiedDimension = paramsVerifiedEqual || lineageVerifiedEqual;
+            finding.confidence =
+                ( verifiedDimension && cacheComparable && cacheEqual && upstream )
+                    ? CausalConfidence::High
+                    : CausalConfidence::Medium;
             finding.evidence
                 << QStringLiteral( "output_digest: reference=%1 student=%2" )
                        .arg( refStep.outputDigest, studentStep->outputDigest );
+            if ( !paramsPresentBoth )
+                finding.missingEvidence
+                    << QStringLiteral( "recorded step parameters unavailable — parameter identity could not be verified" );
+            if ( !lineagePresentBoth )
+                finding.missingEvidence
+                    << QStringLiteral( "lineage signature unavailable — process identity could not be verified" );
             if ( !cacheComparable )
                 finding.missingEvidence
                     << QStringLiteral( "cache-hit state unknown on at least one side" );
@@ -665,9 +695,11 @@ Result<FirstDivergenceReport> analyzeImpl(
                       []( const Walking &a, const Walking &b ) {
                           return a.position < b.position;
                       } );
-    if ( findings.size() > options.maxFindings )
-        findings.resize( options.maxFindings );
 
+    // The first substantive finding is determined BEFORE any capping and is
+    // never dropped: a verdict that flips under its own cap would be a
+    // truncation lie. Only the additional-findings list is bounded, and the
+    // cut is named in evidenceGaps.
     int firstSubstantive = -1;
     for ( int i = 0; i < findings.size(); ++i )
     {
@@ -678,12 +710,27 @@ Result<FirstDivergenceReport> analyzeImpl(
         }
     }
 
+    QVector<Walking> additional;
+    for ( int i = 0; i < findings.size(); ++i )
+    {
+        if ( i == firstSubstantive )
+            continue;
+        if ( additional.size() >= options.maxFindings )
+        {
+            report.evidenceGaps
+                << QStringLiteral( "additional findings truncated at %1 entries (deterministic position order); raise FirstDivergenceOptions::maxFindings for the full list" )
+                       .arg( options.maxFindings );
+            break;
+        }
+        additional.append( findings.at( i ) );
+    }
+
     if ( findings.isEmpty() )
     {
         // Identity documents differ (the shortcut did not fire) but the walk
         // found nothing — comparable-with-differences pins (e.g. run-level
-        // config) with equal steps and roots. Still honest: divergent, and
-        // the run-level diff in the report names the dimension.
+        // config) or an unverifiable root-state difference. Still honest:
+        // divergent, with the run-level diff and any named gaps in the report.
         report.verdict = QStringLiteral( "divergent" );
     }
     else if ( firstSubstantive < 0 )
@@ -692,16 +739,15 @@ Result<FirstDivergenceReport> analyzeImpl(
         // They are informational: listed as findings, and hasFirstDivergence
         // stays false — the shared process produced matching outputs.
         report.verdict = QStringLiteral( "equivalent" );
-        for ( const Walking &entry : findings )
+        for ( const Walking &entry : additional )
             report.additionalFindings.append( entry.finding );
     }
     else
     {
         report.verdict = QStringLiteral( "divergent" );
         report.firstDivergence = findings.at( firstSubstantive ).finding;
-        for ( int i = 0; i < findings.size(); ++i )
-            if ( i != firstSubstantive )
-                report.additionalFindings.append( findings.at( i ).finding );
+        for ( const Walking &entry : additional )
+            report.additionalFindings.append( entry.finding );
     }
     report.hasFirstDivergence = firstSubstantive >= 0;
 

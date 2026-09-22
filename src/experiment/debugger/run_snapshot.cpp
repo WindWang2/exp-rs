@@ -7,6 +7,7 @@
 
 #include <QCryptographicHash>
 #include <QJsonArray>
+#include <QSet>
 #include <QRegularExpression>
 
 namespace sicnu::experiment::debugger
@@ -289,11 +290,16 @@ Result<RunSnapshot> RunSnapshot::fromJson( const QJsonObject &json )
     if ( artifacts.size() > kMaxSnapshotArtifacts )
         return Result<RunSnapshot>::failure(
             malformedSnapshot( QStringLiteral( "artifact count exceeds the snapshot cap" ) ) );
+    QSet<QString> artifactIds;
     for ( const QJsonValue &value : artifacts )
     {
         auto artifact = ArtifactSnapshot::fromJson( value.toObject() );
         if ( !artifact )
             return Result<RunSnapshot>::failure( artifact.diagnostics() );
+        if ( artifactIds.contains( artifact->artifactId ) )
+            return Result<RunSnapshot>::failure( malformedSnapshot(
+                QStringLiteral( "duplicate artifact id '%1'" ).arg( artifact->artifactId ) ) );
+        artifactIds.insert( artifact->artifactId );
         snapshot.m_artifacts.append( artifact.take() );
     }
 
@@ -342,20 +348,25 @@ QJsonObject RunSnapshot::identityDocument() const
     }
     identity.insert( QLatin1String( "steps" ), steps );
 
-    // Root inputs sorted by artifact id: external input state is identity.
+    // Root inputs sorted by their identity (digest, mode) — paths are
+    // volatile and must not influence identity ordering.
     QList<ArtifactSnapshot> roots;
     for ( const ArtifactSnapshot &artifact : m_artifacts )
         if ( artifact.rootInput )
             roots.append( artifact );
     std::sort( roots.begin(), roots.end(),
                []( const ArtifactSnapshot &a, const ArtifactSnapshot &b ) {
-                   return a.artifactId < b.artifactId;
+                   if ( a.digest != b.digest )
+                       return a.digest < b.digest;
+                   return a.digestMode < b.digestMode;
                } );
     QJsonArray rootsJson;
     for ( const ArtifactSnapshot &root : roots )
     {
+        // Identity is CONTENT (digest + mode), not the volatile path: the
+        // same bytes under different file names are the same input state.
+        // Kept consistent with the analyzer's rootInputIdentities.
         QJsonObject entry;
-        entry.insert( QLatin1String( "artifact_id" ), root.artifactId );
         entry.insert( QLatin1String( "digest" ), root.digest );
         entry.insert( QLatin1String( "digest_mode" ), root.digestMode );
         rootsJson.append( entry );

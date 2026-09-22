@@ -39,9 +39,9 @@ pin comparison. It will not invent a step story.
     "student_step_id": "threshold",
     "confidence": "high",
     "evidence": [
-      "params_hash: reference=9f1a… student=44be…",
-      "upstream: ndvi verified identical (digest and lineage)"
-    ]
+      "params_hash: reference=9f1a… student=44be…"
+    ],
+    "missing_evidence": [],
   }
 }
 ```
@@ -55,7 +55,7 @@ because everything upstream was verified identical. The downstream area differen
 
 | Confidence | Meaning |
 |---|---|
-| `high` | Direct evidence (parameters/digests recorded) AND every upstream step verified identical |
+| `high` | Direct evidence (parameters/digests recorded) AND every upstream step verified identical (for a result-without-process divergence: at least one process dimension verified equal, cache state comparable, upstream verified) |
 | `medium` | Direct evidence, partial upstream verification (e.g. cache-served step) |
 | `low` | Indirect evidence only (e.g. lineage signature differs but parameters were not recorded) |
 | `none` | The evidence cannot decide — this is a named gap, never a guess |
