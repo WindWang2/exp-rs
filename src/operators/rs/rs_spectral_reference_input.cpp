@@ -254,6 +254,24 @@ void reconcileWidths( const LoadedRows &rows, const RasterWavelengthGrid &inputG
         }
 
         const bool useGaussian = inputGrid.grid.hasFwhm() && !rows.fwhmNm.empty();
+        if ( useGaussian )
+        {
+            SpectralResampling::CoverageReport coverage;
+            if ( SpectralResampling::analyzeResamplingCoverage(
+                     rows.wavelengthsNm.data(), static_cast<int>( rows.wavelengthsNm.size() ),
+                     inputGrid.grid.centersNm.data(), inputGrid.grid.fwhmNm.data(),
+                     inputBandCount, &coverage )
+                 && coverage.partial > 0 )
+            {
+                refuse( ErrorCode::InvalidInputData,
+                        std::string( refKey ) + ": " +
+                            std::to_string( coverage.partial ) +
+                            " input band(s) have edge-truncated Gaussian SRFs against "
+                            "the reference wavelength grid; widen the reference coverage "
+                            "or drop FWHM to use linear resampling (" +
+                            path.toStdString() + ")" );
+            }
+        }
         // Resampling can widen every row: enforce the cell bound on the OUTPUT
         // shape (count x input-band-count), not just the source.
         const long long outCells = static_cast<long long>( rows.spectra.size() )

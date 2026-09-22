@@ -64,10 +64,14 @@ namespace SpectralOsp
     /// λmax/λmin of the interference Gram matrix UᵀU (k×k), or -1 when it is
     /// not computable — the near-collinear diagnostic that complements the
     /// hard singularity refusal.
+    /// @a projectedTargetNormFraction (when provided) receives |Pd|²/|d|² after
+    /// a successful build (1 = target orthogonal to U; near 0 = nearly inside
+    /// the undesired subspace). Set to -1 on refusal.
     bool buildFilter( const float *target, int bands,
                       const std::vector<std::vector<float>> &interference,
                       Filter *out, QString *errorMessage = nullptr,
-                      double *interferenceCondition = nullptr );
+                      double *interferenceCondition = nullptr,
+                      double *projectedTargetNormFraction = nullptr );
 
     /// OSP score wᵀx (signed, scales with |d|). NaN when @a x has a non-finite
     /// band. @a scratch must have capacity >= @a bands.

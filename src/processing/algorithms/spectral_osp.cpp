@@ -84,10 +84,13 @@ bool validateSpectra( const float *target, int bands,
 
 bool buildFilter( const float *target, int bands,
                   const std::vector<std::vector<float>> &interference,
-                  Filter *out, QString *errorMessage, double *interferenceCondition )
+                  Filter *out, QString *errorMessage, double *interferenceCondition,
+                  double *projectedTargetNormFraction )
 {
     if ( interferenceCondition )
         *interferenceCondition = -1.0;
+    if ( projectedTargetNormFraction )
+        *projectedTargetNormFraction = -1.0;
     if ( !out )
     {
         if ( errorMessage )
@@ -184,6 +187,8 @@ bool buildFilter( const float *target, int bands,
                 "projection retains less than 1e-12 of the target energy" );
         return false;
     }
+    if ( projectedTargetNormFraction )
+        *projectedTargetNormFraction = projectedNorm2 / targetNorm2;
     return true;
 }
 
