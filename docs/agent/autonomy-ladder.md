@@ -40,7 +40,8 @@ tool/action 的能力投影——查看数据始终允许。
 **Precedence:** `course < labspec < teacher < session`。按字段取最高优先
 级来源的声明；`max_level` 取最紧的上限（任何来源都不能放松别人的上限）；
 未知来源被忽略（无法授予任何东西）。合并规则只有一处：
-`resolveEffectivePolicy`。
+`resolveEffectivePolicy`。注意：提升被 mode 天花板压制的等级时，session 层
+必须同时声明自己的 mode（课程声明的 mode 仍然约束）。
 
 **Modes:** `exam`（上限 L2）/ `practice`（上限 L4）/ `instructor`（L5）/
 `agent`（显式 L5 opt-in，无模式上限，验证强制）。
@@ -109,5 +110,6 @@ tool/action 的能力投影——查看数据始终允许。
 | `src/agent/harness/lab_copilot.cpp` | assistance gate |
 | `src/agent/harness/plan_tools.cpp` | execution gate |
 | `src/agent/harness/autonomy_tools.cpp` | `harness:autonomy_status` |
+| `src/agent/harness/tool_manifest.cpp` | `harness:execute_plan` 分类为 `creates_artifact`（execution gate 的 risk 输入） |
 | `src/agent/harness/harness_error.{h,cpp}` | 9 个 autonomy reason code 入封闭错误表 |
 | `tests/test_autonomy_*.cpp` | 轻量套件（schema/分类/引擎/优先级/审计/投影/holder）+ 重量级 gate 套件 |
