@@ -1051,6 +1051,24 @@ target_compile_definitions(test_inspector_host PRIVATE
 )
 sicnu_discover_tests(test_inspector_host)
 
+# RS14-19 Scientific Inspector view-model contract tests (ADR 0172). The
+# test file shipped orphaned (no target) and never ran; this registers it
+# over the same codec sources the app compiles.
+add_executable(test_sci_inspector
+  test_sci_inspector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/scientific/sci_inspection.cpp
+)
+target_link_libraries(test_sci_inspector PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_sci_inspector PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_sci_inspector PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_sci_inspector)
+
 add_executable(test_adversarial_m4
   test_adversarial_m4.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
@@ -6851,17 +6869,24 @@ target_include_directories(test_histogram_stretch_widget PRIVATE
 set_target_properties(test_histogram_stretch_widget PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_histogram_stretch_widget)
 
-# Guided Workflow Widget tests — data layer of the widget (LabSpec loading,
-# step model, param path resolution). Compiles the loader directly so the
-# target stays Qt-only (no app shell, no processing registry).
+# Guided Workflow Widget tests — the LabSpec data layer AND the widget's own
+# session-boundary state machine. The widget-level tests construct the real
+# widget offscreen, so the target also compiles the widget + GuiJobHandle and
+# links sicnu_task_center (GuiJobHandle's default TaskCenter) plus the QGIS
+# headers pulled in by the main_window.h include chain.
 add_executable(test_guided_workflow_widget test_guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
 )
 target_link_libraries(test_guided_workflow_widget PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_task_center
   jsoncpp
 )
 target_include_directories(test_guided_workflow_widget PRIVATE
@@ -6869,6 +6894,10 @@ target_include_directories(test_guided_workflow_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+target_compile_definitions(test_guided_workflow_widget PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_guided_workflow_widget PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_guided_workflow_widget)
 
 # LabSpec drift guards: shipped labs vs the Processing Registry (operator ids,
@@ -10377,6 +10406,44 @@ target_include_directories(test_mission_context PRIVATE
 )
 set_target_properties(test_mission_context PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_mission_context)
+
+# Mission Runtime 13.0 single-authority persistence: load/save contract, the
+# boundary-reset → fresh-mission rule the window's New/Open Project boundary
+# relies on, and the poisoned-authority save refusal. Qt XML channel included.
+add_executable(test_mission_runtime_store
+  test_mission_runtime_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
+  # selection_context pulls ContextRules + WorkbenchHost (same pair as
+  # test_workbench_host); mission_context pulls ContextRules helpers.
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+)
+target_link_libraries(test_mission_runtime_store PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mission_runtime_store PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mission_runtime_store PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mission_runtime_store PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mission_runtime_store)
 
 add_executable(test_mission_e2e_scaffolding
   test_mission_e2e_scaffolding.cpp
