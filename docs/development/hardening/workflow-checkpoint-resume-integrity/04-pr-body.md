@@ -46,10 +46,17 @@
 
 ## 测试证据
 
-- 新增 7 个 TEST_CASE（6 文件内追加，**零新测试可执行文件、零 CMake 改动**）。
-- 杀伤力证明（sabotage/RED）：每项修复在临时 revert 后由对应新测试变红（记录见 `.planning/.../03-implementation-ledger.md` 验证记录节 + PR 评论数据）。
-- targeted 套件（两遍）：`test_ir2_port_param_mapping`、`test_workflow_recovery`、`test_workflow_checkpoint_cache`、`test_d17_workflow_pipeline_e2e`、`test_workflow_ir_v2`、`test_workflow_run_coordinator`、`test_workflow_durability_13`。
-- 平台注意：POSIX 路径验证于 Linux；Windows/macOS 特有行为（ADS、QLockFile、case-insensitive containment）由平台无关节点单测与既有跨平台测试覆盖，未在真实 Windows 上运行（online CI not awaited）。
+- 新增 8 个 TEST_CASE（3 个既有测试 TU 内追加，**零新测试可执行文件、零 CMake 改动**）。
+- 本地验证状态（如实）：
+  - 全部修改 TU（3 源文件 + 3 测试文件）以真实 Qt6/jsoncpp/catch2 头文件路径通过 `g++ -fsyntax-only -std=c++20` 零错误；
+  - 含全部修改的 `sicnu_workflow` SHARED 库完整编译通过（零 error）；
+  - **测试可执行文件的链接与运行应 owner 指令停止**——回归 oracle 的正确性依据为逐条反例推演 + 独立 reviewer 对每个用例"revert 必红、无抖动源"的逐条判定（见 05-adversarial-review.md）。online CI not awaited。
+- 杀伤力证明：独立 reviewer 判定 8 个新 TEST_CASE 中 7 个 revert 必红；destroy 测试初版的侥幸路径（P1）已按其修法重写为结构性必中窗口。
+- 平台注意：POSIX 路径验证于 Linux；Windows/macOS 特有行为（ADS、QLockFile、case-insensitive containment）由平台无关节点单测与既有跨平台测试覆盖，未在真实 Windows 上运行。
+
+## 独立 adversarial review 结论与处置
+
+Reviewer（未参与实现）通读全部现状代码与调用方后结论 **PROCEED-WITH-FIXES**：六项修复本体无 P0；1 个 P1（destroy 测试结构性侥幸路径）+ 3 个 P2 + 7 个 P3。P1/P2 全部修复并各绑回归 oracle（commit `c47e99929c`）；P3 就地修复 3 项（executor 显式 stackLimit=1024、startRun 锁错误消息区分、析构 busy-wait 慢告警），其余 4 项记档（probeOwner 语义属既有 WorkflowRunLock authority、锁文件累积为设计行为、测试 unregister 卫生与文件内既有 idiom 一致）。
 
 ## 已知限制 / 记档不实现（防模糊 TODO）
 
