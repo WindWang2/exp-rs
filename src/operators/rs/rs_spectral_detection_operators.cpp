@@ -17,6 +17,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_anomaly.h"
+#include "processing/algorithms/primitives/dense_linalg.h"
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
 #include "processing/algorithms/spectral_osp.h"
@@ -212,8 +213,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                             std::to_string( backgroundGrid.grid.centersNm.front() ) + "-" +
                             std::to_string( backgroundGrid.grid.centersNm.back() ) + " nm" );
                 backgroundResampled = true;
-                backgroundPartial = coverage.partial > 0;
                 backgroundGaussian = inputGrid.grid.hasFwhm() && backgroundGrid.grid.hasFwhm();
+                // CoverageReport.partial is a Gaussian edge-truncation count;
+                // the linear kernel has no partial notion — only report
+                // "partial" when the Gaussian path actually runs.
+                backgroundPartial = backgroundGaussian && coverage.partial > 0;
                 backgroundCenters = backgroundGrid.grid.centersNm;
             }
         }
@@ -229,6 +233,14 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         {
             // No reconciliation possible (at least one side lacks a grid):
             // band-order interpretation requires matching band counts.
+            if ( backgroundBands < 2 )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "background raster has " + std::to_string( backgroundBands ) +
+                        " band(s); a gridded multi-band background (wavelength "
+                        "metadata on both sides) is required to reconcile onto the " +
+                        std::to_string( bandCount ) + "-band scene, otherwise "
+                        "band-order interpretation needs matching band counts" );
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
                 "background raster has " + std::to_string( backgroundBands ) +
@@ -399,7 +411,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             backgroundSamples = cemStats.count;
             correlation = std::move( cemStats.correlation );
             context.throwIfCancelled();
-            backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
+            backgroundCondition = sicnu::primitives::conditionNumber( correlation, bandCount );
         }
         else
         {
@@ -454,7 +466,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 throw RSOperatorError( ErrorCode::ComputationError,
                                        "Background covariance is singular" );
             backgroundSamples = stats.count;
-            backgroundCondition = SpectralAnomaly::conditionProxy( stats.covariance, bandCount );
+            backgroundCondition = sicnu::primitives::conditionNumber( stats.covariance, bandCount );
         }
     }
 
@@ -464,11 +476,12 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     SpectralTcimf::Filter tcimfFilter;
     SpectralOsp::Filter ospFilter;
     double interferenceCondition = -1.0;
+    double projectedTargetNormFraction = -1.0;
     QString buildError;
     if ( isOsp )
     {
         if ( !SpectralOsp::buildFilter( target, bandCount, interference, &ospFilter, &buildError,
-                                        &interferenceCondition ) )
+                                        &interferenceCondition, &projectedTargetNormFraction ) )
             throw RSOperatorError( ErrorCode::InvalidInputData,
                                    "OSP filter is degenerate: " + buildError.toStdString() );
     }
@@ -580,6 +593,8 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         result["interferenceCount"] = static_cast<Json::UInt64>( interference.size() );
         if ( interferenceCondition >= 0.0 )
             result["interferenceCondition"] = interferenceCondition;
+        if ( projectedTargetNormFraction >= 0.0 )
+            result["projectedTargetNormFraction"] = projectedTargetNormFraction;
         result["interferenceSource"] = interferenceResolved.sourceDescription.toStdString();
         if ( interferenceResolved.resampled )
             result["interferenceResampled"] = true;

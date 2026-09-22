@@ -279,6 +279,24 @@ Json::Value RsSpectralSpatialFuseOperator::run( const Json::Value &params,
         }
     }
 
+    // Provenance: fused scores inherit geometry from the input score plane;
+    // stamp the operator + params so downstream QA can see the lineage
+    // (previously the Float32 product carried no metadata at all).
+    out.setMetadataItem( QStringLiteral( "SICNU_OPERATOR" ),
+                         QStringLiteral( "rs:spectral_spatial_fuse" ) );
+    out.setMetadataItem( QStringLiteral( "SICNU_SOURCE" ),
+                         QString::fromStdString( inputPath ) );
+    out.setMetadataItem( QStringLiteral( "SICNU_FUSION_METHOD" ),
+                         method == SpectralSpatialFusion::Method::Bilateral
+                             ? QStringLiteral( "bilateral" )
+                             : QStringLiteral( "mean" ) );
+    out.setMetadataItem( QStringLiteral( "SICNU_FUSION_RADIUS" ), QString::number( radius ) );
+    out.setMetadataItem( QStringLiteral( "SICNU_FUSION_BETA" ),
+                         QString::number( beta, 'g', 10 ) );
+    if ( method == SpectralSpatialFusion::Method::Bilateral )
+        out.setMetadataItem( QStringLiteral( "SICNU_FUSION_SIGMA_RANGE" ),
+                             QString::number( sigmaRange, 'g', 10 ) );
+
     QString closeError;
     if ( !out.closeWithError( &closeError ) )
         throw RSOperatorError( ErrorCode::GdalError, "Failed to finalize output: " + closeError.toStdString() );
