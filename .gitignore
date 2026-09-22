@@ -54,6 +54,11 @@ data/*
 # for guided workflows, generated docs and (D4/D7) auto-grading.
 !data/labs/
 !data/labs/**
+# Fault injection lab scenarios + schema (RS14-13): small tracked JSON
+# metadata, the single source of truth for fault scenarios. Rasters are
+# generated at runtime into sandbox temp dirs and never tracked here.
+!data/faultlab/
+!data/faultlab/**
 # Lab step outputs (guided runs resolve outputs/... to /output/labs/<labId>/).
 /output/
 # CN satellite product metadata templates (band-role tables, field maps;
@@ -135,6 +140,10 @@ vendor/
 !.planning/lab-spec-data-driven/
 .planning/lab-spec-data-driven/*
 !.planning/lab-spec-data-driven/*.md
+# Fault injection lab track planning notes (RS14-13; markdown only).
+!.planning/RS14-13-fault-injection-labs/
+.planning/RS14-13-fault-injection-labs/*
+!.planning/RS14-13-fault-injection-labs/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/

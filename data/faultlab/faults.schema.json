@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sicnu.lab.faults/1",
+  "title": "Scientific Fault Injection Lab scenario (sicnu.lab.faults/1)",
+  "description": "Declarative fault scenario: a clean base fixture, a fault transform with a seed, sandbox rules, expected observable deltas, an expected diagnosis and a learning objective. The C++ loader (src/faultlab/fault_scenario.cpp) is the authoritative implementation; this schema documents the same contract for authors. Fail-closed: unknown family ids, relations and schema versions are rejected, never defaulted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "title",
+    "fault",
+    "base_fixture",
+    "expected",
+    "learning_objective"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sicnu.lab.faults/1"
+    },
+    "scenario_id": {
+      "type": "string",
+      "pattern": "^fs_[a-z0-9_]+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title_zh": {
+      "type": "string"
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "seed"],
+      "properties": {
+        "family": {
+          "type": "string",
+          "description": "Closed vocabulary from the fault-family registry (src/faultlab/fault_registry.cpp).",
+          "enum": [
+            "band_role_swap",
+            "omit_quality_mask",
+            "wrong_scale_offset",
+            "nodata_as_data",
+            "grid_shift",
+            "crs_mismatch",
+            "temporal_shuffle",
+            "temporal_gap",
+            "train_test_spatial_leakage",
+            "threshold_misuse",
+            "model_channel_mismatch",
+            "provenance_removal"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "description": "Family-specific params. The per-family closed vocabulary (required/optional names) is published by the registry; the transform rejects unknown or missing params with faultlab.fault_unsupported_params."
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Drives every stochastic step of the transform; identical seeds replay identically."
+        }
+      }
+    },
+    "base_fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixture_id", "seed"],
+      "properties": {
+        "fixture_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Deterministic fixture from the built-in factory (src/faultlab/fault_fixtures.cpp)."
+        },
+        "params": {
+          "type": "object"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "const": "temp_copy"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864,
+          "description": "Byte budget for the fixture copy; 64 MiB ceiling."
+        },
+        "require_source_unchanged": {
+          "const": true,
+          "description": "The runner re-digests the source fixture after the run; a drift fails faultlab.source_mutated."
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observables", "diagnosis"],
+      "properties": {
+        "observables": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "relation"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relation": {
+                "enum": ["equals", "not_equals", "changed", "delta_ge", "delta_le", "in_range", "truth_is"]
+              },
+              "value": {
+                "description": "Operand for equals/not_equals/changed(implicit 0)/delta_ge/delta_le; boolean for truth_is."
+              },
+              "range_lo": {
+                "type": "number"
+              },
+              "range_hi": {
+                "type": "number"
+              },
+              "text": {
+                "type": "string",
+                "description": "Operand for text observables (band_roles, acquisition_dates, channel_order, ...)."
+              }
+            }
+          }
+        },
+        "diagnosis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signature"],
+          "properties": {
+            "signature": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Expected lab diagnostic signature (all_negative_index, all_nodata, kappa_near_zero, blank_change_mask, crs_mismatch, scale_stripes) or the typed diagnostic.unmatched when no canonical signature covers the family."
+            }
+          }
+        },
+        "verifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules_ref": {
+              "type": "string",
+              "description": "Grading rules reference (sicnu.lab.rules/1 family) for artifact-level checks."
+            },
+            "must_fail_assertions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Assertion ids that must fail on the faulted artifact (existing OutputVerifier assertion kinds only; no new kinds)."
+            }
+          }
+        }
+      }
+    },
+    "learning_objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^LO-[0-9]{2}$"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "statement_zh": {
+          "type": "string"
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "const": true,
+          "description": "May not be waived: every scenario runs in a verified temp-copy sandbox."
+        },
+        "verify_no_residue": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
