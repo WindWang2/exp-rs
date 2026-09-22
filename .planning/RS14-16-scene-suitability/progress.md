@@ -68,3 +68,10 @@
 - `test_data_platform_surface`：**5 cases / 105 assertions 全绿**（直调 handleDataPlatformTool 的 surface 契约）。
 - `test_surface_parity`：7/8 cases 绿；唯一失败是 CLI 子进程 leg（`:340 waitForStarted`）——`sicnu_geo_rs_cli` 二进制在本 worktree 的部分构建树中不存在（`build-dev/src/cli/` 无产物），属环境性缺失，与本改动无关；与本改动直接相关的 dispatch-probe leg（每个 data-platform def 必须有 handler、绝不 "unknown data-platform tool"）与投影 parity leg 全绿。CI 全量构建下该 leg 将正常执行。
 - capability drift 面：按构造未触碰（kDataPlatformPrefixes/knowledge 零改动）；#1151 既有红灯与本 track 无关。
+
+## 收尾（2026-09-22）
+- Union merge master `14bef28949`（46 commits）：`.gitignore` 白名单并集、tests/CMakeLists.txt 追加块并集；agent 薄壳自动合并核验完好。
+- 合并后回归：11 个 suitability 套件全绿；`test_data_platform_surface` 5 cases / 105 assertions 绿；`test_surface_parity` 3962/3963（唯一失败为 `sicnu_geo_rs_cli` 二进制未构建的环境项，与本改动无关，CI 全量构建下正常）。
+- **PR #1236 已创建**：https://github.com/WindWang2/exp-rs/pull/1236（未等 CI，不以 CI 为完成条件）。
+- Track Definition of Done 对照：①本科生端到端场景=profiles 套件 classification/phenology mini-scenario ✅ ②agent machine-readable=agent_adapter+工具+digest 复核 ✅ ③单一事实源=只调 compareGrids/复用 BenchmarkTaskFamily/Result 词汇（review 双轮确认）✅ ④typed 失败全路径（round1 round2 验证）✅ ⑤离线可用（全部套件无网络）✅ ⑥资源上界（caps+实测 7.7ms/预算 50ms）✅ ⑦动态去重（10 个兄弟 PR 零重叠+union merge 记录）✅
+- follow-up 清单见 Review Gate 记录节。
