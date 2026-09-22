@@ -4,6 +4,7 @@
 #include "agent/autonomy/autonomy_holder.h"
 #include "agent/autonomy/autonomy_policy.h"
 #include "agent/autonomy/autonomy_projection.h"
+#include "harness_actions.h"
 #include "lab_copilot.h"
 #include "spatial_tools/spatial_tool.h"
 
@@ -66,11 +67,20 @@ class AutonomyStatusTool final : public SpatialTool
 
     SpatialToolResult execute( const Json::Value &input ) override
     {
-      const Json::Value &role = input[ "role" ];
-      const Json::Value &domain = input[ "domain" ];
-      const std::string sessionRole = role.isString() ? role.asString() : std::string();
-      const std::string surfaceDomain =
-          domain.isString() && !domain.asString().empty() ? domain.asString() : std::string( "lab" );
+      // Same session-context hardening as the execution gate (plan_tools):
+      // a non-elevated role passes through, an elevated claim needs the
+      // host-injected credential, and the domain is honored only with the
+      // credential — a forged context must not re-scope the projection the
+      // UI renders (it cannot raise levels, but it must not lie either).
+      std::string sessionRole;
+      if ( input.isMember( "role" ) && input[ "role" ].isString() )
+        sessionRole = normalizeLabRole( input[ "role" ].asString() );
+      if ( labRoleMayUseTeacherSurfaces( sessionRole ) && !teacherCredentialValid( input ) )
+        sessionRole = "student";
+      std::string surfaceDomain( "lab" );
+      if ( teacherCredentialValid( input ) && input.isMember( "domain" ) &&
+           input[ "domain" ].isString() && !input[ "domain" ].asString().empty() )
+        surfaceDomain = input[ "domain" ].asString();
 
       std::vector<sicnu::agent::autonomy::AutonomyPolicyLayer> layers;
       const Json::Value &session = input[ "autonomy" ];

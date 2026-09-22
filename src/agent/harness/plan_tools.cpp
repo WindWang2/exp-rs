@@ -15,6 +15,7 @@
 #include "entity_resolver.h"
 #include "evidence.h"
 #include "grounding_tools.h"
+#include "harness_actions.h"
 #include "harness_verification.h"
 #include "lab_copilot.h"
 #include "scientific_preflight.h"
@@ -176,9 +177,6 @@ Json::Value refsProperty()
 /// evidence sidecar writes, the ledger rebind, and map confirmation —
 /// observation surfaces (harness:explain) pass false so they stay strictly
 /// read-only (adversarial review P1).
-Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
-                               const AgentPlan *plan, bool persistEvidence = true );
-
 /// Harness 7.0 (mission Area F): derive verification expectations instead of
 /// the near-vacuous 4.0 defaults. Layered, most specific wins:
 ///   1. structural defaults (existing semantics),
@@ -953,13 +951,30 @@ sicnu::agent::autonomy::AutonomyDecision decidePlanExecution( const Json::Value 
   request.riskClass = riskClassForToolId( request.toolId );
   request.capability = classifyActionRisk( request.riskClass ).capability;
 
-  const Json::Value &role = input[ "role" ];
-  request.role = role.isString() ? role.asString() : std::string();
-  const Json::Value &session = input[ "autonomy" ];
-  const Json::Value &domain = session[ "domain" ];
-  request.domain = domain.isString() && !domain.asString().empty() ? domain.asString() : "agent";
+  // Role is session state, never a caller claim: the same hardening as
+  // labAsk() applies. Non-elevated values pass through; a teacher/admin
+  // claim is honored only with the host-injected credential and degrades
+  // to student otherwise — a forged instructor role must not skip the
+  // lab-student structural rule.
+  std::string role;
+  if ( input.isMember( "role" ) && input[ "role" ].isString() )
+    role = normalizeLabRole( input[ "role" ].asString() );
+  if ( labRoleMayUseTeacherSurfaces( role ) && !teacherCredentialValid( input ) )
+    role = "student";
+  request.role = role;
+
+  // Domain is host-injected session CONTEXT: without the credential the
+  // whole session block (policy and context) is ignored and the request
+  // stays in the research domain. An uncredentialed caller cannot re-scope
+  // itself into — or out of — the teaching domain.
+  std::string domain = "agent";
+  if ( teacherCredentialValid( input ) && input.isMember( "domain" ) &&
+       input[ "domain" ].isString() && !input[ "domain" ].asString().empty() )
+    domain = input[ "domain" ].asString();
+  request.domain = domain;
 
   std::vector<AutonomyPolicyLayer> layers;
+  const Json::Value &session = input[ "autonomy" ];
   if ( session.isObject() && teacherCredentialValid( input ) )
   {
     const AutonomyPolicyParseResult parsed = parseAutonomyPolicy( session );
@@ -1408,7 +1423,46 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
       verifications.push_back( artifact );
       artifacts.append( artifact.toJson() );
     }
-    const Verdict overall = aggregateVerdict( verifications );
+    // Integrity: a Completed run must carry artifact evidence. A run whose
+    // steps produced no output paths verifies an EMPTY artifact set —
+    // aggregating that to PASS would be a success claim with nothing
+    // behind it, so it fails closed instead.
+    Verdict overall = aggregateVerdict( verifications );
+    if ( verifications.empty() )
+    {
+      overall = Verdict::Fail;
+      verificationDoc["reason"] =
+        "completed run produced no verifiable artifacts; success would be a "
+        "claim without evidence";
+    }
+    else if ( plan && plan->outputs.isArray() )
+    {
+      // Declared outputs whose producing step never recorded a verified
+      // path are surfaced honestly instead of being silently dropped from
+      // a delivered result. A FAIL stays FAIL; only a clean PASS degrades.
+      std::set<std::string> verifiedPaths;
+      for ( const ArtifactVerification &verification : verifications )
+        verifiedPaths.insert( verification.path );
+      const auto stepPlans = run->stepPlans(); // one locked copy
+      Json::Value unmapped( Json::arrayValue );
+      for ( const Json::Value &output : plan->outputs )
+      {
+        const std::string fromStep = output.get( "from_step", "" ).asString();
+        bool mapped = false;
+        for ( const auto &step : stepPlans )
+          if ( step.stepId == fromStep && !step.outputLayerPath.empty() &&
+               verifiedPaths.count( step.outputLayerPath ) > 0 )
+            mapped = true;
+        if ( !mapped )
+          unmapped.append( output );
+      }
+      if ( !unmapped.empty() )
+      {
+        verificationDoc["declared_outputs_missing"] = std::move( unmapped );
+        if ( overall == Verdict::Pass )
+          overall = Verdict::PassWithWarnings;
+      }
+    }
     verificationDoc["artifacts"] = artifacts;
     verificationDoc["verdict"] = verdictToStringWire( overall );
     verificationDoc["expectations"] = [ &derived ] {

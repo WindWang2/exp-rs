@@ -5,6 +5,12 @@
 
 #include "../spatial_tools/spatial_tool.h"
 
+#include <workflow/workflow_run.h>
+
+#include <json/json.h>
+
+#include <memory>
+
 namespace sicnu::agent::harness {
 
 /// Registers the plan lifecycle tools (mission Phases 5-10, 13):
@@ -20,5 +26,16 @@ void registerPlanTools();
 /// resolved datasets. Empty error = all pins hold; otherwise a typed
 /// blocking error (IDENTITY_MISMATCH or the resolution failure).
 HarnessError validatePlanIdentity( const AgentPlan &plan );
+
+/// Builds the harness:run_status result document for a run: per-step
+/// states, the aggregate verification verdict over the run's completed
+/// outputs (FAIL can never surface as success), and the evidence sidecar
+/// report. `persistEvidence` (default true) controls the evidence sidecar
+/// writes, the ledger rebind, and map confirmation — observation surfaces
+/// (harness:explain) pass false so they stay strictly read-only
+/// (adversarial review P1). Declared here so the document contract is
+/// directly testable.
+Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
+                               const AgentPlan *plan, bool persistEvidence = true );
 
 } // namespace sicnu::agent::harness

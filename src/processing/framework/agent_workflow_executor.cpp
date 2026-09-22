@@ -349,6 +349,11 @@ Json::Value AgentWorkflowExecutor::assemblePlanResult( int totalSteps, long pipe
   else
   {
     planResult["status"] = "success";
+    // Honest claim class: this surface runs the engine but NOT harness
+    // verification — "success" here means engine completion, never a
+    // scientifically verified product. Verifiable execution goes through
+    // harness:execute_plan / harness:run_status.
+    planResult["verification"] = "not_performed";
   }
 
   return planResult;

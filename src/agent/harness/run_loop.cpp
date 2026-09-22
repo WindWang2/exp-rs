@@ -50,14 +50,29 @@ int &diagnoseAttempts( const std::string &runId )
   // of distinct run ids cannot grow the map without end.
   static std::map<std::string, int> kLedger;
   constexpr size_t kMaxTrackedRuns = 256;
+  // FIFO evict like every other bounded ledger here: clearing wholesale
+  // would reset EVERY tracked run's budget and let a caller that spawns
+  // throwaway run ids evade the diagnose cap.
   if ( kLedger.size() > kMaxTrackedRuns )
-    kLedger.clear();
+    kLedger.erase( kLedger.begin() );
   return kLedger[ runId ];
 }
 /// Proposal-set signature of the LAST issued diagnosis per run. A caller
 /// that re-invokes diagnose WITHOUT changing anything gets a typed
 /// "repeated_error" stop instead of the same proposals again — the loop can
 /// never repair the same error twice (Compiler 10.0 loop guard).
+/// Distinct proposal-set signatures already seen per run (bounded FIFO
+/// like the ledgers above) — the honest source for the
+/// `distinct_proposal_sets` loop-guard telemetry.
+std::set<std::string> &seenProposalSignatures( const std::string &runId )
+{
+  static std::map<std::string, std::set<std::string>> kSeen;
+  constexpr size_t kMaxTrackedRuns = 256;
+  if ( kSeen.size() > kMaxTrackedRuns )
+    kSeen.erase( kSeen.begin() );
+  return kSeen[ runId ];
+}
+
 std::string &lastProposalSignature( const std::string &runId )
 {
   // Same ownership/threading model as diagnoseAttempts: serialized by the
@@ -350,7 +365,8 @@ class DiagnoseRunTool final : public SpatialTool
       // Loop-guard telemetry (ADR 0149 decision 7): how many DISTINCT
       // proposal sets this run has seen, so a caller can tell "same repair
       // twice" from "new failure shape".
-      bounds["distinct_proposal_sets"] = static_cast<Json::Int>( 1 );
+      bounds["distinct_proposal_sets"] =
+          static_cast<Json::Int>( seenProposalSignatures( runId ).size() );
 
       Json::Value stop( Json::objectValue );
       stop["stop"] = false;
@@ -462,6 +478,9 @@ class DiagnoseRunTool final : public SpatialTool
         out["diagnosis"] = diagnosis;
         return SpatialToolResult::ok( std::move( out ) );
       }
+      seenProposalSignatures( runId ).insert( signature );
+      bounds["distinct_proposal_sets"] =
+          static_cast<Json::Int>( seenProposalSignatures( runId ).size() );
       lastProposalSignature( runId ) = signature;
 
       if ( attempts >= kMaxDiagnoseAttempts && !deduped.empty() )
