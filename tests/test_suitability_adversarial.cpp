@@ -1257,3 +1257,44 @@ TEST_CASE( "the builtin profile table keeps its scientific defaults per key",
         REQUIRE( !profile->gridStrict.has_value() );
     }
 }
+
+TEST_CASE( "unrepresentable integral facts fields from json fail typed like goal fields",
+           "[suitability][adversarial]" )
+{
+    // Review round 1 (P1): DatasetFacts::fromJson cast sample/histogram
+    // doubles straight to qint64 — the same UB class the goal parser fixed.
+    auto factsJson = [] {
+        QJsonObject json;
+        json.insert( QStringLiteral( "schema_version" ), 1 );
+        json.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+        return json;
+    };
+
+    QJsonObject hugeSampleCount = factsJson();
+    hugeSampleCount.insert( QStringLiteral( "sample_count" ), 1e300 );
+    const auto huge = DatasetFacts::fromJson( hugeSampleCount );
+    REQUIRE( !huge.has_value() );
+    REQUIRE( huge.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+
+    QJsonObject infiniteMissing = factsJson();
+    infiniteMissing.insert( QStringLiteral( "missing_time_count" ),
+                            std::numeric_limits< double >::infinity() );
+    const auto infinite = DatasetFacts::fromJson( infiniteMissing );
+    REQUIRE( !infinite.has_value() );
+    REQUIRE( infinite.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+
+    QJsonObject hugeHistogram = factsJson();
+    QJsonObject byClass;
+    byClass.insert( QStringLiteral( "forest" ), 1e301 );
+    hugeHistogram.insert( QStringLiteral( "samples_by_class" ), byClass );
+    const auto histogram = DatasetFacts::fromJson( hugeHistogram );
+    REQUIRE( !histogram.has_value() );
+    REQUIRE( histogram.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+
+    // Sane facts keep parsing (regression against over-tightening).
+    QJsonObject sane = factsJson();
+    sane.insert( QStringLiteral( "sample_count" ), 4200.0 );
+    const auto ok = DatasetFacts::fromJson( sane );
+    REQUIRE( ok.has_value() );
+    REQUIRE( ok.value().sampleCount == 4200 );
+}

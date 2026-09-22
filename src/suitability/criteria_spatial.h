@@ -18,6 +18,10 @@ namespace sicnu::suitability
 
 /// AOI ∩ ⋃(usable scene rectangles), same-CRS scenes only, measured by
 /// coordinate-compressed rectangle union (safe at the assessor's scene cap).
+// Note: CRS comparison delegates to sicnu::data::isSameCrs; a scene carrying
+// a non-WKT CRS token (e.g. "EPSG:32633" instead of WKT) makes the underlying
+// OGR layer log a GDAL error to stderr per comparison. The verdict stays
+// correct (incomparable -> excluded -> Unknown), at the cost of log noise.
 SuitabilityCriterion assessSpatialCoverage( const ResolvedRequirements &req,
                                             const QVector<SceneCandidate> &scenes );
 

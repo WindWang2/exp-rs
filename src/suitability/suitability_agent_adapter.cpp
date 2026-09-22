@@ -132,8 +132,11 @@ QVariantMap suitabilityAssess( const QVariantMap &args )
 
     const QString versionId = args.value( QStringLiteral( "dataset_version_id" ) ).toString();
     const QString dbPath = args.value( QStringLiteral( "dataset_db" ) ).toString();
-    // Same open path and read-only convention as the dataset: tools. The
-    // store and its borrowed projection provider live only for this call.
+    // Same open path and read-only convention as the dataset: tools — note
+    // DatasetStore::open CREATES the file when the path does not exist yet
+    // (the dataset: tools' precedent; an assessment on a fresh store simply
+    // reports unknown facts). The store and its borrowed projection provider
+    // live only for this call.
     std::unique_ptr<sicnu::dataset::DatasetStore> store;
     std::unique_ptr<StoreDataProvider> provider;
     if ( !dbPath.isEmpty() )

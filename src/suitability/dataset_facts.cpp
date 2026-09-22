@@ -3,6 +3,7 @@
 #include <QJsonArray>
 
 #include <algorithm>
+#include <cmath>
 
 namespace sicnu::suitability
 {
@@ -23,12 +24,36 @@ QJsonObject sortedHashToJson( const QHash<QString, qint64> &hash )
     return json;
 }
 
-QHash<QString, qint64> hashFromJson( const QJsonObject &json )
+inline constexpr double kMaxExactIntegralDouble = 9007199254740992.0; // 2^53
+
+/// Integral JSON value without UB — the same gate goal fields apply (Slice G
+/// standard): anything non-finite or outside the exact-integer double range
+/// fails typed instead of casting.
+sicnu::data::Result<qint64> boundedCount( double raw, const QString &key )
+{
+    if ( !std::isfinite( raw ) || raw < -kMaxExactIntegralDouble
+         || raw > kMaxExactIntegralDouble )
+    {
+        return sicnu::data::Result<qint64>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.facts_invalid" ),
+            QStringLiteral( "%1 is not a representable integer" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    return sicnu::data::Result<qint64>::success( static_cast< qint64 >( raw ) );
+}
+
+sicnu::data::Result<QHash<QString, qint64>> hashFromJson( const QJsonObject &json,
+                                                          const QString &key )
 {
     QHash<QString, qint64> hash;
     for ( auto it = json.begin(); it != json.end(); ++it )
-        hash.insert( it.key(), static_cast< qint64 >( it.value().toDouble( -1.0 ) ) );
-    return hash;
+    {
+        auto value = boundedCount( it.value().toDouble( -1.0 ), key );
+        if ( !value.has_value() )
+            return sicnu::data::Result<QHash<QString, qint64>>::failure( value.diagnostics() );
+        hash.insert( it.key(), value.value() );
+    }
+    return sicnu::data::Result<QHash<QString, qint64>>::success( hash );
 }
 
 QStringList stringArrayFromJson( const QJsonArray &array )
@@ -109,21 +134,37 @@ sicnu::data::Result<DatasetFacts> DatasetFacts::fromJson( const QJsonObject &jso
             sicnu::data::DiagnosticSeverity::Error } );
     }
     facts.factsTruncated = json.value( QStringLiteral( "facts_truncated" ) ).toBool( false );
-    facts.sampleCount = static_cast< qint64 >(
-        json.value( QStringLiteral( "sample_count" ) ).toDouble( -1.0 ) );
-    facts.pseudoLabelCount = static_cast< qint64 >(
-        json.value( QStringLiteral( "pseudo_label_count" ) ).toDouble( -1.0 ) );
-    facts.missingTimeCount = static_cast< qint64 >(
-        json.value( QStringLiteral( "missing_time_count" ) ).toDouble( -1.0 ) );
+    auto sampleCount = boundedCount(
+        json.value( QStringLiteral( "sample_count" ) ).toDouble( -1.0 ),
+        QStringLiteral( "sample_count" ) );
+    if ( !sampleCount.has_value() )
+        return sicnu::data::Result<DatasetFacts>::failure( sampleCount.diagnostics() );
+    facts.sampleCount = sampleCount.value();
+    auto pseudoLabelCount = boundedCount(
+        json.value( QStringLiteral( "pseudo_label_count" ) ).toDouble( -1.0 ),
+        QStringLiteral( "pseudo_label_count" ) );
+    if ( !pseudoLabelCount.has_value() )
+        return sicnu::data::Result<DatasetFacts>::failure( pseudoLabelCount.diagnostics() );
+    facts.pseudoLabelCount = pseudoLabelCount.value();
+    auto missingTimeCount = boundedCount(
+        json.value( QStringLiteral( "missing_time_count" ) ).toDouble( -1.0 ),
+        QStringLiteral( "missing_time_count" ) );
+    if ( !missingTimeCount.has_value() )
+        return sicnu::data::Result<DatasetFacts>::failure( missingTimeCount.diagnostics() );
+    facts.missingTimeCount = missingTimeCount.value();
     facts.hasLabelSchema = json.value( QStringLiteral( "has_label_schema" ) ).toBool( false );
     facts.labelClasses = stringArrayFromJson(
         json.value( QStringLiteral( "label_classes" ) ).toArray() );
-    facts.samplesByClass = hashFromJson(
-        json.value( QStringLiteral( "samples_by_class" ) ).toObject() );
-    facts.samplesBySeason = hashFromJson(
-        json.value( QStringLiteral( "samples_by_season" ) ).toObject() );
-    facts.samplesByYear = hashFromJson(
-        json.value( QStringLiteral( "samples_by_year" ) ).toObject() );
+    for ( const auto &[key, member] :
+          { qMakePair( QStringLiteral( "samples_by_class" ), &facts.samplesByClass ),
+            qMakePair( QStringLiteral( "samples_by_season" ), &facts.samplesBySeason ),
+            qMakePair( QStringLiteral( "samples_by_year" ), &facts.samplesByYear ) } )
+    {
+        auto hash = hashFromJson( json.value( key ).toObject(), key );
+        if ( !hash.has_value() )
+            return sicnu::data::Result<DatasetFacts>::failure( hash.diagnostics() );
+        *member = hash.value();
+    }
     facts.bandRoles = stringArrayFromJson(
         json.value( QStringLiteral( "band_roles" ) ).toArray() );
     facts.modality = json.value( QStringLiteral( "modality" ) ).toString();
