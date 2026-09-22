@@ -278,3 +278,40 @@ TEST_CASE( "offline refusal and cached-path helpers follow the layer contracts",
   RemoteRangeCache::uninstall();
   CHECK( RemoteRangeCache::installed() == false );
 }
+
+TEST_CASE( "nested credential windows hand the cache fingerprint back to the outer window",
+           "[io][fabric][object_store][identity]" )
+{
+  // Exact restore, same discipline as the config-key journal: closing the
+  // inner window must restore the still-open outer window's OWN fingerprint.
+  // Resetting to the empty context silently re-keys the outer principal's
+  // fetches into the shared (context-less) keyspace — the cross-principal
+  // merge D-1102 exists to prevent.
+  ObjectStoreCredentials outerCreds;
+  outerCreds.accessKeyId = "AKIA_TEST_OUTER";
+  outerCreds.secretAccessKey = "outer-secret";
+  outerCreds.region = "us-west-2a";
+  ObjectStoreCredentials innerCreds;
+  innerCreds.accessKeyId = "AKIA_TEST_INNER";
+  innerCreds.secretAccessKey = "inner-secret";
+  innerCreds.region = "us-west-2a";
+
+  const std::string outerContext = objectStoreCredentialContext( "/vsis3/", outerCreds );
+  const std::string innerContext = objectStoreCredentialContext( "/vsis3/", innerCreds );
+  REQUIRE( !outerContext.empty() );
+  REQUIRE( outerContext != innerContext );
+  REQUIRE( currentRangeCacheCredentialContext().empty() );
+
+  {
+    ScopedObjectStoreCredentials outer( "/vsis3/", outerCreds );
+    CHECK( currentRangeCacheCredentialContext() == outerContext );
+    {
+      ScopedObjectStoreCredentials inner( "/vsis3/", innerCreds );
+      CHECK( currentRangeCacheCredentialContext() == innerContext );
+    }
+    // The outer window is still open and must still be keyed as itself.
+    CHECK( currentRangeCacheCredentialContext() == outerContext );
+  }
+  CHECK( currentRangeCacheCredentialContext().empty() );
+  CHECK( activeScopedCredentialWindows() == 0 );
+}
