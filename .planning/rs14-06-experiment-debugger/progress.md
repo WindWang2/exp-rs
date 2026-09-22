@@ -80,3 +80,18 @@
 - Test-side fix: a one-sided metric leaf was asserted as reference-present — contradicted the
   no-zero-filling contract; the test now pins the honest one-sided shape.
 - 38/38 pass (295 assertions).
+
+### Slice G — GREEN (2026-09-22)
+- End-to-end through REAL recorded evidence: WorkflowCheckpointManager::saveCheckpoint writes
+  production checkpoints; a real SQLite ExperimentStore holds the run records;
+  DirectoryEvidenceSource reads them back through the strict loader.
+- Fault fixtures all locate the exact first divergence: threshold shift (ParameterDivergence,
+  high), missing mask (MissingPreprocessing at consumer, high), nondeterministic kernel
+  (ResultDivergenceWithoutProcessDivergence, high), different scene (non_comparable +
+  DataSubsetDivergence), missing checkpoint (incomplete, named gap), within-window threshold
+  (equivalent + named tolerance rule), and the teaching exemplar (timeline flag == agent
+  diagnostic step; report persisted and re-parses under exp.debugger.divergence.v1).
+- Store-contract discoveries (behavior confirmed correct, tests adapted): runs require their
+  parent experiment (experiment.not_found); pin rewrites on upsert are refused — the dataset
+  fixture inserts the differing pin from the start.
+- 45/45 pass (410 assertions) — full suite green.

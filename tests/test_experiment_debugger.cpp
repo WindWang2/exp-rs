@@ -23,6 +23,15 @@
 #include "experiment/debugger/artifact_metrics.h"
 #include "experiment/debugger/timeline_model.h"
 #include "experiment/debugger/agent_diagnostic.h"
+
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
+#include <json/json.h>
+#include "workflow/workflow_definition.h"
+#include "workflow/workflow_run.h"
+#include "workflow/workflow_checkpoint.h"
+#include "experiment/experiment_store.h"
 #include "catch2/catch_approx.hpp"
 
 #include "experiment_debugger_fixtures.h"
@@ -30,6 +39,8 @@
 using namespace sicnu::experiment::debugger;
 using namespace sicnu::experiment::debugger::fixtures;
 using sicnu::experiment::ExperimentRun;
+using sicnu::experiment::ExperimentStore;
+namespace workflow = sicnu::workflow;
 
 namespace
 {
@@ -1419,4 +1430,332 @@ TEST_CASE( "Slice F: teaching and agent views agree on the divergence point",
         diagnostic.details.value( QLatin1String( "student_step_id" ) ).toString();
     REQUIRE( !timelineStep.isEmpty() );
     REQUIRE( timelineStep == agentStep );
+}
+
+// ============================================================================
+// Slice G — end-to-end fault localization through REAL recorded evidence
+// (checkpoint files via the strict loader + a real ExperimentStore), plus the
+// teaching exemplar walkthrough.
+// ============================================================================
+
+namespace
+{
+
+constexpr const char *kHex1 = "aaaa00000000000000000000000000000000000000000000000000000000aaaa";
+constexpr const char *kHex2 = "bbbb00000000000000000000000000000000000000000000000000000000bbbb";
+constexpr const char *kHex3 = "cccc00000000000000000000000000000000000000000000000000000000cccc";
+constexpr const char *kHex4 = "dddd00000000000000000000000000000000000000000000000000000000dddd";
+constexpr const char *kHex5 = "eeee00000000000000000000000000000000000000000000000000000000eeee";
+
+/// Builds the lab's NDVI pipeline definition. When @p withMask is set, a mask
+/// step sits between ndvi and threshold (threshold consumes the mask).
+workflow::WorkflowDefinition labDefinition( bool withMask )
+{
+    workflow::WorkflowDefinition def;
+    def.id = "workflow:ndvi-threshold-area";
+    def.title = "Vegetation area lab";
+    auto addStep = [ & ]( const std::string &id, const std::string &op,
+                          const std::vector<std::string> &inputs, Json::Value params ) {
+        workflow::StepDef step;
+        step.id = id;
+        step.title = id;
+        step.operatorId = op;
+        step.params = params;
+        for ( const std::string &from : inputs )
+            step.inputs.push_back( { from, "output", "input" } );
+        def.steps.push_back( step );
+    };
+    Json::Value ndviParams;
+    ndviParams["red"] = "B04";
+    ndviParams["nir"] = "B08";
+    addStep( "ndvi", "rs:ndvi", {}, ndviParams );
+    if ( withMask )
+        addStep( "mask", "rs:mask", { "ndvi" }, Json::Value() );
+    Json::Value thresholdParams;
+    thresholdParams["threshold"] = 0.35;
+    addStep( "threshold", "rs:threshold_calc", { withMask ? "mask" : "ndvi" }, thresholdParams );
+    addStep( "area", "rs:area_stats", { "threshold" }, Json::Value() );
+    return def;
+}
+
+/// Records a REAL checkpoint for @p def into @p dir with per-step completed
+/// state: lineage fingerprint + output digest per step id.
+void recordCheckpoint( const QString &dir, const QString &runId,
+                       const workflow::WorkflowDefinition &def,
+                       const QHash<QString, QPair<const char *, const char *>> &stepIdentity,
+                       double thresholdValue )
+{
+    auto run = workflow::WorkflowRun::createFromDefinition( def, runId.toStdString() );
+    REQUIRE( run != nullptr );
+    for ( const auto &stepId : { "ndvi", "mask", "threshold", "area" } )
+    {
+        workflow::StepPlan *plan = run->findStepPlan( stepId );
+        if ( !plan )
+            continue;
+        const auto identity = stepIdentity.value( QLatin1String( stepId ),
+                                                  { kHex1, kHex1 } );
+        plan->fingerprint = identity.first;
+        plan->outputDigest = identity.second;
+        plan->status = "Completed";
+        if ( std::string( stepId ) == "threshold" )
+            plan->resolvedParams["threshold"] = thresholdValue;
+    }
+    workflow::WorkflowCheckpointManager manager;
+    const QString path = manager.saveCheckpoint( *run, dir );
+    REQUIRE( !path.isEmpty() );
+}
+
+/// The full lab: real store + real checkpoints; returns snapshots built
+/// through DirectoryEvidenceSource.
+struct LabHarness
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+
+    LabHarness()
+    {
+        QString error;
+        REQUIRE( store.open( dir.filePath( QStringLiteral( "lab.db" ) ), &error ) );
+        sicnu::experiment::Experiment experiment;
+        experiment.setExperimentId( QStringLiteral( "exp-lab-1" ) );
+        experiment.setName( QStringLiteral( "Vegetation area lab" ) );
+        REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    }
+
+    RunSnapshot recordAndBuild( const QString &runId, bool withMask,
+                                const QHash<QString, QPair<const char *, const char *>> &identity,
+                                double thresholdValue,
+                                ExperimentRun record = ExperimentRun() )
+    {
+        recordCheckpoint( dir.path(), runId, labDefinition( withMask ), identity, thresholdValue );
+        if ( record.runId().isEmpty() )
+            record = makeRunRecord( runId );
+        REQUIRE( store.upsertRun( record ).has_value() );
+
+        DirectoryEvidenceSource source( &store, dir.path() );
+        RunSnapshotBuilder builder( source );
+        auto snapshot = builder.build( runId );
+        REQUIRE( snapshot.has_value() );
+        REQUIRE( snapshot->stepEvidence() == StepEvidenceMode::CheckpointSteps );
+        return snapshot.take();
+    }
+};
+
+} // namespace
+
+TEST_CASE( "Slice G: threshold shift is located end-to-end through real evidence",
+           "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    QHash<QString, QPair<const char *, const char *>> stuIdentity = refIdentity;
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex5, kHex5 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, refIdentity, 0.35 );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, stuIdentity, 0.62 );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ),
+        makeRunRecord( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "Slice G: missing mask step is located end-to-end", "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "mask" ), { kHex4, kHex4 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    QHash<QString, QPair<const char *, const char *>> stuIdentity;
+    // Without the mask the student's threshold step produces a different mask.
+    stuIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex5, kHex5 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex4, kHex4 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), true, refIdentity, 0.35 );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, stuIdentity, 0.35 );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ),
+        makeRunRecord( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::MissingPreprocessing );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "Slice G: nondeterministic kernel reports result divergence without process divergence",
+           "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    QHash<QString, QPair<const char *, const char *>> stuIdentity = refIdentity;
+    // Identical lineage AND parameters, different produced bytes.
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex4 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex5 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, refIdentity, 0.35 );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, stuIdentity, 0.35 );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ),
+        makeRunRecord( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->firstDivergence.kind ==
+             DivergenceKind::ResultDivergenceWithoutProcessDivergence );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "Slice G: different dataset identity is non-comparable end-to-end",
+           "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> identity;
+    identity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    identity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    identity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, identity, 0.35 );
+    // Same process, different scene: the student's STORE record carries a
+    // different dataset pin from the first insert (the store rightly refuses
+    // pin rewrites on upsert).
+    ExperimentRun student = makeRunRecord( QStringLiteral( "run-stu" ) );
+    student.setDatasetVersionId( QStringLiteral( "dsv-other-scene" ) );
+    student.setDatasetFingerprint( QStringLiteral( "fp-dataset-other" ) );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, identity, 0.35,
+                                              student );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ), student, refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "non_comparable" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::DataSubsetDivergence );
+}
+
+TEST_CASE( "Slice G: run without checkpoint evidence degrades honestly end-to-end",
+           "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> identity;
+    identity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    identity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    identity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, identity, 0.35 );
+
+    // Student recorded in the store, but no checkpoint ever written.
+    ExperimentRun orphan = makeRunRecord( QStringLiteral( "run-orphan" ) );
+    REQUIRE( lab.store.upsertRun( orphan ).has_value() );
+    DirectoryEvidenceSource source( &lab.store, lab.dir.path() );
+    RunSnapshotBuilder builder( source );
+    auto stuSnap = builder.build( QStringLiteral( "run-orphan" ) );
+    REQUIRE( stuSnap.has_value() );
+    REQUIRE( stuSnap->stepEvidence() == StepEvidenceMode::Absent );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ), orphan, refSnap, *stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "incomplete" ) );
+    REQUIRE( !report->hasFirstDivergence );
+    REQUIRE( report->evidenceGaps.size() == 1 );
+}
+
+TEST_CASE( "Slice G: declared tolerance accepts a near-threshold run end-to-end",
+           "[debugger][sliceG]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    QHash<QString, QPair<const char *, const char *>> stuIdentity = refIdentity;
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, refIdentity, 0.35 );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, stuIdentity, 0.38 );
+
+    EquivalenceProfile profile = profileWithTolerance();
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ),
+        makeRunRecord( QStringLiteral( "run-stu" ) ), refSnap, stuSnap, profile );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "equivalent" ) );
+    REQUIRE( !report->hasFirstDivergence );
+    bool toleranceRecorded = false;
+    for ( const DivergenceFinding &finding : report->additionalFindings )
+        if ( finding.kind == DivergenceKind::EquivalentAlternativePath
+             && finding.equivalenceRuleId == QStringLiteral( "threshold-window" ) )
+            toleranceRecorded = true;
+    REQUIRE( toleranceRecorded );
+}
+
+TEST_CASE( "Slice G: teaching exemplar — human timeline and agent diagnostic agree",
+           "[debugger][sliceG][exemplar]" )
+{
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    QHash<QString, QPair<const char *, const char *>> stuIdentity = refIdentity;
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex5, kHex5 } );
+
+    RunSnapshot refSnap = lab.recordAndBuild( QStringLiteral( "run-ref" ), false, refIdentity, 0.35 );
+    RunSnapshot stuSnap = lab.recordAndBuild( QStringLiteral( "run-stu" ), false, stuIdentity, 0.62 );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeRunRecord( QStringLiteral( "run-ref" ) ),
+        makeRunRecord( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    auto timeline = TimelineDiffModel::build( refSnap, stuSnap, *alignment, *report );
+    auto diagnostic = AgentDiagnosticAdapter::forReplan( *report );
+
+    // The classroom view and the agent view name the SAME step.
+    QString timelineStep;
+    for ( const TimelineEntry &entry : timeline )
+        if ( entry.isFirstDivergence )
+            timelineStep = entry.studentStepId;
+    REQUIRE( timelineStep == QStringLiteral( "threshold" ) );
+    REQUIRE( diagnostic.details.value( QLatin1String( "student_step_id" ) ).toString()
+             == timelineStep );
+
+    // The report persists beside the lab's runs for the teacher to open.
+    const QJsonDocument document( report->toJson() );
+    const QString reportPath = lab.dir.filePath( QStringLiteral( "divergence-report.json" ) );
+    QFile file( reportPath );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( document.toJson( QJsonDocument::Indented ) );
+    file.close();
+    REQUIRE( QFileInfo::exists( reportPath ) );
+
+    // The persisted report re-parses as the divergence schema document.
+    const auto reparsed = QJsonDocument::fromJson(
+        QFile( reportPath ).size() >= 0 ? QByteArray() : QByteArray() );
+    Q_UNUSED( reparsed );
+    QFile readBack( reportPath );
+    REQUIRE( readBack.open( QIODevice::ReadOnly ) );
+    const QJsonDocument parsed = QJsonDocument::fromJson( readBack.readAll() );
+    REQUIRE( parsed.object().value( QLatin1String( "kind" ) ).toString()
+             == QLatin1String( kDivergenceSchemaKind ) );
+    REQUIRE( parsed.object().value( QLatin1String( "verdict" ) ).toString()
+             == QStringLiteral( "divergent" ) );
 }
