@@ -933,6 +933,23 @@ TEST_CASE( "corrupt disk blocks are refused and re-fetched, never served",
   CHECK( RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64() > corruptBefore );
 }
 
+TEST_CASE( "disk identityBasis requires a strong ETag (LM alone is refused)",
+           "[io][remote][range_cache][fabric9][disk][issue1228]" )
+{
+  // Same-second same-size rewrites make size+Last-Modified unsafe for disk.
+  const std::string etagBasis = RangeDiskBlockStore::identityBasis(
+    "https://Example.COM:443/a.tif", true, "\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
+  CHECK( etagBasis == "etag\nhttps://Example.COM:443/a.tif\n\"v1\"" );
+
+  const std::string lmOnly = RangeDiskBlockStore::identityBasis(
+    "https://example.com/a.tif", false, "", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
+  CHECK( lmOnly.empty() );
+
+  const std::string weak = RangeDiskBlockStore::identityBasis(
+    "https://example.com/a.tif", false, "W/\"v1\"", true, 100, "Mon, 01 Jan 2024 00:00:00 GMT" );
+  CHECK( weak.empty() );
+}
+
 TEST_CASE( "resources without provable identity are never disk-cached",
            "[io][remote][range_cache][fabric9][disk][fail-closed]" )
 {
