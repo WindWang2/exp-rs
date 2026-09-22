@@ -1,0 +1,56 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 512,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "full_read_peak_rss_delta_mb" : 2,
+    "pixels" : 262144,
+    "windowed_scan_peak_rss_delta_mb" : 0
+  },
+  "generated_at" : "2026-09-20T22:28:37Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 5.0099999999999909,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 49,
+    "peak_rss_mb" : 2,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 137,
+    "wall_ms" : 6.6981919999999997,
+    "write_bytes" : 0,
+    "write_ops" : 0
+  },
+  "scale" : {},
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "full_read_peak_bytes" : 2097152,
+    "full_read_pixels" : 262144,
+    "ratio" : 2.0,
+    "semantic_equivalent_to_windowed_scan" : true,
+    "windowed_pixels_per_window" : 65536,
+    "windowed_read_peak_bytes" : 524288,
+    "windowed_reads" : 4
+  },
+  "workload" : "obs_io_full_materialize"
+}
