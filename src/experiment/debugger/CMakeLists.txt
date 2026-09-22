@@ -7,6 +7,8 @@ qt_add_library(sicnu_experiment_debugger STATIC
   snapshot_builder.h
   step_aligner.cpp
   step_aligner.h
+  first_divergence.cpp
+  first_divergence.h
   debugger_types.h
 )
 

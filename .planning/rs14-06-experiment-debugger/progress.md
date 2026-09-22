@@ -43,3 +43,16 @@
 - Staging-helper bug fixed (chain-shape coverage test didn't express the mask scenario; rewritten
   to the real mask topology).
 - 7/7 pass (53 assertions); Slice A regression 9/9.
+
+### Slice C — GREEN (2026-09-22)
+- FirstDivergenceAnalyzer: run-level RunComparison gate → identity shortcut → alignment →
+  single topological walk → typed findings with honest confidence; findings cap; deterministic
+  byte-stable report.
+- SEMANTIC DECISION (from a failing test): accepted-alternative findings when the verdict is
+  "equivalent" live in additionalFindings only — firstDivergence stays empty and
+  hasFirstDivergence=false. A "first divergence" that is not a divergence was a contradiction.
+- Two fixture bugs found by the red-green cycle (tests were self-inconsistent): mixed-modes test
+  wrote equal digest modes with prefixed digests (RDWPD was the CORRECT verdict); missing-mask and
+  parameter fixtures had physically impossible equal downstream digests. Fixed fixtures; the
+  immaterial-missing-step (Low confidence) path remains reachable for genuinely equal outputs.
+- 26/26 pass (188 assertions) incl. A+B regression.

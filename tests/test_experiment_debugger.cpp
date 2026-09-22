@@ -18,6 +18,8 @@
 #include "experiment/debugger/run_snapshot.h"
 #include "experiment/debugger/snapshot_builder.h"
 #include "experiment/debugger/step_aligner.h"
+#include "experiment/debugger/first_divergence.h"
+#include "catch2/catch_approx.hpp"
 
 #include "experiment_debugger_fixtures.h"
 
@@ -567,6 +569,388 @@ TEST_CASE( "Slice B: alignment is deterministic across repeated runs",
                    { QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:threshold" ) } ) );
     auto first = StepAligner::align( refSnap, stuSnap );
     auto second = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+    REQUIRE( first->toJson() == second->toJson() );
+}
+
+// ============================================================================
+// Slice C — first divergence classification
+// ============================================================================
+
+namespace
+{
+
+/// Standard checkpoint-mode pipeline evidence: ndvi -> threshold -> area,
+/// with parameters on the threshold step (the parameter-bearing step).
+StepEvidence checkpointPipeline( const QString &thresholdDigest,
+                                 const QJsonObject &thresholdParams,
+                                 const QString &thresholdLineage = QStringLiteral( "sig-threshold" ),
+                                 bool cacheHit = false,
+                                 const QString &areaDigest = QStringLiteral( "cccc" ) )
+{
+    StepEvidence evidence;
+    evidence.mode = StepEvidenceMode::CheckpointSteps;
+
+    StepSnapshot ndvi;
+    ndvi.stepId = QStringLiteral( "ndvi" );
+    ndvi.operatorId = QStringLiteral( "rs:ndvi" );
+    ndvi.lineageSignature = QStringLiteral( "sig-ndvi" );
+    ndvi.status = QStringLiteral( "Completed" );
+    ndvi.outputDigest = QStringLiteral( "aaaa" );
+    ndvi.digestMode = QLatin1String( kDigestModeSha256Hex );
+    evidence.steps.append( ndvi );
+
+    StepSnapshot threshold;
+    threshold.stepId = QStringLiteral( "threshold" );
+    threshold.operatorId = QStringLiteral( "rs:threshold_calc" );
+    threshold.parameters = thresholdParams;
+    threshold.lineageSignature = thresholdLineage;
+    threshold.status = QStringLiteral( "Completed" );
+    threshold.outputDigest = thresholdDigest;
+    threshold.digestMode = QLatin1String( kDigestModeSha256Hex );
+    threshold.cacheHit = cacheHit;
+    threshold.cacheHitKnown = true;
+    threshold.dependencies = QStringList{ QStringLiteral( "ndvi" ) };
+    evidence.steps.append( threshold );
+
+    StepSnapshot area;
+    area.stepId = QStringLiteral( "area" );
+    area.operatorId = QStringLiteral( "rs:area_stats" );
+    area.lineageSignature = QStringLiteral( "sig-area" );
+    area.status = QStringLiteral( "Completed" );
+    area.outputDigest = areaDigest;
+    area.digestMode = QLatin1String( kDigestModeSha256Hex );
+    area.dependencies = QStringList{ QStringLiteral( "threshold" ) };
+    evidence.steps.append( area );
+    return evidence;
+}
+
+QJsonObject thresholdParams( double value )
+{
+    QJsonObject params;
+    params.insert( QStringLiteral( "threshold" ), value );
+    return params;
+}
+
+RunSnapshot buildSnapshot( InMemoryEvidenceSource &source, const QString &runId,
+                           const StepEvidence &evidence )
+{
+    source.insertRun( makeStoredRun( runId ) );
+    source.insertStepEvidence( runId, evidence );
+    RunSnapshotBuilder builder( source );
+    auto snapshot = builder.build( runId );
+    REQUIRE( snapshot.has_value() );
+    return snapshot.take();
+}
+
+} // namespace
+
+TEST_CASE( "Slice C: identical checkpoint pipelines are identical", "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "identical" ) );
+    REQUIRE( !report->hasFirstDivergence );
+}
+
+TEST_CASE( "Slice C: parameter divergence is located with high confidence",
+           "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    // Physically consistent student run: a different threshold produces a
+    // different binary mask AND a different area.
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.62 ),
+                                                             QStringLiteral( "sig-threshold" ),
+                                                             false,
+                                                             QStringLiteral( "dddd" ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->hasFirstDivergence );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.studentStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+    // The downstream result divergence is an additional finding, not the first.
+    bool sawDownstream = false;
+    for ( const DivergenceFinding &finding : report->additionalFindings )
+        if ( finding.kind == DivergenceKind::ResultDivergenceWithoutProcessDivergence )
+            sawDownstream = true;
+    REQUIRE( sawDownstream );
+}
+
+TEST_CASE( "Slice C: missing preprocessing is located at the consumer",
+           "[debugger][sliceC]" )
+{
+    // Reference: ndvi -> mask -> threshold -> area. Student skips the mask.
+    auto pipelineWithMask = []( const QString &maskDigest ) {
+        StepEvidence evidence = checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                    thresholdParams( 0.35 ) );
+        StepSnapshot mask;
+        mask.stepId = QStringLiteral( "mask" );
+        mask.operatorId = QStringLiteral( "rs:mask" );
+        mask.lineageSignature = QStringLiteral( "sig-mask" );
+        mask.status = QStringLiteral( "Completed" );
+        mask.outputDigest = maskDigest;
+        mask.digestMode = QLatin1String( kDigestModeSha256Hex );
+        mask.dependencies = QStringList{ QStringLiteral( "ndvi" ) };
+        evidence.steps.insert( 1, mask );
+        for ( StepSnapshot &step : evidence.steps )
+            if ( step.stepId == QStringLiteral( "threshold" ) )
+                step.dependencies = QStringList{ QStringLiteral( "mask" ) };
+        return evidence;
+    };
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         pipelineWithMask( QStringLiteral( "ffff" ) ) );
+    // Physically consistent: without the mask, the student's threshold step
+    // produces a DIFFERENT binary mask (even at the same threshold value).
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.35 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::MissingPreprocessing );
+    // Located at the matched consumer of the missing producer.
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.studentStepId == QStringLiteral( "threshold" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "Slice C: different raw input state is located before any step",
+           "[debugger][sliceC]" )
+{
+    // Same pipeline, different root-input fingerprint (provenance mode).
+    auto doc = []( const QString &runId, const QString &rootDigest ) {
+        return makeProvenanceDoc(
+            runId, QStringLiteral( "plan-1" ),
+            {
+                { QStringLiteral( "ndvi" ), QStringLiteral( "rs:ndvi" ), QStringLiteral( "Succeeded" ),
+                  QStringLiteral( "sig-ndvi" ), false,
+                  QStringLiteral( "/lab/%1/ndvi.tif" ).arg( runId ),
+                  QStringLiteral( "sha256fl:aa11" ), 2048 },
+            },
+            {
+                { QStringLiteral( "ndvi" ), QStringLiteral( "/data/raw/scene.tif" ),
+                  rootDigest, 999999 },
+            } );
+    };
+
+    InMemoryEvidenceSource refSource, stuSource;
+    refSource.insertRun( makeStoredRun( QStringLiteral( "run-ref" ) ) );
+    refSource.insertProvenanceDoc( QStringLiteral( "run-ref" ),
+                                   doc( QStringLiteral( "run-ref" ),
+                                        QStringLiteral( "sha256fl:root1" ) ) );
+    stuSource.insertRun( makeStoredRun( QStringLiteral( "run-stu" ) ) );
+    stuSource.insertProvenanceDoc( QStringLiteral( "run-stu" ),
+                                   doc( QStringLiteral( "run-stu" ),
+                                        QStringLiteral( "sha256fl:root2" ) ) );
+
+    RunSnapshotBuilder refBuilder( refSource );
+    RunSnapshotBuilder stuBuilder( stuSource );
+    auto refSnap = refBuilder.build( QStringLiteral( "run-ref" ) );
+    auto stuSnap = stuBuilder.build( QStringLiteral( "run-stu" ) );
+    REQUIRE( refSnap.has_value() );
+    REQUIRE( stuSnap.has_value() );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), *refSnap, *stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::DifferentInputState );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "ndvi" ) );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "Slice C: dataset identity difference is non-comparable, no step walk",
+           "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    // Different dataset identity pins at run level.
+    ExperimentRun refRun = makeStoredRun( QStringLiteral( "run-ref" ) );
+    ExperimentRun stuRun = makeStoredRun( QStringLiteral( "run-stu" ) );
+    stuRun.setDatasetVersionId( QStringLiteral( "dsv-OTHER" ) );
+    stuRun.setDatasetFingerprint( QStringLiteral( "fp-dataset-OTHER" ) );
+
+    auto report = FirstDivergenceAnalyzer::analyze( refRun, stuRun, refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "non_comparable" ) );
+    REQUIRE( report->hasFirstDivergence );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::DataSubsetDivergence );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::High );
+    // No step walk happened.
+    REQUIRE( report->alignment.isEmpty() );
+    REQUIRE( !report->evidenceGaps.isEmpty() );
+}
+
+TEST_CASE( "Slice C: absent step evidence degrades honestly to incomplete",
+           "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    refSource.insertRun( makeStoredRun( QStringLiteral( "run-ref" ) ) );
+    stuSource.insertRun( makeStoredRun( QStringLiteral( "run-stu" ) ) );
+    RunSnapshotBuilder refBuilder( refSource );
+    RunSnapshotBuilder stuBuilder( stuSource );
+    auto refSnap = refBuilder.build( QStringLiteral( "run-ref" ) );
+    auto stuSnap = stuBuilder.build( QStringLiteral( "run-stu" ) );
+    REQUIRE( refSnap.has_value() );
+    REQUIRE( stuSnap.has_value() );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), *refSnap, *stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "incomplete" ) );
+    REQUIRE( !report->hasFirstDivergence );
+    REQUIRE( report->evidenceGaps.size() == 2 );
+}
+
+TEST_CASE( "Slice C: result divergence without process divergence, honest confidence",
+           "[debugger][sliceC]" )
+{
+    // Same params, same lineage, different output digest, same digest mode.
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "ZZZZ" ),
+                                                             thresholdParams( 0.35 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->firstDivergence.kind ==
+             DivergenceKind::ResultDivergenceWithoutProcessDivergence );
+    REQUIRE( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+
+    // Same process identity but one side was served from cache: confidence
+    // drops to medium — the nondeterminism suspect list grows.
+    InMemoryEvidenceSource cacheSource;
+    RunSnapshot cacheSnap = buildSnapshot(
+        cacheSource, QStringLiteral( "run-cache" ),
+        checkpointPipeline( QStringLiteral( "ZZZZ" ), thresholdParams( 0.35 ),
+                            QStringLiteral( "sig-threshold" ), /*cacheHit=*/true ) );
+    auto cacheReport = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-cache" ) ), refSnap, cacheSnap );
+    REQUIRE( cacheReport.has_value() );
+    REQUIRE( cacheReport->firstDivergence.kind ==
+             DivergenceKind::ResultDivergenceWithoutProcessDivergence );
+    REQUIRE( cacheReport->firstDivergence.confidence == CausalConfidence::Medium );
+}
+
+TEST_CASE( "Slice C: mixed digest modes are unknown, never guessed",
+           "[debugger][sliceC]" )
+{
+    // fast vs full workflow fingerprints on identical process identity.
+    auto fastPipeline = []( const QString &runId, const char *digest,
+                            const char *mode = "sha256fl" ) {
+        StepEvidence evidence;
+        evidence.mode = StepEvidenceMode::CheckpointSteps;
+        StepSnapshot step;
+        step.stepId = QStringLiteral( "calibrate" );
+        step.operatorId = QStringLiteral( "rs:calibrate" );
+        step.lineageSignature = QStringLiteral( "sig-cal" );
+        step.status = QStringLiteral( "Completed" );
+        step.outputDigest = QString::fromLatin1( digest );
+        step.digestMode = QString::fromLatin1( mode );
+        evidence.steps.append( step );
+        return evidence;
+    };
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         fastPipeline( QStringLiteral( "run-ref" ),
+                                                       "sha256fl:11" ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         fastPipeline( QStringLiteral( "run-stu" ),
+                                                       "sha256full:22", "sha256full" ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::UnknownNonComparable );
+    REQUIRE( report->firstDivergence.confidence == CausalConfidence::None );
+    REQUIRE( !report->firstDivergence.missingEvidence.isEmpty() );
+}
+
+TEST_CASE( "Slice C: student-only terminal step keeps the verdict equivalent",
+           "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    StepEvidence student = checkpointPipeline( QStringLiteral( "bbbb" ),
+                                               thresholdParams( 0.35 ) );
+    StepSnapshot extra;
+    extra.stepId = QStringLiteral( "histogram" );
+    extra.operatorId = QStringLiteral( "rs:histogram" );
+    extra.status = QStringLiteral( "Completed" );
+    extra.outputDigest = QStringLiteral( "dddd" );
+    extra.digestMode = QLatin1String( kDigestModeSha256Hex );
+    student.steps.append( extra );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ), student );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "equivalent" ) );
+    REQUIRE( !report->hasFirstDivergence );
+    REQUIRE( report->additionalFindings.size() == 1 );
+    REQUIRE( report->additionalFindings.front().kind ==
+             DivergenceKind::EquivalentAlternativePath );
+    REQUIRE( report->additionalFindings.front().studentStepId ==
+             QStringLiteral( "histogram" ) );
+}
+
+TEST_CASE( "Slice C: analysis is deterministic across repeated runs",
+           "[debugger][sliceC]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.62 ) ) );
+    auto first = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    auto second = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
     REQUIRE( first.has_value() );
     REQUIRE( second.has_value() );
     REQUIRE( first->toJson() == second->toJson() );
