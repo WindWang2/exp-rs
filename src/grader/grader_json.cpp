@@ -2,9 +2,9 @@
 #include "grader_json.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
@@ -136,19 +136,20 @@ std::optional<std::string> canonicalNumber( double value, GraderError &error )
     if ( value == 0.0 )
         return std::string( "0" ); // also normalizes -0.0
 
+    // std::to_chars is locale-INDEPENDENT by specification: snprintf/strtod
+    // would follow LC_NUMERIC and emit ",'-separated canonical text (and
+    // therefore divergent digests) under a non-C numeric locale.
+    char buf[64];
     if ( value == std::floor( value ) && std::fabs( value ) < 9.007199254740992e15 ) {
         // Integral within int64-safe range: print without a decimal point.
-        char buf[32];
-        std::snprintf( buf, sizeof( buf ), "%.0f", value );
-        return std::string( buf );
-    }
-
-    // Shortest round-trip probe.
-    char buf[64];
-    for ( int precision : { 15, 16, 17 } ) {
-        std::snprintf( buf, sizeof( buf ), "%.*g", precision, value );
-        if ( std::strtod( buf, nullptr ) == value )
-            return std::string( buf );
+        const auto result = std::to_chars( buf, buf + sizeof( buf ), value, std::chars_format::fixed, 0 );
+        if ( result.ec == std::errc() )
+            return std::string( buf, result.ptr );
+    } else {
+        // Shortest form that round-trips back to the same double.
+        const auto result = std::to_chars( buf, buf + sizeof( buf ), value );
+        if ( result.ec == std::errc() )
+            return std::string( buf, result.ptr );
     }
     error = makeError( GraderErrorCode::Internal, "number failed round-trip canonicalization" );
     return std::nullopt;
@@ -172,8 +173,19 @@ std::optional<Json::Value> parseJsonStrict( const std::string &text, GraderError
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     Json::Value doc;
     std::string parseErrors;
-    if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &parseErrors ) ) {
-        error = makeError( GraderErrorCode::InvalidJson, "invalid JSON: " + parseErrors );
+    // Same safe-reader discipline as guidance_store / plugin_manifest: the
+    // reader can THROW (e.g. "Exceeded stackLimit" on a nesting bomb), and a
+    // grading document is untrusted content — the refusal stays typed.
+    try
+    {
+        if ( !reader->parse( text.data(), text.data() + text.size(), &doc, &parseErrors ) ) {
+            error = makeError( GraderErrorCode::InvalidJson, "invalid JSON: " + parseErrors );
+            return std::nullopt;
+        }
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error = makeError( GraderErrorCode::InvalidJson, std::string( "invalid JSON: " ) + exception.what() );
         return std::nullopt;
     }
     return doc;
