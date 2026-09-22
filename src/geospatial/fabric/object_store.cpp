@@ -505,9 +505,15 @@ ScopedObjectStoreCredentials::~ScopedObjectStoreCredentials()
   // journal above: a still-open OUTER window gets its own fingerprint back —
   // resetting to empty would re-key the outer principal's fetches into the
   // shared context-less keyspace, the cross-principal merge D-1102 forbids.
+  // When this is the LAST window there is no sibling left to hand anything
+  // to: restoring a (possibly already-closed) prior principal's fingerprint
+  // would pin it into the process-global context for every later unwindowed
+  // fetch — also a cross-context merge — so the at-rest answer is empty.
   const std::string current = currentRangeCacheCredentialContext();
   if ( !mOwnContext.empty() && current == mOwnContext )
-    setRangeCacheCredentialContext( mPriorContext );
+    setRangeCacheCredentialContext( gActiveCredentialWindows.load() == 1
+                                      ? std::string()
+                                      : mPriorContext );
   gActiveCredentialWindows.fetch_sub( 1 );
 }
 

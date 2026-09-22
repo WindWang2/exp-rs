@@ -272,11 +272,17 @@ VirtualCubeSourceWindow virtualCubeSourceWindow( const RasterMetadata &metadata,
   // Clamp in the double domain BEFORE the int cast: a window far outside the
   // asset's pixel space used to wrap through the conversion (UB; x86 wraps
   // low and the clamp rescued it, ARM saturates high and produced a bogus
-  // non-empty intersection there). In-range values pass through unchanged.
+  // non-empty intersection there). In-range values pass through unchanged;
+  // the NaN comparison order keeps a NaN extent on the "too low" side, which
+  // the intersection test then drops.
   constexpr double kIntMin = static_cast<double>( std::numeric_limits<int>::min() );
   constexpr double kIntMax = static_cast<double>( std::numeric_limits<int>::max() );
   const auto castClamped = []( double value ) {
-    return static_cast<int>( std::clamp( value, kIntMin, kIntMax ) );
+    if ( !( value > kIntMin ) )
+      return static_cast<int>( kIntMin );
+    if ( value >= kIntMax )
+      return static_cast<int>( kIntMax );
+    return static_cast<int>( value );
   };
   int sx0 = castClamped( std::floor( std::min( srcX0, srcX1 ) ) );
   int sy0 = castClamped( std::floor( std::min( srcY0, srcY1 ) ) );
@@ -713,10 +719,10 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
 
       // Source pixel window covering the target extent — the shared
       // source-window math (its double-domain clamps keep far-away extents
-      // from wrapping through the double→int casts).
+      // from wrapping through the double→int casts; the same predicates are
+      // checked in its head — keep the two in step).
       const std::array<double, 6> &gt = metadata.geotransform;
-      if ( metadata.width <= 0 || metadata.height <= 0 || !metadata.hasGeotransform ||
-           gt[1] == 0.0 || gt[5] == 0.0 )
+      if ( metadata.width <= 0 || !metadata.hasGeotransform || gt[1] == 0.0 || gt[5] == 0.0 )
       {
         provenance.failed = true;
         provenance.errorText = "asset carries no usable geotransform";
