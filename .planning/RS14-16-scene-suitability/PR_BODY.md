@@ -40,8 +40,8 @@ Closes the RS14-16 track goal: answer "does this dataset / scene set fit this ex
 ### 与 open issues 的去重结果
 不触碰 #1146–#1187 任何避让区（SAR/domain/mission/workflow/plugin/TaskCenter/catalog 一致性/jsoncpp 深度炸弹等）。#1184（agent 10k 截断）：本模块 cap 体系独立且显式上报，未动该 issue 面。#1151/#1187（capability mirror 红灯）：`suitability:` 前缀刻意未加入 `kDataPlatformPrefixes`/knowledge，integration.md 写明修复后纳管步骤；`test_capability_drift` 红点集合与 master 一致（observed，不新增）。
 
-### 与其他 19 tracks 的边界（动态去重 2026-09-22）
-`git fetch` 后 master 仍为 `4f6632e1f6`；与当时全部 10 个 open RS14 PR（#1194–#1203）分支逐一 diff：对 `src/suitability/`、`data_platform_tools.cpp` **零文件重叠**；中央文件仅 tests/CMakeLists.txt 尾部追加与 .gitignore 两处，合并平凡。消费兄弟 track 产物的接线点（如统一 ExperimentGoal 类型、asset state 层）见 `integration.md`，均为未来 adapter 位，不复制对方实现。
+### 与其他 19 tracks 的边界（动态去重 + union merge 2026-09-22）
+首轮去重：与当时全部 10 个 open RS14 PR（#1194–#1203）分支逐一 diff，对 `src/suitability/`、`data_platform_tools.cpp` 零文件重叠。提 PR 前复检：master 已前移至 `14bef28949`（46 commits，#1194–#1235 等已合并）→ 执行**语义 union merge**（`.gitignore` 两个 track 白名单块并集、`tests/CMakeLists.txt` 双方追加块并集；agent 侧薄壳经自动合并后逐项核验完好），合并后 11 个 suitability 套件全绿、surface 套件复跑（结果见下）。master 新增内容中无任何 suitability 实现重复（`git grep suitability origin/master -- src` 仅 capability_graph.cpp 一处无关文案）。消费兄弟 track 产物的接线点见 `integration.md`，均为未来 adapter 位，不复制对方实现。
 
 ### Rollback
 纯新增模块 + 5 处最小中央 delta；回滚 = revert 本 PR。
