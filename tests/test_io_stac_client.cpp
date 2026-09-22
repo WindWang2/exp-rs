@@ -820,3 +820,84 @@ TEST_CASE( "fetchItemsConcurrent defaults to the serial contract",
   // Serial default: the server never saw two connections at once.
   CHECK( server.maxInFlightObserved() <= 1 );
 }
+
+TEST_CASE( "a hostile rel link (object-typed) never aborts the search walk",
+           "[io][stac][hostile][utc12]" )
+{
+  // `link["rel"].asString()` on an object throws Json::LogicError — a plain
+  // std::exception, not a GeoError — and the searchAll walk has no net. One
+  // poisoned item in an origin's answer used to kill the whole search;
+  // foreign-typed fields must be inert instead (same doctrine as
+  // extractNextLink's isString guards).
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  std::string item = renderItem( "poisoned", "2026-08-01T10:00:00Z", "12.5", "[10.0,40.0,11.0,41.0]" );
+  item.insert( item.size() - 1,
+               ", \"links\": [{\"rel\": {}, \"href\": \"https://evil.example.com/x\"}]" );
+  const std::string body = renderPage( { item }, "" );
+  testsupport::StacRoute route;
+  route.body = body;
+  server.setRoute( "/search", route );
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.bbox = { 10.0, 40.0, 11.0, 41.0 };
+
+  const StacPage page = client.search( query );   // used to throw Json::LogicError
+  REQUIRE( page.items.size() == 1 );
+  CHECK( page.items[0].id == "poisoned" );
+  // No usable rel=self link: provenance falls back to the delivering URL
+  // (the full request URL, query included).
+  using Catch::Matchers::ContainsSubstring;
+  CHECK_THAT( page.items[0].sourceHref, ContainsSubstring( server.url() + "/search" ) );
+}
+
+TEST_CASE( "a hostile merge link (string-typed) never aborts the pagination walk",
+           "[io][stac][hostile][utc12]" )
+{
+  // `link["merge"].asBool()` throws Json::LogicError for non-bool JSON. A
+  // foreign-typed merge must degrade to false (the documented absent/false
+  // semantic), not kill the walk mid-pagination.
+  HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  const std::string page1 = renderPage(
+    { renderItem( "p1", "2026-08-01T10:00:00Z", "12.5", "[10.0,40.0,11.0,41.0]" ) },
+    server.url() + "/search?page=2" );
+  {
+    testsupport::StacRoute route;
+    route.body = page1;
+    server.setRoute( "/search", route );
+  }
+  // Page 2 carries the poisoned next link — a STRING merge on an otherwise
+  // followable (absolute) href.
+  std::string page2 = renderPage(
+    { renderItem( "p2", "2026-08-02T10:00:00Z", "13.5", "[10.0,40.0,11.0,41.0]" ) },
+    server.url() + "/search?page=3" );
+  const std::string methodTail = "\"method\": \"GET\"}";
+  const std::string poisonedTail = "\"method\": \"GET\", \"merge\": \"yes\"}";
+  const auto tail = page2.find( methodTail );
+  REQUIRE( tail != std::string::npos );
+  page2.replace( tail, methodTail.size(), poisonedTail );
+  {
+    testsupport::StacRoute route;
+    route.body = page2;
+    server.setRoute( "/search?page=2", route );
+  }
+  {
+    testsupport::StacRoute route;
+    route.body = renderPage(
+      { renderItem( "p3", "2026-08-03T10:00:00Z", "14.5", "[10.0,40.0,11.0,41.0]" ) }, "" );
+    server.setRoute( "/search?page=3", route );
+  }
+
+  StacClient client( server.url() );
+  StacSearchQuery query;
+  query.bbox = { 10.0, 40.0, 11.0, 41.0 };
+
+  const StacSearchAllResult result = client.searchAll( query );   // used to throw
+  REQUIRE( result.items.size() == 3 );
+  CHECK( result.items[0].id == "p1" );
+  CHECK( result.items[1].id == "p2" );
+  CHECK( result.items[2].id == "p3" );
+  CHECK( !result.truncatedByLimit );
+}
