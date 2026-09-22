@@ -84,7 +84,7 @@ Classification rules (first mismatching position in topological order):
 8. Digest modes incomparable → downgrade confidence + record `missingEvidence`; never false-equal.
 
 Alternative-valid-path handling:
-- `EquivalenceProfile` (versioned JSON, `exp.debugger.equivalence.v1`): rules `operator_group` (declared interchangeable operator sets), `param_tolerance` (numeric tolerance per operator key), `commutative_siblings` (order-insensitive siblings), `geometry_keys` (which keys are geometry-affecting for an operator).
+- `EquivalenceProfile` (versioned JSON, `exp.debugger.equivalence.v1`): rules `operator_group` (declared interchangeable operator sets), `param_tolerance` (numeric tolerance per operator key), `geometry_keys` (which keys are geometry-affecting for an operator). Sibling-order differences are deliberately NOT a rule: they are absorbed structurally by topological normalization plus content-digest matching, and genuinely rewired dataflow is reported, not blessed.
 - A step matched through a rule records `equivalentRuleId` and kind `EquivalentAlternativePath`; it never terminates the walk; the report verdict becomes `equivalent` only if **no other divergence exists**.
 - `InvariantSet`: declared invariants (`metric_within`, `band_count_is`, `no_step_of_operator`, `step_count_at_least`, `final_digest_equals`) evaluated against a snapshot; used as an independent reference when no exact reference run applies. Failures are typed findings, not corrections.
 

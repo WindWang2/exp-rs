@@ -29,7 +29,7 @@ Commit: `feat(debugger): slice C — first-divergence taxonomy + causal confiden
 
 ## Slice D — alternative-valid-path handling
 Files: `equivalence.{h,cpp}`.
-RED: operator_group rule → match kind equivalent_rule + rule id recorded, walk continues past it; real divergence still found after accepted alternative; profile-less comparison of different operators → divergence (no silent equivalence); param_tolerance rule boundary (within/outside); commutative_siblings order tolerance; invariant-set reference: passing/failing invariants typed; profile document versioned + strict parse.
+RED: operator_group rule → match kind equivalent_rule + rule id recorded, walk continues past it; real divergence still found after accepted alternative; profile-less comparison of different operators → divergence (no silent equivalence); param_tolerance rule boundary (within/outside); invariant-set reference: passing/failing invariants typed; profile document versioned + strict parse. (commutative_siblings was DROPPED during implementation: pure order differences are absorbed by topological normalization + content-digest matching; rewired dataflow is reported honestly — see progress.md / equivalence.h.)
 Commit: `feat(debugger): slice D — equivalence profiles + invariant references (RS14-06)`
 
 ## Slice E — artifact metric comparison
