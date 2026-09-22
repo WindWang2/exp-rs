@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QFileSystemWatcher>
 #include <QPointer>
 #include <QLabel>
 #include <QHBoxLayout>
@@ -376,6 +377,8 @@ public:
     const sicnu::app::MissionRuntimeState &missionRuntime() const { return m_missionRuntime; }
     /// Reload the runtime from the authority and re-project the panel.
     void refreshMissionRuntime();
+    void onMissionSidecarChanged( const QString &path );
+    void armMissionSidecarWatcher();
     /// Show / raise the mission timeline dock.
     void showMissionTimelinePanel();
     /// Retry the selected mission task (same action the agent surface uses).
@@ -654,6 +657,7 @@ private:
     sicnu::app::MissionRuntimeState m_missionRuntime;
     /// Mission timeline dock (created lazily with the workbench infrastructure).
     sicnu::app::MissionTimelinePanel *m_missionPanel = nullptr;
+    QFileSystemWatcher *m_missionSidecarWatcher = nullptr;
 
     // OBIA window (lazy-constructed) — Phase 10B Task 10B.5
     QMainWindow *m_obiaWindow = nullptr;

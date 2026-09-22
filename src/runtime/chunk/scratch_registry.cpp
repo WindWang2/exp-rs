@@ -1,5 +1,6 @@
 // scratch_registry.cpp — see scratch_registry.h for the lease contract.
 #include "scratch_registry.h"
+#include "fsync_compat.h"
 
 #include "memory_planner.h" // saturatingAdd (F-A-14)
 
@@ -44,19 +45,10 @@ std::string sidecarPath( const std::string &path )
 
 void fsyncPath( const std::string &path, bool directory )
 {
-#if !defined( _WIN32 )
-    const int flags = directory ? ( O_RDONLY | O_DIRECTORY ) : O_RDONLY;
-    const int fd = ::open( path.c_str(), flags );
-    if ( fd >= 0 )
-    {
-        ::fsync( fd );
-        ::close( fd );
-    }
-#else
-    (void)path;
-    (void)directory; // Windows durability follows the checkpoint precedent:
-                     // rename is the atomicity boundary, fsync is best-effort.
-#endif
+    // Best-effort: scratch publish already treats durability as optimization
+    // under rename atomicity, but we still FlushFileBuffers on Windows so the
+    // journal cannot outlive unflushed bytes (#1228 / #1186).
+    fsyncPathBestEffort( path, directory );
 }
 
 /// Best-effort parse of the `.digest` sidecar; false on any malformed input.

@@ -493,6 +493,7 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
                     m_missionRuntime.timeline.revision(),
                     m_missionRuntime.timeline.lastEventSeq() );
             }
+            armMissionSidecarWatcher();
         }
         else
         {
@@ -570,6 +571,9 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
             }
             else
             {
+                const quint64 liveTimelineRevision = m_missionRuntime.timeline.revision();
+                const quint64 liveEventSeq = m_missionRuntime.timeline.lastEventSeq();
+
                 if ( !disk.timeline.missionId().isEmpty() && !m_mission.missionId.isEmpty()
                      && disk.timeline.missionId() != m_mission.missionId )
                 {
@@ -595,6 +599,26 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                 else
                 {
                     m_missionRuntime.timeline = disk.timeline;
+                }
+
+                // #1228 / #1186 item 34: poisoned-open clears m_mission to {}
+                // (F3). After an external sidecar repair the reload succeeds;
+                // publishing the empty window context would destroy the
+                // repaired context half. Also adopt disk.context when the
+                // agent advanced the timeline past this window's cache —
+                // F2 already reloads the timeline for the same reason.
+                if ( m_mission.missionId.isEmpty() && disk.authorityLoaded
+                     && !disk.context.missionId.isEmpty() )
+                {
+                    m_mission = disk.context;
+                }
+                else if ( disk.authorityLoaded && !disk.context.missionId.isEmpty()
+                          && m_mission.missionId == disk.context.missionId
+                          && ( disk.timeline.revision() > liveTimelineRevision
+                               || ( disk.timeline.revision() == liveTimelineRevision
+                                    && disk.timeline.lastEventSeq() > liveEventSeq ) ) )
+                {
+                    m_mission = disk.context;
                 }
 
                 if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )

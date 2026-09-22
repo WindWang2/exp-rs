@@ -1,5 +1,6 @@
 // disk_tile_store.cpp — see disk_tile_store.h.
 #include "disk_tile_store.h"
+#include "fsync_compat.h"
 
 #include <cstddef>
 #include <cstdio>
@@ -141,23 +142,11 @@ TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
     return TilePayload{ spec, std::move( buffer ) };
 }
 
-/// Durability helper for writeFile: fsync where available; a no-op on
-/// Windows where rename remains the atomicity boundary (same contract as
-/// scratch_registry's fsyncPath).
+/// Durability helper for writeFile: real fsync / FlushFileBuffers (#1228).
+/// Best-effort wrapper keeps publish/rename progressing on exotic volumes.
 void fsyncBestEffort( const std::string &path, bool directory = false )
 {
-#if !defined( _WIN32 )
-    const int flags = directory ? ( O_RDONLY | O_DIRECTORY ) : O_RDONLY;
-    const int fd = ::open( path.c_str(), flags );
-    if ( fd >= 0 )
-    {
-        ::fsync( fd );
-        ::close( fd );
-    }
-#else
-    (void)path;
-    (void)directory;
-#endif
+    fsyncPathBestEffort( path, directory );
 }
 
 /// Shared read path for read()/readFile(): full fail-closed validation.
