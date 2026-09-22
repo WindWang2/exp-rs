@@ -369,6 +369,9 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // sink pointer into this window — clear it and drop every rendered
     // plugin surface BEFORE the child widgets (docks/menus) disappear.
     sicnu::plugins::PluginUiSchemaRenderer::instance()->setShellSink( nullptr );
+    // PluginUiHost holds the same reverse-ownership sink; leaving it set
+    // would dangle m_exprsShellUi after this window dies.
+    sicnu::plugins::PluginUiHost::instance()->setShellSink( nullptr );
 
     // Stop map jobs and release the active map tool before unique_ptr members
     // and QObject children (canvas) are destroyed — prevents double-delete of
