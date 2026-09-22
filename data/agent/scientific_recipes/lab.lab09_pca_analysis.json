@@ -1,0 +1,150 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.33333333333333331,
+    "diagnostics" : [ "ui_action_step", "manual_step" ],
+    "stages_human_only" : 2,
+    "stages_operator" : 1,
+    "stages_reflection" : 3,
+    "stages_total" : 6
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "pca_analysis",
+    "keywords_en" : [ "analysis", "component", "pca", "principal" ],
+    "keywords_zh" : [ "主成分分析" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/samples/landsat_sample.tif" ],
+    "required_operators" : [ "rs:pca" ]
+  },
+  "recipe_id" : "lab.lab09_pca_analysis",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "7 波段类 Landsat 样本影像。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "action" : "addRasterLayer",
+      "boundary" : "ui_action",
+      "completion_hint" : "7 波段影像已加载。",
+      "description_zh" : "加载 data/samples/landsat_sample.tif。相邻波段间高度相关，PCA 用线性变换把信息集中到少数主成分。",
+      "human_only" : true,
+      "id" : "s01_load_multi_band_image",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'addRasterLayer') — no headless equivalent compiled",
+      "title" : "Load Multi-band Image",
+      "title_zh" : "加载多波段影像",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "7 波段影像已加载。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "输出影像为 3 波段而非 7 波段。",
+      "depends_on" : [ "s01_load_multi_band_image" ],
+      "description_zh" : "执行 rs:pca 算子，把影像降为 3 个主成分（numComponents=3），输出 pca_result 影像。",
+      "id" : "s02_run_pca",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:pca",
+      "params" : 
+      {
+        "input" : "data/samples/landsat_sample.tif",
+        "numComponents" : 3,
+        "output" : "outputs/lab09_pca.tif"
+      },
+      "teaching_note" : "PC1 承载最大方差（约占 80%，主要反映总体亮度），PC2 次之（常反映植被—土壤对比），PC3 及以后主要是噪声或细微特征。",
+      "title" : "Run PCA",
+      "title_zh" : "执行 PCA",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab09_pca.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "输出影像为 3 波段而非 7 波段。"
+        }
+      ]
+    },
+    {
+      "boundary" : "manual",
+      "completion_hint" : "能说出各主成分大致承载的信息。",
+      "depends_on" : [ "s02_run_pca" ],
+      "description_zh" : "逐波段查看 PCA 输出：比较 PC1、PC2、PC3 的亮度分布，把主成分与地物分布对应起来，理解方差—信息集中的含义。",
+      "human_only" : true,
+      "id" : "s03_analyze_pca_results",
+      "index" : 2,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "teaching_note" : "PCA 常用于数据压缩、去相关与噪声分离；MNF 是其考虑噪声模型的推广。",
+      "title" : "Analyze PCA Results",
+      "title_zh" : "分析 PCA 结果",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "能说出各主成分大致承载的信息。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s03_analyze_pca_results" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "为什么前几个主成分能保留原始影像的大部分信息？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "PC2 上的正负值常对应什么地物对比？结合特征向量解释。"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 5,
+      "kind" : "reflection",
+      "prompt" : "PCA 变换后的波段还可以逆变换回原始波段吗？会损失什么？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab09_pca_analysis",
+    "objective" : "掌握用 PCA 对多波段影像做降维的方法：把 7 波段影像压缩为 3 个主成分，并解读各主成分所承载的方差与信息。",
+    "source_fingerprint" : "2e1bc811ba499480",
+    "source_path" : "data/labs/lab09_pca_analysis.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Principal Component Analysis",
+  "title_zh" : "主成分分析"
+}

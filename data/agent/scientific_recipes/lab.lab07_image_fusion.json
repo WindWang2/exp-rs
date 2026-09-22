@@ -1,0 +1,160 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.66666666666666663,
+    "diagnostics" : [ "manual_step" ],
+    "stages_human_only" : 1,
+    "stages_operator" : 2,
+    "stages_reflection" : 3,
+    "stages_total" : 6
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "image_fusion",
+    "keywords_en" : [ "fusion", "image" ],
+    "keywords_zh" : [ "影像融合" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/samples/landsat_sample.tif" ],
+    "required_operators" : [ "rs:image_fusion" ]
+  },
+  "recipe_id" : "lab.lab07_image_fusion",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "本练习以同一样本影像同时充当全色与多光谱输入（教学演示）。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "boundary" : "manual",
+      "completion_hint" : "能说出全色与多光谱数据各自的优缺点。",
+      "description_zh" : "阅读并理解：全色波段空间分辨率高但只有单波段；多光谱数据光谱信息丰富但分辨率较低。融合的目标是同时保留两者优势，得到高分辨率的多光谱影像。",
+      "human_only" : true,
+      "id" : "s01_understanding_fusion",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "teaching_note" : "常见融合方法：Brovey（比值变换）、IHS（色彩空间变换）、PCA（主成分替换）、Gram-Schmidt。",
+      "title" : "Understanding Fusion",
+      "title_zh" : "理解融合概念",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "能说出全色与多光谱数据各自的优缺点。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "融合影像空间细节提升。",
+      "depends_on" : [ "s01_understanding_fusion" ],
+      "description_zh" : "执行 rs:image_fusion 算子（method=brovey）：R_fused = R_ms × Pan / (R_ms + G_ms + B_ms)。本演示中全色与多光谱均使用样本影像。",
+      "id" : "s02_brovey_fusion",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:image_fusion",
+      "params" : 
+      {
+        "method" : "brovey",
+        "ms" : "data/samples/landsat_sample.tif",
+        "output" : "outputs/lab07_brovey.tif",
+        "pan" : "data/samples/landsat_sample.tif"
+      },
+      "teaching_note" : "Brovey 通过归一化光谱比值注入全色细节，计算简单但高保真度依赖波段光谱响应与全色波段接近。",
+      "title" : "Brovey Fusion",
+      "title_zh" : "Brovey 融合",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab07_brovey.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "融合影像空间细节提升。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "能够比较两种融合结果的光谱差异。",
+      "depends_on" : [ "s02_brovey_fusion" ],
+      "description_zh" : "再次执行 rs:image_fusion 算子（method=ihs）：将 RGB 变换到 IHS 色彩空间，用全色影像替换亮度分量 I，再逆变换回 RGB。对比其与 Brovey 的光谱保真度。",
+      "id" : "s03_ihs_fusion",
+      "index" : 2,
+      "kind" : "operator",
+      "operator_id" : "rs:image_fusion",
+      "params" : 
+      {
+        "method" : "ihs",
+        "ms" : "data/samples/landsat_sample.tif",
+        "output" : "outputs/lab07_ihs.tif",
+        "pan" : "data/samples/landsat_sample.tif"
+      },
+      "teaching_note" : "IHS 融合把空间细节与光谱信息分离——亮度承载细节、色调饱和度承载光谱，因此光谱失真相对可控。",
+      "title" : "IHS Fusion",
+      "title_zh" : "IHS 融合",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab07_ihs.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "能够比较两种融合结果的光谱差异。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s03_ihs_fusion" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "为什么融合结果的色彩会偏离原始多光谱影像？哪种方法失真更小？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "融合前是否需要对全色与多光谱影像做配准？配准误差会带来什么伪影？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 5,
+      "kind" : "reflection",
+      "prompt" : "PCA 融合用第几主成分替换全色影像？为什么？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab07_image_fusion",
+    "objective" : "理解全色/多光谱融合的原理与效果：分别用 Brovey 与 IHS 方法把高空间分辨率全色影像与多光谱影像融合，得到兼具高空间细节与光谱信息的成果。",
+    "source_fingerprint" : "2dcb630d1e8297f6",
+    "source_path" : "data/labs/lab07_image_fusion.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Image Fusion",
+  "title_zh" : "影像融合"
+}

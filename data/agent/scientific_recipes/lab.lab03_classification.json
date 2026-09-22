@@ -1,0 +1,177 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.33333333333333331,
+    "diagnostics" : [ "ui_action_step", "ui_action_step" ],
+    "stages_human_only" : 2,
+    "stages_operator" : 1,
+    "stages_reflection" : 3,
+    "stages_total" : 6
+  },
+  "evidence" : 
+  {
+    "grading_pipeline" : "data/pipelines/supervised_classify.json"
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "classification",
+    "keywords_en" : [ "classification", "image", "remote", "sensing" ],
+    "keywords_zh" : [ "遥感影像分类" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : 
+    [
+      "data/samples/landsat_sample.tif",
+      "data/samples/training_samples.shp"
+    ],
+    "required_operators" : [ "rs:supervised_classification" ]
+  },
+  "recipe_id" : "lab.lab03_classification",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "待分类的多光谱影像。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/landsat_sample.tif"
+      }
+    },
+    {
+      "id" : "asset_1",
+      "kind" : "file",
+      "note" : "训练样本 ROI（含类别字段）。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/training_samples.shp"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "action" : "addRasterLayer",
+      "boundary" : "ui_action",
+      "completion_hint" : "两个图层均显示在图层面板中。",
+      "description_zh" : "通过 File > Add Raster Layer... 加载 landsat_sample.tif，再通过 File > Add Vector Layer... 加载 training_samples.shp。",
+      "human_only" : true,
+      "id" : "s01_load_image_and_training_samples",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'addRasterLayer') — no headless equivalent compiled",
+      "title" : "Load Image and Training Samples",
+      "title_zh" : "加载影像与训练样本",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "两个图层均显示在图层面板中。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "输出类别图中不同地物被赋予不同类别编码。",
+      "depends_on" : [ "s01_load_image_and_training_samples" ],
+      "description_zh" : "执行 rs:supervised_classification 算子：以训练样本为监督数据对影像分类。可将 method 参数改为 normal_bayes（正态分布贝叶斯/最大似然思想的实现）、rf（随机森林）等，比较不同分类器的结果差异。",
+      "id" : "s02_supervised_classification",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:supervised_classification",
+      "params" : 
+      {
+        "input" : "data/samples/landsat_sample.tif",
+        "method" : "svm",
+        "output" : "outputs/lab03_classification.tif",
+        "training" : "data/samples/training_samples.shp"
+      },
+      "teaching_note" : "监督分类用已知类别的样本训练决策规则，再对全影像逐像元分类；分类器选择与样本质量共同决定分类精度。",
+      "title" : "Supervised Classification",
+      "title_zh" : "监督分类",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab03_classification.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "输出类别图中不同地物被赋予不同类别编码。"
+        }
+      ]
+    },
+    {
+      "action" : "openClassificationWindow",
+      "boundary" : "ui_action",
+      "completion_hint" : "本练习中总体精度 > 80% 即为良好。",
+      "depends_on" : [ "s02_supervised_classification" ],
+      "description_zh" : "在分类工作窗口中点击 Accuracy Assessment 查看混淆矩阵，记录总体精度（OA）与 Kappa 系数，并将结果导出为 CSV。",
+      "human_only" : true,
+      "id" : "s03_accuracy_assessment",
+      "index" : 2,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'openClassificationWindow') — no headless equivalent compiled",
+      "teaching_note" : "混淆矩阵的对角线为正确分类像元；OA = 对角线之和 / 总像元数；Kappa 修正了随机一致性的影响。",
+      "title" : "Accuracy Assessment",
+      "title_zh" : "精度评价",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "本练习中总体精度 > 80% 即为良好。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s03_accuracy_assessment" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "训练样本的空间分布与纯度如何影响分类精度？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "SVM 与最大似然法在决策面上的假设有何本质差异？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 5,
+      "kind" : "reflection",
+      "prompt" : "Kappa 系数为什么比总体精度更严格？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab03_classification",
+    "objective" : "掌握监督分类的完整流程：加载影像与训练样本，用 SVM 分类器完成地物分类，并通过混淆矩阵评价分类精度。",
+    "source_fingerprint" : "63f62fcf4e133fa7",
+    "source_path" : "data/labs/lab03_classification.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Remote Sensing Image Classification",
+  "title_zh" : "遥感影像分类",
+  "verifier_hooks" : 
+  [
+    {
+      "kind" : "grading_pipeline",
+      "ref" : "data/pipelines/supervised_classify.json"
+    }
+  ]
+}

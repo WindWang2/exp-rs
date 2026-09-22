@@ -1,0 +1,308 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.83333333333333337,
+    "diagnostics" : 
+    [
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "manual_step"
+    ],
+    "stages_human_only" : 1,
+    "stages_operator" : 5,
+    "stages_reflection" : 5,
+    "stages_total" : 11
+  },
+  "evidence" : 
+  {
+    "claims" : 
+    [
+      {
+        "artifact" : "data/labs/_tmp/out/lab8/nir_summary.tif",
+        "claim" : "概要统计 count 波段全图 = 12（12 期全部有效参与）",
+        "tolerance_note" : "见判分意图 T7"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab8/ndvi_series.tif",
+        "claim" : "ndvi_series.tif 为 12 波段 NDVI 栈；常绿林全年均值 0.65–0.85，水体 -0.20–0.00，农田夏冬对比明显",
+        "tolerance_note" : "见判分意图 T1/T2"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab8/ndvi_trend.tif",
+        "claim" : "扰动地块趋势斜率 ≤ −3e-4 NDVI/天且显著低于林地/水体（斜率差 ≥ 2e-4）；不设 r² 达标线",
+        "tolerance_note" : "见判分意图 T3（斜率按天；r² 是思考题 2 考点）"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab8/phenology.tif",
+        "claim" : "农田 SOS 70–170、POS 170–230、EOS 230–330 DOY、LOS 100–250 天；林地/水体振幅 < 0.15（退化值，非 NoData）",
+        "tolerance_note" : "见判分意图 T4"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif",
+        "claim" : "扰动地块 anomaly 均值 ≤ −2.0；林地/水体 |均值| ≤ 1.0（基线 2024-03-01..2024-08-31）",
+        "tolerance_note" : "见判分意图 T5/T6"
+      }
+    ],
+    "data_spec" : "data/labs/data-specs/lab8_temporal_analysis.json",
+    "grading_intent_ref" : "data/labs/grading/lab8_temporal_analysis.intent.json",
+    "grading_pipeline" : "data/labs/pipelines/lab8_temporal_analysis.pipeline.json",
+    "pipeline_runner" : "QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab8_temporal_analysis.pipeline.json"
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "temporal_analysis",
+    "keywords_en" : [ "analysis", "ndvi", "temporal" ],
+    "keywords_zh" : 
+    [
+      "typed refusal",
+      "基线",
+      "实验8：NDVI 时序分析——趋势、物候与异常检测",
+      "时序栈",
+      "物候参数"
+    ],
+    "modality" : "temporal"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/labs/data-specs/lab8_temporal_analysis.json" ],
+    "required_operators" : 
+    [
+      "rs:temporal_anomaly",
+      "rs:temporal_index_series",
+      "rs:temporal_phenology",
+      "rs:temporal_summary",
+      "rs:temporal_trend"
+    ]
+  },
+  "recipe_id" : "lab.temporal_analysis",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "12 期 256×256 合成 Red/NIR 影像（月频，2024-01 至 2024-12），含常绿林/农田/水体/扰动地块四类地物。规格由 D1 离线生成；本地验证用 scripts/gen_lab_fixtures.py temporal 在 data/labs/_tmp/ 生成等价临时数据",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/labs/data-specs/lab8_temporal_analysis.json"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "description_zh" : "查看 12 期影像的获取日期与波段结构（GUI：图层属性；headless：summary 步骤）。核对每景 SICNU_ACQUISITION_DATE：时序算子不做文件名日期推断，日期缺失会被前置检查拒绝（typed refusal，不会静默猜测）。",
+      "headless_note" : "pipeline 步骤 summary",
+      "id" : "s01_s1",
+      "index" : 0,
+      "kind" : "operator",
+      "operator_id" : "rs:temporal_summary",
+      "params" : {},
+      "title" : "加载与体检"
+    },
+    {
+      "depends_on" : [ "s01_s1" ],
+      "description_zh" : "对 12 期影像按 red=3/nir=4 计算 NDVI，得到 12 波段栈。目视检查：常绿林全年高值，农田夏峰冬谷，水体负值。",
+      "headless_note" : "pipeline 步骤 ndvi",
+      "id" : "s02_s2",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:temporal_index_series",
+      "params" : {},
+      "title" : "计算 NDVI 时序栈"
+    },
+    {
+      "depends_on" : [ "s02_s2" ],
+      "description_zh" : "对时序栈逐像元回归，读 slope 波段：扰动地块应呈显著负斜率（≤ −3×10⁻⁴ NDVI/天），常绿林/水体接近 0；扰动地块 r² 很低（季节方差主导）是线性模型选择的考点，不是错误。注意斜率单位是 NDVI/天，乘 365 才是年速率量级。",
+      "headless_note" : "pipeline 步骤 trend",
+      "id" : "s03_s3",
+      "index" : 2,
+      "kind" : "operator",
+      "operator_id" : "rs:temporal_trend",
+      "params" : {},
+      "title" : "线性趋势分析"
+    },
+    {
+      "depends_on" : [ "s03_s3" ],
+      "description_zh" : "读取 sos/pos/eos/los 波段，对照农田'夏峰'先验解释空间格局；解释为什么常绿林与水体的物候输出是振幅近 0 的退化值（无最小振幅门限的交叉法）。",
+      "headless_note" : "pipeline 步骤 phenology",
+      "id" : "s04_s4",
+      "index" : 3,
+      "kind" : "operator",
+      "operator_id" : "rs:temporal_phenology",
+      "params" : {},
+      "title" : "物候参数提取"
+    },
+    {
+      "depends_on" : [ "s04_s4" ],
+      "description_zh" : "以 2024-03-01 至 2024-08-31（扰动前生长季）为基线，分别对 2024-10-15（扰动后）与 2024-08-15（扰动前对照）计算 z-score。对比两幅异常图：只有前者在扰动地块出现 z ≤ −2 的连片负异常；对照为小的正值 z 中位数（季节峰值效应），说明检出信号不是方法伪影；同时观察全图散布的极端负 z——它们来自量化后完全平坦、基线 σ≈0 的像元，是 z-score 的统计边界，判分用稳健统计（中位数/占比）而非均值。",
+      "headless_note" : "pipeline 步骤 anomaly_disturbance + anomaly_control",
+      "id" : "s05_s5",
+      "index" : 4,
+      "kind" : "operator",
+      "operator_id" : "rs:temporal_anomaly",
+      "params" : {},
+      "title" : "异常检测与对照验证"
+    },
+    {
+      "boundary" : "manual",
+      "depends_on" : [ "s05_s5" ],
+      "description_zh" : "把趋势、物候、异常三个结论拼成一条事件叙事：扰动地块'何时开始偏离常态、偏离多快、是否影响生长季参数'。讨论线性趋势对'季节信号 + 扰动'混合序列的局限。",
+      "headless_note" : "无需算子，属于结果解读",
+      "human_only" : true,
+      "id" : "s06_s6",
+      "index" : 5,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "title" : "综合判读"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s06_s6" ],
+      "hint" : "rs:temporal_* 的前置检查会拒绝缺失日期——想想为什么'宁拒绝不猜测'",
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 6,
+      "kind" : "reflection",
+      "prompt" : "如果把 12 期影像的获取日期全部丢掉（或错写成同一天），趋势斜率和物候参数会怎样？这说明了时序数据管理的什么问题？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "hint" : "线性 vs 谐波 + 分段；平台提供 rs:temporal_harmonic_fit / rs:temporal_breakpoints 可自行验证",
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 7,
+      "kind" : "reflection",
+      "prompt" : "趋势图上农田区域的 r² 明显低于扰动地块，为什么线性模型对这两种序列的适配度不同？用什么模型能同时刻画季节与突变？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "hint" : "采样间隔决定了交叉日期的分辨粒度",
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 8,
+      "kind" : "reflection",
+      "prompt" : "月频采样下 SOS 的不确定度大约是多少？要把物候精度提高到 ±5 天，采样策略要怎么改？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_3" ],
+      "hint" : "基线污染 → σ 变大 → z 被稀释；对照实验 T6 为什么重要",
+      "human_only" : true,
+      "id" : "reflection_4",
+      "index" : 9,
+      "kind" : "reflection",
+      "prompt" : "若基线窗口误选了包含扰动的 9–12 月，异常检测结果会怎么变？这说明异常检测的哪个环节最关键？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_4" ],
+      "hint" : "负基线 vs 低振幅是不同的光谱-时间特征",
+      "human_only" : true,
+      "id" : "reflection_5",
+      "index" : 10,
+      "kind" : "reflection",
+      "prompt" : "水体 NDVI 为负、常绿林振幅近 0，二者的物候输出都是振幅近 0 的退化值——它们的机理一样吗？如何区分？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "audience" : "遥感导论本科生（已完成实验1–4）",
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "duration_minutes" : 120,
+    "glossary_terms" : [ "时序栈", "物候参数", "基线", "typed refusal" ],
+    "kind" : "labspec_d3",
+    "lab_id" : "temporal_analysis",
+    "objective" : "理解多时相遥感数据的组织方式（时间戳、逐期影像、时序栈），掌握时序分析对元数据（获取日期）的硬依赖\n掌握 NDVI 时序的线性趋势建模，能解释趋势斜率的物理单位（NDVI/天）及其与采样间隔的关系\n掌握物候参数（SOS/POS/EOS/生长季长度）的阈值交叉提取方法，理解采样频率对物候精度的限制\n掌握基于基线 z-score 的时序异常检测，能设计「扰动期 + 扰动前对照」的验证方案\n能够用 headless 管道（JSON 声明式算子链）完整复现分析流程",
+    "objective_zh" : "理解多时相遥感数据的组织方式（时间戳、逐期影像、时序栈），掌握时序分析对元数据（获取日期）的硬依赖\n掌握 NDVI 时序的线性趋势建模，能解释趋势斜率的物理单位（NDVI/天）及其与采样间隔的关系\n掌握物候参数（SOS/POS/EOS/生长季长度）的阈值交叉提取方法，理解采样频率对物候精度的限制\n掌握基于基线 z-score 的时序异常检测，能设计「扰动期 + 扰动前对照」的验证方案\n能够用 headless 管道（JSON 声明式算子链）完整复现分析流程",
+    "operator_roles" : 
+    [
+      "rs:temporal_summary — 数据体检：逐期有效性概要（count/均值/极值）",
+      "rs:temporal_index_series — 逐期计算 NDVI 并合成 12 波段时序栈（每波段带获取日期元数据）",
+      "rs:temporal_trend — 逐像元线性趋势：slope/intercept/r²/n/rmse，斜率单位 NDVI/天",
+      "rs:temporal_phenology — 阈值交叉法物候参数：sos/pos/eos/los/amplitude 等 7 波段",
+      "rs:temporal_anomaly — 目标时相对基线的 z-score 异常（运行两次：扰动时相 + 扰动前对照）"
+    ],
+    "prerequisite_knowledge" : 
+    [
+      "lab2_spectral_analysis（NDVI 概念）",
+      "lab4_change_detection（变化检测初步）"
+    ],
+    "principle_headings" : 
+    [
+      "植被指数时序与物候信号",
+      "线性趋势与时间尺度",
+      "物候阈值交叉法",
+      "基线 z-score 异常检测"
+    ],
+    "source_fingerprint" : "024fefd4aca51a1b",
+    "source_path" : "data/labs/lab8_temporal_analysis.labspec.json",
+    "source_schema" : "sicnu.labspec.v1",
+    "theme" : "temporal"
+  },
+  "title" : "实验8：NDVI 时序分析——趋势、物候与异常检测",
+  "title_zh" : "实验8：NDVI 时序分析——趋势、物候与异常检测",
+  "verifier_hooks" : 
+  [
+    {
+      "kind" : "grading_pipeline",
+      "ref" : "data/labs/pipelines/lab8_temporal_analysis.pipeline.json"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab8/nir_summary.tif",
+      "claim" : "概要统计 count 波段全图 = 12（12 期全部有效参与）",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 T7"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab8/nir_summary.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab8/ndvi_series.tif",
+      "claim" : "ndvi_series.tif 为 12 波段 NDVI 栈；常绿林全年均值 0.65–0.85，水体 -0.20–0.00，农田夏冬对比明显",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 T1/T2"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab8/ndvi_series.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab8/ndvi_trend.tif",
+      "claim" : "扰动地块趋势斜率 ≤ −3e-4 NDVI/天且显著低于林地/水体（斜率差 ≥ 2e-4）；不设 r² 达标线",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 T3（斜率按天；r² 是思考题 2 考点）"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab8/ndvi_trend.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab8/phenology.tif",
+      "claim" : "农田 SOS 70–170、POS 170–230、EOS 230–330 DOY、LOS 100–250 天；林地/水体振幅 < 0.15（退化值，非 NoData）",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 T4"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab8/phenology.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif",
+      "claim" : "扰动地块 anomaly 均值 ≤ −2.0；林地/水体 |均值| ≤ 1.0（基线 2024-03-01..2024-08-31）",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 T5/T6"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif"
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.5,
+    "diagnostics" : [ "manual_step" ],
+    "stages_human_only" : 1,
+    "stages_operator" : 1,
+    "stages_reflection" : 3,
+    "stages_total" : 5
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "mosaic",
+    "keywords_en" : [ "image", "mosaic" ],
+    "keywords_zh" : [ "影像镶嵌" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/samples/change_before.tif", "data/samples/change_after.tif" ],
+    "required_operators" : [ "rs:mosaic" ]
+  },
+  "recipe_id" : "lab.lab10_mosaic",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "参与镶嵌的影像一（教学演示）。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/change_before.tif"
+      }
+    },
+    {
+      "id" : "asset_1",
+      "kind" : "file",
+      "note" : "参与镶嵌的影像二（教学演示）。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/change_after.tif"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "boundary" : "manual",
+      "completion_hint" : "能列出镶嵌的三个关键问题。",
+      "description_zh" : "阅读并理解：镶嵌把相邻或同区多景影像拼合为一幅连续影像。关键约束与问题是：统一的坐标参考系统、重叠区的色彩平衡、接缝线（seamline）的放置。",
+      "human_only" : true,
+      "id" : "s01_understanding_mosaic",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "teaching_note" : "镶嵌前通常需要将各景重投影到同一 CRS 并做相对辐射归一化，否则接缝处会出现明显色差。",
+      "title" : "Understanding Mosaic",
+      "title_zh" : "理解镶嵌概念",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "能列出镶嵌的三个关键问题。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "输出为覆盖两景范围的拼合影像。",
+      "depends_on" : [ "s01_understanding_mosaic" ],
+      "description_zh" : "执行 rs:mosaic 算子，把 change_before.tif 与 change_after.tif 两景影像拼合输出。注意：所有输入影像必须具有相同的坐标参考系统。",
+      "id" : "s02_run_mosaic",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:mosaic",
+      "params" : 
+      {
+        "inputs" : [ "data/samples/change_before.tif", "data/samples/change_after.tif" ],
+        "output" : "outputs/lab10_mosaic.tif"
+      },
+      "title" : "Run Mosaic",
+      "title_zh" : "执行镶嵌",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab10_mosaic.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "输出为覆盖两景范围的拼合影像。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s02_run_mosaic" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 2,
+      "kind" : "reflection",
+      "prompt" : "若两景影像 CRS 不同，直接镶嵌会得到什么结果？应如何预处理？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "接缝线应如何选取才能最小化视觉突兀？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "重叠区直方图匹配为什么能缓解色差？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab10_mosaic",
+    "objective" : "理解影像镶嵌的流程与关键约束：把多景影像拼合成一幅无缝覆盖的整图，注意坐标系统一致性、色彩平衡与接缝线问题。",
+    "source_fingerprint" : "55f2184f18487c45",
+    "source_path" : "data/labs/lab10_mosaic.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Image Mosaic",
+  "title_zh" : "影像镶嵌"
+}
