@@ -26,7 +26,7 @@
 | [实验10：高光谱分析——MNF 降维、PPI 端元提取、SAM/SID 匹配与线性解混](lab13_hyperspectral_analysis.md) | `lab13_hyperspectral_analysis` | 0 | 0 |
 | [实验11：制图出图——专题数据生产与合规地图排版](lab14_cartographic_mapping.md) | `lab14_cartographic_mapping` | 0 | 0 |
 | [遥感数据体检：波段、元数据与网格身份](lab15_data_inspection.md) | `lab15_data_inspection` | 5 | 2 |
-| [分类精度评价：从不一致图到混淆矩阵](lab16_accuracy_assessment.md) | `lab16_accuracy_assessment` | 5 | 2 |
+| [分类精度评价：从不一致图到混淆矩阵](lab16_accuracy_assessment.md) | `lab16_accuracy_assessment` | 5 | 1 |
 
 ## 实验数据
 
