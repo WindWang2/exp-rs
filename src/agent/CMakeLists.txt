@@ -255,6 +255,7 @@ target_link_libraries(sicnu_agent PUBLIC
   Sicnu::dataset
   Sicnu::experiment
   Sicnu::suitability
+  Sicnu::ScienceContext
   Sicnu::experiment_bridge
   sicnu_workflow
   Sicnu::help
