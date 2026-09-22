@@ -54,8 +54,10 @@ Result<RunSnapshot> RunSnapshotBuilder::build( const QString &runId ) const
     auto evidence = m_source->steps( runId );
     if ( evidence.has_value() )
     {
-        // Normalizer warnings (e.g. recorder-side step truncation) ride into
-        // the report — degrade-in-the-open end to end.
+        // Normalizer warnings (e.g. recorder-side step truncation) ride on
+        // the snapshot result diagnostics — degrade-in-the-open end to end.
+        // (Reaching a divergence report's evidenceGaps is the caller's job:
+        // analyze() consumes snapshots, not result diagnostics.)
         for ( const Diagnostic &diagnostic : evidence.diagnostics() )
             if ( diagnostic.code != QLatin1String( kCodeEvidenceAbsent ) )
                 warnings.append( diagnostic );

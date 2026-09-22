@@ -130,3 +130,22 @@ reproduced findings #1 and #2). Findings and resolutions:
 - Deprecation warning in fixtures removed (zero new warnings).
 - Suites: test_experiment_debugger 49/49 (438), test_experiment_evaluation 20/20 (299),
   test_mlops9_evidence 4/4 (94).
+
+### Deep review round 2 — SHIP verdict (2026-09-22)
+Independent re-review verified every round-1 fix against the pre-fix defect (not just the commit
+message) and confirmed the four new potency tests fail on pre-fix code. All P0/P1 RESOLVED, all
+P2 RESOLVED, zero warnings in debugger TUs, 49/49 (438 assertions) green.
+Residuals from round 2 cleaned in the follow-up commit: debugging.md trailing comma (invalid
+example JSON), equivalence.cpp comment/code mismatch + stale Q_UNUSED(options), builder comment
+overstatement about warning reach. Round-2 edge observations (P4 rootVerify report-once
+interaction; truncation warnings stopping at snapshot diagnostics) documented as known limits
+below and in the ADR.
+
+### Known limits (documented, not defects)
+- A report-once root-input finding lets later root-consuming pairs treat upstream as verified;
+  the input-state finding still wins firstDivergence by position.
+- Bridge truncation warnings surface on the snapshot Result diagnostics; surfacing them inside
+  FirstDivergenceReport.evidenceGaps requires an API that carries diagnostics into analyze() —
+  deferred as an integration-point decision.
+- ADR 0174 number is contested by concurrent PRs #1194/#1196/#1197 — renumber at union per the
+  ADR header note.

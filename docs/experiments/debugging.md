@@ -41,7 +41,7 @@ pin comparison. It will not invent a step story.
     "evidence": [
       "params_hash: reference=9f1a… student=44be…"
     ],
-    "missing_evidence": [],
+    "missing_evidence": []
   }
 }
 ```

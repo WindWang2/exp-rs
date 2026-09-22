@@ -428,7 +428,6 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
                                                         const QVector<Invariant> &invariants,
                                                         const FirstDivergenceOptions &options )
 {
-    Q_UNUSED( options );
     FirstDivergenceReport report;
     report.studentRunId = student.runId();
 
@@ -455,18 +454,17 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
         }
         anyFailed = true;
         DivergenceFinding finding;
-        // Kind by what the invariant constrains: result-level invariants
-        // (metric bounds, final digest) that fail are result divergences the
-        // process cannot explain; process-level ones map onto the taxonomy's
-        // missing-step shape, and an operator prohibition is carried by its
-        // own kind — each finding's evidence names the exact invariant.
+        // A failed invariant is a DECLARED-CONTRACT divergence: there is no
+        // process reference to compare against, so the taxonomy's
+        // unknown/non-comparable kind is the honest carrier — the finding's
+        // evidence names the exact invariant and failure.
+        finding.kind = DivergenceKind::UnknownNonComparable;
         finding.studentStepId = student.steps().isEmpty()
                                    ? QString()
                                    : student.steps().constLast().stepId;
         finding.confidence = CausalConfidence::Medium;
         finding.evidence << QStringLiteral( "invariant '%1' failed: %2" )
                                 .arg( check.invariantId, check.detail );
-        finding.kind = DivergenceKind::UnknownNonComparable;
         report.additionalFindings.append( finding );
     }
 
