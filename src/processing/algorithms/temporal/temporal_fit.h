@@ -70,7 +70,10 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
 struct SeasonalMetrics
 {
   double sos = -1.0;         ///< start of season (doy), -1 when undefined
-  double pos = -1.0;         ///< peak of season (doy)
+  double pos = -1.0;         ///< peak of season (doy); on edge-anchored windows
+                             ///< (season already running at the window edge) pos can
+                             ///< EQUAL sos/eos — ordering is time-ordered, never
+                             ///< strictly interior there
   double eos = -1.0;         ///< end of season (doy)
   double los = 0.0;          ///< length of season in days (eos - sos, wrapped)
   double amplitude = 0.0;    ///< max - min inside the season
@@ -184,7 +187,11 @@ struct PhenologyMultiOptions
 {
   int maxCyclesPerYear = 3;      ///< strongest peaks kept per calendar year (1..4)
   double crossingFraction = 0.5; ///< phenologyThreshold crossing fraction
-  double trendLambda = 1e4;      ///< decomposition trend smoothing (Whittaker λ)
+  /// Decomposition trend smoothing (Whittaker λ, DAY-axis penalty; #1166).
+  /// 1e8 puts the trend cutoff period above ~2 years at any cadence, so the
+  /// annual cycle stays in the climatology; pre-#1200's 1e4 index-axis scale
+  /// let the trend swallow the seasonal signal at day-axis semantics.
+  double trendLambda = 1e8;
   int seasonalWindow = 15;       ///< decomposition climatology smoothing (days)
   int minValidPerSeason = 6;     ///< hard sample floor per window (kernel ≥ 3)
   double minPeakFraction = 0.25; ///< peak must exceed min + this × seasonal range
