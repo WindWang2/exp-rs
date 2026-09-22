@@ -16,8 +16,18 @@
 add_library(sicnu_explain STATIC
   explain_provenance.cpp
   explain_provenance.h
+  explanation_builder.cpp
+  explanation_builder.h
+  explanation_validator.cpp
+  explanation_validator.h
+  guidance_store.cpp
+  guidance_store.h
+  state_vocabulary.cpp
+  state_vocabulary.h
   step_explanation.cpp
   step_explanation.h
+  step_explanation_view_model.cpp
+  step_explanation_view_model.h
 )
 
 add_library(Sicnu::explain ALIAS sicnu_explain)
