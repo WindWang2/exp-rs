@@ -202,8 +202,11 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
                                           ? QObject::tr( "Failed to flush output raster %1" ).arg( destTarget )
                                           : closeError );
     }
-    if ( !staged->publish( nullptr ) )
-        throw QgsProcessingException( QObject::tr( "Failed to publish output raster %1" ).arg( destTarget ) );
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish output raster %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 

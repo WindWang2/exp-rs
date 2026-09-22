@@ -187,8 +187,11 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
                                           : closeError );
     }
     deleteOutputOnFailure.dismiss();
-    if ( !staged->publish( nullptr ) )
-        throw QgsProcessingException( QObject::tr( "Failed to publish merged output %1" ).arg( destTarget ) );
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish merged output %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 

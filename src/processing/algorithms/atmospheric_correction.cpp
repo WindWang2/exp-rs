@@ -664,13 +664,17 @@ bool processFile(const QString &sourcePath, const QString &targetPath,
         };
         if (!statsPass(false)) {
             if (errorMessage)
-                *errorMessage = statError;
+                *errorMessage = statError.isEmpty()
+                                    ? QStringLiteral("Failed to stream band %1 for statistics").arg(bandNum)
+                                    : statError;
             return false;
         }
         if (stats.prepareBins()) {
             if (!statsPass(true)) {
                 if (errorMessage)
-                    *errorMessage = statError;
+                    *errorMessage = statError.isEmpty()
+                                        ? QStringLiteral("Failed to stream band %1 for statistics").arg(bandNum)
+                                        : statError;
                 return false;
             }
         }

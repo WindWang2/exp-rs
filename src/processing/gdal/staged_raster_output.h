@@ -26,6 +26,11 @@ namespace sicnu::processing
 /// Thin composition over the geospatial atomic_fs authority (stagedPathFor /
 /// fsyncFile / publishStagedFile / discardStaged); no staging semantics are
 /// re-implemented here.
+///
+/// Note: publication renames the staged file OVER the target path, so a
+/// pre-existing SYMLINK at the target is replaced as a link (the referent is
+/// left untouched) — the same rename(2) semantics publishStagedFile has
+/// always had, and strictly safer than the old truncate-in-place write.
 class StagedRasterOutput
 {
   public:

@@ -169,8 +169,11 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
                                           ? QObject::tr( "Failed to flush NDVI output %1" ).arg( destTarget )
                                           : closeError );
     }
-    if ( !staged->publish( nullptr ) )
-        throw QgsProcessingException( QObject::tr( "Failed to publish NDVI output %1" ).arg( destTarget ) );
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish NDVI output %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 

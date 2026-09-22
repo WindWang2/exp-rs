@@ -457,7 +457,9 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     // A wrapper that aborts on cancel throws ("Tool execution canceled by
     // user") — rethrow the TYPED Cancelled error, not a generic failure, so
-    // a cancelled job is classified as cancelled downstream (#1043).
+    // a cancelled job is classified as cancelled downstream (#1043). Cancel
+    // deliberately WINS over a coincident genuine failure message: a
+    // cancelled run's diagnosis is its cancellation.
     if ( ( isCancelledFn && isCancelledFn() ) || feedback.isCanceled() )
       throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
                                                "Processing algorithm cancelled during run: " + mDesc.id );
