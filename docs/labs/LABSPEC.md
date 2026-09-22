@@ -65,7 +65,7 @@ LabSpec 是实验的声明式规格：一份 JSON 同时驱动**引导式实验�
 | `title` / `title_zh` | ✓ | 英文 / 中文标题 |
 | `objective` | ✓ | 实验目标，同时作为面板中的描述 |
 | `prerequisites[]` |  | `{path, note?}`，实验数据引用（相对仓库根） |
-| `steps[]` | ✓ | 至少一步；字段见下 |
+| `steps[]` | v1 ✓ / v2·v3 可省 | v1 至少一步，字段见下；v2/v3 可省略（操作序列由流水线定义，ADR 0166——lab12–lab14 即此形态）；若给出则与 v1 同规则校验，且不得为空数组 |
 | `grading_ref` |  | `{pipeline}` 指向既有判分管线；引用会被 drift guard 校验 |
 | `thinking_questions[]` |  | 思考题，渲染进文档 |
 

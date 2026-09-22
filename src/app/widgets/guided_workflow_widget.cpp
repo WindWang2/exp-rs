@@ -172,6 +172,13 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
     const int errorCount = m_loadResult.errors.size();
     if ( errorCount > 0 && index == 0 )
     {
+        // The error page replaces the step view: the previous session must
+        // not keep running Next/Run state against it.
+        m_workflowActive = false;
+        m_currentStepIndex = 0;
+        m_prevButton->setEnabled(false);
+        m_runButton->setEnabled(false);
+        m_nextButton->setEnabled(false);
         m_startButton->setEnabled(false);
         m_stepLabel->setText( tr( "<b>实验规格加载失败</b>" ) );
         QString errorHtml = tr( "<p>以下 LabSpec 文件无法加载，请修复后重启或重新打开本面板：</p><ul>" );
@@ -185,8 +192,27 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
     const int labIndex = labIndexOfRow( index, errorCount );
     if ( labIndex < 0 || labIndex >= m_workflows.size() ) return;
 
+    // Selecting a different workflow is a session boundary: the previous
+    // experiment's step cursor and completion state must never leak into the
+    // newly selected one. A stale cursor used to make Next declare the
+    // never-started experiment complete and Run index past its steps. An
+    // in-flight operator job keeps running (its completion callback is
+    // workflow/step-guarded and only restores the button on the same step).
+    if ( labIndex != m_currentWorkflowIndex )
+    {
+        m_workflowActive = false;
+        m_currentStepIndex = 0;
+        m_prevButton->setEnabled(false);
+        m_runButton->setEnabled(false);
+        m_nextButton->setEnabled(false);
+    }
+
     m_currentWorkflowIndex = labIndex;
-    m_startButton->setEnabled(true);
+    // LabSpec 2/3 labs may carry no steps (the operator sequence is
+    // pipeline-owned, ADR 0166): there is nothing to walk, so Start stays
+    // disabled and the overview says so instead of failing or dead-ending.
+    const bool walkable = !m_workflows[labIndex].steps.isEmpty();
+    m_startButton->setEnabled(walkable);
 
     // Show workflow description
     const auto &wf = m_workflows[labIndex];
@@ -196,19 +222,23 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
     for (int i = 0; i < wf.steps.size(); i++)
         stepsHtml += QString("<li>%1</li>").arg(wf.steps[i].title.toHtmlEscaped());
 
+    const QString startHint = walkable
+        ? tr("点击 <b>开始实验</b> 以开始。")
+        : tr("此实验为 LabSpec 2/3 文档：操作序列由流水线定义，暂无分步引导。");
     m_stepBrowser->setHtml(
         QString("<p>%1</p><p><b>%2</b></p><ol>%3</ol>"
                 "<p>%4</p>")
         .arg(wf.description.toHtmlEscaped(),
              tr("步骤"),
              stepsHtml,
-             tr("点击 <b>开始实验</b> 以开始。"))
+             startHint)
     );
 }
 
 void GuidedWorkflowWidget::onStartWorkflow()
 {
-    if (m_currentWorkflowIndex < 0) return;
+    if (m_currentWorkflowIndex < 0 || m_currentWorkflowIndex >= m_workflows.size()) return;
+    if (m_workflows[m_currentWorkflowIndex].steps.isEmpty()) return;
 
     m_workflowActive = true;
     m_currentStepIndex = 0;
@@ -223,8 +253,10 @@ void GuidedWorkflowWidget::onStartWorkflow()
 void GuidedWorkflowWidget::onNextStep()
 {
     if (!m_workflowActive) return;
-
+    if (m_currentWorkflowIndex < 0 || m_currentWorkflowIndex >= m_workflows.size()) return;
     const auto &wf = m_workflows[m_currentWorkflowIndex];
+    if (m_currentStepIndex < 0 || m_currentStepIndex >= wf.steps.size()) return;
+
     if (m_currentStepIndex < wf.steps.size() - 1) {
         m_currentStepIndex++;
         showStep(m_currentStepIndex);
@@ -255,8 +287,11 @@ void GuidedWorkflowWidget::onPreviousStep()
 void GuidedWorkflowWidget::onRunStepAction()
 {
     if (!m_workflowActive || m_currentWorkflowIndex < 0) return;
-
+    if (m_currentWorkflowIndex >= m_workflows.size()) return;
     const auto &wf = m_workflows[m_currentWorkflowIndex];
+    // Fail-closed: never index past the current workflow's steps (the caller
+    // can observe a stale cursor across a workflow switch).
+    if (m_currentStepIndex < 0 || m_currentStepIndex >= wf.steps.size()) return;
     const auto &step = wf.steps[m_currentStepIndex];
 
     if (step.hasOperator())
@@ -328,7 +363,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
     req.title = m_workflows[m_currentWorkflowIndex].title.toStdString();
     req.source = "guided_lab";
 
-    // Identify the step this submission belongs to: completion restores the
+    // Identify the step this submission belongs to: the outcome restores the
     // run button only when the student is still looking at the same step.
     const QString workflowId = m_workflows[m_currentWorkflowIndex].id;
     const int stepIndex = m_currentStepIndex;
@@ -337,6 +372,15 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
     m_runButton->setEnabled(false);
     m_runButton->setText( tr( "运行中…" ) );
 
+    // True when the student is still in the workflow the job belongs to (the
+    // session boundary may have switched the view to another experiment).
+    const auto onOwningWorkflow = [this, workflowId]()
+    {
+        return m_workflowActive && m_currentWorkflowIndex >= 0
+               && m_currentWorkflowIndex < m_workflows.size()
+               && m_workflows[m_currentWorkflowIndex].id == workflowId;
+    };
+
     auto restoreButton = [this, workflowId, stepIndex]
     {
         m_runButton->setText( tr( "执行此步" ) );
@@ -344,21 +388,39 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
             && m_currentWorkflowIndex >= 0
             && m_workflows[m_currentWorkflowIndex].id == workflowId
             && m_currentStepIndex == stepIndex;
-        m_runButton->setEnabled( onSameStep && !m_jobHandle->isRunning() );
         if ( onSameStep )
+        {
+            m_runButton->setEnabled( !m_jobHandle->isRunning() );
             updateStepDisplay();
+        }
+        else if ( m_workflowActive )
+        {
+            // A newer session owns the button now: refresh it against THAT
+            // session's current step instead of force-disabling (which used
+            // to dead-end the new session's Run until manual navigation).
+            updateStepDisplay();
+        }
+        else
+        {
+            m_runButton->setEnabled( false );
+        }
     };
 
     const long taskId = m_jobHandle->submitJob(
         req,
-        [this, stepTitle, restoreButton]( const QString &outputPath, const Json::Value & )
+        [this, stepTitle, onOwningWorkflow, restoreButton]( const QString &outputPath, const Json::Value & )
         {
             restoreButton();
-            showRunMessage( tr( "“%1” 完成。输出：%2" ).arg( stepTitle, outputPath ), false );
+            // The outcome is reported in the owning workflow's transcript
+            // only; the Task Center keeps the record for every other case.
+            if ( onOwningWorkflow() )
+                showRunMessage( tr( "“%1” 完成。输出：%2" ).arg( stepTitle, outputPath ), false );
         },
-        [this, stepTitle, restoreButton]( const QString &error, bool canceled )
+        [this, stepTitle, onOwningWorkflow, restoreButton]( const QString &error, bool canceled )
         {
             restoreButton();
+            if ( !onOwningWorkflow() )
+                return;
             if ( canceled )
                 showRunMessage( tr( "“%1” 已取消。" ).arg( stepTitle ), true );
             else
@@ -381,6 +443,7 @@ void GuidedWorkflowWidget::showRunMessage( const QString &message, bool isError 
 
 void GuidedWorkflowWidget::showStep(int index)
 {
+    if (m_currentWorkflowIndex < 0 || m_currentWorkflowIndex >= m_workflows.size()) return;
     const auto &wf = m_workflows[m_currentWorkflowIndex];
     if (index < 0 || index >= wf.steps.size()) return;
 
