@@ -82,7 +82,7 @@ Json::Value RsTemporalSenTrendOperator::schema() const
   // excluded from the statistics (n, CIs, MK S never see synthetic samples).
   Json::Value provenanceParam = makeStringParam(
       "provenance",
-      "Per-scene provenance rasters from rs:temporal_gap_fill (array, one per scene, acquisition-time-sorted order; pixel 1 = observed keeps the sample, 0/2 = excluded)", "" );
+      "Gap-fill provenance channel from rs:temporal_gap_fill: the provenance_output artifact path passed once (multi-band, prov_<date> band per scene), or an array of per-scene rasters in acquisition-time-sorted order; pixel 1 = observed keeps the sample, 0/2 = excluded", "" );
   provenanceParam["type"] = "array";
   props["provenance"] = provenanceParam;
   props["output"] = makeOutputParam( "output",

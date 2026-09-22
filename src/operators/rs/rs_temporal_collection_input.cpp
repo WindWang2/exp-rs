@@ -194,6 +194,10 @@ PreparedTemporalRun prepareTemporalRun( const Json::Value &params, RSOperatorCon
 struct ProvenanceChannel::Impl
 {
   std::vector<GdalDatasetWrapper> datasets;
+  /// (dataset index, band index) per scene: identity mapping for the
+  /// per-scene array form, band s+1 of dataset 0 for the gap-fill
+  /// provenance_output artifact form.
+  std::vector<std::pair<int, int>> sceneBands;
 };
 
 ProvenanceChannel::~ProvenanceChannel() = default;
@@ -205,20 +209,18 @@ std::unique_ptr<ProvenanceChannel> ProvenanceChannel::parse(
   if ( !params.isMember( "provenance" ) || params["provenance"].isNull() )
     return nullptr;
   const Json::Value &declared = params["provenance"];
-  if ( !declared.isArray() )
+  if ( !declared.isArray() || declared.empty() )
     throw RSOperatorError( ErrorCode::InvalidParameter,
-                           "'provenance' must be an array of raster paths, one per scene "
-                           "(acquisition-time-sorted order, matching the collection)" );
+                           "'provenance' must be a non-empty array of raster paths: the "
+                           "rs:temporal_gap_fill provenance_output artifact passed ONCE, or "
+                           "one per-scene raster per entry (acquisition-time-sorted order, "
+                           "matching the collection)" );
   const int sceneCount = static_cast<int>( collection.scenes().size() );
-  if ( static_cast<int>( declared.size() ) != sceneCount )
-    throw RSOperatorError( ErrorCode::InvalidParameter,
-                           "'provenance' declares " + std::to_string( declared.size() ) +
-                               " rasters but the collection has " + std::to_string( sceneCount ) +
-                               " scenes (one provenance raster per scene, "
-                               "acquisition-time-sorted order)" );
   auto channel = std::unique_ptr<ProvenanceChannel>( new ProvenanceChannel );
   channel->m_impl = std::make_unique<Impl>();
   channel->m_impl->datasets.resize( declared.size() );
+  channel->m_impl->sceneBands.assign(
+      static_cast<size_t>( sceneCount ), { 0, 1 } );
   for ( Json::ArrayIndex i = 0; i < declared.size(); ++i )
   {
     if ( !declared[i].isString() || declared[i].asString().empty() )
@@ -234,6 +236,85 @@ std::unique_ptr<ProvenanceChannel> ProvenanceChannel::parse(
                              "provenance raster '" + declared[i].asString() +
                                  "' does not share the collection grid" );
   }
+
+  // Gap-fill artifact form: ONE multi-band GeoTIFF with a prov_<date> band
+  // per scene (rs:temporal_gap_fill provenance_output). Band s+1 is scene s's
+  // channel — band names must carry the prov_ prefix so the artifact is
+  // identifiable; anything else with sceneCount bands is ambiguous and
+  // refused instead of silently reading band 1 for every scene.
+  const auto sceneTag = []( const temporal::TemporalSceneRef &scene, int index ) {
+      return scene.time.valid ? scene.time.dateString()
+                              : QStringLiteral( "scene%1" ).arg( index + 1 );
+  };
+  if ( declared.size() == 1 )
+  {
+    const GdalDatasetWrapper &ds = channel->m_impl->datasets[0];
+    // The artifact maps band s+1 -> scene s; that mapping is only lawful
+    // when the band DATES match this collection (an artifact produced from
+    // a different/reordered collection on the same grid would otherwise
+    // exclude the wrong dates silently).
+    bool datesMatch = ds.bandCount() == sceneCount;
+    for ( int s = 0; datesMatch && s < sceneCount; ++s )
+      datesMatch = ds.bandDescription( s + 1 ) ==
+                   QStringLiteral( "prov_%1" ).arg(
+                       sceneTag( collection.scenes().at( s ), s ) );
+    if ( datesMatch )
+    {
+      for ( int s = 0; s < sceneCount; ++s )
+        channel->m_impl->sceneBands[static_cast<size_t>( s )] = { 0, s + 1 };
+      return channel;
+    }
+    if ( ds.bandCount() > 1 )
+    {
+      std::string detail = "band names do not match the collection dates";
+      for ( int s = 0; s < sceneCount && s < ds.bandCount(); ++s )
+      {
+        const QString expected =
+            QStringLiteral( "prov_%1" ).arg( sceneTag( collection.scenes().at( s ), s ) );
+        if ( ds.bandDescription( s + 1 ) != expected )
+        {
+          detail = "band " + std::to_string( s + 1 ) + " is '" +
+                   ds.bandDescription( s + 1 ).toStdString() + "' but scene " +
+                   std::to_string( s ) + " expects '" + expected.toStdString() + "'";
+          break;
+        }
+      }
+      throw RSOperatorError(
+          ErrorCode::InvalidParameter,
+          "'provenance' with one path and " + std::to_string( ds.bandCount() ) +
+              " bands requires the rs:temporal_gap_fill provenance_output artifact "
+              "for THIS collection (one prov_<date> band per scene): " + detail +
+              "; pass one per-scene raster per entry otherwise" );
+    }
+    // A single 1-band raster for a 1-scene collection: the per-scene form.
+  }
+
+  // Per-scene array form: count must match, and a raster carrying a
+  // prov_<date> band name must be scene i's OWN channel. Previously the same
+  // multi-band artifact repeated per scene silently read band 1 for every
+  // scene — excluding the WRONG dates from every statistic.
+  if ( static_cast<int>( declared.size() ) != sceneCount )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "'provenance' declares " + std::to_string( declared.size() ) +
+                               " rasters but the collection has " + std::to_string( sceneCount ) +
+                               " scenes (pass the provenance_output artifact once, or one "
+                               "per-scene raster per scene)" );
+  for ( Json::ArrayIndex i = 0; i < declared.size(); ++i )
+  {
+    channel->m_impl->sceneBands[static_cast<size_t>( i )] = { static_cast<int>( i ), 1 };
+    const QString bandName = channel->m_impl->datasets[i].bandDescription( 1 );
+    if ( !bandName.startsWith( QLatin1String( "prov_" ) ) )
+      continue; // hand-assembled per-scene rasters carry no channel name
+    const QString tag = sceneTag( collection.scenes().at( i ), static_cast<int>( i ) );
+    if ( bandName != QStringLiteral( "prov_%1" ).arg( tag ) )
+      throw RSOperatorError(
+          ErrorCode::InvalidParameter,
+          "provenance raster '" + declared[i].asString() + "' band 1 is '" +
+              bandName.toStdString() + "' but scene " + std::to_string( i ) +
+              " is '" + tag.toStdString() +
+              "' — pass the provenance_output artifact once (multi-band), or one "
+              "per-scene raster per scene in acquisition-time-sorted order" );
+  }
   return channel;
 }
 
@@ -241,10 +322,12 @@ bool ProvenanceChannel::readKeepMask( int sceneIndex, int x, int y, int w, int h
                                       std::uint8_t *keep )
 {
   if ( !m_impl || sceneIndex < 0
-       || sceneIndex >= static_cast<int>( m_impl->datasets.size() ) )
+       || sceneIndex >= static_cast<int>( m_impl->sceneBands.size() ) )
     return false;
+  const auto [datasetIdx, bandIdx] = m_impl->sceneBands[static_cast<size_t>( sceneIndex )];
   std::vector<float> codes( static_cast<size_t>( w ) * h );
-  if ( !m_impl->datasets[sceneIndex].readBandWindow( 1, x, y, w, h, codes.data() ) )
+  if ( !m_impl->datasets[static_cast<size_t>( datasetIdx )].readBandWindow(
+           bandIdx, x, y, w, h, codes.data() ) )
     return false;
   for ( size_t i = 0; i < codes.size(); ++i )
     keep[i] = codes[i] == static_cast<float>( temporal::SampleProvenance::Observed ) ? 1 : 0;

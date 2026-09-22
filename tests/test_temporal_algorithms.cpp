@@ -1654,3 +1654,321 @@ TEST_CASE( "temporal_gap_fill: provenance_output emits per-date 0/1/2 codes E2E"
     REQUIRE( prov3[1] == Approx( 1.0f ) );
     REQUIRE( prov1[0] == Approx( 1.0f ) );
 }
+
+
+// ---------------------------------------------------------------------------
+// Hardening track temporal-change-phenology (19/20).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "temporal_decompose refuses duplicate scene times with a typed error",
+           "[temporal][operators][decompose][hardening-tcp19]" )
+{
+    ensureApp();
+    Fixture fx;
+    // keep_all (the default) preserves two scenes on 2025-02-01. The trend
+    // kernel requires a strictly increasing day axis; previously the operator
+    // passed the degenerate axis straight through and silently published an
+    // all-NaN trend with a fabricated all-zero seasonal band.
+    const char *dates[4] = { "2025-01-01", "2025-02-01", "2025-02-01", "2025-03-01" };
+    for ( int i = 0; i < 4; ++i )
+        REQUIRE( writeTestScene(
+            makeTestScene( fx.filePath( QStringLiteral( "d%1.tif" ).arg( i ) ),
+                           QString::fromUtf8( dates[i] ),
+                           { float( 10 * ( i + 1 ) ), 5.0f }, 2, 1 ) ) );
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 4; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "d%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( "decompose.tif" ).toStdString();
+
+    bool threw = false;
+    try
+    {
+        runOp( "rs:temporal_decompose", params );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = true;
+        const std::string what = e.what();
+        INFO( "message: " << what );
+        REQUIRE( what.find( "strictly increasing" ) != std::string::npos );
+        // The remediation hint names the caller-facing knobs.
+        REQUIRE( what.find( "duplicate_policy" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+    // Fail-closed: no output raster is left behind for a refused run.
+    REQUIRE( !QFile::exists( fx.filePath( "decompose.tif" ) ) );
+}
+
+TEST_CASE( "temporal smooth and phenology honor gap-fill provenance",
+           "[temporal][operators][provenance][hardening-tcp19]" )
+{
+    ensureApp();
+    Fixture fx;
+    // One-peak season 1..5..2 over doy 1..8; the provenance channel marks the
+    // EVEN doys as gap-fill interpolations (code 2), leaving the odd-doys
+    // {2,4,4,2} as observed. Consumers must hand the exclusions to the KERNEL
+    // as NaN (before smoothing/thresholding), never overwrite afterwards.
+    const QVector<float> values = { 1, 2, 3, 4, 5, 4, 3, 2 };
+    const QVector<float> provenanceCodes = { 2, 1, 2, 1, 2, 1, 2, 1 }; // odd doys observed
+    for ( int i = 0; i < 8; ++i )
+    {
+        REQUIRE( writeTestScene( makeTestScene(
+            fx.filePath( QStringLiteral( "sv%1.tif" ).arg( i ) ),
+            QStringLiteral( "2025-01-%1" ).arg( i + 1, 2, 10, QLatin1Char( '0' ) ),
+            { values[i], values[i] }, 2, 1 ) ) );
+        REQUIRE( writeTestScene( makeTestScene(
+            fx.filePath( QStringLiteral( "sr%1.tif" ).arg( i ) ),
+            QStringLiteral( "2025-01-%1" ).arg( i + 1, 2, 10, QLatin1Char( '0' ) ),
+            { provenanceCodes[i], provenanceCodes[i] }, 2, 1 ) ) );
+    }
+
+    Json::Value scenes( Json::arrayValue );
+    Json::Value provenance( Json::arrayValue );
+    for ( int i = 0; i < 8; ++i )
+    {
+        scenes.append( fx.filePath( QStringLiteral( "sv%1.tif" ).arg( i ) ).toStdString() );
+        provenance.append( fx.filePath( QStringLiteral( "sr%1.tif" ).arg( i ) ).toStdString() );
+    }
+
+    // rs:temporal_smooth (savitzky_golay window 5, degree 2): with the full
+    // ramp every position fits; with the exclusions the first positions have
+    // fewer than degree+1 observed samples in window and MUST be NaN — proof
+    // the kernel saw the missing samples (a post-hoc overwrite would leave
+    // them finite).
+    Json::Value smoothPlain( Json::objectValue );
+    smoothPlain["scenes"] = scenes;
+    smoothPlain["band"] = 1;
+    smoothPlain["method"] = "savitzky_golay";
+    smoothPlain["window"] = 5;
+    smoothPlain["degree"] = 2;
+    smoothPlain["output"] = fx.filePath( "smooth_plain.tif" ).toStdString();
+    runOp( "rs:temporal_smooth", smoothPlain );
+    Json::Value smoothProv( smoothPlain );
+    smoothProv["provenance"] = provenance;
+    smoothProv["output"] = fx.filePath( "smooth_prov.tif" ).toStdString();
+    runOp( "rs:temporal_smooth", smoothProv );
+    for ( int s = 1; s <= 8; ++s )
+    {
+        const auto plain = readBand( fx.filePath( "smooth_plain.tif" ), s );
+        REQUIRE( std::isfinite( plain[0] ) );
+    }
+    const auto sProv1 = readBand( fx.filePath( "smooth_prov.tif" ), 1 );
+    const auto sProv2 = readBand( fx.filePath( "smooth_prov.tif" ), 2 );
+    const auto sProv3 = readBand( fx.filePath( "smooth_prov.tif" ), 3 );
+    const auto sProv4 = readBand( fx.filePath( "smooth_prov.tif" ), 4 );
+    const auto sPlain4 = readBand( fx.filePath( "smooth_plain.tif" ), 4 );
+    // doy 1: window [1..3] holds ONE observed sample -> no fit.
+    REQUIRE( std::isnan( sProv1[0] ) );
+    // doy 2: excluded sample stays excluded (NaN to the kernel, not overwritten).
+    REQUIRE( std::isnan( sProv2[0] ) );
+    // doy 3: excluded, and window [1..5] holds only 2 observed -> no fit.
+    REQUIRE( std::isnan( sProv3[0] ) );
+    // doy 4: window [2..6] holds 3 observed {2,4,5} -> finite, and the
+    // 3-point quadratic through them (4.0) differs from the full-ramp fit.
+    REQUIRE( std::isfinite( sProv4[0] ) );
+    REQUIRE( std::fabs( sProv4[0] - sPlain4[0] ) > 1e-3 );
+
+    // rs:temporal_phenology: season metrics move when the synthetic fills
+    // are withdrawn (different samples bracket the crossings and the peak).
+    Json::Value phenoPlain( Json::objectValue );
+    phenoPlain["scenes"] = scenes;
+    phenoPlain["band"] = 1;
+    phenoPlain["output"] = fx.filePath( "pheno_plain.tif" ).toStdString();
+    runOp( "rs:temporal_phenology", phenoPlain );
+    Json::Value phenoProv( phenoPlain );
+    phenoProv["provenance"] = provenance;
+    phenoProv["output"] = fx.filePath( "pheno_prov.tif" ).toStdString();
+    runOp( "rs:temporal_phenology", phenoProv );
+    const auto ampPlain = readBand( fx.filePath( "pheno_plain.tif" ), 5 );
+    const auto ampProv = readBand( fx.filePath( "pheno_prov.tif" ), 5 );
+    const auto posPlain = readBand( fx.filePath( "pheno_plain.tif" ), 2 );
+    const auto posProv = readBand( fx.filePath( "pheno_prov.tif" ), 2 );
+    INFO( "ampPlain=" << ampPlain[0] << " ampProv=" << ampProv[0]
+          << " posPlain=" << posPlain[0] << " posProv=" << posProv[0] );
+    // Plain: observed range 1..5 (amp 4). Provenance-filtered: {2,4,4,2}
+    // (amp 2). POS demotes from doy 5 to doy 4.
+    REQUIRE( ampProv[0] == Approx( 2.0 ).margin( 1e-3 ) );
+    REQUIRE( ampPlain[0] == Approx( 4.0 ).margin( 1e-3 ) );
+    REQUIRE( std::fabs( posPlain[0] - posProv[0] ) > 0.5 );
+}
+
+TEST_CASE( "gap-fill provenance_output wires into downstream statistics directly",
+           "[temporal][operators][provenance][hardening-tcp19]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Ramp with an interior gap every other date: gap_fill synthesizes the
+    // even dates (provenance code 2), the odd dates stay observed (code 1).
+    const float v[6] = { 10, -9999, 30, -9999, 50, -9999 };
+    for ( int i = 0; i < 6; ++i )
+        REQUIRE( writeTestScene( makeTestScene(
+            fx.filePath( QStringLiteral( "g%1.tif" ).arg( i ) ),
+            QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate ),
+            { v[i] }, 1, 1 ) ) );
+
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "g%1.tif" ).arg( i ) ).toStdString() );
+
+    Json::Value gf( Json::objectValue );
+    gf["scenes"] = scenes;
+    gf["band"] = 1;
+    gf["method"] = "linear";
+    gf["output"] = fx.filePath( "gf.tif" ).toStdString();
+    gf["provenance_output"] = fx.filePath( "gf_prov.tif" ).toStdString();
+    runOp( "rs:temporal_gap_fill", gf );
+
+    // (a) The multi-band provenance artifact is accepted AS-IS (one path)
+    // and mapped band-per-scene: only the 3 observed samples enter n.
+    Json::Value wired( Json::objectValue );
+    wired["scenes"] = scenes;
+    wired["band"] = 1;
+    wired["provenance"] = Json::Value( Json::arrayValue );
+    wired["provenance"].append( fx.filePath( "gf_prov.tif" ).toStdString() );
+    wired["output"] = fx.filePath( "sen_wired.tif" ).toStdString();
+    runOp( "rs:temporal_sen_trend", wired );
+    const auto nWired = readBand( fx.filePath( "sen_wired.tif" ), 5 );
+    INFO( "nWired=" << nWired[0] );
+    REQUIRE( nWired[0] == Approx( 3 ) );
+
+    // (b) Repeating ONE multi-band path per scene used to read band 1 for
+    // EVERY scene — scene 1's all-observed channel, silently inflating n to
+    // 6. The prov_<date> band names make that misuse detectable: refuse.
+    Json::Value repeated( wired );
+    repeated["provenance"] = Json::Value( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+        repeated["provenance"].append( fx.filePath( "gf_prov.tif" ).toStdString() );
+    repeated["output"] = fx.filePath( "sen_rep.tif" ).toStdString();
+    bool threw = false;
+    try
+    {
+        runOp( "rs:temporal_sen_trend", repeated );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = true;
+        INFO( "message: " << e.what() );
+        REQUIRE( std::string( e.what() ).find( "prov_" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+    // Fail-closed: the refused run leaves no output raster behind.
+    REQUIRE( !QFile::exists( fx.filePath( "sen_rep.tif" ) ) );
+}
+
+TEST_CASE( "provenance artifact band dates must match the consuming collection",
+           "[temporal][operators][provenance][hardening-tcp19][p1-review]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Collection A (Jan..Jun) gets gap-filled; its provenance_output artifact
+    // carries prov_<Jan..Jun> bands. Consuming it against a DIFFERENT
+    // collection on the same grid (Jul..Dec) must refuse: the positional
+    // band mapping would otherwise exclude the wrong dates silently.
+    const float vA[6] = { 10, -9999, 30, -9999, 50, -9999 };
+    QDate dA( 2025, 1, 1 );
+    for ( int i = 0; i < 6; ++i )
+        REQUIRE( writeTestScene( makeTestScene(
+            fx.filePath( QStringLiteral( "a%1.tif" ).arg( i ) ),
+            dA.addDays( 10 * i ).toString( Qt::ISODate ), { vA[i] }, 1, 1 ) ) );
+
+    Json::Value gf( Json::objectValue );
+    Json::Value scenesA( Json::arrayValue );
+    for ( int i = 0; i < 6; ++i )
+        scenesA.append( fx.filePath( QStringLiteral( "a%1.tif" ).arg( i ) ).toStdString() );
+    gf["scenes"] = scenesA;
+    gf["band"] = 1;
+    gf["method"] = "linear";
+    gf["output"] = fx.filePath( "ga.tif" ).toStdString();
+    gf["provenance_output"] = fx.filePath( "ga_prov.tif" ).toStdString();
+    runOp( "rs:temporal_gap_fill", gf );
+
+    // Collection B: same grid, DIFFERENT dates (Jul..Dec 2025).
+    Json::Value sen( Json::objectValue );
+    Json::Value scenesB( Json::arrayValue );
+    QDate dB( 2025, 7, 1 );
+    for ( int i = 0; i < 6; ++i )
+    {
+        const QString path = fx.filePath( QStringLiteral( "b%1.tif" ).arg( i ) );
+        REQUIRE( writeTestScene( makeTestScene( path,
+                                                dB.addDays( 10 * i ).toString( Qt::ISODate ),
+                                                { float( i + 1 ) }, 1, 1 ) ) );
+        scenesB.append( path.toStdString() );
+    }
+    sen["scenes"] = scenesB;
+    sen["band"] = 1;
+    sen["provenance"] = Json::Value( Json::arrayValue );
+    sen["provenance"].append( fx.filePath( "ga_prov.tif" ).toStdString() );
+    sen["output"] = fx.filePath( "sen_mismatch.tif" ).toStdString();
+
+    bool threw = false;
+    try
+    {
+        runOp( "rs:temporal_sen_trend", sen );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = true;
+        INFO( "message: " << e.what() );
+        REQUIRE( std::string( e.what() ).find( "prov_2025-01-01" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+    REQUIRE( !QFile::exists( fx.filePath( "sen_mismatch.tif" ) ) );
+}
+
+TEST_CASE( "temporal_decompose default lambda keeps the annual signal in the seasonal band",
+           "[temporal][operators][decompose][hardening-tcp19][p3-review]" )
+{
+    ensureApp();
+    Fixture fx;
+    // 36 monthly scenes over 3 years: y = 10 + 5·sin(2π(doy−199)/365.25).
+    // At the new day-axis default (λ=1e8) the trend must stay near the base
+    // level and the doy climatology must carry the full ±5 annual swing —
+    // the pre-#1200 default (λ=1e4 index-era) let the trend absorb the
+    // sine and the seasonal band degrade to noise.
+    const int months = 36;
+    for ( int i = 0; i < months; ++i )
+    {
+        const QDate d = QDate( 2023, 1, 15 ).addMonths( i );
+        const float v = static_cast<float>(
+            10.0 + 5.0 * std::sin( 2.0 * M_PI * ( d.dayOfYear() - 199 ) / 365.25 ) );
+        REQUIRE( writeTestScene( makeTestScene(
+            fx.filePath( QStringLiteral( "m%1.tif" ).arg( i ) ),
+            d.toString( Qt::ISODate ), { v }, 1, 1 ) ) );
+    }
+
+    Json::Value params( Json::objectValue );
+    Json::Value scenes( Json::arrayValue );
+    for ( int i = 0; i < months; ++i )
+        scenes.append( fx.filePath( QStringLiteral( "m%1.tif" ).arg( i ) ).toStdString() );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["output"] = fx.filePath( "dec.tif" ).toStdString();
+    runOp( "rs:temporal_decompose", params );
+
+    // Band layout: trend bands 1..36, seasonal 37..72, remainder 73..108.
+    // Band 18 is a series-interior scene: the first/last trend bands carry
+    // the documented one-sided boundary bias of the second-difference
+    // penalty (endpoints are not asserted, mirroring the kernel-level
+    // decompose known-answer test).
+    const auto trendMid = readBand( fx.filePath( "dec.tif" ), 18 );
+    INFO( "trendMid=" << trendMid[0] );
+    REQUIRE( trendMid[0] > 9.0f );
+    REQUIRE( trendMid[0] < 11.0f );
+    float sMax = -1e9f;
+    float sMin = 1e9f;
+    for ( int b = 37; b <= 72; ++b )
+    {
+        const auto s = readBand( fx.filePath( "dec.tif" ), b );
+        sMax = std::max( sMax, s[0] );
+        sMin = std::min( sMin, s[0] );
+    }
+    INFO( "seasonal max=" << sMax << " min=" << sMin );
+    REQUIRE( sMax > 4.0f );
+    REQUIRE( sMax < 5.6f );
+    REQUIRE( sMin < -4.0f );
+    REQUIRE( sMin > -5.6f );
+}
