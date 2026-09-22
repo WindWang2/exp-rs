@@ -807,7 +807,7 @@ TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
     {
         const long id = center.submitJob( tc12Request( "tc12:bulk" ) );
         REQUIRE( id > 0 );
-        REQUIRE( waitForStatus( id, { TaskStatus::Succeeded, TaskStatus::Failed }, 5000 ) );
+        REQUIRE( waitForStatus( id, { TaskStatus::Completed, TaskStatus::Failed }, 5000 ) );
     }
 
     // One hung task whose cancel deadline must still fire promptly through
@@ -841,7 +841,7 @@ TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
 
     // The terminal tail is untouched by the fired deadline.
     int stillTerminal = 0;
-    for ( const AlgorithmTaskInfo &task : center.allTasks() )
+    for ( const sicnu::AlgorithmTaskInfo &task : center.allTasks() )
         if ( task.taskId != hangId && sicnu::isTerminalStatus( task.status ) )
             ++stillTerminal;
     REQUIRE( stillTerminal >= kTerminalTail );

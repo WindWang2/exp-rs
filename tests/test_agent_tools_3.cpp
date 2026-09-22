@@ -339,17 +339,16 @@ TEST_CASE( "#1155: temporal:ingest_stac refuses a deeply-nested depth bomb clean
     REQUIRE_FALSE( result.success );
     REQUIRE( result.error.find( "invalid STAC result JSON" ) != std::string::npos );
 
-    // The same tool still ingests a well-formed document afterwards (one
-    // minimal Sentinel-2-style feature, register=false keeps it catalog-free).
+    // The same tool still ingests a well-formed document afterwards (two
+    // minimal Sentinel-2-style features — a collection needs >= 2 scenes —
+    // register=false keeps it catalog-free).
     const QString goodPath = QDir( dir.path() ).filePath( QStringLiteral( "good.json" ) );
     {
         QFile f( goodPath );
         REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
-        f.write( QByteArrayLiteral( R"({"features":[{"id":"i1","type":"Feature",)"
-                                   R"("properties":{"datetime":"2026-08-01T10:00:00Z",)"
-                                   R"("platform":"Sentinel-2B","eo:cloud_cover":12.5},)"
-                                   R"("assets":{"green":{"href":"https://example.com/i1_B03.tif",)"
-                                   R"("type":"image/tiff; application=geotiff"}}}]})" ) );
+        f.write( QByteArrayLiteral( R"({"features":[)"
+                                   R"({"id":"i1","type":"Feature","properties":{"datetime":"2026-08-01T10:00:00Z","platform":"Sentinel-2B","eo:cloud_cover":12.5},"assets":{"green":{"href":"https://example.com/i1_B03.tif","type":"image/tiff; application=geotiff"}}},)"
+                                   R"({"id":"i2","type":"Feature","properties":{"datetime":"2026-08-11T10:00:00Z","platform":"Sentinel-2B","eo:cloud_cover":30.0},"assets":{"green":{"href":"https://example.com/i2_B03.tif","type":"image/tiff; application=geotiff"}}}]})" ) );
         f.close();
     }
     Json::Value okInput( Json::objectValue );
@@ -358,5 +357,5 @@ TEST_CASE( "#1155: temporal:ingest_stac refuses a deeply-nested depth bomb clean
     okInput["register"] = false;
     const sicnu::agent::spatial_tools::SpatialToolResult ok = tool.execute( okInput );
     REQUIRE( ok.success );
-    REQUIRE( ok.output["scene_count"].asInt() == 1 );
+    REQUIRE( ok.output["scene_count"].asInt() == 2 );
 }
