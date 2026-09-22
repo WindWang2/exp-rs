@@ -12,7 +12,7 @@ implementation, record the failing assertions, restore (`git stash pop`) + rebui
 | # | Oracle (file → TEST_CASE) | Fix | RED on master | GREEN on fix |
 |---|---------------------------|-----|---------------|--------------|
 | 1 | test_exprs_plugin_system → "uninstall holds the cross-process install lock" | uninstall takes `CrossProcessInstallLock` | ✅ 5 assertions FAILED (:903-:914 — uninstall succeeded, deleted the install, no lock message) | ✅ pass |
-| 2 | test_exprs_plugin_system → "install fails typed and bounded while the lock is held elsewhere" | POSIX `LOCK_NB` + 5 s bounded retry | ✅ **exit 124 — HUNG** (killed by `timeout 20`; the hang IS the defect) | ✅ pass (typed refusal, elapsed < 30 s) |
+| 2 | test_exprs_plugin_system → "install fails typed and bounded while the lock is held elsewhere" | POSIX `LOCK_NB` + 5 s bounded retry | ✅ **exit 124 — HUNG** (killed by `timeout 20`; the hang IS the defect) | ✅ pass (typed `ResourceMissing` after the 5 s deadline, asserted < 30 s wall clock) |
 | 3 | test_exprs_plugin_system → "user index save survives a stale fixed-name temp" | pid-unique `<index>.tmp.<pid>` | ✅ FAILED (:977 — index never written when legacy `.tmp` name is occupied) | ✅ pass |
 | 4 | test_plugin_host_process → "missing worker binary fails fast with a typed diagnostic" | POSIX `access(X_OK)` pre-check | ✅ FAILED (`typedFailure == false` — master reports `IpcProtocolError` after the full handshake wait) | ✅ pass (typed `HostProcessUnavailable`, < 4 s) |
 | 5 | test_ensemble_detection → "detection lane applies linear scale and offset exactly like the raster lane" | gate + `v*scale+offset` parity | ✅ 2 CHECKs FAILED (fed-blob mean 200 / 400 on master vs required 100 / 350 — offset silently dropped; raw pixels fed when scale==1) | ✅ pass (100.0 / 350.0) |
@@ -38,6 +38,40 @@ implementation, record the failing assertions, restore (`git stash pop`) + rebui
 | test_ensemble_parallel | 6 | all passed (incl. oracle 9) |
 
 Key oracles run twice consecutively before PR (see PR body).
+
+## Review round (independent adversarial reviewer)
+
+Verdict round 1: PROCEED-WITH-FIXES (no P0; 1×P1, 3×P2). Round 1 fixes committed as
+`dfae96128` and re-verified:
+
+- **P1 (closed)**: parked-sidecar slot is pre-cleaned before the park + unconditional
+  trailing removal at all three publish sites — a crash-stranded slot would have wedged
+  every later publish on Windows (rename does not overwrite).
+- **P2 (closed)**: saveUserIndex checks stream state after explicit close and removes the
+  temp on write failure (torn-document class); the bounded-lock error distinguishes
+  deadline-hit from acquire error; `DetectionTileEngine::checkContract` now typed-refuses
+  the multimodal-only `preprocess.pad / clamp_min / clamp_max` knobs (#646 discipline —
+  same refusal the single-input and scene engines already made).
+- **P3 (closed)**: ensemble product-swap failure branch removes the stage file; index test
+  cleans up; zero-weight oracles pin the actual "weights sum to zero" verdict (cannot pass
+  vacuously via an unrelated pre-member refusal).
+- **P3 (documented, not changed)**: pid-unique index temps can accumulate after crashes
+  (harmless, never read back); `access(X_OK)` uses real uid vs effective-uid exec (exotic
+  setuid-host edge); `classifyScene` gates `probabilities`, not raw `scores` (-inf logit
+  never reaches the published artifact).
+
+Behavior deltas vs master, for the record:
+
+1. Rollback of a sidecar-publish failure now restores the previous product WITH its sidecar
+   (master pinned the sidecar as "detectably absent" — test 9 updated deliberately).
+2. A same-id install held > 5 s by another process now fails typed and can be retried;
+   master blocked indefinitely on POSIX (and failed fast on Windows) — the bounded failure
+   is the cross-platform-uniform semantic.
+3. `unloadAll()`'s busy fixup no longer adds the PluginInUse diagnostic to a record whose
+   unload a concurrent caller completed in between (master added it whenever the record
+   existed — wrong for that case).
+4. A detection manifest declaring `pad`/`clamp_*` now fails typed at contract check
+   (master silently ignored the knobs).
 
 ## Honest oracle limits
 

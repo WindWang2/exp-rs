@@ -77,17 +77,21 @@ Optimization-only; no new product surface, no second authority anywhere.
     `model_ensemble.cpp`). The old code `remove`d the old `.prov.json` before the new one
     landed and never restored it: a sidecar failure downgraded a verified product to
     `MissingSidecar`. The old sidecar is now PARKED next to the product backup before the
-    swap and restored on any failure (removed only on success). Crash invariant preserved
-    and actually tightened: the old code removed the sidecar only AFTER the product swap
-    (contradicting its own comment), leaving a stale-sidecar crash window; parking before
-    the swap means a crash can only ever leave a MISSING sidecar, never a stale one. The
-    detection `DetectionPublishGuard` already behaved this way.
+    swap and restored on any failure (slot pre-cleaned + unconditionally cleared, so a
+    crash-stranded slot cannot wedge later publishes — review round 1). Crash invariant
+    preserved and actually tightened: the old code removed the sidecar only AFTER the
+    product swap (contradicting its own comment), leaving a stale-sidecar crash window;
+    parking before the swap means a crash can only ever leave a MISSING sidecar, never a
+    stale one. The detection `DetectionPublishGuard` already behaved this way.
 11. **Scene classification artifacts carry their identity fields on disk** (ensemble +
     single-model). `backend`/`device`/`model_ref`/`ensemble_members` were added to the
     payload only after the publish, so the durable document silently lacked them. Now built
     before `publishClassificationArtifact`.
 12. **Dead code removed**: the duplicated task-intent gate in `model_execution_service.cpp`
     (superseded by #1226's pre-route gate, unreachable for every path).
+13. **Detection contract check refuses the multimodal-only preprocess knobs**
+    (`preprocess.pad / clamp_min / clamp_max`) — the same #646 typed refusal the
+    single-input and scene engines already made (review round 1).
 
 ## Dedup record
 
@@ -101,6 +105,18 @@ Optimization-only; no new product surface, no second authority anywhere.
   detection sidecar / plugin-adapter infer serialization (recorded with evidence, need design
   agreement or platform access), teaching/app-shell files (owned by #1237/#1239).
 
+## Independent review
+
+One full adversarial review round (reviewer had not seen the code): verdict
+PROCEED-WITH-FIXES, no P0, 1×P1 + 3×P2 closed in commit `dfae96128` and re-verified;
+remaining P3s documented in the ledger (test-oracle limits, setuid edge, index-temp
+accumulation). Deliberate behavior deltas vs master are listed in
+`01-test-ledger.md` §"Behavior deltas" (rollback restores the product+sidecar PAIR;
+same-id installs held > 5 s now fail typed and retriable — matching the Windows
+fail-fast semantic — instead of blocking indefinitely on POSIX; the unloadAll busy
+fixup skips the PluginInUse diagnostic for concurrently-completed unloads; detection
+pad/clamp knobs fail the contract check).
+
 ## Test evidence
 
 All oracles extend EXISTING test files (no new executables, no `tests/CMakeLists.txt`
@@ -112,7 +128,10 @@ summary. The bounded-acquire oracle is demonstrated RED via `timeout` (the hang 
 Full targeted suites (all with existing tests): `test_exprs_plugin_system`,
 `test_exprs_plugin_loader`, `test_plugin_host_process`, `test_model_ensemble`,
 `test_model_tasks`, `test_ensemble_scene`, `test_ensemble_detection`,
-`test_ensemble_parallel` — key oracles run twice consecutively.
+`test_ensemble_parallel` — all 8 suites run twice consecutively green (127 test cases
+total; the single pass-2 failure was a pre-existing timing-sensitive crash-recovery UI
+test failing once under concurrent machine load — it passes 3/3 in isolation and on the
+idle-machine rerun).
 
 ## Known limitations
 

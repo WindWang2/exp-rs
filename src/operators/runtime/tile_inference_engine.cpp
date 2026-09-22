@@ -3984,8 +3984,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
-  if ( hadSidecar )
-    QFile::remove( sidecarBackupPath );
+  QFile::remove( sidecarBackupPath ); // unconditional: also clears crash litter
 
   // Platform 10.0: EO domain preflight per feed — enforced against each
   // feed's BOUND contract and ITS effective band selection, after the
