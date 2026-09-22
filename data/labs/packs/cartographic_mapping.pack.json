@@ -3,7 +3,7 @@
   "lab_id": "cartographic_mapping",
   "pack_version": "1.0.0",
   "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
-  "declared_offline_bytes": 1976,
+  "declared_offline_bytes": 1881,
   "inputs": [
     {
       "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif",
@@ -101,8 +101,8 @@
       "path": "data/labs/mapspecs/lab11_thematic_map.mapspec.json",
       "role": "aux",
       "provenance": "committed-fixture",
-      "sha256": "dd17ea820ce6f3868dfbe2108e617f7993c995bbbb8bf3e21293fac5ef56c681",
-      "bytes": 1976,
+      "sha256": "ad081257ef39112d0af3207f1697a3b2ad89042e2ca728e14864b7cdaac4467d",
+      "bytes": 1881,
       "sensor_truth": "map layout spec (thematic map composition)"
     }
   ]
