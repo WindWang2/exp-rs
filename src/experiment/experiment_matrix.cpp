@@ -59,6 +59,17 @@ QJsonObject cellIdentityJson( const QHash<QString, QString> &assignments )
 
 } // namespace
 
+QString matrixCellId( const QString &matrixId, const QHash<QString, QString> &assignments )
+{
+    QJsonObject identity;
+    identity.insert( QStringLiteral( "matrix_id" ), matrixId );
+    identity.insert( QStringLiteral( "assignments" ), cellIdentityJson( assignments ) );
+    return QString::fromUtf8(
+        QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( identity ),
+                                  QCryptographicHash::Sha256 )
+            .toHex() );
+}
+
 QString axisRoleToString( AxisRole role )
 {
     return roleKeyFor( role );
@@ -216,21 +227,12 @@ Result<QVector<MatrixCell>> MatrixDescriptor::enumerateCells() const
     }
 
     // Cell identity last, once every assignment is in place: SHA-256 over
-    // the canonical RFC-8785 form of {matrix_id, assignments}. The matrix id
-    // is part of the identity (review round 1): two matrices with identical
-    // assignment sets are DIFFERENT experiments, so their ledgers and
-    // aggregates must never co-mingle.
+    // the canonical RFC-8785 form of {matrix_id, assignments} (see
+    // matrixCellId). The matrix id is part of the identity (review round 1):
+    // two matrices with identical assignment sets are DIFFERENT experiments,
+    // so their ledgers and aggregates must never co-mingle.
     for ( MatrixCell &cell : cells )
-    {
-        QJsonObject identity;
-        identity.insert( QStringLiteral( "matrix_id" ), matrixId );
-        identity.insert( QStringLiteral( "assignments" ),
-                         cellIdentityJson( cell.assignments ) );
-        cell.cellId = QString::fromUtf8(
-            QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( identity ),
-                                      QCryptographicHash::Sha256 )
-                .toHex() );
-    }
+        cell.cellId = matrixCellId( matrixId, cell.assignments );
     return Result<QVector<MatrixCell>>::success( cells );
 }
 

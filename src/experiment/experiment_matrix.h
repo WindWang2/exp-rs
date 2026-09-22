@@ -43,6 +43,14 @@ enum class AxisRole
 QString axisRoleToString( AxisRole role );
 std::optional<AxisRole> axisRoleFromString( const QString &text );
 
+/// Canonical cell id for an assignment map inside one matrix identity
+/// space — the exact content hash MatrixDescriptor::enumerateCells() stamps
+/// into MatrixCell::cellId ({matrix_id, assignments}, SHA-256 over the
+/// RFC-8785 canonical form). Public so non-cartesian point sets (RS14-07
+/// one-at-a-time / Latin-hypercube study samplers) share ONE identity
+/// algorithm instead of forking the hash.
+QString matrixCellId( const QString &matrixId, const QHash<QString, QString> &assignments );
+
 struct MatrixAxis
 {
     QString name;             ///< "region", "year", "sensor", "model", "seed", …
