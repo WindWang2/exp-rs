@@ -7,6 +7,7 @@
 #include <json/json.h>
 
 #include "agent/commands/workspace_commands.h"
+#include "agent/spatial_tools/temporal_workspace_tools.h"
 #include "agent/contracts/spatial_contracts.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
@@ -306,4 +307,56 @@ TEST_CASE( "Symbology tools apply and roll back renderers", "[agent3][symbology]
   CHECK( afterUndo.output["renderer"]["renderer"].asString() == "categorizedSymbol" );
 
   QgsProject::instance()->removeAllMapLayers();
+}
+
+TEST_CASE( "#1155: temporal:ingest_stac refuses a deeply-nested depth bomb cleanly",
+           "[d16][agent][robustness]" )
+{
+    // The 'result' file path is workspace content: a hostile document nested
+    // past jsoncpp's useful recursion bound must be a typed failure, never a
+    // stack overflow / escaping exception (the pre-#1155 default reader).
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QString bomb;
+    for ( int i = 0; i < 1000; ++i )
+        bomb += QLatin1Char( '[' );
+    bomb += QStringLiteral( "1" );
+    for ( int i = 0; i < 1000; ++i )
+        bomb += QLatin1Char( ']' );
+    const QString bombPath = QDir( dir.path() ).filePath( QStringLiteral( "bomb.json" ) );
+    {
+        QFile f( bombPath );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( bomb.toUtf8() );
+        f.close();
+    }
+
+    sicnu::agent::spatial_tools::TemporalIngestStacTool tool;
+    Json::Value input( Json::objectValue );
+    input["result"] = bombPath.toStdString();
+    input["name"] = "bombed";
+    const sicnu::agent::spatial_tools::SpatialToolResult result = tool.execute( input );
+    REQUIRE_FALSE( result.success );
+    REQUIRE( result.error.find( "invalid STAC result JSON" ) != std::string::npos );
+
+    // The same tool still ingests a well-formed document afterwards (one
+    // minimal Sentinel-2-style feature, register=false keeps it catalog-free).
+    const QString goodPath = QDir( dir.path() ).filePath( QStringLiteral( "good.json" ) );
+    {
+        QFile f( goodPath );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( QByteArrayLiteral( R"({"features":[{"id":"i1","type":"Feature",)"
+                                   R"("properties":{"datetime":"2026-08-01T10:00:00Z",)"
+                                   R"("platform":"Sentinel-2B","eo:cloud_cover":12.5},)"
+                                   R"("assets":{"green":{"href":"https://example.com/i1_B03.tif",)"
+                                   R"("type":"image/tiff; application=geotiff"}}}]})" ) );
+        f.close();
+    }
+    Json::Value okInput( Json::objectValue );
+    okInput["result"] = goodPath.toStdString();
+    okInput["name"] = "post-bomb-series";
+    okInput["register"] = false;
+    const sicnu::agent::spatial_tools::SpatialToolResult ok = tool.execute( okInput );
+    REQUIRE( ok.success );
+    REQUIRE( ok.output["scene_count"].asInt() == 1 );
 }

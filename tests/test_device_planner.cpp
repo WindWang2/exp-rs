@@ -225,6 +225,9 @@ TEST_CASE( "#1160: an externally held session keeps its ledger reservation past 
   hw.cudaDeviceCount = 1;
   hw.vramBudgetMb = 200;
   registry.setHardwareForTest( hw );
+  // The ensemble pre-acquisition shape needs the PRODUCTION default pool
+  // (2); RegistryGuard widens it to 8 for the other tests.
+  registry.setMaxCachedSessions( 2 );
   registry.registerProvider(
     "planner7",
     []( const ModelInfo &, const ModelHardwareCapabilities &, std::string * ) -> ModelRuntimePtr {

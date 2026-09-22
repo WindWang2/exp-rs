@@ -602,7 +602,9 @@ TEST_CASE( "terrain operators accept a legacy undeclared input with a warning",
         runOp( id, declaredParams );
         REQUIRE( metaItem( declaredOut, sicnu::sar::kRadiometricStateKey ) == "gamma0" );
         REQUIRE( metaItem( declaredOut, "SICNU_SAR_STATE_ASSUMED" ).empty() );
-        REQUIRE( metaItem( declaredOut, "SICNU_SAR_DOMAIN_ASSUMED" ).empty() );
+        // The calibration is declared but the numeric DOMAIN is not — the
+        // linear-power assumption is still persisted honestly (#1165).
+        REQUIRE( metaItem( declaredOut, "SICNU_SAR_DOMAIN_ASSUMED" ) == "linear_power" );
     }
 }
 

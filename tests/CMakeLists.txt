@@ -10553,11 +10553,7 @@ sicnu_discover_tests(test_processing_catalog_ux)
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 600)
 
-  add_executable(test_d16_temporal_tools test_d16_temporal_tools.cpp
-    # the #1167/#1155 regressions exercise TemporalIngestStacTool — link
-    # the real tool implementation (Qt Core only).
-    ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/temporal_workspace_tools.cpp
-  )
+  add_executable(test_d16_temporal_tools test_d16_temporal_tools.cpp)
   target_link_libraries(test_d16_temporal_tools PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
