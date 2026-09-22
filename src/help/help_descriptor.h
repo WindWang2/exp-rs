@@ -121,7 +121,10 @@ struct GuidanceDescriptor
 /// is preserved verbatim in originCode — the catalog never erases it.
 struct DiagnosticInfo
 {
-    QString originFamily; ///< "harness" | "operator" | "geospatial" | "dataset" | "preflight" | "rs"
+    /// "harness" | "operator" | "geospatial" | "dataset" | "preflight" | "rs" |
+    /// "env" — the DiagnosticFamily names of help_id.h; an unknown family is
+    /// dropped by the content store, so this list must match that enum.
+    QString originFamily;
     QString originCode;   ///< byte-identical machine code (e.g. "DATASET_NOT_FOUND")
     QString whatHappened; ///< 中文
     QString whyItMatters; ///< 中文，用遥感/GIS 后果表述
