@@ -1291,10 +1291,41 @@ TEST_CASE( "unrepresentable integral facts fields from json fail typed like goal
     REQUIRE( !histogram.has_value() );
     REQUIRE( histogram.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
 
+    // RED on master: extent doubles had no finite guard, so a corrupted
+    // store document carried ±inf (or silently-zeroed gaps) into the
+    // spatial criteria and the report digest. Same typed gate as the
+    // integral fields.
+    QJsonObject infiniteExtent = factsJson();
+    infiniteExtent.insert( QStringLiteral( "has_extent" ), true );
+    infiniteExtent.insert( QStringLiteral( "min_x" ),
+                           std::numeric_limits< double >::infinity() );
+    const auto infiniteExtentFacts = DatasetFacts::fromJson( infiniteExtent );
+    REQUIRE( !infiniteExtentFacts.has_value() );
+    REQUIRE( infiniteExtentFacts.diagnostics().first().code
+             == QStringLiteral( "suitability.facts_invalid" ) );
+
+    QJsonObject missingExtentMember = factsJson();
+    missingExtentMember.insert( QStringLiteral( "has_extent" ), true );
+    missingExtentMember.insert( QStringLiteral( "max_y" ), 40.0 );
+    const auto missingExtent = DatasetFacts::fromJson( missingExtentMember );
+    REQUIRE( !missingExtent.has_value() );
+    REQUIRE( missingExtent.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+
     // Sane facts keep parsing (regression against over-tightening).
     QJsonObject sane = factsJson();
     sane.insert( QStringLiteral( "sample_count" ), 4200.0 );
     const auto ok = DatasetFacts::fromJson( sane );
     REQUIRE( ok.has_value() );
     REQUIRE( ok.value().sampleCount == 4200 );
+
+    QJsonObject saneExtent = factsJson();
+    saneExtent.insert( QStringLiteral( "has_extent" ), true );
+    saneExtent.insert( QStringLiteral( "min_x" ), 10.0 );
+    saneExtent.insert( QStringLiteral( "min_y" ), 20.0 );
+    saneExtent.insert( QStringLiteral( "max_x" ), 30.0 );
+    saneExtent.insert( QStringLiteral( "max_y" ), 40.0 );
+    const auto extentOk = DatasetFacts::fromJson( saneExtent );
+    REQUIRE( extentOk.has_value() );
+    REQUIRE( extentOk.value().minX == 10.0 );
+    REQUIRE( extentOk.value().maxY == 40.0 );
 }
