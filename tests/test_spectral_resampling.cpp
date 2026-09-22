@@ -216,6 +216,54 @@ TEST_CASE("SpectralResampling resampleSpectrumGaussian rejects non-monotonic sou
     CHECK_FALSE(SpectralResampling::resampleSpectrumGaussian(src, badWl, 2, dstWl, dstFwhm, 1, out));
 }
 
+TEST_CASE("SpectralResampling Gaussian SRF propagates source holes like the linear kernel (#1186 item 28)", "[resample][gaussian][nodata]")
+{
+    // Regression oracle for the #1186 item 28 follow-up: a non-finite source
+    // band inside a target band's SRF support (|diff| <= 3.5*FWHM, the same
+    // set of bands that contribute weight) must propagate as NaN — never as a
+    // confident interpolated value — while a hole OUTSIDE the support must
+    // not change the Gaussian aggregate at all (the linear kernel ignores
+    // holes outside the bracket the same way).
+
+    SECTION("hole inside the SRF support yields NaN, not the bracket-linear value")
+    {
+        // Target 450 (FWHM=100): support 450±350 covers 400/500/600, so the
+        // NaN at 600 poisons the integration. The linear bracket of 450 is
+        // [400,500] — both finite — so the pre-fix fallback silently emitted
+        // the bracket value 0.2 instead of NaN.
+        const float src[] = {0.1f, 0.3f, std::numeric_limits<float>::quiet_NaN()};
+        const float srcWl[] = {400.0f, 500.0f, 600.0f};
+        const float dstWl[] = {450.0f};
+        const float dstFwhm[] = {100.0f};
+        float out[1] = {0.0f};
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(src, srcWl, 3, dstWl, dstFwhm, 1, out));
+        CHECK(std::isnan(out[0]));
+    }
+
+    SECTION("hole outside the SRF support does not degrade the Gaussian value")
+    {
+        // Target 520 (FWHM=20): support 520±70 covers only the 500 band, so
+        // the Gaussian value is exactly the 500 value (0.9). The NaN at 400
+        // sits outside the support; the pre-fix code broke on it, discarded
+        // the aggregate and fell back to the linear bracket value
+        // 0.9 + 0.2*(0.3-0.9) = 0.78.
+        const float srcWl[] = {400.0f, 500.0f, 600.0f, 700.0f};
+        const float dstWl[] = {520.0f};
+        const float dstFwhm[] = {20.0f};
+        float out[1] = {0.0f};
+
+        const float holed[] = {std::numeric_limits<float>::quiet_NaN(), 0.9f, 0.3f, 0.7f};
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(holed, srcWl, 4, dstWl, dstFwhm, 1, out));
+        CHECK(out[0] == Approx(0.9f).margin(1e-6f));
+
+        // The hole-free spectrum must give the identical value.
+        const float clean[] = {0.1f, 0.9f, 0.3f, 0.7f};
+        float cleanOut[1] = {0.0f};
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(clean, srcWl, 4, dstWl, dstFwhm, 1, cleanOut));
+        CHECK(cleanOut[0] == Approx(out[0]).margin(1e-6f));
+    }
+}
+
 
 
 
