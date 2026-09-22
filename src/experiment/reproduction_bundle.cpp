@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTextStream>
@@ -59,6 +60,80 @@ QJsonObject loadBundleJson( const QString &bundleDir, const QString &name, bool 
 }
 
 } // namespace
+
+bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
+{
+    const QDir dir( bundleDir );
+    QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
+    if ( !checksumFile.open( QIODevice::ReadOnly ) )
+    {
+        reasons->append( QStringLiteral( "checksums.txt missing" ) );
+        return false;
+    }
+    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
+                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+    QStringList listed;
+    for ( const QString &line : lines )
+    {
+        const int split = line.indexOf( QStringLiteral( "  " ) );
+        if ( split <= 0 )
+        {
+            // A line that cannot be parsed is an integrity signal, not noise:
+            // skipping it would let a truncated or edited table pass while
+            // only pretending to verify the bundle.
+            reasons->append( QStringLiteral( "malformed checksum line: %1" ).arg( line ) );
+            return false;
+        }
+        const QString digest = line.left( split );
+        const QString name = line.mid( split + 2 );
+        listed.append( name );
+        // Path traversal guard: bundle members are relative names inside the
+        // directory, never absolute paths or ../ escapes.
+        if ( name.startsWith( QLatin1Char( '/' ) ) || name.contains( QLatin1String( ".." ) ) )
+        {
+            reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
+            return false;
+        }
+        QFile member( dir.filePath( name ) );
+        if ( !member.open( QIODevice::ReadOnly ) ||
+             QString::fromUtf8(
+                 QCryptographicHash::hash( member.readAll(), QCryptographicHash::Sha256 )
+                     .toHex() ) != digest )
+        {
+            reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
+            return false;
+        }
+    }
+    for ( const char *member : kRequiredBundleMembers )
+    {
+        if ( !listed.contains( QLatin1String( member ) ) )
+        {
+            reasons->append( QStringLiteral( "checksums.txt does not cover %1" )
+                                 .arg( QLatin1String( member ) ) );
+            return false;
+        }
+    }
+    // Coverage is directional in both ways: every checksums.txt line must
+    // hash-match a file, AND every file in the bundle must be covered —
+    // an uncovered member (metrics.json with its checksum line stripped, a
+    // stray document) is exactly the tamper shape the gate exists for.
+    // checksums.txt cannot list itself.
+    const QFileInfoList bundleFiles =
+        dir.entryInfoList( QDir::Files, QDir::Name | QDir::IgnoreCase );
+    for ( const QFileInfo &entry : bundleFiles )
+    {
+        const QString name = entry.fileName();
+        if ( name == QLatin1String( "checksums.txt" ) )
+            continue;
+        if ( !listed.contains( name ) )
+        {
+            reasons->append( QStringLiteral( "checksums.txt does not cover %1" ).arg( name ) );
+            return false;
+        }
+    }
+    reasons->append( QStringLiteral( "bundle checksums verified" ) );
+    return true;
+}
 
 QJsonObject ReproductionBundleReport::toJson() const
 {
@@ -313,6 +388,21 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
     // explicitly — an unmet check sets the flag, the default never counts
     // as a verdict.
     bool impossible = false;
+
+    // 0. Integrity first: verify checksums.txt against the bundle contents
+    // BEFORE trusting any of the documents below (a tampered bundle must
+    // not be able to talk its way into a better verdict). An empty or
+    // partially-readable table fails here instead of passing vacuously.
+    {
+        QStringList checksumReasons;
+        if ( !verifyBundleChecksums( bundleDir, &checksumReasons ) )
+        {
+            validation.reasons.append( checksumReasons );
+            validation.level = dataset::ReproductionLevel::Impossible;
+            return validation;
+        }
+    }
+
     bool ok = false;
     const QJsonObject runConfig =
         loadBundleJson( bundleDir, QStringLiteral( "run_config.json" ), &ok );
@@ -413,45 +503,6 @@ ReproductionValidation ReproductionBundleExporter::validateBundle(
             validation.level = dataset::ReproductionLevel::Impossible;
             return validation;
         }
-    }
-
-    // 0. Integrity first: verify checksums.txt against the bundle contents
-    // before trusting any of the documents above (a tampered bundle must
-    // not be able to talk its way into a better verdict).
-    {
-        bool checksumOk = false;
-        const QJsonObject manifestJson =
-            loadBundleJson( bundleDir, QStringLiteral( "manifest.json" ), &checksumOk );
-        Q_UNUSED( manifestJson );
-        QFile checksumFile( QDir( bundleDir ).filePath( QStringLiteral( "checksums.txt" ) ) );
-        if ( !checksumFile.open( QIODevice::ReadOnly ) )
-        {
-            validation.reasons.append( QStringLiteral( "checksums.txt missing" ) );
-            validation.level = dataset::ReproductionLevel::Impossible;
-            return validation;
-        }
-        const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
-                                      .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
-        for ( const QString &line : lines )
-        {
-            const int split = line.indexOf( QStringLiteral( "  " ) );
-            if ( split <= 0 )
-                continue;
-            const QString digest = line.left( split );
-            const QString name = line.mid( split + 2 );
-            QFile member( QDir( bundleDir ).filePath( name ) );
-            if ( !member.open( QIODevice::ReadOnly ) ||
-                 QString::fromUtf8(
-                     QCryptographicHash::hash( member.readAll(), QCryptographicHash::Sha256 )
-                         .toHex() ) != digest )
-            {
-                validation.reasons.append(
-                    QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
-                validation.level = dataset::ReproductionLevel::Impossible;
-                return validation;
-            }
-        }
-        validation.reasons.append( QStringLiteral( "bundle checksums verified" ) );
     }
 
     // 5. Artifacts present — an UNWIRED artifact hook is a checked-nothing

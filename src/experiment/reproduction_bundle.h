@@ -26,6 +26,7 @@
 #include "lineage.h"
 
 #include <QJsonObject>
+#include <QStringList>
 
 #include <functional>
 
@@ -38,6 +39,24 @@ namespace sicnu::experiment
 {
 
 inline constexpr const char *kReproductionBundleSchemaVersion = "1";
+
+/// Documents every bundle consumer requires to be present and verified; the
+/// checksum gate additionally covers EVERY file in the bundle directory, so
+/// parsed-but-unlisted documents (metrics.json, model_refs.json, …) cannot
+/// slip through integrity either.
+inline constexpr const char *kRequiredBundleMembers[] = {
+    "manifest.json", "run_config.json", "environment.json",
+};
+
+/// "Integrity first" gate shared by the exporter's validateBundle and the
+/// offline importer: every checksums.txt line must be a well-formed
+/// "<sha256>  <name>" entry, every named file must exist and hash-match,
+/// every required member must be covered, and every file in the bundle
+/// directory must be listed (checksums.txt itself exempt — it cannot list
+/// itself). An empty or partially readable checksums.txt is a failure —
+/// never a vacuous pass. Appends human-readable reasons and returns false
+/// on the first problem.
+bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons );
 
 struct ReproductionBundleOptions
 {
