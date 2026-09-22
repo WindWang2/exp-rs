@@ -112,20 +112,30 @@ bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBand
 
         double sumWeight = 0.0;
         double sumVal = 0.0;
+        bool holeInSupport = false;
 
         for ( int i = 0; i < srcBands; ++i )
         {
+            const float diff = srcWl[i] - targetWl;
+            // The support is the same band set that carries weight: within
+            // 3.5 FWHM of the target center, exactly the cutoff below.
+            const bool inSupport = std::abs( diff ) <= 3.5f * fwhm;
             const float sVal = src[i];
-            // #1186: do not skip non-finite source bands — match the linear
-            // kernel so holes propagate as NaN instead of confident GUI matches.
+            // #1186: match the linear kernel — a non-finite source band inside
+            // the target band's SRF support propagates as NaN (no confident
+            // value across the hole); outside the support it cannot contribute
+            // and must not poison the aggregate (the linear kernel likewise
+            // ignores holes outside its bracket).
             if ( !std::isfinite( sVal ) )
             {
-                out[t] = nan;
-                sumWeight = 0.0;
-                break;
+                if ( inSupport )
+                {
+                    holeInSupport = true;
+                    break;
+                }
+                continue;
             }
-            const float diff = srcWl[i] - targetWl;
-            if ( std::abs( diff ) > 3.5f * fwhm )
+            if ( !inSupport )
                 continue;
 
             const double w = std::exp( -static_cast<double>( diff * diff ) / static_cast<double>( twoSigmaSq ) );
@@ -133,7 +143,14 @@ bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBand
             sumVal += w * static_cast<double>( sVal );
         }
 
-        if ( sumWeight > 1e-12 )
+        if ( holeInSupport )
+        {
+            // The NaN must survive: the tiny-FWHM linear fallback below is
+            // only for support-starved targets, never a way to interpolate
+            // across a hole (#1186).
+            out[t] = nan;
+        }
+        else if ( sumWeight > 1e-12 )
         {
             out[t] = static_cast<float>( sumVal / sumWeight );
         }

@@ -315,7 +315,9 @@ void reconcileWidths( const LoadedRows &rows, const RasterWavelengthGrid &inputG
                                 std::to_string( inputGrid.grid.centersNm[static_cast<size_t>( b )] ) +
                                 " nm) lies outside the reference wavelength coverage " +
                                 gridExtentNm( rows.wavelengthsNm ).toStdString() +
-                                "; select input bands inside the coverage (" +
+                                ", or the reference spectrum carries a non-finite value "
+                                "within this band's SRF support; select input bands inside "
+                                "the coverage and a finite reference (" +
                                 path.toStdString() + ")" );
             out->flat.insert( out->flat.end(), resampled.begin(), resampled.end() );
         }
