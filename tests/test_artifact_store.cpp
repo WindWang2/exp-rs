@@ -192,11 +192,67 @@ TEST_CASE( "forget removes metadata after physical deletion", "[artifact_store][
     const QString id = rec.value().artifactId;
     REQUIRE( store.attachRef( id, QStringLiteral( "run" ), QStringLiteral( "run-1" ) ) );
 
-    REQUIRE( store.forget( id ) ); // cascade drops refs too
+    // GC finishing path: cascade is EXPLICIT (the default refuses referenced
+    // rows, see "forget refuses referenced artifacts" below).
+    REQUIRE( store.forget( id, ArtifactStore::ForgetItemPolicy::Cascade ) );
     REQUIRE( store.count() == 0 );
     REQUIRE( store.artifactById( id ) == std::nullopt );
     REQUIRE( store.refsOf( id ).isEmpty() );
     REQUIRE_FALSE( store.forget( id ) );
+}
+
+TEST_CASE( "forget refuses referenced artifacts unless cascade is explicit",
+           "[artifact_store][gc][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString payload = dir.filePath( "a.tif" );
+    writePayload( payload, "payload" );
+
+    ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "artifacts.sqlite" ), &err ) );
+    const auto rec = store.registerArtifact( makeRegistration( QStringLiteral( "pinned" ), payload ) );
+    REQUIRE( rec );
+    const QString id = rec.value().artifactId;
+    REQUIRE( store.attachRef( id, QStringLiteral( "data_asset" ), QStringLiteral( "asset-7" ) ) );
+
+    // A referenced artifact is never dropped by the default policy — a
+    // reapable()→forget() race that attaches a ref in between must leave the
+    // row (and its pin) in place, not silently prune a referenced artifact.
+    const auto refused = store.forget( id );
+    CHECK_FALSE( refused.operator bool() );
+    REQUIRE( refused.diagnostics().size() == 1 );
+    CHECK( refused.diagnostics().first().code == QStringLiteral( "artifact.referenced" ) );
+    REQUIRE( store.artifactById( id ).has_value() );
+    REQUIRE( store.refCount( id ) == 1 );
+
+    // Unpinned rows are dropped by the default policy.
+    REQUIRE( store.detachRef( id, QStringLiteral( "data_asset" ), QStringLiteral( "asset-7" ) ) );
+    REQUIRE( store.forget( id ).operator bool() );
+    REQUIRE( store.artifactById( id ) == std::nullopt );
+
+    // Explicit cascade retains the legacy finishing semantics.
+    const auto rec2 = store.registerArtifact( makeRegistration( QStringLiteral( "cascade" ), payload ) );
+    REQUIRE( rec2 );
+    REQUIRE( store.attachRef( rec2.value().artifactId, QStringLiteral( "run" ), QStringLiteral( "run-2" ) ) );
+    REQUIRE( store.forget( rec2.value().artifactId,
+                           ArtifactStore::ForgetItemPolicy::Cascade ).operator bool() );
+    REQUIRE( store.artifactById( rec2.value().artifactId ) == std::nullopt );
+    REQUIRE( store.refsOf( rec2.value().artifactId ).isEmpty() );
+}
+
+TEST_CASE( "open() reports a fresh database without leaking probe errors",
+           "[artifact_store][open]" )
+{
+    QTemporaryDir dir;
+    ArtifactStore store;
+    QString err;
+    // A brand-new database has no store_meta yet — the schema probe cannot
+    // run, and that is explicitly NOT an error: open() must return true with
+    // an empty diagnostic (a newer-schema database still fails closed).
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "fresh.sqlite" ) ), &err ) );
+    CHECK( err.isEmpty() );
+    CHECK( store.isOpen() );
 }
 
 TEST_CASE( "Digest backfill and content-digest lookup", "[artifact_store][digest]" )

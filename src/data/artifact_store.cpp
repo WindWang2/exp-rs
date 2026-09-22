@@ -240,10 +240,10 @@ bool ArtifactStore::open( const QString &dbPath, QString *errorOut )
     }
     // Forward-compat guard: refuse a database written by a NEWER schema.
     {
-        // A fresh database has no store_meta yet — that is not an error.
-        if ( errorOut )
-            errorOut->clear();
-        Stmt v( m_impl->db, "SELECT value FROM store_meta WHERE key='schema_version'", errorOut );
+        // A fresh database has no store_meta yet — that is not an error, so
+        // the probe does not own errorOut: a failed prepare here must not
+        // leak "no such table" into the diagnostic of a SUCCESSFUL open.
+        Stmt v( m_impl->db, "SELECT value FROM store_meta WHERE key='schema_version'" );
         if ( v && v.stepRow() && v.text( 0 ).toInt() > QString( kCurrentSchemaVersion ).toInt() )
         {
             if ( errorOut )
@@ -661,7 +661,7 @@ QVector<ArtifactRecord> ArtifactStore::reapable( qint64 lastTouchCutoffMs ) cons
     return out;
 }
 
-Result<void> ArtifactStore::forget( const QString &artifactId )
+Result<void> ArtifactStore::forget( const QString &artifactId, ForgetItemPolicy policy )
 {
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id" ) ) );
@@ -670,6 +670,37 @@ Result<void> ArtifactStore::forget( const QString &artifactId )
         return Result<void>::failure( diag( QStringLiteral( "artifact.transaction" ),
                                             lastError( m_impl->db ) ) );
     {
+        // Reference guard (plan/execute equivalence with reapable()): checked
+        // INSIDE the removal transaction, so a pin attached between the
+        // caller's reapable() plan and this execute stops the drop instead of
+        // silently pruning a referenced artifact.
+        if ( policy == ForgetItemPolicy::Refuse )
+        {
+            Stmt r( m_impl->db, "SELECT 1 FROM artifact_refs WHERE artifact_id=? LIMIT 1", nullptr );
+            if ( !r )
+            {
+                m_impl->exec( "ROLLBACK", nullptr );
+                return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
+            }
+            r.bind( 1, artifactId );
+            // A probe step ERROR must fail the removal, never read as
+            // "unreferenced" — the guard is a guarantee, not best-effort.
+            const int probeRc = sqlite3_step( r.get() );
+            if ( probeRc == SQLITE_ROW )
+            {
+                m_impl->exec( "ROLLBACK", nullptr );
+                return Result<void>::failure( diag(
+                    QStringLiteral( "artifact.referenced" ),
+                    QStringLiteral( "artifact %1 still has references; resolve them or pass"
+                                    " the cascade policy explicitly" )
+                        .arg( artifactId ) ) );
+            }
+            if ( probeRc != SQLITE_DONE )
+            {
+                m_impl->exec( "ROLLBACK", nullptr );
+                return Result<void>::failure( diag( QStringLiteral( "artifact.db" ), lastError( m_impl->db ) ) );
+            }
+        }
         Stmt d( m_impl->db, "DELETE FROM artifact_refs WHERE artifact_id=?", nullptr );
         Stmt a( m_impl->db, "DELETE FROM artifacts WHERE artifact_id=?", nullptr );
         if ( d && a )
