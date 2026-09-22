@@ -35,3 +35,8 @@ Reviewer：独立 subagent（未参与实现），对 `a9dc33fa73..HEAD` 全 dif
 1. **本地测试未执行**：宿主机被约 10 个并发 campaign worktree 的构建压满（load ~28），qgis_core（983 TU）首建未能在本会话内完成链接；按用户指示停止构建。三个 oracle 为 RED-first 设计，失败机理已逐一分析论证；复现命令：`cmake --build build-dev --target test_task_center_12 test_output_committer && ctest --test-dir build-dev -R 'test_task_center_12|test_output_committer'`。
 2. 杀伤力（RED）实测同因顺延——测试断言即旧实现失败点（D1：break 丢堆头→lateRan 永假；D2：无 cancel→snapshot==Succeeded；D3：PAM 不发布→stable 缺文件）。
 3. online CI not awaited（campaign 契约）。
+
+## 终局记录
+
+- PR #1256 已创建（base master @ a9dc33fa73，head hardening/taskcenter-execution-plane-jobs，commits 6fa7271be4 + 7e9404a178）。**未 merge，未等待线上 CI**（campaign 契约 + 用户指示）。
+- 独立 review 结论 READY；P0/P1 = 0；P2（先前已存在）已落地低风险半 + 跟进项记录；P3 全部记录于 PR 已知限制。
