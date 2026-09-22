@@ -281,6 +281,20 @@ TEST_CASE( "rs:matched_filter / rs:ace / rs:cem_detection streaming matches the 
             kind = "tcimf";
         else if ( kind == "osp_detection" )
             kind = "osp";
+
+        // #1183: without declared NoData the background sample count is the
+        // deterministic first-tiles prefix — the whole scene when it fits in
+        // one tile, the first 256×256 tile (65536 pixels) once the budget
+        // binds. Pinning it here makes a budget/geometry drift fail loudly
+        // here instead of as a diffuse score mismatch below.
+        if ( !withNoData && kind != "osp" )
+        {
+            const size_t expectedBg = std::min<size_t>(
+                static_cast<size_t>( W ) * H,
+                static_cast<size_t>( 256 ) * 256 );
+            REQUIRE( result["backgroundSamples"].asUInt64() == expectedBg );
+        }
+
         std::vector<std::vector<float>> interferenceSpectra;
         if ( !interference.isNull() )
             for ( const auto &row : interference )

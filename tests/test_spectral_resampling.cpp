@@ -262,6 +262,41 @@ TEST_CASE("SpectralResampling Gaussian SRF propagates source holes like the line
         REQUIRE(SpectralResampling::resampleSpectrumGaussian(clean, srcWl, 4, dstWl, dstFwhm, 1, cleanOut));
         CHECK(cleanOut[0] == Approx(out[0]).margin(1e-6f));
     }
+
+    SECTION("hole exactly at the support boundary (|diff| == 3.5*FWHM) propagates NaN")
+    {
+        // Target 500 (FWHM=20): the support edge sits exactly at 570 — the
+        // same expression that admits a band's weight also scopes a hole, so
+        // a non-finite value at 570 must yield NaN, not a Gaussian over 450.
+        const float srcWl[] = {430.0f, 450.0f, 500.0f, 570.0f};
+        const float dstWl[] = {500.0f};
+        const float dstFwhm[] = {20.0f};
+        float out[1] = {0.0f};
+
+        const float holed[] = {0.0f, 0.1f, 0.5f, std::numeric_limits<float>::quiet_NaN()};
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(holed, srcWl, 4, dstWl, dstFwhm, 1, out));
+        CHECK(std::isnan(out[0]));
+
+        // Outside the edge by one unit the hole is ignored again.
+        const float srcWlFar[] = {430.0f, 450.0f, 500.0f, 571.0f};
+        const float holedFar[] = {0.0f, 0.1f, 0.5f, 0.9f};
+        const float srcHoled571[] = {0.0f, 0.1f, 0.5f, std::numeric_limits<float>::quiet_NaN()};
+        float outFar[1] = {0.0f};
+        float outClean[1] = {0.0f};
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(srcHoled571, srcWlFar, 4, dstWl, dstFwhm, 1, outFar));
+        REQUIRE(SpectralResampling::resampleSpectrumGaussian(holedFar, srcWlFar, 4, dstWl, dstFwhm, 1, outClean));
+        CHECK(outFar[0] == Approx(outClean[0]).margin(1e-6f));
+    }
+
+    SECTION("Gaussian kernel refuses a single-band source like the linear one")
+    {
+        const float src[] = {0.1f};
+        const float srcWl[] = {400.0f};
+        const float dstWl[] = {450.0f};
+        const float dstFwhm[] = {20.0f};
+        float out[1] = {0.0f};
+        CHECK_FALSE(SpectralResampling::resampleSpectrumGaussian(src, srcWl, 1, dstWl, dstFwhm, 1, out));
+    }
 }
 
 
