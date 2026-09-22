@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "study_id": "classification-reject-threshold-sweep",
+  "experiment_id": "study-classification-reject-threshold",
+  "algorithm_id": "rs:supervised_classification",
+  "base_parameters": {
+    "input": "my_image.tif",
+    "training": "training_sites.geojson",
+    "method": "svm"
+  },
+  "sampling": {
+    "strategy": "grid"
+  },
+  "dimensions": [
+    {
+      "parameter_path": "rejectThreshold",
+      "min_value": 0.3,
+      "max_value": 0.9,
+      "step_count": 5
+    }
+  ],
+  "budget": {
+    "max_runs": 16,
+    "max_in_flight": 2,
+    "per_run_timeout_ms": 600000,
+    "seed_replicates": 3,
+    "seed": 42
+  },
+  "metrics": ["overallAccuracy", "meanConfidence"],
+  "objective_metrics": [
+    { "name": "overallAccuracy", "maximize": true }
+  ],
+  "objective_metric": "overallAccuracy",
+  "spatial_comparison": false,
+  "spatial_epsilon": 0.0
+}

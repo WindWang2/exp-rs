@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "study_id": "change-threshold-sweep",
+  "experiment_id": "study-change-threshold",
+  "algorithm_id": "rs:change_detection",
+  "base_parameters": {
+    "before": "t1.tif",
+    "after": "t2.tif",
+    "method": "change_mask",
+    "makeMask": true
+  },
+  "sampling": {
+    "strategy": "lhs"
+  },
+  "dimensions": [
+    {
+      "parameter_path": "threshold",
+      "min_value": 0.05,
+      "max_value": 0.8,
+      "step_count": 8
+    }
+  ],
+  "budget": {
+    "max_runs": 12,
+    "max_in_flight": 2,
+    "per_run_timeout_ms": 600000,
+    "seed_replicates": 2,
+    "seed": 11
+  },
+  "metrics": ["changedPercent", "thresholdUsed"],
+  "objective_metrics": [],
+  "objective_metric": "",
+  "spatial_comparison": true,
+  "spatial_epsilon": 0.0
+}
