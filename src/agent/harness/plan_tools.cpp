@@ -996,10 +996,6 @@ class ExecutePlanTool final : public SpatialTool
       Json::Value plan( Json::objectValue );
       plan["type"] = "object";
       props["plan"] = plan;
-      Json::Value skipPreflight( Json::objectValue );
-      skipPreflight["type"] = "boolean";
-      skipPreflight["description"] = "Skip intent preflight (only for custom plans).";
-      props["skip_preflight"] = skipPreflight;
       Json::Value required( Json::arrayValue );
       required.append( "plan" );
       return objectSchema( std::move( props ), std::move( required ) );
@@ -1046,9 +1042,14 @@ class ExecutePlanTool final : public SpatialTool
             autonomy.reasonCode, "validation" );
       }
 
-      // 1. Deterministic preflight gate (Phase 5): blocked -> refuse.
-      const bool skip = input.get( "skip_preflight", false ).asBool();
-      if ( !skip && !plan.intent.empty() && plan.inputs.isArray() && !plan.inputs.empty() )
+      // 1. Deterministic preflight gate (Phase 5): blocked -> refuse. The
+      // gate is unconditional for typed intents: the old skip_preflight
+      // input let any caller (including the LLM) override a blocked
+      // verdict, contradicting the scientific_preflight.h contract that
+      // blocked plans are refused and cannot be overridden. Custom plans
+      // keep their natural bypass — with no intent there is no rule pack
+      // to run.
+      if ( !plan.intent.empty() && plan.inputs.isArray() && !plan.inputs.empty() )
       {
         const PreflightOutcome outcome = preflightIntent( plan.intent, plan.inputs );
         if ( outcome.verdict == "blocked" )
