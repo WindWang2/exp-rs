@@ -80,3 +80,9 @@ set_target_properties(sicnu_experiment PROPERTIES
   CXX_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON
 )
+
+# RS14-17 reproducibility capsule: a projection module ON TOP of this
+# library's recorded facts (never a second store). Kept as a separate
+# target so the heavy experiment sources are not relinked when only the
+# capsule changes.
+add_subdirectory(capsule)
