@@ -97,6 +97,9 @@ add_library(sicnu_agent SHARED
   harness/lab_copilot.h
   harness/lab_tools.cpp
   harness/lab_tools.h
+  # RS14-12: teaching autonomy ladder — read-only status projection tool.
+  harness/autonomy_tools.cpp
+  harness/autonomy_tools.h
   # teaching-lab-platform-11: adversarial prompt-injection / leak corpus
   harness/lab_injection_corpus.cpp
   harness/lab_injection_corpus.h
@@ -247,6 +250,9 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters
+  # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
+  # decision engine the lab copilot and the plan executor gate on.
+  Sicnu::autonomy
   ${JSONCPP_LIBRARIES}
 )
 

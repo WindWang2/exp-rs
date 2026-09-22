@@ -215,6 +215,41 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Honest-scope notes: executable subset statements, typed refusals, caveats."
+    },
+    "autonomy": {
+      "type": "object",
+      "description": "RS14-12 teaching autonomy ladder: optional per-lab policy layer (sicnu.autonomy-policy/1). Resolved between the course and teacher/session layers (course < labspec < teacher < session). Absent = inherit; a malformed block never grants anything.",
+      "required": ["schema", "level", "mode"],
+      "properties": {
+        "schema": { "const": "sicnu.autonomy-policy/1" },
+        "level": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3", "L4", "L5"],
+          "description": "L0 no_assistance | L1 concept_hint | L2 error_localization | L3 next_step_recommendation | L4 plan_generation | L5 autonomous_execution."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["exam", "practice", "instructor", "agent"],
+          "description": "Session mode; ceilings: exam L2, practice L4, instructor L5, agent L5 (explicit opt-in, verification mandatory)."
+        },
+        "max_level": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3", "L4", "L5"],
+          "description": "Optional ceiling this lab declares; the tightest declared ceiling always wins."
+        },
+        "capability_overrides": {
+          "type": "object",
+          "description": "Per-capability explicit decisions (allow|deny). Keys are the closed capability taxonomy.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["decision"],
+            "properties": {
+              "decision": { "enum": ["allow", "deny"] },
+              "reason_code": { "type": "string" }
+            }
+          }
+        }
+      }
     }
   }
 }

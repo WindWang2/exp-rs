@@ -1,6 +1,14 @@
 // src/agent/harness/lab_copilot.cpp
 #include "lab_copilot.h"
 
+#include "agent/autonomy/autonomy_audit.h"
+#include "agent/autonomy/autonomy_capability.h"
+#include "agent/autonomy/autonomy_classification.h"
+#include "agent/autonomy/autonomy_decision.h"
+#include "agent/autonomy/autonomy_holder.h"
+#include "agent/autonomy/autonomy_level.h"
+#include "agent/autonomy/autonomy_policy.h"
+#include "agent/autonomy/autonomy_projection.h"
 #include "harness_actions.h"
 #include "harness_error.h"
 #include "lab_diagnostics.h"
@@ -10,6 +18,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace sicnu::agent::harness {
 
@@ -38,6 +47,107 @@ void appendGatedAction( Json::Value &doc, const std::string &key, Json::Value ar
   context.role = role;
   doc["suggested_actions"].append(
     resolvedSuggestedActionForRole( key, std::move( arguments ), context ) );
+}
+
+//
+// RS14-12: the autonomy gate for the teaching surface.
+//
+// The L0..L5 ladder is decided BEFORE any assistance is produced: the intent
+// is classified onto the capability ladder, the effective policy is resolved
+// (course < labspec < teacher < session — one merge rule, in the autonomy
+// module), and the decision is audited. A malformed policy block never
+// grants anything: a parse failure simply does not contribute a layer.
+//
+using namespace sicnu::agent::autonomy;
+
+/// Resolves the autonomy policy for one lab request. The labspec layer reads
+/// the lab document's optional "autonomy" block; the session layer is the
+/// host-injected session state (the tool schema omits it, exactly like
+/// `role`, so a composing model is never invited to claim authority).
+///
+/// The session layer is privileged — it can raise a level — so it is honored
+/// only together with the host-injected teacher credential, the same gate the
+/// teacher surfaces use. A self-injected block without the credential is
+/// ignored (fail-safe: the session keeps the course/labspec policy), and
+/// restrictions never need the block at all because they live in the course
+/// and labspec layers.
+AutonomyPolicy labAutonomyPolicy( const Json::Value &input, const std::string &labId )
+{
+  std::vector<AutonomyPolicyLayer> layers;
+  if ( !labId.empty() )
+  {
+    const Json::Value spec = LabSpecCatalog::instance().lab( labId );
+    const Json::Value &block = spec.get( "autonomy", Json::Value() );
+    if ( block.isObject() )
+    {
+      const AutonomyPolicyParseResult parsed = parseAutonomyPolicy( block );
+      if ( parsed.ok )
+        layers.emplace_back( AutonomyPolicyLayer{ policy_sources::kLabspec, parsed.policy } );
+    }
+  }
+  const Json::Value &session = input.get( "autonomy", Json::Value() );
+  if ( session.isObject() && teacherCredentialValid( input ) )
+  {
+    const AutonomyPolicyParseResult parsed = parseAutonomyPolicy( session );
+    if ( parsed.ok )
+      layers.emplace_back( AutonomyPolicyLayer{ policy_sources::kSession, parsed.policy } );
+  }
+  return AutonomyPolicyHolder::instance().effectivePolicy( layers );
+}
+
+/// Classifies the intent onto the capability ladder, decides, and audits.
+AutonomyDecision decideLabAssistance( const Json::Value &input, const std::string &role,
+                                      const std::string &intent, const std::string &labId )
+{
+  AutonomyRequest request;
+  request.domain = "lab";
+  request.role = role;
+  request.intent = intent;
+  request.capability = classifyAssistanceIntent( intent ).capability;
+  const AutonomyPolicy policy = labAutonomyPolicy( input, labId );
+  const AutonomyDecision decision = decideAutonomy( policy, request );
+  AutonomyAuditLog::instance().record( request, policy, decision );
+  return decision;
+}
+
+/// Downgrade target → the lab intent that serves it (closed mapping; the
+/// engine never downgrades below concept_hint).
+std::string labIntentForCapability( const std::string &capability )
+{
+  if ( capability == assistance_capabilities::kErrorLocalization )
+    return kIntentLabTroubleshoot;
+  if ( capability == assistance_capabilities::kNextStepRecommendation )
+    return kIntentLabHint;
+  return kIntentLabConcept;
+}
+
+/// Typed refusal envelope carrying the autonomy reason code — a refusal is
+/// never retryable, and the student is told what they CAN ask instead.
+Json::Value autonomyRefusalEnvelope( const std::string &intent, const std::string &role,
+                                     const AutonomyDecision &decision )
+{
+  const std::string reasonZh = autonomyReasonZh( decision.reasonCode );
+  Json::Value details( Json::objectValue );
+  details["intent"] = intent;
+  details["role"] = role;
+  details["capability"] = decision.capability;
+  details["effective_level"] = autonomyLevelToString( decision.effectiveLevel );
+  details["reason_code"] = decision.reasonCode;
+  details["alternative_zh"] = kRefusalAlternativeZh;
+  const HarnessError error = HarnessError::make( decision.reasonCode, reasonZh,
+                                                 std::move( details ), true,
+                                                 Json::Value( Json::arrayValue ) );
+  Json::Value envelope = errorEnvelope( error );
+
+  Json::Value refusal( Json::objectValue );
+  refusal["refused"] = true;
+  refusal["intent"] = intent;
+  refusal["role"] = role;
+  refusal["reason_code"] = decision.reasonCode;
+  refusal["reason_zh"] = reasonZh;
+  refusal["alternative_zh"] = kRefusalAlternativeZh;
+  envelope["refusal"] = std::move( refusal );
+  return envelope;
 }
 
 /// The lab context for one request: which lab, which step (0-based), and the
@@ -318,15 +428,19 @@ bool constantTimeEquals( const std::string &a, const std::string &b )
     return false;
   unsigned char diff = 0;
   for ( size_t i = 0; i < a.size(); ++i )
-    diff |= static_cast<unsigned char>( a[i] ) ^ static_cast<unsigned char>( b[i] );
-  return diff == 0;
+    diff |= static_cast<unsigned char>( a[ i ] ) ^ static_cast<unsigned char>( b[ i ] );
+  return diff;
 }
+
+} // namespace
 
 /// The teacher surface is credential-gated, not claim-gated: the host (UI
 /// session server) configures SICNU_LAB_TEACHER_TOKEN and injects the token
 /// ONLY into authenticated teacher sessions — a value a model composing tool
 /// arguments cannot know. Unset/empty token disables the teacher surface
 /// entirely (fail-closed): every caller is treated as a student.
+/// The same gate guards the privileged autonomy session layer (RS14-12), so
+/// a self-injected policy block can never escalate a session.
 bool teacherCredentialValid( const Json::Value &input )
 {
   const char *expected = std::getenv( "SICNU_LAB_TEACHER_TOKEN" );
@@ -337,8 +451,6 @@ bool teacherCredentialValid( const Json::Value &input )
     return false;
   return constantTimeEquals( provided.asString(), std::string( expected ) );
 }
-
-} // namespace
 
 Json::Value teachingRefusalEnvelope( const std::string &intent, const std::string &role )
 {
@@ -398,20 +510,33 @@ Json::Value labAsk( const Json::Value &input )
   const LabAnchor anchor = resolveAnchor( input, message );
   const LabObservation observation = parseLabObservation( input.get( "observation", Json::Value() ) );
 
+  // RS14-12: the autonomy gate — before any assistance is produced. A deny
+  // is a typed refusal; a downgrade routes the answer to the capability the
+  // effective level DOES unlock (the student still gets help, just not the
+  // next step itself).
+  const AutonomyDecision autonomy = decideLabAssistance( input, role, intent, anchor.labId );
+  if ( autonomy.kind == AutonomyDecisionKind::Deny )
+    return autonomyRefusalEnvelope( intent, role, autonomy );
+  const std::string effectiveIntent =
+      autonomy.kind == AutonomyDecisionKind::Downgrade
+          ? labIntentForCapability( autonomy.downgradeTo )
+          : intent;
+
   Json::Value result = objectWithSuggestedActions();
-  result["intent"] = intent;
+  result["intent"] = effectiveIntent;
   result["role"] = role;
+  result["autonomy"] = autonomyDecisionDoc( autonomy );
   Json::Value signals( Json::arrayValue );
   for ( const std::string &signal : classification.matchedSignals )
     signals.append( signal );
   result["classification_signals"] = std::move( signals );
   appendAnchorDoc( result, anchor );
 
-  if ( intent == kIntentLabTroubleshoot )
+  if ( effectiveIntent == kIntentLabTroubleshoot )
     buildTroubleshootAnswer( result, observation, role );
-  else if ( intent == kIntentLabHint )
+  else if ( effectiveIntent == kIntentLabHint )
     buildHintAnswer( result, role, anchor );
-  else if ( intent == kIntentLabConcept )
+  else if ( effectiveIntent == kIntentLabConcept )
     buildConceptAnswer( result, message );
   else // teacher requesting execution/grading in chat: point at the teacher surface.
     result["answer_zh"] = "请通过 harness:lab_reference 获取参考方案或成绩引用。";

@@ -1,6 +1,12 @@
 // src/agent/harness/plan_tools.cpp
 #include "plan_tools.h"
 
+#include "agent/autonomy/autonomy_audit.h"
+#include "agent/autonomy/autonomy_classification.h"
+#include "agent/autonomy/autonomy_decision.h"
+#include "agent/autonomy/autonomy_holder.h"
+#include "agent/autonomy/autonomy_policy.h"
+#include "agent/autonomy/autonomy_projection.h"
 #include "agent_plan.h"
 #include "capability_graph.h"
 #include "capability_knowledge.h"
@@ -10,10 +16,12 @@
 #include "evidence.h"
 #include "grounding_tools.h"
 #include "harness_verification.h"
+#include "lab_copilot.h"
 #include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
 #include "operators/framework/model_catalog.h"
 #include "processing/framework/execution_id.h"
+#include "tool_manifest.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -27,6 +35,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace sicnu::agent::harness {
 
@@ -917,6 +926,52 @@ class RepairPlanTool final : public SpatialTool
     }
 };
 
+//
+// RS14-12: the execution gate for harness:execute_plan — the highest
+// blast-radius single call in the harness (one call = N mutations), reached
+// by the lab copilot's routed_tool path, by MCP tools/call, and by the CLI.
+// The gate sits BEFORE compile and submit: a refused plan never reaches the
+// workflow engine, and the decision is audited with its typed reason.
+//
+// Session context (role / domain / policy overrides) is host-injected into
+// the tool input — the input schema deliberately omits it, exactly like the
+// lab tools, so a composing model is never invited to claim authority. The
+// session layer can raise a level, so it is honored only together with the
+// host-injected teacher credential (the same gate the teacher surfaces use):
+// a self-injected block without the credential is ignored and the session
+// keeps the course policy. The risk class comes from the harness tool
+// manifest (single source of truth), classified onto the capability ladder
+// by the autonomy module.
+//
+sicnu::agent::autonomy::AutonomyDecision decidePlanExecution( const Json::Value &input )
+{
+  using namespace sicnu::agent::autonomy;
+
+  AutonomyRequest request;
+  request.toolId = "harness:execute_plan";
+  request.actionKey = "harness:execute_plan";
+  request.riskClass = riskClassForToolId( request.toolId );
+  request.capability = classifyActionRisk( request.riskClass ).capability;
+
+  const Json::Value &role = input[ "role" ];
+  request.role = role.isString() ? role.asString() : std::string();
+  const Json::Value &session = input[ "autonomy" ];
+  const Json::Value &domain = session[ "domain" ];
+  request.domain = domain.isString() && !domain.asString().empty() ? domain.asString() : "agent";
+
+  std::vector<AutonomyPolicyLayer> layers;
+  if ( session.isObject() && teacherCredentialValid( input ) )
+  {
+    const AutonomyPolicyParseResult parsed = parseAutonomyPolicy( session );
+    if ( parsed.ok )
+      layers.emplace_back( AutonomyPolicyLayer{ policy_sources::kSession, parsed.policy } );
+  }
+  const AutonomyPolicy policy = AutonomyPolicyHolder::instance().effectivePolicy( layers );
+  const AutonomyDecision decision = decideAutonomy( policy, request );
+  AutonomyAuditLog::instance().record( request, policy, decision );
+  return decision;
+}
+
 class ExecutePlanTool final : public SpatialTool
 {
   public:
@@ -978,6 +1033,17 @@ class ExecutePlanTool final : public SpatialTool
         if ( !identityError.code.empty() )
           return SpatialToolResult::failure( identityError.summary, identityError.code,
                                              "validation" );
+      }
+
+      // RS14-12: the autonomy gate — before preflight, compile, or submit.
+      // A refused plan never reaches the workflow engine. The typed code is
+      // the decision; the full record is in the audit log.
+      const sicnu::agent::autonomy::AutonomyDecision autonomy = decidePlanExecution( input );
+      if ( autonomy.kind != sicnu::agent::autonomy::AutonomyDecisionKind::Allow )
+      {
+        return SpatialToolResult::failure(
+            sicnu::agent::autonomy::autonomyReasonZh( autonomy.reasonCode ),
+            autonomy.reasonCode, "validation" );
       }
 
       // 1. Deterministic preflight gate (Phase 5): blocked -> refuse.

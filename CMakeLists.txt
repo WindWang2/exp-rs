@@ -776,6 +776,9 @@ add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
 add_subdirectory(src/processing)
+# RS14-12 teaching autonomy ladder: Qt-free policy leaf; must precede the
+# agent library that links it (and hosts the two gate call sites).
+add_subdirectory(src/agent/autonomy)
 add_subdirectory(src/agent)
 
 # SICNU_GEO_RS: extra include paths needed by unconditional core sources
