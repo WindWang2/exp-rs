@@ -460,8 +460,7 @@ TEST_CASE( "Seasonal decomposition trend is time-regularized, not sample-indexed
     {
         REQUIRE( std::isfinite( dense.trend[i] ) );
         REQUIRE( std::isfinite( coarse.trend[i] ) );
-        maxDelta = std::max( maxDelta,
-                             std::fabs( dense.trend[i] - coarse.trend[i] ) );
+        maxDelta = std::max( maxDelta, double( std::fabs( dense.trend[i] - coarse.trend[i] ) ) );
     }
     REQUIRE( maxDelta > 1e-4 );
 }

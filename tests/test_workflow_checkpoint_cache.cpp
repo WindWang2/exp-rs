@@ -356,10 +356,13 @@ TEST_CASE( "Cancel before dispatch marks everything Cancelled", "[d17][workflow]
 
     const auto statuses = coordinator.getAllStatuses();
     REQUIRE( statuses.size() == 6 );
-    // Every node reached a terminal state — none left hanging.
+    // #1179 potency fix: the run was cancelled BEFORE dispatch — a no-op
+    // requestCancel would have completed all-Succeeded and passed the old
+    // any-terminal-state loop. Each node must be Cancelled or Skipped by
+    // the cancel cascade; none may have executed.
     for ( const NodeStatusSnapshot &snapshot : statuses )
-        REQUIRE( ( snapshot.state == ExecutionState::Cancelled || snapshot.state == ExecutionState::Skipped
-                   || snapshot.state == ExecutionState::Succeeded || snapshot.state == ExecutionState::Failed ) );
+        REQUIRE( ( snapshot.state == ExecutionState::Cancelled
+                   || snapshot.state == ExecutionState::Skipped ) );
 }
 
 TEST_CASE( "#1158: a cancel racing a resume is never swallowed into Succeeded nodes",
@@ -1649,20 +1652,50 @@ TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][wo
     const QByteArray provBytes = provFile.readAll();
 
     std::mt19937 rng( 7 );
+    // #1179 potency fix: the old loop discarded both isSuccess() results, so
+    // a mutation that made the parser ACCEPT garbage passed green — only
+    // crashes failed. Both parsers are total functions over QJsonObject, so
+    // a mutation CAN legally produce a re-parseable document; what must
+    // never happen is accepting a MUTATED graph that still claims a valid
+    // schema version AND a mutated provenance graph that re-serializes to a
+    // DIFFERENT node/edge set. Assert: acceptance implies structural
+    // integrity (ids unique, edges reference declared nodes).
+    int accepted = 0;
     for ( int i = 0; i < 120; ++i )
     {
-        // IR document mutations: parse or reject — never crash.
         const QJsonObject irDoc =
             QJsonDocument::fromJson( mutateBytes( irBytes, rng ) ).object();
         const auto irResult = WorkflowIR::fromJson( irDoc ); // parse or reject — never crash
-        (void) irResult.isSuccess();
+        if ( irResult.isSuccess() )
+        {
+            ++accepted;
+            const WorkflowDocument doc = irResult.value();
+            for ( const NodeFact &node : doc.nodes )
+                REQUIRE_FALSE( node.nodeId.isEmpty() );
+        }
 
         const QJsonObject provDoc =
             QJsonDocument::fromJson( mutateBytes( provBytes, rng ) ).object();
         const auto provResult = ProvenanceGraph::fromJson( provDoc ); // same contract
-        (void) provResult.isSuccess();
+        if ( provResult.isSuccess() )
+        {
+            ++accepted;
+            const ProvenanceGraph graph = provResult.value();
+            QSet<QString> nodeIds;
+            for ( const auto &node : graph.nodes() )
+            {
+                REQUIRE_FALSE( node.id.isEmpty() );
+                REQUIRE_FALSE( nodeIds.contains( node.id ) );
+                nodeIds.insert( node.id );
+            }
+            for ( const auto &edge : graph.edges() )
+            {
+                REQUIRE( nodeIds.contains( edge.fromId ) );
+                REQUIRE( nodeIds.contains( edge.toId ) );
+            }
+        }
     }
-    SUCCEED( "150+120 mutations: no crash, all fail-closed" );
+    INFO( "mutations accepted by the parsers: " << accepted );
 }
 
 // ---------------------------------------------------------------------------

@@ -308,7 +308,10 @@ TEST_CASE( "data scale: catalog population copies a bounded number of records pe
                                     / static_cast<double>( accumulated );
         WARN( "100k catalog resident set: " << ( rss / 1024 / 1024 ) << " MiB ("
               << kibPerRecord << " KiB per record)" );
-        CHECK( kibPerRecord < 64.0 * 1024.0 );
+        // #1179 potency fix: the oracle SAID 64 KiB per record but enforced
+        // 64 * 1024 KiB = 64 MiB (~1000× the documented ceiling). Enforce
+        // the documented bound, with modest slack for allocator overhead.
+        CHECK( kibPerRecord < 96.0 );
     }
 }
 
@@ -1257,7 +1260,7 @@ TEST_CASE( "data scale: relocating an asset never inverts shared-path precedence
     auto probe = [&manager]( const QString &path ) {
         const auto hit = manager->findByPath( path );
         REQUIRE( hit.has_value() );
-        return hit->assetId;
+        return hit->id();
     };
     REQUIRE( probe( relative ) == first );
     REQUIRE( probe( file ) == first );
