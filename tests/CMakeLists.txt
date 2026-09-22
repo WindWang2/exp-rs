@@ -9647,6 +9647,171 @@ target_link_libraries(test_agent_loop_resume PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_resume)
 
+# Unified Scientific Verifier Slice A (#1191): status lattice, versioned
+# spec/report serde, error codes, sha256 (pure C++; no Qt/GDAL link).
+add_executable(test_verifier_schema test_verifier_schema.cpp)
+target_link_libraries(test_verifier_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_schema)
+
+# RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
+# PreflightReport schema (pure C++; no Qt/GDAL link).
+add_executable(test_preflight_report_schema test_preflight_report_schema.cpp)
+target_link_libraries(test_preflight_report_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_report_schema)
+
+# RS14-03 Scientific Repair Planner: versioned repair_plan/1.0 schema,
+# SHA-256/16 fingerprints, fail-closed envelope reader (Qt-free leaf).
+add_executable(test_repair_planner_schema test_repair_planner_schema.cpp)
+target_link_libraries(test_repair_planner_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_repair_planner
+)
+sicnu_discover_tests(test_repair_planner_schema)
+
+# RS14-20 Scientific Recipe Compiler (#1206): schema, compiler, validator,
+# registry, lookup, equivalence and the lab document/source contract —
+# Qt-free leaves over sicnu_recipes.
+add_executable(test_recipe_schema test_recipe_schema.cpp)
+target_link_libraries(test_recipe_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_recipe_schema)
+
+add_executable(test_recipe_compiler test_recipe_compiler.cpp)
+target_link_libraries(test_recipe_compiler PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_recipe_compiler)
+
+add_executable(test_recipe_validator test_recipe_validator.cpp)
+target_link_libraries(test_recipe_validator PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_recipe_validator)
+
+add_executable(test_recipe_registry test_recipe_registry.cpp)
+target_link_libraries(test_recipe_registry PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_recipe_registry)
+
+add_executable(test_recipe_lookup test_recipe_lookup.cpp)
+target_link_libraries(test_recipe_lookup PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_recipe_lookup)
+
+add_executable(test_recipe_equivalence test_recipe_equivalence.cpp)
+target_link_libraries(test_recipe_equivalence PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+# The equivalence gate reads the shipped labs, sidecar catalogs and committed
+# artifacts straight from the source tree.
+target_compile_definitions(test_recipe_equivalence PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_recipe_equivalence)
+
+add_executable(test_lab_document test_lab_document.cpp)
+target_link_libraries(test_lab_document PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_lab_document)
+
+add_executable(test_lab_source test_lab_source.cpp)
+target_link_libraries(test_lab_source PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_recipes
+)
+sicnu_discover_tests(test_lab_source)
+
+# RS14-07 Study → ExecutionPlane bridge E2E: full Qt/GDAL lane through the
+# single execution spine (sicnu_study_bridge over Sicnu::study +
+# sicnu_task_center, both pulled in transitively).
+sicnu_add_test(test_study_e2e)
+target_link_libraries(test_study_e2e PRIVATE sicnu_study_bridge)
+
+# Structure oracle: build/test wiring drift gate — every src/**/CMakeLists
+# reachable from root, every src/**/*.cpp named by an eligible build script,
+# every test_*.cpp registered. Pure std::filesystem; no Qt/GDAL link.
+add_executable(test_build_wiring_drift test_build_wiring_drift.cpp)
+target_link_libraries(test_build_wiring_drift PRIVATE
+  Catch2::Catch2WithMain
+)
+target_include_directories(test_build_wiring_drift PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_build_wiring_drift PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_build_wiring_drift PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+sicnu_discover_tests(test_build_wiring_drift)
+
+# RS14-18 Undergraduate Curriculum Pack: curriculum catalog/progress/availability
+# over the agent harness (sicnu_agent already in the sicnu_add_test stack).
+sicnu_add_test(test_curriculum)
+sicnu_link_jsoncpp(test_curriculum)
+
+# RS14-15 Explainable Scientific Workflow: provenance + step explanation schema
+# (sicnu_explain links jsoncpp PUBLIC).
+add_executable(test_explain_schema test_explain_schema.cpp)
+target_link_libraries(test_explain_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_explain
+)
+sicnu_discover_tests(test_explain_schema)
+
+# RS14-13 Scientific Fault Injection Lab: registry, expectations, fixtures,
+# observables, diagnosis (sicnu_faultlab links jsoncpp PUBLIC).
+add_executable(test_faultlab test_faultlab.cpp)
+target_link_libraries(test_faultlab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_faultlab
+)
+sicnu_discover_tests(test_faultlab)
+
+# RS14-05 Process-aware Experiment Grader: engine/types/error/json/sha256
+# schema (sicnu_grader links jsoncpp PUBLIC).
+add_executable(test_grader_schema test_grader_schema.cpp)
+target_link_libraries(test_grader_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_schema)
+
+# LabSpec v3 runtime: checkpoint verify, hint policy, session state/store,
+# spec runtime (sicnu_lab_runtime links jsoncpp PUBLIC).
+add_executable(test_lab_runtime test_lab_runtime.cpp)
+target_link_libraries(test_lab_runtime PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+)
+sicnu_discover_tests(test_lab_runtime)
+
+# RS14-19 Scientific Inspector: inspection aggregate + versioned codec. The
+# aggregate compiles into the test binary (pattern: test_interaction_tools)
+# until the view-model/widget slices consume it from the app shell.
+add_executable(test_sci_inspector test_sci_inspector.cpp
+  ../src/app/workbench/scientific/sci_inspection.cpp)
+target_link_libraries(test_sci_inspector PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_sci_inspector PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(test_sci_inspector PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+sicnu_discover_tests(test_sci_inspector)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)

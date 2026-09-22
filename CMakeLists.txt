@@ -758,6 +758,28 @@ add_subdirectory(src/study)
 # projection over recorded run evidence. Leaf over Sicnu::experiment +
 # sicnu_workflow read surfaces; consumers are opt-in (tests, future CLI/GUI).
 add_subdirectory(src/experiment/debugger)
+# Unified Scientific Verifier Slice A (#1191, ADR 0172): the one verification
+# truth — status lattice, versioned spec/report serde, sha256. Qt-free leaf;
+# consumers are opt-in (tests first).
+add_subdirectory(src/verify)
+# RS14-03 Scientific Repair Planner (ADR 0174): explicit, auditable,
+# rejectable repair candidate plans over preflight findings. Qt-free leaf.
+add_subdirectory(src/repair_planner)
+# RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
+# PreflightReport judged before execution. Qt/QGIS/GDAL-free leaf.
+add_subdirectory(src/preflight)
+# RS14-20 Scientific Recipe Compiler (#1206): LabSpec → versioned
+# machine-readable recipes. Qt-free leaf over the lab contract chain.
+add_subdirectory(src/recipes)
+# RS14-11 Evidence-first Agent Session (ADR 0175): bounded, auditable
+# orchestration loop core — session state machine, decision records, journal,
+# seams, policy. Qt-free leaf; the Qt-capable adapter stays out of this dir.
+add_subdirectory(src/agent_loop)
+# RS14-07 Study → ExecutionPlane adapter: thin bridge routing study points
+# through the single execution spine (pattern: src/experiment/bridge). Links
+# Sicnu::study and sicnu_task_center — the latter is defined in src/processing
+# below; CMake resolves target names at generate time. Consumers are opt-in.
+add_subdirectory(src/study/bridge)
 # Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
 # help/diagnostic knowledge (descriptor model, registry, search, JSON store,
 # projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
