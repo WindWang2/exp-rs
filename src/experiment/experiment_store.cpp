@@ -639,12 +639,20 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
         runExecutionFingerprint( run.executionIdentity() );
     const QString resultFingerprint = run.resultFingerprint();
 
+    // Every identity column is refreshed on conflict, not just the status
+    // mirrors: listRuns filters on these columns, so leaving any of them
+    // stale while json moves on (allowed while the run is still Created)
+    // makes filtered listings disagree with the record they return.
     Stmt upsert( db, QStringLiteral(
         "INSERT INTO experiment_runs(run_id, experiment_id, status, algorithm_id,"
         " dataset_version_id, split_manifest_id, seed, config_hash,"
         " execution_fingerprint, result_fingerprint, json, created_ms, updated_ms)"
         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(run_id) DO UPDATE SET status=excluded.status,"
+        " experiment_id=excluded.experiment_id, algorithm_id=excluded.algorithm_id,"
+        " dataset_version_id=excluded.dataset_version_id,"
+        " split_manifest_id=excluded.split_manifest_id, seed=excluded.seed,"
+        " config_hash=excluded.config_hash,"
         " execution_fingerprint=excluded.execution_fingerprint,"
         " result_fingerprint=excluded.result_fingerprint,"
         " json=excluded.json, updated_ms=excluded.updated_ms" ) );
@@ -676,6 +684,66 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
     // used to only CHECK existence — run_ids stayed empty forever, so every
     // surface reading run_count reported 0 and the prune's run-list rewrite
     // was dead code). Read-modify-write inside this same transaction.
+    //
+    // experiment_id is not part of the frozen execution identity, so an
+    // upsert may legitimately move a run between experiments (typically the
+    // start-time Created → Running transition). The #1172 mirror is
+    // add-only, so the old experiment's run_ids would keep the stale id
+    // forever — drop it first.
+    if ( parsed && parsed->experimentId() != run.experimentId() )
+    {
+        Stmt oldSelect( db, QStringLiteral( "SELECT json FROM experiments WHERE id=?" ) );
+        if ( !oldSelect )
+        {
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                oldSelect.error( db ) ) );
+        }
+        oldSelect.bind( 1, parsed->experimentId() );
+        if ( oldSelect.stepRow() )
+        {
+            QJsonDocument oldDoc;
+            {
+                QJsonParseError oldParseError;
+                oldDoc = QJsonDocument::fromJson( oldSelect.text( 0 ).toUtf8(), &oldParseError );
+                if ( oldParseError.error != QJsonParseError::NoError || !oldDoc.isObject() )
+                {
+                    return ResultT::failure( storeDiag(
+                        QStringLiteral( "experiment.corrupt_record" ),
+                        QStringLiteral( "experiment %1 record cannot be parsed" )
+                            .arg( parsed->experimentId() ) ) );
+                }
+            }
+            QJsonObject oldRoot = oldDoc.object();
+            QJsonArray oldRunIds = oldRoot.value( QStringLiteral( "run_ids" ) ).toArray();
+            QJsonArray keptRunIds;
+            for ( const QJsonValue &v : oldRunIds )
+            {
+                if ( v.toString() != run.runId() )
+                    keptRunIds.append( v );
+            }
+            if ( keptRunIds.size() != oldRunIds.size() )
+            {
+                oldRoot.insert( QStringLiteral( "run_ids" ), keptRunIds );
+                Stmt oldUpdate( db, QStringLiteral(
+                    "UPDATE experiments SET json=? WHERE id=?" ) );
+                if ( !oldUpdate )
+                {
+                    return ResultT::failure( storeDiag(
+                        QStringLiteral( "experiment.store_query_failed" ),
+                        oldUpdate.error( db ) ) );
+                }
+                oldUpdate.bind( 1, QString::fromUtf8(
+                                       QJsonDocument( oldRoot ).toJson( QJsonDocument::Compact ) ) );
+                oldUpdate.bind( 2, parsed->experimentId() );
+                if ( !oldUpdate.step() )
+                {
+                    return ResultT::failure( storeDiag(
+                        QStringLiteral( "experiment.store_write_failed" ),
+                        oldUpdate.error( db ) ) );
+                }
+            }
+        }
+    }
     {
         Stmt experimentSelect( db, QStringLiteral( "SELECT json FROM experiments WHERE id=?" ) );
         if ( !experimentSelect )
@@ -936,6 +1004,9 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
     {
         Stmt count( m_impl->db, QStringLiteral(
             "SELECT COUNT(*) FROM experiment_runs%1" ).arg( where ) );
+        if ( !count )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                count.error( m_impl->db ) ) );
         int bindIndex = 1;
         if ( !experimentId.isEmpty() )
             count.bind( bindIndex++, experimentId );
@@ -1252,7 +1323,11 @@ bool runPruneEligibleLocked( sqlite3 *db, const QString &runId,
         return false;
     if ( policy.keepWithRunLineage && runHasLineageLocked( db, runId ) )
         return false;
-    if ( policy.keepWithBenchmarkCitation && runCitedByBenchmarkLocked( db, runId ) )
+    // Benchmark citation is protected UNCONDITIONALLY (header contract):
+    // benchmark_results rows are immutable, so pruning a cited run would
+    // strand a phantom reference — the #1217 defect class. The policy flag
+    // is accepted for source compatibility but never disables this guard.
+    if ( runCitedByBenchmarkLocked( db, runId ) )
         return false;
     if ( policy.olderThan.isValid() &&
          createdMs >= policy.olderThan.toMSecsSinceEpoch() )
@@ -1538,15 +1613,27 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
         return ResultT::failure( validated.diagnostics() );
 
     const QString json = jsonToText( record.toJson() );
+    // #1173 doctrine (same as upsertExperiment): BEGIN IMMEDIATE around the
+    // conflict check + insert so a concurrent connection cannot race a second
+    // insert past the SELECT and degrade the UNIQUE failure into a generic
+    // store_write_failed (must stay experiment.conflict).
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt existing( m_impl->db, QStringLiteral( "SELECT json FROM run_metrics WHERE run_id=?" ) );
         if ( !existing )
+        {
+            m_impl->rollback();
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                                 existing.error( m_impl->db ) ) );
+        }
         existing.bind( 1, record.runId );
         if ( existing.stepRow() )
         {
-            if ( existing.text( 0 ) == json )
+            const bool same = existing.text( 0 ) == json;
+            m_impl->rollback();
+            if ( same )
                 return ResultT::success();
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.conflict" ),
                                                 QStringLiteral( "metrics for run %1 exist with different content" )
@@ -1557,15 +1644,27 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
         "INSERT INTO run_metrics(run_id, dataset_version_id, json, created_ms)"
         " VALUES(?,?,?,?)" ) );
     if ( !insert )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
     insert.bind( 1, record.runId );
     insert.bind( 2, record.protocol.datasetVersionId() );
     insert.bind( 3, json );
     insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 
@@ -1675,6 +1774,9 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
     qint64 total = 0;
     {
         Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM run_metrics%1" ).arg( where ) );
+        if ( !count )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                count.error( m_impl->db ) ) );
         if ( !datasetVersionId.isEmpty() )
             count.bind( 1, datasetVersionId );
         if ( count.stepRow() )
@@ -1970,18 +2072,30 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkDefinition(
 
     const QString digest = definition.contentDigest();
     const QString json = jsonToText( definition.toJson() );
+    // #1173 doctrine: BEGIN IMMEDIATE around the conflict check + insert so a
+    // concurrent connection cannot race a second insert past the SELECT and
+    // degrade the UNIQUE failure into a generic store_write_failed (must stay
+    // experiment.benchmark_conflict).
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt existing( m_impl->db, QStringLiteral(
             "SELECT content_digest, json FROM benchmark_definitions"
             " WHERE benchmark_id=? AND benchmark_version=?" ) );
         if ( !existing )
+        {
+            m_impl->rollback();
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                                 existing.error( m_impl->db ) ) );
+        }
         existing.bind( 1, definition.benchmarkId() );
         existing.bind( 2, qint64( definition.benchmarkVersion() ) );
         if ( existing.stepRow() )
         {
-            if ( existing.text( 0 ) == digest && existing.text( 1 ) == json )
+            const bool same = existing.text( 0 ) == digest && existing.text( 1 ) == json;
+            m_impl->rollback();
+            if ( same )
                 return ResultT::success();
             return ResultT::failure( storeDiag(
                 QStringLiteral( "experiment.benchmark_conflict" ),
@@ -1994,16 +2108,28 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkDefinition(
         "INSERT INTO benchmark_definitions(benchmark_id, benchmark_version,"
         " content_digest, json, created_ms) VALUES(?,?,?,?,?)" ) );
     if ( !insert )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
     insert.bind( 1, definition.benchmarkId() );
     insert.bind( 2, qint64( definition.benchmarkVersion() ) );
     insert.bind( 3, digest );
     insert.bind( 4, json );
     insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 
@@ -2078,16 +2204,28 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkR
                                             QStringLiteral( "result_id and benchmark_id required" ) ) );
 
     const QString json = jsonToText( result.toJson() );
+    // #1173 doctrine: BEGIN IMMEDIATE around the conflict check + insert so a
+    // concurrent connection cannot race a second insert past the SELECT and
+    // degrade the UNIQUE failure into a generic store_write_failed (must stay
+    // experiment.conflict).
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt existing( m_impl->db,
                        QStringLiteral( "SELECT json FROM benchmark_results WHERE result_id=?" ) );
         if ( !existing )
+        {
+            m_impl->rollback();
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                                 existing.error( m_impl->db ) ) );
+        }
         existing.bind( 1, result.resultId() );
         if ( existing.stepRow() )
         {
-            if ( existing.text( 0 ) == json )
+            const bool same = existing.text( 0 ) == json;
+            m_impl->rollback();
+            if ( same )
                 return ResultT::success();
             return ResultT::failure( storeDiag(
                 QStringLiteral( "experiment.conflict" ),
@@ -2099,16 +2237,28 @@ sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkR
         "INSERT INTO benchmark_results(result_id, benchmark_id, benchmark_version,"
         " json, created_ms) VALUES(?,?,?,?,?)" ) );
     if ( !insert )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
     insert.bind( 1, result.resultId() );
     insert.bind( 2, result.benchmarkId() );
     insert.bind( 3, qint64( result.benchmarkVersion() ) );
     insert.bind( 4, json );
     insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 

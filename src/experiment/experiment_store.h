@@ -111,8 +111,10 @@ class ExperimentStore
         /// the run's lineage edges with it, atomically.
         bool keepWithRunLineage = true;
         /// Runs cited by an immutable benchmark_results row are never
-        /// removable (#1173). Setting false is not supported as a cascade
-        /// delete of benchmark rows — refuse prune of cited runs instead.
+        /// removable (#1173). The flag is accepted for source compatibility
+        /// but has no behavioral effect: even with false, cited runs are
+        /// refused (a cascade delete of benchmark rows is not supported, so
+        /// honoring false would strand phantom references).
         bool keepWithBenchmarkCitation = true;
 
         QJsonObject toJson() const;
