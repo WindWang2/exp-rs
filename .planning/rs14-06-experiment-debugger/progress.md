@@ -70,3 +70,13 @@
   test: the plain aligner left the rule-matched step unmatched → phantom missing_preprocessing).
 - Test-side: QVector::operator<< mutation polluted later assertions — explicit copy.
 - 32/32 pass (236 assertions) incl. A+B+C regression.
+
+### Slices E + F — GREEN (2026-09-22)
+- ArtifactMetricComparer: matched-pair digest verdicts (equal/different/one_sided/
+  incomparable_modes/both_absent) + bounded sorted-path metric deltas via metricValueAtPath.
+- TimelineDiffModel (Qt-free) + AgentDiagnosticAdapter (exp.diag.v1 codes, recoverability,
+  suggested_action, details{kind,confidence,step ids}); teaching/agent consistency test pins that
+  both views name the SAME divergence step.
+- Test-side fix: a one-sided metric leaf was asserted as reference-present — contradicted the
+  no-zero-filling contract; the test now pins the honest one-sided shape.
+- 38/38 pass (295 assertions).

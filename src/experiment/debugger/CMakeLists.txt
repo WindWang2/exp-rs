@@ -11,6 +11,12 @@ qt_add_library(sicnu_experiment_debugger STATIC
   first_divergence.h
   equivalence.cpp
   equivalence.h
+  artifact_metrics.cpp
+  artifact_metrics.h
+  timeline_model.cpp
+  timeline_model.h
+  agent_diagnostic.cpp
+  agent_diagnostic.h
   debugger_types.h
 )
 

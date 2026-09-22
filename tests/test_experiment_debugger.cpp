@@ -20,6 +20,9 @@
 #include "experiment/debugger/step_aligner.h"
 #include "experiment/debugger/first_divergence.h"
 #include "experiment/debugger/equivalence.h"
+#include "experiment/debugger/artifact_metrics.h"
+#include "experiment/debugger/timeline_model.h"
+#include "experiment/debugger/agent_diagnostic.h"
 #include "catch2/catch_approx.hpp"
 
 #include "experiment_debugger_fixtures.h"
@@ -1206,3 +1209,214 @@ TEST_CASE( "Slice D: invariant reference evaluates honestly, gaps are named",
     REQUIRE( failing->firstDivergence.evidence.front().contains( QStringLiteral( "area-sane" ) ) );
 }
 
+// ============================================================================
+// Slice E — artifact + metric comparison
+// ============================================================================
+
+TEST_CASE( "Slice E: step-output digests compare with honest mode handling",
+           "[debugger][sliceE]" )
+{
+    StepEvidence refEvidence = checkpointPipeline( QStringLiteral( "bbbb" ), thresholdParams( 0.35 ) );
+    StepEvidence studentEvidence = checkpointPipeline( QStringLiteral( "bbbb" ), thresholdParams( 0.35 ) );
+    // Make the threshold digests differ and one side digest-less.
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    auto comparisons = ArtifactMetricComparer::compareStepOutputs( refSnap, stuSnap, *alignment );
+    REQUIRE( comparisons.size() == 3 );
+    REQUIRE( comparisons.at( 0 ).digestVerdict == ArtifactComparison::DigestVerdict::Equal );
+
+    // One-sided digest: ndvi recorded, threshold not — honest one_sided.
+    StepEvidence halfEvidence = checkpointPipeline( QStringLiteral( "" ), thresholdParams( 0.35 ) );
+    RunSnapshot halfSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-half" ), halfEvidence );
+    auto halfAlignment = StepAligner::align( refSnap, halfSnap );
+    REQUIRE( halfAlignment.has_value() );
+    auto halfComparisons = ArtifactMetricComparer::compareStepOutputs( refSnap, halfSnap, *halfAlignment );
+    REQUIRE( halfComparisons.at( 1 ).digestVerdict == ArtifactComparison::DigestVerdict::OneSided );
+}
+
+TEST_CASE( "Slice E: metric deltas report one-sided leaves without zero-filling",
+           "[debugger][sliceE]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    QJsonObject refMetrics;
+    refMetrics.insert( QStringLiteral( "area_km2" ), 40.0 );
+    QJsonObject stuMetrics;
+    stuMetrics.insert( QStringLiteral( "area_km2" ), 42.5 );
+    stuMetrics.insert( QStringLiteral( "overall_accuracy" ), 0.91 );
+    refSnap.setMetrics( refMetrics );
+    stuSnap.setMetrics( stuMetrics );
+
+    auto deltas = ArtifactMetricComparer::compareRunMetrics( refSnap, stuSnap );
+    REQUIRE( deltas.size() == 2 );
+    REQUIRE( deltas.at( 0 ).path == QStringLiteral( "area_km2" ) );
+    REQUIRE( deltas.at( 0 ).referencePresent );
+    REQUIRE( deltas.at( 0 ).studentPresent );
+    REQUIRE( deltas.at( 0 ).delta == Catch::Approx( 2.5 ) );
+    // Student-only leaf: reported one-sided — never zero-filled into a delta.
+    REQUIRE( deltas.at( 1 ).path == QStringLiteral( "overall_accuracy" ) );
+    REQUIRE( !deltas.at( 1 ).referencePresent );
+    REQUIRE( deltas.at( 1 ).studentPresent );
+    REQUIRE( deltas.at( 1 ).studentValue == Catch::Approx( 0.91 ) );
+
+    // One-sided: leaf only on the student side has no delta and no reference value.
+    QJsonObject onlyRef;
+    onlyRef.insert( QStringLiteral( "kappa" ), 0.7 );
+    refSnap.setMetrics( onlyRef );
+    auto oneSided = ArtifactMetricComparer::compareRunMetrics( refSnap, stuSnap );
+    bool kappaFound = false;
+    for ( const MetricDeltaFinding &finding : oneSided )
+        if ( finding.path == QStringLiteral( "kappa" ) )
+        {
+            kappaFound = true;
+            REQUIRE( finding.referencePresent );
+            REQUIRE( !finding.studentPresent );
+        }
+    REQUIRE( kappaFound );
+}
+
+TEST_CASE( "Slice E: metric leaves are capped in deterministic sorted order",
+           "[debugger][sliceE]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    QJsonObject metrics;
+    for ( int i = 0; i < 300; ++i )
+        metrics.insert( QStringLiteral( "m%1" ).arg( i, 3, 10, QLatin1Char( '0' ) ), i * 1.0 );
+    refSnap.setMetrics( metrics );
+    stuSnap.setMetrics( metrics );
+
+    auto deltas = ArtifactMetricComparer::compareRunMetrics( refSnap, stuSnap, 100 );
+    REQUIRE( deltas.size() == 100 );
+    // sorted order: m000 < m001 < ... — the cut is deterministic
+    REQUIRE( deltas.front().path == QStringLiteral( "m000" ) );
+    REQUIRE( deltas.at( 99 ).path == QStringLiteral( "m099" ) );
+}
+
+// ============================================================================
+// Slice F — timeline model + agent diagnostic
+// ============================================================================
+
+TEST_CASE( "Slice F: timeline flags the first divergence exactly as the report does",
+           "[debugger][sliceF]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.62 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    auto alignmentResult = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignmentResult.has_value() );
+
+    auto timeline = TimelineDiffModel::build( refSnap, stuSnap, *alignmentResult, *report );
+    REQUIRE( timeline.size() == 3 );
+    REQUIRE( timeline.at( 0 ).status == QStringLiteral( "matched_identical" ) );
+    REQUIRE( timeline.at( 1 ).status == QStringLiteral( "matched_divergent" ) );
+    REQUIRE( timeline.at( 1 ).isFirstDivergence );
+    REQUIRE( timeline.at( 1 ).referenceStepId ==
+             report->firstDivergence.referenceStepId );
+    REQUIRE( timeline.at( 1 ).divergenceKind ==
+             divergenceKindName( report->firstDivergence.kind ) );
+    REQUIRE( timeline.at( 2 ).status == QStringLiteral( "matched_identical" ) );
+    REQUIRE( !timeline.at( 2 ).isFirstDivergence );
+}
+
+TEST_CASE( "Slice F: agent diagnostic carries the closed code set and actions",
+           "[debugger][sliceF]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.62 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+
+    auto diagnostic = AgentDiagnosticAdapter::forReplan( *report );
+    REQUIRE( diagnostic.code == QLatin1String( kDiagFirstDivergence ) );
+    REQUIRE( diagnostic.component == QStringLiteral( "experiment.debugger" ) );
+    REQUIRE( diagnostic.recoverability == QStringLiteral( "manual" ) );
+    REQUIRE( !diagnostic.suggestedAction.isEmpty() );
+    REQUIRE( diagnostic.details.value( QLatin1String( "divergence_kind" ) ).toString()
+             == QStringLiteral( "parameter_divergence" ) );
+    REQUIRE( diagnostic.details.value( QLatin1String( "confidence" ) ).toString()
+             == QStringLiteral( "high" ) );
+
+    const QJsonObject json = diagnostic.toJson();
+    REQUIRE( json.value( QLatin1String( "schema" ) ).toString()
+             == QStringLiteral( "exp.diag.v1" ) );
+
+    // Identical outcome → no_divergence, no action needed.
+    InMemoryEvidenceSource twinSource;
+    RunSnapshot twinSnap = buildSnapshot( twinSource, QStringLiteral( "run-twin" ),
+                                          checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                              thresholdParams( 0.35 ) ) );
+    auto twinReport = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-twin" ) ), refSnap, twinSnap );
+    REQUIRE( twinReport.has_value() );
+    auto twinDiagnostic = AgentDiagnosticAdapter::forReplan( *twinReport );
+    REQUIRE( twinDiagnostic.code == QLatin1String( kDiagNoDivergence ) );
+
+    // Typed failures produce the same envelope shape.
+    QVector<sicnu::data::Diagnostic> failure;
+    failure.append( { QLatin1String( kCodeUnknownRun ), QStringLiteral( "no recorded run 'x'" ),
+                      sicnu::data::DiagnosticSeverity::Error } );
+    auto failureDiagnostic = AgentDiagnosticAdapter::forFailure( failure, QStringLiteral( "x" ) );
+    REQUIRE( failureDiagnostic.code == QLatin1String( kDiagUnknownRun ) );
+    REQUIRE( failureDiagnostic.toJson().value( QLatin1String( "schema" ) ).toString()
+             == QStringLiteral( "exp.diag.v1" ) );
+}
+
+TEST_CASE( "Slice F: teaching and agent views agree on the divergence point",
+           "[debugger][sliceF]" )
+{
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    RunSnapshot stuSnap = buildSnapshot( stuSource, QStringLiteral( "run-stu" ),
+                                         checkpointPipeline( QStringLiteral( "eeee" ),
+                                                             thresholdParams( 0.62 ) ) );
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ), refSnap, stuSnap );
+    REQUIRE( report.has_value() );
+    auto alignmentResult = StepAligner::align( refSnap, stuSnap );
+    auto timeline = TimelineDiffModel::build( refSnap, stuSnap, *alignmentResult, *report );
+    auto diagnostic = AgentDiagnosticAdapter::forReplan( *report );
+
+    QString timelineStep;
+    for ( const TimelineEntry &entry : timeline )
+        if ( entry.isFirstDivergence )
+            timelineStep = entry.studentStepId.isEmpty() ? entry.referenceStepId
+                                                         : entry.studentStepId;
+    const QString agentStep =
+        diagnostic.details.value( QLatin1String( "student_step_id" ) ).toString();
+    REQUIRE( !timelineStep.isEmpty() );
+    REQUIRE( timelineStep == agentStep );
+}
