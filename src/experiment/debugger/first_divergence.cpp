@@ -5,6 +5,7 @@
 
 #include "first_divergence.h"
 
+#include "debugger_types.h"
 #include "equivalence.h"
 
 #include <QHash>
@@ -269,7 +270,13 @@ Result<FirstDivergenceReport> analyzeImpl(
     }
 
     // ── Identity shortcut: identical identity documents are identical runs ──
-    if ( reference.identityDocument() == student.identityDocument() )
+    // The identity document deliberately excludes the run status label
+    // (volatile/presentational per run_snapshot.cpp), so gate the shortcut on
+    // that label directly: a reference that completed and a student that
+    // failed are never "identical" — with digest-less evidence both
+    // documents can otherwise agree while the outcomes differ.
+    if ( reference.identityDocument() == student.identityDocument()
+         && reference.pins().runStatus == student.pins().runStatus )
     {
         report.verdict = QStringLiteral( "identical" );
         return Result<FirstDivergenceReport>::success( report );
@@ -321,6 +328,13 @@ Result<FirstDivergenceReport> analyzeImpl(
             outputVerify.insert( refStep->stepId, Verify::Unknown );
         else if ( refStep->digestMode != studentStep->digestMode )
             outputVerify.insert( refStep->stepId, Verify::Unknown ); // incomparable modes
+        else if ( refStep->digestMode == QLatin1String( kDigestModeUnknown ) )
+            outputVerify.insert( refStep->stepId, Verify::Unknown ); // kDigestModeUnknown on
+                                                                     // both sides: the
+                                                                     // recorded strings are
+                                                                     // not digests, so their
+                                                                     // equality verifies
+                                                                     // nothing
         else
             outputVerify.insert( refStep->stepId,
                                  refStep->outputDigest == studentStep->outputDigest

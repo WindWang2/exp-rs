@@ -1944,3 +1944,32 @@ TEST_CASE( "Review: bridge-mode result divergence cannot claim high confidence",
     REQUIRE( namesParams );
     REQUIRE( namesLineage );
 }
+
+TEST_CASE( "Slice C: identical pipeline but a failed student run is never 'identical'",
+           "[debugger][sliceC]" )
+{
+    // The identity document deliberately excludes the run status label, so
+    // with digest-less evidence both documents could agree while the
+    // outcomes differed — and the status-blind shortcut answered
+    // "identical" for a reference that completed and a student run that
+    // failed. The shortcut must consult the outcome it excluded.
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+
+    ExperimentRun failedRun = makeRunRecord( QStringLiteral( "run-stu" ) );
+    failedRun.setStatus( sicnu::experiment::RunStatus::Failed );
+    stuSource.insertRun( failedRun );
+    stuSource.insertStepEvidence( QStringLiteral( "run-stu" ),
+                                  checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                      thresholdParams( 0.35 ) ) );
+    RunSnapshotBuilder stuBuilder( stuSource );
+    auto stuSnap = stuBuilder.build( QStringLiteral( "run-stu" ) );
+    REQUIRE( stuSnap.has_value() );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ), failedRun, refSnap, stuSnap.take() );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict != QStringLiteral( "identical" ) );
+}

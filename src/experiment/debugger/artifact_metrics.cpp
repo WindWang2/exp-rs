@@ -4,6 +4,7 @@
 #include "artifact_metrics.h"
 
 #include "../metric_path.h"
+#include "debugger_types.h"
 
 #include <QJsonArray>
 #include <QSet>
@@ -126,6 +127,10 @@ QVector<ArtifactComparison> ArtifactMetricComparer::compareStepOutputs(
         if ( refStep->outputDigest.isEmpty() || studentStep->outputDigest.isEmpty() )
             comparison.digestVerdict = ArtifactComparison::DigestVerdict::OneSided;
         else if ( refStep->digestMode != studentStep->digestMode )
+            comparison.digestVerdict = ArtifactComparison::DigestVerdict::IncomparableModes;
+        else if ( refStep->digestMode == QLatin1String( kDigestModeUnknown ) )
+            // kDigestModeUnknown on both sides: the recorded strings are not
+            // digests, so their equality is not content verification.
             comparison.digestVerdict = ArtifactComparison::DigestVerdict::IncomparableModes;
         else
             comparison.digestVerdict = refStep->outputDigest == studentStep->outputDigest
