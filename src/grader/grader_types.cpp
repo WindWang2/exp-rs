@@ -1125,10 +1125,23 @@ std::optional<GradingRubric> GradingRubric::fromJson( const Json::Value &doc, Gr
             }
             if ( stageJson.isMember( "expectedState" ) )
                 stringMember( stageJson, "expectedState", requirement.expectedState );
-            if ( stageJson.isMember( "orderedAfter" ) && stageJson["orderedAfter"].isArray() ) {
+            if ( stageJson.isMember( "orderedAfter" ) ) {
+                if ( !stageJson["orderedAfter"].isArray() ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                       "orderedAfter must be an array", path + ".orderedAfter" );
+                    return std::nullopt;
+                }
+                // Typed refusal, mirroring the criteria-level stage check: a
+                // silently dropped entry would grade MORE permissively than
+                // the teacher declared.
                 for ( const auto &entry : stageJson["orderedAfter"] ) {
-                    if ( entry.isString() )
-                        requirement.orderedAfter.push_back( entry.asString() );
+                    if ( !entry.isString() || entry.asString().empty() ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "orderedAfter entries must be non-empty strings",
+                                           path + ".orderedAfter" );
+                        return std::nullopt;
+                    }
+                    requirement.orderedAfter.push_back( entry.asString() );
                 }
             }
             rubric.requiredStages.push_back( std::move( requirement ) );

@@ -20,10 +20,12 @@ target_link_libraries( sicnu_grader PUBLIC jsoncpp )
 target_include_directories( sicnu_grader PUBLIC ${CMAKE_SOURCE_DIR}/src )
 target_compile_features( sicnu_grader PUBLIC cxx_std_20 )
 
-# Layer guard: the grader leaf consumes recorded facts — including verifier
-# verdicts — as versioned JSON documents (EvidenceKind::verifier_verdict); it
-# never links the verifier to recompute it. Qt/GDAL/sicnu linkage would break
-# the ADR 0174 leaf discipline.
+# Layer guard — deliberately LAST in this file so it observes every link
+# declared above (adding a link below this guard defeats it; keep new links in
+# the add_library block). The grader leaf consumes recorded facts — including
+# verifier verdicts — as versioned JSON documents
+# (EvidenceKind::verifier_verdict); it never links the verifier to recompute
+# it. Qt/GDAL/sicnu linkage would break the ADR 0174 leaf discipline.
 get_target_property( SICNU_GRADER_LINK_LIBRARIES sicnu_grader LINK_LIBRARIES )
 set( SICNU_GRADER_ALLOWED_LINKS jsoncpp jsoncpp_lib )
 foreach( SICNU_GRADER_LINK IN LISTS SICNU_GRADER_LINK_LIBRARIES )

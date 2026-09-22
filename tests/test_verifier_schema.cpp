@@ -749,6 +749,28 @@ TEST_CASE( "the canonical seal refuses non-finite bodies and non-hex spec digest
         CHECK( report.digest().empty() );
     }
 
+    SECTION( "a non-finite body is refused even when no expectedDigest is supplied" )
+    {
+        // jsoncpp parses 1e999 to a non-finite double without a parse error;
+        // the seal-skip path (empty expectedDigest) must still fail closed.
+        std::vector<VerificationCheckResult> checks( 1 );
+        checks[0].checkId = "c1";
+        checks[0].kind = "artifact.grid";
+        checks[0].status = S::Pass;
+        const VerificationReport report =
+            buildReport( "spec.x", "node", std::string( 64, 'a' ), checks );
+        Json::Value hostile = report.toCanonicalJson();
+        Json::Value evidence( Json::objectValue );
+        evidence["source"] = "grid:out.tif";
+        evidence["observed"]["nodataFraction"] = Json::Value( 1e999 );
+        evidence["expected"] = Json::Value( Json::objectValue );
+        hostile["checks"][0]["evidence"] = evidence;
+        VerificationReport parsed;
+        std::string error;
+        REQUIRE_FALSE( VerificationReport::fromCanonicalJson( hostile, parsed, error, "" ) );
+        CHECK( error.find( "non-finite" ) != std::string::npos );
+    }
+
     SECTION( "healthy reports keep a full digest" )
     {
         std::vector<VerificationCheckResult> checks( 1 );

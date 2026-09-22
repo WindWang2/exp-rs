@@ -752,6 +752,23 @@ TEST_CASE( "hostile documents are typed refusals, never exceptions", "[grader][s
         CHECK_FALSE( GradeReport::fromJson( doc, err ).has_value() );
     }
 
+    SECTION( "requiredStages.orderedAfter non-string entry is a typed refusal" )
+    {
+        // A silently dropped entry would grade more permissively than the
+        // teacher declared — the criteria-level check refuses, so must this one.
+        Json::Value doc = rubricJson();
+        Json::Value requirement{ Json::objectValue };
+        requirement["stageKey"] = "train";
+        requirement["orderedAfter"] = Json::Value{ Json::arrayValue };
+        requirement["orderedAfter"].append( "train" );
+        requirement["orderedAfter"].append( 42 ); // hostile: non-string
+        doc["requiredStages"] = Json::Value{ Json::arrayValue };
+        doc["requiredStages"].append( requirement );
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+        CHECK( err.path.find( "orderedAfter" ) != std::string::npos );
+    }
+
     SECTION( "parseJsonStrict survives a deep nesting bomb as typed refusal" )
     {
         const std::string bomb( 40000, '[' );

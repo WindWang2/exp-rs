@@ -872,6 +872,11 @@ bool VerificationReport::fromCanonicalJson( const Json::Value &json, Verificatio
     };
     if ( !json.isObject() )
         return fail( "report document must be a JSON object" );
+    // Defense in depth: refuse non-finite bodies even when the caller passes
+    // an empty expectedDigest (which skips the seal check). Legit producers
+    // cannot seal such a body; hand-forged ones must not parse either.
+    if ( containsNonFiniteNumber( json ) )
+        return fail( "report body carries a non-finite number and cannot be sealed" );
     std::string unknown;
     if ( hasUnknownField( json, reportFields(), unknown ) )
         return fail( "unknown report field: '" + unknown + "'" );
