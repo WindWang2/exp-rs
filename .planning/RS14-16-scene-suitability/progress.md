@@ -49,3 +49,11 @@
 - 2026-09-21 (Slice G): **profiles 位置初始化加固**：`makeBuiltinProfiles` 的 12 参位置聚合初始化改为具名字段构造（baseProfile + 逐字段赋值）——新增字段变为编译安全的编辑；新增全表逐 key 默认值 pin 测试防科学先验漂移。
 - 2026-09-21 (Slice G): 其余对抗性结论（无需修复，测试锁死）：grid 等步长抽样 linear→(i,j) 译码与暴力全比对拍一致（n=12 全集 66 对 + n=21 抽样 200/210 期望阻断数 + n=203 抽样确定性）；重复/空 scene id 不参与判定只透传报告（镜像输入，确定性锁定）；畸形 JSON（非对象 criteria、垃圾/200 层嵌套 evidence、100k 字符 summary、重复 criterion id=last-wins）要么 typed 失败要么字节稳定 round-trip；重放确定性（QHash 反序插入双跑逐字节相同 + digest 相同）复证 Slice C 排序决策。
 - 2026-09-21 (Slice G): observed 未修：①`temporal.coverage` 存在窗口内 1 景 + 其余时间未知即 Suitable（存在性判定，方向保守，B/D 已锁）；②`spatial.resolution` 部分场景 gsd 未知仍可 Suitable（B 决策"未知不参与判定"锁定，依赖 gsd_invalid 诊断保持非沉默）；③抽样模式下"抽样内 0 阻断 → Suitable"有 note 声明（E 决策锁定）；④季节映射北半球假设不变（D 决策）。**master open issues 触碰检查**：本模块不触 #1151（capability mirror——无任何 capability 镜像读写）、不触 #1184（10k 截断——模块自身 cap 体系独立：1000 scenes/200 pairs/50000 rows/64 facet values），仅报告不修。
+
+## Slice H 记录（主智能体收尾，2026-09-22）
+- H1/H2 由被中断的前任 agent 提交（8d5e531e16、b9eb449c17），质量良好。
+- H3 重构：适配器从 src/agent 下沉到 `src/suitability/suitability_agent_adapter.{h,cpp}`（sicnu_suitability 内），agent 侧只留薄壳（defs 两行 + prefix 一行 + dispatch 两分支 + CMake 链接一行）——动机：qgis_agent 全量链接需数小时，adapter 在 Qt-only 层可直接单测（5 cases / 26 assertions 绿）。dataset_version_id 无 dataset_db → 拒绝（拒绝无证据源的点名查询）。
+- capability knowledge / kDataPlatformPrefixes 刻意不动（#1151/#1187 避让）；surface parity 由既有 test_surface_parity 自动覆盖（sicnu_agent 构建在后台进行，PR 前验证）。
+- H4：integration.md（track-local 接线点文档）落地。
+- 最终套件（11 个，全部绿）：core 68/11、spatial 195/18、spectral 93/10、temporal 79/13、labels 115/24、store_provider 226/5、profiles 92/10、adversarial 350/21、uncertainty 50/7、teaching 76/5、agent_tools 26/5（assertions/cases）。
+- observed：sicnu_agent + test_data_platform_surface/test_surface_parity 全量构建耗时长（qgis_core ~1000+ TU，-j1），后台进行中，PR 前回收结果；test_capability_drift 在 master 本就红（#1151），本 track 不新增红灯 case。
