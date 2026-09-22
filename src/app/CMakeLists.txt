@@ -381,6 +381,21 @@ add_executable(sicnu_geo_rs
 
 # Desktop shell embeds no QML; skip Qt's configure-time qmlimportscanner pass
 # (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
+
+# Undergraduate Lab Cockpit (student-facing projection UI)
+target_sources(sicnu_geo_rs PRIVATE
+    teaching/course_home_page.cpp
+    teaching/course_home_page.h
+    teaching/guided_lab_workspace.cpp
+    teaching/guided_lab_workspace.h
+    teaching/lab_cockpit_dock.cpp
+    teaching/lab_cockpit_dock.h
+    teaching/status_badge.h
+)
+if(TARGET Sicnu::teaching)
+    target_link_libraries(sicnu_geo_rs PRIVATE Sicnu::teaching)
+endif()
+
 set_target_properties(sicnu_geo_rs PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
 
 target_include_directories(sicnu_geo_rs PRIVATE

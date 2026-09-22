@@ -233,6 +233,14 @@ void QgisDesktopWindow::showGuidedWorkflows()
         m_workflowDock->raise();
     }
 }
+
+void QgisDesktopWindow::showLabCockpit()
+{
+    if ( m_labCockpitDock ) {
+        m_labCockpitDock->show();
+        m_labCockpitDock->raise();
+    }
+}
 void QgisDesktopWindow::restorePanelState()
 {
     QSettings settings;
