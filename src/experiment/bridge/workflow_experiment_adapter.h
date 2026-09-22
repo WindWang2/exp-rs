@@ -97,8 +97,9 @@ class WorkflowExperimentMonitor : public QObject
     /// aggregate into a lifecycle event and records it. Content-identical to
     /// what the queued runStateChanged delivery would carry (same snapshot
     /// code path); terminal/Interrupted states are recorded, transitional
-    /// states are ignored (never recorded as anything). For refs this
-    /// monitor never enabled the bridge refuses — no fabricated history.
+    /// states are refused with a typed bridge_invalid_event diagnostic
+    /// (nothing recorded, nothing fabricated). For refs this monitor never
+    /// enabled the bridge refuses — no fabricated history.
     Result<QString> recordAggregateState( const workflow::WorkflowRun &run );
 
     /// Startup/stale reconciliation: runs recorded as non-terminal whose
