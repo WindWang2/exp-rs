@@ -47,6 +47,18 @@ MissionRunStatus fromTaskStatus( sicnu::TaskStatus status, const QString &detail
     return s;
 }
 
+bool parseLongId( const QString &id, long &out )
+{
+    bool ok = false;
+    const long value = id.toLong( &ok );
+    if ( !ok || value < 0 )
+        return false;
+    out = value;
+    return true;
+}
+
+} // namespace
+
 MissionRunStatus fromRunState( sicnu::workflow::WorkflowRunState state, const QString &detail )
 {
     MissionRunStatus s;
@@ -86,18 +98,6 @@ MissionRunStatus fromRunState( sicnu::workflow::WorkflowRunState state, const QS
     s.detail = detail;
     return s;
 }
-
-bool parseLongId( const QString &id, long &out )
-{
-    bool ok = false;
-    const long value = id.toLong( &ok );
-    if ( !ok || value < 0 )
-        return false;
-    out = value;
-    return true;
-}
-
-} // namespace
 
 MissionRunStatus resolveMissionRunStatus( const MissionRunRef &ref )
 {
