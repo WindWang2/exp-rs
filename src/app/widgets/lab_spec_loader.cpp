@@ -360,13 +360,13 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
                          .arg( stdToQString( operatorKey ) ), 0, labId );
         const Json::Value &operatorRanges = ranges[ operatorKey ];
         if ( !operatorRanges.isObject() )
-          return fail( QStringLiteral( "param_ranges[%1] must be an object" ).arg( operatorKey ), 0, labId );
+          return fail( QStringLiteral( "param_ranges[%1] must be an object" ).arg( stdToQString( operatorKey ) ), 0, labId );
         for ( const auto &paramKey : operatorRanges.getMemberNames() )
         {
           const Json::Value &range = operatorRanges[ paramKey ];
           if ( !range.isObject() )
             return fail( QStringLiteral( "param_ranges[%1][%2] must be an object" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           for ( const auto &key : range.getMemberNames() )
           {
             if ( !rangeKeys.contains( stdToQString( key ) ) )
@@ -377,23 +377,23 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
           const bool hasValues = range.isMember( "values" );
           if ( !hasMin && !hasMax && !hasValues )
             return fail( QStringLiteral( "param_ranges[%1][%2] needs min, max or values" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMin && !range[ "min" ].isNumeric() )
             return fail( QStringLiteral( "param_ranges[%1][%2].min must be a number" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMax && !range[ "max" ].isNumeric() )
             return fail( QStringLiteral( "param_ranges[%1][%2].max must be a number" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMin && hasMax && range[ "min" ].asDouble() > range[ "max" ].asDouble() )
             return fail( QStringLiteral( "param_ranges[%1][%2]: min exceeds max" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasValues
                && ( !range[ "values" ].isArray() || range[ "values" ].empty() ) )
             return fail( QStringLiteral( "param_ranges[%1][%2].values must be a non-empty array" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( range.isMember( "note_zh" ) && !isNonEmptyString( range[ "note_zh" ] ) )
             return fail( QStringLiteral( "param_ranges[%1][%2].note_zh must be a non-empty string" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
         }
       }
     }
