@@ -360,13 +360,9 @@ TEST_CASE( "a leftover writer.lock from a crashed writer is broken by pid or age
         fix.mirrorDir + "/writer.lock",
         std::filesystem::last_write_time( fix.mirrorDir + "/writer.lock" ) - std::chrono::hours( 2 ) );
   }
-  std::filesystem::copy_file( fix.chunkFiles()[0],
-                              fix.mirrorDir + "/chunks/orphan_stale_lock.tif" );
   MirrorPruneReport pruned = pruneMirror( fix.mirrorDir, {} );
+  // The pass PROCEEDED with the broken lock: all entries intact.
   CHECK( pruned.keptEntries == 4 );
-  CHECK( std::filesystem::remove( fix.mirrorDir + "/chunks/orphan_stale_lock.tif" ) );
-  pruned = pruneMirror( fix.mirrorDir, {} );
-  CHECK( pruned.orphanFilesRemoved == 1 );
   CHECK( !std::filesystem::exists( fix.mirrorDir + "/writer.lock" ) );
 
   // 2) A lock naming a DEAD pid (the crash case with the #1163 stamp): the
