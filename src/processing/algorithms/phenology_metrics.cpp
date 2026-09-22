@@ -18,15 +18,23 @@ namespace
 {
 
 constexpr double kTiny = 1e-12;
-constexpr double kYearDays = 365.0;
+// Mean Gregorian year length. A fixed-365 modulo drifts one day per leap
+// year against calendar DOY; 365.25 keeps multi-year season windows within
+// ~1 day of the civil calendar without needing a civil epoch here. Callers
+// with real QDate DOYs should prefer phenologyThreshold's doyOf vector.
+constexpr double kYearDays = 365.25;
 
 /// Day-of-year view of a tDays value: doy(0) = 1 (epoch-aligned seasons).
+/// Result is in [1, 366]; the leap-day bucket is day 366 (fractional year
+/// remainder past day 365).
 double doyOf( double t )
 {
     double d = std::fmod( t, kYearDays );
     if ( d < 0.0 )
         d += kYearDays;
-    return d + 1.0;
+    // Map [0, 365.25) → DOY [1, 366].
+    const double doy = std::floor( d ) + 1.0;
+    return doy > 366.0 ? 366.0 : doy;
 }
 
 bool inSeason( double doy, int startDoy, int endDoy )

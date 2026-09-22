@@ -17,8 +17,8 @@
   test is significant at @a significanceAlpha (exact p-value via the
   regularized incomplete beta) and (c) BIC strictly decreases
   (BIC = n·ln(RSS/n) + p·ln(n)). The OLS-MOSUM moving-sum statistic
-  (h = ⌊0.15·n⌋) is computed and reported as the structural-stability
-  screen; the accept/reject gate is the F-test p-value.
+  (h = ⌊0.15·n⌋, standardized by σ√h) is computed and reported as the
+  structural-stability screen; the accept/reject gate is the F-test p-value.
 
   NaN samples are absent, never zero. Deterministic: fixed scan order,
   single-threaded.

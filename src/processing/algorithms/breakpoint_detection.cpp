@@ -269,8 +269,11 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
             window += residuals[s];
         for ( int end = h; end <= static_cast<int>( n ); ++end )
         {
+            // Standardize by σ√h (window length): Var(Σ_h e_i) ≈ hσ² under the
+            // iid screen null. The prior σ√n form understated |M| by √(h/n)
+            // and only tests read mosumMax.
             result.mosumMax = std::max( result.mosumMax,
-                                        std::abs( window / ( sigma * std::sqrt( static_cast<double>( n ) ) ) ) );
+                                        std::abs( window / ( sigma * std::sqrt( static_cast<double>( h ) ) ) ) );
             if ( end < static_cast<int>( n ) )
                 window += residuals[end] - residuals[end - h];
         }
