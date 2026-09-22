@@ -54,8 +54,9 @@ harness:preflight {
 
 `harness:execute_plan` runs the same rule pack automatically when the plan
 declares an `intent` — planners cannot skip it by forgetting to call
-preflight first (the explicit `skip_preflight` flag exists only for custom
-plans with no intent).
+preflight first, and there is no flag to override it: a blocked verdict
+always refuses execution. Custom plans with no `intent` run no rule pack
+(there is nothing to check).
 
 ---
 

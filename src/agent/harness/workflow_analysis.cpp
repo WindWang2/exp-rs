@@ -24,6 +24,7 @@ namespace {
 using facts::bandFacts;
 using facts::crsOf;
 using facts::gridFacts;
+using facts::isGeographicAuthid;
 using facts::lowered;
 
 /// Families whose kernels are continuous arithmetic — a categorical input is
@@ -36,13 +37,6 @@ const char *const kContinuousFamilies[] = {
 /// `model` param must be compatible with an upstream artifact.
 const char *const kModelSeamOperators[] = {
   "rs:infer", "rs:segment", "rs:detect", "rs:embedding",
-};
-
-/// Authids treated as geographic (unprojected) by the requires_projected
-/// check without invoking GDAL. Closed list; a WKT-only CRS degrades the
-/// check to a skip.
-const char *const kGeographicAuthids[] = {
-  "EPSG:4326", "EPSG:4269", "EPSG:4258", "EPSG:4610",
 };
 
 bool isModelSeamOperator( const std::string &operatorId )
@@ -231,10 +225,10 @@ bool isGeographicCrs( const Json::Value &facts )
     }
     return false;
   }
-  for ( const char *geo : kGeographicAuthids )
-    if ( authid == lowered( geo ) )
-      return true;
-  return false;
+  // Shared closed list (facts::isGeographicAuthid, band_facts) so the
+  // workflow requires_projected check and the preflight rule packs agree on
+  // which CRS carry degree-based pixel sizes.
+  return isGeographicAuthid( authid );
 }
 
 /// Shape-tolerant grid facts (review A-4): the inspect tools emit

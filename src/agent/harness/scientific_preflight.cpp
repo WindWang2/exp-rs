@@ -30,6 +30,7 @@ using facts::SarFacts;
 using facts::bandFacts;
 using facts::crsOf;
 using facts::gridFacts;
+using facts::isGeographicAuthid;
 using facts::lowered;
 using facts::modalityOf;
 using facts::radiometricState;
@@ -63,9 +64,10 @@ void addBlocker( PreflightOutcome &outcome, const std::string &code,
 }
 
 void addWarning( PreflightOutcome &outcome, const std::string &code,
-                 const std::string &message )
+                 const std::string &message, bool repairable = false )
 {
-  outcome.issues.append( makeIssueWithCode( code, "warning", message, false, Json::Value() ) );
+  outcome.issues.append( makeIssueWithCode( code, "warning", message, repairable,
+                                            Json::Value() ) );
   outcome.checks.append( makeCheck( code, true, code, Json::Value() ) );
 }
 
@@ -279,9 +281,13 @@ void opticalChangeRules( const std::vector<PreflightInput> &inputs, PreflightOut
     const bool resolutionMismatch =
       a.pixelSizeX && b.pixelSizeX && std::fabs( a.pixelSizeX - b.pixelSizeX ) > 1e-9;
     if ( resolutionMismatch && !sizeMismatch )
+      // Resampling to a shared grid is a deterministic repair, so this
+      // warning is repairable: the verdict becomes "fixable" (reachable),
+      // which is what the session fixable→proposals flow keys on.
       addWarning( outcome, "GRID_MISMATCH",
                   "Pixel size differs between '" + primary->name + "' and '" + input.name +
-                    "' — resample to a shared grid for pixel-wise change" );
+                    "' — resample to a shared grid for pixel-wise change",
+                  true );
     const std::string stateA = radiometricState( primary->understanding );
     const std::string stateB = radiometricState( input.understanding );
     if ( !stateA.empty() && !stateB.empty() && stateA != stateB )
@@ -441,21 +447,44 @@ void temporalSeriesRules( const std::vector<PreflightInput> &inputs,
   }
   const Json::Value &facts = withFacts->temporalFacts;
   const int sceneCount = facts.get( "scene_count", 0 ).asInt();
+  const Json::Value &dates = facts.get( "dates", Json::Value() );
+  const bool hasDates = dates.isArray() && !dates.empty();
+  // Facts that declare no usable content narrow no checks — but they must
+  // not silently turn the pack into a pass either. A declared-but-empty
+  // facts object (or a hostile scene_count) degrades to the same honest
+  // warning as absent facts: unknown stays unknown.
+  if ( sceneCount <= 0 && !hasDates )
+  {
+    addWarning( outcome, "TIME_ORDER_INVALID",
+                "Temporal collection facts for '" + intentLabel +
+                  "' declare no usable scene_count/dates; series quality cannot "
+                  "be verified" );
+    return;
+  }
   if ( minScenes > 0 && sceneCount > 0 && sceneCount < minScenes )
     addBlocker( outcome, error_codes::kInvalidParameter,
                 "'" + intentLabel + "' needs >= " + std::to_string( minScenes ) +
                   " scenes; collection provides " + std::to_string( sceneCount ),
                 "temporal.preflight_collection" );
-  const Json::Value &dates = facts.get( "dates", Json::Value() );
-  if ( dates.isArray() && dates.size() >= 2 )
+  if ( hasDates && dates.size() >= 2 )
   {
     bool sorted = true;
+    bool comparable = true;
     for ( Json::ArrayIndex i = 1; i < dates.size(); ++i )
     {
+      if ( !dates[i - 1].isString() || !dates[i].isString() )
+      {
+        comparable = false;
+        continue;
+      }
       if ( dates[i - 1].asString() > dates[i].asString() )
         sorted = false;
     }
-    if ( !sorted )
+    if ( !comparable )
+      addWarning( outcome, "TIME_ORDER_INVALID",
+                  "Collection dates carry non-string entries; acquisition order "
+                  "cannot be verified" );
+    else if ( !sorted )
       addBlocker( outcome, error_codes::kTimeOrderInvalid,
                   "Collection dates are not in acquisition order", "check_collection" );
     const int maxGapDays = facts.get( "max_gap_days", 0 ).asInt();
@@ -645,20 +674,35 @@ void inferenceRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
                 "Model '" + modelName + "' expects " + expectedRadiometry +
                   " input; dataset declares " + datasetRadiometry );
 
-  // Resolution window.
+  // Resolution window. The manifest window is in meters; a geographic CRS
+  // reports degree-based pixel sizes (9e-5 deg ≈ 10 m) and an unrecognized
+  // CRS reports unknown units — neither may be compared against a meter
+  // window. Comparing anyway declared every EPSG:4326 scene "finer than the
+  // model's recommended minimum".
   const GridFacts grid = gridFacts( withModel->understanding );
   const double minRes = manifest.get( "min_resolution_meters", -1.0 ).asDouble();
   const double maxRes = manifest.get( "max_resolution_meters", -1.0 ).asDouble();
-  if ( grid.pixelSizeX > 0 && minRes > 0 && grid.pixelSizeX < minRes )
+  if ( grid.pixelSizeX > 0 && ( minRes > 0 || maxRes > 0 ) &&
+       isGeographicAuthid( grid.crs ) )
+  {
     addAdvice( outcome, error_codes::kModelIncompatible,
-               "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
-                 " m) is finer than the model's recommended minimum (" +
-                 std::to_string( minRes ) + " m)" );
-  if ( grid.pixelSizeX > 0 && maxRes > 0 && grid.pixelSizeX > maxRes )
-    addAdvice( outcome, error_codes::kModelIncompatible,
-               "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
-                 " m) is coarser than the model's recommended maximum (" +
-                 std::to_string( maxRes ) + " m)" );
+               "Dataset '" + withModel->name +
+                 "' is in a geographic CRS (degree units); the model resolution "
+                 "window in meters cannot be verified" );
+  }
+  else
+  {
+    if ( grid.pixelSizeX > 0 && minRes > 0 && grid.pixelSizeX < minRes )
+      addAdvice( outcome, error_codes::kModelIncompatible,
+                 "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                   " m) is finer than the model's recommended minimum (" +
+                   std::to_string( minRes ) + " m)" );
+    if ( grid.pixelSizeX > 0 && maxRes > 0 && grid.pixelSizeX > maxRes )
+      addAdvice( outcome, error_codes::kModelIncompatible,
+                 "Dataset resolution (" + std::to_string( grid.pixelSizeX ) +
+                   " m) is coarser than the model's recommended maximum (" +
+                   std::to_string( maxRes ) + " m)" );
+  }
 }
 
 /// Cross-modality pack (7.0): optical + SAR fused analysis. Both branches

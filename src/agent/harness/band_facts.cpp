@@ -105,22 +105,68 @@ std::string crsOf( const Json::Value &understanding )
   return "";
 }
 
+// Closed geographic-authid list, shared with the workflow requires_projected
+// check (workflow_analysis.cpp) so both layers agree on which CRS carry
+// degree-based pixel sizes. Unknown/WKT-only CRS are deliberately not
+// recognized: their units are unknown, never silently assumed to be meters.
+bool isGeographicAuthid( const std::string &crs )
+{
+  static const char *const kGeographicAuthids[] = {
+    "epsg:4326", "epsg:4269", "epsg:4258", "epsg:4610", "crs:84", "ogc:crs84",
+  };
+  const std::string authid = lowered( crs );
+  for ( const char *geo : kGeographicAuthids )
+    if ( authid == geo )
+      return true;
+  return false;
+}
+
 GridFacts gridFacts( const Json::Value &understanding )
 {
   GridFacts facts;
   facts.crs = crsOf( understanding );
-  if ( understanding.isMember( "pixel_size" ) && understanding["pixel_size"].isArray() &&
-       understanding["pixel_size"].size() == 2 )
-  {
-    facts.pixelSizeX = understanding["pixel_size"][0].asDouble();
-    facts.pixelSizeY = understanding["pixel_size"][1].asDouble();
-  }
-  if ( understanding.isMember( "size" ) && understanding["size"].isArray() &&
-       understanding["size"].size() == 2 )
-  {
-    facts.width = understanding["size"][0].asInt64();
-    facts.height = understanding["size"][1].asInt64();
-  }
+  // Shape tolerance (mirrors the GridShapeFacts review A-4 convention in
+  // workflow_analysis.cpp): the inspect tools emit `size` {width,height} /
+  // `pixel_size` {x,y} OBJECTS (raster_inspect_tool.cpp) while declared
+  // facts use [w,h]/[x,y] ARRAYS. Both shapes are the same physical fact;
+  // parsing only one of them silently zeroed every grid check on
+  // inspect-derived inputs. Non-numeric members stay unknown (0) — checks
+  // skip, they never fake a verdict.
+  const auto readXy = []( const Json::Value &value, double &first, double &second ) {
+    if ( value.isArray() && value.size() == 2 && value[0].isNumeric()
+         && value[1].isNumeric() )
+    {
+      first = value[0].asDouble();
+      second = value[1].asDouble();
+      return true;
+    }
+    if ( value.isObject() && value["x"].isNumeric() && value["y"].isNumeric() )
+    {
+      first = value["x"].asDouble();
+      second = value["y"].asDouble();
+      return true;
+    }
+    return false;
+  };
+  const auto readWh = []( const Json::Value &value, Json::Int &first, Json::Int &second ) {
+    if ( value.isArray() && value.size() == 2 && value[0].isNumeric()
+         && value[1].isNumeric() )
+    {
+      first = value[0].asInt64();
+      second = value[1].asInt64();
+      return true;
+    }
+    if ( value.isObject() && value["width"].isNumeric() && value["height"].isNumeric() )
+    {
+      first = value["width"].asInt64();
+      second = value["height"].asInt64();
+      return true;
+    }
+    return false;
+  };
+  if ( understanding.isMember( "pixel_size" ) )
+    readXy( understanding["pixel_size"], facts.pixelSizeX, facts.pixelSizeY );
+  readWh( understanding.get( "size", Json::Value() ), facts.width, facts.height );
   return facts;
 }
 

@@ -187,3 +187,37 @@ TEST_CASE( "collector refuses missing files with a typed error",
     REQUIRE( !facts.has_value() );
     REQUIRE( !error.empty() );
 }
+
+TEST_CASE( "metadata cap drops are counted, never silent",
+           "[scientific_state][review2][p2_cap]" )
+{
+    // RED on master: the collector loop bounded SCANNED entries at the cap,
+    // so items beyond it never reached MetadataItems and dropped() stayed 0
+    // — exactly the >cap files where "truncation is never silent" matters.
+    ensureGdal();
+    const std::string dir = CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" );
+    std::filesystem::create_directories( dir );
+    const std::string path = ( fs::path( dir ) / "capped.tif" ).string();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, path.c_str(), 2, 2, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    for ( int i = 0; i < 600; ++i )
+        GDALSetMetadataItem( dataset, ( "FILLER_" + std::to_string( i ) ).c_str(),
+                             std::to_string( i ).c_str(), nullptr );
+    GDALClose( dataset );
+
+    std::string error;
+    const std::optional<DatasetFacts> facts = collectDatasetFacts( path, error );
+    REQUIRE( facts.has_value() );
+    REQUIRE( facts->metadata.all().size() == kMaxCollectedMetadataItems );
+    REQUIRE( facts->droppedMetadataItems == 600 - kMaxCollectedMetadataItems );
+
+    StateResolutionInput input;
+    input.dataset = *facts;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+    bool truncated = false;
+    for ( const ResolutionNote &note : state.notes )
+        truncated = truncated || note.code == "facts.metadata_truncated";
+    REQUIRE( truncated );
+}
