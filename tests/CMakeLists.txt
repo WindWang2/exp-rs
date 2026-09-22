@@ -12598,3 +12598,27 @@ target_include_directories(test_evidence_seam PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_evidence_seam TEST_PREFIX "test_evidence_seam::")
+
+# ── Undergraduate Lab Cockpit projections (Catch2 + Sicnu::teaching) ──────
+# Qt-free leaf suite: course/timeline/readiness/autonomy/feedback/session.
+function(sicnu_add_teaching_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::teaching
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_teaching_test(test_teaching_lab_cockpit)

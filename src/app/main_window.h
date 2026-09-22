@@ -285,6 +285,7 @@ public:
     void checkVersion();
     void loadSampleData();
     void showGuidedWorkflows();
+    void showLabCockpit();
     void options();
     void showProcessingToolbox();
     void showProcessingHistory();
@@ -586,6 +587,7 @@ private:
     QgsDockWidget *m_logDock = nullptr;
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
+    QgsDockWidget *m_labCockpitDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
     QDockWidget *m_agentCopilotDock = nullptr;
 

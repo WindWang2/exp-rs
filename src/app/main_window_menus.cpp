@@ -657,6 +657,9 @@ void QgisDesktopWindow::setupMenu()
     tip( helpMenu->addAction( ic( "workflow" ), tr( "Guided Workflow" ),
                               this, &QgisDesktopWindow::showGuidedWorkflows ),
          tr( "Step-by-step guided experiment workflow." ) );
+    tip( helpMenu->addAction( ic( "workflow" ), tr( "遥感实验学习工作台" ),
+                              this, &QgisDesktopWindow::showLabCockpit ),
+         tr( "Undergraduate Lab Cockpit: course home, readiness, guided steps, feedback." ) );
     helpMenu->addSeparator();
     tip( helpMenu->addAction( ic( "met_d_t_" ), tr( "Check Version" ),
                               this, &QgisDesktopWindow::checkVersion ),
