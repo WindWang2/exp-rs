@@ -585,3 +585,41 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     REQUIRE_FALSE(QFile::exists(stable + ".new"));
     REQUIRE_FALSE(QFile::exists(stable + ".old"));
 }
+
+TEST_CASE( "Commit publishes the GDAL PAM .aux.xml sidecar with the dataset",
+           "[output_committer][sidecars]" )
+{
+  // Regression oracle: the publish sidecar vocabulary covered .tfw/.aux but
+  // NOT .aux.xml (GDAL PAM: statistics, masks, metadata). A committed raster
+  // lost its PAM file (left behind in the temp directory, violating the
+  // "temps are consumed by a full publish" contract) while .tfw/.aux rode
+  // along — three sidecar vocabularies (publish / discardTemporary /
+  // ArtifactGC) drifting apart.
+  QTemporaryDir dir;
+  DataManager manager;
+  OutputCommitter committer( &manager );
+
+  // Build the temp dataset + a PAM sidecar the way GDAL does beside a raster.
+  const QString tempPath = stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                                         QStringLiteral( "scratch.tif" ) );
+  const QString tempPam = tempPath + QStringLiteral( ".aux.xml" );
+  {
+    QFile pam( tempPam );
+    REQUIRE( pam.open( QIODevice::WriteOnly ) );
+    pam.write( "<PAMDataset><Metadata><MDI key=\"test\">pam</MDI></Metadata></PAMDataset>" );
+  }
+
+  AlgorithmOutputRequest request;
+  request.kind = AssetKind::Raster;
+  request.tempPath = tempPath;
+  request.stablePath = dir.filePath( QStringLiteral( "pam_stable.tif" ) );
+  request.persistence = PersistencePolicy::SessionTemporary;
+
+  const CommitResult result = committer.commit( request );
+  REQUIRE( result );
+
+  // The PAM sidecar published beside the primary and the temp copy is gone.
+  CHECK( QFile::exists( request.stablePath + QStringLiteral( ".aux.xml" ) ) );
+  CHECK_FALSE( QFile::exists( tempPam ) );
+  CHECK_FALSE( QFile::exists( tempPath ) );
+}
