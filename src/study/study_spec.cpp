@@ -84,11 +84,15 @@ Result<void> ParameterStudySpec::validate() const
             return Result<void>::failure(
                 specError( QStringLiteral( "study.spec_invalid_dimension_path" ),
                            QStringLiteral( "every dimension requires a parameter path" ) ) );
+        // The span itself must be finite: min=-DBL_MAX/max=DBL_MAX passes the
+        // endpoint check but overflows to an infinite ladder.
         if ( !std::isfinite( dim.minValue ) || !std::isfinite( dim.maxValue )
-             || !( dim.minValue < dim.maxValue ) )
+             || !( dim.minValue < dim.maxValue )
+             || !std::isfinite( dim.maxValue - dim.minValue ) )
             return Result<void>::failure(
                 specError( QStringLiteral( "study.spec_invalid_dimension_range" ),
-                           QStringLiteral( "dimension %1 requires min < max (finite)" )
+                           QStringLiteral( "dimension %1 requires min < max (finite,"
+                                           " non-overflowing span)" )
                                .arg( dim.parameterPath ) ) );
         if ( dim.stepCount < 2 || dim.stepCount > experiment::kMaxMatrixCells )
             return Result<void>::failure(

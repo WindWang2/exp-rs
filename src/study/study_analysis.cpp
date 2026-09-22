@@ -91,11 +91,30 @@ QString trendLabel( const QVector<CurvePoint> &points )
     return QStringLiteral( "non-monotone" );
 }
 
+QString escapeAssignmentPart( const QString &part )
+{
+    QString escaped;
+    escaped.reserve( part.size() );
+    for ( const QChar ch : part )
+    {
+        if ( ch == QLatin1Char( '\\' ) || ch == QLatin1Char( '=' )
+             || ch == QLatin1Char( '|' ) )
+            escaped.append( QLatin1Char( '\\' ) );
+        escaped.append( ch );
+    }
+    return escaped;
+}
+
 QString assignmentsKey( const QHash<QString, QString> &assignments )
 {
+    // Parameter paths are caller-chosen strings; without escaping, a path
+    // carrying '|' or '=' could make two different assignment sets join to
+    // the same key and pool their metrics into one uncertainty band.
     QStringList pairs;
     for ( auto it = assignments.constBegin(); it != assignments.constEnd(); ++it )
-        pairs.append( QStringLiteral( "%1=%2" ).arg( it.key(), it.value() ) );
+        pairs.append( QStringLiteral( "%1=%2" )
+                          .arg( escapeAssignmentPart( it.key() ),
+                                escapeAssignmentPart( it.value() ) ) );
     pairs.sort();
     return pairs.join( QLatin1Char( '|' ) );
 }
@@ -121,6 +140,7 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
         const QStringList linkedRuns = ledger.runsForCell( point.pointId );
         bool anyRecorded = false;
         bool anyFailed = false;
+        bool anyCancelled = false;
         bool anyInFlight = false;
         for ( const QString &runId : linkedRuns )
         {
@@ -131,9 +151,12 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
             const dataset::RunStatus status = run.value().status();
             if ( status == dataset::RunStatus::Completed )
                 anyRecorded = true;
-            else if ( status == dataset::RunStatus::Failed
-                      || status == dataset::RunStatus::Cancelled )
+            else if ( status == dataset::RunStatus::Failed )
                 anyFailed = true;
+            else if ( status == dataset::RunStatus::Cancelled )
+                anyCancelled = true; // its own terminal state — the report has a
+                                     // cancelled bucket; folding it into "failed"
+                                     // made that bucket dead code
             else
                 anyInFlight = true;
             if ( status != dataset::RunStatus::Completed )
@@ -148,10 +171,14 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
         }
         aggregate.status =
             anyRecorded
-                ? ( anyFailed ? QStringLiteral( "partial" ) : QStringLiteral( "recorded" ) )
-                : ( anyFailed ? QStringLiteral( "failed" )
-                              : ( anyInFlight ? QStringLiteral( "in_progress" )
-                                              : QStringLiteral( "missing" ) ) );
+                ? ( ( anyFailed || anyCancelled ) ? QStringLiteral( "partial" )
+                                                  : QStringLiteral( "recorded" ) )
+                : ( anyFailed
+                        ? QStringLiteral( "failed" )
+                        : ( anyCancelled
+                                ? QStringLiteral( "cancelled" )
+                                : ( anyInFlight ? QStringLiteral( "in_progress" )
+                                                : QStringLiteral( "missing" ) ) ) );
         for ( const QString &metric : spec.metricNames )
             aggregate.metrics.insert( metric,
                                       pooledAggregate(
