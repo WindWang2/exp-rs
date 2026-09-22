@@ -6,6 +6,7 @@
 #include "workbench/mission_run_authority.h"
 #include "workbench/mission_run_resolver.h"
 #include "workbench/mission_runtime_store.h"
+#include "workbench/mission_timeline_panel.h"
 #include "active_view_host.h"
 #include "layer_tree_menu.h"
 #include "project_context.h"
