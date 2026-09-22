@@ -50,7 +50,7 @@ TEST_CASE( "the exemplar directory ships exactly the three documented studies",
     REQUIRE( files.size() == 3 );
     REQUIRE( files.contains( QStringLiteral( "ndvi-threshold.sicnu-study.json" ) ) );
     REQUIRE( files.contains(
-        QStringLiteral( "classification-reject-threshold.sicnu-study.json" ) ) );
+        QStringLiteral( "classification-training-budget.sicnu-study.json" ) ) );
     REQUIRE( files.contains( QStringLiteral( "change-threshold.sicnu-study.json" ) ) );
 }
 
@@ -104,10 +104,16 @@ TEST_CASE( "classification exemplar: grid with replicates and a declared objecti
            "[study][exemplars][grid]" )
 {
     const auto spec =
-        loadSpec( QStringLiteral( "classification-reject-threshold.sicnu-study.json" ) );
+        loadSpec( QStringLiteral( "classification-training-budget.sicnu-study.json" ) );
     REQUIRE( spec.has_value() );
     REQUIRE( spec.value().algorithmId == QStringLiteral( "rs:supervised_classification" ) );
     REQUIRE( spec.value().strategy == SamplingStrategy::Grid );
+    // The sweep moves TRAINING BUDGET (maxSamplesPerClass) — a parameter the
+    // operator genuinely consumes ahead of its held-out evaluation, so the
+    // declared objective can produce a non-flat, honestly-decided field.
+    REQUIRE( spec.value().dimensions.size() == 1 );
+    REQUIRE( spec.value().dimensions.first().parameterPath
+             == QStringLiteral( "maxSamplesPerClass" ) );
     // This exemplar declares an explicit task metric with its direction — the
     // one shipped study where the report MAY name a declaredBest. The
     // metrics are the operator's held-out evaluation pair (testSplit > 0 in
@@ -133,10 +139,10 @@ TEST_CASE( "classification exemplar: grid with replicates and a declared objecti
     {
         REQUIRE( point.parameters.value( QStringLiteral( "method" ) ).toString()
                  == QStringLiteral( "svm" ) );
-        const double reject =
-            point.parameters.value( QStringLiteral( "rejectThreshold" ) ).toDouble();
-        REQUIRE( reject >= 0.3 );
-        REQUIRE( reject <= 0.9 );
+        const double budget =
+            point.parameters.value( QStringLiteral( "maxSamplesPerClass" ) ).toDouble();
+        REQUIRE( budget >= 100 );
+        REQUIRE( budget <= 600 );
         seedsByParameters[ QJsonDocument( point.parameters ).toJson() ].insert(
             point.seed );
     }
@@ -153,6 +159,10 @@ TEST_CASE( "change threshold exemplar: LHS budget shape and seeded variability",
     REQUIRE( spec.value().algorithmId == QStringLiteral( "rs:change_detection" ) );
     REQUIRE( spec.value().strategy == SamplingStrategy::LatinHypercube );
     REQUIRE( spec.value().spatialComparison );
+    // Exact metric set for the report's curves (one per declared metric).
+    REQUIRE( spec.value().metricNames.size() == 2 );
+    REQUIRE( spec.value().metricNames.contains( QStringLiteral( "changedPercent" ) ) );
+    REQUIRE( spec.value().metricNames.contains( QStringLiteral( "thresholdUsed" ) ) );
 
     const auto points = sampleStudyPoints( spec.value() );
     REQUIRE( points.has_value() );

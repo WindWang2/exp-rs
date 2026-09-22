@@ -52,7 +52,7 @@ through the production reader (`test_study_exemplars`):
 | File | Sweep | Teaching point |
 |---|---|---|
 | `ndvi-threshold.sicnu-study.json` | `rs:threshold_raster.threshold`, OAT, 9 runs | the canonical parameter → mask → trend chain; spatial differences ON; **no** declared best |
-| `classification-reject-threshold.sicnu-study.json` | `rs:supervised_classification.rejectThreshold`, grid, 5×3 replicates | uncertainty across seeds; held-out accuracy pair (`testSplit: 0.3` makes the operator emit `overallAccuracy`/`kappa`); the ONE exemplar that declares an objective metric (`overallAccuracy`, maximize) so the report may name a `declared_best` |
+| `classification-training-budget.sicnu-study.json` | `rs:supervised_classification.maxSamplesPerClass`, grid, 5×3 replicates | training-budget sweep against the held-out accuracy pair (`testSplit: 0.3` makes the operator emit `overallAccuracy`/`kappa`); the ONE exemplar that declares an objective metric (`overallAccuracy`, maximize) so the report may name a `declared_best` |
 | `change-threshold.sicnu-study.json` | `rs:change_detection.threshold`, seeded LHS, 6×2 runs | controlled-scale sampling: same seed replays, different seed explores |
 
 ## Running a study
@@ -92,6 +92,14 @@ retry, no silent truncation, no silent fallback anywhere.
   by the matrix authority's dominance logic, uncertainty bands across seed
   replicates, and `declared_best` **only** when the spec declared an
   objective metric (labeled as evidence with its basis, not a recommendation).
+
+One honesty note on the envelope: replicate runs record DISTINCT seeds, but
+the submitted parameter document is identical (the execution spine has no
+seed field). A deterministic operator that ignores the recorded seed
+therefore produces zero-width bands — a truthful null result, not noise.
+Sweeps whose dimension genuinely moves the metrics (like the classification
+exemplar's training budget) are where curves and `declared_best` carry
+signal.
 
 A report READER tolerates unknown fields (evidence must survive additive
 evolution) but refuses foreign versions — deliberately asymmetric with the
