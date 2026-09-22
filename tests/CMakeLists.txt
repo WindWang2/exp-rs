@@ -294,6 +294,31 @@ sicnu_add_study_test(test_study_runner)
 sicnu_add_study_test(test_study_analysis)
 sicnu_add_study_test(test_study_spatial)
 sicnu_add_study_test(test_study_export)
+
+# Experiment Exploration Studio projections (Catch2 + Sicnu::experiment_studio).
+# Qt Core only — no QGIS/GUI so suites stay offline-fast like study tests.
+function(sicnu_add_experiment_studio_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::experiment_studio
+    Sicnu::study
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_experiment_studio_test(test_experiment_studio_core)
+
 target_link_libraries(test_study_spatial PRIVATE GDAL::GDAL)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)

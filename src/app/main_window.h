@@ -146,6 +146,7 @@ class WorkbenchHost;
 class ProcessingHistoryPanel;
 class TemporalWorkbenchPanel;
 class DatasetExperimentPanel;
+class ExperimentStudioDock;
 class ModelWorkbenchPanel;
 class CartographyDock;
 namespace va
@@ -224,6 +225,7 @@ public:
     void showUnifiedProcessingHistory();
     void showTemporalWorkbench();
     void showDatasetExperimentBench();
+    void showExperimentExplorationStudio();
     void showModelBench();
 
     /** Workbench 10.0: cartography bridge surface (compose/preflight/repair/export). */
@@ -677,6 +679,7 @@ private:
     class sicnu::app::ProcessingHistoryPanel *m_historyPanel = nullptr;
     class sicnu::app::TemporalWorkbenchPanel *m_temporalPanel = nullptr;
     class sicnu::app::DatasetExperimentPanel *m_datasetExperimentPanel = nullptr;
+    class sicnu::app::ExperimentStudioDock *m_experimentStudioDock = nullptr;
     class sicnu::app::ModelWorkbenchPanel *m_modelPanel = nullptr;
     class sicnu::app::CartographyDock *m_cartographyDock = nullptr;
     sicnu::app::va::VaWorkbenchPanel *m_vaPanel = nullptr;
