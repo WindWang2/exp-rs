@@ -101,13 +101,35 @@ zero-width bands are the truthful null). Verdict: **PR-ready**.
 
 ## 与 open issues 的去重 / Dynamic dedup
 
-Re-checked at PR time: none of the open issues/PRs duplicate this work; the
-avoid-list issues (#1146–#1187 per recon §4) are untouched — no TaskCenter,
-Workflow, operator-algorithm, plugin, or catalog code changed. Open PRs
-#1237–#1243 (lab cockpit, teaching admin, experiment studio UI, science
-context broker, agent ops, geospatial/spectral hardening) operate on other
-surfaces; #1238's experiment-studio UI is a GUI layer over different
-stores — no file overlap with this branch.
+Re-checked at PR time against the OPEN PR set (new hardening wave
+#1243–#1252):
+
+- **#1246 (`hardening/integration-build-contract-drift`) overlaps this
+  branch on exactly two files** — root `CMakeLists.txt` and
+  `tests/CMakeLists.txt`: it independently wires
+  `add_subdirectory(src/study/bridge)` and registers
+  `sicnu_add_test(test_study_e2e)` (same orphaned-module finding). Union
+  rule: the two wirings must land ONCE. Whichever of the two PRs merges
+  second must drop the duplicated lines. Two facts make this branch the
+  correct survivor for the study wiring: (a) #1246 does not touch
+  `tests/test_study_e2e.cpp`, which **cannot compile** against master —
+  it needs the namespace fix (`sicnu::dataset::runStatusToString`) and the
+  Catch2 `WARN(std::string)` fix carried here (commits `b4706c7c9`,
+  `c64e5ce1b`); (b) #1246's registration links only `sicnu_study_bridge`,
+  while the e2e also needs `GDAL::GDAL` on the link line. Everything else
+  in #1246 (verify/repair_planner/agent_loop/recipes/preflight wiring,
+  drift oracle) is untouched by this branch.
+- **#1252 (`hardening/experiment-capsule-debugger-study`)** hardens
+  `src/study` core (spec-validation finite span, analysis/spatial) — zero
+  file overlap with this branch and additive for it: the exemplar specs
+  use small finite ranges, so the hardened validation accepts them.
+- All other open PRs (#1237–#1245, #1247–#1251) operate on other surfaces
+  (teaching cockpit, admin console, experiment-studio UI, science context
+  broker, agent ops, geospatial/spectral/verifier/agent-harness/processing/
+  workflow/temporal hardening) — no file overlap with this branch.
+- The avoid-list issues (#1146–#1187 per recon §4) are untouched — no
+  TaskCenter, Workflow, operator-algorithm, plugin, or catalog code
+  changed.
 
 ## 与其他 19 tracks 的边界 / Track boundaries
 
