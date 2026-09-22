@@ -12338,3 +12338,23 @@ set_target_properties(test_agentbench_corpus PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_agentbench_corpus TEST_PREFIX "test_agentbench_corpus::")
+
+# Provider error-path regression lane (processing-provider-atomic-errors
+# track): fail-closed contracts for external tool wrappers, short writes and
+# flush failures. Append-only per the shared-tests-file convention.
+add_executable(test_processing_error_paths test_processing_error_paths.cpp)
+target_link_libraries(test_processing_error_paths PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_processing_error_paths PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_processing_error_paths)
