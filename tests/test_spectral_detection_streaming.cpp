@@ -7,6 +7,13 @@
 // matches within the same FP-ulp tolerance the rs:rx_anomaly streaming gate
 // documents (stats rounding is amplified by the matrix inversion).
 //
+// #1183: background accumulation is capped at max(minSamples*16, bands*64)
+// samples, stopping after the whole 256×256 tile that crosses the budget —
+// a deterministic first-tiles prefix. The reference replicates that documented
+// contract (same tile order, same in-tile pixel order) instead of demanding
+// full-scene statistics the driver no longer computes; scoring itself still
+// streams every tile of the scene against that background.
+//
 // The NoData case also proves QA honesty: declared-NoData pixels are excluded
 // from the background statistics identically on both paths. (Their scores
 // stay finite — the kernels NaN only non-finite inputs — but the two paths
@@ -124,6 +131,34 @@ std::vector<float> referenceScores( const std::string &kind,
     for ( int b = 0; b < B; ++b )
         target[static_cast<size_t>( b )] = 30.0f + 10.0f * b;
 
+    // #1183 background prefix: replicate the driver's deterministic first-
+    // tiles accumulation — 256×256 tiles in row-major order, stopping after
+    // the tile whose cumulative pixel count crosses the budget. In-tile pixel
+    // order matches the driver's BIP window order, so the single-tile prefix
+    // accumulates bit-exactly. (These cases carry no declared NoData, so the
+    // valid-pixel count equals the consumed pixel count.)
+    const size_t budget = std::max<size_t>(
+        static_cast<size_t>( SpectralCem::minSamplesRequired( B, false ) ) * 16,
+        static_cast<size_t>( B ) * 64 );
+    std::vector<float> bgBip;
+    size_t accumulated = 0;
+    for ( int ty = 0; ty < H && accumulated < budget; ty += 256 )
+    {
+        for ( int tx = 0; tx < W && accumulated < budget; tx += 256 )
+        {
+            const int tw = std::min( 256, W - tx );
+            const int th = std::min( 256, H - ty );
+            bgBip.reserve( static_cast<size_t>( tw ) * th * B );
+            for ( int y = ty; y < ty + th; ++y )
+                for ( int x = tx; x < tx + tw; ++x )
+                    for ( int b = 0; b < B; ++b )
+                        bgBip.push_back(
+                            bip[( static_cast<size_t>( y ) * W + x ) * B + b] );
+            accumulated += static_cast<size_t>( tw ) * th;
+        }
+    }
+    const size_t bgCount = bgBip.size() / static_cast<size_t>( B );
+
     if ( kind == "osp" )
     {
         // OSP consumes no background statistics: filter, then score.
@@ -139,7 +174,7 @@ std::vector<float> referenceScores( const std::string &kind,
     if ( kind == "cem" || kind == "tcimf" )
     {
         SpectralCem::CorrelationStats stats;
-        SpectralCem::accumulateCorrelation( bip.data(), count, B, &stats, true,
+        SpectralCem::accumulateCorrelation( bgBip.data(), bgCount, B, &stats, true,
                                             noData.data(), hasNoData.data() );
         SpectralCem::finalizeCorrelation( &stats );
         if ( kind == "cem" )
@@ -164,10 +199,10 @@ std::vector<float> referenceScores( const std::string &kind,
 
     {
         SpectralAnomaly::BackgroundStats stats;
-        SpectralAnomaly::accumulateMean( bip.data(), count, B, &stats, true,
+        SpectralAnomaly::accumulateMean( bgBip.data(), bgCount, B, &stats, true,
                                          noData.data(), hasNoData.data() );
         SpectralAnomaly::finalizeMean( &stats );
-        SpectralAnomaly::accumulateCovariance( bip.data(), count, B, &stats, true,
+        SpectralAnomaly::accumulateCovariance( bgBip.data(), bgCount, B, &stats, true,
                                                noData.data(), hasNoData.data() );
         SpectralAnomaly::finalizeCovariance( &stats );
         std::vector<double> invCov;
