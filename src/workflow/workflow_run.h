@@ -133,7 +133,9 @@ public:
   /// When non-empty this run is a temporary resume submission OF another run
   /// (the ghost that checkpoint election groups under its original). Empty
   /// for every run a user started directly.
-  const std::string &resumeOf() const;
+  /// Returned by value (like attempt()) so the mutex-guarded string cannot
+  /// escape as a dangling reference after another thread mutates it (#1186).
+  std::string resumeOf() const;
   void setResumeOf( const std::string &runId );
 
   WorkflowRunState state() const;

@@ -1284,10 +1284,9 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                     QStringLiteral( "Superseded by resume of run %1 (temporary internal run)" )
                         .arg( QString::fromStdString( runId ) )
                         .toStdString() );
-                // Already inside the swap's m_mutex scope: capture + queue
-                // only — persist runs after the lock drops; the public
-                // resumeRun wrapper drains the queue outside the lock.
-                swapPersists.push_back( capturePersistLocked( ghost ) );
+                // Notify observers, but do NOT persist the ghost (#1186): a
+                // post-unlock persist would recreate the checkpoint we remove
+                // below and leave a permanent Canceled ghost + lock on disk.
                 queueRunStateNotificationLocked( *ghost, 0,
                                                  QDateTime::currentMSecsSinceEpoch() );
             }
@@ -1298,7 +1297,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
             QFile::remove( checkpointPathLocked( ghostRunId ) );
-            m_locksByRunId.erase( ghostRunId );
+            m_locksByRunId.erase( ghostRunId ); // destructor releases + drops lock file
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             swapPersists.push_back( capturePersistLocked( run ) );

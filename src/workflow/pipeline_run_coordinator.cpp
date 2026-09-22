@@ -10,6 +10,7 @@
 #include "runtime/observability/fault_point.h"
 
 #include <QCoreApplication>
+#include <QEventLoop>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -154,10 +155,19 @@ FingerprintResult computeArtifactFingerprintFull( const QString &path, qint64 si
     qToLittleEndian<qint64>( size, sizeLE.data() );
     hash.addData( sizeLE );
     qint64 remaining = size;
+    // #1186 / C-F6: when the affinity thread is the GUI thread, a multi-GB
+    // hash freezes the event loop so the user cannot click Cancel (phase-1
+    // atomic is only set after the click is delivered). Pump events once
+    // per chunk so input + the cancel hop can land; the atomic abort check
+    // above still bounds cancel latency to one chunk.
+    const bool pumpGui = QCoreApplication::instance()
+                         && QThread::currentThread() == QCoreApplication::instance()->thread();
     while ( remaining > 0 )
     {
         if ( aborted() )
             return { {}, true };
+        if ( pumpGui )
+            QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
         const QByteArray chunk = file.read( qMin( kFullHashChunkBytes, remaining ) );
         if ( chunk.isEmpty() )
             return {}; // short read: the file shrank under us — unverifiable
@@ -227,8 +237,10 @@ bool isContainedInDirectory( const QString &artifactPath, const QString &canonic
     const QString canonicalArtifact = QFileInfo( artifactPath ).canonicalFilePath();
     if ( canonicalArtifact.isEmpty() )
         return false;
+    // #1186: macOS default APFS/HFS+ is case-insensitive — CaseSensitive
+    // rejects case-variant spellings of the same run dir (ir2.artifact_outside_run).
     return canonicalArtifact.startsWith( canonicalRunDir + QLatin1Char( '/' ),
-#ifdef Q_OS_WIN
+#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
                                          Qt::CaseInsensitive
 #else
                                          Qt::CaseSensitive
@@ -283,8 +295,8 @@ bool runOnCoordinatorThread( PipelineRunCoordinator *self, const std::function<v
     Q_ASSERT( self );
     if ( QThread::currentThread() == self->thread() )
         return false;
-    // A false return means the marshal itself failed (e.g. dying object):
-    // the caller must run inline rather than return a silently empty answer.
+    // A false return means the marshal itself failed (e.g. dying object).
+    // Callers must NOT run the body on the foreign thread (#1186 / D7).
     return QMetaObject::invokeMethod( self, body, Qt::BlockingQueuedConnection );
 }
 
@@ -313,8 +325,9 @@ auto invokeOnCoordinatorThread( const PipelineRunCoordinator *self, F &&body ) -
     }
     if constexpr ( std::is_void_v<Result> )
     {
-        if ( !runOnCoordinatorThread( owner, body ) )
-            body(); // marshal failed (dying object): run inline rather than drop the call
+        // #1186: marshal failure (dying object) drops the call — never run
+        // affinity-thread bookkeeping inline on a foreign thread (D7).
+        (void) runOnCoordinatorThread( owner, body );
         return;
     }
     else
@@ -649,11 +662,14 @@ void PipelineRunCoordinator::requestCancel()
     // the flag is set BEFORE the blocking marshal, not inside it (Track 13).
     m_state->cancelRequested.store( true, std::memory_order_relaxed );
     // Phase 2 — affinity thread: mutate statuses/bookkeeping. Callers already
-    // on the affinity thread run inline, which keeps the synchronous
-    // pipelineCompleted behaviour.
-    if ( runOnCoordinatorThread( this, [this] { requestCancelOnAffinity(); } ) )
+    // on the affinity thread run inline; a failed marshal (dying object)
+    // drops phase-2 — the atomic above still aborts in-flight hashes (#1186).
+    if ( QThread::currentThread() == thread() )
+    {
+        requestCancelOnAffinity();
         return;
-    requestCancelOnAffinity();
+    }
+    (void) runOnCoordinatorThread( this, [this] { requestCancelOnAffinity(); } );
 }
 
 void PipelineRunCoordinator::requestCancelOnAffinity()
@@ -1264,7 +1280,10 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     m_state->def = resumedDef;
     m_state->runDirectory = runDirectory;
     m_state->runId = runId;
-    m_state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 0 ) + 1;
+    // #1186: attempt-less v1.1 checkpoints must resume as attempt 2 (default
+    // 1 + 1), not attempt 1 — otherwise provenance overwrites the original
+    // attempt's canonical record under the same path.
+    m_state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 1 ) + 1;
     m_state->checkpointPath = checkpointFilePath;
     m_state->finished = false;
     m_state->success = false;
