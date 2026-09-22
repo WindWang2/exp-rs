@@ -151,8 +151,10 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
     QString from;
     QString to;
   };
+  // #1174: dependents (sidecars) FIRST, primary LAST — presence of the primary
+  // is the completeness marker (atomic_fs group contract). Publishing the
+  // primary first left a crash window where new .shp sat beside stale .dbf/.shx.
   QVector<PublishPair> publishes;
-  publishes.append( { request.tempPath, request.stablePath } );
   const QString tempBase = tempInfo.absolutePath() + QLatin1Char( '/' ) + tempInfo.completeBaseName();
   const QString stableBase = stableInfo.absolutePath() + QLatin1Char( '/' ) + stableInfo.completeBaseName();
   const QStringList sidecarSuffixes = { QStringLiteral( ".shx" ), QStringLiteral( ".dbf" ),
@@ -166,6 +168,7 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
     if ( QFile::exists( from ) )
       publishes.append( { from, stableBase + suffix } );
   }
+  publishes.append( { request.tempPath, request.stablePath } );
 
   // Stage the move: stale targets away first, then move/copy each file.
   // Supports cross-filesystem boundaries (QFile::rename fallback to copy+remove).

@@ -419,3 +419,91 @@ TEST_CASE( "main-phase publish failure rolls published sidecars back to the"
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( sidecarTarget + ".bak" ) );
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target.string() + ".bak" ) );
 }
+
+TEST_CASE( "publishStagedMembers publishes dependents before main with backup restore",
+           "[io][atomic][group][issue1174]" )
+{
+  // Classification-trio shape: two dependents + one main completeness marker.
+  const std::string dir = scratch( "members" );
+  const std::string oldLabel = ( fs::path( dir ) / "label.tif" ).string();
+  const std::string oldProb = ( fs::path( dir ) / "prob.tif" ).string();
+  const std::string stagedLabel = ( fs::path( dir ) / "label.tmp.tif" ).string();
+  const std::string stagedProb = ( fs::path( dir ) / "prob.tmp.tif" ).string();
+  const std::string stagedUnc = ( fs::path( dir ) / "unc.tmp.tif" ).string();
+  const std::string targetUnc = ( fs::path( dir ) / "unc.tif" ).string();
+
+  auto write = []( const std::string &path, const char *payload ) {
+    std::ofstream out( path );
+    out << payload;
+  };
+  write( oldLabel, "OLD_LABEL" );
+  write( oldProb, "OLD_PROB" );
+  write( stagedLabel, "NEW_LABEL" );
+  write( stagedProb, "NEW_PROB" );
+  write( stagedUnc, "NEW_UNC" );
+
+  sicnu::geo::atomic_fs::publishStagedMembers( {
+    { stagedUnc, targetUnc },
+    { stagedProb, oldProb },
+    { stagedLabel, oldLabel },
+  } );
+
+  auto read = []( const std::string &path ) {
+    std::ifstream in( path );
+    std::string s;
+    in >> s;
+    return s;
+  };
+  CHECK( read( oldLabel ) == "NEW_LABEL" );
+  CHECK( read( oldProb ) == "NEW_PROB" );
+  CHECK( read( targetUnc ) == "NEW_UNC" );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( oldLabel + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( stagedLabel ) );
+}
+
+TEST_CASE( "publishStagedMembers restores prior group when a mid-member publish fails",
+           "[io][atomic][group][issue1174]" )
+{
+  const std::string dir = scratch( "members_fail" );
+  const std::string oldMain = ( fs::path( dir ) / "main.dat" ).string();
+  const std::string oldSide = ( fs::path( dir ) / "side.dat" ).string();
+  const std::string stagedSide = ( fs::path( dir ) / "side.tmp.dat" ).string();
+  const std::string stagedMain = ( fs::path( dir ) / "main.tmp.dat" ).string();
+  {
+    std::ofstream out( oldMain ); out << "OLD_MAIN";
+  }
+  {
+    std::ofstream out( oldSide ); out << "OLD_SIDE";
+  }
+  {
+    std::ofstream out( stagedSide ); out << "NEW_SIDE";
+  }
+  {
+    std::ofstream out( stagedMain ); out << "NEW_MAIN";
+  }
+  // Occupying the main target with a directory makes the final publish fail
+  // after the dependent has already swapped in — rollback must restore OLD_SIDE.
+  REQUIRE( sicnu::geo::atomic_fs::removeFileQuiet( oldMain ) );
+  fs::create_directory( oldMain );
+
+  bool failed = false;
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedMembers( {
+      { stagedSide, oldSide },
+      { stagedMain, oldMain },
+    } );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  std::ifstream sideIn( oldSide );
+  std::string sideContent;
+  sideIn >> sideContent;
+  CHECK( sideContent == "OLD_SIDE" );
+  CHECK( fs::is_directory( oldMain ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( oldSide + ".bak" ) );
+}
