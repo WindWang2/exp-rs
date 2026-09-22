@@ -822,7 +822,6 @@ add_subdirectory(src/processing)
 # Study → ExecutionPlane adapter (RS14-07): thin opt-in bridge leaf; must
 # follow src/processing because it links the sicnu_task_center target defined
 # there (pattern: src/experiment/bridge after its workflow dependency).
-add_subdirectory(src/study/bridge)
 # RS14-12 teaching autonomy ladder: Qt-free policy leaf; must precede the
 # agent library that links it (and hosts the two gate call sites).
 add_subdirectory(src/agent/autonomy)
@@ -851,7 +850,6 @@ add_subdirectory(src/contracts)
 # RS14-11: evidence-first agent session orchestration — pure C++20 core
 # (state machine, decision records, journal, seams). The Qt-capable
 # production adapter and tool live in src/agent/tools.
-add_subdirectory(src/agent_loop)
 # RS14-01 Scientific Data Passport: versioned read-only scientific asset
 # state layer (Qt-free, jsoncpp-only core).
 add_subdirectory(src/scientific_state)
