@@ -149,3 +149,12 @@ below and in the ADR.
   deferred as an integration-point decision.
 - ADR 0174 number is contested by concurrent PRs #1194/#1196/#1197 — renumber at union per the
   ADR header note.
+
+### Final — PR created (2026-09-22)
+- Final dedup: origin/master unchanged at 4f6632e1f (no rebase needed). New concurrent PRs
+  #1194/#1196/#1197 also claim ADR 0174 — renumber at union per the ADR header note; boundary
+  statements for all adjacent tracks added to the PR description.
+- Final targeted regression at HEAD: test_experiment_debugger 49/49 (438), test_experiment_evaluation
+  20/20 (299), test_mlops9_evidence 4/4 (94). Zero debugger-TU warnings.
+- PR: https://github.com/WindWang2/exp-rs/pull/1199 (branch agent/rs14-experiment-debugger,
+  12 commits, 32 files, +7145 lines). CI not awaited per campaign rules.
