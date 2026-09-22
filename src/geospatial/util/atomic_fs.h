@@ -51,6 +51,13 @@ void fsyncFile( const std::string &path );
 /// back (staged file is left for `discardStaged` by the caller).
 void publishStagedFile( const std::string &stagedPath, const std::string &targetPath );
 
+/// Best-effort rename that replaces an existing destination.
+/// Windows: MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED).
+/// POSIX: rename(2). Returns false on any failure (locked source/target, etc.).
+/// Prefer publishStagedFile for publication paths that must fail closed with
+/// GeoError — this helper is for GC / quarantine / soft paths.
+bool renameReplaceQuiet( const std::string &from, const std::string &to );
+
 /// Removes a staged/stray file; missing files are not an error. Returns false
 /// when the file exists but could not be removed (locked).
 bool removeFileQuiet( const std::string &path );

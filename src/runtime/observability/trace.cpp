@@ -445,7 +445,18 @@ std::string installFileSinkFromEnv()
         auto tmpRoot = std::filesystem::temp_directory_path( ec );
         if ( ec )
             return std::string(); // no usable temp dir: stay disabled, never throw
-        options.directory = ( tmpRoot / "sicnu-trace" ).string();
+        // #1178: never path::string() (ANSI on Windows) — mirror env_doctor's
+        // u8PathString so non-ASCII usernames keep a usable trace directory.
+        const std::filesystem::path traceDir = tmpRoot / "sicnu-trace";
+        try
+        {
+            const std::u8string u8 = traceDir.generic_u8string();
+            options.directory.assign( reinterpret_cast<const char *>( u8.data() ), u8.size() );
+        }
+        catch ( ... )
+        {
+            return std::string();
+        }
     }
     if ( const char *maxMb = std::getenv( "SICNU_TRACE_MAX_MB" ) )
     {

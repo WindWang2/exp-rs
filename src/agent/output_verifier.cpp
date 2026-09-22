@@ -902,9 +902,9 @@ QString resolveRulesPath( const QString &labIdOrRulesPath, const QString &rulesD
   QStringList searchDirs;
   if ( !rulesDir.isEmpty() )
     searchDirs << rulesDir;
-  const QByteArray envDir = qgetenv( "SICNU_LAB_RULES_DIR" );
+  const QString envDir = qEnvironmentVariable( "SICNU_LAB_RULES_DIR" );
   if ( !envDir.isEmpty() )
-    searchDirs << QString::fromLocal8Bit( envDir );
+    searchDirs << envDir;
 #ifdef SICNU_SOURCE_DIR
   searchDirs << QString::fromUtf8( SICNU_SOURCE_DIR ) + QStringLiteral( "/data/labs/grading" );
 #endif

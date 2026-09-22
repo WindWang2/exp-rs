@@ -265,13 +265,26 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
 #endif
 }
 
+bool renameReplaceQuiet( const std::string &from, const std::string &to )
+{
+  if ( !fileExists( from ) )
+    return false;
+#ifdef _WIN32
+  const std::wstring wideFrom = wideFromUtf8( from );
+  const std::wstring wideTo = wideFromUtf8( to );
+  return MoveFileExW( wideFrom.c_str(), wideTo.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED ) != 0;
+#else
+  return ::rename( from.c_str(), to.c_str() ) == 0;
+#endif
+}
+
 /// Renames a file within the same directory (backup moves). Quiet: false on
-/// any failure.
+/// any failure. Windows uses MoveFileExW so an existing destination is replaced
+/// the same way publishStagedFile does (#1178) — fs::rename refuses that.
 bool moveFileQuiet( const std::string &from, const std::string &to )
 {
-  std::error_code ec;
-  fs::rename( fs::u8path( from ), fs::u8path( to ), ec );
-  return !ec;
+  return renameReplaceQuiet( from, to );
 }
 
 bool removeFileQuiet( const std::string &path )

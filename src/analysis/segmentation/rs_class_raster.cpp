@@ -267,11 +267,18 @@ RsClassRasterResult RsClassRaster::paint(
 
     GDALClose( dstDs );
 
-    QFile::remove( outputPath );
-    if ( !QFile::rename( tempPath, outputPath ) )
+    // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW on Windows) —
+    // never delete-then-rename (that strips an unlocked previous output when
+    // the target is locked / QFile::rename refuses the replace).
+    try
+    {
+        sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), outputPath.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
     {
         removeIncompleteOutput( tempPath );
-        result.errorMessage = QStringLiteral( "Cannot finalize output: %1" ).arg( outputPath );
+        result.errorMessage = QStringLiteral( "Cannot finalize output: %1 (%2)" )
+                                .arg( outputPath, QString::fromUtf8( ex.what() ) );
         return result;
     }
 

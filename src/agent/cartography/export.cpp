@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace sicnu::agent::cartography {
 
 namespace {
@@ -245,21 +247,17 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
     result.error = QStringLiteral( "exported file is empty or unreadable" );
     return result;
   }
-  // Swap into place: POSIX rename(2) replaces an existing target
-  // atomically; Windows cannot, so fall back to remove+rename there. The
-  // temp file keeps verified bytes until the very end either way.
-  if ( !QFile::rename( tempPath, finalPath ) )
+  // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW). The verified
+  // temp bytes stay put until publish succeeds; a locked target fails closed.
+  try
   {
-    if ( !QFile::exists( finalPath ) )
-    {
-      result.error = QStringLiteral( "cannot move the export into place at '%1'" ).arg( finalPath );
-      return result;
-    }
-    if ( !QFile::remove( finalPath ) || !QFile::rename( tempPath, finalPath ) )
-    {
-      result.error = QStringLiteral( "cannot replace the existing export at '%1'" ).arg( finalPath );
-      return result;
-    }
+    sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), finalPath.toStdString() );
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    result.error = QStringLiteral( "cannot publish the export at '%1': %2" )
+                     .arg( finalPath, QString::fromUtf8( ex.what() ) );
+    return result;
   }
 
   result.ok = true;
@@ -428,20 +426,17 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
       result.error = QStringLiteral( "atlas page %1 export is empty or unreadable" ).arg( index + 1 );
       break;
     }
-    if ( !QFile::rename( tempPath, finalPath ) )
+    try
     {
-      if ( !QFile::exists( finalPath ) )
-      {
-        result.error = QStringLiteral( "cannot move atlas page %1 into place at '%2'" )
-                         .arg( index + 1 )
-                         .arg( finalPath );
-        break;
-      }
-      if ( !QFile::remove( finalPath ) || !QFile::rename( tempPath, finalPath ) )
-      {
-        result.error = QStringLiteral( "cannot replace atlas page at '%1'" ).arg( finalPath );
-        break;
-      }
+      sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), finalPath.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
+    {
+      result.error = QStringLiteral( "cannot publish atlas page %1 at '%2': %3" )
+                       .arg( index + 1 )
+                       .arg( finalPath )
+                       .arg( QString::fromUtf8( ex.what() ) );
+      break;
     }
     page.path = QFileInfo( finalPath ).absoluteFilePath().toStdString();
     page.file_name = baseName.toStdString() + "_" + unique.toStdString() + "." +

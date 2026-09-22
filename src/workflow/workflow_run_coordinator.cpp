@@ -28,6 +28,7 @@
 #include "data/artifact_store.h"
 #include "data/execution_fingerprint.h"
 #include "runtime/observability/trace.h"
+#include "geospatial/util/atomic_fs.h"
 
 namespace sicnu::workflow {
 
@@ -154,9 +155,13 @@ bool rehydrateMovedOutput( const StepPlan &plan )
         QFile::remove( tmp );
         return false;
     }
-    if ( QFile::exists( destination ) )
-        QFile::remove( destination );
-    if ( !QFile::rename( tmp, destination ) )
+    // #1178: ReplaceFileW / MoveFileExW — never remove-then-rename (Windows
+    // sharing violation after deleting the previous good artifact).
+    try
+    {
+        sicnu::geo::atomic_fs::publishStagedFile( tmp.toStdString(), destination.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError & )
     {
         QFile::remove( tmp );
         return false;
