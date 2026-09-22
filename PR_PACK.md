@@ -13,7 +13,7 @@ Generated: 2026-09-22
 - sources: `src/agent/autonomy/{autonomy_level,autonomy_capability,autonomy_classification,autonomy_policy,autonomy_decision,autonomy_audit,autonomy_projection,autonomy_holder}.{h,cpp}` + `fake_action_provider.h` (new Qt-free static lib `Sicnu::autonomy`), `src/agent/harness/lab_copilot.{h,cpp}`, `src/agent/harness/plan_tools.cpp`, `src/agent/harness/autonomy_tools.{h,cpp}` (new), `src/agent/harness/harness_error.{h,cpp}`, `src/agent/harness/tool_manifest.cpp`, `src/agent/spatial_tools/spatial_tool.cpp`
 - build: `CMakeLists.txt` (+1 add_subdirectory), `src/agent/CMakeLists.txt` (+link +2 sources), `src/agent/autonomy/CMakeLists.txt` (new)
 - tests: `tests/test_autonomy_{policy,classification,decision,precedence,audit,projection,holder,gate}.cpp` (new), `tests/CMakeLists.txt` (+`sicnu_add_autonomy_test` helper, +8 registrations)
-- data/docs: `data/labs/labspec.schema.json` (optional per-lab `autonomy` block), `docs/agent/autonomy-ladder.md` (new), `docs/adr/0172-teaching-autonomy-ladder.md` (new), `PR_PACK.md`
+- data/docs: `data/labs/labspec.schema.json` (optional per-lab `autonomy` block), `docs/agent/autonomy-ladder.md` (new), `docs/adr/0176-teaching-autonomy-ladder.md` (new), `PR_PACK.md`
 
 ## Non-goals
 
@@ -27,7 +27,14 @@ One closed ladder (`L0 no_assistance · L1 concept_hint · L2 error_localization
 
 ## Issue mapping
 
-None. New capability layer; no existing issue closed or touched. Dynamic dedup vs the open-issue exclusion list is recorded in `.planning/RS14-12-teaching-autonomy/recon.md` (gitignored; summarized here).
+None. New capability layer; no existing issue closed or touched.
+
+## Dynamic dedup (at PR time)
+
+- `origin/master` unmoved since the baseline (`4f6632e1f6`).
+- 14 open RS14 sibling PRs reviewed: no functional overlap. Nearest neighbours and the boundary: #1197 (LabSpec 2.0) also touches `data/labs/labspec.schema.json` — both changes are additive (this PR adds the optional per-lab `autonomy` block; theirs bumps `spec_version`); #1190 (curriculum pack) organizes lab content, #1196 (process grader) grades process — both consume, not duplicate, this policy layer through the documented DTOs. #1191/#1196 create `docs/integration.md`; this PR deliberately does NOT create that file (its wiring points live in `docs/agent/autonomy-ladder.md`) to avoid a create/create conflict.
+- ADR numbers 0172–0175 are taken by sibling tracks (#1191 verifier, #1193 capability graph, #1194/#1196/#1199, #1201); this track's ADR is 0176.
+- The open-issue exclusion list (SAR correctness, mission runtime, Workflow/D17, ImportCenter, jsoncpp, NoData, capability mirror, plugin lifecycle, TaskCenter, Catalog/Dataset/Experiment, geospatial mirror, atomic publish, WBF perf, perf baseline, test oracle, georeferencer UAF, CLI concurrency, P3 batch) has no overlap with this layer; two pre-existing test failures (`test_labspec` ×2, `test_harness9_contracts` ×1) were verified identical on the untouched baseline and are recorded as observed, not fixed.
 
 ## Tests
 
