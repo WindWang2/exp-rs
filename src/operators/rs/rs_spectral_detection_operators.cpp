@@ -355,20 +355,34 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 } );
         };
 
+        // #1183: the estimator only needs O(bands) samples; full-scene
+        // accumulation is O(pixels × bands²). Cap the background sample budget
+        // well above the minimum floor so the covariance stays stable without
+        // streaming every pixel of a 5k×5k×330 scene.
+        const int minSamplesFloor = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
+        const size_t sampleBudget = static_cast<size_t>(
+            std::max( minSamplesFloor * 16, bandCount * 64 ) );
+
         if ( usesCorrelation )
         {
             // CEM/TCIMF background: one second-moment pass over the raw spectra.
             SpectralCem::CorrelationStats cemStats;
+            bool budgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
+                         if ( cemStats.count >= sampleBudget )
+                         {
+                             budgetReached = true;
+                             return false;
+                         }
                          SpectralCem::accumulateCorrelation(
                              bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
                              &cemStats, true, bgNoData, bgHasNoData );
                          context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.5,
                                                  "Background correlation" );
                          return true;
-                     } ) )
+                     } ) && !budgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (correlation pass)" );
             if ( cemStats.count == 0 )
@@ -389,16 +403,22 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         }
         else
         {
+            bool meanBudgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
+                         if ( stats.count >= sampleBudget )
+                         {
+                             meanBudgetReached = true;
+                             return false;
+                         }
                          SpectralAnomaly::accumulateMean(
                              bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
                              &stats, true, bgNoData, bgHasNoData );
                          context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.33,
                                                  "Background mean" );
                          return true;
-                     } ) )
+                     } ) && !meanBudgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (mean pass)" );
             if ( stats.count == 0 )
@@ -407,6 +427,9 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             context.throwIfCancelled();
 
             tilesSeen = 0;
+            // accumulateCovariance resets stats.count on first call — budget
+            // against the post-accumulate count, not the mean-pass count.
+            bool covBudgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
@@ -415,8 +438,13 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                              &stats, true, bgNoData, bgHasNoData );
                          context.reportProgress( 0.33 + ( ++tilesSeen ) * backgroundPerTile * 0.33,
                                                  "Background covariance" );
+                         if ( stats.count >= sampleBudget )
+                         {
+                             covBudgetReached = true;
+                             return false;
+                         }
                          return true;
-                     } ) )
+                     } ) && !covBudgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (covariance pass)" );
             SpectralAnomaly::finalizeCovariance( &stats );
