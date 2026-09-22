@@ -303,3 +303,30 @@ TEST_CASE( "identical sessions serialize byte-identically", "[agent_loop][modes]
     REQUIRE( jsonToString( first.summary.toJson() ) == jsonToString( second.summary.toJson() ) );
     REQUIRE( jsonToString( first.journal.toJson() ) == jsonToString( second.journal.toJson() ) );
 }
+
+TEST_CASE( "a preflight ok verdict carrying proposals is never executed silently",
+           "[agent_loop][modes]" )
+{
+    // Fail-closed contract: a preflight implementation that reports "ok"
+    // while still carrying repair proposals must not sail through to
+    // execution. The proposals route through repair approval — and a
+    // radiometric (strictest-class) proposal is never auto-approved, so
+    // the session refuses with the typed preflight reason instead of
+    // running the plan.
+    FakeScenario scenario;
+    RepairProposal radiometric;
+    radiometric.ruleId = "dem-radiometric-normalize";
+    radiometric.riskClass = "radiometric";
+    radiometric.operatorId = "rs:radiometric_normalize";
+    scenario.preflight = { { "ok", { radiometric } } };
+    SessionPolicy policy = SessionPolicy::defaults(); // execute_with_verify
+    FakeSeams seams( scenario );
+    ScientificAgentSession session( policy, makeDependencies( seams ), {}, "sess-ok-proposals" );
+
+    const SessionResult result = session.run( makeRequest() );
+
+    REQUIRE( seams.executorFake().beginCount() == 0 );
+    REQUIRE_FALSE( result.ok );
+    REQUIRE( result.terminalState == terminal_states::kRefused );
+    REQUIRE( result.stopReason == stop_reasons::kPreflightBlocked );
+}

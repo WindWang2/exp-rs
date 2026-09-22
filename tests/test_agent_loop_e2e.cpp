@@ -431,3 +431,37 @@ TEST_CASE( "a session that never executed never claims success", "[agent_loop][e
     REQUIRE( result.summary.verificationVerdict == "FAIL" );
     REQUIRE_FALSE( result.summary.verificationVerdict == "PASS" );
 }
+
+TEST_CASE( "re-approved repair proposals keep the plan identity stable", "[agent_loop][e2e]" )
+{
+    // The no-progress detector keys on the attempt-independent plan
+    // identity. When the same repair is proposed again on a later attempt
+    // and re-approved, it must NOT be appended twice: a duplicated rule id
+    // would change the identity without changing the science, so the same
+    // failing science would look like fresh progress forever and only the
+    // replan budget would stop the loop.
+    FakeScenario scenario;
+    scenario.preflight = {
+        { "ok", {} }, // attempt 1: clean
+        { "fixable", { { "fix-1", "shape_preserving", "rs:reproject" } } }, // attempts 2+
+    };
+    scenario.execution = {
+        { false, "EXEC_FAILED", {} },
+        { false, "EXEC_FAILED", {} },
+    };
+    scenario.diagnosis = { { "BAD_GEOMETRY", { { "fix-1", "shape_preserving", "rs:reproject" } } } };
+    SessionPolicy policy = SessionPolicy::defaults();
+    policy.mode = RunMode::ExecuteWithVerify;
+    FakeSeams seams( scenario );
+    ScientificAgentSession session( policy, makeDependencies( seams ), {}, "sess-dedup" );
+
+    const SessionResult result = session.run( makeRequest() );
+
+    // The repeated science repeats its failure key: no-progress fires
+    // (the identity stayed h(ndvi|fix-1) across attempts 2 and 3), BEFORE
+    // the replan budget is spent. A duplicated approval would keep
+    // mutating the identity, the failure keys would never repeat, and the
+    // loop would instead run to SESSION_REPLAN_LIMIT.
+    REQUIRE( result.stopReason == stop_reasons::kNoProgress );
+    REQUIRE( result.summary.budgets[ "replans_used" ].asInt() == 3 );
+}

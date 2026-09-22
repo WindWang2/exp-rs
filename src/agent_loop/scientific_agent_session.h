@@ -91,13 +91,20 @@ class ScientificAgentSession {
                             std::function< long long() > clock = {},
                             std::string sessionId = {} );
 
-    /// Resume a NON-TERMINAL session from its persisted journal: the stage
-    /// machine restarts at the journal's final stage, the journal (with its
+    /// Resume a session from its persisted journal: the stage machine
+    /// restarts at the journal's final stage, the journal (with its
     /// sequence and decision numbering) is adopted, and the attempt counter
-    /// is derived from the recorded replans. Seams are re-injected — no work
-    /// is re-executed; the resumed session appends to the same journal.
-    /// Returns nullopt when the journal is terminal or has no resumable
-    /// stage.
+    /// is derived from the recorded replans. Seams are re-injected — no
+    /// work is re-executed; the resumed session appends to the same
+    /// journal.
+    /// Only the PRE-PLAN stages (goal_normalization, data_state_snapshot)
+    /// are resumable: everything from plan_request onward dispatches on
+    /// in-memory state the journal does not carry as values, so a resume
+    /// there would run real seams over default-constructed state and
+    /// fabricate a delivery. A session parked past the plan seam (or a
+    /// terminal journal) returns nullopt and must restart as a new session.
+    /// run() on a resumed session must restate the journalled goal; a
+    /// different goal is refused (SESSION_GOAL_MISMATCH).
     static std::optional< ScientificAgentSession > resume(
         const SessionJournal &journal, SessionPolicy policy, Dependencies deps,
         std::function< long long() > clock = {} );
