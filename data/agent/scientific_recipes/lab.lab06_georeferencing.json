@@ -1,0 +1,142 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.0,
+    "diagnostics" : [ "ui_action_step", "manual_step", "manual_step" ],
+    "stages_human_only" : 3,
+    "stages_operator" : 0,
+    "stages_reflection" : 3,
+    "stages_total" : 6
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "georeferencing",
+    "keywords_en" : [ "georeferencing", "image" ],
+    "keywords_zh" : [ "影像配准（几何校正）" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/samples/landsat_sample.tif" ],
+    "required_operators" : []
+  },
+  "recipe_id" : "lab.lab06_georeferencing",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "待配准的影像。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "action" : "openGeoreferencer",
+      "boundary" : "ui_action",
+      "completion_hint" : "配准窗口已打开并载入影像。",
+      "description_zh" : "通过菜单打开几何校正（Georeferencer）工作窗口，并加载待配准影像。",
+      "human_only" : true,
+      "id" : "s01_open_the_georeferencer",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'openGeoreferencer') — no headless equivalent compiled",
+      "title" : "Open the Georeferencer",
+      "title_zh" : "打开配准工具",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "配准窗口已打开并载入影像。"
+        }
+      ]
+    },
+    {
+      "boundary" : "manual",
+      "completion_hint" : "GCP 列表齐备且残差（RMS error）处于可接受范围。",
+      "depends_on" : [ "s01_open_the_georeferencer" ],
+      "description_zh" : "在影像上选取至少 6 个均匀分布的地面控制点（道路交叉口、河流汇合处等明显地物），并输入或拾取其真实地图坐标。",
+      "human_only" : true,
+      "id" : "s02_pick_ground_control_points",
+      "index" : 1,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "teaching_note" : "GCP 的数量、精度与空间分布共同决定变换模型的求解质量；控制点应覆盖全幅并避免聚集在局部。",
+      "title" : "Pick Ground Control Points",
+      "title_zh" : "选取地面控制点",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "GCP 列表齐备且残差（RMS error）处于可接受范围。"
+        }
+      ]
+    },
+    {
+      "boundary" : "manual",
+      "completion_hint" : "校正影像已叠加到地图上并与参考数据对齐。",
+      "depends_on" : [ "s02_pick_ground_control_points" ],
+      "description_zh" : "选择一次多项式变换（First Order Polynomial），检查 RMSE 后执行重采样（最近邻/双线性），输出带地理坐标的校正影像。",
+      "human_only" : true,
+      "id" : "s03_solve_transform_and_resample",
+      "index" : 2,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "teaching_note" : "多项式变换将影像坐标映射到地图坐标；重采样决定输出像元值的取值方式——最近邻保留原始 DN、双线性更平滑。",
+      "title" : "Solve Transform and Resample",
+      "title_zh" : "求解变换并重采样",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "校正影像已叠加到地图上并与参考数据对齐。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s03_solve_transform_and_resample" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "一次、二次多项式变换分别至少需要多少个 GCP？次数越高越好吗？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "最近邻与双线性重采样各适合什么数据（类别图还是连续影像）？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 5,
+      "kind" : "reflection",
+      "prompt" : "若 GCP 全部集中在影像一角，几何校正会出现什么问题？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab06_georeferencing",
+    "objective" : "掌握影像几何校正的流程：在配准工作窗口中选取地面控制点（GCP），用多项式变换模型求解并重采样输出具有正确地理坐标的影像。",
+    "source_fingerprint" : "81be03d3ecebe985",
+    "source_path" : "data/labs/lab06_georeferencing.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Image Georeferencing",
+  "title_zh" : "影像配准（几何校正）"
+}

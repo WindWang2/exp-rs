@@ -826,13 +826,13 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
         // this the production path never registers a capacity and freeMb
         // would read 0, silently demoting every GPU request to cpu.
         if ( info && info->vramCapacityMb > 0 )
-          m_ledger.setCapacity( i, info->vramCapacityMb );
+          m_ledger->setCapacity( i, info->vramCapacityMb );
         // Platform 9.0: the free verdict is the HONEST minimum of what the
         // ledger still reserves for sessions and what the driver reports as
         // physically free (other processes on the card count). Either source
         // alone is used as-is; both unknown stays -1 (unenforced, -1 ignored).
         const int ledgerFree =
-          info && info->vramCapacityMb > 0 ? m_ledger.freeMb( i ) : -1;
+          info && info->vramCapacityMb > 0 ? m_ledger->freeMb( i ) : -1;
         const int realFree = info ? info->freeVramMb : -1;
         int freeMb = -1;
         if ( ledgerFree >= 0 && realFree >= 0 )
@@ -899,12 +899,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   if ( device.gpu && estimateMb > 0 )
   {
     std::string admitWhy;
-    if ( !m_ledger.tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
+    if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
     {
       // Memory-pressure valve: ONE bounded eviction pass over the sessions
       // pinned to this device, then a single retry. No loops, no queueing.
       evictDeviceLocked( device.cudaIndex );
-      if ( !m_ledger.tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
+      if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
       {
         lock.unlock();
         if ( errorMessage )
@@ -949,7 +949,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     if ( device.gpu && estimateMb > 0 )
     {
       lock.lock();
-      m_ledger.release( device.cudaIndex, estimateMb, identityComponent );
+      m_ledger->release( device.cudaIndex, estimateMb, identityComponent );
       lock.unlock();
     }
     throw;
@@ -961,7 +961,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     if ( device.gpu && estimateMb > 0 )
     {
       lock.lock();
-      m_ledger.release( device.cudaIndex, estimateMb, identityComponent );
+      m_ledger->release( device.cudaIndex, estimateMb, identityComponent );
       lock.unlock();
     }
     if ( errorMessage )
@@ -984,12 +984,33 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     return raced->second.session;
   }
   CacheEntry entry;
-  entry.session = session;
   entry.lastUsed = ++m_useCounter;
   entry.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
   entry.cudaIndex = device.gpu ? device.cudaIndex : -1;
   entry.reservedVramMb = device.gpu ? std::max( 0, estimateMb ) : 0;
   entry.ledgerHolder = identityComponent;
+  // #1160: the reservation is tied to the SESSION's lifetime, not the
+  // cache entry's. An ensemble holds MemberRun.session beyond eviction;
+  // releasing the reservation on LRU drop while members still executed
+  // under-counted physically-occupied VRAM and let concurrent admission
+  // over-commit the device (ADR 0171 D3: the ledger is the admission
+  // authority). The wrapper's deleter releases the ledger AFTER the
+  // model is destroyed (never admitting onto still-occupied memory), and
+  // the shared ledger pointer keeps the release safe even if the registry
+  // object itself is gone by then.
+  if ( entry.cudaIndex >= 0 && entry.reservedVramMb > 0 && !entry.ledgerHolder.empty() )
+  {
+    const auto ledger = m_ledger;
+    const int cudaIndex = entry.cudaIndex;
+    const int reservedMb = entry.reservedVramMb;
+    const std::string holder = entry.ledgerHolder;
+    ModelRuntimePtr base = session;
+    session = ModelRuntimePtr( base.get(), [ base, ledger, cudaIndex, reservedMb, holder ]( IModelRuntime * ) mutable {
+        base.reset(); // destroy the model FIRST — never admit onto live VRAM
+        ledger->release( cudaIndex, reservedMb, holder );
+    } );
+  }
+  entry.session = session;
   m_cache[key] = std::move( entry );
   ++m_totalLoaded;
   while ( m_cache.size() > m_maxSessions )
@@ -1119,8 +1140,12 @@ void ModelRuntimeRegistry::evictExpiredLocked( std::int64_t nowMs )
 
 void ModelRuntimeRegistry::dropReservationLocked( const CacheEntry &entry )
 {
-  if ( entry.cudaIndex >= 0 && entry.reservedVramMb > 0 && !entry.ledgerHolder.empty() )
-    m_ledger.release( entry.cudaIndex, entry.reservedVramMb, entry.ledgerHolder );
+  // #1160: reservations follow the SESSION, released by the wrapper
+  // deleter installed at acquisition when the last reference drops.
+  // Erasing the cache entry only drops the registry's own reference —
+  // an externally held session (ensemble member) keeps its reservation,
+  // which is exactly the occupancy the ledger must keep counting.
+  (void)entry;
 }
 
 void ModelRuntimeRegistry::evictDeviceLocked( int cudaIndex )
@@ -1294,7 +1319,7 @@ DevicePlacementPolicy ModelRuntimeRegistry::placementPolicy() const
 std::vector<VramLedger::DeviceState> ModelRuntimeRegistry::deviceReport() const
 {
   std::lock_guard<std::mutex> lock( m_mutex );
-  return m_ledger.snapshot();
+  return m_ledger->snapshot();
 }
 
 } // namespace sicnu::operators::runtime

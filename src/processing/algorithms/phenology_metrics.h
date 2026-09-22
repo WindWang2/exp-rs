@@ -8,7 +8,8 @@
   Smoothed-season phenology for one regular-calendar series (NaN = missing).
   All returned day values are on the caller's @a tDays axis (day offsets from
   the series epoch); a day-of-year view is derived internally as
-  doy(t) = fmod(t, 365) + 1 (epoch-aligned seasons).
+  doy(t) = floor(fmod(t, 365.25)) + 1 ∈ [1, 366] (epoch-aligned seasons;
+  mean Gregorian year to limit leap-year drift vs a fixed-365 modulo).
 
   Biology guard (ADR 0161): a metric set is valid only when
   sos < pos < eos on the (possibly year-wrapping) axis and

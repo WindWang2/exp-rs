@@ -785,3 +785,70 @@ TEST_CASE( "admissionSnapshot mirrors the idle never-starve rule", "[tc12][snaps
     center.shutdownForTests();
     engine.shutdownForTests();
 }
+
+TEST_CASE( "#1159: the cancel-deadline scan stays bounded to armed candidates",
+           "[tc12][cancel][perf]" )
+{
+    ensureApp();
+    auto &engine = JobEngine::instance();
+    engine.shutdownForTests();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+    center.setCancelWatchdogMs( 150 );
+
+    // Volume: a long tail of TERMINAL tasks — the map the pre-#1159 scan
+    // walked in full on every 25 ms tick and every record delivery.
+    constexpr int kTerminalTail = 2000;
+    engine.clearExecutors();
+    engine.registerExecutor( "tc12:", []( const JobRequest &, sicnu::operators::RSOperatorContext & ) {
+        return Json::Value();
+    } );
+    for ( int i = 0; i < kTerminalTail; ++i )
+    {
+        const long id = center.submitJob( tc12Request( "tc12:bulk" ) );
+        REQUIRE( id > 0 );
+        REQUIRE( waitForStatus( id, { TaskStatus::Completed, TaskStatus::Failed }, 5000 ) );
+    }
+
+    // One hung task whose cancel deadline must still fire promptly through
+    // the armed index while the terminal tail sits in the same map.
+    std::atomic<bool> hangRelease{ false };
+    engine.registerExecutor( "tc12:", [&hangRelease]( const JobRequest &req,
+                                                      sicnu::operators::RSOperatorContext & ) {
+        if ( req.algorithmId == "tc12:hang2" )
+        {
+            while ( !hangRelease.load( std::memory_order_relaxed ) )
+                QThread::msleep( 10 );
+        }
+        return Json::Value();
+    } );
+    const long hangId = center.submitJob( tc12Request( "tc12:hang2" ) );
+    REQUIRE( hangId > 0 );
+    REQUIRE( waitForStatus( hangId, { TaskStatus::Running }, 5000 ) );
+    REQUIRE( center.cancelTask( hangId ) );
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto info = center.waitForTask( hangId, std::chrono::milliseconds( 8000 ),
+                                          std::chrono::milliseconds( 10 ) );
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    REQUIRE( info.status == TaskStatus::Canceled );
+    REQUIRE( info.errorMessage.contains( QStringLiteral( "watchdog" ), Qt::CaseInsensitive ) );
+    // The deadline (150 ms) must fire within a bounded multiple of itself:
+    // with the armed index the scan is O(1) here regardless of the 2000-task
+    // tail; a full-map walk per tick would still pass eventually, so the
+    // bound is a generous regression tripwire, not the proof itself.
+    REQUIRE( elapsed < std::chrono::milliseconds( 3000 ) );
+
+    // The terminal tail is untouched by the fired deadline.
+    int stillTerminal = 0;
+    for ( const sicnu::AlgorithmTaskInfo &task : center.allTasks() )
+        if ( task.taskId != hangId && sicnu::isTerminalStatus( task.status ) )
+            ++stillTerminal;
+    REQUIRE( stillTerminal >= kTerminalTail );
+
+    hangRelease.store( true );
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    center.shutdownForTests();
+    engine.shutdownForTests();
+}

@@ -1,0 +1,56 @@
+{
+  "allowed_tools": [
+    "temporal:smooth",
+    "temporal:gap_fill",
+    "harness:verify"
+  ],
+  "case_id": "temporal/smoothing-basic",
+  "description": "Seasonal NDVI smoothing",
+  "expected_evidence": [
+    {
+      "id": "smooth-series",
+      "kind": "raster",
+      "required_fields": [
+        "nodata_fraction"
+      ]
+    }
+  ],
+  "goal": "Smooth the NDVI time series keeping the NoData fraction at or under 0.05.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "smooth-series",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "scientific",
+      "id": "sci-nodata",
+      "kind": "numeric_le",
+      "params": {
+        "evidence_id": "smooth-series",
+        "field": "nodata_fraction",
+        "max": 0.05
+      },
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "temporal",
+  "title": "Seasonal NDVI smoothing"
+}

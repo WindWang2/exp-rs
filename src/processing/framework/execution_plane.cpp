@@ -244,16 +244,23 @@ Json::Value ExecutionPlane::buildCommittedResultPayload( const sicnu::AlgorithmT
   CommitOutcome outcome;
   outcome.payload = payload;
   outcome.at = QDateTime::currentDateTimeUtc();
-  if ( m_commitCache.size() >= kMaxCommitCacheEntries )
+  // A null committerHandler first-build skips the transactional commit. Caching
+  // that payload would poison later builders that supply a real handler
+  // (conditional reachability). Only cache when commit ran or there was nothing
+  // to commit.
+  const bool cacheable = static_cast<bool>( committerHandler )
+                         || info.outputLayerPath.isEmpty();
+  if ( cacheable )
   {
-    // Evict the oldest outcome; task ids never repeat, so a stale entry only
-    // matters for pathological late double-build attempts.
-    auto oldest = std::min_element( m_commitCache.begin(), m_commitCache.end(),
-                                    []( const auto &a, const auto &b ) { return a.second.at < b.second.at; } );
-    if ( oldest != m_commitCache.end() )
-      m_commitCache.erase( oldest );
+    if ( m_commitCache.size() >= kMaxCommitCacheEntries )
+    {
+      auto oldest = std::min_element( m_commitCache.begin(), m_commitCache.end(),
+                                      []( const auto &a, const auto &b ) { return a.second.at < b.second.at; } );
+      if ( oldest != m_commitCache.end() )
+        m_commitCache.erase( oldest );
+    }
+    m_commitCache[info.taskId] = std::move( outcome );
   }
-  m_commitCache[info.taskId] = std::move( outcome );
   return payload;
 }
 

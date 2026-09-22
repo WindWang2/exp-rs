@@ -143,6 +143,7 @@ CogValidationReport validateCog( const std::string &path )
   const bool compressionOk = compression != nullptr && *compression != '\0';
   addCheck( report.checks, "compression", compressionOk,
             compressionOk ? compression : "no IMAGE_STRUCTURE COMPRESSION" );
+  allPass = allPass && compressionOk;
 
   // Float bands benefit (COG spec recommends) from a predictor; detectable
   // via the PREDICTOR tag mirror in metadata when the producer set it.

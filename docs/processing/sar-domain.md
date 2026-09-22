@@ -102,7 +102,7 @@ geometry, bounded bilinear/nearest samplers); streaming driver:
 2. **Products** (fixed five-band Float32, order in
    `SICNU_SAR_GEOCODE_BANDS`): `backscatter` (resampled radiometry in the
    input's own declared domain — pass calibrated sigma0), `gamma0`
-   (= backscatter · sin θ0 / sin θL, Ulander 1996 area factor from REAL
+   (= backscatter · sin θL / sin θ0, Ulander 1996 projected-area factor from REAL
    per-pixel geometry — distinct from the constant-geometry plane-fit model
    of `rs:sar_terrain_flatten`), `incidence` (ellipsoid reference θ0),
    `local_incidence` (terrain facet θL), `layover_shadow`
@@ -491,7 +491,9 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    `rs:sar_speckle` propagates them so filtering a derived product does not
    silently drop its state.
 3. **Terrain family input contract.** `rs:sar_terrain_flatten` and
-   `rs:sar_terrain_correction` apply `sigma0·cosθ0/cosθi`, which is only
+   `rs:sar_terrain_correction` apply `sigma0·sinθi/sinθ0` (Ulander 1996 /
+   Small 2011 eq. 5 projected-area RTC factor, the same token `rs:sar_geocode`'s
+   gamma0 band carries), which is only
    lawful for sigma0 input. A declared `gamma0`/`beta0`/`dn`, a derived token,
    a conflicting declaration (`SICNU_SAR_CALIBRATION` vs
    `SICNU_RADIOMETRIC_STATE` disagreeing) or an unrecognized token is a typed
@@ -509,6 +511,9 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    `SICNU_SAR_GEOCODE_BAND_STATES = sigma0,gamma0,incidence_deg,
    local_incidence_deg,mask_class` (the product is inherently mixed; one dataset
    token cannot describe five bands). `result.bandStates` mirrors the key.
+   Downstream operators that take a band index (`rs:sar_backscatter`,
+   `rs:sar_speckle`, `rs:sar_texture`, `rs:sar_calibrate`) consult this map and
+   refuse geometry/mask bands (and the whole stack for calibrate).
    On the legacy undeclared path the sigma0 assumption is persisted as
    `SICNU_SAR_STATE_ASSUMED=sigma0_legacy_undeclared` (same for the terrain
    operators), so downstream guards can see the assumption instead of trusting

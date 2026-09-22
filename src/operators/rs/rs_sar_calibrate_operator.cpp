@@ -132,6 +132,17 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                               "Cannot open input raster: " + inputPath);
     }
 
+    // #1147: declared-domain preflight — the DN formula sigma0 =
+    // (DN² − noise)/A² is a linear-power kernel; a dB-domain product
+    // (internal or legacy external) would be exponentially mis-scaled while
+    // the output confidently declares linear_power. Same refusal the six
+    // downstream family operators already implement.
+    if ( sicnu::sar::readDomain( src ) == QLatin1String( "db" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "input declares SICNU_SAR_DOMAIN=db; this operator's DN formula "
+                               "is linear power — convert with rs:sar_backscatter "
+                               "inputDomain=db first" );
+
     // Declared-contract preflight: this operator applies the DN formula
     // sigma0 = (DN² − noise)/A². Re-applying it to a product that already
     // declares a calibrated state would double-scale the radiometry, a derived
@@ -162,6 +173,16 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                         "' (pair metric / texture), which carries no backscatter "
                         "calibration; rs:sar_calibrate applies the DN formula and cannot "
                         "recalibrate a derived product" );
+            }
+            // Optical vocabulary on the shared radiometric-state key.
+            if ( declared.token == QLatin1String( "digital_number" ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "input declares optical radiometric state 'digital_number'; "
+                    "rs:sar_calibrate requires the SAR DN token 'dn' (and "
+                    "SICNU_MODALITY=sar). Re-import the SAR product or retag "
+                    "SICNU_SAR_CALIBRATION=dn" );
             }
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
@@ -215,11 +236,20 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                               : QDir::cleanPath( QDir( baseDir ).filePath( declaredLut ) );
                 const QString canonicalBase = QDir( baseDir ).canonicalPath();
                 const QString canonicalLut = QFileInfo( lutPath ).canonicalFilePath();
-                const bool contained = baseDir != QDir::rootPath()
-                                       && ( ( !canonicalBase.isEmpty()
-                                              && !canonicalLut.isEmpty()
-                                              && canonicalLut.startsWith( canonicalBase + QLatin1Char( '/' ) ) )
-                                            || lutPath.startsWith( baseDir + QLatin1Char( '/' ) ) );
+                // #1164: the canonical comparison GOVERNS wherever it can be
+                // computed (a symlink inside the directory pointing outside
+                // resolves outside — refused); the lexical form is a FALLBACK
+                // for a LUT that does not exist yet / is on a dead link,
+                // never an alternative acceptance route.
+                bool contained = false;
+                if ( baseDir != QDir::rootPath() )
+                {
+                    if ( !canonicalBase.isEmpty() && !canonicalLut.isEmpty() )
+                        contained =
+                            canonicalLut.startsWith( canonicalBase + QLatin1Char( '/' ) );
+                    else
+                        contained = lutPath.startsWith( baseDir + QLatin1Char( '/' ) );
+                }
                 if ( !contained )
                 {
                     throw RSOperatorError(
@@ -256,6 +286,20 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(firstBand));
     }
+
+    // A geocode five-band product declares SICNU_SAR_GEOCODE_BAND_STATES —
+    // none of those bands is DN. Refuse before the DN formula runs.
+    if ( !sicnu::sar::datasetMeta( src, sicnu::sar::kGeocodeBandStatesKey )
+              .trimmed()
+              .isEmpty() )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares SICNU_SAR_GEOCODE_BAND_STATES (geocode mixed "
+            "product); rs:sar_calibrate applies the DN formula and cannot "
+            "recalibrate a geocode stack" );
+    }
+
 
     // One per-row LUT describes one calibration vector: real dual-pol products
     // carry a different vector per polarization, so a multi-band run reuses

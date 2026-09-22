@@ -429,6 +429,42 @@ TEST_CASE( "Seasonal decomposition recovers trend and climatology", "[temporal][
         REQUIRE( std::fabs( r.remainder[d] ) < 0.3 );
 }
 
+TEST_CASE( "Seasonal decomposition trend is time-regularized, not sample-indexed (#1166)",
+           "[temporal][decompose][issue1166]" )
+{
+    ensureApp();
+    // The SAME 12 y-values sampled once every day and once every 3 days:
+    // a sample-index trend returns BIT-IDENTICAL trends for both axes; a
+    // day-regularized penalty must treat the coarse series as a much
+    // smoother-in-time signal and differ.
+    std::vector<float> y;
+    for ( int i = 0; i < 12; ++i )
+        y.push_back( static_cast<float>( std::sin( 2.0 * M_PI * i / 12.0 ) + 0.02 * i ) );
+    std::vector<double> tDense, tCoarse;
+    std::vector<int> doyDense, doyCoarse;
+    for ( int i = 0; i < 12; ++i )
+    {
+        tDense.push_back( static_cast<double>( i ) );
+        tCoarse.push_back( 3.0 * static_cast<double>( i ) );
+        doyDense.push_back( ( 10 * i ) % 365 + 1 );
+        doyCoarse.push_back( ( 30 * i ) % 365 + 1 );
+    }
+
+    const DecompositionResult dense = seasonalDecompose( y, tDense, doyDense, 2.0, 4 );
+    const DecompositionResult coarse = seasonalDecompose( y, tCoarse, doyCoarse, 2.0, 4 );
+    REQUIRE( dense.trend.size() == 12 );
+    REQUIRE( coarse.trend.size() == 12 );
+
+    double maxDelta = 0.0;
+    for ( int i = 2; i < 10; ++i ) // interior: the penalty is one-sided at ends
+    {
+        REQUIRE( std::isfinite( dense.trend[i] ) );
+        REQUIRE( std::isfinite( coarse.trend[i] ) );
+        maxDelta = std::max( maxDelta, double( std::fabs( dense.trend[i] - coarse.trend[i] ) ) );
+    }
+    REQUIRE( maxDelta > 1e-4 );
+}
+
 // ---------------------------------------------------------------------------
 // Gap-fill kernel (Temporal 7.0): the interpolation math extracted from
 // rs:temporal_gap_fill — previously inlined in the operator with zero
@@ -518,4 +554,44 @@ TEST_CASE( "Gap-fill counts: filled vs fillable accounting matches the operator 
     REQUIRE( counts.fillable == 3 );
     REQUIRE( counts.filled == 2 );
     REQUIRE( std::isnan( out[4] ) );
+}
+
+TEST_CASE( "Phenology SOS/EOS share interpolated midpoint semantics", "[temporal][phenology][p3-1228]" )
+{
+    ensureApp();
+    // Sparse samples so quantization vs interpolation disagree by >1 day.
+    // Peak at doy 200 (t=199). Values cross 0.5-amplitude between 140→160 and
+    // 240→260: interpolated SOS/EOS near 150/250; sample-quantized would be 160/240.
+    std::vector<float> y;
+    std::vector<double> t;
+    std::vector<int> doy;
+    for ( int d : { 100, 140, 160, 200, 240, 260, 300 } )
+    {
+        const double value = 0.2 + 0.8 * std::exp( -std::pow( ( d - 200 ) / 60.0, 2 ) );
+        y.push_back( static_cast<float>( value ) );
+        t.push_back( d - 1.0 );
+        doy.push_back( d );
+    }
+    const SeasonalMetrics m = phenologyThreshold( y, t, doy, 1, 366, 0.5 );
+    REQUIRE( m.valid );
+    REQUIRE( m.sos == Approx( 150.0 ).margin( 2.0 ) );
+    REQUIRE( m.eos == Approx( 250.0 ).margin( 2.0 ) );
+    // Midpoints at 50% amplitude equal SOS/EOS at crossingFraction 0.5.
+    REQUIRE( m.greenUpMidDoy == Approx( m.sos ).margin( 1e-6 ) );
+    REQUIRE( m.senescenceMidDoy == Approx( m.eos ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "doyAt leap-year bracket keeps day 366", "[temporal][phenology][p3-1228]" )
+{
+    ensureApp();
+    // Rising limb crosses 50% between doy 365 and 366; falling limb after the
+    // peak stays inside the season window so metrics stay valid. Prior +365
+    // unwrap treated d==366 as year-end wrap and could collapse leap brackets.
+    std::vector<float> y = { 0.0f, 1.0f, 0.0f };
+    std::vector<double> t = { 0.0, 1.0, 2.0 };
+    std::vector<int> doy = { 365, 366, 366 };
+    const SeasonalMetrics m = phenologyThreshold( y, t, doy, 360, 366, 0.5 );
+    REQUIRE( m.valid );
+    REQUIRE( m.greenUpMidDoy == Approx( 366.0 ).margin( 0.6 ) );
+    REQUIRE( m.sos == Approx( 366.0 ).margin( 0.6 ) );
 }

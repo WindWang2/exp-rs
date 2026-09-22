@@ -308,7 +308,10 @@ TEST_CASE( "data scale: catalog population copies a bounded number of records pe
                                     / static_cast<double>( accumulated );
         WARN( "100k catalog resident set: " << ( rss / 1024 / 1024 ) << " MiB ("
               << kibPerRecord << " KiB per record)" );
-        CHECK( kibPerRecord < 64.0 * 1024.0 );
+        // #1179 potency fix: the oracle SAID 64 KiB per record but enforced
+        // 64 * 1024 KiB = 64 MiB (~1000× the documented ceiling). Enforce
+        // the documented bound, with modest slack for allocator overhead.
+        CHECK( kibPerRecord < 96.0 );
     }
 }
 
@@ -1225,4 +1228,67 @@ TEST_CASE( "data scale: the equivalence oracle detects a deliberately broken loo
             ++emptyIndexMisses;
     }
     CHECK( emptyIndexMisses == expectedHits );
+}
+
+//------------------------------------------------------------------------------
+// #1161 — resyncKeys must not invert path-key precedence
+//------------------------------------------------------------------------------
+
+TEST_CASE( "data scale: relocating an asset never inverts shared-path precedence",
+           "[data_scale][path_index][issue1161]" )
+{
+    auto manager = makeManager();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // Two spellings of ONE file registered as two assets: ./dup.tif first,
+    // then the absolute spelling — both fall into the same shard and share
+    // the path key. Insertion order pins findByPath to the FIRST asset.
+    const QString file = dir.filePath( QStringLiteral( "dup.tif" ) );
+    {
+        QFile f( file );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "x" );
+    }
+    const QDir workDir( dir.path() );
+    const QString relative = workDir.filePath( QStringLiteral( "./dup.tif" ) );
+    const AssetId first = registerAsset( *manager, relative );
+    const AssetId second = registerAsset( *manager, file );
+    REQUIRE_FALSE( first.isNull() );
+    REQUIRE_FALSE( second.isNull() );
+    REQUIRE( first != second );
+
+    auto probe = [&manager]( const QString &path ) {
+        const auto hit = manager->findByPath( path );
+        REQUIRE( hit.has_value() );
+        return hit->id();
+    };
+    REQUIRE( probe( relative ) == first );
+    REQUIRE( probe( file ) == first );
+
+    // Self-relocate of the EARLIER asset onto its own source: resyncKeys
+    // re-inserts its keys. Pre-#1161 the re-insert appended at the vector
+    // tail and findByPath silently returned the LATER asset.
+    sicnu::data::SourceDescriptor same;
+    same.providerKey = QStringLiteral( "memory-raster" );
+    same.canonicalSource = relative;
+    const auto relocated = manager->relocate( { first, same } );
+    REQUIRE( relocated );
+
+    REQUIRE( probe( relative ) == first );
+    REQUIRE( probe( file ) == first );
+
+    // Relocating the earlier asset to a FRESH path (the covered case) keeps
+    // resolving the shared key to the remaining asset.
+    const QString moved = dir.filePath( QStringLiteral( "moved.tif" ) );
+    {
+        QFile f( moved );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "x" );
+    }
+    sicnu::data::SourceDescriptor movedSource;
+    movedSource.providerKey = QStringLiteral( "memory-raster" );
+    movedSource.canonicalSource = moved;
+    REQUIRE( manager->relocate( { first, movedSource } ) );
+    REQUIRE( probe( file ) == second );
+    REQUIRE( manager->findByPath( relative ).has_value() );
 }

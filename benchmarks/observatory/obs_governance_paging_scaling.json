@@ -1,0 +1,84 @@
+{
+  "complexity" : 
+  {
+    "exponent" : 2.3058743873681919,
+    "model" : "super-linear",
+    "points" : 
+    [
+      {
+        "ms" : 9.1603940000000001,
+        "n" : 500
+      },
+      {
+        "ms" : 19.637646,
+        "n" : 1000
+      },
+      {
+        "ms" : 45.29513,
+        "n" : 2000
+      }
+    ]
+  },
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 0,
+    "pages_requested" : 10,
+    "rows_materialized" : 200,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Debug",
+    "compiler" : "gcc 16",
+    "cores" : 40,
+    "cpu_model" : "Intel(R) Xeon(R) Silver 4210R CPU @ 2.40GHz",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "pages" : 10,
+    "rows" : 2000
+  },
+  "generated_at" : "2026-09-20T22:28:42Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 45.314000000000021,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 222,
+    "peak_rss_mb" : 3,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 82,
+    "wall_ms" : 45.29513,
+    "write_bytes" : 0,
+    "write_ops" : 0
+  },
+  "scale" : 
+  {
+    "items" : 2000,
+    "kind" : "small",
+    "probes" : 0
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "doublings" : 2,
+    "exponent" : 2.3058743873681919,
+    "ms_per_page" : 
+    {
+      "1000" : 3.9275291999999999,
+      "2000" : 4.5295129999999997,
+      "500" : 3.0534646666666667
+    },
+    "rows_largest" : 2000,
+    "rows_smallest" : 500,
+    "worst_doubling_exponent" : 1.2057339426915246
+  },
+  "workload" : "obs_governance_paging_scaling"
+}

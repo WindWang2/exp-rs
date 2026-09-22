@@ -135,8 +135,32 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
     m_storePath = dbPath;
     if ( !m_impl->exec( "PRAGMA journal_mode=WAL", errorOut ) ||
          !m_impl->exec( "PRAGMA synchronous=NORMAL", errorOut ) ||
-         !m_impl->exec( "PRAGMA busy_timeout=5000", errorOut ) ||
-         !m_impl->exec(
+         !m_impl->exec( "PRAGMA busy_timeout=5000", errorOut ) )
+    {
+        close();
+        return false;
+    }
+    // Schema gate BEFORE DDL (read-only forward tolerance must not mutate a
+    // newer store via CREATE TABLE IF NOT EXISTS / index rebuilds).
+    {
+        QMutexLocker lock( &m_impl->mutex );
+        Stmt stmt( db, QStringLiteral( "SELECT value FROM exp_meta WHERE key='schema_version'" ) );
+        if ( stmt && stmt.stepRow() )
+        {
+            const QString existing = stmt.text( 0 );
+            if ( !existing.isEmpty()
+                 && existing != QLatin1String( kExperimentStoreSchemaVersion ) )
+            {
+                m_impl->readOnly = true;
+                if ( errorOut )
+                    *errorOut = QStringLiteral(
+                        "experiment schema %1 is newer than supported (%2); opened read-only" )
+                                    .arg( existing, QLatin1String( kExperimentStoreSchemaVersion ) );
+                return true;
+            }
+        }
+    }
+    if ( !m_impl->exec(
              "CREATE TABLE IF NOT EXISTS exp_meta("
              "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
              errorOut ) ||
@@ -235,30 +259,27 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
         return false;
     }
 
-    QString existing;
+    // Stamp schema version when missing (fresh / pre-version stores only —
+    // newer schemas already returned read-only above).
     {
         QMutexLocker lock( &m_impl->mutex );
         Stmt stmt( db, QStringLiteral( "SELECT value FROM exp_meta WHERE key='schema_version'" ) );
-        if ( stmt && stmt.stepRow() )
-            existing = stmt.text( 0 );
-    }
-    if ( existing.isEmpty() )
-    {
-        if ( !m_impl->exec(
-                 QStringLiteral(
-                     "INSERT OR REPLACE INTO exp_meta(key,value) VALUES('schema_version','%1')" )
-                     .arg( kExperimentStoreSchemaVersion )
-                     .toUtf8()
-                     .constData(),
-                 errorOut ) )
+        const bool have = stmt && stmt.stepRow() && !stmt.text( 0 ).isEmpty();
+        if ( !have )
         {
-            close();
-            return false;
+            lock.unlock();
+            if ( !m_impl->exec(
+                     QStringLiteral(
+                         "INSERT OR REPLACE INTO exp_meta(key,value) VALUES('schema_version','%1')" )
+                         .arg( kExperimentStoreSchemaVersion )
+                         .toUtf8()
+                         .constData(),
+                     errorOut ) )
+            {
+                close();
+                return false;
+            }
         }
-    }
-    else if ( existing != QLatin1String( kExperimentStoreSchemaVersion ) )
-    {
-        m_impl->readOnly = true;
     }
     return true;
 }
@@ -315,17 +336,25 @@ sicnu::data::Result<void> ExperimentStore::upsertExperiment( const Experiment &e
                                             QStringLiteral( "experiment requires id + name" ) ) );
 
     const QString json = jsonToText( experiment.toJson() );
-    // Upsert semantics: an existing experiment's content is never silently
-    // rewritten — name changes ride a new revision of the record via explicit
-    // delete + create by the caller (experiments are immutable-ish registries).
+    // #1173: BEGIN IMMEDIATE around the conflict check + insert so a concurrent
+    // connection cannot race a second insert past the SELECT and degrade the
+    // UNIQUE failure into a generic store_write_failed (must stay experiment.conflict).
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     Stmt exists( m_impl->db, QStringLiteral( "SELECT json FROM experiments WHERE id=?" ) );
     if ( !exists )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             exists.error( m_impl->db ) ) );
+    }
     exists.bind( 1, experiment.experimentId() );
     if ( exists.stepRow() )
     {
-        if ( exists.text( 0 ) == json )
+        const bool same = exists.text( 0 ) == json;
+        m_impl->rollback();
+        if ( same )
             return ResultT::success();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.conflict" ),
                                             QStringLiteral( "experiment %1 exists with different content" )
@@ -334,15 +363,28 @@ sicnu::data::Result<void> ExperimentStore::upsertExperiment( const Experiment &e
     Stmt insert( m_impl->db, QStringLiteral(
         "INSERT INTO experiments(id, name, json, created_ms) VALUES(?,?,?,?)" ) );
     if ( !insert )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
     insert.bind( 1, experiment.experimentId() );
     insert.bind( 2, experiment.name() );
     insert.bind( 3, json );
     insert.bind( 4, QDateTime::currentMSecsSinceEpoch() );
     if ( !insert.step() )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.conflict" ),
+                                            QStringLiteral( "experiment %1 exists with different content" )
+                                                .arg( experiment.experimentId() ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
-                                            insert.error( m_impl->db ) ) );
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 
@@ -407,27 +449,70 @@ sicnu::data::Result<void> ExperimentStore::deleteExperiment( const QString &expe
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
                                             QStringLiteral( "store is read-only" ) ) );
 
-    // An experiment with runs is never row-deleted.
+    // #1173: count-then-delete inside BEGIN IMMEDIATE so a concurrent run
+    // insert cannot land between the guard and the DELETE (orphaning runs).
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt runs( m_impl->db, QStringLiteral(
             "SELECT COUNT(*) FROM experiment_runs WHERE experiment_id=?" ) );
         if ( !runs )
+        {
+            m_impl->rollback();
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                                 runs.error( m_impl->db ) ) );
+        }
         runs.bind( 1, experimentId );
         if ( runs.stepRow() && runs.i64( 0 ) > 0 )
+        {
+            m_impl->rollback();
             return ResultT::failure( storeDiag(
                 QStringLiteral( "experiment.delete_refused" ),
                 QStringLiteral( "experiment %1 still has runs" ).arg( experimentId ) ) );
+        }
+    }
+    {
+        // Drop lineage edges that name this experiment so deleteExperiment
+        // does not leave dangling experiment_lineage rows.
+        Stmt edges( m_impl->db, QStringLiteral(
+            "DELETE FROM experiment_lineage WHERE (from_kind='experiment' AND from_id=?)"
+            " OR (to_kind='experiment' AND to_id=?)" ) );
+        if ( !edges )
+        {
+            m_impl->rollback();
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                edges.error( m_impl->db ) ) );
+        }
+        edges.bind( 1, experimentId );
+        edges.bind( 2, experimentId );
+        if ( !edges.step() )
+        {
+            m_impl->rollback();
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                                edges.error( m_impl->db ) ) );
+        }
     }
     Stmt stmt( m_impl->db, QStringLiteral( "DELETE FROM experiments WHERE id=?" ) );
     if ( !stmt )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             stmt.error( m_impl->db ) ) );
+    }
     stmt.bind( 1, experimentId );
     if ( !stmt.step() || stmt.changes( m_impl->db ) != 1 )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.not_found" ),
                                             QStringLiteral( "experiment %1 not found" ).arg( experimentId ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 
@@ -587,20 +672,66 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             upsert.error( db ) ) );
     }
-    // Mirror the run row into the experiment's run list.
+    // Mirror the run row into the experiment's run list (#1172: the block
+    // used to only CHECK existence — run_ids stayed empty forever, so every
+    // surface reading run_count reported 0 and the prune's run-list rewrite
+    // was dead code). Read-modify-write inside this same transaction.
     {
-        Stmt experimentExists( db, QStringLiteral( "SELECT 1 FROM experiments WHERE id=?" ) );
-        if ( !experimentExists )
+        Stmt experimentSelect( db, QStringLiteral( "SELECT json FROM experiments WHERE id=?" ) );
+        if ( !experimentSelect )
         {
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                                experimentExists.error( db ) ) );
+                                                experimentSelect.error( db ) ) );
         }
-        experimentExists.bind( 1, run.experimentId() );
-        if ( !experimentExists.stepRow() )
+        experimentSelect.bind( 1, run.experimentId() );
+        if ( !experimentSelect.stepRow() )
         {
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.not_found" ),
                                                 QStringLiteral( "experiment %1 does not exist" )
                                                     .arg( run.experimentId() ) ) );
+        }
+        const QString experimentJson = experimentSelect.text( 0 );
+        QJsonDocument doc;
+        {
+            QJsonParseError parseError;
+            doc = QJsonDocument::fromJson( experimentJson.toUtf8(), &parseError );
+            if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
+                                                    QStringLiteral( "experiment %1 record cannot be parsed" )
+                                                        .arg( run.experimentId() ) ) );
+            }
+        }
+        QJsonObject root = doc.object();
+        QJsonArray runIds = root.value( QStringLiteral( "run_ids" ) ).toArray();
+        bool present = false;
+        for ( const QJsonValue &v : runIds )
+        {
+            if ( v.toString() == run.runId() )
+            {
+                present = true;
+                break;
+            }
+        }
+        if ( !present )
+        {
+            runIds.append( run.runId() );
+            root.insert( QStringLiteral( "run_ids" ), runIds );
+            Stmt experimentUpdate( db, QStringLiteral(
+                "UPDATE experiments SET json=? WHERE id=?" ) );
+            if ( !experimentUpdate )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                    experimentUpdate.error( db ) ) );
+            }
+            experimentUpdate.bind( 1,
+                                   QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) ) );
+            experimentUpdate.bind( 2, run.experimentId() );
+            if ( !experimentUpdate.step() )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                                    experimentUpdate.error( db ) ) );
+            }
         }
     }
     return ResultT::success();
@@ -957,12 +1088,12 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
 qint64 ExperimentStore::runCount() const
 {
     if ( !m_impl )
-        return 0;
+        return -1; // closed store: fail closed (was 0, which looked empty)
     QMutexLocker lock( &m_impl->mutex );
     Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM experiment_runs" ) );
     if ( count && count.stepRow() )
         return count.i64( 0 );
-    return 0;
+    return -1; // query error: fail closed, not "empty"
 }
 
 QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
@@ -978,33 +1109,58 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
         return ids;
     limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
     QMutexLocker lock( &m_impl->mutex );
+    // One deferred read transaction so OFFSET pages share a single snapshot
+    // under concurrent writers (skip/dup risk with per-page implicit snapshots).
+    m_impl->exec( "BEGIN", nullptr );
     constexpr qint64 kPage = 200;
-    qint64 offset = 0;
+    qint64 lastCreatedMs = 0;
+    QString lastRunId;
+    bool pastFirstPage = false;
+    // Keyset pagination after the first page: (created_ms, run_id) avoids
+    // OFFSET drift entirely under concurrent writers.
     while ( qint64( ids.size() ) < limit )
     {
-        Stmt stmt( m_impl->db, QStringLiteral(
-            "SELECT run_id, json FROM experiment_runs ORDER BY created_ms, run_id"
-            " LIMIT ? OFFSET ?" ) );
+        Stmt stmt( m_impl->db,
+                   !pastFirstPage
+                       ? QStringLiteral(
+                             "SELECT run_id, json, created_ms FROM experiment_runs"
+                             " ORDER BY created_ms, run_id LIMIT ?" )
+                       : QStringLiteral(
+                             "SELECT run_id, json, created_ms FROM experiment_runs"
+                             " WHERE (created_ms > ?) OR (created_ms = ? AND run_id > ?)"
+                             " ORDER BY created_ms, run_id LIMIT ?" ) );
         if ( !stmt )
             break;
-        stmt.bind( 1, kPage );
-        stmt.bind( 2, offset );
+        if ( !pastFirstPage )
+        {
+            stmt.bind( 1, kPage );
+        }
+        else
+        {
+            stmt.bind( 1, lastCreatedMs );
+            stmt.bind( 2, lastCreatedMs );
+            stmt.bind( 3, lastRunId );
+            stmt.bind( 4, kPage );
+        }
         bool pageEmpty = true;
+        int rows = 0;
         while ( stmt.stepRow() )
         {
             pageEmpty = false;
-            // Structured member read (#1056): a raw substring needle never
-            // matches refs whose characters JSON escaping rewrites (quotes,
-            // backslashes, control chars), so one execution could silently
-            // record duplicate runs. Parse each row and compare the member.
+            ++rows;
+            lastRunId = stmt.text( 0 );
+            lastCreatedMs = stmt.i64( 2 );
             const QJsonObject row = textToJson( stmt.text( 1 ) );
             if ( row.value( QStringLiteral( "execution_ref" ) ).toString() == executionRef )
-                ids.append( stmt.text( 0 ) );
+                ids.append( lastRunId );
+            if ( qint64( ids.size() ) >= limit )
+                break;
         }
-        if ( pageEmpty )
+        if ( pageEmpty || rows < kPage )
             break;
-        offset += kPage;
+        pastFirstPage = true;
     }
+    m_impl->exec( "COMMIT", nullptr );
     return ids;
 }
 
@@ -1044,6 +1200,7 @@ QJsonObject prunePolicyToJson( const ExperimentStore::RunPrunePolicy &policy )
         ? policy.olderThan.toString( Qt::ISODateWithMs ) : QString() );
     json.insert( QStringLiteral( "keep_promoted" ), policy.keepPromoted );
     json.insert( QStringLiteral( "keep_with_run_lineage" ), policy.keepWithRunLineage );
+    json.insert( QStringLiteral( "keep_with_benchmark_citation" ), policy.keepWithBenchmarkCitation );
     return json;
 }
 
@@ -1068,6 +1225,22 @@ bool runHasLineageLocked( sqlite3 *db, const QString &runId )
     return stmt.stepRow();
 }
 
+/// True when an immutable benchmark_results JSON cites @p runId via
+/// experiment_run_id (#1173). Fail-conservative on unreadable state.
+bool runCitedByBenchmarkLocked( sqlite3 *db, const QString &runId )
+{
+    if ( runId.isEmpty() )
+        return false;
+    // Match the exact JSON string value produced by BenchmarkResult::toJson.
+    Stmt stmt( db, QStringLiteral(
+        "SELECT 1 FROM benchmark_results WHERE json LIKE ? LIMIT 1" ) );
+    if ( !stmt )
+        return true;
+    const QString needle = QLatin1String( "%\"experiment_run_id\":\"" ) + runId + QLatin1String( "\"%" );
+    stmt.bind( 1, needle );
+    return stmt.stepRow();
+}
+
 /// Whether the CURRENT store state makes @p runId removable under @p policy.
 /// Shared verbatim by plan and execute — that shared derivation IS the
 /// dry-run/execute equivalence contract (Oracle O4).
@@ -1078,6 +1251,8 @@ bool runPruneEligibleLocked( sqlite3 *db, const QString &runId,
     if ( policy.keepPromoted && runPromotedLocked( db, runId ) )
         return false;
     if ( policy.keepWithRunLineage && runHasLineageLocked( db, runId ) )
+        return false;
+    if ( policy.keepWithBenchmarkCitation && runCitedByBenchmarkLocked( db, runId ) )
         return false;
     if ( policy.olderThan.isValid() &&
          createdMs >= policy.olderThan.toMSecsSinceEpoch() )
@@ -1662,35 +1837,48 @@ sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionR
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.promotion_invalid" ),
                                             QStringLiteral( "promotion record requires promotion_id + run_id" ) ) );
 
-    // Conflict rule: same promotion id with DIFFERENT evidence is a refusal —
-    // silently rewriting promotion evidence would corrupt the approval trail.
+    // #1173: conflict check + insert inside BEGIN IMMEDIATE. The previous
+    // SELECT-then-INSERT OR REPLACE could silently REPLACE concurrent approval
+    // evidence from another connection — exactly what promotion_conflict exists
+    // to prevent. Idempotent same-content saves still succeed without rewriting.
+    if ( !m_impl->begin( nullptr ) )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt existing( m_impl->db, QStringLiteral(
             "SELECT json FROM model_promotions WHERE promotion_id=?" ) );
-        if ( existing )
+        if ( !existing )
         {
-            existing.bind( 1, record.promotionId );
-            if ( existing.stepRow() )
-            {
-                const auto parsed = PromotionRecord::fromJson(
-                    QJsonDocument::fromJson( existing.text( 0 ).toUtf8() ).object() );
-                if ( !parsed || !( parsed.value() == record ) )
-                    return ResultT::failure( storeDiag(
-                        QStringLiteral( "experiment.promotion_conflict" ),
-                        QStringLiteral( "promotion %1 already exists with different content" )
-                            .arg( record.promotionId ) ) );
-            }
+            m_impl->rollback();
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                existing.error( m_impl->db ) ) );
+        }
+        existing.bind( 1, record.promotionId );
+        if ( existing.stepRow() )
+        {
+            const auto parsed = PromotionRecord::fromJson(
+                QJsonDocument::fromJson( existing.text( 0 ).toUtf8() ).object() );
+            m_impl->rollback();
+            if ( parsed && parsed.value() == record )
+                return ResultT::success();
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.promotion_conflict" ),
+                QStringLiteral( "promotion %1 already exists with different content" )
+                    .arg( record.promotionId ) ) );
         }
     }
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     Stmt insert( m_impl->db, QStringLiteral(
-        "INSERT OR REPLACE INTO model_promotions(promotion_id, run_id, model_id,"
+        "INSERT INTO model_promotions(promotion_id, run_id, model_id,"
         " model_digest, dataset_version_id, verdict, decision, decided_by,"
         " decided_at_ms, created_ms, json) VALUES(?,?,?,?,?,?,?,?,?,?,?)" ) );
     if ( !insert )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
                                             insert.error( m_impl->db ) ) );
+    }
     insert.bind( 1, record.promotionId );
     insert.bind( 2, record.runId );
     insert.bind( 3, record.modelId );
@@ -1703,8 +1891,19 @@ sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionR
     insert.bind( 10, record.createdAtUtc.isValid() ? record.createdAtUtc.toMSecsSinceEpoch() : nowMs );
     insert.bind( 11, QString::fromUtf8( QJsonDocument( record.toJson() ).toJson() ) );
     if ( !insert.step() )
+    {
+        m_impl->rollback();
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.promotion_conflict" ),
+            QStringLiteral( "promotion %1 already exists with different content" )
+                .arg( record.promotionId ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
-                                            insert.error( m_impl->db ) ) );
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 

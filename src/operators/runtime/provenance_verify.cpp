@@ -32,6 +32,11 @@ int gridMismatchEvidence( const QString &productPath, const Json::Value &prov,
   const Json::Value &output = prov["output"];
   if ( !output.isObject() )
     return 0; // nothing recorded — nothing to contradict (truthful-empty 8.0 docs)
+  // #1186: ensemble detection VECTOR products record format "vector" with
+  // width/height 0 — never GDALOpen them as rasters (false GridMismatch).
+  if ( output.isMember( "format" ) && output["format"].isString()
+       && output["format"].asString() == "vector" )
+    return 0;
   // Wrong-typed fields are MalformedSidecar evidence, never exceptions
   // (the "never throws" contract). Tri-state: -1 = wrong type, 0 = absent,
   // 1 = a real integer was read into *value.

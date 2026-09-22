@@ -1182,6 +1182,49 @@ TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][w
     CHECK( threwMissing );
 }
 
+TEST_CASE( "McpServer run_workflow survives a deeply-nested pipeline depth bomb (#1154)",
+           "[agent][mcp][workflow][robustness]" )
+{
+    registerNoopOperator();
+    TestMcpServer server;
+
+    // ~1000 nested arrays: past jsoncpp's useful recursion bound. The pre-fix
+    // default reader crashed the process (SIGSEGV on MSVC at depth ~866,
+    // escaping Json::LogicError -> terminate on GCC); the hardened reader
+    // must refuse it as a plain malformed pipeline and leave the server alive
+    // for the next request.
+    QString depthBomb;
+    for ( int i = 0; i < 1000; ++i )
+        depthBomb += QLatin1Char( '[' );
+    depthBomb += QStringLiteral( "1" );
+    for ( int i = 0; i < 1000; ++i )
+        depthBomb += QLatin1Char( ']' );
+
+    QVariantMap args;
+    args[QStringLiteral( "pipeline" )] = depthBomb;
+    bool threw = false;
+    try
+    {
+        server.testRunWorkflow( args );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "pipeline rejected" ) ) );
+    }
+    REQUIRE( threw );
+
+    // The server is still alive: a well-formed pipeline is accepted.
+    QVariantMap okArgs;
+    okArgs[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+        "id": "after_depth_bomb",
+        "name": "noop",
+        "steps": [{"id": "s1", "title": "only", "operator": "rs:mcp_noop", "params": {}}]
+    })" );
+    const QVariantMap submitted = server.testRunWorkflow( okArgs );
+    CHECK( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+}
+
 TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every execution entry point", "[agent][mcp][sandbox]" )
 {
     registerNoopOperator();

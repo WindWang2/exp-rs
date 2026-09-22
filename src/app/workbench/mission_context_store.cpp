@@ -48,7 +48,10 @@ bool saveMissionContextToSidecar( const QString &projectFilePath, const MissionC
             *error = QStringLiteral( "cannot open sidecar for write: %1" ).arg( path );
         return false;
     }
-    const QByteArray bytes = QJsonDocument( doc ).toJson( QJsonDocument::Indented );
+    // #1170: compact — the authority is rewritten on every mission:advance
+    // and every project save; Indented doubled the bytes rotated through
+    // last-good for no reader benefit.
+    const QByteArray bytes = QJsonDocument( doc ).toJson( QJsonDocument::Compact );
     if ( file.write( bytes ) != bytes.size() )
     {
         if ( error )

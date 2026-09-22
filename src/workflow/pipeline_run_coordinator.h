@@ -47,6 +47,7 @@
 #include <QString>
 #include <QThreadPool>
 
+#include <atomic>
 #include <functional>
 
 #include "workflow/workflow_ir_v2.h"
@@ -119,9 +120,12 @@ struct NodeExecutionResult
 
 /// Inputs: IR2 target port name -> artifact path (D-W6; prefer explicit port
 /// names over source-node-id keys). The run directory is where the executor
-/// writes artifacts.
+/// writes artifacts. @p cancelRequested is the run's cooperative
+/// cancellation flag — the executor wires it into RSOperatorContext so a
+/// requestCancel() aborts a long-running registry operator mid-run (#1152).
 using NodeExecutor = std::function<NodeExecutionResult(
-    const NodeFact &node, const QHash<QString, QString> &inputArtifacts, const QString &runDirectory )>;
+    const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
+    const QString &runDirectory, const std::atomic<bool> *cancelRequested )>;
 
 /// Deterministic synthetic executor (D17 hermetic tests): artifact bytes are
 /// a function of the node signature. Bind it explicitly via setExecutor —

@@ -79,19 +79,22 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
 
   // --- unknown top-level keys (schema: additionalProperties: false) --------
   // Version-strict: spec_version 2 fields in a v1 document are a semantic
-  // drift the author must opt into explicitly, so they are rejected there.
+  // drift the author must opt into explicitly, so they are rejected there;
+  // the same discipline keeps the v3 runtime block (ADR 0174) out of v1/v2.
   static const QStringList v2RootKeys = {
     QStringLiteral( "objective_zh" ), QStringLiteral( "glossary" ),
     QStringLiteral( "expected_artifacts" ), QStringLiteral( "param_ranges" ),
     QStringLiteral( "grading_rules" ), QStringLiteral( "principles" ),
     QStringLiteral( "prerequisite_knowledge" )
   };
+  static const QStringList v3RootKeys = { QStringLiteral( "runtime" ) };
   QStringList allowedRootKeys = {
     QStringLiteral( "spec_version" ), QStringLiteral( "id" ), QStringLiteral( "title" ),
     QStringLiteral( "title_zh" ), QStringLiteral( "objective" ), QStringLiteral( "prerequisites" ),
     QStringLiteral( "steps" ), QStringLiteral( "grading_ref" ), QStringLiteral( "thinking_questions" )
   };
   allowedRootKeys += v2RootKeys;
+  allowedRootKeys += v3RootKeys;
   for ( const auto &key : root.getMemberNames() )
   {
     const QString name = stdToQString( key );
@@ -108,11 +111,12 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     || ( specVersion.isDouble() && specVersion.asDouble() == std::floor( specVersion.asDouble() ) );
   if ( !integral )
     return fail( QStringLiteral( "spec_version must be an integer" ) );
-  // LabSpec 2 is a strict superset of v1 (lab platform 12.0): the loader
-  // accepts both, v2-only fields are validated below when the version is 2.
+  // LabSpec 2 is a strict superset of v1 (lab platform 12.0) and LabSpec 3 a
+  // strict superset of 2 (ADR 0174): the loader accepts all three; newer-
+  // generation fields are validated below when the version allows them.
   const int contractVersion = specVersion.asInt();
-  if ( contractVersion != 1 && contractVersion != 2 )
-    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1 or 2)" )
+  if ( contractVersion != 1 && contractVersion != 2 && contractVersion != 3 )
+    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1, 2 or 3)" )
                    .arg( contractVersion ) );
   if ( contractVersion == 1 )
   {
@@ -120,6 +124,14 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     {
       if ( root.isMember( key.toStdString() ) )
         return fail( QStringLiteral( "top-level key '%1' requires spec_version 2" ).arg( key ) );
+    }
+  }
+  if ( contractVersion < 3 )
+  {
+    for ( const auto &key : v3RootKeys )
+    {
+      if ( root.isMember( key.toStdString() ) )
+        return fail( QStringLiteral( "top-level key '%1' requires spec_version 3" ).arg( key ) );
     }
   }
 
@@ -348,13 +360,13 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
                          .arg( stdToQString( operatorKey ) ), 0, labId );
         const Json::Value &operatorRanges = ranges[ operatorKey ];
         if ( !operatorRanges.isObject() )
-          return fail( QStringLiteral( "param_ranges[%1] must be an object" ).arg( operatorKey ), 0, labId );
+          return fail( QStringLiteral( "param_ranges[%1] must be an object" ).arg( stdToQString( operatorKey ) ), 0, labId );
         for ( const auto &paramKey : operatorRanges.getMemberNames() )
         {
           const Json::Value &range = operatorRanges[ paramKey ];
           if ( !range.isObject() )
             return fail( QStringLiteral( "param_ranges[%1][%2] must be an object" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           for ( const auto &key : range.getMemberNames() )
           {
             if ( !rangeKeys.contains( stdToQString( key ) ) )
@@ -365,23 +377,23 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
           const bool hasValues = range.isMember( "values" );
           if ( !hasMin && !hasMax && !hasValues )
             return fail( QStringLiteral( "param_ranges[%1][%2] needs min, max or values" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMin && !range[ "min" ].isNumeric() )
             return fail( QStringLiteral( "param_ranges[%1][%2].min must be a number" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMax && !range[ "max" ].isNumeric() )
             return fail( QStringLiteral( "param_ranges[%1][%2].max must be a number" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasMin && hasMax && range[ "min" ].asDouble() > range[ "max" ].asDouble() )
             return fail( QStringLiteral( "param_ranges[%1][%2]: min exceeds max" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( hasValues
                && ( !range[ "values" ].isArray() || range[ "values" ].empty() ) )
             return fail( QStringLiteral( "param_ranges[%1][%2].values must be a non-empty array" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
           if ( range.isMember( "note_zh" ) && !isNonEmptyString( range[ "note_zh" ] ) )
             return fail( QStringLiteral( "param_ranges[%1][%2].note_zh must be a non-empty string" )
-                           .arg( operatorKey, paramKey ), 0, labId );
+                           .arg( stdToQString( operatorKey ), stdToQString( paramKey ) ), 0, labId );
         }
       }
     }
@@ -391,6 +403,14 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
          && !isNonEmptyString( root[ "grading_rules" ] ) )
       return fail( QStringLiteral( "grading_rules must be a non-empty string" ), 0, labId );
   }
+
+  // --- LabSpec 3 runtime block (shallow here) ------------------------------
+  // The loader only refuses a non-object runtime; the deep typed validation
+  // (stages/checkpoints/questions/hints/reproducibility) is owned by
+  // sicnu_lab_runtime (src/lab) and enforced by tests/test_lab_runtime plus
+  // the test_labspec v3 drift guard — one deep validator, no parallel truth.
+  if ( contractVersion == 3 && !root[ "runtime" ].isObject() )
+    return fail( QStringLiteral( "runtime must be an object" ), 0, labId );
 
   // --- steps ---------------------------------------------------------------
   if ( !root.isMember( "steps" ) || !root[ "steps" ].isArray() || root[ "steps" ].empty() )

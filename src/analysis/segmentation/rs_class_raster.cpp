@@ -14,6 +14,8 @@
 
 #include <algorithm>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace
 {
 
@@ -54,51 +56,6 @@ void removeShapefileWithSidecars( const QString &shpPath )
     }
 }
 
-bool renameShapefileWithSidecars( const QString &tmpPath, const QString &finalPath )
-{
-    // Rename main dataset
-    if ( !QFile::rename( tmpPath, finalPath ) )
-        return false;
-    const QFileInfo tmpFi( tmpPath );
-    const QFileInfo finalFi( finalPath );
-    const QStringList exts{ QStringLiteral( ".dbf" ), QStringLiteral( ".shx" ),
-                            QStringLiteral( ".prj" ), QStringLiteral( ".cpg" ),
-                            QStringLiteral( ".qpj" ) };
-    for ( const QString &ext : exts )
-    {
-        const QString tmpSide = tmpPath + ext;
-        if ( !QFile::exists( tmpSide ) )
-            continue;
-        const QString finalSide = finalPath + ext;
-        // Also try dir/base variant for final path consistency
-        QFile::remove( finalSide );
-        // If final side exists via dir/base naming, remove it too
-        const QString finalAlt = finalFi.absolutePath() + QLatin1Char( '/' )
-                                 + finalFi.completeBaseName() + ext;
-        if ( finalAlt != finalSide )
-            QFile::remove( finalAlt );
-        if ( !QFile::rename( tmpSide, finalSide ) )
-        {
-            // Rollback already-renamed main file is caller responsibility
-            return false;
-        }
-    }
-    // Clean up any stray dir/base sidecars left from normal naming
-    for ( const QString &ext : exts )
-    {
-        const QString tmpAlt = tmpFi.absolutePath() + QLatin1Char( '/' )
-                               + tmpFi.completeBaseName() + ext;
-        if ( QFile::exists( tmpAlt ) )
-        {
-            const QString finalSide = finalPath + ext;
-            if ( !QFile::exists( finalSide ) )
-                QFile::rename( tmpAlt, finalSide );
-            else
-                QFile::remove( tmpAlt );
-        }
-    }
-    return true;
-}
 
 } // namespace
 
@@ -310,11 +267,18 @@ RsClassRasterResult RsClassRaster::paint(
 
     GDALClose( dstDs );
 
-    QFile::remove( outputPath );
-    if ( !QFile::rename( tempPath, outputPath ) )
+    // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW on Windows) —
+    // never delete-then-rename (that strips an unlocked previous output when
+    // the target is locked / QFile::rename refuses the replace).
+    try
+    {
+        sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), outputPath.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
     {
         removeIncompleteOutput( tempPath );
-        result.errorMessage = QStringLiteral( "Cannot finalize output: %1" ).arg( outputPath );
+        result.errorMessage = QStringLiteral( "Cannot finalize output: %1 (%2)" )
+                                .arg( outputPath, QString::fromUtf8( ex.what() ) );
         return result;
     }
 
@@ -413,9 +377,12 @@ RsClassRasterResult RsClassRaster::polygonize(
         }
     }
 
-    const QString tempVectorPath = outputVectorPath
-                                   + QStringLiteral( ".tmp~%1" )
-                                         .arg( reinterpret_cast<quintptr>( &outputVectorPath ) );
+    // Preserve extension so OGR treats the stage as a normal dataset and
+    // sidecars land at stem.tmp~.dbf (matches atomic_fs::sidecarsFor).
+    const QFileInfo outVecFi( outputVectorPath );
+    const QString tempVectorPath = outVecFi.absolutePath() + QLatin1Char( '/' )
+                                   + outVecFi.completeBaseName()
+                                   + QStringLiteral( ".tmp~." ) + outVecFi.suffix();
 
     GDALDatasetH vecDs = GDALCreate( drv, tempVectorPath.toUtf8().constData(),
                                      0, 0, 0, GDT_Unknown, nullptr );
@@ -471,15 +438,18 @@ RsClassRasterResult RsClassRaster::polygonize(
         return result;
     }
 
-    // Atomically publish temp dataset over the final path (preserves previous
-    // result on failure, cleans orphan sidecars).
-    removeShapefileWithSidecars( outputVectorPath );
-    if ( !renameShapefileWithSidecars( tempVectorPath, outputVectorPath ) )
+    // #1174: sidecars-first / main-last with .bak rollback. Do NOT delete the
+    // previous output first — that destroyed the last good group on failure.
+    try
     {
-        // Fallback: at least try to remove incomplete temp sidecars
+        sicnu::geo::atomic_fs::publishStagedGroup( tempVectorPath.toStdString(),
+                                                   outputVectorPath.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
+    {
         removeShapefileWithSidecars( tempVectorPath );
-        result.errorMessage = QStringLiteral( "polygonize: failed to finalize output %1" )
-                                .arg( outputVectorPath );
+        result.errorMessage = QStringLiteral( "polygonize: failed to finalize output %1 (%2)" )
+                                .arg( outputVectorPath, QString::fromUtf8( ex.what() ) );
         return result;
     }
 

@@ -2605,9 +2605,11 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
     // set must reproduce it, so a cursor replayed under different filters is
     // refused instead of resuming from a misinterpreted tuple. Digested so the
     // cursor stays short regardless of filter count.
-    QString echoSource = QStringLiteral( "gov1|%1|%2|%3" )
+    // #1186: bind the cursor to THIS store path so a replay against another
+    // workspace with identical filters cannot silently continue.
+    QString echoSource = QStringLiteral( "gov1|%1|%2|%3|%4" )
                              .arg( static_cast<int>( query.set ) )
-                             .arg( query.sortBy, whereSql );
+                             .arg( query.sortBy, whereSql, m_storePath );
     for ( const QString &bind : textBinds )
         echoSource += QChar( 0x1f ) + bind;
     for ( const qint64 bind : intBinds )

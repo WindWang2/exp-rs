@@ -162,8 +162,9 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   // Platform 10.0 task INTENT gate applies to ensembles too: a task adapter
   // carries a canonical EO task; the ensemble manifest's task must agree
   // before any member runs (checked BEFORE the route so the ensemble path
-  // cannot bypass it).
-  if ( !request.requiredEoTask.empty() && !model.ensemble.declared
+  // cannot bypass it). #1186: the prior `!ensemble.declared` guard contradicted
+  // the comment and let classify-vs-segmentation mismatches through.
+  if ( !request.requiredEoTask.empty()
        && sicnu::operators::canonicalEoTask( model.task ) != request.requiredEoTask )
     throw RSOperatorError(
       ErrorCode::InvalidInputData,

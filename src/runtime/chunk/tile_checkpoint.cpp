@@ -1,5 +1,6 @@
 // tile_checkpoint.cpp — see tile_checkpoint.h.
 #include "tile_checkpoint.h"
+#include "fsync_compat.h"
 
 #include <cstddef>
 #include <atomic>
@@ -63,18 +64,9 @@ std::uint64_t payloadDigestOf( const TileCheckpoint &checkpoint )
 
 void fsyncPath( const std::string &path, bool directory )
 {
-#if !defined( _WIN32 )
-    const int flags = directory ? ( O_RDONLY | O_DIRECTORY ) : O_RDONLY;
-    const int fd = ::open( path.c_str(), flags );
-    if ( fd >= 0 )
-    {
-        ::fsync( fd );
-        ::close( fd );
-    }
-#else
-    (void)path;
-    (void)directory;
-#endif
+    // Fail-closed for files: a checkpoint that did not leave the Windows
+    // cache must not claim durability (#1228 / #1186).
+    fsyncPathCompat( path, directory );
 }
 } // namespace
 
@@ -119,7 +111,15 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
             return false;
         }
     }
-    fsyncPath( tmp, /*directory=*/false );
+    try
+    {
+        fsyncPath( tmp, /*directory=*/false );
+    }
+    catch ( const std::exception & )
+    {
+        std::remove( tmp.c_str() );
+        return false; // fail-closed: undurable checkpoint must not publish
+    }
     std::error_code ec;
     std::filesystem::rename( tmp, path, ec );
     if ( ec )
@@ -129,7 +129,16 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
         return false;
     }
     if ( auto dir = std::filesystem::path( path ).parent_path(); !dir.empty() )
-        fsyncPath( dir.string(), /*directory=*/true );
+    {
+        try
+        {
+            fsyncPath( dir.string(), /*directory=*/true );
+        }
+        catch ( const std::exception & )
+        {
+            // Directory fsync is best-effort across volumes.
+        }
+    }
     return true;
 }
 

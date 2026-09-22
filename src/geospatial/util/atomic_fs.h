@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sicnu::geo::atomic_fs
@@ -50,6 +51,13 @@ void fsyncFile( const std::string &path );
 /// back (staged file is left for `discardStaged` by the caller).
 void publishStagedFile( const std::string &stagedPath, const std::string &targetPath );
 
+/// Best-effort rename that replaces an existing destination.
+/// Windows: MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED).
+/// POSIX: rename(2). Returns false on any failure (locked source/target, etc.).
+/// Prefer publishStagedFile for publication paths that must fail closed with
+/// GeoError — this helper is for GC / quarantine / soft paths.
+bool renameReplaceQuiet( const std::string &from, const std::string &to );
+
 /// Removes a staged/stray file; missing files are not an error. Returns false
 /// when the file exists but could not be removed (locked).
 bool removeFileQuiet( const std::string &path );
@@ -63,6 +71,14 @@ void discardStaged( const std::string &stagedMainPath );
 /// Existing targets are replaced. On failure, already-published targets are
 /// restored/removed per the backup set and GeoError carries the failed name.
 void publishStagedGroup( const std::string &stagedMainPath, const std::string &targetMainPath );
+
+/// Publishes an ordered list of (staged → target) pairs. Callers put dependents
+/// FIRST and the completeness-marker (main) LAST — same contract as
+/// publishStagedGroup. Existing targets are moved to ".bak" before replacement;
+/// on failure already-published members are removed and backups restored.
+/// Empty `members` is a no-op. Missing staged files are skipped (except that
+/// an empty list after filtering is still success).
+void publishStagedMembers( const std::vector<std::pair<std::string, std::string>> &members );
 
 /// Runs writer(stagedPath), then fsync + publish. On any exception the staged
 /// file is discarded and the exception rethrown — target stays untouched.

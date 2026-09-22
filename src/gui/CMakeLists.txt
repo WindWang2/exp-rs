@@ -1867,6 +1867,9 @@ find_package(${QT_VERSION_BASE} COMPONENTS Multimedia MultimediaWidgets Qml Quic
 set_property(GLOBAL PROPERTY QGIS_GUI_HDRS ${QGIS_GUI_HDRS})
 
 if(ENABLE_MODELTEST)
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/tests/qt_modeltest")
+    message(FATAL_ERROR "ENABLE_MODELTEST requires tests/qt_modeltest (not present in this tree)")
+  endif()
   include_directories(../../tests/qt_modeltest)
 endif()
 

@@ -115,5 +115,30 @@
     "family": "io",
     "extends": "family:io",
     "intents": ["preprocess"]
-  }
+  },
+{
+  "id": "io:subdatasets",
+  "family": "io",
+  "side_effects": false,
+  "artifacts": { "subdatasets": {"kind": "json"} },
+  "limitations": [
+    "Subdataset enumeration is bounded and redacted; select one subdataset explicitly for full metadata projection"
+  ]
+},
+{
+  "id": "io:metadata_patch",
+  "family": "io",
+  "side_effects": true,
+  "verification": { "checks": ["provenance"] },
+  "limitations": [
+    "Whitelist-validated write-back only; the update-capability gate refuses datasets finalized read-only"
+  ]
+},
+{
+  "id": "io:verify_dataset",
+  "family": "io",
+  "side_effects": false,
+  "verification": { "checks": ["provenance", "dimensions"] },
+  "limitations": ["Fails closed when the finalize manifest is absent unless allowMissingManifest is set"]
+}
 ]

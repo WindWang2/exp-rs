@@ -3,7 +3,7 @@
   "lab_id": "hyperspectral_analysis",
   "pack_version": "1.0.0",
   "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
-  "declared_offline_bytes": 962,
+  "declared_offline_bytes": 935,
   "inputs": [
     {
       "path": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
@@ -23,8 +23,8 @@
       "path": "data/labs/spectral-library/lab10_sicnu_library.json",
       "role": "aux",
       "provenance": "committed-fixture",
-      "sha256": "e05cd7aaea68f76225fdd6bc0c06057d1c645764e90224b733f1768266908e07",
-      "bytes": 962,
+      "sha256": "ed3d32cb84085080c5886d77f1aacc84525b2780d46466dd58e58de468f54e67",
+      "bytes": 935,
       "sensor_truth": "SICNU spectral library (ADR 0081) — class endmembers"
     }
   ]

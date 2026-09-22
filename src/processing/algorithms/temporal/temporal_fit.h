@@ -87,14 +87,16 @@ struct SeasonalMetrics
   /// between the bracketing samples. NaN when the crossing is not sampled —
   /// same undefined-marker convention as the rate fields (unlike the legacy
   /// -1 sos/pos/eos sentinel) so rasters can write it verbatim into a
-  /// NaN-NoData band. Year-boundary brackets interpolate modulo 365.
+  /// NaN-NoData band. Year-boundary brackets interpolate modulo 365 (366 when
+  /// either bracket sample is day 366).
   double greenUpMidDoy = std::numeric_limits<double>::quiet_NaN();
   double senescenceMidDoy = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
 };
 
 /// Threshold-fraction phenology on one season window of a series:
-/// SOS/EOS = first/last crossing of base + fraction·amplitude. @a tDays are
+/// SOS/EOS = interpolated rising/falling crossings of base + fraction·amplitude
+/// (same semantics as greenUpMidDoy / senescenceMidDoy). @a tDays are
 /// day offsets (season-agnostic); @a doyOf gives the day-of-year per sample
 /// (for season extraction + metric reporting). @a crossingFraction in (0,1].
 SeasonalMetrics phenologyThreshold( const std::vector<float> &y,

@@ -1,0 +1,57 @@
+{
+  "allowed_tools": [
+    "map:export_geotiff",
+    "harness:verify"
+  ],
+  "case_id": "map/publisher-transient",
+  "description": "Map delivery under a transient publisher failure",
+  "expected_evidence": [
+    {
+      "id": "delivery",
+      "kind": "map",
+      "required_fields": [
+        "crs"
+      ]
+    }
+  ],
+  "faults": [
+    {
+      "at_step": 0,
+      "kind": "transient_failure"
+    }
+  ],
+  "goal": "Export the map; the publisher may throw one transient error.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "delivery",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "map_delivery",
+  "title": "Map delivery under a transient publisher failure"
+}

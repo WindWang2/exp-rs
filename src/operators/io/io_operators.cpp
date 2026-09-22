@@ -192,8 +192,8 @@ Json::Value IoTranslateOperator::run( const Json::Value &params, RSOperatorConte
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::translateRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
-                                   sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+      sicnu::geo::translateRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
+                                   sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
                                    options, &progress );
     context.reportProgressForced( 1.0, "translate complete" );
     return result.toJson();
@@ -263,8 +263,8 @@ Json::Value IoWarpOperator::run( const Json::Value &params, RSOperatorContext &c
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::warpRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
-                              sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+      sicnu::geo::warpRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
+                              sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
                               options, &progress );
     context.reportProgressForced( 1.0, "warp complete" );
     return result.toJson();
@@ -311,7 +311,7 @@ Json::Value IoReprojectOperator::metadata() const
 Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( input );
     if ( !meta.crs.valid && params::getString( params, "srcCrsOverride" ).empty() )
     {
@@ -331,7 +331,7 @@ Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorConte
     options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::warpRaster( input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+      sicnu::geo::warpRaster( input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
                               options, &progress );
     context.reportProgressForced( 1.0, "reproject complete" );
     return result.toJson();
@@ -374,7 +374,7 @@ Json::Value IoClipOperator::metadata() const
 Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     const std::string srcOverride = params::getString( params, "srcCrsOverride" );
     const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( input );
     if ( !meta.crs.valid && srcOverride.empty() )
@@ -426,7 +426,7 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result = sicnu::geo::warpRaster(
-      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw, options, &progress );
+      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(), options, &progress );
     context.reportProgressForced( 1.0, "clip complete" );
     return result.toJson();
   } );
@@ -471,8 +471,8 @@ Json::Value IoConvertFormatOperator::metadata() const
 Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
-    const std::string output = sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
+    const std::string output = sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath();
     const std::string driver = params::getString( params, "driver", "GTiff" );
     // Vector routing is capability-based (11.0): a vector driver that can
     // create datasets goes through the streaming reader→writer contract —
@@ -559,7 +559,7 @@ Json::Value IoBuildOverviewsOperator::run( const Json::Value &params, RSOperator
         levels.push_back( level );
     }
     ContextProgress progress( context );
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     const int built = sicnu::geo::buildOverviews( input, levels,
                                                   params::getString( params, "resampling", "GAUSS" ), &progress );
     Json::Value result;
@@ -637,7 +637,7 @@ Json::Value IoMakeCogOperator::run( const Json::Value &params, RSOperatorContext
     // overrides actually reach the COG driver (first-match-wins lookup makes
     // appended duplicates dead letters), and every key's provenance is
     // explained in the result.
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     sicnu::geo::io::CogProductionOptions options;
     options.preset = preset;
     options.blocksize = params::getInt( params, "blocksize", 0 );
@@ -653,7 +653,7 @@ Json::Value IoMakeCogOperator::run( const Json::Value &params, RSOperatorContext
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result = sicnu::geo::makeCogWithOptions(
-      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw, plan.creationOptions,
+      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(), plan.creationOptions,
       &progress );
 
     // Deterministic mode implies reproducibility demands; record the plan so
@@ -713,8 +713,8 @@ Json::Value IoVectorConvertOperator::run( const Json::Value &params, RSOperatorC
     }
     ContextProgress progress( context );
     Json::Value result = sicnu::geo::vectorConvert(
-      sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
-      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+      sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
       params::getString( params, "driver", "GPKG" ), params::getString( params, "layer" ),
       params::getString( params, "targetCrs" ), params::getString( params, "where" ), clipBounds, &progress );
     context.reportProgressForced( 1.0, "vector conversion complete" );
@@ -762,7 +762,7 @@ Json::Value IoInspectOperator::run( const Json::Value &params, RSOperatorContext
   return guarded( [ & ] {
     sicnu::geo::InspectOptions options;
     options.includeStatistics = params::getBool( params, "includeStatistics", false );
-    Json::Value result = sicnu::geo::runInspect( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw, options );
+    Json::Value result = sicnu::geo::runInspect( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(), options );
     context.reportProgressForced( 1.0, "inspect complete" );
     return result;
   } );
@@ -804,7 +804,7 @@ Json::Value IoDoctorOperator::run( const Json::Value &params, RSOperatorContext 
     sicnu::geo::InspectOptions options;
     options.includeStatistics = params::getBool( params, "includeStatistics", false );
     const sicnu::geo::DoctorReport report =
-      sicnu::geo::runDoctor( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw, options );
+      sicnu::geo::runDoctor( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(), options );
     context.reportProgressForced( 1.0, "doctor complete" );
     return report.toJson();
   } );
@@ -850,7 +850,7 @@ Json::Value IoSubdatasetsOperator::metadata() const
 Json::Value IoSubdatasetsOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     const int select = params::getInt( params, "select", 0 );
     if ( select == 0 )
     {
@@ -914,7 +914,7 @@ Json::Value IoMetadataPatchOperator::metadata() const
 Json::Value IoMetadataPatchOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = sicnu::geo::io::checkTargetPath( params::requireString( params, "input" ) ).raw;
+    const std::string input = sicnu::geo::io::checkTargetPath( params::requireString( params, "input" ) ).openPath();
     const Json::Value &patchParams = params["patches"];
     if ( !patchParams.isArray() || patchParams.empty() )
       throw RSOperatorError( ErrorCode::InvalidParameter, "patches must be a non-empty array" );
@@ -982,7 +982,7 @@ Json::Value IoVerifyDatasetOperator::run( const Json::Value &params, RSOperatorC
   return guarded( [ & ] {
     const bool allowMissing = params::getBool( params, "allowMissingManifest", false );
     const sicnu::geo::io::ManifestVerifyReport report =
-      sicnu::geo::io::verifyDataset( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
+      sicnu::geo::io::verifyDataset( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
                                      allowMissing );
     context.reportProgressForced( 1.0, "verification complete" );
     return report.toJson();

@@ -144,6 +144,13 @@ class RunEnvironment
     /// metrics embedded in export bundles go through this before write.
     static QJsonObject redactSecretKeys( const QJsonObject &json );
 
+    /// The denylist matchers behind filterSecrets, exposed so downstream
+    /// export boundaries (reproducibility capsules) can REFUSE documents
+    /// carrying secret-shaped names/values — fail closed, never silently
+    /// redact a divergence between what was recorded and what ships.
+    static bool nameLooksSecret( const QString &name );
+    static bool valueLooksSecret( const QString &value );
+
     QJsonObject toJson() const;
     static Result<RunEnvironment> fromJson( const QJsonObject &json );
 

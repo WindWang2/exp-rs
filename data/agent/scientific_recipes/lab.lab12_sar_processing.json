@@ -1,0 +1,349 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.83333333333333337,
+    "diagnostics" : 
+    [
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "empty_params",
+      "manual_step"
+    ],
+    "stages_human_only" : 1,
+    "stages_operator" : 5,
+    "stages_reflection" : 5,
+    "stages_total" : 11
+  },
+  "evidence" : 
+  {
+    "artifacts" : 
+    [
+      {
+        "kind" : "raster",
+        "note_zh" : "定标后水体 σ0 ≈ 0.006（-22 dB）、森林 ≈ 0.025（-16 dB），无负值；见判分意图 S1",
+        "path" : "data/labs/_tmp/out/lab9/sigma0_before.tif"
+      },
+      {
+        "kind" : "raster",
+        "note_zh" : "Lee 5×5 后水体 ENL ≥ 1.5×原始，均值保持 ±10%；见判分意图 S2",
+        "path" : "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif"
+      },
+      {
+        "kind" : "raster",
+        "note_zh" : "变化掩膜检出率 ≥ 65%，虚警率 ≤ 2%，changedPercent ≈ 2.4%（容差 [1,6]%）；见判分意图 S3",
+        "path" : "data/labs/_tmp/out/lab9/change_otsu.tif"
+      },
+      {
+        "kind" : "raster",
+        "note_zh" : "#803：全波段滤波后 band2 的 NoData 洞保持、band1 不被污染；见判分意图 S4",
+        "path" : "data/labs/_tmp/out/lab9/stack_lee_allbands.tif"
+      },
+      {
+        "kind" : "raster",
+        "note_zh" : "#785：地形校正输出含 γ0/有效掩膜（+本地入射角），缓丘有效像元 ≥ 98%；见判分意图 S5",
+        "path" : "data/labs/_tmp/out/lab9/gamma0_before.tif"
+      }
+    ],
+    "claims" : 
+    [
+      {
+        "artifact" : "data/labs/_tmp/out/lab9/sigma0_before.tif",
+        "claim" : "定标后水体 σ0 ≈ 0.006（-22 dB）、森林 ≈ 0.025（-16 dB），无负值",
+        "tolerance_note" : "见判分意图 S1"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+        "claim" : "Lee 5×5 后水体 ENL ≥ 1.5×原始，均值保持 ±10%",
+        "tolerance_note" : "见判分意图 S2"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab9/change_otsu.tif",
+        "claim" : "变化掩膜检出率 ≥ 65%，虚警率 ≤ 2%，changedPercent ≈ 2.4%（容差 [1,6]%）",
+        "tolerance_note" : "见判分意图 S3"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab9/stack_lee_allbands.tif",
+        "claim" : "#803：全波段滤波后 band2 的 NoData 洞保持、band1 不被污染",
+        "tolerance_note" : "见判分意图 S4"
+      },
+      {
+        "artifact" : "data/labs/_tmp/out/lab9/gamma0_before.tif",
+        "claim" : "#785：地形校正输出含 γ0/有效掩膜（+本地入射角），缓丘有效像元 ≥ 98%",
+        "tolerance_note" : "见判分意图 S5"
+      }
+    ],
+    "data_spec" : "data/labs/data-specs/lab9_sar_processing.json",
+    "grading_intent_ref" : "data/labs/grading/lab9_sar_processing.intent.json",
+    "grading_pipeline" : "data/labs/pipelines/lab9_sar_processing.pipeline.json",
+    "grading_rules" : "data/labs/grading/sar_processing.rules.json",
+    "pipeline_runner" : "QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab9_sar_processing.pipeline.json"
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "sar_processing",
+    "keywords_en" : [ "processing", "sar" ],
+    "keywords_zh" : 
+    [
+      "typed refusal",
+      "σ0 / γ0",
+      "同极化配对",
+      "实验9：SAR 相干斑抑制与变化检测",
+      "相干斑",
+      "等效视数"
+    ],
+    "modality" : "sar"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/labs/data-specs/lab9_sar_processing.json" ],
+    "required_operators" : 
+    [
+      "rs:sar_calibrate",
+      "rs:sar_change",
+      "rs:sar_speckle",
+      "rs:sar_terrain_correction"
+    ]
+  },
+  "recipe_id" : "lab.lab12_sar_processing",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "同极化 VV/VV 配对 DN 影像（2025-03-01 / 2025-04-15，256×256，4 视相干斑，A=100）+ 同网格 DEM + 双波段 NoData 演示栈 + 变化真值码图。规格由 D1 离线生成；本地验证用 scripts/gen_lab_fixtures.py sar",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/labs/data-specs/lab9_sar_processing.json"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "description_zh" : "对前/后时相 DN 影像用同一校准常数 A=100 定标到 σ0（linear power）。检查统计：水体区 ≈ -22 dB，森林区 ≈ -16 dB。强调两景必须同常数，否则幅度系统差会被当成变化。",
+      "headless_note" : "pipeline 步骤 cal_before / cal_after",
+      "id" : "s01_s1",
+      "index" : 0,
+      "kind" : "operator",
+      "operator_id" : "rs:sar_calibrate",
+      "params" : {},
+      "title" : "辐射定标"
+    },
+    {
+      "depends_on" : [ "s01_s1" ],
+      "description_zh" : "对两景 σ0 各做 Lee 5×5 滤波。评价：在水体均匀区计算 ENL，对比滤波前后（ENL 应提升 ≥ 1.5×）并检查均值保持（|Δ|≤10%）。",
+      "headless_note" : "pipeline 步骤 speckle_before / speckle_after",
+      "id" : "s02_s2",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:sar_speckle",
+      "params" : {},
+      "title" : "相干斑抑制"
+    },
+    {
+      "depends_on" : [ "s02_s2" ],
+      "description_zh" : "以滤波后两景为输入（同极化配对 + 严格配准是硬前置条件），linear power 域进入对数比，Otsu 自动阈值，输出 UInt8 变化掩膜。对照植入变化区计算检出率与虚警率。",
+      "headless_note" : "pipeline 步骤 change",
+      "id" : "s03_s3",
+      "index" : 2,
+      "kind" : "operator",
+      "operator_id" : "rs:sar_change",
+      "params" : {},
+      "title" : "变化检测"
+    },
+    {
+      "depends_on" : [ "s03_s3" ],
+      "description_zh" : "对双波段 DN 栈（band2 含 20×20 NoData 洞）执行 band=0 全波段 Lee 滤波。验证：band2 的洞保持 NoData，band1 全幅有效——修复前 band1 会被 band2 的 NoData 污染。",
+      "headless_note" : "pipeline 步骤 speckle_stack_allbands",
+      "id" : "s04_s4",
+      "index" : 3,
+      "kind" : "operator",
+      "operator_id" : "rs:sar_speckle",
+      "params" : {},
+      "title" : "多波段 NoData 验证（#803）"
+    },
+    {
+      "depends_on" : [ "s04_s4" ],
+      "description_zh" : "对前时相 σ0 + DEM 做地形校正：incidenceDeg=35、headingDeg=190、lookDirection=right（视线方位角 = 190+90 = 280°）、flagIncidence=true。检查输出含 γ0、有效掩膜与本地入射角波段；理解为什么'哪一侧视'写错会让山地 γ0 系统性偏差。",
+      "headless_note" : "pipeline 步骤 terrain_correction",
+      "id" : "s05_s5",
+      "index" : 4,
+      "kind" : "operator",
+      "operator_id" : "rs:sar_terrain_correction",
+      "params" : {},
+      "title" : "视角几何验证（#785）"
+    },
+    {
+      "boundary" : "manual",
+      "depends_on" : [ "s05_s5" ],
+      "description_zh" : "把变化掩膜叠加回影像，结合 dB 幅值解释变化方向（本实验为采伐迹地变亮：残余双次散射）。讨论：若跳过滤波直接做变化检测，Otsu 阈值会被斑噪声推向何处？",
+      "headless_note" : "无需算子，属于结果解读",
+      "human_only" : true,
+      "id" : "s06_s6",
+      "index" : 5,
+      "kind" : "human_only",
+      "reason" : "manual step — no operator or UI action bound",
+      "title" : "综合判读"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s06_s6" ],
+      "hint" : "相干叠加的统计本质 vs 探测器读出噪声",
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 6,
+      "kind" : "reflection",
+      "prompt" : "为什么 SAR 相干斑是乘性噪声而光学传感器噪声近似加性？这决定了滤波器设计（Lee 的线性模型）的什么假设？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "hint" : "可自行跑 rs:sar_speckle 对比；作物制图 vs 城市变化",
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 7,
+      "kind" : "reflection",
+      "prompt" : "把 kernelSize 从 5 改到 9，ENL 与边缘保真各怎么变？'压斑'与'保细节'的取舍在什么应用里偏向哪边？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "hint" : "幅度系统差 → 全图单侧偏移 → Otsu 阈值失效",
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 8,
+      "kind" : "reflection",
+      "prompt" : "若两景用了不同校准常数（A=100 与 A=80），对数比变化图会出现什么伪影？如何用直方图发现？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_3" ],
+      "hint" : "平地上错几何几乎无影响、山地 γ0 系统偏差且无报错——静默错误的危险",
+      "human_only" : true,
+      "id" : "reflection_4",
+      "index" : 9,
+      "kind" : "reflection",
+      "prompt" : "#785 修复为什么坚持'UI 不得自动填充 lookAzimuthDeg'？自动填充在什么地形下会造成无法察觉的错误？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_4" ],
+      "hint" : "两个缺陷都与'隐式语义'有关：域（线性/对数）与 NoData 归属",
+      "human_only" : true,
+      "id" : "reflection_5",
+      "index" : 10,
+      "kind" : "reflection",
+      "prompt" : "平台拒绝'declared-dB 输入 + 默认 linear_power 域'的组合（typed refusal）。类比 #803，为什么'宁可拒绝、不可猜测'在 SAR 链里特别重要？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "audience" : "遥感导论本科生（已完成实验1、4）",
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "duration_minutes" : 120,
+    "glossary_terms" : 
+    [
+      "相干斑",
+      "等效视数",
+      "σ0 / γ0",
+      "同极化配对",
+      "typed refusal"
+    ],
+    "kind" : "labspec_d3",
+    "lab_id" : "lab12_sar_processing",
+    "objective" : "Course lab 9 — SAR Processing. Structured teaching content (objectives, principles, glossary, expected artifacts, thinking questions) is carried in the LabSpec 2 fields merged from lab9_sar_processing.labspec.json.",
+    "objective_zh" : "主题：sar（受众：遥感导论本科生（已完成实验1、4），约 120 分钟）\n理解 SAR 相干斑的乘性噪声本质与等效视数（ENL）度量，掌握 Lee 滤波的自适应均值-方差估计原理\n掌握 SAR 辐射定标流程（DN → σ0），理解两景影像必须使用同一校准常数才能可比\n掌握 dB 对数比 + Otsu 自动阈值的双时相变化检测方法，能报告检出率与虚警率\n理解同极化配对与严格配准作为变化检测的前置条件\n通过 #785（视角几何）与 #803（多波段 NoData）两个已修复缺陷的复现实验，理解传感器几何与 NoData 语义对 SAR 处理链的正确性意义",
+    "operator_roles" : 
+    [
+      "rs:sar_calibrate — DN → σ0 辐射定标（linear power 域）",
+      "rs:sar_speckle — Lee 5×5 相干斑抑制；band=0 全波段模式验证 #803 逐波段 NoData",
+      "rs:sar_change — 双时相对数比 + Otsu 阈值 → UInt8 变化掩膜与统计",
+      "rs:sar_terrain_correction — 教学演示：视角几何（heading±look side）与本地入射角（#785）"
+    ],
+    "prerequisite_knowledge" : 
+    [
+      "lab1_image_enhancement（空间滤波概念）",
+      "lab4_change_detection（光学变化检测，作对照）"
+    ],
+    "principle_headings" : 
+    [
+      "相干斑：乘性噪声与统计模型",
+      "Lee 滤波：局部线性最小方差估计",
+      "辐射定标与 dB 对数比",
+      "视角几何与 NoData 语义：两个已修缺陷的教学意义"
+    ],
+    "source_fingerprint" : "b61d434e13cf85f9",
+    "source_path" : "data/labs/lab9_sar_processing.labspec.json",
+    "source_schema" : "sicnu.labspec.v1",
+    "spec_version" : 2,
+    "theme" : "sar",
+    "wrapper_path" : "data/labs/lab12_sar_processing.lab.json"
+  },
+  "title" : "实验9：SAR 相干斑抑制与变化检测",
+  "title_zh" : "实验9：SAR 相干斑抑制与变化检测",
+  "verifier_hooks" : 
+  [
+    {
+      "kind" : "lab_rules",
+      "ref" : "data/labs/grading/sar_processing.rules.json"
+    },
+    {
+      "kind" : "grading_pipeline",
+      "ref" : "data/labs/pipelines/lab9_sar_processing.pipeline.json"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab9/sigma0_before.tif",
+      "claim" : "定标后水体 σ0 ≈ 0.006（-22 dB）、森林 ≈ 0.025（-16 dB），无负值",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 S1"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab9/sigma0_before.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+      "claim" : "Lee 5×5 后水体 ENL ≥ 1.5×原始，均值保持 ±10%",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 S2"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab9/change_otsu.tif",
+      "claim" : "变化掩膜检出率 ≥ 65%，虚警率 ≤ 2%，changedPercent ≈ 2.4%（容差 [1,6]%）",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 S3"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab9/change_otsu.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab9/stack_lee_allbands.tif",
+      "claim" : "#803：全波段滤波后 band2 的 NoData 洞保持、band1 不被污染",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 S4"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab9/stack_lee_allbands.tif"
+    },
+    {
+      "artifact" : "data/labs/_tmp/out/lab9/gamma0_before.tif",
+      "claim" : "#785：地形校正输出含 γ0/有效掩膜（+本地入射角），缓丘有效像元 ≥ 98%",
+      "kind" : "expected_claim",
+      "tolerance_note" : "见判分意图 S5"
+    },
+    {
+      "kind" : "artifact_exists",
+      "target" : "data/labs/_tmp/out/lab9/gamma0_before.tif"
+    }
+  ]
+}

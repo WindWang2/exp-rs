@@ -1,5 +1,6 @@
 // resumable_tile_run.cpp — see resumable_tile_run.h for the resume laws R1-R6.
 #include "resumable_tile_run.h"
+#include "fsync_compat.h"
 
 #include "runtime/observability/execution_telemetry.h"
 #include "runtime/observability/fault_point.h"
@@ -177,6 +178,10 @@ void ResumableTileRun::appendCommit( std::uint64_t index )
     if ( !out )
         throw std::runtime_error( "resumable tile run: journal append failed on "
                                   + m_journalPath );
+    // Durability for the commit record itself (#1228): the journal must not
+    // claim a tile durable while its bytes sit only in the page cache.
+    out.close();
+    fsyncPathCompat( m_journalPath, /*directory=*/false );
 }
 
 void ResumableTileRun::saveCheckpoint( std::uint64_t committedCount ) const

@@ -706,6 +706,74 @@ TEST_CASE( "temporal_sen_trend: hand-derived Sen slope and Mann-Kendall p-value"
     REQUIRE( n[0] == Approx( 3 ) );
 }
 
+TEST_CASE( "temporal statistics honor gap-fill provenance (#1167)",
+           "[temporal][operators][provenance][issue1167]" )
+{
+    ensureApp();
+    Fixture fx;
+    // Eight days of a perfect ramp 1..8; a provenance channel marks HALF the
+    // samples as gap-fill interpolations (code 2). Without the channel the
+    // synthetic fills inflate n and tighten the inference; with it they are
+    // excluded from the statistics entirely.
+    const QVector<float> values = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    const QVector<float> provenanceCodes = { 1, 2, 1, 2, 1, 2, 1, 2 }; // 4 observed
+    for ( int i = 0; i < 8; ++i )
+    {
+        REQUIRE( writeTestScene( makeTestScene( fx.filePath( QStringLiteral( "pv%1.tif" ).arg( i ) ),
+                                                QStringLiteral( "2025-01-%1" ).arg( i + 1, 2, 10, QLatin1Char( '0' ) ),
+                                                { values[i] }, 1, 1 ) ) );
+        REQUIRE( writeTestScene( makeTestScene( fx.filePath( QStringLiteral( "pr%1.tif" ).arg( i ) ),
+                                                QStringLiteral( "2025-01-%1" ).arg( i + 1, 2, 10, QLatin1Char( '0' ) ),
+                                                { provenanceCodes[i] }, 1, 1 ) ) );
+    }
+
+    Json::Value scenes( Json::arrayValue );
+    Json::Value provenance( Json::arrayValue );
+    for ( int i = 0; i < 8; ++i )
+    {
+        scenes.append( fx.filePath( QStringLiteral( "pv%1.tif" ).arg( i ) ).toStdString() );
+        provenance.append( fx.filePath( QStringLiteral( "pr%1.tif" ).arg( i ) ).toStdString() );
+    }
+
+    // Run 1 (no provenance): the interpolated samples count as observations.
+    Json::Value plain( Json::objectValue );
+    plain["scenes"] = scenes;
+    plain["band"] = 1;
+    plain["alpha"] = 0.05;
+    plain["output"] = fx.filePath( QStringLiteral( "sen_plain.tif" ) ).toStdString();
+    runOp( "rs:temporal_sen_trend", plain );
+
+    // Run 2 (provenance): only the 4 observed samples enter.
+    Json::Value filtered( plain );
+    filtered["provenance"] = provenance;
+    filtered["output"] = fx.filePath( QStringLiteral( "sen_prov.tif" ) ).toStdString();
+    runOp( "rs:temporal_sen_trend", filtered );
+
+    const auto nPlain = readBand( fx.filePath( QStringLiteral( "sen_plain.tif" ) ), 5 );
+    const auto nProv = readBand( fx.filePath( QStringLiteral( "sen_prov.tif" ) ), 5 );
+    const auto pPlain = readBand( fx.filePath( QStringLiteral( "sen_plain.tif" ) ), 4 );
+    const auto pProv = readBand( fx.filePath( QStringLiteral( "sen_prov.tif" ) ), 4 );
+    REQUIRE( nPlain[0] == Approx( 8 ) );
+    REQUIRE( nProv[0] == Approx( 4 ) );
+    // The inference differs materially: 8 perfectly monotone samples vs 4.
+    REQUIRE( std::fabs( pPlain[0] - pProv[0] ) > 1e-6 );
+
+    // rs:temporal_trend consumes the channel the same way (regression n).
+    Json::Value trendPlain( Json::objectValue );
+    trendPlain["scenes"] = scenes;
+    trendPlain["band"] = 1;
+    trendPlain["output"] = fx.filePath( QStringLiteral( "trend_plain.tif" ) ).toStdString();
+    runOp( "rs:temporal_trend", trendPlain );
+    Json::Value trendProv( trendPlain );
+    trendProv["provenance"] = provenance;
+    trendProv["output"] = fx.filePath( QStringLiteral( "trend_prov.tif" ) ).toStdString();
+    runOp( "rs:temporal_trend", trendProv );
+    const auto rnPlain = readBand( fx.filePath( QStringLiteral( "trend_plain.tif" ) ), 4 );
+    const auto rnProv = readBand( fx.filePath( QStringLiteral( "trend_prov.tif" ) ), 4 );
+    REQUIRE( rnPlain[0] == Approx( 8 ) );
+    REQUIRE( rnProv[0] == Approx( 4 ) );
+}
+
 TEST_CASE( "temporal_sen_trend: too few valid observations yield NaN, not zero",
            "[temporal][operators][sen]" )
 {

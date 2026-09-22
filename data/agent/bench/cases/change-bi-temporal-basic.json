@@ -1,0 +1,65 @@
+{
+  "allowed_tools": [
+    "rs:co_register",
+    "rs:change_detect",
+    "harness:verify"
+  ],
+  "case_id": "change/bi-temporal-basic",
+  "description": "Bi-temporal change detection",
+  "expected_evidence": [
+    {
+      "id": "change-map",
+      "kind": "raster",
+      "path": "work://case/change.tif",
+      "required_fields": [
+        "change_score"
+      ]
+    }
+  ],
+  "goal": "Co-register two dates and deliver a change map.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "change-map",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-order",
+      "kind": "step_order",
+      "params": {
+        "steps": [
+          "rs:co_register",
+          "rs:change_detect"
+        ]
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 8000,
+    "max_tool_calls": 10
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "change",
+  "title": "Bi-temporal change detection"
+}

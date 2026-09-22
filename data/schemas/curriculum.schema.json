@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sicnu.curriculum/1",
+  "title": "SICNU Undergraduate Curriculum Manifest",
+  "description": "Teaching-organization layer over the lab contract chain (LabSpec / lab-registry / packs / grading). The manifest only REFERENCES labs, packs and capabilities — it never restates lab content. Authoring contract for RS14; the C++ loader (sicnu::agent::harness::CurriculumCatalog) is the behavioral authority and rejects unknown keys.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "title", "title_zh", "modules"],
+  "properties": {
+    "schema": { "const": "sicnu.curriculum/1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "title_zh": { "type": "string", "minLength": 1 },
+    "audience_zh": { "type": "string" },
+    "note_zh": { "type": "string" },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/module" }
+    },
+    "forward_references": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/forwardReference" }
+    }
+  },
+  "definitions": {
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "index", "title", "title_zh", "summary_zh", "learning_outcomes", "labs"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^m[0-9]{2}_[a-z][a-z0-9_]*$" },
+        "index": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "title_zh": { "type": "string", "minLength": 1 },
+        "summary_zh": { "type": "string", "minLength": 1 },
+        "learning_outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "prerequisite_modules": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^m[0-9]{2}_[a-z][a-z0-9_]*$" }
+        },
+        "estimated_effort_minutes": { "type": "integer", "minimum": 1 },
+        "optional": { "type": "boolean" },
+        "labs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/labRef" }
+        }
+      }
+    },
+    "labRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lab_id", "role", "estimated_effort_minutes"],
+      "properties": {
+        "lab_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "role": { "enum": ["core", "optional", "external"] },
+        "estimated_effort_minutes": { "type": "integer", "minimum": 1 },
+        "required_data_packs": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "teacher_notes": { "$ref": "#/definitions/teacherNotes" }
+      }
+    },
+    "teacherNotes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objectives_zh": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "common_mistakes_zh": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mistake_zh", "why_zh", "check_zh"],
+            "properties": {
+              "mistake_zh": { "type": "string", "minLength": 1 },
+              "why_zh": { "type": "string", "minLength": 1 },
+              "check_zh": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "grading_hook_zh": { "type": "string", "minLength": 1 }
+      }
+    },
+    "forwardReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "reason_zh"],
+      "properties": {
+        "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_]*:[a-z0-9_]+$" },
+        "reason_zh": { "type": "string", "minLength": 1 },
+        "wiring": { "type": "string" }
+      }
+    }
+  }
+}

@@ -17,12 +17,15 @@ struct MutatingTool {
 /// Inline tools that mutate state, despite living in read-mostly namespaces.
 /// Execution ids (rs:/gdal:/otb:/qgis:) are creates_artifact by prefix rule;
 /// this table only needs the exceptions and the destructive/network cases.
-constexpr std::array<MutatingTool, 41> kMutating = { {
+constexpr std::array<MutatingTool, 42> kMutating = { {
   // temporal: registration + removal
   { "temporal:create_collection", risk_classes::kCreatesArtifact },
   { "temporal:register_collection", risk_classes::kModifiesProject },
   { "temporal:remove_collection", risk_classes::kDestructive },
   { "temporal:ingest_stac", risk_classes::kCreatesArtifact },
+  // harness: the plan executor runs a whole compiled workflow (N mutations
+  // through the authoritative engine) — the highest blast-radius tool.
+  { "harness:execute_plan", risk_classes::kCreatesArtifact },
   // cartography: compose/repair/chart mutations write layouts
   { "cartography:compose", risk_classes::kModifiesProject },
   { "cartography:repair", risk_classes::kModifiesProject },

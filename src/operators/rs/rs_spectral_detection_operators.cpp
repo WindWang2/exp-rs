@@ -17,6 +17,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_anomaly.h"
+#include "processing/algorithms/primitives/dense_linalg.h"
 #include "processing/algorithms/spectral_cem.h"
 #include "processing/algorithms/spectral_detection.h"
 #include "processing/algorithms/spectral_osp.h"
@@ -212,8 +213,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                             std::to_string( backgroundGrid.grid.centersNm.front() ) + "-" +
                             std::to_string( backgroundGrid.grid.centersNm.back() ) + " nm" );
                 backgroundResampled = true;
-                backgroundPartial = coverage.partial > 0;
                 backgroundGaussian = inputGrid.grid.hasFwhm() && backgroundGrid.grid.hasFwhm();
+                // CoverageReport.partial is a Gaussian edge-truncation count;
+                // the linear kernel has no partial notion — only report
+                // "partial" when the Gaussian path actually runs.
+                backgroundPartial = backgroundGaussian && coverage.partial > 0;
                 backgroundCenters = backgroundGrid.grid.centersNm;
             }
         }
@@ -229,6 +233,14 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         {
             // No reconciliation possible (at least one side lacks a grid):
             // band-order interpretation requires matching band counts.
+            if ( backgroundBands < 2 )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "background raster has " + std::to_string( backgroundBands ) +
+                        " band(s); a gridded multi-band background (wavelength "
+                        "metadata on both sides) is required to reconcile onto the " +
+                        std::to_string( bandCount ) + "-band scene, otherwise "
+                        "band-order interpretation needs matching band counts" );
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
                 "background raster has " + std::to_string( backgroundBands ) +
@@ -355,20 +367,34 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 } );
         };
 
+        // #1183: the estimator only needs O(bands) samples; full-scene
+        // accumulation is O(pixels × bands²). Cap the background sample budget
+        // well above the minimum floor so the covariance stays stable without
+        // streaming every pixel of a 5k×5k×330 scene.
+        const int minSamplesFloor = SpectralCem::minSamplesRequired( bandCount, loading > 0.0 );
+        const size_t sampleBudget = static_cast<size_t>(
+            std::max( minSamplesFloor * 16, bandCount * 64 ) );
+
         if ( usesCorrelation )
         {
             // CEM/TCIMF background: one second-moment pass over the raw spectra.
             SpectralCem::CorrelationStats cemStats;
+            bool budgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
+                         if ( cemStats.count >= sampleBudget )
+                         {
+                             budgetReached = true;
+                             return false;
+                         }
                          SpectralCem::accumulateCorrelation(
                              bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
                              &cemStats, true, bgNoData, bgHasNoData );
                          context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.5,
                                                  "Background correlation" );
                          return true;
-                     } ) )
+                     } ) && !budgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (correlation pass)" );
             if ( cemStats.count == 0 )
@@ -385,20 +411,26 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             backgroundSamples = cemStats.count;
             correlation = std::move( cemStats.correlation );
             context.throwIfCancelled();
-            backgroundCondition = SpectralAnomaly::conditionProxy( correlation, bandCount );
+            backgroundCondition = sicnu::primitives::conditionNumber( correlation, bandCount );
         }
         else
         {
+            bool meanBudgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
+                         if ( stats.count >= sampleBudget )
+                         {
+                             meanBudgetReached = true;
+                             return false;
+                         }
                          SpectralAnomaly::accumulateMean(
                              bip, static_cast<size_t>( tile.width ) * tile.height, bandCount,
                              &stats, true, bgNoData, bgHasNoData );
                          context.reportProgress( ( ++tilesSeen ) * backgroundPerTile * 0.33,
                                                  "Background mean" );
                          return true;
-                     } ) )
+                     } ) && !meanBudgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (mean pass)" );
             if ( stats.count == 0 )
@@ -407,6 +439,9 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             context.throwIfCancelled();
 
             tilesSeen = 0;
+            // accumulateCovariance resets stats.count on first call — budget
+            // against the post-accumulate count, not the mean-pass count.
+            bool covBudgetReached = false;
             if ( !forEachBackgroundTile(
                      [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
                          context.throwIfCancelled();
@@ -415,8 +450,13 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                              &stats, true, bgNoData, bgHasNoData );
                          context.reportProgress( 0.33 + ( ++tilesSeen ) * backgroundPerTile * 0.33,
                                                  "Background covariance" );
+                         if ( stats.count >= sampleBudget )
+                         {
+                             covBudgetReached = true;
+                             return false;
+                         }
                          return true;
-                     } ) )
+                     } ) && !covBudgetReached )
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to stream background tiles (covariance pass)" );
             SpectralAnomaly::finalizeCovariance( &stats );
@@ -426,7 +466,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                 throw RSOperatorError( ErrorCode::ComputationError,
                                        "Background covariance is singular" );
             backgroundSamples = stats.count;
-            backgroundCondition = SpectralAnomaly::conditionProxy( stats.covariance, bandCount );
+            backgroundCondition = sicnu::primitives::conditionNumber( stats.covariance, bandCount );
         }
     }
 
@@ -436,11 +476,12 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     SpectralTcimf::Filter tcimfFilter;
     SpectralOsp::Filter ospFilter;
     double interferenceCondition = -1.0;
+    double projectedTargetNormFraction = -1.0;
     QString buildError;
     if ( isOsp )
     {
         if ( !SpectralOsp::buildFilter( target, bandCount, interference, &ospFilter, &buildError,
-                                        &interferenceCondition ) )
+                                        &interferenceCondition, &projectedTargetNormFraction ) )
             throw RSOperatorError( ErrorCode::InvalidInputData,
                                    "OSP filter is degenerate: " + buildError.toStdString() );
     }
@@ -482,7 +523,28 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )
             {
+                // #1150: invalid pixels (non-finite or matching a declared
+                // band NoData) propagate to the output as NaN — the raster's
+                // NoData — exactly like rs:rx_anomaly. A finite sentinel
+                // (e.g. −9999) otherwise scores as an extreme finite outlier
+                // that poisons min/max and downstream thresholds.
                 const float *x = bip + p * bandCount;
+                bool valid = true;
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    if ( !std::isfinite( x[b] )
+                         || ( hasNoDataPerBand[static_cast<size_t>( b )]
+                              && x[b] == noDataPerBand[static_cast<size_t>( b )] ) )
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                if ( !valid )
+                {
+                    tileScores[p] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 tileScores[p] =
                     isOsp ? SpectralOsp::ospScore( x, ospFilter, bandCount, &scratch )
                     : isTcimf ? SpectralTcimf::tcimfScore( x, tcimfFilter, bandCount, &scratch )
@@ -531,6 +593,8 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         result["interferenceCount"] = static_cast<Json::UInt64>( interference.size() );
         if ( interferenceCondition >= 0.0 )
             result["interferenceCondition"] = interferenceCondition;
+        if ( projectedTargetNormFraction >= 0.0 )
+            result["projectedTargetNormFraction"] = projectedTargetNormFraction;
         result["interferenceSource"] = interferenceResolved.sourceDescription.toStdString();
         if ( interferenceResolved.resampled )
             result["interferenceResampled"] = true;

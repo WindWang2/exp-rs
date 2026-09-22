@@ -16,6 +16,8 @@
 #include <QThread>
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <thread>
 #include <algorithm>
 #include <vector>
@@ -560,6 +562,44 @@ TEST_CASE( "ImportCenter cancel stops registration at a batch boundary",
 
     REQUIRE( report.cancelled );
     REQUIRE( report.registered < kFiles );
+}
+
+TEST_CASE( "#1153: destroying ImportCenter mid-scan cannot deadlock the owner thread",
+           "[workspace][import][cancel][issue1153]" )
+{
+    // The pre-fix worker hopped registration batches onto the owner with a
+    // BlockingQueuedConnection; an owner that never pumps (panel teardown /
+    // app exit) wedged the worker on the metacall semaphore and
+    // ~QThreadPool's unbounded wait made the hang permanent. Regression: an
+    // owner thread that starts a scan and is destroyed WITHOUT ever pumping
+    // must complete its destruction under a deadline (the worker observes
+    // cancel() inside the latch wait).
+    std::future<bool> teardown = std::async( std::launch::async, [] {
+        Fixture fx;
+        QTemporaryDir dir;
+        QDir( dir.path() ).mkpath( QStringLiteral( "tree" ) );
+        const QString raster = makeRaster( QStringLiteral( "imp-deadlock-src.tif" ) );
+        constexpr int kFiles = 8;
+        for ( int i = 0; i < kFiles; ++i )
+            QFile::copy( raster, QDir( dir.filePath( QStringLiteral( "tree" ) ) )
+                                     .filePath( QStringLiteral( "f%1.tif" ).arg( i ) ) );
+
+        ImportScanOptions options;
+        options.root = dir.path();
+        options.registrationBatch = 1;
+        // Start the scan and destroy the center (Fixture dtor) without ever
+        // running an event loop on this thread — the registration hops are
+        // posted but undeliverable, the exact teardown window.
+        fx.importer.startScan( options );
+        QThread::msleep( 20 ); // let the worker reach its first latch wait
+        return true; // Fixture (and its ImportCenter) destructs here
+    } );
+
+    // Pre-fix behaviour never satisfied this deadline (30 s pool wait, then
+    // the unbounded ~QThreadPool wait). 10 s is generous for the fixed path
+    // (milliseconds).
+    REQUIRE( teardown.wait_for( std::chrono::seconds( 10 ) ) == std::future_status::ready );
+    REQUIRE( teardown.get() );
 }
 
 TEST_CASE( "Run mirror records truthful states and preserves run documents (#754)",

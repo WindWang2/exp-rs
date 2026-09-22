@@ -48,7 +48,7 @@ Json::Value makeDemInputContract() {
 Json::Value RsSarTerrainCorrectionOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
-    props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power)");
+    props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power). Legacy undeclared rasters are processed under the documented sigma0/linear assumption; DN or beta0 legacy content produces a wrong gamma0 (calibrate first, rs:sar_calibrate)");
     props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output", "Output terrain correction raster (Float32 + optional Byte mask)", "tif");
     props["band"] = makeIntegerParam("band", "1-based input band", 1);
@@ -272,6 +272,9 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     dst.setMetadataItem("SICNU_RADIOMETRIC_STATE", "gamma0");
     if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
         dst.setMetadataItem("SICNU_SAR_STATE_ASSUMED", "sigma0_legacy_undeclared");
+        // #1165: numeric-domain assumption provenance (see terrain_flatten).
+        if ( sicnu::sar::readDomain( src ).isEmpty() )
+            dst.setMetadataItem("SICNU_SAR_DOMAIN_ASSUMED", "linear_power");
     dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
                         QString::number(lookAzimuthDeg, 'g', 10));
 

@@ -12,8 +12,10 @@
 #include <cstdint>
 #include <cstring>
 #ifndef _WIN32
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/file.h>
 #else
 #include <windows.h>
 #endif
@@ -272,6 +274,88 @@ long currentProcessId()
 #endif
 }
 
+/// #1186: cross-process install lock for one plugin id. Per-pid parks prevent
+/// byte corruption; without this lock two processes can still race the final
+/// swap and the loser's rollback reverts a committed upgrade.
+class CrossProcessInstallLock
+{
+  public:
+    explicit CrossProcessInstallLock( const std::string &lockPath )
+        : m_path( lockPath )
+    {
+    }
+    ~CrossProcessInstallLock() { release(); }
+    CrossProcessInstallLock( const CrossProcessInstallLock & ) = delete;
+    CrossProcessInstallLock &operator=( const CrossProcessInstallLock & ) = delete;
+
+    bool acquire( std::string &error )
+    {
+        release();
+        std::error_code ec;
+        fs::create_directories( fs::path( m_path ).parent_path(), ec );
+#ifdef _WIN32
+        const int wideLen = MultiByteToWideChar( CP_UTF8, 0, m_path.c_str(), -1, nullptr, 0 );
+        if ( wideLen <= 0 )
+        {
+            error = "cannot encode install lock path";
+            return false;
+        }
+        std::wstring wide( static_cast<std::size_t>( wideLen ), L'\0' );
+        MultiByteToWideChar( CP_UTF8, 0, m_path.c_str(), -1, wide.data(), wideLen );
+        m_handle = ::CreateFileW( wide.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                  0 /* exclusive */, nullptr, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr );
+        if ( m_handle == INVALID_HANDLE_VALUE )
+        {
+            error = "another process holds the install lock for this plugin id (or the lock file is unwritable)";
+            return false;
+        }
+        return true;
+#else
+        m_fd = ::open( m_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0666 );
+        if ( m_fd < 0 )
+        {
+            error = "cannot open install lock file at " + m_path;
+            return false;
+        }
+        if ( ::flock( m_fd, LOCK_EX ) != 0 )
+        {
+            error = "cannot acquire install lock at " + m_path;
+            ::close( m_fd );
+            m_fd = -1;
+            return false;
+        }
+        return true;
+#endif
+    }
+
+    void release()
+    {
+#ifdef _WIN32
+        if ( m_handle != INVALID_HANDLE_VALUE )
+        {
+            ::CloseHandle( m_handle );
+            m_handle = INVALID_HANDLE_VALUE;
+        }
+#else
+        if ( m_fd >= 0 )
+        {
+            ::flock( m_fd, LOCK_UN );
+            ::close( m_fd );
+            m_fd = -1;
+        }
+#endif
+    }
+
+  private:
+    std::string m_path;
+#ifdef _WIN32
+    HANDLE m_handle = INVALID_HANDLE_VALUE;
+#else
+    int m_fd = -1;
+#endif
+};
+
 /// Liveness probe for a staging owner pid: distinguishes crash residue
 /// (collectible) from a CONCURRENT install's in-flight transaction (hands
 /// off). Same contract as the snapshot sweep's probe.
@@ -479,6 +563,21 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
     const std::string userRoot = PluginDiscovery::userPluginRoot();
     const std::string target = userRoot + "/" + manifest.id;
+
+    // #1186: serialize install/upgrade of the same id across processes.
+    CrossProcessInstallLock installLock( userRoot + "/.locks/" + manifest.id + ".install.lock" );
+    {
+        std::string lockError;
+        if ( !installLock.acquire( lockError ) )
+        {
+            PluginDiagnostic failure;
+            failure.code = PluginDiagnosticCode::ResourceMissing;
+            failure.pluginId = manifest.id;
+            failure.message = lockError;
+            log.add( failure );
+            return false;
+        }
+    }
 
     // Guard against id takeover by a different payload (an existing
     // directory with a manifest declaring a different id).

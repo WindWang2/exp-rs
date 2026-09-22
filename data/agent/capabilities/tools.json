@@ -530,5 +530,37 @@
       "Writes a reproduction bundle directory; secrets are filtered at the export boundary"
     ],
     "surface": "data_platform_tool"
-  }
+  },
+{
+  "id": "cartography:export",
+  "family": "cartography",
+  "extends": "family:cartography",
+  "side_effects": true,
+  "artifacts": { "output": {"kind": "json"} },
+  "surface": "spatial_tool"
+},
+{
+  "id": "cartography:produce",
+  "family": "cartography",
+  "extends": "family:cartography",
+  "side_effects": true,
+  "artifacts": { "manifest": {"kind": "json"} },
+  "surface": "spatial_tool"
+},
+{
+  "id": "cartography:diff_templates",
+  "family": "cartography",
+  "extends": "family:cartography",
+  "side_effects": false,
+  "artifacts": { "diff": {"kind": "json"} },
+  "surface": "spatial_tool"
+},
+{
+  "id": "cartography:explain",
+  "family": "cartography",
+  "extends": "family:cartography",
+  "side_effects": false,
+  "artifacts": { "explanation": {"kind": "json"} },
+  "surface": "spatial_tool"
+}
 ]

@@ -1,0 +1,151 @@
+{
+  "compilation" : 
+  {
+    "coverage" : 0.33333333333333331,
+    "diagnostics" : [ "ui_action_step", "ui_action_step" ],
+    "stages_human_only" : 2,
+    "stages_operator" : 1,
+    "stages_reflection" : 3,
+    "stages_total" : 6
+  },
+  "goal_pattern" : 
+  {
+    "intent" : "atmospheric_correction",
+    "keywords_en" : [ "atmospheric", "correction" ],
+    "keywords_zh" : [ "大气校正" ],
+    "modality" : "optical"
+  },
+  "preflight" : 
+  {
+    "required_assets" : [ "data/samples/landsat_sample.tif" ],
+    "required_operators" : [ "rs:atmospheric_correction" ]
+  },
+  "recipe_id" : "lab.lab08_atmospheric_correction",
+  "required_assets" : 
+  [
+    {
+      "id" : "primary",
+      "kind" : "file",
+      "note" : "含 DN 值的类 Landsat 样本影像。",
+      "predicate" : 
+      {
+        "must_exist" : true,
+        "path" : "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema" : "sicnu.scientific_recipe/1",
+  "stages" : 
+  [
+    {
+      "action" : "addRasterLayer",
+      "boundary" : "ui_action",
+      "completion_hint" : "影像已加载，当前像元值为 DN。",
+      "description_zh" : "加载 data/samples/landsat_sample.tif。大气校正把传感器记录的 DN 值转换为地表反射率。",
+      "human_only" : true,
+      "id" : "s01_load_satellite_image",
+      "index" : 0,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'addRasterLayer') — no headless equivalent compiled",
+      "title" : "Load Satellite Image",
+      "title_zh" : "加载卫星影像",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "影像已加载，当前像元值为 DN。"
+        }
+      ]
+    },
+    {
+      "completion_hint" : "输出像元值变为 0-1 的地表反射率。",
+      "depends_on" : [ "s01_load_satellite_image" ],
+      "description_zh" : "执行 rs:atmospheric_correction 算子（method=dos1）。DOS1 假设场景中最暗像元的反射率为 0，由此估计大气散射造成的路径辐射并从整幅影像中扣除。",
+      "id" : "s02_dos1_correction",
+      "index" : 1,
+      "kind" : "operator",
+      "operator_id" : "rs:atmospheric_correction",
+      "params" : 
+      {
+        "input" : "data/samples/landsat_sample.tif",
+        "method" : "dos1",
+        "output" : "outputs/lab08_dos1.tif"
+      },
+      "teaching_note" : "电磁波穿过大气时被吸收与散射；暗目标减法是最简单的绝对校正方法，无需大气参数即可近似去除程辐射。",
+      "title" : "DOS1 Correction",
+      "title_zh" : "DOS1 暗目标校正",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "artifact_exists",
+          "target" : "outputs/lab08_dos1.tif"
+        },
+        {
+          "kind" : "completion_hint",
+          "text" : "输出像元值变为 0-1 的地表反射率。"
+        }
+      ]
+    },
+    {
+      "action" : "openComparisonDialog",
+      "boundary" : "ui_action",
+      "completion_hint" : "校正后影像地物更清晰、暗色区域更暗。",
+      "depends_on" : [ "s02_dos1_correction" ],
+      "description_zh" : "通过 View > Compare Layers... 以分屏模式对比原始影像与校正结果，注意大气霾对暗色区域的掩盖被削弱。",
+      "human_only" : true,
+      "id" : "s03_compare_before_after",
+      "index" : 2,
+      "kind" : "human_only",
+      "reason" : "UI-verb step (main-window slot 'openComparisonDialog') — no headless equivalent compiled",
+      "teaching_note" : "地表反射率更具物理意义，是跨期比较与定量反演的前提。",
+      "title" : "Compare Before/After",
+      "title_zh" : "校正前后对比",
+      "verifier_hooks" : 
+      [
+        {
+          "kind" : "completion_hint",
+          "text" : "校正后影像地物更清晰、暗色区域更暗。"
+        }
+      ]
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "s03_compare_before_after" ],
+      "human_only" : true,
+      "id" : "reflection_1",
+      "index" : 3,
+      "kind" : "reflection",
+      "prompt" : "DOS1 的『暗像元反射率为 0』假设在什么场景下会失效？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_1" ],
+      "human_only" : true,
+      "id" : "reflection_2",
+      "index" : 4,
+      "kind" : "reflection",
+      "prompt" : "为什么定量遥感（如反演叶面积指数）必须先做大气校正？"
+    },
+    {
+      "boundary" : "reflection",
+      "depends_on" : [ "reflection_2" ],
+      "human_only" : true,
+      "id" : "reflection_3",
+      "index" : 5,
+      "kind" : "reflection",
+      "prompt" : "DOS2 相对 DOS1 增加了什么物理量？QUAC 又为什么不需要辅助数据？"
+    }
+  ],
+  "teaching_origin" : 
+  {
+    "compiled_by" : "sicnu.lab2recipe/1",
+    "kind" : "labspec_d2",
+    "lab_id" : "lab08_atmospheric_correction",
+    "objective" : "理解大气对遥感信号的影响并掌握 DOS 暗目标校正方法：把 DN 值转换为地表反射率的近似，并对比校正前后的影像差异。",
+    "source_fingerprint" : "57d21c45eb155037",
+    "source_path" : "data/labs/lab08_atmospheric_correction.lab.json",
+    "spec_version" : 2
+  },
+  "title" : "Atmospheric Correction",
+  "title_zh" : "大气校正"
+}

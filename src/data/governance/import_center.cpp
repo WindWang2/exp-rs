@@ -7,6 +7,11 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QThread>
+
+#include <atomic>
+#include <chrono>
+#include <memory>
 #include <QDirIterator>
 #include <QSet>
 #include <QFile>
@@ -67,6 +72,10 @@ ImportCenter::ImportCenter( WorkspaceService &service, QObject *parent )
 
 ImportCenter::~ImportCenter()
 {
+    // #1153: cancel() is observed by the worker inside its latch wait and
+    // at every batch boundary, so the pool drains promptly and
+    // ~QThreadPool's own unbounded waitForDone can never engage on a
+    // worker stuck in a blocking metacall (the pre-fix deadlock).
     cancel();
     m_pool.clear();
     m_pool.waitForDone( 30000 );
@@ -226,23 +235,41 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
             }
             if ( chunk.isEmpty() )
                 continue;
-            // Registration runs on the owning thread (DataManager affinity);
-            // the tally comes back via the queued lambda's return path below.
-            QMetaObject::invokeMethod( this, [ this, guard, chunk ]() {
-                if ( !guard )
-                    return;
-                for ( const QString &path : chunk )
+            // Registration runs on the owning thread (DataManager affinity).
+            // #1153: the hop is a PLAIN QueuedConnection with a latched,
+            // bounded wait — a BlockingQueuedConnection from this pool
+            // worker deadlocked the destructor (the owner stops pumping
+            // during teardown while the worker blocks on the metacall's
+            // semaphore; ~QThreadPool then waits unboundedly on the worker).
+            // The cancel flag is observed inside the wait, so cancel()
+            // releases it within one poll interval.
+            auto batchDone = std::make_shared<std::atomic_bool>( false );
+            QMetaObject::invokeMethod( this, [ this, guard, chunk, batchDone ]() {
+                if ( guard )
                 {
-                    sicnu::data::RegisterRequest request;
-                    request.source.providerKey = vectorSuffix( path ) ? QStringLiteral( "ogr" ) : QStringLiteral( "gdal" );
-                    request.source.canonicalSource = path;
-                    const sicnu::data::RegisterResult result = m_dataManager->registerSource( request );
-                    if ( result.assetId.isNull() )
-                        ++guard->m_failedThisBatch;
-                    else
-                        ++guard->m_importedThisBatch;
+                    for ( const QString &path : chunk )
+                    {
+                        sicnu::data::RegisterRequest request;
+                        request.source.providerKey = vectorSuffix( path ) ? QStringLiteral( "ogr" ) : QStringLiteral( "gdal" );
+                        request.source.canonicalSource = path;
+                        const sicnu::data::RegisterResult result = m_dataManager->registerSource( request );
+                        if ( result.assetId.isNull() )
+                            ++guard->m_failedThisBatch;
+                        else
+                            ++guard->m_importedThisBatch;
+                    }
                 }
-            }, Qt::BlockingQueuedConnection );
+                batchDone->store( true, std::memory_order_release );
+            }, Qt::QueuedConnection );
+            const auto latchDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+            while ( !batchDone->load( std::memory_order_acquire ) )
+            {
+                if ( m_cancel.load() )
+                    break;
+                if ( std::chrono::steady_clock::now() >= latchDeadline )
+                    break;
+                QThread::msleep( 5 );
+            }
             report.registered += m_importedThisBatch;
             report.failed += m_failedThisBatch;
             m_importedThisBatch = 0;

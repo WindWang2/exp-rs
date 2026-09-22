@@ -143,6 +143,25 @@ function(sicnu_add_sdk_test NAME)
   sicnu_discover_tests(${NAME})
 endfunction()
 
+# RS14-07 Parameter Studio: light study test executables. Links only
+# Catch2 + Sicnu::study (Qt Core + experiment authority transitively) —
+# no QGIS, no GUI — so the study contract suites build and run fast offline.
+function(sicnu_add_study_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::study
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
 # Helper function to add a Catch2 offscreen UI dialog test executable
 function(sicnu_add_dialog_test NAME)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_DEFAULT_MAIN" "MAIN_SOURCE" "SOURCES;EXTRA_LIBS;EXTRA_INCLUDES")
@@ -267,6 +286,15 @@ catch_discover_tests(test_sample_fixtures
 
 # Geospatial I/O Foundation 4.0 (light targets — see sicnu_add_io_test above).
 sicnu_add_io_test(test_io_canonical_metadata)
+
+# RS14-07 Parameter Sensitivity & Uncertainty Studio (light study targets).
+sicnu_add_study_test(test_study_spec)
+sicnu_add_study_test(test_study_sampling)
+sicnu_add_study_test(test_study_runner)
+sicnu_add_study_test(test_study_analysis)
+sicnu_add_study_test(test_study_spatial)
+sicnu_add_study_test(test_study_export)
+target_link_libraries(test_study_spatial PRIVATE GDAL::GDAL)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)
@@ -3177,6 +3205,14 @@ target_link_libraries(test_mlops9_version_dag PRIVATE Sicnu::dataset SQLite::SQL
 sicnu_add_test(test_mlops9_evidence TIMEOUT 300)
 target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# RS14-06 Experiment Debugger (ADR 0174): normalized run snapshots, step
+# alignment, first-divergence classification over recorded evidence. The
+# debugger lib carries its own deps (Sicnu::experiment/dataset/workflow);
+# SQLite is listed explicitly to match the experiment-suite convention.
+sicnu_add_test(test_experiment_debugger TIMEOUT 300)
+target_link_libraries(test_experiment_debugger PRIVATE
+  Sicnu::experiment_debugger Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
 # MLOps 9.0 scale & durability: 100k-run metadata stress, concurrent
 # readers/writer, corruption refusal, injected commit-fault recovery.
 # RUN_SERIAL: pays 100k single-row transactions by design.
@@ -3225,6 +3261,25 @@ target_link_libraries(test_d19_foundry_benchmark_chain PRIVATE Sicnu::experiment
 # reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
 target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# RS14-17 reproducibility capsule: LIGHT executable on purpose — links only
+# the capsule projection module + experiment/dataset (Qt/Core level). The
+# default sicnu_add_test chain would drag QGIS/agent/operators into a
+# pure-document contract suite.
+qt_add_executable(test_experiment_capsule test_experiment_capsule.cpp)
+target_link_libraries(test_experiment_capsule PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment_capsule
+)
+target_include_directories(test_experiment_capsule PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_experiment_capsule PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_experiment_capsule TIMEOUT 120)
 
 # Foundation 5.0 dataset composition/label QA + the 100k metadata scale
 # contract (goal §20/§37/§46/§52). RUN_SERIAL: the 100k benchmark should not
@@ -9084,6 +9139,9 @@ target_compile_definitions(test_workflow_cache_e2e PRIVATE
   SICNU_CLI_BINARY="${CMAKE_BINARY_DIR}/sicnu_geo_rs_cli"
 )
 sicnu_link_jsoncpp(test_workflow_cache_e2e)
+if(TARGET sicnu_geo_rs_cli)
+  add_dependencies(test_workflow_cache_e2e sicnu_geo_rs_cli)
+endif()
 sicnu_discover_tests(test_workflow_cache_e2e)
 endif()
 
@@ -9361,6 +9419,8 @@ target_compile_definitions(test_plugin_host_process PRIVATE
   SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
   SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
 )
+# #1186: target-scoped builds must build runtime-loaded fixtures first.
+add_dependencies(test_plugin_host_process isolation_plugin exprs_plugin_host_worker)
 
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
@@ -9376,6 +9436,7 @@ target_link_libraries(test_exprs_plugin_loader PRIVATE sicnu_sdk)
 target_compile_definitions(test_exprs_plugin_loader PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
+add_dependencies(test_exprs_plugin_loader hello_plugin)
 
 # POSIX-only test (setenv + /tmp path semantics); the Windows lane has no
 # equivalent coverage today. See test_help_* for the help-system suites.
@@ -9546,6 +9607,46 @@ sicnu_add_test(test_contract_platform_9)
 target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_platform_9)
 
+# RS14-11: evidence-first agent session core (pure C++; no Qt/GDAL link).
+add_executable(test_agent_loop_core test_agent_loop_core.cpp)
+target_link_libraries(test_agent_loop_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_core)
+
+# RS14-11: seam interfaces, deterministic offline doubles, session policy.
+add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
+target_link_libraries(test_agent_loop_seams PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_seams)
+
+# RS14-11: session driver — dry-run / plan-only / execute-with-verify modes.
+add_executable(test_agent_loop_modes test_agent_loop_modes.cpp)
+target_link_libraries(test_agent_loop_modes PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_modes)
+
+# RS14-11: full-loop E2E on deterministic offline doubles (slices D/E/F).
+add_executable(test_agent_loop_e2e test_agent_loop_e2e.cpp)
+target_link_libraries(test_agent_loop_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_e2e)
+
+# RS14-11: journal restart/resume of a cancelled session.
+add_executable(test_agent_loop_resume test_agent_loop_resume.cpp)
+target_link_libraries(test_agent_loop_resume PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_resume)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
@@ -9661,6 +9762,44 @@ function(sicnu_add_help_test NAME)
 endfunction()
 
 sicnu_add_help_test(test_help_core)
+
+# ── RS14-12 teaching autonomy ladder ───────────────────────────────────────
+# Policy-layer tests: Catch2 + Sicnu::autonomy (jsoncpp transitively) only —
+# no Qt, no QGIS — so the level semantics, schema, decision engine, audit
+# log and projection suites build and run fast. Gate-wiring tests that must
+# exercise the real seams use the standard heavy helper (sicnu_add_test).
+function(sicnu_add_autonomy_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::autonomy
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+sicnu_add_autonomy_test(test_autonomy_policy)
+sicnu_add_autonomy_test(test_autonomy_classification)
+sicnu_add_autonomy_test(test_autonomy_decision)
+sicnu_add_autonomy_test(test_autonomy_precedence)
+sicnu_add_autonomy_test(test_autonomy_audit)
+sicnu_add_autonomy_test(test_autonomy_projection)
+sicnu_add_autonomy_test(test_autonomy_holder)
+
+# Gate wiring: exercises the real seams (lab copilot entry point, the
+# SpatialToolRegistry execute path for harness:execute_plan), so it uses the
+# standard heavy helper.
+sicnu_add_test(test_autonomy_gate)
+sicnu_link_jsoncpp(test_autonomy_gate)
 
 # Coverage & drift contracts against the LIVE operator registry + harness
 # taxonomy: reuses the standard heavy test helper (sicnu_operators +
@@ -10187,6 +10326,9 @@ add_executable(test_object_identity
   test_object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost; workbench_host.cpp is
+  # Qt-only, so link the REAL implementation instead of stubbing it (the
+  # out-of-tree targets were link-broken since the Workbench 5.0 seam).
   ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_object_identity PRIVATE
@@ -11754,24 +11896,10 @@ target_include_directories(test_ensemble_parallel PRIVATE
 # the agent tool objects (spatial_tool_registry + contracts + mission_tools,
 # which are QGIS-free by construction).
 # ---------------------------------------------------------------------------
-set(SICNU_MISSION_RUNTIME_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_run_authority.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_tool_authority.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/mission_tools.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/spatial_tool_registry.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/contracts/spatial_contracts.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/harness/harness_actions.cpp
-)
+# #1186: shared with mission-runtime-gate (cmake/SicnuMissionRuntimeSources.cmake)
+set(SICNU_MISSION_SRC_ROOT "${CMAKE_SOURCE_DIR}")
+include("${CMAKE_SOURCE_DIR}/cmake/SicnuMissionRuntimeSources.cmake")
+set(SICNU_MISSION_RUNTIME_SOURCES ${SICNU_MISSION_RUNTIME_SOURCES_FULL})
 
 function(sicnu_add_mission_runtime_test NAME)
   # The mission-runtime test sources live in mission-runtime-gate/tests/ (not
@@ -12029,3 +12157,184 @@ target_include_directories(test_suitability_agent_tools PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_agent_tools)
+# =============================================================================
+# RS14-01 Scientific Data Passport: unified scientific asset state layer.
+# Core contracts run in the jsoncpp-only lane (no Qt, no QGIS, no GDAL);
+# the GDAL facts collector gets its own io-lane target once it lands.
+# =============================================================================
+sicnu_add_sdk_test(test_scientific_state_core)
+target_link_libraries(test_scientific_state_core PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_resolver)
+target_link_libraries(test_scientific_state_resolver PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_geo)
+target_link_libraries(test_scientific_state_geo PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_provenance)
+target_link_libraries(test_scientific_state_provenance PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_diff)
+target_link_libraries(test_scientific_state_diff PRIVATE Sicnu::ScientificState)
+
+sicnu_add_sdk_test(test_scientific_state_teaching)
+target_link_libraries(test_scientific_state_teaching PRIVATE Sicnu::ScientificState)
+
+sicnu_add_io_test(test_scientific_state_gdal)
+target_link_libraries(test_scientific_state_gdal PRIVATE Sicnu::ScientificStateGdal)
+
+# RS14-01 Slice F4: catalog adapter — Qt lane (real DataManager + GDAL).
+sicnu_add_test(test_scientific_state_catalog)
+target_link_libraries(test_scientific_state_catalog PRIVATE
+  Sicnu::ScientificState
+  Sicnu::ScientificStateCatalog
+  Sicnu::ScientificStateGdal
+)
+set_target_properties(test_scientific_state_catalog PROPERTIES AUTOMOC ON)
+sicnu_add_sdk_test(test_scientific_state_fixtures)
+target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_review)
+target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)
+# RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
+# (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
+add_executable(test_agentbench_core test_agentbench_core.cpp)
+target_link_libraries(test_agentbench_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_core)
+target_include_directories(test_agentbench_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_core PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_core TEST_PREFIX "test_agentbench_core::")
+
+# RS14 agent-benchmark Slice A: case schema contract.
+add_executable(test_agentbench_case test_agentbench_case.cpp)
+target_link_libraries(test_agentbench_case PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_case)
+target_include_directories(test_agentbench_case PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_case PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_case TEST_PREFIX "test_agentbench_case::")
+
+# RS14 agent-benchmark Slice B: trace schema + replay validation.
+add_executable(test_agentbench_trace test_agentbench_trace.cpp)
+target_link_libraries(test_agentbench_trace PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_trace)
+target_include_directories(test_agentbench_trace PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_trace PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_trace TEST_PREFIX "test_agentbench_trace::")
+
+# RS14 agent-benchmark Slice C: deterministic fake agent.
+add_executable(test_agentbench_fake test_agentbench_fake.cpp)
+target_link_libraries(test_agentbench_fake PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_fake)
+target_include_directories(test_agentbench_fake PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_fake PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_fake TEST_PREFIX "test_agentbench_fake::")
+
+# RS14 agent-benchmark Slice D: hidden-invariant oracle.
+add_executable(test_agentbench_invariants test_agentbench_invariants.cpp)
+target_link_libraries(test_agentbench_invariants PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_invariants)
+target_include_directories(test_agentbench_invariants PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_invariants PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_invariants TEST_PREFIX "test_agentbench_invariants::")
+
+# RS14 agent-benchmark Slice E: 8-metric evaluator + failure taxonomy.
+add_executable(test_agentbench_evaluator test_agentbench_evaluator.cpp)
+target_link_libraries(test_agentbench_evaluator PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_evaluator)
+target_include_directories(test_agentbench_evaluator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_evaluator PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_evaluator TEST_PREFIX "test_agentbench_evaluator::")
+
+# RS14 agent-benchmark Slice G: JSON + Markdown reports.
+add_executable(test_agentbench_report test_agentbench_report.cpp)
+target_link_libraries(test_agentbench_report PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_report)
+target_include_directories(test_agentbench_report PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_report PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_report TEST_PREFIX "test_agentbench_report::")
+
+# RS14 agent-benchmark Slice H: suite runner.
+add_executable(test_agentbench_suite test_agentbench_suite.cpp)
+target_link_libraries(test_agentbench_suite PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_suite)
+target_include_directories(test_agentbench_suite PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_suite PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_suite TEST_PREFIX "test_agentbench_suite::")
+
+# RS14 agent-benchmark Slice H: corpus validation (reads data/agent/bench).
+add_executable(test_agentbench_corpus test_agentbench_corpus.cpp)
+target_link_libraries(test_agentbench_corpus PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_corpus)
+target_include_directories(test_agentbench_corpus PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_agentbench_corpus PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_agentbench_corpus PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_corpus TEST_PREFIX "test_agentbench_corpus::")

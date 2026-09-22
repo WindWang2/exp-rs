@@ -20,10 +20,16 @@
 
 #include <QString>
 
+#include "workflow/workflow_run.h"
+
 namespace sicnu::app
 {
 
 /// Resolve one run reference against the execution authorities.
 MissionRunStatus resolveMissionRunStatus( const MissionRunRef &ref );
+
+/// #1168: the workflow-run-state → mission-liveness mapping, exported so
+/// the gate test pins it (Interrupted must NOT read as Alive).
+MissionRunStatus fromRunState( sicnu::workflow::WorkflowRunState state, const QString &detail );
 
 } // namespace sicnu::app

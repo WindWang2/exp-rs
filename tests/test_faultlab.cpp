@@ -1,0 +1,1525 @@
+// test_faultlab.cpp — core semantics of the Scientific Fault Injection Lab
+// Framework (RS14-13). Slice A: scenario schema gate, sandbox contract,
+// deterministic core types. Slice tests are appended per TDD slice; every
+// TEST_CASE name is prefixed "fault lab: " so `ctest -R 'fault lab'` selects
+// the suite regardless of executable name.
+#include "faultlab/deterministic.h"
+#include "faultlab/fault_diagnosis.h"
+#include "faultlab/fault_expectations.h"
+#include "faultlab/fault_fixtures.h"
+#include "faultlab/fault_observables.h"
+#include "faultlab/fault_registry.h"
+#include "faultlab/fault_report.h"
+#include "faultlab/fault_runner.h"
+#include "faultlab/fault_report.h"
+#include "faultlab/fault_sandbox.h"
+#include "faultlab/fault_transforms.h"
+#include "faultlab/fault_types.h"
+#include "faultlab/util/canonical_json.h"
+#include "faultlab/util/sha256.h"
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <json/json.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <vector>
+
+using namespace sicnu::faultlab;
+
+namespace
+{
+/// Minimal valid scenario document (sicnu.lab.faults/1). Individual tests
+/// mutate copies to probe the validation rules.
+Json::Value validScenarioDoc()
+{
+    Json::Value doc( Json::objectValue );
+    doc["schema_version"] = kFaultScenarioSchemaId;
+    doc["scenario_id"] = "fs_band_role_swap_ndvi";
+    doc["title"] = "Band role swap on an index pair";
+    doc["title_zh"] = "指数波段对上的波段角色互换";
+
+    Json::Value fault( Json::objectValue );
+    fault["family"] = "band_role_swap";
+    Json::Value params( Json::objectValue );
+    params["role_a"] = "red";
+    params["role_b"] = "nir";
+    fault["params"] = params;
+    fault["seed"] = 42u;
+    doc["fault"] = fault;
+
+    Json::Value fixture( Json::objectValue );
+    fixture["fixture_id"] = "two_band_index_pair";
+    fixture["params"] = Json::objectValue;
+    fixture["seed"] = 42u;
+    doc["base_fixture"] = fixture;
+
+    Json::Value sandbox( Json::objectValue );
+    sandbox["class"] = "temp_copy";
+    sandbox["max_bytes"] = Json::Value::UInt64( 1048576 );
+    sandbox["require_source_unchanged"] = true;
+    doc["sandbox"] = sandbox;
+
+    Json::Value expected( Json::objectValue );
+    Json::Value obs( Json::arrayValue );
+    Json::Value o1( Json::objectValue );
+    o1["id"] = "band_roles";
+    o1["relation"] = "changed";
+    obs.append( o1 );
+    Json::Value o2( Json::objectValue );
+    o2["id"] = "index_mean";
+    o2["relation"] = "delta_ge";
+    o2["value"] = 0.5;
+    obs.append( o2 );
+    expected["observables"] = obs;
+    Json::Value diagnosis( Json::objectValue );
+    diagnosis["signature"] = "all_negative_index";
+    expected["diagnosis"] = diagnosis;
+    doc["expected"] = expected;
+
+    Json::Value lo( Json::objectValue );
+    lo["id"] = "LO-03";
+    lo["statement"] = "Recognize that band metadata, not band position, defines an index.";
+    lo["statement_zh"] = "认识到定义指数的是波段元数据而不是波段位置。";
+    doc["learning_objective"] = lo;
+
+    Json::Value cleanup( Json::objectValue );
+    cleanup["required"] = true;
+    cleanup["verify_no_residue"] = true;
+    doc["cleanup"] = cleanup;
+    return doc;
+}
+
+FaultGrid sampleGrid()
+{
+    FaultGrid grid;
+    grid.width = 4;
+    grid.height = 3;
+    grid.crsId = "EPSG:4326";
+    grid.hasNoData = true;
+    grid.noDataValue = -9999.0;
+    BandSpec red;
+    red.role = "red";
+    red.samples = { 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2 };
+    BandSpec nir;
+    nir.role = "nir";
+    nir.samples = { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 };
+    grid.bands = { red, nir };
+    return grid;
+}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Slice A — schema gate
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault lab: scenario loader accepts sicnu.lab.faults/1", "[faultlab]" )
+{
+    const auto result = loadFaultScenario( validScenarioDoc() );
+    REQUIRE( result.ok );
+    CHECK( result.value.scenarioId == "fs_band_role_swap_ndvi" );
+    CHECK( result.value.fault.familyId == "band_role_swap" );
+    CHECK( result.value.fault.seed == 42u );
+    CHECK( result.value.fixtureId == "two_band_index_pair" );
+    CHECK( result.value.maxBytes == 1048576u );
+    CHECK( result.value.expectedDiagnosisSignature == "all_negative_index" );
+    CHECK( result.value.learningObjectiveId == "LO-03" );
+    REQUIRE( result.value.expectations.size() == 2 );
+    CHECK( result.value.expectations[0].relation == ExpectationRelation::Changed );
+    CHECK( result.value.expectations[1].relation == ExpectationRelation::DeltaGe );
+    CHECK( result.diagnostics.empty() );
+}
+
+TEST_CASE( "fault lab: scenario loader rejects foreign schema versions", "[faultlab]" )
+{
+    Json::Value doc = validScenarioDoc();
+    doc["schema_version"] = "sicnu.lab.faults/2";
+    const auto result = loadFaultScenario( doc );
+    CHECK_FALSE( result.ok );
+    REQUIRE( !result.diagnostics.empty() );
+    CHECK( result.diagnostics.front().code == "faultlab.schema_version" );
+}
+
+TEST_CASE( "fault lab: scenario loader rejects a missing schema version", "[faultlab]" )
+{
+    Json::Value doc = validScenarioDoc();
+    doc.removeMember( "schema_version" );
+    const auto result = loadFaultScenario( doc );
+    CHECK_FALSE( result.ok );
+    REQUIRE( !result.diagnostics.empty() );
+    CHECK( result.diagnostics.front().code == "faultlab.schema_version" );
+}
+
+TEST_CASE( "fault lab: scenario loader rejects an unknown fault family", "[faultlab]" )
+{
+    Json::Value doc = validScenarioDoc();
+    doc["fault"]["family"] = "cosmic_ray_zap";
+    const auto result = loadFaultScenario( doc );
+    CHECK_FALSE( result.ok );
+    REQUIRE( !result.diagnostics.empty() );
+    CHECK( result.diagnostics.front().code == "faultlab.fault_unknown_family" );
+}
+
+TEST_CASE( "fault lab: scenario loader rejects malformed required fields", "[faultlab]" )
+{
+    SECTION( "scenario id outside the closed pattern" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["scenario_id"] = "BandRoleSwap";
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "no observable expectations" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["expected"]["observables"] = Json::arrayValue;
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "unknown expectation relation" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["expected"]["observables"][0]["relation"] = "roughly";
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_relation" );
+    }
+    SECTION( "learning objective id outside the closed pattern" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["learning_objective"]["id"] = "objective-3";
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_objective" );
+    }
+    SECTION( "sandbox byte budget above the schema cap" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["sandbox"]["max_bytes"] = Json::Value::UInt64( 128ull * 1024 * 1024 );
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "cleanup may not be waived" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["cleanup"]["required"] = false;
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+}
+
+TEST_CASE( "fault lab: scenario loader accepts every registered fault family", "[faultlab]" )
+{
+    for ( const auto &family : faultFamilyCatalog() )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["fault"]["family"] = family.id;
+        const auto result = loadFaultScenario( doc );
+        INFO( family.id );
+        CHECK( result.ok );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice A — sandbox contract
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault lab: sandbox copies are independent deep copies", "[faultlab]" )
+{
+    const auto sandbox = FaultSandbox::create();
+    REQUIRE( sandbox.ok );
+    CHECK( sandbox->active() );
+    CHECK_FALSE( sandbox->path().empty() );
+
+    const FaultGrid source = sampleGrid();
+    FaultGrid copy = FaultSandbox::copyOf( source );
+
+    // Mutating the copy must never reach the source.
+    copy.bands[0].role = "nir";
+    copy.bands[1].role = "red";
+    copy.bands[0].samples[0] = 999.0;
+    copy.extras["marker"] = "faulted";
+
+    CHECK( source.bands[0].role == "red" );
+    CHECK( source.bands[1].role == "nir" );
+    CHECK( source.bands[0].samples[0] == 0.1 );
+    CHECK( source.extras.isObject() );
+    CHECK( source.extras.getMemberNames().empty() );
+}
+
+TEST_CASE( "fault lab: sandbox cleanup verifies no residue", "[faultlab]" )
+{
+    std::string path;
+    {
+        auto sandbox = FaultSandbox::create();
+        REQUIRE( sandbox.ok );
+        path = sandbox->path();
+        CHECK( sandbox->verifyNoResidue() == false ); // still present
+        sandbox->cleanup();
+        CHECK( sandbox->verifyNoResidue() );
+        CHECK_FALSE( sandbox->active() );
+    }
+    // Destructor of a cleaned sandbox is a no-op and leaves nothing behind.
+    CHECK_FALSE( std::filesystem::exists( path ) );
+}
+
+TEST_CASE( "fault lab: sandbox destructor cleans up an abandoned sandbox", "[faultlab]" )
+{
+    std::string path;
+    {
+        const auto sandbox = FaultSandbox::create();
+        REQUIRE( sandbox.ok );
+        path = sandbox->path();
+        CHECK( std::filesystem::exists( path ) );
+    }
+    CHECK_FALSE( std::filesystem::exists( path ) );
+}
+
+TEST_CASE( "fault lab: sandbox enforces the scenario byte budget", "[faultlab]" )
+{
+    const auto sandbox = FaultSandbox::create();
+    REQUIRE( sandbox.ok );
+    const FaultGrid source = sampleGrid();
+    // A 4x3 two-band float grid is ~192 bytes of samples: a 1 MiB budget
+    // admits it, a 1-byte budget must refuse before any copy is made.
+    const auto refused = FaultSandbox::copyWithinBudget( source, 1 );
+    CHECK_FALSE( refused.ok );
+    REQUIRE( !refused.diagnostics.empty() );
+    CHECK( refused.diagnostics.front().code == "faultlab.budget_exceeded" );
+    const auto copied = FaultSandbox::copyWithinBudget( source, 1048576 );
+    CHECK( copied.ok );
+    CHECK( copied.value.bands.size() == 2 );
+}
+
+// ---------------------------------------------------------------------------
+// Slice A — determinism primitives
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault lab: deterministic prng replays identically for a seed", "[faultlab]" )
+{
+    deterministic::Pcg32 a( 42 );
+    deterministic::Pcg32 b( 42 );
+    deterministic::Pcg32 c( 43 );
+    for ( int i = 0; i < 16; ++i )
+    {
+        const auto va = a.nextU32();
+        CHECK( va == b.nextU32() );
+        CHECK( va != c.nextU32() );
+    }
+    for ( int i = 0; i < 16; ++i )
+    {
+        CHECK( a.nextDouble() >= 0.0 );
+        CHECK( a.nextDouble() < 1.0 );
+    }
+}
+
+TEST_CASE( "fault lab: derived seeds do not perturb each other", "[faultlab]" )
+{
+    const auto split = deterministic::seedFor( 42, "split" );
+    const auto patch = deterministic::seedFor( 42, "patch" );
+    const auto splitAgain = deterministic::seedFor( 42, "split" );
+    CHECK( split != patch );
+    CHECK( split == splitAgain );
+}
+
+// ---------------------------------------------------------------------------
+// Slice A — canonical json + digest
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault lab: canonical json is byte-stable across runs", "[faultlab]" )
+{
+    Json::Value doc( Json::objectValue );
+    doc["zeta"] = 1;
+    doc["alpha"] = 2.5;
+    doc["middle"] = "text";
+    Json::Value arr( Json::arrayValue );
+    arr.append( 3 );
+    arr.append( 4 );
+    doc["array"] = arr;
+
+    const std::string first = canonical::toCanonicalString( doc );
+    const std::string second = canonical::toCanonicalString( doc );
+    CHECK( first == second );
+    // Keys sorted, arrays in order, floats pinned to a stable format.
+    CHECK( first.find( "\"alpha\":2.5" ) != std::string::npos );
+    CHECK( first.find( "\"array\":[3,4]" ) != std::string::npos );
+    CHECK( first.find( "\"alpha\"" ) < first.find( "\"middle\"" ) );
+    CHECK( first.find( "\"middle\"" ) < first.find( "\"zeta\"" ) );
+}
+
+TEST_CASE( "fault lab: sha256 matches the FIPS 180-4 known answers", "[faultlab]" )
+{
+    CHECK( sha256Hex( "" ) ==
+           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" );
+    CHECK( sha256Hex( "abc" ) ==
+           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
+    const std::string longMsg( 1000, 'a' );
+    CHECK( sha256Hex( longMsg ) ==
+           "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3" );
+}
+
+TEST_CASE( "fault lab: canonical grid digest is stable and NaN-safe", "[faultlab]" )
+{
+    FaultGrid grid = sampleGrid();
+    grid.bands[0].samples[3] = std::nan( "" );
+    const std::string first = canonical::sha256HexOf( grid.toJson() );
+    const std::string second = canonical::sha256HexOf( grid.toJson() );
+    CHECK( first == second );
+    CHECK( first.size() == 64 );
+    // A mutated copy must digest differently.
+    FaultGrid other = FaultSandbox::copyOf( grid );
+    other.bands[1].scale = 2.0;
+    CHECK( canonical::sha256HexOf( other.toJson() ) != first );
+}
+
+// ---------------------------------------------------------------------------
+// Slice B — metadata/state faults (band role swap, omit quality mask,
+// wrong scale/offset, NoData-as-data) + observables + expectations
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Fixture with a QA-masked pair: QA==0 marks cloud pixels; a subset of
+/// masked pixels are additionally NaN, the rest are finite-but-masked — so
+/// dropping the QA band measurably changes `valid_fraction`.
+FaultGrid qualityMaskedGrid()
+{
+    FaultGrid grid;
+    grid.width = 4;
+    grid.height = 3;
+    grid.crsId = "EPSG:4326";
+    grid.hasNoData = true;
+    grid.noDataValue = -9999.0;
+
+    BandSpec red;
+    red.role = "red";
+    red.samples = { 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32 };
+    BandSpec nir;
+    nir.role = "nir";
+    nir.samples = { 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62 };
+    BandSpec qa;
+    qa.role = "qa";
+    qa.samples = { 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1 };
+    grid.bands = { red, nir, qa };
+
+    // Two of the four QA-invalid pixels are NaN in the data bands; two stay
+    // finite so that omitting the mask moves `valid_fraction`.
+    for ( int band = 0; band < 2; ++band )
+    {
+        grid.bands[band].samples[5] = std::nan( "" );
+        grid.bands[band].samples[6] = std::nan( "" );
+    }
+    return grid;
+}
+
+/// Base grid whose extras declare an NDVI-style index pair (numerator NIR,
+/// denominator Red) so `index_mean` is measurable. Constant bands keep the
+/// expected index mean exactly computable: (0.9-0.1)/(0.9+0.1) = +0.8, and a
+/// role swap drives it to -0.8 — the all-negative-index diagnosis.
+FaultGrid indexPairGrid()
+{
+    FaultGrid grid = sampleGrid();
+    for ( double &sample : grid.bands[0].samples )
+    {
+        sample = 0.1;
+    }
+    for ( double &sample : grid.bands[1].samples )
+    {
+        sample = 0.9;
+    }
+    Json::Value pair( Json::objectValue );
+    pair["numerator"] = "nir";
+    pair["denominator"] = "red";
+    grid.extras["index_pair"] = pair;
+    return grid;
+}
+
+FaultSpec swapSpec()
+{
+    FaultSpec spec;
+    spec.familyId = "band_role_swap";
+    spec.params["role_a"] = "red";
+    spec.params["role_b"] = "nir";
+    spec.seed = 42;
+    return spec;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: band role swap exchanges exactly the two roles", "[faultlab]" )
+{
+    FaultGrid grid = indexPairGrid();
+    const auto before = measureObservables( grid );
+    REQUIRE( before.count( "index_mean" ) == 1 );
+    const double cleanMean = before.at( "index_mean" ).number;
+
+    const auto outcome = applyFault( grid, swapSpec() );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands[0].role == "nir" );
+    CHECK( grid.bands[1].role == "red" );
+
+    const auto after = measureObservables( grid );
+    REQUIRE( after.count( "index_mean" ) == 1 );
+    // Swapping numerator/denominator flips the ratio index sign.
+    CHECK( after.at( "index_mean" ).number == Catch::Approx( -cleanMean ) );
+    CHECK( before.at( "band_roles" ).text != after.at( "band_roles" ).text );
+}
+
+TEST_CASE( "fault lab: band role swap refuses unsafe targets and params", "[faultlab]" )
+{
+    SECTION( "role absent from the fixture" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_b"] = "swir2";
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+        // The grid is untouched by a refused transform.
+        CHECK( grid.bands[0].role == "red" );
+    }
+    SECTION( "identical roles" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["role_b"] = "red";
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "unknown param name" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec = swapSpec();
+        spec.params["channels"] = Json::arrayValue;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: omitting the quality mask changes masking observables", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    const double cleanValid = before.at( "valid_fraction" ).number;
+    CHECK( before.at( "band_count" ).number == 3 );
+
+    FaultSpec spec;
+    spec.familyId = "omit_quality_mask";
+    spec.seed = 7;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands.size() == 2 );
+    CHECK( grid.bandIndexByRole( "qa" ) == -1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "band_count" ).number == 2 );
+    CHECK( before.at( "band_roles" ).text != after.at( "band_roles" ).text );
+    // Two finite-but-masked pixels per band are now counted as valid.
+    CHECK( after.at( "valid_fraction" ).number > cleanValid );
+}
+
+TEST_CASE( "fault lab: wrong scale/offset moves band statistics, NaN-safe", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    const double cleanMean = before.at( "band.mean.red" ).number;
+
+    SECTION( "samples mutated (gain + offset)" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["offset"] = 1.0;
+        spec.seed = 11;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 10 ); // 12 samples minus 2 no-data
+        CHECK( grid.bands[0].samples[5] != grid.bands[0].samples[5] ); // still NaN
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "band.mean.red" ).number ==
+               Catch::Approx( cleanMean * 2.0 + 1.0 ) );
+    }
+    SECTION( "declared metadata mutated (data kept)" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        spec.params["metadata"] = true;
+        spec.seed = 11;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( grid.bands[0].samples[0] == 0.10 ); // samples untouched
+        CHECK( grid.bands[0].scale == 2.0 );       // declared scale wrong
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "band.scale.red" ).number != before.at( "band.scale.red" ).number );
+        CHECK( after.at( "band.mean.red" ).number == Catch::Approx( cleanMean ) );
+    }
+    SECTION( "zero gain refused" )
+    {
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 0.0;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: NoData-as-data fills sentinel pixels and moves stats", "[faultlab]" )
+{
+    FaultGrid grid = qualityMaskedGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "nodata_fraction" ).number > 0.0 );
+
+    SECTION( "default fill = declared sentinel" )
+    {
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        spec.seed = 5;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 4 ); // two NaN samples in two data bands
+        CHECK( grid.bands[0].samples[5] == grid.noDataValue );
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "nodata_fraction" ).number == 0.0 );
+        CHECK( after.at( "finite_fraction" ).number == 1.0 );
+        CHECK( after.at( "band.mean.red" ).number != before.at( "band.mean.red" ).number );
+    }
+    SECTION( "explicit fill value" )
+    {
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        spec.params["fill_value"] = 0.0;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( grid.bands[1].samples[6] == 0.0 );
+    }
+    SECTION( "non-finite fill refused" )
+    {
+        FaultGrid nanGrid = qualityMaskedGrid();
+        nanGrid.noDataValue = std::nan( "" );
+        FaultSpec spec;
+        spec.familyId = "nodata_as_data";
+        const auto outcome = applyFault( nanGrid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: expectation relations evaluate observables with evidence", "[faultlab]" )
+{
+    const FaultGrid clean = indexPairGrid();
+    const ObservableSet cleanSet = measureObservables( clean );
+    FaultGrid faulted = FaultSandbox::copyOf( clean );
+    REQUIRE( applyFault( faulted, swapSpec() ).ok );
+    const ObservableSet faultedSet = measureObservables( faulted );
+
+    std::vector<ObservableExpectation> expectations;
+    ObservableExpectation changed;
+    changed.id = "band_roles";
+    changed.relation = ExpectationRelation::Changed;
+    expectations.push_back( changed );
+    ObservableExpectation deltaLe;
+    deltaLe.id = "index_mean";
+    deltaLe.relation = ExpectationRelation::DeltaLe;
+    deltaLe.value = -0.5;
+    expectations.push_back( deltaLe );
+    ObservableExpectation truthIs;
+    truthIs.id = "provenance.generator_present";
+    truthIs.relation = ExpectationRelation::TruthIs;
+    truthIs.value = 0.0;
+    expectations.push_back( truthIs );
+    ObservableExpectation missing;
+    missing.id = "channel_order";
+    missing.relation = ExpectationRelation::Changed;
+    expectations.push_back( missing );
+
+    const auto results = checkExpectations( cleanSet, faultedSet, expectations );
+    REQUIRE( results.size() == 4 );
+    CHECK( results[0].passed );                                     // band_roles changed
+    CHECK( results[1].passed );                                     // index delta <= -0.5
+    CHECK( results[1].delta <= -0.5 );                              // evidence carries the delta
+    CHECK_FALSE( results[2].passed );                               // truth observable never produced
+    CHECK( results[2].note.find( "observable" ) != std::string::npos );
+    CHECK_FALSE( results[3].passed );                               // channel_order never produced
+    CHECK( results[3].note.find( "observable" ) != std::string::npos );
+}
+
+// ---------------------------------------------------------------------------
+// Slice C — geometry/temporal faults (grid shift, CRS mismatch, temporal
+// shuffle, temporal gap)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Four dated epochs (32x32, one value per epoch) for temporal faults.
+FaultGrid temporalGrid()
+{
+    FaultGrid grid;
+    grid.width = 4;
+    grid.height = 4;
+    grid.crsId = "EPSG:4326";
+    const char *dates[4] = { "2020-03-01", "2020-04-01", "2020-05-01", "2020-06-01" };
+    const char *roles[4] = { "epoch1", "epoch2", "epoch3", "epoch4" };
+    for ( int band = 0; band < 4; ++band )
+    {
+        BandSpec spec;
+        spec.role = roles[band];
+        spec.acquisitionDate = dates[band];
+        spec.samples.assign( 16, 0.1 * ( band + 1 ) );
+        grid.bands.push_back( spec );
+    }
+    return grid;
+}
+
+std::string datesOf( const FaultGrid &grid )
+{
+    std::string joined;
+    for ( const auto &band : grid.bands )
+    {
+        if ( !joined.empty() )
+        {
+            joined += ",";
+        }
+        joined += band.acquisitionDate;
+    }
+    return joined;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: grid shift moves only the grid origin", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+
+    FaultSpec spec;
+    spec.familyId = "grid_shift";
+    spec.params["dx"] = 0.5;
+    spec.params["dy"] = -0.5;
+    spec.seed = 3;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "geo_transform.origin_x" ).number ==
+           Catch::Approx( before.at( "geo_transform.origin_x" ).number + 0.5 ) );
+    // dx/dy are image-space pixel offsets: a north-up grid has pixelY < 0,
+    // so dy = -0.5 moves the origin NORTH by half a pixel.
+    CHECK( after.at( "geo_transform.origin_y" ).number ==
+           Catch::Approx( before.at( "geo_transform.origin_y" ).number + 0.5 ) );
+    // Pixel size and everything else must stay untouched.
+    CHECK( grid.geoTransform[1] == 1.0 );
+    CHECK( grid.geoTransform[5] == -1.0 );
+    CHECK( after.at( "band.mean.epoch1" ).number ==
+           before.at( "band.mean.epoch1" ).number );
+}
+
+TEST_CASE( "fault lab: CRS mismatch rewrites the CRS only", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "crs" ).text == "EPSG:4326" );
+
+    FaultSpec spec;
+    spec.familyId = "crs_mismatch";
+    spec.params["crs"] = "EPSG:3857";
+    spec.seed = 3;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( grid.crsId == "EPSG:3857" );
+    CHECK( measureObservables( grid ).at( "crs" ).text == "EPSG:3857" );
+
+    SECTION( "unknown CRS refused" )
+    {
+        FaultSpec bad = spec;
+        bad.params["crs"] = "EPSG:9999";
+        FaultGrid local = temporalGrid();
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( local.crsId == "EPSG:4326" );
+    }
+    SECTION( "declaring the fixture's own CRS is not a fault" )
+    {
+        FaultSpec same = spec;
+        same.params["crs"] = "EPSG:4326";
+        FaultGrid local = temporalGrid();
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: temporal shuffle permutes dated epochs deterministically", "[faultlab]" )
+{
+    const std::string original = "2020-03-01,2020-04-01,2020-05-01,2020-06-01";
+
+    SECTION( "same seed replays the same permutation" )
+    {
+        FaultGrid a = temporalGrid();
+        FaultGrid b = temporalGrid();
+        FaultSpec spec;
+        spec.familyId = "temporal_shuffle";
+        spec.seed = 42;
+        REQUIRE( applyFault( a, spec ).ok );
+        REQUIRE( applyFault( b, spec ).ok );
+        CHECK( datesOf( a ) == datesOf( b ) );
+        CHECK( datesOf( a ) != original );
+    }
+    SECTION( "the permutation always moves the epoch order" )
+    {
+        for ( std::uint32_t seed = 0; seed < 16; ++seed )
+        {
+            FaultGrid grid = temporalGrid();
+            FaultSpec spec;
+            spec.familyId = "temporal_shuffle";
+            spec.seed = seed;
+            const auto outcome = applyFault( grid, spec );
+            INFO( seed );
+            REQUIRE( outcome.ok );
+            CHECK( outcome.mutations == 1 );
+            CHECK( datesOf( grid ) != original );
+            // Same multiset of dates: a shuffle, not a rewrite.
+            CHECK( datesOf( grid ).size() == original.size() );
+        }
+    }
+    SECTION( "a grid without dated epochs refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "temporal_shuffle";
+        spec.seed = 1;
+        const auto outcome = applyFault( grid, spec );
+        CHECK_FALSE( outcome.ok );
+        CHECK( outcome.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: temporal gap drops one dated epoch", "[faultlab]" )
+{
+    FaultGrid grid = temporalGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "acquisition_dates" ).text ==
+           "2020-03-01,2020-04-01,2020-05-01,2020-06-01" );
+
+    FaultSpec spec;
+    spec.familyId = "temporal_gap";
+    spec.params["epoch_index"] = 1;
+    spec.seed = 9;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+    CHECK( grid.bands.size() == 3 );
+    CHECK( measureObservables( grid ).at( "acquisition_dates" ).text ==
+           "2020-03-01,2020-05-01,2020-06-01" );
+
+    SECTION( "out-of-range index refused" )
+    {
+        FaultGrid local = temporalGrid();
+        FaultSpec bad;
+        bad.familyId = "temporal_gap";
+        bad.params["epoch_index"] = 7;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+        CHECK( local.bands.size() == 4 );
+    }
+    SECTION( "a non-integer index refused" )
+    {
+        FaultGrid local = temporalGrid();
+        FaultSpec bad;
+        bad.familyId = "temporal_gap";
+        bad.params["epoch_index"] = 1.5;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice D — ML/evaluation faults (train/test spatial leakage, threshold
+// misuse, model channel mismatch)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// 16x16 grid with train points clustered in two cells and test points in
+/// disjoint cells (cell size 4): a clean leakage.overlap_fraction of 0.
+FaultGrid leakageGrid()
+{
+    FaultGrid grid;
+    grid.width = 16;
+    grid.height = 16;
+    grid.extras["leakage_cell_size"] = 4;
+
+    Json::Value samples( Json::arrayValue );
+    auto addSample = [&samples]( const char *role, double x, double y ) {
+        Json::Value sample( Json::objectValue );
+        sample["role"] = role;
+        sample["x"] = x;
+        sample["y"] = y;
+        samples.append( sample );
+    };
+    addSample( "train", 1.0, 1.0 );
+    addSample( "train", 2.0, 2.5 );
+    addSample( "train", 3.0, 3.5 );
+    addSample( "train", 13.0, 13.0 );
+    addSample( "test", 9.0, 1.0 );
+    addSample( "test", 9.5, 1.5 );
+    addSample( "test", 10.0, 2.0 );
+    addSample( "test", 10.5, 2.5 );
+    grid.extras["samples"] = samples;
+    return grid;
+}
+
+/// Score layer + truth labels with a separable-at-0.5 closed form: scores
+/// below 0.5 are truth-0, above are truth-1. A destructive threshold
+/// (0.95) collapses kappa toward 0.
+FaultGrid thresholdGrid()
+{
+    FaultGrid grid = sampleGrid();
+    Json::Value score( Json::arrayValue );
+    Json::Value truth( Json::arrayValue );
+    for ( int i = 0; i < 12; ++i )
+    {
+        const bool positive = i % 2 == 0;
+        score.append( positive ? 0.6 + 0.03 * i : 0.4 - 0.03 * i );
+        truth.append( positive ? 1 : 0 );
+    }
+    grid.extras["score"] = score;
+    grid.extras["truth"] = truth;
+    grid.extras["threshold"] = 0.5;
+    return grid;
+}
+
+/// Three constant bands feeding a declared linear model over channel order.
+FaultGrid modelGrid()
+{
+    FaultGrid grid = sampleGrid();
+    for ( double &sample : grid.bands[0].samples )
+    {
+        sample = 1.0; // red
+    }
+    for ( double &sample : grid.bands[1].samples )
+    {
+        sample = 2.0; // nir
+    }
+    BandSpec green;
+    green.role = "green";
+    green.samples.assign( 12, 3.0 );
+    grid.bands.push_back( green );
+
+    Json::Value model( Json::objectValue );
+    Json::Value order( Json::arrayValue );
+    order.append( "red" );
+    order.append( "nir" );
+    order.append( "green" );
+    model["channel_order"] = order;
+    Json::Value weights( Json::arrayValue );
+    weights.append( 1.0 );
+    weights.append( 2.0 );
+    weights.append( 3.0 );
+    model["weights"] = weights;
+    model["bias"] = 0.1;
+    grid.extras["model"] = model;
+    return grid;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: train/test spatial leakage duplicates or relocates samples", "[faultlab]" )
+{
+    const auto before = measureObservables( leakageGrid() );
+    CHECK( before.at( "leakage.overlap_fraction" ).number == 0.0 );
+    CHECK( before.at( "leakage.test_count" ).number == 4 );
+
+    SECTION( "duplicate mode clones train points into the test role" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        spec.seed = 17;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 4 ); // four train points cloned
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "leakage.test_count" ).number == 8 );
+        // Four of the eight test samples (the clones) now sit inside train
+        // cells; the four original test samples stay outside.
+        CHECK( after.at( "leakage.overlap_fraction" ).number == 0.5 );
+    }
+    SECTION( "relocate mode moves a train point into the test role" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "relocate";
+        spec.seed = 17;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 1 );
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "leakage.test_count" ).number == 4 ); // unchanged
+        CHECK( after.at( "leakage.overlap_fraction" ).number > 0.0 );
+    }
+    SECTION( "unknown mode refused" )
+    {
+        FaultGrid grid = leakageGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "smuggle";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without samples refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "train_test_spatial_leakage";
+        spec.params["mode"] = "duplicate";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: threshold misuse rewrites the decision cut", "[faultlab]" )
+{
+    FaultGrid grid = thresholdGrid();
+    const auto before = measureObservables( grid );
+    CHECK( before.at( "threshold" ).number == 0.5 );
+    CHECK( before.at( "kappa" ).number == Catch::Approx( 1.0 ) );
+
+    FaultSpec spec;
+    spec.familyId = "threshold_misuse";
+    spec.params["threshold"] = 0.95;
+    spec.seed = 23;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( grid.extras["threshold"].asDouble() == 0.95 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "threshold" ).number == 0.95 );
+    CHECK( after.at( "positive_fraction" ).number < before.at( "positive_fraction" ).number );
+    // A destructive cut destroys the prediction-truth agreement.
+    CHECK( after.at( "kappa" ).number < 0.5 );
+
+    SECTION( "out-of-range threshold refused" )
+    {
+        FaultGrid local = thresholdGrid();
+        FaultSpec bad;
+        bad.familyId = "threshold_misuse";
+        bad.params["threshold"] = 1.5;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "re-declaring the current threshold is not a fault" )
+    {
+        FaultGrid local = thresholdGrid();
+        FaultSpec same;
+        same.familyId = "threshold_misuse";
+        same.params["threshold"] = 0.5;
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+}
+
+TEST_CASE( "fault lab: model channel mismatch permutes the channel order", "[faultlab]" )
+{
+    FaultGrid grid = modelGrid();
+    const auto before = measureObservables( grid );
+    REQUIRE( before.count( "channel_order" ) == 1 );
+    CHECK( before.at( "channel_order" ).text == "red,nir,green" );
+    CHECK( before.at( "model_output_mean" ).number == Catch::Approx( 14.1 ) );
+
+    FaultSpec spec;
+    spec.familyId = "model_channel_mismatch";
+    Json::Value permutation( Json::arrayValue );
+    permutation.append( 1 );
+    permutation.append( 0 );
+    permutation.append( 2 );
+    spec.params["permutation"] = permutation;
+    spec.seed = 31;
+    const auto outcome = applyFault( grid, spec );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.mutations == 1 );
+
+    const auto after = measureObservables( grid );
+    CHECK( after.at( "channel_order" ).text == "nir,red,green" );
+    // Weights stay put, channels move: 1*nir + 2*red + 3*green + 0.1
+    // = 2 + 2 + 9 + 0.1 = 13.1.
+    CHECK( after.at( "model_output_mean" ).number == Catch::Approx( 13.1 ) );
+
+    SECTION( "non-bijection refused" )
+    {
+        FaultGrid local = modelGrid();
+        FaultSpec bad;
+        bad.familyId = "model_channel_mismatch";
+        Json::Value notBijection( Json::arrayValue );
+        notBijection.append( 0 );
+        notBijection.append( 0 );
+        notBijection.append( 1 );
+        bad.params["permutation"] = notBijection;
+        const auto refused = applyFault( local, bad );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "identity permutation is not a fault" )
+    {
+        FaultGrid local = modelGrid();
+        FaultSpec same;
+        same.familyId = "model_channel_mismatch";
+        Json::Value identity( Json::arrayValue );
+        identity.append( 0 );
+        identity.append( 1 );
+        identity.append( 2 );
+        same.params["permutation"] = identity;
+        const auto refused = applyFault( local, same );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without a model refuses" )
+    {
+        FaultGrid local = sampleGrid();
+        FaultSpec spec2;
+        spec2.familyId = "model_channel_mismatch";
+        Json::Value perm( Json::arrayValue );
+        perm.append( 0 );
+        perm.append( 1 );
+        spec2.params["permutation"] = perm;
+        const auto refused = applyFault( local, spec2 );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice E — artifact/provenance faults + the canonical report schema
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+FaultGrid provenanceGrid()
+{
+    FaultGrid grid = sampleGrid();
+    Json::Value provenance( Json::objectValue );
+    provenance["schema"] = "exp-rs-prov/1";
+    provenance["generator"] = "faultlab.fixture_factory";
+    provenance["seed"] = 42u;
+    provenance["product"] = "two_band_index_pair";
+    grid.extras["provenance"] = provenance;
+    return grid;
+}
+
+FaultRunReport sampleReport()
+{
+    FaultRunReport report;
+    report.scenarioId = "fs_provenance_removal_generator";
+    report.faultFamily = "provenance_removal";
+    report.seed = 42;
+    report.fixtureSeed = 42;
+    report.fixtureId = "provenanced_pair";
+    report.faultApplied = true;
+    report.faultMutations = 1;
+    report.expectationsPassed = true;
+    report.expectedDiagnosisSignature = "diagnostic.unmatched";
+    report.actualDiagnosisSignature = "diagnostic.unmatched";
+    report.diagnosisMatched = true;
+    report.sandboxRemoved = true;
+    report.sourceDigestBefore = std::string( "a" ).append( 64, 'b' );
+    report.sourceDigestAfter = std::string( "a" ).append( 64, 'b' );
+    report.sourceUnchanged = true;
+    report.replayDigest = std::string( "c" ).append( 64, 'd' );
+    report.replayDeterministic = true;
+    report.passed = true;
+
+    ExpectationResult evidence;
+    evidence.id = "provenance.generator_present";
+    evidence.relation = ExpectationRelation::TruthIs;
+    evidence.passed = true;
+    evidence.expected = 0.0;
+    evidence.observed = 0.0;
+    report.expectationResults.push_back( evidence );
+    return report;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: provenance removal clears generator evidence", "[faultlab]" )
+{
+    SECTION( "default scope blanks the generator fields" )
+    {
+        FaultGrid grid = provenanceGrid();
+        const auto before = measureObservables( grid );
+        CHECK( before.at( "provenance.generator_present" ).truth );
+
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.seed = 13;
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.mutations == 1 );
+
+        const auto after = measureObservables( grid );
+        CHECK( after.at( "provenance.generator_present" ).truth == false );
+        // Schema/seed survive; the generator identity is what vanished.
+        CHECK( grid.extras["provenance"].isMember( "schema" ) );
+    }
+    SECTION( "scope all removes the whole block" )
+    {
+        FaultGrid grid = provenanceGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.params["scope"] = "all";
+        const auto outcome = applyFault( grid, spec );
+        REQUIRE( outcome.ok );
+        CHECK_FALSE( grid.extras.isMember( "provenance" ) );
+        // The observable now vanishes rather than reporting a faked default.
+        CHECK( measureObservables( grid ).count( "provenance.generator_present" ) == 0 );
+    }
+    SECTION( "unknown scope refused" )
+    {
+        FaultGrid grid = provenanceGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        spec.params["scope"] = "half";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsupported_params" );
+    }
+    SECTION( "a fixture without provenance refuses" )
+    {
+        FaultGrid grid = sampleGrid();
+        FaultSpec spec;
+        spec.familyId = "provenance_removal";
+        const auto refused = applyFault( grid, spec );
+        CHECK_FALSE( refused.ok );
+        CHECK( refused.diagnostics.front().code == "faultlab.fault_unsafe_target" );
+    }
+}
+
+TEST_CASE( "fault lab: report schema serializes canonically and digests stably", "[faultlab]" )
+{
+    const FaultRunReport first = sampleReport();
+    const FaultRunReport second = sampleReport();
+
+    const std::string textFirst = faultReportToJson( first );
+    const std::string textSecond = faultReportToJson( second );
+    CHECK( textFirst == textSecond );
+    CHECK( faultReportDigest( first ) == faultReportDigest( second ) );
+    CHECK( faultReportDigest( first ).size() == 64 );
+
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    REQUIRE( reader->parse( textFirst.data(), textFirst.data() + textFirst.size(), &parsed,
+                            &errors ) );
+    CHECK( parsed["schema_version"].asString() == kFaultReportSchemaId );
+    CHECK( parsed["scenario_id"].asString() == "fs_provenance_removal_generator" );
+    CHECK( parsed["verdict"]["passed"].asBool() );
+    CHECK( parsed["verdict"]["source_unchanged"].asBool() );
+    CHECK( parsed["verdict"]["replay_deterministic"].asBool() );
+    CHECK( parsed["expected_diagnosis"]["signature"].asString() == "diagnostic.unmatched" );
+    CHECK( parsed["cleanup"]["sandbox_removed"].asBool() );
+    REQUIRE( parsed["observable_evidence"].isArray() );
+    CHECK( parsed["observable_evidence"][0]["id"].asString() == "provenance.generator_present" );
+
+    SECTION( "a mutated report digests differently" )
+    {
+        FaultRunReport mutated = sampleReport();
+        mutated.expectationsPassed = false;
+        CHECK( faultReportDigest( mutated ) != faultReportDigest( first ) );
+    }
+    SECTION( "diagnostics travel in the report body" )
+    {
+        FaultRunReport withDiagnostic = sampleReport();
+        withDiagnostic.diagnostics.push_back(
+            FaultDiagnostic{ "faultlab.cleanup_failed", "sandbox residue", FaultSeverity::Error } );
+        const std::string text = faultReportToJson( withDiagnostic );
+        CHECK( text.find( "faultlab.cleanup_failed" ) != std::string::npos );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice F — deterministic fixtures, diagnosis mirror, scenario runner with
+// deterministic replay and cleanup verification
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+FaultScenario bandSwapScenario()
+{
+    Json::Value doc( Json::objectValue );
+    doc["schema_version"] = kFaultScenarioSchemaId;
+    doc["scenario_id"] = "fs_band_role_swap_ndvi";
+    doc["title"] = "Band role swap on an NDVI pair";
+    Json::Value fault( Json::objectValue );
+    fault["family"] = "band_role_swap";
+    fault["params"] = Json::Value( Json::objectValue );
+    fault["params"]["role_a"] = "red";
+    fault["params"]["role_b"] = "nir";
+    fault["seed"] = 42u;
+    doc["fault"] = fault;
+    Json::Value fixture( Json::objectValue );
+    fixture["fixture_id"] = "two_band_index_pair";
+    fixture["params"] = Json::objectValue;
+    fixture["seed"] = 42u;
+    doc["base_fixture"] = fixture;
+    Json::Value sandbox( Json::objectValue );
+    sandbox["max_bytes"] = Json::Value::UInt64( 1048576 );
+    doc["sandbox"] = sandbox;
+    Json::Value expected( Json::objectValue );
+    Json::Value obs( Json::arrayValue );
+    Json::Value changed( Json::objectValue );
+    changed["id"] = "band_roles";
+    changed["relation"] = "changed";
+    obs.append( changed );
+    Json::Value delta( Json::objectValue );
+    delta["id"] = "index_mean";
+    delta["relation"] = "delta_le";
+    delta["value"] = -0.5;
+    obs.append( delta );
+    expected["observables"] = obs;
+    Json::Value diagnosis( Json::objectValue );
+    diagnosis["signature"] = "all_negative_index";
+    expected["diagnosis"] = diagnosis;
+    doc["expected"] = expected;
+    Json::Value lo( Json::objectValue );
+    lo["id"] = "LO-03";
+    lo["statement"] = "Band metadata, not band position, defines an index.";
+    doc["learning_objective"] = lo;
+    return loadFaultScenario( doc ).value;
+}
+
+} // namespace
+
+TEST_CASE( "fault lab: fixture factory is deterministic and typed", "[faultlab]" )
+{
+    const char *ids[] = { "two_band_index_pair", "quality_masked_pair", "temporal_stack",
+                          "classification_grid", "probability_layer", "model_input_stack",
+                          "provenanced_pair" };
+    for ( const char *id : ids )
+    {
+        const auto first = makeFixture( id, Json::objectValue, 42 );
+        const auto second = makeFixture( id, Json::objectValue, 42 );
+        INFO( id );
+        REQUIRE( first.ok );
+        REQUIRE( second.ok );
+        CHECK( canonical::sha256HexOf( first.value.toJson() ) ==
+               canonical::sha256HexOf( second.value.toJson() ) );
+
+        const auto other = makeFixture( id, Json::objectValue, 43 );
+        REQUIRE( other.ok );
+        CHECK( canonical::sha256HexOf( other.value.toJson() ) !=
+               canonical::sha256HexOf( first.value.toJson() ) );
+    }
+    const auto unknown = makeFixture( "no_such_fixture", Json::objectValue, 1 );
+    CHECK_FALSE( unknown.ok );
+    CHECK( unknown.diagnostics.front().code == "faultlab.fixture_unknown" );
+}
+
+TEST_CASE( "fault lab: diagnosis mirror maps clean-to-faulted transitions", "[faultlab]" )
+{
+    SECTION( "band swap on an index pair reads all-negative-index" )
+    {
+        const FaultGrid cleanGrid = makeFixture( "two_band_index_pair", Json::objectValue, 42 ).value;
+        FaultGrid faulted = FaultSandbox::copyOf( cleanGrid );
+        REQUIRE( applyFault( faulted, swapSpec() ).ok );
+        CHECK( diagnoseTransition( measureObservables( cleanGrid ),
+                                   measureObservables( faulted ) ) == "all_negative_index" );
+    }
+    SECTION( "CRS change reads crs-mismatch" )
+    {
+        const FaultGrid cleanGrid = makeFixture( "temporal_stack", Json::objectValue, 42 ).value;
+        FaultGrid faulted = FaultSandbox::copyOf( cleanGrid );
+        FaultSpec spec;
+        spec.familyId = "crs_mismatch";
+        spec.params["crs"] = "EPSG:3857";
+        REQUIRE( applyFault( faulted, spec ).ok );
+        CHECK( diagnoseTransition( measureObservables( cleanGrid ),
+                                   measureObservables( faulted ) ) == "crs_mismatch" );
+    }
+    SECTION( "sub-pixel grid shift is detected by the origin delta, not a signature" )
+    {
+        const FaultGrid cleanGrid = makeFixture( "temporal_stack", Json::objectValue, 42 ).value;
+        FaultGrid faulted = FaultSandbox::copyOf( cleanGrid );
+        FaultSpec spec;
+        spec.familyId = "grid_shift";
+        spec.params["dx"] = 0.5;
+        spec.params["dy"] = 0.5;
+        REQUIRE( applyFault( faulted, spec ).ok );
+        // Stripes are a resampling symptom the observation level cannot see;
+        // the honest signature-level verdict is unmatched and the origin
+        // observable carries the detection.
+        CHECK( diagnoseTransition( measureObservables( cleanGrid ),
+                                   measureObservables( faulted ) ) == "diagnostic.unmatched" );
+        double delta = 0.0;
+        CHECK( measureObservables( faulted ).at( "geo_transform.origin_x" ).number -
+                   measureObservables( cleanGrid ).at( "geo_transform.origin_x" ).number ==
+               Catch::Approx( 0.5 ) );
+    }
+    SECTION( "pixel size mismatch reads scale-stripes (the lab brain's own rule)" )
+    {
+        // Direct rule check: the mirror fires exactly when the lab brain
+        // would — pixel sizes differing by more than 1%.
+        ObservableSet clean;
+        ObservableSet faulted;
+        clean.insert( { "geo_transform.pixel_x",
+                        Observable{ "geo_transform.pixel_x", ObservableKind::Number, 1.0, "", false } } );
+        faulted.insert( { "geo_transform.pixel_x",
+                          Observable{ "geo_transform.pixel_x", ObservableKind::Number, 2.0, "", false } } );
+        CHECK( diagnoseTransition( clean, faulted ) == "scale_stripes" );
+    }
+    SECTION( "destructive threshold reads kappa-near-zero" )
+    {
+        const FaultGrid cleanGrid = makeFixture( "probability_layer", Json::objectValue, 42 ).value;
+        FaultGrid faulted = FaultSandbox::copyOf( cleanGrid );
+        FaultSpec spec;
+        spec.familyId = "threshold_misuse";
+        spec.params["threshold"] = 0.95;
+        REQUIRE( applyFault( faulted, spec ).ok );
+        CHECK( diagnoseTransition( measureObservables( cleanGrid ),
+                                   measureObservables( faulted ) ) == "kappa_near_zero" );
+    }
+    SECTION( "metadata-only faults stay typed-unmatched" )
+    {
+        const FaultGrid cleanGrid = makeFixture( "two_band_index_pair", Json::objectValue, 42 ).value;
+        FaultGrid faulted = FaultSandbox::copyOf( cleanGrid );
+        FaultSpec spec;
+        spec.familyId = "wrong_scale_offset";
+        spec.params["role"] = "red";
+        spec.params["gain"] = 2.0;
+        REQUIRE( applyFault( faulted, spec ).ok );
+        CHECK( diagnoseTransition( measureObservables( cleanGrid ),
+                                   measureObservables( faulted ) ) == "diagnostic.unmatched" );
+    }
+}
+
+TEST_CASE( "fault lab: runner produces a passing, digest-stable report", "[faultlab]" )
+{
+    const FaultScenario scenario = bandSwapScenario();
+    const auto first = runFaultScenario( scenario );
+    const auto second = runFaultScenario( scenario );
+    REQUIRE( first.ok );
+    REQUIRE( second.ok );
+
+    const FaultRunReport &report = first.value;
+    CHECK( report.passed );
+    CHECK( report.faultApplied );
+    CHECK( report.expectationsPassed );
+    CHECK( report.diagnosisMatched );
+    CHECK( report.actualDiagnosisSignature == "all_negative_index" );
+    CHECK( report.sandboxRemoved );
+    CHECK( report.sourceUnchanged );
+    CHECK( report.replayDeterministic );
+    CHECK( report.diagnostics.empty() );
+
+    // Digests stable across runs: the same scenario replays byte-identically.
+    CHECK( faultReportDigest( first.value ) == faultReportDigest( second.value ) );
+}
+
+TEST_CASE( "fault lab: runner fails cleanly on impossible expectations", "[faultlab]" )
+{
+    FaultScenario scenario = bandSwapScenario();
+    scenario.expectations[1].relation = ExpectationRelation::DeltaGe;
+    scenario.expectations[1].value = 100.0; // impossible for a role swap
+
+    const auto result = runFaultScenario( scenario );
+    REQUIRE( result.ok );
+    CHECK_FALSE( result.value.passed );
+    CHECK( result.value.faultApplied );
+    CHECK_FALSE( result.value.expectationsPassed );
+    REQUIRE( result.value.expectationResults.size() == 2 );
+    CHECK( result.value.expectationResults[1].passed == false );
+    CHECK( result.value.expectationResults[1].delta < 0.0 ); // evidence carries the real delta
+    // Cleanup and source immutability still hold for a failed scenario.
+    CHECK( result.value.sandboxRemoved );
+    CHECK( result.value.sourceUnchanged );
+}
+
+TEST_CASE( "fault lab: runner refuses oversized fixtures with a typed budget error", "[faultlab]" )
+{
+    FaultScenario scenario = bandSwapScenario();
+    scenario.maxBytes = 1;
+    const auto result = runFaultScenario( scenario );
+    CHECK_FALSE( result.value.passed );
+    bool budgetSeen = false;
+    for ( const auto &diagnostic : result.value.diagnostics )
+    {
+        if ( diagnostic.code == "faultlab.budget_exceeded" )
+        {
+            budgetSeen = true;
+        }
+    }
+    CHECK( budgetSeen );
+    CHECK( result.value.sandboxRemoved );
+}
+
+TEST_CASE( "fault lab: runner reports unknown fixtures with a typed error", "[faultlab]" )
+{
+    FaultScenario scenario = bandSwapScenario();
+    scenario.fixtureId = "missing_fixture";
+    const auto result = runFaultScenario( scenario );
+    CHECK_FALSE( result.value.passed );
+    bool fixtureSeen = false;
+    for ( const auto &diagnostic : result.value.diagnostics )
+    {
+        if ( diagnostic.code == "faultlab.fixture_unknown" )
+        {
+            fixtureSeen = true;
+        }
+    }
+    CHECK( fixtureSeen );
+    CHECK( result.value.sandboxRemoved );
+}
+
+TEST_CASE( "fault lab: runner reports fault refusals without touching the source", "[faultlab]" )
+{
+    FaultScenario scenario = bandSwapScenario();
+    // The index-pair fixture has no SWIR band: the swap must refuse.
+    scenario.fault.params["role_b"] = "swir2";
+    const auto result = runFaultScenario( scenario );
+    REQUIRE( result.ok );
+    CHECK_FALSE( result.value.passed );
+    CHECK_FALSE( result.value.faultApplied );
+    bool unsafeSeen = false;
+    for ( const auto &diagnostic : result.value.diagnostics )
+    {
+        if ( diagnostic.code == "faultlab.fault_unsafe_target" )
+        {
+            unsafeSeen = true;
+        }
+    }
+    CHECK( unsafeSeen );
+    CHECK( result.value.sourceUnchanged );
+    CHECK( result.value.sandboxRemoved );
+}

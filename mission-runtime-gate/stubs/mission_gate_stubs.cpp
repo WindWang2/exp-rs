@@ -76,3 +76,68 @@ QStringList selectedLayerIds( const SelectionContextSnapshot & )
 } // namespace ContextRules
 
 } // namespace sicnu::app
+
+// selection_context.cpp references WorkbenchHost (workbench_host.h, Q_OBJECT)
+// but workbench_host.cpp is NOT part of the harness source list — the shell
+// TU is not compilable here. Define exactly the symbols the harness's TUs
+// reference (the same repair class as the macro comment in tests/CMakeLists.txt):
+// the staticMetaObject for the FunctionPointer connect<> overload, the two
+// accessors, and the manually-defined signal.
+const QMetaObject sicnu::app::WorkbenchHost::staticMetaObject{};
+
+const QMetaObject *sicnu::app::WorkbenchHost::metaObject() const
+{
+    return &staticMetaObject;
+}
+
+void *sicnu::app::WorkbenchHost::qt_metacast( const char * )
+{
+    return nullptr;
+}
+
+int sicnu::app::WorkbenchHost::qt_metacall( QMetaObject::Call, int, void ** )
+{
+    return -1;
+}
+
+QString sicnu::app::WorkbenchHost::activeWorkbenchId() const
+{
+    return QString();
+}
+
+sicnu::app::IWorkbench *sicnu::app::WorkbenchHost::activeWorkbench() const
+{
+    return nullptr;
+}
+
+void sicnu::app::WorkbenchHost::activeWorkbenchChanged( const QString &, const QString & ) {}
+
+// Remaining out-of-line members the harness never calls (defined so the
+// vtable/emission of any additional reference cannot come back as a new
+// link failure):
+sicnu::app::WorkbenchHost::WorkbenchHost( QObject *parent )
+    : QObject( parent )
+{
+}
+
+bool sicnu::app::WorkbenchHost::registerWorkbench( IWorkbench * )
+{
+    return false;
+}
+
+sicnu::app::IWorkbench *sicnu::app::WorkbenchHost::workbench( const QString & ) const
+{
+    return nullptr;
+}
+
+QStringList sicnu::app::WorkbenchHost::workbenchIds() const
+{
+    return {};
+}
+
+bool sicnu::app::WorkbenchHost::activate( const QString & )
+{
+    return false;
+}
+
+void sicnu::app::WorkbenchHost::workbenchRegistered( const QString & ) {}

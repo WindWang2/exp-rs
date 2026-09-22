@@ -103,17 +103,25 @@ std::string pluginSnapshotRoot( const std::string &tempDirectory );
 long snapshotOwnerPid();
 
 /// Bounded GC over the snapshot root (WP3). Reclaims in-flight residue
-/// (*~staging-*, upgrade-*, *~old-*) whose OWNING pid is dead — artifacts
+/// (*~staging-*, *~old-*) whose OWNING pid is dead — artifacts
 /// of a live process (this one or a concurrent instance) are never
 /// touched — restores a ~old-* backup when its dest went missing mid-swap,
 /// drops last-good-<id> directories whose id is not in @p liveIds
 /// (abandoned dev trees, externally uninstalled plugins), and cleans the
 /// legacy <temp>/plugin-last-good-<id> layout left by 12.0 builds.
+/// #1157: a dead-owner upgrade-<id>-<pid> snapshot of a still-live plugin
+/// is the LAST COMPLETE copy — the owner may have died mid-rollback, when
+/// restorePluginSnapshot has already cleared the live directory
+/// file-by-file. With @p pluginRoots supplied it is RESTORED into
+/// <root>/<id> (mirroring reconcileStaging's park handling) instead of
+/// being deleted as residue; only an unrestorable snapshot falls back to
+/// removal.
 /// Fails closed: a symlinked root is skipped, a non-directory root is
 /// untouched, a symlinked ENTRY is never promoted — it is residue and
 /// removed. Returns the number of directories removed.
 int sweepPluginSnapshots( const std::string &tempDirectory,
-                          const std::vector<std::string> &liveIds );
+                          const std::vector<std::string> &liveIds,
+                          const std::vector<std::string> &pluginRoots = {} );
 
 /// One asynchronous capture. Owns its worker thread: cancel() + join in the
 /// destructor means a dropped job (registry teardown, a newer capture

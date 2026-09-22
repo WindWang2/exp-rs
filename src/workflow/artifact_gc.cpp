@@ -7,6 +7,8 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace sicnu::workflow {
 
 namespace {
@@ -63,11 +65,12 @@ QString tryRemoveFile( const QString &path, QStringList *errors )
 
   const QString staging = path + QStringLiteral( ".gctrash" );
   QFile::remove( staging );
-  if ( QFile::rename( path, staging ) )
+  // #1178: MoveFileExW replace so a leftover .gctrash cannot block quarantine.
+  if ( sicnu::geo::atomic_fs::renameReplaceQuiet( path.toStdString(), staging.toStdString() ) )
   {
     if ( QFile::remove( staging ) )
       return path;
-    QFile::rename( staging, path ); // best-effort restore; direct retry below
+    sicnu::geo::atomic_fs::renameReplaceQuiet( staging.toStdString(), path.toStdString() );
   }
 
   QFile file( path );

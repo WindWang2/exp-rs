@@ -1,0 +1,54 @@
+{
+  "allowed_tools": [
+    "model:run_inference",
+    "harness:verify"
+  ],
+  "case_id": "model/batch-explain",
+  "description": "Inference with a mandatory batch explanation",
+  "expected_evidence": [
+    {
+      "id": "detections",
+      "kind": "raster",
+      "require_in_explanation": true,
+      "required_fields": [
+        "detections"
+      ]
+    }
+  ],
+  "goal": "Run inference and state the batching in the final explanation.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "detections",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-explain",
+      "kind": "explanation_mentions",
+      "params": {
+        "phrase": "batch 32"
+      },
+      "severity": "warning"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "model",
+  "title": "Inference with a mandatory batch explanation"
+}

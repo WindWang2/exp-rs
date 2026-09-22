@@ -739,6 +739,9 @@ sicnu_write_feature_probes_header("${CMAKE_BINARY_DIR}/sicnu_feature_probes.h")
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)
+# RS14-05 Process-aware Experiment Grader (ADR 0174): pure C++20 + jsoncpp
+# leaf library (sicnu_grader) — zero Qt/GDAL/sicnu dependencies, no I/O.
+add_subdirectory(src/grader)
 # Dataset, Experiment & Reproducibility Foundation 5.0 (ADR 0134-0138): the
 # science-core stores over sicnu_data (dataset identity/manifest/splits) and
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
@@ -748,17 +751,32 @@ add_subdirectory(src/dataset)
 # compute. Pure science-core leaf over Sicnu::data/Sicnu::dataset vocabulary.
 add_subdirectory(src/suitability)
 add_subdirectory(src/experiment)
+# Parameter Sensitivity & Uncertainty Studio (RS14-07): studies the existing
+# experiment/execution authorities — never a second store or scheduler.
+add_subdirectory(src/study)
+# RS14-06 Experiment Debugger (ADR 0174): read-only first-divergence
+# projection over recorded run evidence. Leaf over Sicnu::experiment +
+# sicnu_workflow read surfaces; consumers are opt-in (tests, future CLI/GUI).
+add_subdirectory(src/experiment/debugger)
 # Unified Help, Hint & Diagnostic Knowledge System 6.0: single authority for
 # help/diagnostic knowledge (descriptor model, registry, search, JSON store,
 # projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
 # through narrow source interfaces, never links the app/operator layers.
 add_subdirectory(src/help)
+# Explainable Scientific Workflow (RS14-15, ADR 0167): per-step explanation
+# schema, authored-guidance store, builder and hallucination-guard validator.
+# Pure C++20 + jsoncpp leaf; authoritative facts enter through narrow source
+# interfaces implemented by src/explain/adapters (added after src/workflow).
+add_subdirectory(src/explain)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
+# Scientific Fault Injection Lab Framework (RS14-13). Qt-free C++20 leaf over
+# jsoncpp only; placed after the runtime/data leaves, before consumers.
+add_subdirectory(src/faultlab)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)
@@ -773,6 +791,9 @@ add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
 add_subdirectory(src/processing)
+# RS14-12 teaching autonomy ladder: Qt-free policy leaf; must precede the
+# agent library that links it (and hosts the two gate call sites).
+add_subdirectory(src/agent/autonomy)
 add_subdirectory(src/agent)
 
 # SICNU_GEO_RS: extra include paths needed by unconditional core sources
@@ -793,6 +814,14 @@ add_subdirectory(src/operators)
 # Contract Platform 9.0: canonical descriptors, contract graph and the
 # mechanical drift scanners (test/tooling side, zero product runtime cost).
 add_subdirectory(src/contracts)
+# RS14-01 Scientific Data Passport: versioned read-only scientific asset
+# state layer (Qt-free, jsoncpp-only core).
+add_subdirectory(src/scientific_state)
+add_subdirectory(src/scientific_state/gdal)
+add_subdirectory(src/scientific_state/catalog)
+# RS14 agent-benchmark: offline traces-in agent trajectory benchmark.
+# Plain C++20 + jsoncpp, no Qt (headless harness; see docs/agent/benchmark-harness.md).
+add_subdirectory(src/agentbench)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
@@ -801,6 +830,9 @@ add_subdirectory(src/workflow)
 # src/workflow: the adapter links the sicnu_workflow target.
 add_subdirectory(src/experiment/bridge)
 add_subdirectory(src/jobs)
+# LabSpec v3 lab runtime (rs14-labspec2-runtime, ADR 0174). Qt-free metadata
+# layer; depends on jsoncpp only.
+add_subdirectory(src/lab)
 add_subdirectory(src/python/isolated)
 add_subdirectory(src/python/sdk)
 # ExpRS Developer Platform public SDK (plugin infrastructure + install/export)

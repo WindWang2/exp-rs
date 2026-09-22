@@ -7,11 +7,12 @@
   Locking design (no lock held across network I/O unless it must be):
     * the store mutex guards the block index, global LRU list, byte
       accounting and telemetry — operations are O(1) and short.
-    * each resource carries its own fetch mutex: the reader that misses
-      performs the coalesced ranged GET under the RESOURCE lock, so a
-      concurrent reader of the same missing range waits and then hits the
-      freshly-filled blocks (request dedup), while unrelated resources
-      fetch in parallel.
+    * each resource carries its own fetch mutex + in-progress flag: the
+      reader that misses owns the coalesced ranged GET, but RELEASES the
+      mutex for the entire transfer (and every retry backoff) so the
+      per-resource lock never spans the retry budget. Concurrent readers of
+      the same missing range wait on fetchCv and then hit the freshly-filled
+      blocks (request dedup); unrelated resources fetch in parallel.
     * a read that crosses an invalidation restarts against the new
       generation (bounded restarts) — a reader never receives a blend of
       two content versions within one Read call.
@@ -34,6 +35,7 @@
 #include <cpl_vsi_virtual.h>
 
 #include <algorithm>
+#include <cctype>
 #include <condition_variable>
 #include <atomic>
 #include <chrono>
@@ -114,10 +116,151 @@ bool underlyingUrl( const std::string &path, std::string &requestUrl, std::strin
   return true;
 }
 
+/// Lowercase ASCII helper (host / scheme already lower in parse for scheme).
+std::string asciiLower( const std::string &text )
+{
+  std::string out = text;
+  for ( char &c : out )
+    c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+  return out;
+}
+
+/// Uppercase percent-encoding hex digits ("%2f" → "%2F") so equivalent
+/// encodings collapse under one cache key without decoding reserved bytes.
+std::string normalizePercentHex( const std::string &text )
+{
+  std::string out = text;
+  for ( std::size_t i = 0; i + 2 < out.size(); ++i )
+  {
+    if ( out[i] != '%' )
+      continue;
+    out[i + 1] = static_cast<char>( std::toupper( static_cast<unsigned char>( out[i + 1] ) ) );
+    out[i + 2] = static_cast<char>( std::toupper( static_cast<unsigned char>( out[i + 2] ) ) );
+    i += 2;
+  }
+  return out;
+}
+
+/// Sort query pairs by key then value so "?b=2&a=1" and "?a=1&b=2" share a key.
+/// Pairs without '=' stay bare keys; pairs with '=' keep the equals even when
+/// the value is empty ("flag" vs "flag=" stay distinct after sorting).
+std::string canonicalizeQueryOrder( const std::string &query )
+{
+  if ( query.empty() )
+    return query;
+  struct Pair
+  {
+      std::string key;
+      std::string value;
+      bool hasEquals = false;
+      bool operator<( const Pair &other ) const
+      {
+        if ( key != other.key )
+          return key < other.key;
+        if ( hasEquals != other.hasEquals )
+          return !hasEquals && other.hasEquals;
+        return value < other.value;
+      }
+  };
+  std::vector<Pair> pairs;
+  std::size_t start = 0;
+  while ( start <= query.size() )
+  {
+    const std::size_t end = query.find( '&', start );
+    const std::string piece =
+      query.substr( start, end == std::string::npos ? std::string::npos : end - start );
+    if ( !piece.empty() )
+    {
+      Pair pair;
+      const std::size_t eq = piece.find( '=' );
+      if ( eq == std::string::npos )
+      {
+        pair.key = piece;
+      }
+      else
+      {
+        pair.key = piece.substr( 0, eq );
+        pair.value = piece.substr( eq + 1 );
+        pair.hasEquals = true;
+      }
+      pairs.push_back( std::move( pair ) );
+    }
+    if ( end == std::string::npos )
+      break;
+    start = end + 1;
+  }
+  std::sort( pairs.begin(), pairs.end() );
+  std::string out;
+  for ( const Pair &pair : pairs )
+  {
+    if ( !out.empty() )
+      out.push_back( '&' );
+    out += pair.key;
+    if ( pair.hasEquals )
+    {
+      out.push_back( '=' );
+      out += pair.value;
+    }
+  }
+  return out;
+}
+
+/// Cache-identity spelling for http(s): lowercased host, stripped default
+/// ports, percent-hex normalized path, sorted query. Fragment is omitted
+/// (never affects ranged bytes). Signed-URL query VALUES stay intact so
+/// distinct signatures never collapse; only pair ORDER is normalized.
+std::string httpCacheIdentityKey( const ResourceUri &uri )
+{
+  std::string authority = asciiLower( uri.host );
+  std::string hostname = authority;
+  std::string port;
+  if ( !authority.empty() && authority.front() == '[' )
+  {
+    const std::size_t rb = authority.find( ']' );
+    if ( rb != std::string::npos )
+    {
+      hostname = authority.substr( 0, rb + 1 );
+      if ( rb + 1 < authority.size() && authority[rb + 1] == ':' )
+        port = authority.substr( rb + 2 );
+    }
+  }
+  else
+  {
+    const std::size_t colon = authority.rfind( ':' );
+    // A single colon ⇒ host:port. Multiple colons without brackets ⇒ leave
+    // as-is (malformed / rare); do not strip.
+    if ( colon != std::string::npos && authority.find( ':' ) == colon )
+    {
+      hostname = authority.substr( 0, colon );
+      port = authority.substr( colon + 1 );
+    }
+  }
+  if ( ( uri.scheme == "https" && port == "443" ) || ( uri.scheme == "http" && port == "80" ) )
+    port.clear();
+
+  std::string path = normalizePercentHex( uri.path );
+  if ( path.empty() )
+    path = "/";
+  const std::string query = canonicalizeQueryOrder( uri.query );
+
+  std::string out = uri.scheme + "://";
+  if ( !uri.userinfo.empty() )
+    out += uri.userinfo + "@";
+  out += hostname;
+  if ( !port.empty() )
+    out += ":" + port;
+  out += path;
+  if ( !query.empty() )
+    out += "?" + query;
+  return out;
+}
+
 std::string resourceKey( const std::string &requestUrl )
 {
   const ResourceUri uri = ResourceUri::parse( requestUrl );
-  return uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
+  if ( uri.kind == ResourceKind::RemoteHttp )
+    return httpCacheIdentityKey( uri );
+  return uri.remoteUrl();
 }
 
 /// 11.0 object-entry key (D-1102): canonical VSI spelling + the creating
@@ -174,6 +317,8 @@ struct ResourceEntry
   std::uint64_t bytesCached = 0;      // 12.0: sum of this entry's block bytes
                                       // (per-resource budget basis)
   std::mutex fetchMutex;
+  std::condition_variable fetchCv; // waiters wake when an owner finishes
+  bool fetchInProgress = false;    // owner holds origin transfer; mutex released
   std::uint64_t sizeBytes = 0;
   bool hasSize = false;
   // 12.0 TTL basis: the steady-clock millisecond stamp of the last
@@ -223,8 +368,9 @@ class CacheStore
     // gate never holds the store mutex and never holds a resource's
     // fetchMutex ACROSS the wait of a different resource — a waiter blocks
     // only until other resources' fetches drain. A request larger than the
-    // cap is admitted when NOTHING else is in flight (head-of-line, no
-    // starvation).
+    // cap is admitted when NOTHING else is in flight (head-of-line). Under
+    // sustained small-fetch load an over-cap fetch can still be starved by
+    // barging new arrivals — see RangeCacheConfig::maxConcurrentFetchBytes.
     // 13.0: the admission scope is ONE ORIGIN TRANSFER (one attempt of a
     // ranged GET) — a retry's backoff sleep runs with the slot released,
     // so the cap bounds bytes on the wire, never patience.
@@ -956,9 +1102,12 @@ std::vector<unsigned char> fetchRangeOnce( const std::string &requestUrl, std::u
       result.body.resize( static_cast<std::size_t>( windowBytes ) );
       return result.body; // verified window (EOF-clamped ends are fine)
     }
-    // 206 without a parseable range: treat as an opaque slice — callers
-    // verify coverage before serving.
-    return result.body;
+    // 206 without a parseable Content-Range must NEVER enter the cache as
+    // an opaque slice at the requested offset (#1228 / #1186): a hostile or
+    // broken origin would poison every later reader. Refuse and let the
+    // caller fall back to a direct read.
+    throw GeoError( ErrorCode::Unsupported,
+                    "range_cache: 206 response missing a parseable Content-Range" );
   }
   // A range-ignoring origin answers with the object from byte 0 (possibly
   // cut by the byte budget). The answer serves the request only when it
@@ -1344,9 +1493,27 @@ class RangeCacheHandle final : public VSIVirtualHandle
         return length;
       }
 
-      // The resource fetch mutex dedups concurrent readers: the waiter
-      // re-checks the cache once the fetching thread finished.
-      std::lock_guard<std::mutex> fetchLock( mEntry->fetchMutex );
+      // Fetch ownership: waiters sleep on fetchCv while one thread owns the
+      // origin transfer. The mutex is RELEASED for the entire transfer (and
+      // every retry backoff) so the per-resource lock never spans the retry
+      // budget (#1228 / #1186 item 32).
+      std::unique_lock<std::mutex> fetchLock( mEntry->fetchMutex );
+      while ( mEntry->fetchInProgress )
+      {
+        mEntry->fetchCv.wait( fetchLock );
+        if ( mGeneration != cache.entryGeneration( mEntry ) )
+        {
+          mGeneration = cache.entryGeneration( mEntry );
+          *restarted = true;
+          return 0;
+        }
+        if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
+        {
+          cache.hits.fetch_add( 1 );
+          cache.dedupHits.fetch_add( 1 );
+          return length;
+        }
+      }
       if ( mGeneration != cache.entryGeneration( mEntry ) )
       {
         mGeneration = cache.entryGeneration( mEntry );
@@ -1378,7 +1545,11 @@ class RangeCacheHandle final : public VSIVirtualHandle
         return fallbackRead( destination, position, fetchEnd - position );
       }
 
+      mEntry->fetchInProgress = true;
+      fetchLock.unlock();
+
       std::vector<unsigned char> bytes;
+      bool transportFailed = false;
       try
       {
         // 13.0: the in-flight byte admission covers ONE origin transfer.
@@ -1386,6 +1557,7 @@ class RangeCacheHandle final : public VSIVirtualHandle
         // released before every backoff sleep — so a retrying fetch holds no
         // origin slot while it waits (the byte cap bounds wire bytes, not
         // patience; retry fairness stays bounded by fetchAttempts).
+        // The resource fetchMutex is also released here (see above).
         if ( mEntry->vsiObject )
         {
           // The VSI path has no retry loop: its single transfer admits here.
@@ -1401,9 +1573,25 @@ class RangeCacheHandle final : public VSIVirtualHandle
       }
       catch ( const GeoError & )
       {
+        transportFailed = true;
+      }
+
+      fetchLock.lock();
+      mEntry->fetchInProgress = false;
+      mEntry->fetchCv.notify_all();
+
+      if ( transportFailed )
+      {
         // Failure fallback: the cache is never a correctness gate — read the
         // same bytes straight through /vsicurl/.
         return fallbackRead( destination, position, fetchEnd - position );
+      }
+      // Generation may have moved while the mutex was released.
+      if ( mGeneration != cache.entryGeneration( mEntry ) )
+      {
+        mGeneration = cache.entryGeneration( mEntry );
+        *restarted = true;
+        return 0;
       }
       // 12.0: the fetch completed but the veto landed while it was in
       // flight — these bytes are DISCARDED (never inserted into the memory
@@ -1541,6 +1729,18 @@ std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::s
     }
     else
     {
+      // #1162: an unprovable identity (weak/absent/multipart-"null" ETag —
+      // exactly the objects the identity layer supports) must still catch
+      // the one change signal a HEAD always carries: the SIZE. Serving old
+      // blocks under the NEW entry size is coherent-but-stale — mirror the
+      // http arm's size_mismatch fallback and drop the blocks instead.
+      if ( facts.hasSize && storedIdentity.hasSize
+           && facts.sizeBytes != storedIdentity.sizeBytes )
+      {
+        cache.invalidate( key );
+        return cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
+                                           vsiObjectIdentity( vsiPath, facts ) );
+      }
       if ( facts.hasSize )
         cache.updateEntrySize( entry, facts.sizeBytes );
       // A provable HEAD with a matching strong ETag is the VSI

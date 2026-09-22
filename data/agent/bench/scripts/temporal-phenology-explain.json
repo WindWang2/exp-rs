@@ -1,0 +1,42 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "temporal/phenology-explain",
+  "explanation": "The smoothed series marks the season peaks in phenology; evidence smooth-series.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/phenology-explain",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:smooth"
+    },
+    {
+      "evidence": "smooth-series",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02
+        },
+        "output_path": "work://case/smooth.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

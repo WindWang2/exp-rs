@@ -1,6 +1,7 @@
 // rs_classifier_normalbayes.cpp — Phase 10A Task 10.8 + F12 class order sidecar.
 
 #include "rs_classifier_normalbayes.h"
+#include "rs_classifier_labels_sidecar.h"
 #include "rs_class_order.h"
 #include "sicnu_logging.h"
 
@@ -44,10 +45,13 @@ bool RsClassifierNormalBayes::save( const QString &path ) const
   // model file fail validation (self-poisoning legacy round-trip).
   if ( mClassLabels.isEmpty() )
     return false;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  // #1175: stamp the pair so a torn sidecar cannot load as "legacy empty".
+  if ( !sicnu::classification::labels_sidecar::writePair(
+         path, RsClassOrder::toJson( mClassLabels ) ) )
+  {
+    QFile::remove( path );
     return false;
-  f.write( RsClassOrder::toJson( mClassLabels ).toJson( QJsonDocument::Compact ) );
+  }
   return true;
 }
 
@@ -56,13 +60,15 @@ bool RsClassifierNormalBayes::load( const QString &path )
   mClassLabels.clear();
   if ( !RsClassifierCvBackend<cv::ml::NormalBayesClassifier>::load( path ) )
     return false;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.exists() )
-    return true; // legacy model without a sidecar — classOrder() stays empty
-  if ( !f.open( QIODevice::ReadOnly ) )
+  QJsonArray arr;
+  using LS = sicnu::classification::labels_sidecar::LoadStatus;
+  const LS status = sicnu::classification::labels_sidecar::loadArray( path, arr );
+  if ( status == LS::Failed )
     return false;
+  if ( status == LS::LegacyMissing )
+    return true; // legacy model without a sidecar — classOrder() stays empty
   QVector<int> order;
-  if ( !RsClassOrder::fromJson( QJsonDocument::fromJson( f.readAll() ), order ) )
+  if ( !RsClassOrder::fromJsonArray( arr, order ) )
     return false;
   mClassLabels = order;
   return true;

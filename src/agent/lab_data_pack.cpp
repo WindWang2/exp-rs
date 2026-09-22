@@ -257,10 +257,40 @@ LabPackVerification LabPackVerifier::verify( const LabDataPack &pack, const QStr
   bool failed = false;
   bool degraded = false;
 
+  const QString canonicalRoot = QFileInfo( root ).canonicalFilePath();
   for ( const LabPackInput &input : pack.inputs )
   {
+    // #1186: confine input paths under the pack root — absolute / ../ paths
+    // used to yield an existence+size+sha256 oracle outside the pack.
+    if ( QFileInfo( input.path ).isAbsolute()
+         || input.path.split( QLatin1Char( '/' ) ).contains( QStringLiteral( ".." ) ) )
+    {
+      Json::Value issue( Json::objectValue );
+      issue["code"] = "lab.pack_input_outside_root";
+      issue["path"] = input.path.toStdString();
+      issue["detail"] = "input path must be pack-relative without '..'";
+      verification.issues.append( issue );
+      failed = true;
+      continue;
+    }
     const QString absolute = QDir( root ).filePath( input.path );
     const QFileInfo info( absolute );
+    if ( !canonicalRoot.isEmpty() )
+    {
+      const QString canonical = info.canonicalFilePath();
+      if ( !canonical.isEmpty()
+           && !canonical.startsWith( canonicalRoot + QLatin1Char( '/' ) )
+           && canonical != canonicalRoot )
+      {
+        Json::Value issue( Json::objectValue );
+        issue["code"] = "lab.pack_input_outside_root";
+        issue["path"] = input.path.toStdString();
+        issue["detail"] = "resolved input escapes the pack root";
+        verification.issues.append( issue );
+        failed = true;
+        continue;
+      }
+    }
 
     if ( !info.isFile() )
     {

@@ -22,6 +22,8 @@ target_link_libraries(qgis_analysis PUBLIC
     qgis_core
     GDAL::GDAL
     Qt6::Core
+    # #1174: classification/OBIA polygonize publish routes through atomic_fs.
+    Sicnu::Geospatial
 )
 
 # qgsleastsquares.cpp (helmert/projective) uses GSL LU/SVD.

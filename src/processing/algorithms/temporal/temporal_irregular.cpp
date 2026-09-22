@@ -261,21 +261,19 @@ std::vector<float> whittakerSmoothTimeRobust( const std::vector<float> &y,
   std::vector<float> z = whittakerSmoothTime( y, tDays, weights, lambda );
   for ( int iter = 1; iter < maxIter; ++iter )
   {
-    std::vector<double> absRes;
-    absRes.reserve( static_cast<size_t>( n ) );
+    std::vector<double> residuals;
+    residuals.reserve( static_cast<size_t>( n ) );
     for ( int i = 0; i < n; ++i )
     {
       if ( std::isfinite( y[static_cast<size_t>( i )] ) &&
            std::isfinite( z[static_cast<size_t>( i )] ) )
-        absRes.push_back(
-          std::abs( static_cast<double>( y[static_cast<size_t>( i )] ) -
-                    z[static_cast<size_t>( i )] ) );
+        residuals.push_back(
+          static_cast<double>( y[static_cast<size_t>( i )] ) -
+          z[static_cast<size_t>( i )] );
     }
-    if ( absRes.empty() )
+    if ( residuals.empty() )
       break;
-    std::sort( absRes.begin(), absRes.end() );
-    const double mad = absRes[absRes.size() / 2];
-    const double k = std::max( 3.0 * 1.4826 * mad, 1e-9 );
+    const double k = std::max( 3.0 * detail::madScale( residuals ), 1e-9 );
     bool changed = false;
     for ( int i = 0; i < n; ++i )
     {

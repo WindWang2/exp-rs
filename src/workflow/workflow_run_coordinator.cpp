@@ -28,6 +28,7 @@
 #include "data/artifact_store.h"
 #include "data/execution_fingerprint.h"
 #include "runtime/observability/trace.h"
+#include "geospatial/util/atomic_fs.h"
 
 namespace sicnu::workflow {
 
@@ -154,9 +155,13 @@ bool rehydrateMovedOutput( const StepPlan &plan )
         QFile::remove( tmp );
         return false;
     }
-    if ( QFile::exists( destination ) )
-        QFile::remove( destination );
-    if ( !QFile::rename( tmp, destination ) )
+    // #1178: ReplaceFileW / MoveFileExW — never remove-then-rename (Windows
+    // sharing violation after deleting the previous good artifact).
+    try
+    {
+        sicnu::geo::atomic_fs::publishStagedFile( tmp.toStdString(), destination.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError & )
     {
         QFile::remove( tmp );
         return false;
@@ -447,11 +452,27 @@ void WorkflowRunCoordinator::persistRun( PersistRequest request )
 
 long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
 {
+    // #1154: the pipeline text is client-supplied through the unauthenticated
+    // MCP run_workflow surface. jsoncpp's default builder does not bound its
+    // recursion usefully — a deeply-nested string SIGSEGVs (MSVC) or throws
+    // an escaping Json::LogicError (GCC terminate). A workflow document is
+    // shallow (steps + per-step params), so bound it explicitly and catch,
+    // returning the typed INVALID_PIPELINE the handler already promises.
     Json::CharReaderBuilder builder;
+    builder["stackLimit"] = 64;
     Json::Value root;
     std::string errs;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( jsonPipeline.c_str(), jsonPipeline.c_str() + jsonPipeline.length(), &root, &errs ) )
+    bool parsed = false;
+    try
+    {
+        parsed = reader->parse( jsonPipeline.c_str(), jsonPipeline.c_str() + jsonPipeline.length(), &root, &errs );
+    }
+    catch ( const Json::Exception & )
+    {
+        parsed = false;
+    }
+    if ( !parsed )
         return -1;
 
     WorkflowDefinition def;
@@ -1263,10 +1284,9 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                     QStringLiteral( "Superseded by resume of run %1 (temporary internal run)" )
                         .arg( QString::fromStdString( runId ) )
                         .toStdString() );
-                // Already inside the swap's m_mutex scope: capture + queue
-                // only — persist runs after the lock drops; the public
-                // resumeRun wrapper drains the queue outside the lock.
-                swapPersists.push_back( capturePersistLocked( ghost ) );
+                // Notify observers, but do NOT persist the ghost (#1186): a
+                // post-unlock persist would recreate the checkpoint we remove
+                // below and leave a permanent Canceled ghost + lock on disk.
                 queueRunStateNotificationLocked( *ghost, 0,
                                                  QDateTime::currentMSecsSinceEpoch() );
             }
@@ -1277,7 +1297,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
             QFile::remove( checkpointPathLocked( ghostRunId ) );
-            m_locksByRunId.erase( ghostRunId );
+            m_locksByRunId.erase( ghostRunId ); // destructor releases + drops lock file
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             swapPersists.push_back( capturePersistLocked( run ) );
@@ -1388,7 +1408,18 @@ long WorkflowRunCoordinator::pipelineIdForRun( const std::string &runId ) const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     const auto it = m_pipelineByRunId.find( runId );
-    return it != m_pipelineByRunId.end() ? it->second : -1;
+    if ( it != m_pipelineByRunId.end() )
+        return it->second;
+    // Terminal runs drop the reverse map so resume can re-bind (#1097), but
+    // m_runsByPipeline retains history. Mission reconcile must still resolve
+    // a finished run — otherwise Running tasks go Stale forever with a lost
+    // success verdict (#1228 / #1186 item 34).
+    for ( const auto &kv : m_runsByPipeline )
+    {
+        if ( kv.second && kv.second->runId() == runId )
+            return kv.first;
+    }
+    return -1;
 }
 
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowRunCoordinator::runs() const

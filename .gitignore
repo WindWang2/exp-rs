@@ -54,6 +54,11 @@ data/*
 # for guided workflows, generated docs and (D4/D7) auto-grading.
 !data/labs/
 !data/labs/**
+# Fault injection lab scenarios + schema (RS14-13): small tracked JSON
+# metadata, the single source of truth for fault scenarios. Rasters are
+# generated at runtime into sandbox temp dirs and never tracked here.
+!data/faultlab/
+!data/faultlab/**
 # Lab step outputs (guided runs resolve outputs/... to /output/labs/<labId>/).
 /output/
 # CN satellite product metadata templates (band-role tables, field maps;
@@ -125,6 +130,7 @@ vendor/
 .superpowers/
 .gstack/
 .planning/*
+!.planning/RS14-05-process-grader/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
 !.planning/cartography-platform-7/
@@ -138,6 +144,10 @@ vendor/
 !.planning/RS14-16-scene-suitability/
 .planning/RS14-16-scene-suitability/*
 !.planning/RS14-16-scene-suitability/*.md
+# Fault injection lab track planning notes (RS14-13; markdown only).
+!.planning/RS14-13-fault-injection-labs/
+.planning/RS14-13-fault-injection-labs/*
+!.planning/RS14-13-fault-injection-labs/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/
@@ -152,6 +162,7 @@ vendor/
 .planning/teaching-lab-platform-11/*
 !.planning/teaching-lab-platform-11/*.md
 !.planning/plugin-platform-9/
+!.planning/rs14-explainable-workflow/
 !.planning/ds41-plugin-lifecycle-13/
 !.planning/geospatial-data-fabric-9/
 !.planning/lab-content-expansion/
@@ -444,3 +455,16 @@ data/labs/_tmp/
 !.planning/ds41-workflow-durability-13/
 .planning/ds41-workflow-durability-13/*
 !.planning/ds41-workflow-durability-13/*.md
+
+# rs14-labspec2-runtime (LabSpec 2.0 + lab runtime): track planning notes (markdown only; logs stay local).
+!.planning/rs14-labspec2-runtime/
+.planning/rs14-labspec2-runtime/*
+!.planning/rs14-labspec2-runtime/*.md
+# rs14-06-experiment-debugger (RS14 Track 06): track planning notes (markdown only; logs stay local).
+!.planning/rs14-06-experiment-debugger/
+.planning/rs14-06-experiment-debugger/*
+!.planning/rs14-06-experiment-debugger/*.md
+# RS14-14-agent-benchmark: track planning notes (markdown only; logs stay local).
+!.planning/RS14-14-agent-benchmark/
+.planning/RS14-14-agent-benchmark/*
+!.planning/RS14-14-agent-benchmark/*.md

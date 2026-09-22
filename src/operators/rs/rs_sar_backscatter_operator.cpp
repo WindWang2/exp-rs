@@ -162,10 +162,48 @@ Json::Value RsSarBackscatterOperator::run(const Json::Value& params,
                               "Cannot open input raster: " + inputPath);
     }
 
+    // #1147: declared-domain preflight. The kernels here are linear-power
+    // math unless inputDomain=db opts into the pure numeric conversion; a
+    // product that DECLARES SICNU_SAR_DOMAIN=db while the parameter still
+    // says linear_power (the default) would be exponentially mis-scaled
+    // with a confidently wrong output state block. A present declaration
+    // must agree with the parameter (an undeclared legacy raster keeps the
+    // parameter as its only domain statement).
+    {
+        const QString declaredDomain = sicnu::sar::readDomain( src );
+        if ( !declaredDomain.isEmpty()
+             && declaredDomain != QString::fromStdString( inputDomainStr ) )
+        {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "input declares SICNU_SAR_DOMAIN=" + declaredDomain.toStdString()
+                    + " but inputDomain=" + inputDomainStr
+                    + "; pass inputDomain=" + declaredDomain.toStdString()
+                    + " (a dB input only supports the pure numeric conversion — "
+                      "cross-state conversions are refused above)" );
+        }
+    }
+
     if (band < 1 || band > src.bandCount()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(band));
     }
+
+    // Honour SICNU_SAR_GEOCODE_BAND_STATES: geometry / mask bands on a geocode
+    // product must not be re-processed as backscatter (dataset-level token is
+    // sigma0 for the whole five-band stack).
+    if ( !sicnu::sar::bandIsBackscatterState( src, band ) )
+    {
+        const QString bandState =
+            sicnu::sar::effectiveBandRadiometricState( src, band );
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "band " + std::to_string( band ) + " declares state '" +
+                bandState.toStdString() +
+                "' via SICNU_SAR_GEOCODE_BAND_STATES (not a backscatter power "
+                "band); select band 1 (sigma0) or band 2 (gamma0)" );
+    }
+
 
     // Cross-check the assumed input state against the product's declared
     // SICNU_SAR_CALIBRATION: applying a geometry conversion for the wrong

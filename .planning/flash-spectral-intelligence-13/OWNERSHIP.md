@@ -80,3 +80,7 @@ Docs (owner):
 5. `docs/adr/` — take 0167 (0166 claimed by #1136).
 6. `tests/synthetic_raster_builder.h` — additive methods only; if another track edits it,
    rebase and re-apply additively.
+7. `data/agent/capabilities/*.json` (#1151) — the capability-knowledge mirror is
+   hand-authored and NOT covered by any generator: after a union merge, run
+   `test_capability_drift` (both coverage floors — operators AND tools) and author
+   entries for anything the merge added or dropped before the final gate set.

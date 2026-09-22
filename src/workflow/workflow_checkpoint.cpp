@@ -7,6 +7,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+
+#include "geospatial/util/atomic_fs.h"
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QtGlobal>
@@ -388,9 +390,16 @@ int WorkflowCheckpointManager::electCheckpoints( const QString &directoryPath )
     {
       if ( candidate.info.absoluteFilePath() == newest.absoluteFilePath() )
         continue;
-      if ( QFile::rename( candidate.info.absoluteFilePath(),
-                          candidate.info.absoluteFilePath() + QLatin1String( ".orphaned" ) ) )
+      const QString src = candidate.info.absoluteFilePath();
+      const QString dst = src + QLatin1String( ".orphaned" );
+      // #1186: replace an existing .orphaned so a prior partial quarantine
+      // cannot leave the loser live (QFile::rename refuses existing targets
+      // on Windows). Fail closed with a warning when the rename still fails.
+      if ( sicnu::geo::atomic_fs::renameReplaceQuiet( src.toStdString(), dst.toStdString() ) )
         ++quarantined;
+      else
+        qWarning( "WorkflowCheckpointManager: failed to quarantine loser checkpoint %s",
+                  qPrintable( src ) );
     }
   }
   return quarantined;
@@ -400,14 +409,17 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
 {
   const QString dir = directoryPath.isEmpty() ? defaultCheckpointDirectory() : directoryPath;
 
-  // Sweep orphaned tmp files from crashed saves. Recovery runs at startup,
-  // before any new saves, so anything matching the tmp pattern is a leftover.
+  // Sweep orphaned tmp files from crashed saves, and retired election losers
+  // (*.orphaned). Recovery runs at startup, before any new saves (#1186).
   {
     QDir d( dir );
     if ( d.exists() )
     {
-      const QStringList orphans = d.entryList( QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ) },
-                                               QDir::Files );
+      const QStringList orphans = d.entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ),
+                     QStringLiteral( "checkpoint_*.json.orphaned" ),
+                     QStringLiteral( "*.orphaned" ) },
+        QDir::Files );
       for ( const QString &orphan : orphans )
         QFile::remove( d.absoluteFilePath( orphan ) );
     }

@@ -180,7 +180,7 @@ def render_lab(doc):
         out.append("")
     out.append("## 实验步骤")
     out.append("")
-    for i, step in enumerate(doc["steps"], start=1):
+    for i, step in enumerate(doc.get("steps") or [], start=1):
         out.append(render_step(i, step))
     if doc.get("expected_artifacts"):
         out.append("## 预期成果")
@@ -233,10 +233,11 @@ def render_readme(labs):
     out.append("| 实验 | 编号 | 步骤 | 绑定算子 |")
     out.append("|------|------|------|----------|")
     for _, doc, _ in labs:
-        operators = [s["operator_id"] for s in doc["steps"] if "operator_id" in s]
+        steps = doc.get("steps") or []
+        operators = [s["operator_id"] for s in steps if "operator_id" in s]
         out.append(
             f"| [{doc['title_zh']}]({doc['id']}.md) | `{doc['id']}` "
-            f"| {len(doc['steps'])} | {len(operators)} |"
+            f"| {len(steps)} | {len(operators)} |"
         )
     out.append("")
     out.append(SAMPLE_DATA_TABLE)

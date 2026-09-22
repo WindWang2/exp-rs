@@ -197,12 +197,20 @@ TEST_CASE( "A corrupt lineage envelope is refused, never clamped into service",
     };
     for ( const Case &c : cases )
     {
-        patchCheckpoint( base, c.fields );
+        // #1179 potency fix: each case patches a FRESH copy of the base
+        // checkpoint. The cumulative patching let fields from earlier cases
+        // (e.g. attempt: 2.5) perform the refusal the later case was meant
+        // to exercise — deleting the resumeOf validation left this green.
+        const QString fresh = dir.path() + QStringLiteral( "/corrupt-%1.json" )
+                                              .arg( QString::fromStdString( c.name ) );
+        REQUIRE( QFile::copy( base, fresh ) );
+        patchCheckpoint( fresh, c.fields );
         QString err;
-        auto loaded = WorkflowCheckpointManager().loadCheckpoint( base, &err );
+        auto loaded = WorkflowCheckpointManager().loadCheckpoint( fresh, &err );
         INFO( c.name );
         REQUIRE( loaded == nullptr );
         REQUIRE( !err.isEmpty() );
+        QFile::remove( fresh );
     }
 }
 

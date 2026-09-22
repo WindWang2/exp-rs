@@ -325,18 +325,17 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     {
       for ( int ir = 0; ir < 3; ++ir )
       {
-        std::vector<double> absRes;
-        absRes.reserve( static_cast<size_t>( valid ) );
+        std::vector<double> residuals;
+        residuals.reserve( static_cast<size_t>( valid ) );
         for ( int i = seg.first; i < seg.second; ++i )
         {
           if ( segWeights[i] <= 0.0 )
             continue;
-          absRes.push_back( std::abs( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) ) );
+          residuals.push_back( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) );
         }
-        if ( absRes.empty() )
+        if ( residuals.empty() )
           break;
-        std::sort( absRes.begin(), absRes.end() );
-        const double scale = 1.4826 * absRes[absRes.size() / 2];
+        const double scale = detail::madScale( residuals );
         const double delta = scale > 1e-9 ? 1.5 * scale : 1e6;
         for ( int i = seg.first; i < seg.second; ++i )
         {

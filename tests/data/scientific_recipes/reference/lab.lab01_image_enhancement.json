@@ -1,0 +1,137 @@
+{
+  "goal_pattern": {
+    "intent": "image_enhancement",
+    "keywords_en": [],
+    "keywords_zh": [],
+    "modality": "optical"
+  },
+  "preflight": {
+    "required_assets": [],
+    "required_operators": []
+  },
+  "recipe_id": "lab.lab01_image_enhancement",
+  "required_assets": [
+    {
+      "id": "primary",
+      "kind": "file",
+      "predicate": {
+        "must_exist": true,
+        "path": "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema": "sicnu.scientific_recipe/1",
+  "stages": [
+    {
+      "action": "addRasterLayer",
+      "boundary": "ui_action",
+      "human_only": true,
+      "id": "load_data",
+      "index": 0,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "影像已加载并显示在地图画布上。"
+        }
+      ]
+    },
+    {
+      "id": "stretch",
+      "index": 1,
+      "kind": "operator",
+      "operator_id": "rs:contrast_stretch",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "method": "percent_clip",
+        "output": "outputs/lab01_percent_clip.tif"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab01_percent_clip.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "增强后的影像细节明显增多。"
+        }
+      ]
+    },
+    {
+      "id": "smooth",
+      "index": 2,
+      "kind": "operator",
+      "operator_id": "opencv:gaussian_blur",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "kernelSize": 3,
+        "output": "outputs/lab01_gaussian.tif",
+        "sigma": 1.0
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab01_gaussian.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "平滑影像噪声减少，但边界变柔和。"
+        }
+      ]
+    },
+    {
+      "id": "edges",
+      "index": 3,
+      "kind": "operator",
+      "operator_id": "opencv:sobel",
+      "params": {
+        "dx": 1,
+        "dy": 1,
+        "input": "data/samples/landsat_sample.tif",
+        "kernelSize": 3,
+        "output": "outputs/lab01_sobel.tif"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab01_sobel.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "边缘检测影像中地物边界呈亮线。"
+        }
+      ]
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_1",
+      "index": 4,
+      "kind": "reflection",
+      "prompt": "百分比截断拉伸为何要先去除两端极值？保留比例如何影响视觉效果？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_2",
+      "index": 5,
+      "kind": "reflection",
+      "prompt": "平滑滤波与锐化滤波在频域上分别对应什么操作？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_3",
+      "index": 6,
+      "kind": "reflection",
+      "prompt": "中值滤波为什么对椒盐噪声特别有效而高斯滤波效果较差？"
+    }
+  ],
+  "teaching_origin": {
+    "compiled_by": "sicnu.lab2recipe/1",
+    "kind": "labspec_d2",
+    "lab_id": "lab01_image_enhancement"
+  },
+  "title": "Image Enhancement and Spatial Filtering",
+  "title_zh": "影像增强与空间滤波"
+}

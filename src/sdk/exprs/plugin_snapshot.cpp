@@ -662,7 +662,8 @@ bool restorePluginSnapshot( const std::string &snapshotDir,
 }
 
 int sweepPluginSnapshots( const std::string &tempDirectory,
-                          const std::vector<std::string> &liveIds )
+                          const std::vector<std::string> &liveIds,
+                          const std::vector<std::string> &pluginRoots )
 {
     namespace fsn = std::filesystem;
     const std::string root = pluginSnapshotRoot( tempDirectory );
@@ -748,6 +749,43 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
             // upgrade whose rollback source must not be pulled.
             const long owner = trailingPid( name );
             remove = owner <= 0 || ( owner != ownPid && !pidAlive( owner ) );
+            // #1157: a dead-owner snapshot of a still-live plugin is the
+            // last complete copy, not residue — the owner may have died
+            // mid-rollback, after restorePluginSnapshot had already begun
+            // clearing the live directory file-by-file. Deleting it (the
+            // old rule) stranded a partial install with no recovery path.
+            // Restore it into <root>/<id> like reconcileStaging restores a
+            // parked dest; an unrestorable snapshot still falls back to
+            // residue removal (and stays collectible when roots are not
+            // supplied or the plugin is no longer live).
+            if ( remove && owner > 0 && !pluginRoots.empty() )
+            {
+                std::string pluginId = name.substr( std::string( "upgrade-" ).size() );
+                const size_t lastDash = pluginId.rfind( '-' );
+                if ( lastDash != std::string::npos )
+                    pluginId = pluginId.substr( 0, lastDash );
+                const bool stillLive =
+                    std::find( liveIds.begin(), liveIds.end(), pluginId ) != liveIds.end();
+                if ( !pluginId.empty() && stillLive )
+                {
+                    for ( const std::string &rootDir : pluginRoots )
+                    {
+                        const fs::path target = fs::path( rootDir ) / pluginId;
+                        std::error_code probeError;
+                        if ( !fsn::is_directory( target, probeError ) )
+                            continue;
+                        std::string restoreError;
+                        if ( restorePluginSnapshot( entry.generic_string(),
+                                                    target.generic_string(), pluginId,
+                                                    restoreError ) )
+                        {
+                            remove = false;
+                            ++removed; // the snapshot dir was consumed by the restore
+                            break;
+                        }
+                    }
+                }
+            }
         }
         else if ( name.rfind( "last-good-", 0 ) == 0 )
         {

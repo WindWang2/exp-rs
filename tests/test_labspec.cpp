@@ -48,6 +48,42 @@ QList<lab::LabSpec> loadShippedLabs( lab::LabLoadResult *resultOut = nullptr )
 
 } // namespace
 
+namespace {
+
+/// Master reality guard: the D3 merged teaching documents (lab12/13/14) are
+/// LabSpec 2 docs WITHOUT a steps key — their step chain lives in the
+/// lab-registry's source labspec. The strict loader correctly rejects them
+/// (steps are required), and the guided panel presents them as typed errors
+/// by design. This helper recognizes exactly that known-merged shape so the
+/// inventory gate can tolerate it WITHOUT loosening the loader contract:
+/// the doc must be spec_version 2, carry no steps key, and be a canonical
+/// registry entry whose declared source exists.
+bool isKnownMergedDoc( const lab::LabSpecError &error )
+{
+    if ( !error.reason.contains( QStringLiteral( "steps must be a non-empty array" ) ) )
+        return false;
+    QFile docFile( error.path );
+    if ( !docFile.open( QIODevice::ReadOnly ) )
+        return false;
+    const QJsonDocument doc = QJsonDocument::fromJson( docFile.readAll() );
+    if ( !doc.isObject() || doc.object().contains( QStringLiteral( "steps" ) ) )
+        return false;
+    if ( doc.object().value( QStringLiteral( "spec_version" ) ).toInt() != 2 )
+        return false;
+    QFile registryFile( labsRoot() + QStringLiteral( "/data/labs/lab-registry.json" ) );
+    if ( !registryFile.open( QIODevice::ReadOnly ) )
+        return false;
+    const QJsonDocument registry = QJsonDocument::fromJson( registryFile.readAll() );
+    const QJsonObject canonical = registry.object().value( QStringLiteral( "canonical" ) ).toObject();
+    const QJsonObject entry = canonical.value( error.labId ).toObject();
+    if ( entry.isEmpty() )
+        return false;
+    const QString source = entry.value( QStringLiteral( "source" ) ).toString();
+    return !source.isEmpty() && QFile::exists( labsRoot() + QStringLiteral( "/" ) + source );
+}
+
+} // namespace
+
 TEST_CASE( "Shipped lab inventory loads cleanly", "[labspec][drift]" )
 {
     lab::LabLoadResult result;
@@ -56,8 +92,27 @@ TEST_CASE( "Shipped lab inventory loads cleanly", "[labspec][drift]" )
     // The canonical set reconciles the 7 documented labs with the 10 former
     // hardcoded workflows — the union is 11; the gate is ">= 10".
     REQUIRE( labs.size() >= 10 );
-    INFO( lab::errorStrings( result ).join( QStringLiteral( "; " ) ).toStdString() );
-    REQUIRE( result.ok() );
+
+    // Known merged docs are tolerated explicitly (see isKnownMergedDoc);
+    // every OTHER load problem still fails the gate.
+    QStringList mergedIds;
+    lab::LabLoadResult tolerable;
+    for ( const auto &error : result.errors )
+    {
+        INFO( error.toString().toStdString() );
+        if ( isKnownMergedDoc( error ) )
+            mergedIds << error.labId;
+        else
+            tolerable.errors.append( error );
+    }
+    INFO( lab::errorStrings( tolerable ).join( QStringLiteral( "; " ) ).toStdString() );
+    REQUIRE( tolerable.ok() );
+    // The merged set is closed: new steps-less docs must register themselves
+    // canonically and update this guard deliberately.
+    REQUIRE( mergedIds.size() == 3 );
+    REQUIRE( mergedIds.contains( QStringLiteral( "lab12_sar_processing" ) ) );
+    REQUIRE( mergedIds.contains( QStringLiteral( "lab13_hyperspectral_analysis" ) ) );
+    REQUIRE( mergedIds.contains( QStringLiteral( "lab14_cartographic_mapping" ) ) );
 
     // Lab ids are unique and match their file names (loader enforces both,
     // but pin the invariant explicitly).

@@ -20,7 +20,7 @@
 namespace sicnu::app
 {
 
-class PluginUiInvokeDelegate : public sicnu::plugins::UiInvokeDelegate
+class PluginUiInvokeDelegate : public ::sicnu::plugins::UiInvokeDelegate
 {
   public:
     explicit PluginUiInvokeDelegate( QString pluginId ) : mPluginId( std::move( pluginId ) ) {}
@@ -31,7 +31,7 @@ class PluginUiInvokeDelegate : public sicnu::plugins::UiInvokeDelegate
       // until the worker answers or the timeout elapses — acceptable on the
       // renderer's delivery thread (a wedged plugin delays one event, never
       // the UI).
-      return sicnu::plugins::PluginRuntimeHost::instance().invokePluginUi(
+      return ::sicnu::plugins::PluginRuntimeHost::instance().invokePluginUi(
         mPluginId.toStdString(), event );
     }
 

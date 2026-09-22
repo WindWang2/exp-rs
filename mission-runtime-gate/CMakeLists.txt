@@ -51,21 +51,10 @@ find_path(JSONCPP_INCLUDE_DIR json/json.h REQUIRED)
 file(REAL_PATH "${CMAKE_CURRENT_LIST_DIR}/.." SICNU_SOURCE_DIR)
 set(SICNU_SOURCE_DIR "${SICNU_SOURCE_DIR}" CACHE PATH "repo root" FORCE)
 
+set(SICNU_MISSION_SRC_ROOT "${SICNU_SOURCE_DIR}")
+include("${SICNU_SOURCE_DIR}/cmake/SicnuMissionRuntimeSources.cmake")
 set(MISSION_GATE_SOURCES
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_run_authority.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_context.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
-  ${SICNU_SOURCE_DIR}/src/app/workbench/mission_tool_authority.cpp
-  ${SICNU_SOURCE_DIR}/src/agent/spatial_tools/mission_tools.cpp
-  ${SICNU_SOURCE_DIR}/src/agent/spatial_tools/spatial_tool_registry.cpp
-  ${SICNU_SOURCE_DIR}/src/agent/contracts/spatial_contracts.cpp
-  ${SICNU_SOURCE_DIR}/src/agent/harness/harness_actions.cpp
+  ${SICNU_MISSION_RUNTIME_SOURCES_GATE}
   ${CMAKE_CURRENT_LIST_DIR}/stubs/mission_gate_stubs.cpp
 )
 

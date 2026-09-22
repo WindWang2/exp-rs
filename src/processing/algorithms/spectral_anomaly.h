@@ -60,7 +60,7 @@ namespace SpectralAnomaly
 
     /// Deterministic lower bound on the 2-norm condition number of a B×B PSD
     /// background matrix (covariance or second-moment): λmax·B/tr with λmax
-    /// from a fixed-start power iteration (normalized ones start, early exit
+    /// legacy power-iteration proxy (normalized ones start, early exit
     /// at 1e-12 relative Rayleigh residual). Since λmin ≤ tr/B for PSD, the
     /// value never overstates the conditioning; it is a QA diagnostic for
     /// result JSON (Spectral Intelligence 12.0), not a gate. Returns -1.0

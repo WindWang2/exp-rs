@@ -334,6 +334,16 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
       return;
     }
   }
+  for ( double w : m_wavelengths )
+  {
+    if ( !std::isfinite( w ) || !( w > 0.0 ) )
+    {
+      m_statusLabel->setText(
+          tr( "Cannot save: wavelength values must be finite and positive "
+              "(the strict library loader rejects non-finite grids)." ) );
+      return;
+    }
+  }
   for ( int i = 1; i < m_wavelengths.size(); ++i )
   {
     if ( !( m_wavelengths[i] > m_wavelengths[i - 1] ) )

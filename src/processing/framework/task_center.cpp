@@ -475,6 +475,7 @@ void TaskCenter::shutdownForTests()
         m_manualQueued.clear();
         m_liveTaskCount = 0;
         m_armedCancelDeadlines = 0;
+        m_armedCancelTaskIds.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -831,6 +832,7 @@ void TaskCenter::setCancelWatchdogMs( unsigned int timeoutMs )
         for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
             it->cancelDeadline = {};
         m_armedCancelDeadlines = 0;
+        m_armedCancelTaskIds.clear();
     }
     else
     {
@@ -852,6 +854,7 @@ void TaskCenter::setCancelWatchdogMs( unsigned int timeoutMs )
                                   : std::chrono::steady_clock::now();
             info.cancelDeadline = base + std::chrono::milliseconds( timeoutMs );
             ++armed;
+            m_armedCancelTaskIds.insert( it.key() );
         }
         m_armedCancelDeadlines += armed;
         if ( armed > 0 )
@@ -2160,12 +2163,14 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
          && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
     {
         ++m_armedCancelDeadlines;
+        m_armedCancelTaskIds.insert( task.taskId );
     }
     else if ( oldStatus == TaskStatus::Cancelling && task.status != TaskStatus::Cancelling
               && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
     {
         task.cancelDeadline = {};
         --m_armedCancelDeadlines;
+        m_armedCancelTaskIds.remove( task.taskId );
     }
 
     // 9.0 M5: actual-usage observation — one RSS sample on every terminal
@@ -2219,6 +2224,7 @@ void TaskCenter::forgetDerivedTaskStateLocked( long taskId )
     dropReadyCandidateLocked( taskId );
     m_incompleteParentCount.remove( taskId );
     m_manualQueued.removeAll( taskId );
+    m_fusedChains.remove( taskId );
 }
 
 /// Reviewed P2 fix: drops estimate/dims cache entries ONLY for tasks that
@@ -3235,6 +3241,14 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
                 info.errorMessage = strandedReason;
                 info.endTime = QDateTime::currentDateTimeUtc();
                 info.logBuffer.append( strandedReason );
+                // Drop the listener map immediately — waiting for
+                // clearCompletedTasks leaked jobId→taskId for the lifetime of
+                // the terminal task entry.
+                if ( !info.jobId.empty() )
+                {
+                    m_taskByJobId.remove( info.jobId );
+                    info.jobId.clear();
+                }
                 updatePipelineForTaskLocked( targetId );
                 queueTaskUpdatedLocked( targetId );
                 fireCallbacks = true;
@@ -3310,8 +3324,15 @@ void TaskCenter::enforceCancelDeadlines()
         if ( m_armedCancelDeadlines == 0 )
             return; // one comparison when nothing is armed
         const auto now = std::chrono::steady_clock::now();
-        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        // #1159: iterate the armed index, not the whole task map — the
+        // aging-sweep design applied to the cancel deadline. setTaskStatusLocked
+        // below mutates the set, so the loop runs over a snapshot copy.
+        const QList<long> armedIds = m_armedCancelTaskIds.values();
+        for ( long armedId : armedIds )
         {
+            auto it = m_tasks.find( armedId );
+            if ( it == m_tasks.end() )
+                continue;
             AlgorithmTaskInfo &info = it.value();
             if ( info.status != TaskStatus::Cancelling
                  || info.cancelDeadline == std::chrono::steady_clock::time_point{}
@@ -3382,6 +3403,11 @@ bool isTransientExecutionError( const QString &error )
 
 bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
 {
+    // #1182: the user's cancel intent lives in TaskCenter (cancelReason +
+    // the Cancelling status); auto-retry must never resurrect a task the
+    // user asked to cancel, whatever the engine-side error class says.
+    if ( task.status == TaskStatus::Cancelling || task.cancelReason != TaskCancelReason::None )
+        return false;
     if ( m_maxAutoRetries <= 0 )
         return false;
     if ( task.autoRetryAttempts >= m_maxAutoRetries )
@@ -3443,6 +3469,9 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             info.cancelRequestStamp = {};
             info.cancelDeadline = {};
             info.cancelReason = TaskCancelReason::None;
+            // Fresh attempt: clear the prior run's start stamp so ExecutionEnd
+            // telemetry measures this retry, not wall time since first attempt.
+            info.runStartStamp = {};
             if ( !deadJobId.empty() )
                 m_taskByJobId.remove( deadJobId );
             // The retried run records fresh identity: drop the failed
@@ -4141,8 +4170,26 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                                            findOutputPathInParams( params ) );
         }
 
-        // Phase C: bind the fused head to its member tasks so completion of
-        // the head completes the members with the tail payload.
+        if ( pipeInfo.stepToTaskId.isEmpty() )
+        {
+            pipeInfo.isCompleted = true;
+            if ( def.steps.empty() )
+            {
+                pipeInfo.isFailed = false;
+            }
+            else
+            {
+                pipeInfo.isFailed = true;
+                pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
+            }
+            m_pipelines[pipelineId] = pipeInfo;
+            m_waitCondition.wakeAll();
+            return pipelineId;
+        }
+
+        // Phase C: bind the fused head only after the pipeline has dispatchable
+        // steps — binding before the empty-step failure return leaked entries
+        // in m_fusedChains for failed fused heads.
         if ( fusedPlan.stepIds.size() >= 2 )
         {
             FusedChainBinding binding;
@@ -4160,23 +4207,6 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 if ( headTaskId > 0 )
                     m_fusedChains[headTaskId] = binding;
             }
-        }
-
-        if ( pipeInfo.stepToTaskId.isEmpty() )
-        {
-            pipeInfo.isCompleted = true;
-            if ( def.steps.empty() )
-            {
-                pipeInfo.isFailed = false;
-            }
-            else
-            {
-                pipeInfo.isFailed = true;
-                pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
-            }
-            m_pipelines[pipelineId] = pipeInfo;
-            m_waitCondition.wakeAll();
-            return pipelineId;
         }
 
         m_pipelines[pipelineId] = pipeInfo;

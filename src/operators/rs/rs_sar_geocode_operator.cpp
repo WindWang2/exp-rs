@@ -78,7 +78,7 @@ void normalizeHalo( const float *haloBuf, size_t bufN, bool hasSentinel, float s
 Json::Value RsSarGeocodeOperator::schema() const {
     using namespace schema;
     Json::Value props( Json::objectValue );
-    props["input"] = makeRasterParam( "input", "Calibrated SAR raster (sigma0 power); its grid is azimuth/range, defined by the declared timing contract" );
+    props["input"] = makeRasterParam( "input", "Calibrated SAR raster (sigma0 power); its grid is azimuth/range, defined by the declared timing contract. Legacy undeclared rasters run under the documented sigma0/linear assumption; DN or beta0 legacy content produces wrong products (calibrate first, rs:sar_calibrate)" );
     props["dem"] = makeRasterParam( "dem", "DEM raster — geodetic or projected, north-up; defines the output map grid" );
     props["output"] = makeOutputParam( "output", "Output raster path", "tif" );
     props["band"] = makeNumberParam( "band", "1-based SAR band to geocode", 1.0 );
@@ -618,6 +618,10 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
         out.setMetadataItem( QLatin1String( "SICNU_SAR_STATE_ASSUMED" ),
                              QLatin1String( "sigma0_legacy_undeclared" ) );
+    // #1165: numeric-domain assumption provenance (see terrain_flatten).
+    if ( sicnu::sar::readDomain( sarDs ).isEmpty() )
+        out.setMetadataItem( QLatin1String( "SICNU_SAR_DOMAIN_ASSUMED" ),
+                             QLatin1String( "linear_power" ) );
 
     QString closeError;
     if ( !out.closeWithError( &closeError ) )

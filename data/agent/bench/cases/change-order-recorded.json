@@ -1,0 +1,45 @@
+{
+  "allowed_tools": [
+    "rs:co_register",
+    "rs:change_detect",
+    "harness:verify"
+  ],
+  "case_id": "change/bi-temporal-basic",
+  "description": "Recorded clean change trajectory",
+  "expected_evidence": [
+    {
+      "id": "change-map",
+      "kind": "raster",
+      "required_fields": [
+        "change_score"
+      ]
+    }
+  ],
+  "goal": "Co-register two dates and deliver a change map (replay of a recorded run).",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "change-map",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 8000,
+    "max_tool_calls": 10
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "change",
+  "title": "Recorded clean change trajectory"
+}

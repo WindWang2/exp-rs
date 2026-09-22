@@ -22,6 +22,21 @@ const char *const kHelperNames =
     "requireString|getString|getInt|getDouble|getBool|hasNumber|getEnum|"
     "getStringArray";
 
+/// The canonical spectral reference seam (Spectral Intelligence 13.0,
+/// rs_spectral_reference_input.h): every resolver/schema call passes the
+/// key arguments as LITERALS, so the scanner can extract them at the call
+/// site and treat the resolver's internal char*-parameter indexing as
+/// bounded by those literals instead of reporting it as dynamic.
+const char *const kSeamResolverNames = "resolveSpectralReference";
+const char *const kSeamSchemaHelperName = "referenceInputSchemaProps";
+
+bool isSeamResolver( const std::string &fn )
+{
+    static const std::regex re( "\\b(?:" +
+                                std::string( kSeamResolverNames ) + ")\\b" );
+    return std::regex_search( fn, re );
+}
+
 bool isIdentChar( char c )
 {
     return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_';
@@ -88,12 +103,28 @@ std::vector<std::string> jsonValueParams( std::string_view signature )
     return names;
 }
 
+/// `const char *NAME` parameter identifiers in a signature — the seam
+/// resolver's literal-bound key arguments (#1187).
+std::set<std::string> charPointerParams( std::string_view signature )
+{
+    static const std::regex re(
+        R"re([(,]\s*const\s+char\s*\*\s*([A-Za-z_]\w*)\s*(?=[,)]))re" );
+    const std::string sig( signature );
+    std::set<std::string> names;
+    auto it = std::sregex_iterator( sig.begin(), sig.end(), re );
+    for ( ; it != std::sregex_iterator(); ++it )
+        names.insert( ( *it )[1].str() );
+    return names;
+}
+
 struct ReadCollector
 {
     std::set<std::string> keys;
     std::vector<std::string> unresolved;
 
-    void collect( std::string_view body, const std::vector<std::string> &vars )
+    void collect( std::string_view body, const std::vector<std::string> &vars,
+                  const std::set<std::string> &boundedIndexes =
+                      std::set<std::string>() )
     {
         const Span whole{ 0, body.size() };
         const std::string text( body );
@@ -108,11 +139,35 @@ struct ReadCollector
                 for ( const auto &key : findMatches( body, whole, reIndexed ) )
                     keys.insert( key );
             }
-            // 2. dynamic (non-literal) indexing on a tracked var
+            // 2. dynamic (non-literal) indexing on a tracked var. A plain
+            //    identifier index that is a char* PARAMETER of the enclosing
+            //    seam resolver is bounded: every call site passes a literal
+            //    (extracted by rule 6), so the access is not a guess.
             {
-                const std::regex reDyn(
-                    "\\b" + var + R"re(\s*\[\s*(?!\s*"))re" );
-                if ( std::regex_search( text, dynamicMatch, reDyn ) )
+                bool offending = false;
+                const std::regex reDynId( "\\b" + var +
+                    R"re(\s*\[\s*([A-Za-z_]\w*)\s*\])re" );
+                for ( auto it = std::sregex_iterator( text.begin(), text.end(),
+                                                      reDynId );
+                      it != std::sregex_iterator(); ++it )
+                {
+                    if ( !boundedIndexes.count( ( *it )[1].str() ) )
+                    {
+                        offending = true;
+                        break;
+                    }
+                }
+                if ( !offending )
+                {
+                    // Dynamic but NOT a plain identifier (string building,
+                    // member chains, calls) — still refuse to guess.
+                    const std::regex reDynOther(
+                        "\\b" + var +
+                        "\\s*\\[\\s*(?!\\s*(?:[A-Za-z_]\\w*\\s*\\]|\"))" );
+                    if ( std::regex_search( text, dynamicMatch, reDynOther ) )
+                        offending = true;
+                }
+                if ( offending )
                     unresolved.push_back( "dynamic key access on '" + var +
                                           "'" );
             }
@@ -147,12 +202,29 @@ struct ReadCollector
                 if ( std::regex_search( text, dynamicMatch, reBands ) )
                     keys.insert( "bands" );
             }
+            // 6. spectral reference seam: the resolver consumes its two
+            //    literal key arguments (inlineKey/refKey) — every call site
+            //    in the tree passes literals (#1187).
+            {
+                const std::regex reSeam(
+                    "\\b(?:" + std::string( kSeamResolverNames ) +
+                    R"re()\s*\(\s*)re" + var +
+                    R"re(\s*,\s*"([^"]+)"\s*,\s*"([^"]+)")re" );
+                for ( auto it = std::sregex_iterator( text.begin(), text.end(),
+                                                      reSeam );
+                      it != std::sregex_iterator(); ++it )
+                {
+                    keys.insert( ( *it )[1].str() );
+                    keys.insert( ( *it )[2].str() );
+                }
+            }
         }
     }
 };
 
-ReadCollector collectReads( std::string_view body,
-                            const std::vector<std::string> &rootVars )
+ReadCollector collectReads(
+    std::string_view body, const std::vector<std::string> &rootVars,
+    const std::set<std::string> &boundedIndexes = std::set<std::string>() )
 {
     ReadCollector collector;
     std::vector<std::string> vars = rootVars;
@@ -169,7 +241,7 @@ ReadCollector collectReads( std::string_view body,
              std::find( vars.begin(), vars.end(), alias ) == vars.end() )
             vars.push_back( alias );
     }
-    collector.collect( body, vars );
+    collector.collect( body, vars, boundedIndexes );
     return collector;
 }
 
@@ -373,6 +445,45 @@ bool extractDeclaredFrom( std::string_view body,
     return true;
 }
 
+/// Spectral reference seam on the DECLARED side: a
+/// referenceInputSchemaProps("inline", "ref", ...) call (loop-merged into
+/// the schema container — invisible to the literal-write rules) declares
+/// both keys plus the helper's own fixed literal keys (#1187).
+void seamSchemaKeys( const FileUnit &unit, const GlobalHelpers &global,
+                     std::string_view body, std::set<std::string> &out )
+{
+    static const std::regex reSeamCall(
+        "\\b" + std::string( kSeamSchemaHelperName ) +
+        R"re(\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)")re" );
+    const std::string text( body );
+    bool seamUsed = false;
+    for ( auto it = std::sregex_iterator( text.begin(), text.end(),
+                                          reSeamCall );
+          it != std::sregex_iterator(); ++it )
+    {
+        out.insert( ( *it )[1].str() );
+        out.insert( ( *it )[2].str() );
+        seamUsed = true;
+    }
+    if ( !seamUsed )
+        return;
+    // The helper's fixed keys (libraryPath / libraryMaterials today) are
+    // literal writes in its own body.
+    HelperDef storage;
+    const HelperDef *def =
+        resolveHelper( global, unit, kSeamSchemaHelperName, storage );
+    if ( !def )
+        return;
+    const std::string helperBody = def->unit->src.substr(
+        def->span.begin, def->span.end - def->span.begin );
+    static const std::regex reFixed(
+        R"re(\bprops\s*\[\s*"([^"]+)"\s*\]\s*=(?!=))re" );
+    for ( auto it = std::sregex_iterator( helperBody.begin(), helperBody.end(),
+                                          reFixed );
+          it != std::sregex_iterator(); ++it )
+        out.insert( ( *it )[1].str() );
+}
+
 /// Declared-key collection for a schema-building body, following helpers
 /// that RECEIVE the container as an argument (e.g. addCommonProps(props)).
 /// Returns false when no makeRootSchema container is found in @p body.
@@ -394,6 +505,9 @@ bool collectDeclaredKeys( const FileUnit &unit, const GlobalHelpers &global,
     for ( const auto &k : findMatches( body, { 0, body.size() }, reProps ) )
         out.insert( k );
 
+    // Spectral reference seam: loop-merged props (invisible above).
+    seamSchemaKeys( unit, global, body, out );
+
     // Helpers receiving the container (e.g. addCommonProps(props)): their
     // bodies declare parameters through the helper's own parameter name.
     if ( depth <= 0 )
@@ -412,6 +526,7 @@ bool collectDeclaredKeys( const FileUnit &unit, const GlobalHelpers &global,
             continue;
         const std::string helperBody = def->unit->src.substr(
             def->span.begin, def->span.end - def->span.begin );
+        seamSchemaKeys( *def->unit, global, helperBody, out );
         const Span sigSpan =
             functionSignature( def->unit->src, def->span.begin - 1 );
         const auto vars = jsonValueParams( def->unit->src.substr(
@@ -443,6 +558,7 @@ bool collectDeclaredKeys( const FileUnit &unit, const GlobalHelpers &global,
 void collectReadsInto( const FileUnit &unit, const GlobalHelpers &global,
                        const Span &bodySpan, OperatorScanResult &r,
                        std::set<std::string> &visited, int maxDepth,
+                       const std::string &fnName = std::string(),
                        bool isRoot = false )
 {
     const std::string_view src = unit.src;
@@ -458,7 +574,16 @@ void collectReadsInto( const FileUnit &unit, const GlobalHelpers &global,
     }
     const std::string text(
         src.substr( bodySpan.begin, bodySpan.end - bodySpan.begin ) );
-    ReadCollector reads = collectReads( text, vars );
+    // Seam resolvers index the params root through their char* key
+    // parameters; every call site passes literals (rule 6), so those
+    // indexes are bounded, not dynamic (#1187).
+    std::set<std::string> bounded;
+    if ( isSeamResolver( fnName ) )
+    {
+        bounded = charPointerParams(
+            src.substr( sigSpan.begin, sigSpan.end - sigSpan.begin ) );
+    }
+    ReadCollector reads = collectReads( text, vars, bounded );
     r.readParams.insert( reads.keys.begin(), reads.keys.end() );
     r.unresolved.insert( r.unresolved.end(), reads.unresolved.begin(),
                          reads.unresolved.end() );
@@ -489,7 +614,7 @@ void collectReadsInto( const FileUnit &unit, const GlobalHelpers &global,
         if ( !def )
             continue;
         collectReadsInto( *def->unit, global, def->span, r, visited,
-                          maxDepth - 1, false );
+                          maxDepth - 1, fn, false );
     }
 }
 
@@ -540,6 +665,8 @@ void extractOperator( const FileUnit &unit,
                         def->unit->src.substr( def->span.begin,
                                                def->span.end -
                                                    def->span.begin );
+                    seamSchemaKeys( *def->unit, global, helperBody,
+                                    r.declaredParams );
                     if ( extractDeclaredFrom( helperBody,
                                               r.declaredParams ) )
                     {
@@ -570,7 +697,12 @@ void extractOperator( const FileUnit &unit,
         // Copy: names visited during schema extraction must not suppress
         // read collection.
         std::set<std::string> runVisited{ visited.begin(), visited.end() };
-        collectReadsInto( unit, global, bodies.run, r, runVisited, 2, true );
+        // Depth 3 (#1187): the spectral reference seam chains
+        // run → resolve* helper → resolveSpectralReference → (bounded
+        // reads); at depth 2 the loud bound fired on the third hop even
+        // though every hop is visited at most once (the visited set bounds
+        // the cost, not the depth).
+        collectReadsInto( unit, global, bodies.run, r, runVisited, 3, std::string(), true );
     }
     else
     {

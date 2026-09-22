@@ -60,12 +60,16 @@ function piToolName(mcpName: string): string {
 function detectBinary(): string | null {
   const envBin = process.env.EXP_RS_MCP_BIN;
   if (envBin) return envBin;
-  const candidates = [
+  const bases = [
     "build/sicnu_geo_rs",
     "build-dev/sicnu_geo_rs",
     "../build/sicnu_geo_rs",
     "./sicnu_geo_rs",
   ];
+  // #1186: Windows builds ship .exe — probe both spellings.
+  const candidates = bases.flatMap((b) =>
+    process.platform === "win32" ? [b + ".exe", b] : [b, b + ".exe"],
+  );
   for (const candidate of candidates) {
     try {
       if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;

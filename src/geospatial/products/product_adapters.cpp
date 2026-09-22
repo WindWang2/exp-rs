@@ -424,7 +424,7 @@ ProductMetadata readSentinel1( const std::string &path )
       product.polarizations.push_back( value );
   }
   product.modality = "sar";
-  product.radiometricState = "digital_number";
+  product.radiometricState = "dn";
   return product;
 }
 

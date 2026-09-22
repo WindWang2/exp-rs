@@ -21,6 +21,8 @@
 #include "app/workbench/mission_stage.h"
 #include "app/workbench/mission_timeline_bridge.h"
 #include "app/workbench/mission_timeline_store.h"
+#include "app/workbench/mission_run_resolver.h"
+#include "workflow/workflow_run.h"
 
 #include <QDir>
 #include <QFile>
@@ -493,6 +495,49 @@ TEST_CASE( "a fresh project opens with an empty task space", "[mission][persiste
 
 // ── Property: fingerprint stability ──────────────────────────────────────
 
+TEST_CASE( "a save to a path with no authority publishes the live timeline intact",
+           "[mission][persistence]" )
+{
+    // #1149: Save-As / moved project / removed sidecar — the reload at the
+    // new target returns "nothing to adopt" (success, authorityLoaded=false,
+    // empty timeline). The save path must then publish the LIVE timeline,
+    // never the reloaded empty one: modeling that flow through the store,
+    // the published authority carries the full task space.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString projectA = dir.filePath( uniqueStem() + QStringLiteral( "-a.qgz" ) );
+    const QString projectB = dir.filePath( uniqueStem() + QStringLiteral( "-b.qgz" ) );
+
+    MissionRuntimeState live = makeRuntime( QStringLiteral( "mission-live" ) );
+    QDomDocument docA;
+    QString err;
+    REQUIRE( saveMissionRuntime( projectA, docA, live, &err ) );
+
+    // The Save-As reload: a FRESH document (the doc QgsProject is assembling
+    // for the new file never contains the element yet) at a path with no
+    // sidecar.
+    QDomDocument freshDoc;
+    freshDoc.appendChild( freshDoc.createElement( QStringLiteral( "qgis" ) ) );
+    MissionRuntimeState disk;
+    REQUIRE( loadMissionRuntime( projectB, freshDoc, disk, &err ) );
+    CHECK_FALSE( disk.authorityLoaded );
+    CHECK_FALSE( disk.authorityCorrupt );
+    CHECK( disk.timeline.missionId().isEmpty() );
+    CHECK( disk.timeline.tasks().isEmpty() );
+
+    // "Nothing to adopt" must not read as "adopt an empty task space": the
+    // fixed save path keeps the live timeline (the #1149 guard) and
+    // publishes it at the new path as a first publication.
+    MissionRuntimeState toPublish = live;
+    QDomDocument docB;
+    REQUIRE( saveMissionRuntime( projectB, docB, toPublish, &err ) );
+
+    MissionRuntimeState reopened;
+    REQUIRE( loadMissionRuntime( projectB, QDomDocument(), reopened, &err ) );
+    CHECK( reopened.authorityLoaded );
+    CHECK( reopened.timeline == live.timeline );
+}
+
 TEST_CASE( "embedding the timeline does not change the mission fingerprint",
            "[mission][persistence]" )
 {
@@ -752,4 +797,35 @@ TEST_CASE( "deleting a referenced layer marks dependent tasks stale", "[mission]
     const MissionTask *after = tl.task( QStringLiteral( "t2" ) );
     CHECK( after->status == MissionTaskStatus::Succeeded );
     CHECK( after->inputRefIds == QStringList { QStringLiteral( "layer-b-renamed" ) } );
+}
+
+TEST_CASE( "last-good recovers the authority when the sidecar is absent (#1169)",
+           "[mission][persistence][issue1169]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( uniqueStem() + QStringLiteral( ".qgz" ) );
+
+    MissionRuntimeState live = makeRuntime( QStringLiteral( "mission-lg" ) );
+    QDomDocument doc;
+    QString err;
+    REQUIRE( saveMissionRuntime( project, doc, live, &err ) );
+
+    // The removal paths leave last-good beside an ABSENT sidecar.
+    const QString sidecar = missionSidecarPathForProject( project );
+    const QString lastGood = missionRuntimeLastGoodPathForProject( project );
+    REQUIRE( QFileInfo::exists( lastGood ) );
+    REQUIRE( QFile::remove( sidecar ) );
+
+    // The #1149 first-publication reload: the fresh-doc load must recover
+    // the authority from last-good instead of answering "nothing there".
+    MissionRuntimeState recovered;
+    REQUIRE( loadMissionRuntime( project, QDomDocument(), recovered, &err ) );
+    CHECK( recovered.recoveredFromLastGood );
+    CHECK( recovered.authorityLoaded );
+    CHECK( recovered.timeline == live.timeline );
+    bool noticed = false;
+    for ( const QString &n : recovered.notices )
+        noticed = noticed || n.contains( QLatin1String( "last_good" ) );
+    CHECK( noticed );
 }

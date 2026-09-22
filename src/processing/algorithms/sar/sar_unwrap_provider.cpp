@@ -213,7 +213,9 @@ UnwrapProviderStatus runExternalUnwrapProvider( const UnwrapProviderRequest &req
 
     if ( process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 )
     {
-        const QString tail = QString::fromLocal8Bit( process.readAll() ).right( 512 );
+        // OEM/ANSI child bytes must not be decoded as the ACP (#1228 / #1186):
+        // providers may emit UTF-8 diagnostics (paths, Chinese labels).
+        const QString tail = QString::fromUtf8( process.readAll() ).right( 512 );
         return fail( UnwrapProviderStatus::Failed, QStringLiteral( "UNWRAP_PROVIDER_FAILED" ),
                      QStringLiteral( "provider '%1' exited abnormally (code %2)%3" )
                          .arg( request.providerName )
