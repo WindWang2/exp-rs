@@ -34,7 +34,7 @@ inline sicnu::experiment::ExperimentRun makeRunRecord( const QString &runId )
     run.setSplitFingerprint( QStringLiteral( "fp-split-1" ) );
     run.setSeed( 7 );
     run.setSoftwareRevision( QStringLiteral( "rev-test" ) );
-    static const QDateTime start = QDateTime( QDate( 2026, 9, 22 ), QTime( 8, 0, 0 ), Qt::UTC );
+    static const QDateTime start( QDate( 2026, 9, 22 ), QTime( 8, 0, 0 ), QTimeZone::utc() );
     run.setCreatedAtUtc( start );
     run.setStartedAtUtc( start );
     run.setFinishedAtUtc( start.addSecs( 90 ) );
