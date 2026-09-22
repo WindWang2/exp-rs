@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -150,14 +151,24 @@ int VirtualCubeGrid::width() const
 {
   if ( !valid() )
     throw GeoError( ErrorCode::InvalidArgument, "cube grid is not valid" );
-  return static_cast<int>( std::llround( ( maxX - minX ) / scaleX ) );
+  // Every bounds check downstream sits on these ints — a crafted extent/scale
+  // ratio past int range must be a typed refusal, not a silent wrap (UB).
+  const long long cells = std::llround( ( maxX - minX ) / scaleX );
+  if ( cells < 0 || cells > static_cast<long long>( std::numeric_limits<int>::max() ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "cube grid extent/scale implies more than INT_MAX columns" );
+  return static_cast<int>( cells );
 }
 
 int VirtualCubeGrid::height() const
 {
   if ( !valid() )
     throw GeoError( ErrorCode::InvalidArgument, "cube grid is not valid" );
-  return static_cast<int>( std::llround( ( maxY - minY ) / scaleY ) );
+  const long long cells = std::llround( ( maxY - minY ) / scaleY );
+  if ( cells < 0 || cells > static_cast<long long>( std::numeric_limits<int>::max() ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "cube grid extent/scale implies more than INT_MAX rows" );
+  return static_cast<int>( cells );
 }
 
 Json::Value VirtualCubeGrid::toJson() const
@@ -258,10 +269,19 @@ VirtualCubeSourceWindow virtualCubeSourceWindow( const RasterMetadata &metadata,
   const double srcX1 = ( maxX - gt[0] ) / gt[1];
   const double srcY0 = ( maxY - gt[3] ) / gt[5];
   const double srcY1 = ( minY - gt[3] ) / gt[5];
-  int sx0 = static_cast<int>( std::floor( std::min( srcX0, srcX1 ) ) );
-  int sy0 = static_cast<int>( std::floor( std::min( srcY0, srcY1 ) ) );
-  int sx1 = static_cast<int>( std::ceil( std::max( srcX0, srcX1 ) ) );
-  int sy1 = static_cast<int>( std::ceil( std::max( srcY0, srcY1 ) ) );
+  // Clamp in the double domain BEFORE the int cast: a window far outside the
+  // asset's pixel space used to wrap through the conversion (UB; x86 wraps
+  // low and the clamp rescued it, ARM saturates high and produced a bogus
+  // non-empty intersection there). In-range values pass through unchanged.
+  constexpr double kIntMin = static_cast<double>( std::numeric_limits<int>::min() );
+  constexpr double kIntMax = static_cast<double>( std::numeric_limits<int>::max() );
+  const auto castClamped = []( double value ) {
+    return static_cast<int>( std::clamp( value, kIntMin, kIntMax ) );
+  };
+  int sx0 = castClamped( std::floor( std::min( srcX0, srcX1 ) ) );
+  int sy0 = castClamped( std::floor( std::min( srcY0, srcY1 ) ) );
+  int sx1 = castClamped( std::ceil( std::max( srcX0, srcX1 ) ) );
+  int sy1 = castClamped( std::ceil( std::max( srcY0, srcY1 ) ) );
   sx0 = std::max( sx0, 0 );
   sy0 = std::max( sy0, 0 );
   sx1 = std::min( sx1, metadata.width );
@@ -691,33 +711,28 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         continue;
       }
 
-      // Source pixel window covering the target extent.
+      // Source pixel window covering the target extent — the shared
+      // source-window math (its double-domain clamps keep far-away extents
+      // from wrapping through the double→int casts).
       const std::array<double, 6> &gt = metadata.geotransform;
-      if ( metadata.width <= 0 || !metadata.hasGeotransform || gt[1] == 0.0 || gt[5] == 0.0 )
+      if ( metadata.width <= 0 || metadata.height <= 0 || !metadata.hasGeotransform ||
+           gt[1] == 0.0 || gt[5] == 0.0 )
       {
         provenance.failed = true;
         provenance.errorText = "asset carries no usable geotransform";
         result.provenance.push_back( std::move( provenance ) );
         continue;
       }
-      const double srcX0 = ( targetMinX - gt[0] ) / gt[1];
-      const double srcX1 = ( targetMaxX - gt[0] ) / gt[1];
-      const double srcY0 = ( targetMaxY - gt[3] ) / gt[5];
-      const double srcY1 = ( targetMinY - gt[3] ) / gt[5];
-      int sx0 = static_cast<int>( std::floor( std::min( srcX0, srcX1 ) ) );
-      int sy0 = static_cast<int>( std::floor( std::min( srcY0, srcY1 ) ) );
-      int sx1 = static_cast<int>( std::ceil( std::max( srcX0, srcX1 ) ) );
-      int sy1 = static_cast<int>( std::ceil( std::max( srcY0, srcY1 ) ) );
-      sx0 = std::max( sx0, 0 );
-      sy0 = std::max( sy0, 0 );
-      sx1 = std::min( sx1, metadata.width );
-      sy1 = std::min( sy1, metadata.height );
-      if ( sx1 <= sx0 || sy1 <= sy0 )
+      const VirtualCubeSourceWindow sourceWindowResult =
+        virtualCubeSourceWindow( metadata, targetMinX, targetMinY, targetMaxX, targetMaxY );
+      if ( !sourceWindowResult.ok )
       {
+        // Declared extent never intersects the window: provenance records the
+        // consulted asset, nothing contributed.
         result.provenance.push_back( std::move( provenance ) );
         continue;
       }
-      const RasterWindow sourceWindow { sx0, sy0, sx1 - sx0, sy1 - sy0 };
+      const RasterWindow sourceWindow = sourceWindowResult.window;
       provenance.sourceWindow = sourceWindow;
 
       // Mirror hit (needs the source window for the key).

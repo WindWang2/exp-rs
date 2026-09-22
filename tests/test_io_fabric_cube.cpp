@@ -526,3 +526,25 @@ TEST_CASE( "chunk plans count millions without materializing them",
   REQUIRE_THROWS_AS( CubeChunkPlan::forMultidimDescriptor( descriptor, shape, multidimSlice ),
                      GeoError );
 }
+
+TEST_CASE( "grid dimensions beyond int range are a typed refusal, never a silent wrap",
+           "[io][fabric][cube][grid]" )
+{
+  // Every bounds check downstream (readWindow clamps, chunk-plan sizing,
+  // chunk pixel rects) sits on these ints: a crafted extent/scale ratio past
+  // int range must be refused as typed GeoError, not wrap through the
+  // long-long → int cast (UB) into a garbage grid.
+  VirtualCubeGrid grid;
+  grid.explicitGrid = true;
+  grid.crs.valid = true;
+  grid.crs.authid = "EPSG:4326";
+  grid.scaleX = 1e-6;
+  grid.scaleY = 1e-6;
+  grid.minX = 0.0;
+  grid.minY = 0.0;
+  grid.maxX = 1e9;   // 1e15 cells per axis — far past INT_MAX, exact in double
+  grid.maxY = 1e9;
+  REQUIRE( grid.valid() );
+  REQUIRE_THROWS_AS( grid.width(), GeoError );
+  REQUIRE_THROWS_AS( grid.height(), GeoError );
+}
