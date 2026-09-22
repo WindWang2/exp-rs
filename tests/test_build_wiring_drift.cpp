@@ -25,10 +25,11 @@
 //   3. every tests/test_*.cpp (recursive) must be registered in
 //      tests/CMakeLists.txt, i.e. its stem must appear as a whole word.
 //
-// Known text-level limitations, both fail-open: a basename surviving only in a
-// commented-out source list still counts as listed, and a test stem surviving
-// only in a comment still counts as registered. Any new module, source file or
-// test that lands without wiring turns this test red with the path listed.
+// Known text-level limitations, all fail-open: add_subdirectory operands with
+// unresolved variables or absolute paths cannot be checked statically, and
+// CMake bracket comments #[[...]] (none exist in this repository) survive the
+// line-based comment stripper. Any new module, source file or test that lands
+// without wiring turns this test red with the path listed.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -120,7 +121,7 @@ bool is_under( const fs::path &child, const fs::path &dir )
 bool is_excluded_dir( const std::string &name )
 {
     return name == ".git" || name == "CMakeFiles" || name == "Testing" ||
-           name.rfind( "build", 0 ) == 0; // build, build-dev, build-sanitizer, ...
+           name == "build" || name.rfind( "build-", 0 ) == 0; // build, build-dev, ...
 }
 
 std::vector<fs::path> collect_build_scripts( const fs::path &root )
