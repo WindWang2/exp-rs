@@ -527,69 +527,71 @@ TEST_CASE( "Foreign-thread destruction during a whole-file hash never frees live
     ensureApp();
     const QString dir = scratchDir( QStringLiteral( "destroy-hash" ) );
 
-    // 32 MiB artifact: Auto identity escalates to the whole-file hash, which
-    // pumps the event loop once per 1 MiB chunk — dozens of pump windows in
-    // which a foreign destruction can land re-entrantly inside onNodeFinished.
-    const qint64 artifactBytes = 32LL * 1024 * 1024;
+    // 64 MiB artifact: Auto identity escalates to the whole-file hash —
+    // roughly 64 chunked reads, each pumping the event loop, so the hash
+    // frame stays on the affinity thread for hundreds of milliseconds.
+    const qint64 artifactBytes = 64LL * 1024 * 1024;
     auto destroyed = std::make_shared<std::atomic<bool>>( false );
+    auto completionSeen = std::make_shared<std::atomic<bool>>( false );
+
     auto *coordinator = new PipelineRunCoordinator;
     QPointer<PipelineRunCoordinator> guard( coordinator );
     const QPointer<QEventLoop> loopGuard = new QEventLoop;
 
+    // Window-hit oracle: when the delete lands inside onNodeFinished (the
+    // point of this test), the drain ran re-entrantly inside the frame and
+    // the fixed coordinator ABANDONS the completion — nodeFinished must
+    // never be emitted. If scheduling ever pushes the delete past the frame,
+    // this assertion fails loudly instead of passing vacuously.
+    QObject::connect( coordinator, &PipelineRunCoordinator::nodeFinished, coordinator,
+                      [completionSeen]( const QString &, bool, const QString & ) {
+                          completionSeen->store( true );
+                      },
+                      Qt::DirectConnection );
+
     coordinator->setExecutor(
-        [artifactBytes]( const NodeFact &node, const QHash<QString, QString> &,
-                         const QString &runDirectory,
-                         const std::atomic<bool> * ) -> NodeExecutionResult {
-            NodeExecutionResult result;
-            const QString artifact =
-                QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        [artifactBytes, coordinator, destroyed, loopGuard]( const NodeFact &node,
+                                                            const QHash<QString, QString> &,
+                                                            const QString &runDirectory,
+                                                            const std::atomic<bool> * ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        const QString artifact =
+            QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        {
+            QFile f( artifact );
+            if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
             {
-                QFile f( artifact );
-                if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-                {
-                    result.errorMessage = QStringLiteral( "cannot write artifact" );
-                    return result;
-                }
-                const QByteArray chunk( 1024 * 1024, 'x' );
-                for ( qint64 written = 0; written < artifactBytes; written += chunk.size() )
-                    f.write( chunk );
+                result.errorMessage = QStringLiteral( "cannot write artifact" );
+                return result;
             }
-            result.success = true;
-            result.artifactPath = artifact;
-            return result;
+            const QByteArray chunk( 1024 * 1024, 'x' );
+            for ( qint64 written = 0; written < artifactBytes; written += chunk.size() )
+                f.write( chunk );
+        }
+        // Spawn the destroyer NOW, just before the executor returns: the
+        // worker queues the completion right afterwards, the affinity thread
+        // enters onNodeFinished and starts hashing, and the grace sleep
+        // below drops the delete INTO the hash's event pump — the exact
+        // re-entrancy window the destructor drain must survive.
+        std::thread( [coordinator, destroyed, loopGuard] {
+            QThread::msleep( 150 );
+            delete coordinator; // foreign-thread destruction
+            destroyed->store( true );
+            if ( loopGuard )
+                QMetaObject::invokeMethod( loopGuard, &QEventLoop::quit, Qt::QueuedConnection );
+        } ).detach();
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
         } );
 
     WorkflowDocument def = chainDef( 1 );
     REQUIRE( coordinator->startRun( def, dir ) );
 
-    // Arm a 0 ms timer that deletes the coordinator from a FOREIGN thread.
-    // The timer is created on this (affinity) thread via a queued closure, so
-    // it first fires while the event loop is pumping INSIDE onNodeFinished's
-    // whole-file hash — exactly the re-entrancy window the destructor drain
-    // must survive.
-    QMetaObject::invokeMethod(
-        QCoreApplication::instance(),
-        [coordinator, destroyed, loopGuard] {
-            QTimer *killer = new QTimer( QCoreApplication::instance() );
-            killer->setSingleShot( true );
-            QObject::connect( killer, &QTimer::timeout, QCoreApplication::instance(),
-                              [coordinator, destroyed, loopGuard] {
-                                  std::thread( [coordinator, destroyed, loopGuard] {
-                                      delete coordinator; // foreign-thread destruction
-                                      destroyed->store( true );
-                                      if ( loopGuard )
-                                          QMetaObject::invokeMethod(
-                                              loopGuard, &QEventLoop::quit,
-                                              Qt::QueuedConnection );
-                                  } ).detach();
-                              },
-                              Qt::DirectConnection );
-            killer->start( 0 );
-        },
-        Qt::QueuedConnection );
-
     // Drive the affinity loop: worker completion -> onNodeFinished (hash,
-    // pumps) -> killer timer -> foreign delete -> destructor drain.
+    // pumps) -> destroyer lands mid-hash -> destructor drain re-enters the
+    // frame -> hash aborts on the tripped cancel flag -> frame unwinds ->
+    // destructor finishes.
     QTimer::singleShot( 60000, loopGuard, &QEventLoop::quit );
     loopGuard->exec();
 
@@ -598,5 +600,6 @@ TEST_CASE( "Foreign-thread destruction during a whole-file hash never frees live
     // pre-fix destructor freed m_state while the affinity thread was still
     // inside onNodeFinished's hash, corrupting the heap.
     REQUIRE( guard.isNull() );
+    REQUIRE_FALSE( completionSeen->load() );
     delete loopGuard;
 }

@@ -27,17 +27,19 @@ namespace sicnu::workflow {
 namespace {
 
 /// Qt→jsoncpp parameter conversion. Returns nullopt when the document cannot
-/// be converted: QJsonDocument::fromJson accepts nesting depths this build's
-/// jsoncpp refuses (its default stackLimit is far below Qt's parse depth), and
-/// an over-limit tree makes CharReader::parse THROW Json::Exception rather
-/// than return false. Running the operator on the empty-object fallback used
-/// to be both fail-open (defaults executed as if the user configured nothing)
-/// and, in the throwing window, a crash — the exception escaped the executor
-/// into the QThreadPool worker.
+/// be converted: an over-limit tree makes CharReader::parse THROW
+/// Json::Exception rather than return false, and running the operator on the
+/// empty-object fallback used to be both fail-open (defaults executed as if
+/// the user configured nothing) and, in the throwing window, a crash — the
+/// exception escaped the executor into the QThreadPool worker. The stackLimit
+/// is pinned to Qt's own parse ceiling so authored documents (which passed
+/// QJsonDocument::fromJson) always convert identically on every jsoncpp
+/// build; deeper trees can only arrive programmatically and are refused.
 std::optional<Json::Value> qJsonObjectToJsonCpp( const QJsonObject &object )
 {
     Json::Value parsed;
     Json::CharReaderBuilder builder;
+    builder[ "stackLimit" ] = 1024;
     std::string errs;
     const QByteArray bytes = QJsonDocument( object ).toJson( QJsonDocument::Compact );
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );

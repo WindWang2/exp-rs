@@ -541,18 +541,19 @@ TEST_CASE( "Registry executor fails closed on parameters jsoncpp cannot convert"
     QTemporaryDir runDir;
     REQUIRE( runDir.isValid() );
 
-    // The converter window (regression oracle): Qt parses this tree fine, but
-    // jsoncpp refuses it — CharReader::parse with the default stackLimit
-    // (256 on this build, 1000 upstream) throws Json::Exception, and Qt's
-    // own parse ceiling (1024) still accepts the document. Depth 1020 keeps
-    // the window portable: any jsoncpp default refuses it, Qt never does.
-    // The pre-fix executor either ran the operator with EMPTY parameters
-    // (fail-open defaults) or let the throw escape into the QThreadPool
-    // worker (std::terminate). Both are killed by demanding a typed refusal
-    // with no artifact published.
+    // The converter window (regression oracle): the executor pins jsoncpp's
+    // stackLimit to 1024 (Qt's own parse ceiling), so documents that passed
+    // QJsonDocument::fromJson always convert — on every jsoncpp build. A
+    // DEEPER tree can only arrive programmatically (or from a future parser
+    // change): the conversion then throws Json::Exception, and the pre-fix
+    // executor either ran the operator with EMPTY parameters (fail-open
+    // defaults) or let the throw escape into the QThreadPool worker
+    // (std::terminate). Both are killed by demanding a typed refusal with no
+    // artifact published. Constructed in memory, not parsed from JSON, so
+    // the test is independent of any parser's depth ceiling.
     NodeFact deep = makeNode( QStringLiteral( "deep" ), { makePort( QStringLiteral( "input" ) ) } );
     deep.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
-    deep.parameters = deeplyNestedParameters( 1020 );
+    deep.parameters = deeplyNestedParameters( 1500 );
 
     const NodeExecutionResult refused = executor( deep, {}, runDir.path(), nullptr );
     REQUIRE_FALSE( refused.success );

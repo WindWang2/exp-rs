@@ -531,15 +531,28 @@ PipelineRunCoordinator::~PipelineRunCoordinator()
     // m_state touch after it) is still on the affinity stack. Freeing
     // m_state here would be a use-after-free; wait for the frame(s) to
     // unwind instead. The cancel flag tripped above bounds the wait to one
-    // hash chunk. On the affinity thread itself the stack unwinds before the
-    // member destruction below, so waiting would be both wrong and
-    // deadlock-prone there.
+    // hash chunk.
     if ( QThread::currentThread() != thread() )
     {
+        int waitedMs = 0;
         while ( m_state->affinityBusy.load( std::memory_order_acquire ) > 0 )
+        {
             QThread::msleep( 1 );
+            if ( ++waitedMs == 5000 )
+                qWarning( "PipelineRunCoordinator: destructor still waiting for an active "
+                          "completion frame after %d ms", waitedMs );
+        }
         // Late emissions from the unwinding frame must not outlive `this`.
         QCoreApplication::removePostedEvents( this );
+    }
+    else if ( m_state->affinityBusy.load( std::memory_order_acquire ) > 0 )
+    {
+        // Affinity-thread destruction FROM INSIDE a pump-serviced event
+        // (delete while onNodeFinished's hash pump dispatches it): waiting
+        // would deadlock against our own stack, so this unsupported
+        // deletion point is called out loudly instead of silently racing.
+        qWarning( "PipelineRunCoordinator: deleted from its affinity thread while a completion "
+                  "frame is active (pump-reentrant delete); concurrent state access is unsafe" );
     }
 }
 
@@ -654,20 +667,28 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
     // path leaves the coordinator reusable. A fresh UUID colliding with a
     // live holder is practically impossible — if it happens, refuse.
     const QString freshRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    // Absolute from here on: the checkpoint document, artifact containment
+    // and the ownership lock must not depend on the starting process's cwd —
+    // a relative runDirectory made the lock path cwd-derived, so two
+    // processes resuming from different cwds each "owned" the run.
+    const QString absoluteRunDirectory = QDir( runDirectory ).absolutePath();
     auto freshLock = std::make_unique<WorkflowRunLock>(
-        WorkflowRunLock::lockPathForRun( QDir( runDirectory ).absolutePath(),
-                                         freshRunId.toStdString() ) );
+        WorkflowRunLock::lockPathForRun( absoluteRunDirectory, freshRunId.toStdString() ) );
     {
         QString heldByPid;
-        if ( freshLock->tryAcquire( &heldByPid ) != WorkflowRunLock::TryResult::Acquired )
+        const WorkflowRunLock::TryResult acquired = freshLock->tryAcquire( &heldByPid );
+        if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner )
             return fail( QStringLiteral( "run '%1' in '%2' is already owned by a live process (pid %3)" )
-                             .arg( freshRunId, runDirectory,
+                             .arg( freshRunId, absoluteRunDirectory,
                                    heldByPid.isEmpty() ? QStringLiteral( "?" ) : heldByPid ) );
+        if ( acquired == WorkflowRunLock::TryResult::Error )
+            return fail( QStringLiteral( "cannot create the ownership lock for run '%1' in '%2'" )
+                             .arg( freshRunId, absoluteRunDirectory ) );
     }
 
     // Fresh state.
     m_state->def = runDef;
-    m_state->runDirectory = runDirectory;
+    m_state->runDirectory = absoluteRunDirectory;
     m_state->runId = freshRunId;
     m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
     // Ownership of the fresh run: released when this run finalizes or the
@@ -1234,6 +1255,13 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     // leaves the coordinator reusable instead of half-loaded.
     const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( resumedDef );
     const QString runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
+    // Fail closed: an empty or relative runDirectory cannot anchor the
+    // ownership lock (a relative path would derive it from the resuming
+    // process's cwd, so two processes could each believe they own the run)
+    // nor the artifact containment checks below.
+    if ( runDirectory.isEmpty() || QDir::isRelativePath( runDirectory ) )
+        return fail( QStringLiteral( "checkpoint '%1' records a non-absolute run directory '%2'" )
+                         .arg( checkpointFilePath, runDirectory ) );
     const QString canonicalRunDir = QDir( runDirectory ).canonicalPath();
 
     // Cross-process resume ownership (#727 parity): the checkpoint's runId is

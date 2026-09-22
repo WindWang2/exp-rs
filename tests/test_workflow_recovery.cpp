@@ -497,14 +497,31 @@ TEST_CASE( "recovery does not sweep the tmp file of a run owned by a live proces
   WorkflowRunLock lock( WorkflowRunLock::lockPathForRun( tmpDir.path(), "run-live-tmp" ) );
   REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
 
+  // A legal runId may itself contain the tmp marker (isValidRunId allows
+  // '.'): the probe must split on the LAST ".json.tmp." or it would check the
+  // wrong run's lock and sweep this live writer's in-flight tmp.
+  const QString markerRunId = QStringLiteral( "a.json.tmp.9" );
+  WorkflowRunLock markerLock( WorkflowRunLock::lockPathForRun( tmpDir.path(),
+                                                               markerRunId.toStdString() ) );
+  REQUIRE( markerLock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+  const QString markerTmp =
+    tmpDir.filePath( QStringLiteral( "checkpoint_%1.json.tmp.424242.8" ).arg( markerRunId ) );
+  {
+    QFile f( markerTmp );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( "{}" );
+  }
+
   auto recovered = manager.recoverInterruptedRuns( tmpDir.path() );
   REQUIRE( recovered.empty() ); // owned by a live process: untouched
   // The pre-fix sweep deleted the in-flight tmp REGARDLESS of ownership —
   // the live writer's final rename then failed and its checkpoint silently
   // never appeared.
   REQUIRE( QFile::exists( liveTmp ) );
+  REQUIRE( QFile::exists( markerTmp ) );
 
   // Owner gone: the next pass sweeps the tmp and reconciles the run.
+  markerLock.release();
   lock.release();
   recovered = manager.recoverInterruptedRuns( tmpDir.path() );
   REQUIRE( recovered.size() == 1 );

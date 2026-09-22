@@ -437,8 +437,13 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
         QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ) }, QDir::Files );
       for ( const QString &orphan : tmpOrphans )
       {
+        // The tmp suffix pid/counter are digits, so the LAST ".json.tmp."
+        // marker is always the true suffix separator — a legal runId may
+        // itself contain ".json.tmp." (isValidRunId allows '.'), and a
+        // first-marker split would probe the wrong run's lock and sweep a
+        // live writer's in-flight tmp.
         const QString marker = QStringLiteral( ".json.tmp." );
-        const qsizetype markerPos = orphan.indexOf( marker );
+        const qsizetype markerPos = orphan.lastIndexOf( marker );
         if ( !orphan.startsWith( QLatin1String( "checkpoint_" ) ) || markerPos < 0 )
           continue; // not a name this writer family produces
         const QString runId =
