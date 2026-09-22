@@ -23,12 +23,12 @@ constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
 inline float finishValue( double v, SarDomain domain )
 {
+  // Ratio (DN² − noise)/A² can go negative when noise exceeds power; σ⁰ is
+  // a power quantity — nonpositive values are NoData in both domains.
+  if ( !( v > 0.0 ) )
+    return kNan;
   if ( domain == SarDomain::Decibels )
-  {
-    if ( !( v > 0.0 ) )
-      return kNan; // dB of nonpositive power is undefined → NoData
     return static_cast<float>( linearToDb( v ) );
-  }
   return static_cast<float>( v );
 }
 } // namespace

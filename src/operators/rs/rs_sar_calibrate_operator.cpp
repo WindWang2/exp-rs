@@ -174,6 +174,16 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                         "calibration; rs:sar_calibrate applies the DN formula and cannot "
                         "recalibrate a derived product" );
             }
+            // Optical vocabulary on the shared radiometric-state key.
+            if ( declared.token == QLatin1String( "digital_number" ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidParameter,
+                    "input declares optical radiometric state 'digital_number'; "
+                    "rs:sar_calibrate requires the SAR DN token 'dn' (and "
+                    "SICNU_MODALITY=sar). Re-import the SAR product or retag "
+                    "SICNU_SAR_CALIBRATION=dn" );
+            }
             throw RSOperatorError(
                 ErrorCode::InvalidParameter,
                 "input declares unrecognized SICNU_SAR_CALIBRATION='" +
@@ -276,6 +286,20 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "band out of range: " + std::to_string(firstBand));
     }
+
+    // A geocode five-band product declares SICNU_SAR_GEOCODE_BAND_STATES —
+    // none of those bands is DN. Refuse before the DN formula runs.
+    if ( !sicnu::sar::datasetMeta( src, sicnu::sar::kGeocodeBandStatesKey )
+              .trimmed()
+              .isEmpty() )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "input declares SICNU_SAR_GEOCODE_BAND_STATES (geocode mixed "
+            "product); rs:sar_calibrate applies the DN formula and cannot "
+            "recalibrate a geocode stack" );
+    }
+
 
     // One per-row LUT describes one calibration vector: real dual-pol products
     // carry a different vector per polarization, so a multi-band run reuses

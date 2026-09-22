@@ -342,8 +342,10 @@ bool textureRaster( const GdalDatasetWrapper &src, int band,
   } );
   if ( ok )
   {
-    writeSarOutputMetadata( dst, QString(), QStringLiteral( "linear_power" ), polarizations,
-                            sensor, 0.0, 0.0 );
+    // GLCM measures are dimensionless window statistics — do not stamp
+    // linear_power (that vocabulary is for backscatter). Domain stays empty;
+    // the operator stamps sar_texture on the radiometric/calibration keys.
+    writeSarOutputMetadata( dst, QString(), QString(), polarizations, sensor, 0.0, 0.0 );
     dst.setMetadataItem( QStringLiteral( "SICNU_SAR_TEXTURE_MEASURES" ), measureList.size() == 1
                                                                             ? glcmMeasureToString( measureList.front() )
                                                                             : QStringLiteral( "%1 measures" )

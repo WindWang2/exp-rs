@@ -201,6 +201,22 @@ Json::Value RsSarTextureOperator::run(const Json::Value& params,
                               "band out of range: " + std::to_string(band));
     }
 
+    // Honour SICNU_SAR_GEOCODE_BAND_STATES: geometry / mask bands on a geocode
+    // product must not be re-processed as backscatter (dataset-level token is
+    // sigma0 for the whole five-band stack).
+    if ( !sicnu::sar::bandIsBackscatterState( src, band ) )
+    {
+        const QString bandState =
+            sicnu::sar::effectiveBandRadiometricState( src, band );
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "band " + std::to_string( band ) + " declares state '" +
+                bandState.toStdString() +
+                "' via SICNU_SAR_GEOCODE_BAND_STATES (not a backscatter power "
+                "band); select band 1 (sigma0) or band 2 (gamma0)" );
+    }
+
+
     // A conflicting declaration (SICNU_SAR_CALIBRATION vs
     // SICNU_RADIOMETRIC_STATE) is never interpreted, even by a state-agnostic
     // operator: the input's declared contract is unreadable, so refuse.

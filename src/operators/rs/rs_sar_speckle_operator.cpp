@@ -197,6 +197,22 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
                               "band out of range: " + std::to_string(firstBand));
     }
 
+    // Honour SICNU_SAR_GEOCODE_BAND_STATES: geometry / mask bands on a geocode
+    // product must not be re-processed as backscatter (dataset-level token is
+    // sigma0 for the whole five-band stack).
+    if ( !sicnu::sar::bandIsBackscatterState( src, firstBand ) )
+    {
+        const QString bandState =
+            sicnu::sar::effectiveBandRadiometricState( src, firstBand );
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "band " + std::to_string( firstBand ) + " declares state '" +
+                bandState.toStdString() +
+                "' via SICNU_SAR_GEOCODE_BAND_STATES (not a backscatter power "
+                "band); select band 1 (sigma0) or band 2 (gamma0)" );
+    }
+
+
     // #803: the sentinel is per band — bands of a multi-band SAR stack can
     // declare different (or no) NoData values, so it is queried inside the
     // filter loop. The old code reused band 1's sentinel everywhere, which
