@@ -9647,6 +9647,25 @@ target_link_libraries(test_agent_loop_resume PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_resume)
 
+# Agent Operations & Recovery Control Center (Qt-free core).
+add_executable(test_agent_ops_core test_agent_ops_core.cpp)
+target_link_libraries(test_agent_ops_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_agent_ops_core)
+
+# Agent Ops Control Center UI offscreen smoke (optional when UI lib present).
+if(TARGET sicnu_agent_ops_ui)
+  add_executable(test_agent_ops_ui_smoke test_agent_ops_ui_smoke.cpp)
+  target_link_libraries(test_agent_ops_ui_smoke PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_agent_ops_ui
+    Qt6::Widgets
+  )
+  sicnu_discover_tests(test_agent_ops_ui_smoke)
+endif()
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
