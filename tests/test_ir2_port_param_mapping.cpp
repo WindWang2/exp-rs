@@ -506,3 +506,100 @@ TEST_CASE( "#1152: the registry executor wires the run cancel flag into the oper
 
     registry.unregisterOperator( "test:ir2_cancel_polling" );
 }
+
+namespace
+{
+
+// Builds a parameters object nested @p depth levels deep — the shape a
+// hostile or machine-generated workflow document carries. Qt's JSON parser
+// accepts far deeper trees than this build's jsoncpp converter refuses.
+QJsonObject deeplyNestedParameters( int depth )
+{
+    QJsonObject leaf;
+    leaf.insert( QStringLiteral( "value" ), 1 );
+    for ( int i = 0; i < depth; ++i )
+    {
+        QJsonObject wrapper;
+        wrapper.insert( QStringLiteral( "nested" ), leaf );
+        leaf = wrapper;
+    }
+    return leaf;
+}
+
+} // namespace
+
+TEST_CASE( "Registry executor fails closed on parameters jsoncpp cannot convert",
+           "[d18][ir2][executor][deep-params]" )
+{
+    ensureApp();
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_writes_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_writes_artifact", [] { return std::make_unique<WritingOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+
+    // The converter window (regression oracle): the executor pins jsoncpp's
+    // stackLimit to 1024 (Qt's own parse ceiling), so documents that passed
+    // QJsonDocument::fromJson always convert — on every jsoncpp build. A
+    // DEEPER tree can only arrive programmatically (or from a future parser
+    // change): the conversion then throws Json::Exception, and the pre-fix
+    // executor either ran the operator with EMPTY parameters (fail-open
+    // defaults) or let the throw escape into the QThreadPool worker
+    // (std::terminate). Both are killed by demanding a typed refusal with no
+    // artifact published. Constructed in memory, not parsed from JSON, so
+    // the test is independent of any parser's depth ceiling.
+    NodeFact deep = makeNode( QStringLiteral( "deep" ), { makePort( QStringLiteral( "input" ) ) } );
+    deep.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+    deep.parameters = deeplyNestedParameters( 1500 );
+
+    const NodeExecutionResult refused = executor( deep, {}, runDir.path(), nullptr );
+    REQUIRE_FALSE( refused.success );
+    REQUIRE( refused.artifactPath.isEmpty() );
+    REQUIRE( refused.errorMessage.startsWith( QLatin1String( "ir2.operator_failed:" ) ) );
+    REQUIRE( refused.errorMessage.contains( QStringLiteral( "deep" ) ) );
+    // The operator must never have run: no default-named artifact on disk.
+    REQUIRE_FALSE( QFile::exists( QDir( runDir.path() ).filePath( QStringLiteral( "deep.out.tif" ) ) ) );
+
+    // Positive control: a shallow document converts and runs normally.
+    NodeFact shallow = makeNode( QStringLiteral( "shallow" ), { makePort( QStringLiteral( "input" ) ) } );
+    shallow.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+    QJsonObject params;
+    params.insert( QStringLiteral( "note" ), QStringLiteral( "plain" ) );
+    shallow.parameters = params;
+    const NodeExecutionResult ok = executor( shallow, {}, runDir.path(), nullptr );
+    REQUIRE( ok.success );
+    REQUIRE( QFile::exists( ok.artifactPath ) );
+
+    registry.unregisterOperator( "test:ir2_writes_artifact" );
+}
+
+TEST_CASE( "Registry executor refuses a nodeId that forks an NTFS alternate data stream",
+           "[d18][ir2][executor][ads-node-id]" )
+{
+    ensureApp();
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_writes_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_writes_artifact", [] { return std::make_unique<WritingOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+
+    // "host:stream" is a legal POSIX file name, so the pre-fix executor wrote
+    // the artifact happily here — but on NTFS the default artifact name
+    // forks an ADS and the bytes never land on the declared output. The id is
+    // refused on every platform so authoring catches it before a Windows run.
+    NodeFact ads = makeNode( QStringLiteral( "host:stream" ), { makePort( QStringLiteral( "input" ) ) } );
+    ads.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+    const NodeExecutionResult refused = executor( ads, {}, runDir.path(), nullptr );
+    REQUIRE_FALSE( refused.success );
+    REQUIRE( refused.artifactPath.isEmpty() );
+    REQUIRE( refused.errorMessage.startsWith( QLatin1String( "ir2.operator_failed: unsafe nodeId" ) ) );
+    REQUIRE_FALSE( QFile::exists( QDir( runDir.path() ).filePath( QStringLiteral( "host:stream.out.tif" ) ) ) );
+
+    registry.unregisterOperator( "test:ir2_writes_artifact" );
+}

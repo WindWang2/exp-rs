@@ -303,6 +303,12 @@ std::unique_ptr<WorkflowRun> WorkflowRun::createFromDefinition( const WorkflowDe
   run->m_stepPlans.reserve( def.steps.size() );
   for ( const auto &stepDef : def.steps )
   {
+    // Second line of defense behind workflowDefinitionFromJson: a
+    // programmatically-built definition that skips the JSON gate must not
+    // seed an id-less plan — two of them serialize a checkpoint that is
+    // refused on load (duplicate "" stepPlans id).
+    if ( stepDef.id.empty() )
+      return nullptr;
     StepPlan plan;
     plan.stepId = stepDef.id;
     plan.operatorId = stepDef.operatorId;

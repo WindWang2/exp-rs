@@ -9,11 +9,14 @@
 // filesystem itself.
 #include <catch2/catch_test_macros.hpp>
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QSignalSpy>
+#include <QThread>
 #include <QTimer>
 
 #if defined( Q_OS_WIN )
@@ -25,7 +28,11 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <functional>
+#include <memory>
+#include <thread>
 
 #include "app/pipeline/labspec_workflow_lift.h"
 #include "workflow/pipeline_run_coordinator.h"
@@ -360,4 +367,239 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
         }
     }
     REQUIRE( corpusOperatorSteps == 16 );
+}
+
+namespace
+{
+
+bool waitUntilPredicate( const std::function<bool()> &predicate, int timeoutMs = 20000 )
+{
+    const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
+    while ( QDateTime::currentMSecsSinceEpoch() < deadline )
+    {
+        if ( predicate() )
+            return true;
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+        QThread::msleep( 10 );
+    }
+    return predicate();
+}
+
+QByteArray readFileBytes( const QString &path )
+{
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return {};
+    return f.readAll();
+}
+
+} // namespace
+
+TEST_CASE( "A checkpoint mid-resume is owned by one process at a time", "[d17][e2e][resume][ownership]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "ownership" ) );
+
+    // Gate executor: writes every node's artifact but parks "node_2" inside
+    // the worker until the test releases it — the stand-in for a long-running
+    // operator in the owning process.
+    auto gate = std::make_shared<std::atomic<bool>>( false );
+    PipelineRunCoordinator owner;
+    owner.setExecutor( [gate]( const NodeFact &node, const QHash<QString, QString> &,
+                               const QString &runDirectory,
+                               const std::atomic<bool> *cancel ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        const QString artifact =
+            QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        {
+            QFile f( artifact );
+            if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+            {
+                result.errorMessage = QStringLiteral( "cannot write artifact" );
+                return result;
+            }
+            f.write( "x" );
+        }
+        if ( node.nodeId == QLatin1String( "node_2" ) )
+        {
+            while ( !gate->load() && !( cancel && cancel->load() ) )
+                QThread::msleep( 10 );
+        }
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    } );
+    REQUIRE( owner.startRun( chainDef( 3 ), dir ) );
+    REQUIRE( waitUntilPredicate( [&owner] {
+        return owner.getAllStatuses().value( QStringLiteral( "node_2" ) ).state
+               == ExecutionState::Running;
+    } ) );
+    // The initial checkpoint records node_1 Succeeded, node_2 Running.
+    const QByteArray checkpointBefore = readFileBytes( owner.checkpointPath() );
+    REQUIRE( !checkpointBefore.isEmpty() );
+
+    // The double-execution oracle: while the owner holds the run, a second
+    // coordinator resuming the same checkpoint must be REFUSED. The pre-fix
+    // coordinator accepted it — both processes then executed node_2/node_3
+    // against the same artifact paths and overwrote each other's checkpoints.
+    {
+        PipelineRunCoordinator peer;
+        peer.setExecutor( makeSyntheticNodeExecutor() );
+        QString err;
+        REQUIRE_FALSE( peer.resumeFromCheckpoint( owner.checkpointPath(), &err ) );
+        REQUIRE( err.contains( QLatin1String( "live process" ) ) );
+        // A refused resume is a no-op on disk: the owner's checkpoint is
+        // exactly the bytes the peer read, never a peer-state rewrite.
+        REQUIRE( readFileBytes( owner.checkpointPath() ) == checkpointBefore );
+    }
+
+    // Release the gate: the owner finishes and finalizes, which drops the
+    // ownership lock — the checkpoint becomes verifiable by peers again.
+    gate->store( true );
+    REQUIRE( waitForCompleted( owner ) );
+
+    PipelineRunCoordinator verifier;
+    verifier.setExecutor( makeSyntheticNodeExecutor() );
+    QString verifyErr;
+    REQUIRE( verifier.resumeFromCheckpoint( owner.checkpointPath(), &verifyErr ) );
+    REQUIRE( waitForCompleted( verifier ) );
+    const QMap<QString, NodeStatusSnapshot> statuses = verifier.getAllStatuses();
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+}
+
+TEST_CASE( "Two coordinators cannot resume the same checkpoint concurrently",
+           "[d17][e2e][resume][ownership][double-resume]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "double-resume" ) );
+
+    // Produce a terminal checkpoint, then invalidate one artifact so the
+    // resume has real work (a node reverts to Pending and would re-execute).
+    PipelineRunCoordinator first;
+    first.setExecutor( makeSyntheticNodeExecutor() );
+    REQUIRE( first.startRun( chainDef( 2 ), dir ) );
+    REQUIRE( waitForCompleted( first ) );
+    const QString checkpoint = first.checkpointPath();
+    REQUIRE( QFile::remove( QDir( dir ).filePath( QStringLiteral( "node_2.artifact" ) ) ) );
+
+    // Resume A parks node_1 (still Succeeded? no — node_1's artifact is
+    // intact, it CacheHits; node_2 re-executes). Park INSIDE node_2's
+    // re-execution via a gate executor bound to the resuming coordinator.
+    auto gate = std::make_shared<std::atomic<bool>>( false );
+    auto resumeA = std::make_unique<PipelineRunCoordinator>();
+    resumeA->setExecutor( [gate]( const NodeFact &node, const QHash<QString, QString> &,
+                                  const QString &runDirectory,
+                                  const std::atomic<bool> *cancel ) -> NodeExecutionResult {
+        while ( !gate->load() && !( cancel && cancel->load() ) )
+            QThread::msleep( 10 );
+        NodeExecutionResult result;
+        const QString artifact =
+            QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        QFile f( artifact );
+        f.open( QIODevice::WriteOnly | QIODevice::Truncate );
+        f.write( "y" );
+        f.close();
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    } );
+    REQUIRE( resumeA->resumeFromCheckpoint( checkpoint ) );
+    REQUIRE( waitUntilPredicate( [&resumeA] {
+        return resumeA->getAllStatuses().value( QStringLiteral( "node_2" ) ).state
+               == ExecutionState::Running;
+    } ) );
+
+    // Resume B of the SAME checkpoint while A holds it: refused, no work.
+    PipelineRunCoordinator resumeB;
+    resumeB.setExecutor( makeSyntheticNodeExecutor() );
+    QString err;
+    REQUIRE_FALSE( resumeB.resumeFromCheckpoint( checkpoint, &err ) );
+    REQUIRE( err.contains( QLatin1String( "live process" ) ) );
+
+    gate->store( true );
+    REQUIRE( waitForCompleted( *resumeA ) );
+}
+
+TEST_CASE( "Foreign-thread destruction during a whole-file hash never frees live state",
+           "[d17][e2e][destroy][uaf]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "destroy-hash" ) );
+
+    // 64 MiB artifact: Auto identity escalates to the whole-file hash —
+    // roughly 64 chunked reads, each pumping the event loop, so the hash
+    // frame stays on the affinity thread for hundreds of milliseconds.
+    const qint64 artifactBytes = 64LL * 1024 * 1024;
+    auto destroyed = std::make_shared<std::atomic<bool>>( false );
+    auto completionSeen = std::make_shared<std::atomic<bool>>( false );
+
+    auto *coordinator = new PipelineRunCoordinator;
+    QPointer<PipelineRunCoordinator> guard( coordinator );
+    const QPointer<QEventLoop> loopGuard = new QEventLoop;
+
+    // Window-hit oracle: when the delete lands inside onNodeFinished (the
+    // point of this test), the drain ran re-entrantly inside the frame and
+    // the fixed coordinator ABANDONS the completion — nodeFinished must
+    // never be emitted. If scheduling ever pushes the delete past the frame,
+    // this assertion fails loudly instead of passing vacuously.
+    QObject::connect( coordinator, &PipelineRunCoordinator::nodeFinished, coordinator,
+                      [completionSeen]( const QString &, bool, const QString & ) {
+                          completionSeen->store( true );
+                      },
+                      Qt::DirectConnection );
+
+    coordinator->setExecutor(
+        [artifactBytes, coordinator, destroyed, loopGuard]( const NodeFact &node,
+                                                            const QHash<QString, QString> &,
+                                                            const QString &runDirectory,
+                                                            const std::atomic<bool> * ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        const QString artifact =
+            QDir( runDirectory ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
+        {
+            QFile f( artifact );
+            if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+            {
+                result.errorMessage = QStringLiteral( "cannot write artifact" );
+                return result;
+            }
+            const QByteArray chunk( 1024 * 1024, 'x' );
+            for ( qint64 written = 0; written < artifactBytes; written += chunk.size() )
+                f.write( chunk );
+        }
+        // Spawn the destroyer NOW, just before the executor returns: the
+        // worker queues the completion right afterwards, the affinity thread
+        // enters onNodeFinished and starts hashing, and the grace sleep
+        // below drops the delete INTO the hash's event pump — the exact
+        // re-entrancy window the destructor drain must survive.
+        std::thread( [coordinator, destroyed, loopGuard] {
+            QThread::msleep( 150 );
+            delete coordinator; // foreign-thread destruction
+            destroyed->store( true );
+            if ( loopGuard )
+                QMetaObject::invokeMethod( loopGuard, &QEventLoop::quit, Qt::QueuedConnection );
+        } ).detach();
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+        } );
+
+    WorkflowDocument def = chainDef( 1 );
+    REQUIRE( coordinator->startRun( def, dir ) );
+
+    // Drive the affinity loop: worker completion -> onNodeFinished (hash,
+    // pumps) -> destroyer lands mid-hash -> destructor drain re-enters the
+    // frame -> hash aborts on the tripped cancel flag -> frame unwinds ->
+    // destructor finishes.
+    QTimer::singleShot( 60000, loopGuard, &QEventLoop::quit );
+    loopGuard->exec();
+
+    REQUIRE( waitUntilPredicate( [destroyed] { return destroyed->load(); }, 30000 ) );
+    // Surviving with the coordinator fully destroyed IS the assertion: the
+    // pre-fix destructor freed m_state while the affinity thread was still
+    // inside onNodeFinished's hash, corrupting the heap.
+    REQUIRE( guard.isNull() );
+    REQUIRE_FALSE( completionSeen->load() );
+    delete loopGuard;
 }

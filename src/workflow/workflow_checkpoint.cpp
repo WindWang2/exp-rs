@@ -76,6 +76,20 @@ QString WorkflowCheckpointManager::saveCheckpoint( const WorkflowRun &run, const
   writerBuilder["indentation"] = "  ";
   const std::string jsonStr = Json::writeString( writerBuilder, root );
 
+  // The writer honours the reader's cap (mirrors atomicWriteJson's writer
+  // check): a checkpoint past kMaxCheckpointDocumentBytes is one this build's
+  // loadCheckpoint always refuses, so promoting it would trade a clear save
+  // failure for a silently unrecoverable run (every later load warns and
+  // skips).
+  if ( static_cast<qint64>( jsonStr.size() ) > kMaxCheckpointDocumentBytes )
+  {
+    qWarning( "WorkflowCheckpointManager: checkpoint for run %s exceeds the %lld byte size cap "
+              "(%lld bytes); refusing to write it",
+              runIdRaw.c_str(), static_cast<long long>( kMaxCheckpointDocumentBytes ),
+              static_cast<long long>( jsonStr.size() ) );
+    return QString();
+  }
+
   QFile file( tmpPath );
   if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
     return QString();
@@ -411,16 +425,41 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
 
   // Sweep orphaned tmp files from crashed saves, and retired election losers
   // (*.orphaned). Recovery runs at startup, before any new saves (#1186).
+  // A tmp file whose run is still LOCKED by a live process is a save in
+  // flight, not a crashed one: deleting it would break that writer's final
+  // rename so its checkpoint would silently never appear. Liveness follows
+  // the lock primitive (#727), never the pid embedded in the tmp name.
   {
     QDir d( dir );
     if ( d.exists() )
     {
-      const QStringList orphans = d.entryList(
-        QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ),
-                     QStringLiteral( "checkpoint_*.json.orphaned" ),
+      const QStringList tmpOrphans = d.entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json.tmp.*" ) }, QDir::Files );
+      for ( const QString &orphan : tmpOrphans )
+      {
+        // The tmp suffix pid/counter are digits, so the LAST ".json.tmp."
+        // marker is always the true suffix separator — a legal runId may
+        // itself contain ".json.tmp." (isValidRunId allows '.'), and a
+        // first-marker split would probe the wrong run's lock and sweep a
+        // live writer's in-flight tmp.
+        const QString marker = QStringLiteral( ".json.tmp." );
+        const qsizetype markerPos = orphan.lastIndexOf( marker );
+        if ( !orphan.startsWith( QLatin1String( "checkpoint_" ) ) || markerPos < 0 )
+          continue; // not a name this writer family produces
+        const QString runId =
+          orphan.mid( QStringLiteral( "checkpoint_" ).size(),
+                      markerPos - QStringLiteral( "checkpoint_" ).size() );
+        const WorkflowRunLock::OwnerProbe probe = WorkflowRunLock::probeOwner(
+          WorkflowRunLock::lockPathForRun( dir, runId.toStdString() ) );
+        if ( probe.state == WorkflowRunLock::OwnerProbe::State::LiveOwner )
+          continue;
+        QFile::remove( d.absoluteFilePath( orphan ) );
+      }
+      const QStringList retired = d.entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json.orphaned" ),
                      QStringLiteral( "*.orphaned" ) },
         QDir::Files );
-      for ( const QString &orphan : orphans )
+      for ( const QString &orphan : retired )
         QFile::remove( d.absoluteFilePath( orphan ) );
     }
   }

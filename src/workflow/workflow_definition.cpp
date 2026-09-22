@@ -115,21 +115,33 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
     for ( const auto &stepVal : json["steps"] )
     {
       if ( !stepVal.isObject() )
-        continue;
+      {
+        // Fail-closed: silently dropping a malformed entry would execute a
+        // different (smaller) workflow than the one authored.
+        error = "steps: non-object step entry";
+        return false;
+      }
 
       StepDef step;
       if ( stepVal.isMember( "id" ) && stepVal["id"].isString() )
         step.id = stepVal["id"].asString();
 
-      if ( !step.id.empty() )
+      if ( step.id.empty() )
       {
-        if ( seenStepIds.find( step.id ) != seenStepIds.end() )
-        {
-          error = "Duplicate step id: " + step.id;
-          return false;
-        }
-        seenStepIds.insert( step.id );
+        // Fail-closed: a step without an id cannot take part in the run —
+        // dependencies reference ids, plan lookup is by id, and two id-less
+        // steps would serialize a checkpoint whose stepPlans both carry ""
+        // (refused on load as a duplicate id, so the run could never be
+        // restored). Mirrors the IR2 gate ("node: missing 'nodeId'").
+        error = "step: missing 'id'";
+        return false;
       }
+      if ( seenStepIds.find( step.id ) != seenStepIds.end() )
+      {
+        error = "Duplicate step id: " + step.id;
+        return false;
+      }
+      seenStepIds.insert( step.id );
 
       if ( stepVal.isMember( "title" ) && stepVal["title"].isString() )
         step.title = stepVal["title"].asString();

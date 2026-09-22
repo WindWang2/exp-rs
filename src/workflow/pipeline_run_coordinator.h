@@ -41,6 +41,13 @@
 // fast path) — a foreign-thread destruction is safe but marshals a drain,
 // which completes only while that thread services its event loop.
 //
+// Cross-process ownership (#727 parity): a started or resumed run holds a
+// WorkflowRunLock next to its checkpoint for the whole execution — a second
+// process (or coordinator) resuming the same checkpoint mid-flight is
+// refused with a typed error instead of double-executing the remaining
+// nodes. The lock releases when the run finalizes; a terminal checkpoint can
+// then be re-verified (all-CacheHit) by anyone.
+//
 
 #include <QHash>
 #include <QObject>

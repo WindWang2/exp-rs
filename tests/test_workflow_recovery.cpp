@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "workflow/workflow_checkpoint.h"
+#include "workflow/workflow_definition.h"
+#include "workflow/workflow_limits.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_lock.h"
 #include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
+#include <json/json.h>
 #include <string>
 
 using namespace sicnu::workflow;
@@ -416,4 +419,174 @@ TEST_CASE( "lock files are not confused with checkpoints by the listing (#727)",
   const QStringList checkpoints = manager.listCheckpoints( tmpDir.path() );
   REQUIRE( checkpoints.size() == 1 );
   REQUIRE( checkpoints.front().endsWith( "checkpoint_run-listed.json" ) );
+}
+
+TEST_CASE( "saveCheckpoint refuses to write a checkpoint its own loader would reject",
+           "[workflow][v2][checkpoint][write-cap]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  WorkflowCheckpointManager manager;
+
+  WorkflowDefinition def;
+  def.id = "wf_write_cap";
+  def.title = "Write Cap Test";
+  StepDef step;
+  step.id = "s1";
+  step.operatorId = "rs:test";
+  def.steps.push_back( step );
+
+  auto run = WorkflowRun::createFromDefinition( def, "run-write-cap" );
+  REQUIRE( run );
+  run->transitionTo( WorkflowRunState::Planning );
+  run->transitionTo( WorkflowRunState::Running );
+
+  // Inflate the serialized document past the shared 16 MiB checkpoint cap.
+  // The pre-fix writer happily promoted it — and every later loadCheckpoint
+  // refused it, so the run became silently unrecoverable (warn + skip on
+  // every recovery pass). The writer must honour the reader's cap.
+  if ( StepPlan *plan = run->findStepPlan( "s1" ) )
+  {
+    ( *plan ).resolvedParams["blob"] =
+      std::string( static_cast<size_t>( kMaxCheckpointDocumentBytes ) + 1024, 'x' );
+    run->updateStepPlan( *plan );
+  }
+
+  const QString savedPath = manager.saveCheckpoint( *run, tmpDir.path() );
+  REQUIRE( savedPath.isEmpty() );
+  REQUIRE_FALSE( QFile::exists( tmpDir.filePath( "checkpoint_run-write-cap.json" ) ) );
+  // No tmp residue either: the refusal happens before any file is written.
+  REQUIRE( QDir( tmpDir.path() )
+               .entryList( QStringList{ QStringLiteral( "*.tmp.*" ) }, QDir::Files )
+               .isEmpty() );
+}
+
+TEST_CASE( "recovery does not sweep the tmp file of a run owned by a live process",
+           "[workflow][v2][recovery][tmp-lock]" )
+{
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  WorkflowCheckpointManager manager;
+
+  WorkflowDefinition def;
+  def.id = "wf_live_tmp";
+  def.title = "Live Tmp Test";
+  StepDef step;
+  step.id = "s1";
+  step.operatorId = "rs:test";
+  def.steps.push_back( step );
+
+  auto run = WorkflowRun::createFromDefinition( def, "run-live-tmp" );
+  REQUIRE( run );
+  run->transitionTo( WorkflowRunState::Running );
+  REQUIRE( !manager.saveCheckpoint( *run, tmpDir.path() ).isEmpty() );
+
+  // A save in flight: a tmp file beside the checkpoint, writer alive.
+  const QString liveTmp =
+    tmpDir.filePath( QStringLiteral( "checkpoint_run-live-tmp.json.tmp.424242.7" ) );
+  {
+    QFile f( liveTmp );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( "{}" );
+  }
+
+  // Simulate the live owner by holding the run's lock — liveness follows the
+  // lock primitive (#727), never the pid embedded in the tmp name.
+  WorkflowRunLock lock( WorkflowRunLock::lockPathForRun( tmpDir.path(), "run-live-tmp" ) );
+  REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+
+  // A legal runId may itself contain the tmp marker (isValidRunId allows
+  // '.'): the probe must split on the LAST ".json.tmp." or it would check the
+  // wrong run's lock and sweep this live writer's in-flight tmp.
+  const QString markerRunId = QStringLiteral( "a.json.tmp.9" );
+  WorkflowRunLock markerLock( WorkflowRunLock::lockPathForRun( tmpDir.path(),
+                                                               markerRunId.toStdString() ) );
+  REQUIRE( markerLock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+  const QString markerTmp =
+    tmpDir.filePath( QStringLiteral( "checkpoint_%1.json.tmp.424242.8" ).arg( markerRunId ) );
+  {
+    QFile f( markerTmp );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( "{}" );
+  }
+
+  auto recovered = manager.recoverInterruptedRuns( tmpDir.path() );
+  REQUIRE( recovered.empty() ); // owned by a live process: untouched
+  // The pre-fix sweep deleted the in-flight tmp REGARDLESS of ownership —
+  // the live writer's final rename then failed and its checkpoint silently
+  // never appeared.
+  REQUIRE( QFile::exists( liveTmp ) );
+  REQUIRE( QFile::exists( markerTmp ) );
+
+  // Owner gone: the next pass sweeps the tmp and reconciles the run.
+  markerLock.release();
+  lock.release();
+  recovered = manager.recoverInterruptedRuns( tmpDir.path() );
+  REQUIRE( recovered.size() == 1 );
+  REQUIRE_FALSE( QFile::exists( liveTmp ) );
+}
+
+TEST_CASE( "an id-less definition step is refused instead of poisoning the checkpoint",
+           "[workflow][v2][definition][step-id]" )
+{
+  // JSON gate: two id-less steps used to parse fine — createFromDefinition
+  // then seeded two plans with stepId "" and saveCheckpoint promoted a
+  // checkpoint whose loadCheckpoint always failed ("duplicate stepPlans id
+  // ''"). The definition can never round-trip, so it must be refused here.
+  Json::Value doc( Json::objectValue );
+  doc["id"] = "wf_no_id";
+  Json::Value steps( Json::arrayValue );
+  for ( int i = 0; i < 2; ++i )
+  {
+    Json::Value stepJson( Json::objectValue );
+    stepJson["title"] = "id-less";
+    stepJson["operatorId"] = "rs:test";
+    steps.append( stepJson );
+  }
+  doc["steps"] = steps;
+
+  WorkflowDefinition parsed;
+  std::string err;
+  REQUIRE_FALSE( workflowDefinitionFromJson( doc, parsed, err ) );
+  REQUIRE( err.find( "missing 'id'" ) != std::string::npos );
+
+  // A malformed (non-object) step entry is a typed error too, never a silent
+  // drop that would execute a smaller workflow than authored.
+  Json::Value malformed = doc;
+  malformed["steps"][0] = Json::Value( "not-an-object" );
+  WorkflowDefinition parsed2;
+  REQUIRE_FALSE( workflowDefinitionFromJson( malformed, parsed2, err ) );
+  REQUIRE( err.find( "non-object step entry" ) != std::string::npos );
+
+  // Programmatic gate: definitions that bypass the JSON parser cannot seed
+  // id-less plans either.
+  WorkflowDefinition programmatic;
+  StepDef idLess;
+  idLess.operatorId = "rs:test";
+  programmatic.steps.push_back( idLess );
+  programmatic.steps.push_back( idLess );
+  REQUIRE( WorkflowRun::createFromDefinition( programmatic, "run-poison" ) == nullptr );
+
+  // Positive control: a well-formed definition still round-trips.
+  Json::Value good = doc;
+  good["steps"][0]["id"] = "s1";
+  good["steps"][1]["id"] = "s2";
+  WorkflowDefinition goodDef;
+  std::string goodErr;
+  REQUIRE( workflowDefinitionFromJson( good, goodDef, goodErr ) );
+
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+  WorkflowCheckpointManager manager;
+  auto run = WorkflowRun::createFromDefinition( goodDef, "run-round-trip" );
+  REQUIRE( run );
+  run->transitionTo( WorkflowRunState::Running );
+  const QString path = manager.saveCheckpoint( *run, tmpDir.path() );
+  REQUIRE( !path.isEmpty() );
+  QString loadErr;
+  auto loaded = manager.loadCheckpoint( path, &loadErr );
+  REQUIRE( loaded != nullptr );
+  REQUIRE( loaded->runId() == "run-round-trip" );
 }
