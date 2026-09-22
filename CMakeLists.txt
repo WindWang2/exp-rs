@@ -791,6 +791,10 @@ add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
 add_subdirectory(src/processing)
+# Study → ExecutionPlane adapter (RS14-07): thin opt-in bridge leaf; must
+# follow src/processing because it links the sicnu_task_center target defined
+# there (pattern: src/experiment/bridge after its workflow dependency).
+add_subdirectory(src/study/bridge)
 # RS14-12 teaching autonomy ladder: Qt-free policy leaf; must precede the
 # agent library that links it (and hosts the two gate call sites).
 add_subdirectory(src/agent/autonomy)
