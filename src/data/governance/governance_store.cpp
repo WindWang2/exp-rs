@@ -796,6 +796,10 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "asset upsert prepare failed" ) ) );
         }
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        // Two-phase batch: every asset's row is upserted and its previous
+        // alias ownership released BEFORE any new alias claim is probed, so a
+        // same-batch path move (A hands /p to B in one call) resolves by the
+        // batch's final state instead of by row order.
         for ( const GovernedAsset &asset : assets )
         {
             up.reset();
@@ -833,12 +837,22 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
             }
             delAlias.reset();
             delAlias.bind( 1, asset.assetId );
-            delAlias.step();
-            // Alias ownership is single-writer for canonical paths AND
-            // secondary aliases (issue #758-2 symmetry): a collision (two
-            // assets claiming one path) is surfaced as a diagnostic and the
-            // existing owner is kept, instead of a silent INSERT OR REPLACE
-            // steal between sibling assets.
+            if ( !delAlias.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_asset" ),
+                                                       QStringLiteral( "alias delete failed for asset %1" )
+                                                           .arg( asset.assetId ) ) );
+            }
+        }
+        // Alias ownership is single-writer for canonical paths AND
+        // secondary aliases (issue #758-2 symmetry): a collision (two
+        // assets claiming one path) is surfaced as a diagnostic and the
+        // existing owner is kept, instead of a silent INSERT OR REPLACE
+        // steal between sibling assets.
+        for ( const GovernedAsset &asset : assets )
+        {
+            if ( !asset.canonicalSource.isEmpty() )
             {
                 StmtView owner( m_impl->cached( "SELECT asset_id FROM aliases WHERE path=?" ) );
                 bool foreign = false;
@@ -854,7 +868,14 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
                     insAlias.reset();
                     insAlias.bind( 1, asset.canonicalSource );
                     insAlias.bind( 2, asset.assetId );
-                    insAlias.step();
+                    if ( !insAlias.step() )
+                    {
+                        m_impl->exec( "ROLLBACK" );
+                        return Result<void>::failure( govDiag(
+                            QStringLiteral( "store.upsert_asset" ),
+                            QStringLiteral( "alias %1 write failed for asset %2: %3" )
+                                .arg( asset.canonicalSource, asset.assetId, m_impl->lastError ) ) );
+                    }
                 }
             }
             for ( const QString &alias : asset.aliases )
@@ -876,7 +897,14 @@ Result<void> GovernanceStore::upsertAssets( const QVector<GovernedAsset> &assets
                 insAlias.reset();
                 insAlias.bind( 1, alias );
                 insAlias.bind( 2, asset.assetId );
-                insAlias.step();
+                if ( !insAlias.step() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( govDiag(
+                        QStringLiteral( "store.upsert_asset" ),
+                        QStringLiteral( "alias %1 write failed for asset %2: %3" )
+                            .arg( alias, asset.assetId, m_impl->lastError ) ) );
+                }
             }
         }
     }
@@ -1217,7 +1245,13 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
         }
         del.bind( 1, entityKind );
         del.bind( 2, entityId );
-        del.step();
+        if ( !del.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.set_tags" ),
+                                                   QStringLiteral( "tag delete failed for %1/%2: %3" )
+                                                       .arg( entityKind, entityId, m_impl->lastError ) ) );
+        }
         for ( const QString &tag : tags )
         {
             if ( tag.isEmpty() )
@@ -1226,7 +1260,13 @@ Result<void> GovernanceStore::setTags( const QString &entityKind, const QString 
             ins.bind( 1, entityKind );
             ins.bind( 2, entityId );
             ins.bind( 3, tag );
-            ins.step();
+            if ( !ins.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.set_tags" ),
+                                                       QStringLiteral( "tag %1 write failed for %2/%3: %4" )
+                                                           .arg( tag, entityKind, entityId, m_impl->lastError ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )
@@ -1710,24 +1750,45 @@ QVector<ResultRecord> GovernanceStore::resultsDependingOnAssets( const QStringLi
     if ( !m_impl || assetIds.isEmpty() )
         return out;
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    // IN-lists are chunked at 500 (SQLite var limit headroom) — the caller
-    // passes a bounded downstream set (depth-capped).
-    QStringList placeholders;
-    for ( int i = 0; i < assetIds.size(); ++i )
-        placeholders.append( QStringLiteral( "?" ) );
-    Stmt s( m_impl->db,
-            QStringLiteral( "SELECT DISTINCT r.result_id, r.semantic_type, r.name, r.status, r.revision,"
-                            " r.producer_json, r.run_id, r.metrics_json, r.quality_json, r.metadata_json,"
-                            " r.tags_json, r.superseded_by, r.validation_notes, r.created_ms, r.updated_ms"
-                            " FROM results r JOIN result_inputs i ON i.result_id=r.result_id"
-                            " WHERE i.asset_id IN (%1)" ).arg( placeholders.join( QLatin1Char( ',' ) ) ) );
-    if ( !s )
-        return out;
-    int idx = 1;
-    for ( const QString &id : assetIds )
-        s.bind( idx++, id );
-    while ( s.stepRow() )
-        out.append( m_impl->readResult( s ) );
+    // IN-lists are chunked at 500 (SQLite var limit headroom): the caller
+    // passes a width-unbounded downstream set, and a single oversized
+    // statement would fail to PREPARE past the engine's host-parameter limit
+    // (999 on old builds, 32766/250000 on newer ones) — silently answering
+    // "nothing depends on these assets". A result may consume inputs from
+    // different chunks, so hits are deduplicated by id (first-seen order).
+    constexpr int kChunkSize = 500;
+    QSet<QString> seen;
+    for ( int base = 0; base < assetIds.size(); base += kChunkSize )
+    {
+        const int count = qMin( kChunkSize, static_cast<int>( assetIds.size() ) - base );
+        QStringList placeholders;
+        for ( int i = 0; i < count; ++i )
+            placeholders.append( QStringLiteral( "?" ) );
+        Stmt s( m_impl->db,
+                QStringLiteral( "SELECT DISTINCT r.result_id, r.semantic_type, r.name, r.status,"
+                                " r.revision, r.producer_json, r.run_id, r.metrics_json,"
+                                " r.quality_json, r.metadata_json, r.tags_json, r.superseded_by,"
+                                " r.validation_notes, r.created_ms, r.updated_ms"
+                                " FROM results r JOIN result_inputs i ON i.result_id=r.result_id"
+                                " WHERE i.asset_id IN (%1)" ).arg( placeholders.join( QLatin1Char( ',' ) ) ) );
+        if ( !s )
+            break;  // connection-level failure (OOM/corruption): the vector
+                    // return type has no error channel, so chunks 0..N-1 are
+                    // reported — a partial answer, narrower but still a
+                    // silent prefix. A Result-returning variant is the
+                    // follow-up fix.
+        int idx = 1;
+        for ( int i = 0; i < count; ++i )
+            s.bind( idx++, assetIds.at( base + i ) );
+        while ( s.stepRow() )
+        {
+            const QString id = s.text( 0 );
+            if ( seen.contains( id ) )
+                continue;
+            seen.insert( id );
+            out.append( m_impl->readResult( s ) );
+        }
+    }
     return out;
 }
 
@@ -1861,7 +1922,13 @@ Result<void> GovernanceStore::addRunOutputs( const QVector<QPair<QString, QStrin
             s.reset();
             s.bind( 1, pair.first );
             s.bind( 2, pair.second );
-            s.step();
+            if ( !s.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.add_run_outputs" ),
+                                                       QStringLiteral( "run output %1→%2 write failed: %3" )
+                                                           .arg( pair.first, pair.second, m_impl->lastError ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )
@@ -1934,25 +2001,50 @@ Result<void> GovernanceStore::upsertExperiment( const ExperimentRecord &experime
         }
         fix.bind( 1, now );
         fix.bind( 2, idText );
-        fix.step();
+        if ( !fix.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_experiment" ),
+                                                   QStringLiteral( "experiment created_ms fixup failed" ) ) );
+        }
         clearV.bind( 1, idText );
-        clearV.step();
+        if ( !clearV.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_experiment" ),
+                                                   QStringLiteral( "variant clear failed for %1: %2" ).arg( idText, m_impl->lastError ) ) );
+        }
         for ( const ExperimentVariant &variant : experiment.variants )
         {
             insV.reset();
             insV.bind( 1, idText );
             insV.bind( 2, variant.key );
             insV.bind( 3, jsonToText( variant.value ) );
-            insV.step();
+            if ( !insV.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_experiment" ),
+                                                       QStringLiteral( "variant %1 write failed: %2" ).arg( variant.key, m_impl->lastError ) ) );
+            }
         }
         clearR.bind( 1, idText );
-        clearR.step();
+        if ( !clearR.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_experiment" ),
+                                                   QStringLiteral( "run clear failed for %1: %2" ).arg( idText, m_impl->lastError ) ) );
+        }
         for ( const QString &runId : experiment.runIds )
         {
             insR.reset();
             insR.bind( 1, idText );
             insR.bind( 2, runId );
-            insR.step();
+            if ( !insR.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_experiment" ),
+                                                       QStringLiteral( "run %1 link failed: %2" ).arg( runId, m_impl->lastError ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )
@@ -1973,13 +2065,33 @@ Result<void> GovernanceStore::removeExperiment( const QString &experimentId )
         Stmt e( m_impl->db, "DELETE FROM experiments WHERE experiment_id=?" );
         Stmt v( m_impl->db, "DELETE FROM experiment_variants WHERE experiment_id=?" );
         Stmt r( m_impl->db, "DELETE FROM experiment_runs WHERE experiment_id=?" );
+        if ( !e || !v || !r )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "experiment remove prepare failed" ) ) );
+        }
         e.bind( 1, experimentId );
-        e.step();
+        if ( !e.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_experiment" ),
+                                                   QStringLiteral( "experiment delete failed for %1: %2" ).arg( experimentId, m_impl->lastError ) ) );
+        }
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
         v.bind( 1, experimentId );
-        v.step();
+        if ( !v.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_experiment" ),
+                                                   QStringLiteral( "variant delete failed for %1: %2" ).arg( experimentId, m_impl->lastError ) ) );
+        }
         r.bind( 1, experimentId );
-        r.step();
+        if ( !r.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_experiment" ),
+                                                   QStringLiteral( "run delete failed for %1: %2" ).arg( experimentId, m_impl->lastError ) ) );
+        }
         if ( !m_impl->commit() )
             return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                    m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
