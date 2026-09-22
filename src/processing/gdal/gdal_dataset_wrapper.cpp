@@ -14,6 +14,7 @@
 #include <mutex>
 
 #include "qgsdatasourceresolver.h"
+#include "runtime/observability/fault_point.h"
 
 // OpenCV is an optional dependency of sicnu_processing; only the core header
 // is needed for the nested-parallelism cap below (#692).
@@ -123,6 +124,32 @@ bool GdalDatasetWrapper::closeWithError( QString *errorMessage )
     CPLErrorReset();
     GDALClose( static_cast<GDALDatasetH>( m_dataset ) );
     m_dataset = nullptr;
+    // Verification fault matrix: arm "gdal_wrapper.close_flush" to inject a
+    // real CPL failure after GDALClose, driving the production check below
+    // down its real failure branch (test-only arming; disabled = one atomic
+    // load).
+    if ( SICNU_FAULT_POINT( "gdal_wrapper.close_flush" ) )
+        CPLError( CE_Failure, CPLE_AppDefined,
+                  "gdal_wrapper: injected close-time flush failure" );
+    if ( CPLGetLastErrorType() == CE_Failure )
+    {
+        if ( errorMessage )
+            *errorMessage = QString::fromUtf8( CPLGetLastErrorMsg() );
+        CPLErrorReset();
+        return false;
+    }
+    return true;
+}
+
+bool closeDatasetFailClosed(GDALDatasetH dataset, QString *errorMessage)
+{
+    if (!dataset)
+        return true;
+    CPLErrorReset();
+    GDALClose(dataset);
+    if ( SICNU_FAULT_POINT( "gdal_wrapper.close_flush" ) )
+        CPLError( CE_Failure, CPLE_AppDefined,
+                  "gdal_wrapper: injected close-time flush failure" );
     if ( CPLGetLastErrorType() == CE_Failure )
     {
         if ( errorMessage )
