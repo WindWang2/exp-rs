@@ -152,10 +152,7 @@ namespace va
 class VaWorkbenchPanel;
 class VaSelectionHub;
 } // namespace va
-namespace sicnu::app
-{
 class MissionTimelinePanel;
-}
 class ViewLinkController;
 class VaLayerLinkController;
 class RsOperatorCatalogPanel;
