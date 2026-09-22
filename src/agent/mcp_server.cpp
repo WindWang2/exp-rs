@@ -135,7 +135,12 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
 /// io:probe/io:capabilities/io:product/io:product_plan are registered spatial
 /// tools (Foundation 5.0). Only the latter route through the spatial handler;
 /// the operator ids keep the algorithm dispatch path (#1056).
-bool isSpatialIoTool(const QString &toolId)
+/// Generalized into registry-truth routing: a tool id that resolves in the
+/// SpatialToolRegistry routes to the spatial handler REGARDLESS of prefix —
+/// the hand-maintained prefix chains kept missing each new registry family
+/// (io:, then solution:/style:/template:). The allow-list is enforced at the
+/// call site, so an unallowed prefix inside the registry still cannot route.
+bool isSpatialRegistryTool(const QString &toolId)
 {
     auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
     registry.registerBuiltinTools();
@@ -146,104 +151,11 @@ bool isSpatialIoTool(const QString &toolId)
 /// Absolute paths must canonicalize under workspace root.
 bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &workspaceRoot, QString *detail)
 {
-    if (pathValue.isEmpty())
-        return false;
-
-    // URL / VSI virtual-path awareness (#722-era remote policy): a network
-    // data reference is NOT a filesystem path — treating one as relative
-    // (QFileInfo::isAbsolute() == false for "https://host/x.tif") wrongly
-    // ALLOWED any URL, while on Linux "/vsicurl/https://..." canonicalized
-    // outside the workspace and was wrongly REJECTED. Policy: remote
-    // http(s) data references (optionally /vsicurl/-prefixed) are allowed
-    // read-only data inputs (bounded by GDAL HTTP timeouts); file:// maps to
-    // its local path and falls through to the workspace check; every other
-    // scheme is rejected. SICNU_MCP_ALLOW_REMOTE=0 restores strict local-only.
-    {
-        const QString trimmed = pathValue.trimmed();
-        const QString lowered = trimmed.toLower();
-        const bool vsiPrefixed = lowered.startsWith(QStringLiteral("/vsicurl/"));
-        const bool vsiOther = lowered.startsWith(QStringLiteral("/vsi")) && !vsiPrefixed;
-        const bool httpUrl = lowered.startsWith(QStringLiteral("http://")) ||
-                             lowered.startsWith(QStringLiteral("https://"));
-        const bool fileUrl = lowered.startsWith(QStringLiteral("file://"));
-        if (vsiOther && !vsiPrefixed) {
-            if (detail)
-                *detail = QStringLiteral("Only /vsicurl/ remote sources are supported: %1").arg(pathValue);
-            return true;
-        }
-        if (httpUrl || vsiPrefixed) {
-            if (!envFlagEnabled("SICNU_MCP_ALLOW_REMOTE")) {
-                if (detail)
-                    *detail = QStringLiteral("Remote data references are disabled "
-                                             "(set SICNU_MCP_ALLOW_REMOTE=1): %1").arg(pathValue);
-                return true;
-            }
-            return false; // scheme-validated remote reference, not a workspace path
-        }
-        if (fileUrl) {
-            const QUrl url(trimmed);
-            // file:///abs/path -> local path; falls through to the workspace check.
-            QString local = url.toLocalFile();
-            if (local.isEmpty())
-                local = trimmed.mid(7);
-            if (!absolutePathOutsideWorkspace(local, workspaceRoot, detail))
-                return false;
-            if (detail && detail->isEmpty())
-                *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
-            return true;
-        }
-    }
-
-    QString path = pathValue;
-    if (path.startsWith(QLatin1Char('~'))) {
-        path = QDir::homePath() + path.mid(1);
-    }
-
-    QString workspaceCanon = QDir(workspaceRoot).canonicalPath();
-    if (workspaceCanon.isEmpty())
-        workspaceCanon = QFileInfo(workspaceRoot).absoluteFilePath();
-    if (workspaceCanon.isEmpty())
-        return false;
-
-    const QFileInfo fi(path);
-    QString resolved;
-    if (fi.isAbsolute()) {
-        if (fi.exists()) {
-            resolved = fi.canonicalFilePath();
-        } else {
-            // Non-existent output path: resolve parent dir + filename
-            QDir parent = fi.dir();
-            QString parentCanon = parent.canonicalPath();
-            if (parentCanon.isEmpty())
-                parentCanon = parent.absolutePath();
-            resolved = QDir(parentCanon).filePath(fi.fileName());
-        }
-    } else {
-        const QString joined = QDir(workspaceCanon).filePath(path);
-        const QFileInfo fiJoined(joined);
-        if (fiJoined.exists()) {
-            resolved = fiJoined.canonicalFilePath();
-        } else {
-            QDir parent = fiJoined.dir();
-            QString parentCanon = parent.canonicalPath();
-            if (parentCanon.isEmpty())
-                parentCanon = parent.absolutePath();
-            resolved = QDir(parentCanon).filePath(fiJoined.fileName());
-        }
-    }
-
-    const QString normResolved = QDir::cleanPath(resolved);
-    const QString normWorkspace = QDir::cleanPath(workspaceCanon);
-
-    if (normResolved == normWorkspace)
-        return false;
-    if (normResolved.startsWith(normWorkspace + QLatin1Char('/')))
-        return false;
-
-    if (detail) {
-        *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
-    }
-    return true;
+    // Containment policy moved verbatim to tool_catalog/surface_registry.cpp
+    // (surfacePathOutsideWorkspace) so the data-platform store/artifact
+    // handlers enforce the SAME workspace rule this gate validates with —
+    // one authority, no second copy of the canonicalization policy.
+    return sicnu::agent::tool_catalog::surfacePathOutsideWorkspace(pathValue, workspaceRoot, detail);
 }
 
 bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot, QString *detail)
@@ -939,34 +851,15 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleArtifactRead(arguments);
             }
-            else if (toolName.startsWith(QStringLiteral("spatial:")) ||
-                     toolName.startsWith(QStringLiteral("layout:")) ||
-                     toolName.startsWith(QStringLiteral("cartography:")) ||
-                     toolName.startsWith(QStringLiteral("workbench:")) ||
-                     toolName.startsWith(QStringLiteral("symbology:")) ||
-                     toolName.startsWith(QStringLiteral("workflow:")) ||
-                     toolName.startsWith(QStringLiteral("workspace:")) ||
-                     toolName.startsWith(QStringLiteral("project:")) ||
-                     toolName.startsWith(QStringLiteral("asset:")) ||
-                     toolName.startsWith(QStringLiteral("collection:")) ||
-                     toolName.startsWith(QStringLiteral("lineage:")) ||
-                     toolName.startsWith(QStringLiteral("result:")) ||
-                     toolName.startsWith(QStringLiteral("harness:")) ||
-                     toolName.startsWith(QStringLiteral("run:")))
+            else if (isToolIdAllowed(toolName) && isSpatialRegistryTool(toolName))
             {
-                resultData = handleSpatialToolCall(toolName, arguments);
-            }
-            else if (toolName.startsWith(QStringLiteral("temporal:")))
-            {
-                resultData = handleSpatialToolCall(toolName, arguments);
-            }
-            else if (toolName.startsWith(QStringLiteral("mission:")))
-            {
-                // Mission Runtime 13.0: the mission:* tools are registry tools
-                // over the single-authority mission runtime store
-                // (spatial_tools/mission_tools.cpp). They join the
-                // registry-backed dispatch — an allowed-but-unregistered id
-                // used to fall through to "Algorithm not registered".
+                // Registry-truth routing: every SpatialToolRegistry member is
+                // reachable here without a per-family routing entry. The
+                // allow-list check keeps the policy identical to dispatchToolCall
+                // (an allowed prefix in the registry routes; an unallowed one
+                // cannot). Allowed-but-unregistered ids fall through to the
+                // algorithm dispatcher below, which reports the truthful
+                // "Algorithm not found" for operator/algorithm ids (#1056).
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
             else if (toolName.startsWith(QStringLiteral("view:")) ||
@@ -976,15 +869,6 @@ void McpServer::handleRequest(const QVariantMap &request)
                      toolName.startsWith(QStringLiteral("raster:")))
             {
                 resultData = dispatchToolCall(toolName, arguments, false);
-            }
-            else if (toolName.startsWith(QStringLiteral("io:")) && isSpatialIoTool(toolName))
-            {
-                // Registered io: spatial tools (probe/capabilities/product/
-                // product_plan) were cataloged but unreachable — the fallthrough
-                // below resolved them against the algorithm registry and failed
-                // with "Algorithm not found" (#1056). io:inspect/io:doctor are
-                // NOT spatial tools and keep the operator dispatch path.
-                resultData = handleSpatialToolCall(toolName, arguments);
             }
             else if (isToolIdAllowed(toolName))
             {
@@ -1717,9 +1601,18 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     }
 
     if (reason) {
+        // Render the enforced policy from surface_registry's table — the
+        // message used to hand-enumerate a long-stale prefix subset, which
+        // misdirected agents trying to recover from a denial.
+        const QStringList prefixes =
+            sicnu::agent::tool_catalog::surfaceAllowedPrefixes();
+        QStringList quoted;
+        quoted.reserve(prefixes.size());
+        for (const QString &prefix : prefixes)
+            quoted.append(prefix);
         *reason = QStringLiteral(
-            "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, otb_tools:, qgis:, qgis_algorithms:, opencv:, spatial:, layout:, temporal:).").arg(toolId);
+                      "Tool id '%1' is not in the MCP allow-list (%2).")
+                      .arg(toolId, quoted.join(QStringLiteral(", ")));
     }
     return false;
 }
@@ -2331,21 +2224,12 @@ QVariantMap McpServer::handleListTools(const QString &category, bool compact,
     QVariantList toolList;
     toolList.reserve(static_cast<int>(tools.size()));
 
-    const bool headlessNoGui = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
-        || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
     for (const auto &t : tools) {
-        // In headless MCP (no GUI registry), hide GUI-only interaction tools
-        // that would always fail with -32000.
-        if (headlessNoGui && t.category == ToolCategory::Interaction) {
-            const QString qname = QString::fromStdString(t.name);
-            if (qname.startsWith(QStringLiteral("view:")) || qname.startsWith(QStringLiteral("roi:")) ||
-                qname.startsWith(QStringLiteral("canvas:")) || qname.startsWith(QStringLiteral("layer:")) ||
-                qname.startsWith(QStringLiteral("raster:"))) {
-                // Only hide if not actually registered headlessly
-                if (!sicnu::agent::InteractionToolRegistry::instance().hasTool(t.name))
-                    continue;
-            }
-        }
+        // ONE shared headless rule (surface_registry): a GUI-only interaction
+        // entry the live registry does not actually register is hidden from
+        // tools/list, list_tools, and search_tools alike.
+        if (sicnu::agent::tool_catalog::headlessHidesCatalogTool(t))
+            continue;
         QVariantMap toolMap;
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
@@ -2418,18 +2302,11 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
     QVariantList toolList;
     toolList.reserve(static_cast<int>(tools.size()));
 
-    const bool headlessNoGui2 = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
-        || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
     for (const auto &t : tools) {
-        if (headlessNoGui2 && t.category == ToolCategory::Interaction) {
-            const QString qname = QString::fromStdString(t.name);
-            if (qname.startsWith(QStringLiteral("view:")) || qname.startsWith(QStringLiteral("roi:")) ||
-                qname.startsWith(QStringLiteral("canvas:")) || qname.startsWith(QStringLiteral("layer:")) ||
-                qname.startsWith(QStringLiteral("raster:"))) {
-                if (!sicnu::agent::InteractionToolRegistry::instance().hasTool(t.name))
-                    continue;
-            }
-        }
+        // Same shared headless rule as handleListTools — one predicate,
+        // three surfaces.
+        if (sicnu::agent::tool_catalog::headlessHidesCatalogTool(t))
+            continue;
         QVariantMap toolMap;
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);

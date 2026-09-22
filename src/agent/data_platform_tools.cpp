@@ -27,6 +27,10 @@
 // testable without linking the agent library; this file only registers and
 // dispatches (see suitability/suitability_agent_adapter.h for the contract).
 #include "suitability/suitability_agent_adapter.h"
+// Workspace containment authority (surfacePathOutsideWorkspace): store and
+// bundle paths must honour the SAME SICNU_MCP_WORKSPACE rule the MCP gate
+// validates with (#1033 containment contract for this surface).
+#include "tool_catalog/surface_registry.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -110,16 +114,76 @@ qint64 pageCursor( const QVariant &value )
 
 [[noreturn]] void fail( const QString &message ) { throw std::runtime_error( message.toStdString() ); }
 
+/// Anchors a caller-supplied filesystem path to the SICNU_MCP_WORKSPACE root
+/// exactly the way the MCP gate (surfacePathOutsideWorkspace) classifies it:
+/// a relative path is resolved against the workspace BEFORE a store/bundle is
+/// opened, so the location that gets opened IS the location that was
+/// validated — a relative dataset_db with CWD != workspace used to slip past
+/// the gate (validated <workspace>/<path>, opened <cwd>/<path>: fail-open).
+/// Absolute, home-relative (~), and URL/vsi-scheme references are returned
+/// unchanged: the gate either approved those as-is or rejected them. With the
+/// env unset this is the identity (CWD-relative behavior unchanged).
+/// Classification and joining both use the RAW argument — trimming here would
+/// class " /abs/x" as absolute (it is relative to the gate) and re-open the
+/// workspace escape the gate had closed.
+QString anchoredWorkspacePath( const QString &raw )
+{
+    const QString workspace = qEnvironmentVariable( "SICNU_MCP_WORKSPACE" );
+    if ( workspace.isEmpty() || raw.isEmpty() )
+        return raw;
+    if ( QFileInfo( raw ).isAbsolute() || raw.startsWith( QLatin1Char( '~' ) ) )
+        return raw;
+    const QString lowered = raw.toLower();
+    if ( lowered.startsWith( QStringLiteral( "http://" ) )
+         || lowered.startsWith( QStringLiteral( "https://" ) )
+         || lowered.startsWith( QStringLiteral( "file://" ) )
+         || lowered.startsWith( QStringLiteral( "/vsi" ) ) )
+        return raw;
+    // Join the RAW string, byte-for-byte the gate's relative branch: the gate
+    // validated QDir(workspace).filePath(raw), so that exact path is opened.
+    return QDir( workspace ).filePath( raw );
+}
+
+/// artifactAvailable oracle with the workspace containment applied: a
+/// recorded artifact path that resolves outside the configured sandbox is
+/// reported UNAVAILABLE instead of stat()-probing it — recorded paths come
+/// from database rows (never from the argument tree), so the argument-level
+/// gate never saw them, and existence/size of sandbox-external files must
+/// not leak through this surface. With no sandbox configured, behavior is
+/// unchanged.
+std::function<bool( const QString &path, qint64 sizeBytes )> containedArtifactChecker()
+{
+    return []( const QString &path, qint64 sizeBytes ) {
+        const QString workspace = qEnvironmentVariable( "SICNU_MCP_WORKSPACE" );
+        if ( workspace.isEmpty() )
+        {
+            // No sandbox configured: master behavior (probe the recorded path).
+            const QFileInfo info( path );
+            return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
+        }
+        // Resolve FIRST, then classify and stat the SAME resolved path: a
+        // bare relative artifact name recorded in a bundle is
+        // workspace-relative for the gate but was CWD-relative for the probe,
+        // which leaked existence/size of <cwd> files into the report.
+        const QString resolved = anchoredWorkspacePath( path );
+        if ( sicnu::agent::tool_catalog::surfacePathOutsideWorkspace( resolved, workspace ) )
+            return false;
+        const QFileInfo info( resolved );
+        return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
+    };
+}
+
 std::unique_ptr<DatasetStore> openDatasetStore( const QVariantMap &args )
 {
     const QString dbPath = args.value( QStringLiteral( "dataset_db" ) ).toString();
     if ( dbPath.isEmpty() )
         fail( QStringLiteral( "dataset_db is required" ) );
+    const QString anchored = anchoredWorkspacePath( dbPath );
     auto store = std::make_unique<DatasetStore>();
     QString error;
-    if ( !store->open( dbPath, &error ) )
+    if ( !store->open( anchored, &error ) )
         fail( QStringLiteral( "cannot open dataset_db at '%1'%2" )
-                  .arg( dbPath, error.isEmpty() ? QString() : QStringLiteral( ": " ) + error ) );
+                  .arg( anchored, error.isEmpty() ? QString() : QStringLiteral( ": " ) + error ) );
     return store;
 }
 
@@ -128,11 +192,12 @@ std::unique_ptr<sicnu::experiment::ExperimentStore> openExperimentStore( const Q
     const QString dbPath = args.value( QStringLiteral( "experiment_db" ) ).toString();
     if ( dbPath.isEmpty() )
         fail( QStringLiteral( "experiment_db is required" ) );
+    const QString anchored = anchoredWorkspacePath( dbPath );
     auto store = std::make_unique<sicnu::experiment::ExperimentStore>();
     QString error;
-    if ( !store->open( dbPath, &error ) )
+    if ( !store->open( anchored, &error ) )
         fail( QStringLiteral( "cannot open experiment_db at '%1'%2" )
-                  .arg( dbPath, error.isEmpty() ? QString() : QStringLiteral( ": " ) + error ) );
+                  .arg( anchored, error.isEmpty() ? QString() : QStringLiteral( ": " ) + error ) );
     return store;
 }
 
@@ -956,10 +1021,7 @@ QVariantMap reproducibilityInspect( const QVariantMap &args )
         fail( QStringLiteral( "run not found: %1" ).arg( runId ) );
 
     sicnu::experiment::ReproductionHooks hooks;
-    hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
-        const QFileInfo info( path );
-        return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
-    };
+    hooks.artifactAvailable = containedArtifactChecker();
     auto report = sicnu::experiment::ReplayReadiness::assess( run.value(), datasetStore.get(), hooks );
     const auto fingerprint =
         sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
@@ -986,7 +1048,7 @@ QVariantMap reproducibilityExport( const QVariantMap &args )
         fail( QStringLiteral( "run and out are required" ) );
     sicnu::experiment::ReproductionBundleExporter exporter( *experimentStore, *datasetStore );
     sicnu::experiment::ReproductionBundleOptions options;
-    options.outputDir = outputDir;
+    options.outputDir = anchoredWorkspacePath( outputDir );
     const QString portable = args.value( QStringLiteral( "mode" ) ).toString();
     if ( portable == QLatin1String( "portable" ) )
         options.mode = sicnu::experiment::ReproductionBundleOptions::Mode::Portable;
@@ -1006,6 +1068,7 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
     const QString bundleDir = args.value( QStringLiteral( "bundle" ) ).toString();
     if ( bundleDir.isEmpty() )
         fail( QStringLiteral( "bundle is required" ) );
+    const QString anchoredBundleDir = anchoredWorkspacePath( bundleDir );
     sicnu::experiment::ReproductionBundleExporter exporter( *experimentStore, *datasetStore );
     sicnu::experiment::ReproductionHooks hooks;
     // Explicit caller-declared availability (headless MCP has no registries).
@@ -1021,11 +1084,8 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
         const bool available = args.value( QStringLiteral( "algorithm_available" ) ).toBool();
         hooks.algorithmAvailable = [ available ]( const QString & ) { return available; };
     }
-    hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
-        const QFileInfo info( path );
-        return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
-    };
-    const auto validation = exporter.validateBundle( bundleDir, hooks );
+    hooks.artifactAvailable = containedArtifactChecker();
+    const auto validation = exporter.validateBundle( anchoredBundleDir, hooks );
     QJsonObject data;
     data.insert( QStringLiteral( "level" ),
                  reproductionLevelToString( validation.level ) );

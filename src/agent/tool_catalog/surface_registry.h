@@ -12,6 +12,7 @@
 #include "agent_tool.h"
 
 #include <QString>
+#include <QStringList>
 
 #include <json/json.h>
 
@@ -70,5 +71,29 @@ std::vector<std::string> surfaceFamilies( const SurfaceQuery &query = {} );
 /// prefix is stripped before matching. custom_tools: is not allowed here —
 /// @p isCustomTools reports it so the trust-gate caller can handle it.
 bool surfaceIdAllowed( const QString &id, bool *isCustomTools = nullptr );
+
+/// The allow-prefix table itself, for callers that must RENDER the policy
+/// (e.g. the tools/call denial message) instead of hard-coding a stale copy
+/// of it. Order matches surfaceIdAllowed's table.
+QStringList surfaceAllowedPrefixes();
+
+/// True when @p tool must be hidden from every headless surface: the union
+/// projection (tools/list), the meta list_tools, and search_tools all apply
+/// this ONE predicate so GUI-only interaction entries cannot drift between
+/// discovery surfaces (#701 headless rule). GUI-only means a view:/roi:/
+/// canvas:/layer:/raster: id that the live InteractionToolRegistry does not
+/// actually register; when the registry has no view:get_state probe the
+/// whole GUI-only set is treated as absent.
+bool headlessHidesCatalogTool( const AgentTool &tool );
+
+/// Workspace path containment — the single policy authority (moved verbatim
+/// from mcp_server.cpp's absolutePathOutsideWorkspace). Relative paths
+/// resolve against @p workspaceRoot; absolute paths must canonicalize inside
+/// it. Remote http(s)/(/vsicurl/) data references are allowed read-only when
+/// SICNU_MCP_ALLOW_REMOTE=1, file:// maps to its local path, every other
+/// scheme is rejected. An empty @p workspaceRoot means "no sandbox
+/// configured" and returns false (nothing is outside an unset workspace).
+bool surfacePathOutsideWorkspace( const QString &path, const QString &workspaceRoot,
+                                  QString *detail = nullptr );
 
 } // namespace sicnu::agent::tool_catalog

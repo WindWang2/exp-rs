@@ -33,6 +33,8 @@
 #include "agent/tool_catalog/meta_protocol_tools.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/data_platform_tools.h"
+#include "agent/spatial_tools/spatial_tool.h"
+#include "agent/interaction_tool_registry.h"
 
 #ifndef SICNU_SOURCE_DIR
 #error "SICNU_SOURCE_DIR must point at the repo source tree"
@@ -499,4 +501,170 @@ TEST_CASE("Dispatch-visible spatial families are listing-visible", "[surface_par
         INFO("family: " << family);
         REQUIRE(surfaceIdAllowed(QStringLiteral("%1:__probe__").arg(family)));
     }
+}
+
+TEST_CASE("Every registered spatial tool is allow-listed and listing-visible",
+          "[surface_parity]")
+{
+    // Ghost-surface gate (registry-membership sweep): SpatialToolRegistry is
+    // the DISPATCH authority for registry-backed tools, so the projection and
+    // the allow-list are re-derived from THAT ground truth instead of from a
+    // hand-typed family list (which is how the solution:/style:/template:
+    // families went registered-but-unreachable: tools/call answered -32602
+    // "Unknown tool" and tools/list omitted them). A registry tool that fails
+    // either check here is a ghost: present for harness-internal callers,
+    // dead for every agent surface.
+    auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+    registry.registerBuiltinTools();
+    REQUIRE(registry.size() > 50); // sweep must actually see the builtin set
+
+    std::map<std::string, SurfaceTool> projected;
+    for (const SurfaceTool &tool : collectSurfaceTools())
+        projected[tool.name] = tool;
+
+    for (const auto &tool : registry.tools())
+    {
+        const std::string name = tool->name();
+        INFO("registry tool: " << name);
+        REQUIRE(surfaceIdAllowed(QString::fromStdString(name)));
+        REQUIRE(projected.count(name) == 1);
+        // The projection's schema is the registry tool's own schema — the
+        // provider must not publish a diverging copy.
+        REQUIRE(canonicalJson(projected[name].inputSchema)
+                == canonicalJson(tool->inputSchema()));
+    }
+}
+
+TEST_CASE("Registry-only families dispatch through tools/call", "[surface_parity]")
+{
+    // Dispatch leg of the ghost gate: the three families that were registered
+    // without any MCP route answer with a tool result (or a structured tool
+    // error) after the fix — never the router's -32602 "Unknown tool". All
+    // three probes execute against process-local registries only (no
+    // QgsProject / filesystem), so an actual execution is safe headlessly.
+    SurfaceProbeServer &s = server();
+    static const char *kGhostFamilyProbes[] = {
+        "solution:search", "template:search", "style:list",
+    };
+    for (const char *toolName : kGhostFamilyProbes)
+    {
+        INFO("probe: " << toolName);
+        int rpcCode = 0;
+        s.callTool(QString::fromUtf8(toolName), {}, &rpcCode);
+        REQUIRE_FALSE(rpcCode == -32602);
+    }
+}
+
+TEST_CASE("GUI-hide rule agrees across tools/list, list_tools, and search_tools",
+          "[surface_parity]")
+{
+    // Convergence oracle: the headless GUI-hide rule used to live as three
+    // hand-copied predicates (union projection, meta list_tools, search_tools)
+    // with the prefix table typed out twice more. All surfaces now share ONE
+    // predicate (surface_registry headlessHidesCatalogTool); this test pins
+    // the agreement on a catalog entry with no backing interaction tool under
+    // BOTH states of the rule (no view:get_state probe vs one present).
+    SurfaceProbeServer &s = server();
+    auto &registry = sicnu::agent::InteractionToolRegistry::instance();
+
+    AgentTool probe;
+    probe.name = "view:parity_probe";
+    probe.displayName = "Parity Probe";
+    probe.category = ToolCategory::Interaction;
+    probe.description = "GUI-hide parity probe";
+    probe.inputSchema = Json::Value(Json::objectValue);
+    probe.inputSchema["type"] = "object";
+    AgentToolCatalog::instance().registerCustomTool(probe);
+
+    const bool hiddenFromProjection = !findSurfaceTool("view:parity_probe").has_value();
+    const bool listedName = [&](const QString &tool) {
+        s.request(QVariantMap{
+            { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
+            { QStringLiteral("id"), 300 },
+            { QStringLiteral("method"), QStringLiteral("tools/call") },
+            { QStringLiteral("params"), QVariantMap{
+                { QStringLiteral("name"), QStringLiteral("list_tools") },
+                { QStringLiteral("arguments"), QVariantMap{} } } } });
+        for (const auto &entry : s.lastResponseResult.value(QStringLiteral("tools")).toList())
+            if (entry.toMap().value(QStringLiteral("name")).toString() == tool)
+                return true;
+        return false;
+    }("view:parity_probe");
+    const bool searchedName = [&](const QString &needle) {
+        s.request(QVariantMap{
+            { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
+            { QStringLiteral("id"), 301 },
+            { QStringLiteral("method"), QStringLiteral("tools/call") },
+            { QStringLiteral("params"), QVariantMap{
+                { QStringLiteral("name"), QStringLiteral("search_tools") },
+                { QStringLiteral("arguments"), QVariantMap{
+                    { QStringLiteral("query"), needle } } } } } });
+        for (const auto &entry : s.lastResponseResult.value(QStringLiteral("tools")).toList())
+            if (entry.toMap().value(QStringLiteral("name")).toString() == needle)
+                return true;
+        return false;
+    }("parity_probe");
+
+    const bool protocolListed = [&] {
+        s.request(QVariantMap{
+            { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
+            { QStringLiteral("id"), 302 },
+            { QStringLiteral("method"), QStringLiteral("tools/list") },
+            { QStringLiteral("params"), QVariantMap{} } });
+        for (const auto &entry : s.lastResponseResult.value(QStringLiteral("tools")).toList())
+            if (entry.toMap().value(QStringLiteral("name")).toString() == QStringLiteral("view:parity_probe"))
+                return true;
+        return false;
+    }();
+
+    const bool viewGetStateRegistered =
+        registry.findTool("view:get_state").has_value();
+    if (!viewGetStateRegistered)
+    {
+        // Headless rule active: the unbacked GUI-only entry is hidden from
+        // every discovery surface alike.
+        REQUIRE(hiddenFromProjection);
+        REQUIRE_FALSE(listedName);
+        REQUIRE_FALSE(searchedName);
+        REQUIRE_FALSE(protocolListed);
+    }
+    else
+    {
+        // Rule inactive (a real GUI probe exists): visible everywhere.
+        REQUIRE(hiddenFromProjection == false);
+        REQUIRE(listedName);
+        REQUIRE(searchedName);
+        REQUIRE(protocolListed);
+    }
+
+    AgentToolCatalog::instance().unregisterCustomTool("view:parity_probe");
+    REQUIRE_FALSE(findSurfaceTool("view:parity_probe").has_value());
+}
+
+TEST_CASE("Allow-list denial message renders the enforced prefix table",
+          "[surface_parity]")
+{
+    // Regression: the tools/call denial used to hand-enumerate a long-stale
+    // subset of the allow-list (missing io:, data:, harness:, mission:, …),
+    // misdirecting agents that tried to recover from a denial. The message is
+    // now rendered from surfaceAllowedPrefixes() — the SAME table
+    // surfaceIdAllowed enforces — so it must list every current family.
+    SurfaceProbeServer &s = server();
+
+    // execute_operator with a blocked id is the one dispatch path that
+    // surfaces the reason text (dispatchToolCall throws it verbatim).
+    const QString error = s.callTool(QStringLiteral("execute_operator"),
+                                     QVariantMap{ { QStringLiteral("operator_id"),
+                                                    QStringLiteral("python:train") } });
+    REQUIRE(error.contains(QStringLiteral("not in the MCP allow-list")));
+    for (const QString &prefix : surfaceAllowedPrefixes())
+    {
+        INFO("prefix: " << prefix.toStdString());
+        REQUIRE(error.contains(prefix));
+    }
+    // The stale hand-enumeration said "otb_tools:" but nothing else; pin a
+    // few families the old message definitively lacked.
+    REQUIRE(error.contains(QStringLiteral("harness:")));
+    REQUIRE(error.contains(QStringLiteral("mission:")));
+    REQUIRE(error.contains(QStringLiteral("data:")));
 }

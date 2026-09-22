@@ -183,7 +183,10 @@ private:
     bool m_initialized = false;
     /// Unified tool execution helper routing calls through ToolCallDispatcher
     QVariantMap dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall);
-    /// Allow-list: rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1
+    /// Allow-list (surface_registry surfaceIdAllowed): the rs:/gdal:/otb:/qgis:/
+    /// opencv: operator families plus every agent tool namespace (io:, spatial:,
+    /// harness:, mission:, … — full table in surfaceAllowedPrefixes(), the one
+    /// authority; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1).
     static bool isToolIdAllowed(const QString &toolId, QString *reason = nullptr);
     /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
