@@ -167,12 +167,12 @@ add_executable(sicnu_geo_rs
     experiment_studio/experiment_studio_dock.h
     experiment_studio/sensitivity_chart_widget.cpp
     experiment_studio/sensitivity_chart_widget.h
-    workbench/model_workbench_panel.cpp
-    cartography/cartography_dock.cpp
 
     # Teacher Authoring & Assessment Console (parallel-safe vs #1237/#1238)
     teaching_admin/teaching_admin_dock.cpp
     teaching_admin/teaching_admin_dock.h
+    workbench/model_workbench_panel.cpp
+    cartography/cartography_dock.cpp
 
     # Workbench 10.0 — Visual Analytics component platform
     visualanalytics/va_source.cpp
@@ -444,3 +444,119 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::study
     Sicnu::experiment_studio
     Sicnu::teaching_admin
+    # D5: desktop lab auto-recording surface + lab report builder (bridge
+    # converts coordinator truth into experiment records).
+    Sicnu::experiment_bridge
+    Sicnu::Geospatial
+    sicnu_core
+    sicnu_processing
+    sicnu_operators
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_jobs
+    sicnu_task_center
+    sicnu_agent
+  # unified-trace bootstrap in main.cpp (Verification 7.0)
+    sicnu_runtime
+    jsoncpp
+    CURL::libcurl
+    ${PCRE2_16}
+    ${PCRE2_8}
+)
+
+if(SICNU_EMBED_PYTHON)
+    target_sources(sicnu_geo_rs PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+        # sicnu_app_interface.cpp is NOT compiled into the exe (#652): it
+        # already lives in sicnu_core (exported, WINDOWS_EXPORT_ALL_SYMBOLS ON)
+        # and this exe links sicnu_core - a second exe-side copy is the ODR
+        # hazard. The CLI keeps its own copy (it does not link sicnu_core).
+        widgets/python_script_editor.cpp
+        widgets/python_script_editor.h
+    )
+    target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/python/isolated ${CMAKE_SOURCE_DIR}/src/app/python)
+    target_link_libraries(sicnu_geo_rs PRIVATE Python::Python sicnu_python_isolated)
+    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_EMBED_PYTHON=1)
+endif()
+
+# Phase 10A — Pixel-Based Classification. Link only when the static
+# library was actually built (OpenCV ml component available).
+if(TARGET qgis_app_classify)
+    target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_classify)
+    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_CLASSIFY=1)
+    # Workbench 5.0 session adapter wraps the classification lab window.
+    target_sources(sicnu_geo_rs PRIVATE
+        workbench/session_adapters.cpp
+        workbench/interactive_session.cpp
+    )
+endif()
+
+# Phase 10B — OBIA Classification. Link only when the static library
+# was actually built (OpenCV ml component available).
+if(TARGET qgis_app_obia)
+    target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_obia)
+    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_OBIA=1)
+endif()
+
+set_target_properties(sicnu_geo_rs PROPERTIES
+    AUTOUIC OFF
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    OUTPUT_NAME "sicnu_geo_rs"
+)
+
+install(TARGETS sicnu_geo_rs
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+)
+
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
+            DESTINATION share/sicnu_geo_rs/resources)
+endif()
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
+            DESTINATION share/sicnu_geo_rs/resources)
+elseif(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons
+            DESTINATION share/sicnu_geo_rs/resources/icons)
+endif()
+install(FILES
+        ${CMAKE_SOURCE_DIR}/resources/styles.qss
+        ${CMAKE_SOURCE_DIR}/resources/styles-dark.qss
+        DESTINATION share/sicnu_geo_rs/resources)
+install(FILES ${CMAKE_SOURCE_DIR}/resources/icons.qrc
+        DESTINATION share/sicnu_geo_rs/resources)
+
+# Install QGIS reference data (symbology, projections)
+# Source lives under refs/qgis/; install path stays qgis_ref for runtime compatibility.
+if(EXISTS ${CMAKE_SOURCE_DIR}/refs/qgis/resources)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/refs/qgis/resources
+            DESTINATION share/sicnu_geo_rs/qgis_ref
+            PATTERN "*.db" EXCLUDE)
+elseif(EXISTS ${CMAKE_SOURCE_DIR}/qgis_ref/resources)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/qgis_ref/resources
+            DESTINATION share/sicnu_geo_rs/qgis_ref
+            PATTERN "*.db" EXCLUDE)
+endif()
+
+# Install desktop file (only if packaging files exist)
+if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop
+            DESTINATION share/applications)
+endif()
+
+# Install app icon
+if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg
+            DESTINATION share/icons/hicolor/scalable/apps)
+endif()
+
+# Install data directory
+if(EXISTS ${CMAKE_SOURCE_DIR}/data)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/data
+            DESTINATION share/sicnu_geo_rs)
+endif()
