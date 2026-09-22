@@ -295,6 +295,22 @@ sicnu_add_study_test(test_study_analysis)
 sicnu_add_study_test(test_study_spatial)
 sicnu_add_study_test(test_study_export)
 target_link_libraries(test_study_spatial PRIVATE GDAL::GDAL)
+# Shipped exemplar specs: loaded through the production reader, so the test
+# needs the source tree path (light target — no QGIS).
+sicnu_add_study_test(test_study_exemplars)
+target_compile_definitions(test_study_exemplars PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+# RS14-07 full-stack teaching e2e: the NDVI threshold exemplar runs through the
+# REAL spine (ExecutionPlane → TaskCenter → JobEngine → rs:threshold_raster).
+# Heavy by design — sicnu_add_test links the qgis/processing/agent chain; build
+# it once and run it before final review (see .planning/RS14-07 build notes).
+sicnu_add_test(test_study_e2e)
+target_link_libraries(test_study_e2e PRIVATE
+  Sicnu::study
+  Sicnu::study_bridge
+  GDAL::GDAL
+)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)

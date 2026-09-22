@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "study_id": "ndvi-threshold-sweep",
+  "experiment_id": "study-ndvi-threshold",
+  "algorithm_id": "rs:threshold_raster",
+  "base_parameters": {
+    "input": "my_ndvi.tif",
+    "thresholdMethod": "manual"
+  },
+  "sampling": {
+    "strategy": "oat"
+  },
+  "dimensions": [
+    {
+      "parameter_path": "threshold",
+      "min_value": 0.1,
+      "max_value": 0.9,
+      "step_count": 9
+    }
+  ],
+  "budget": {
+    "max_runs": 32,
+    "max_in_flight": 2,
+    "per_run_timeout_ms": 300000,
+    "seed_replicates": 1,
+    "seed": 7
+  },
+  "metrics": ["maskedPercent", "thresholdUsed"],
+  "objective_metrics": [],
+  "objective_metric": "",
+  "spatial_comparison": true,
+  "spatial_epsilon": 0.0
+}

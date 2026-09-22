@@ -153,13 +153,14 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
             if ( run && run.value().status() != sicnu::experiment::RunStatus::Completed )
                 WARN( QStringLiteral( "run %1 status %2 error: %3" )
                           .arg( runId )
-                          .arg( sicnu::experiment::runStatusToString( run.value().status() ),
+                          .arg( sicnu::dataset::runStatusToString( run.value().status() ),
                                 run.value()
                                     .metrics()
                                     .value( QStringLiteral( "error" ) )
                                     .toObject()
                                     .value( QStringLiteral( "message" ) )
-                                    .toString() ) );
+                                    .toString() )
+                          .toStdString() );
         }
     }
     REQUIRE( summary.recordedCount == 9 );

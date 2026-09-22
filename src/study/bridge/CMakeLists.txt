@@ -23,6 +23,18 @@ target_link_libraries(sicnu_study_bridge
     sicnu_task_center
 )
 
+# jsoncpp is used in the adapter body only (committed-payload conversion); the
+# canonical `jsoncpp` target is resolved once at the top level (see
+# sicnu_processing for the resolution rationale).
+if(TARGET jsoncpp)
+  target_link_libraries(sicnu_study_bridge PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(sicnu_study_bridge PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(sicnu_study_bridge PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(sicnu_study_bridge PRIVATE jsoncpp)
+endif()
+
 set_target_properties(sicnu_study_bridge PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
