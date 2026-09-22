@@ -564,12 +564,25 @@ SpatialToolResult TemporalIngestStacTool::execute( const Json::Value &input )
       return SpatialToolResult::failure( "cannot open STAC result document: " +
                                            input["result"].asString(),
                                          "DATA_IO", "IO" );
+    // #1155: workspace file, but the depth-bomb class is the same — bound
+    // the reader recursion and catch jsoncpp's limit exception so a hostile
+    // document is a typed failure instead of a stack overflow.
     Json::CharReaderBuilder readerBuilder;
+    readerBuilder[ "stackLimit" ] = 64;
     std::unique_ptr<Json::CharReader> reader( readerBuilder.newCharReader() );
     Json::Value parsed;
     std::string parseError;
     const QByteArray raw = file.readAll();
-    if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &parsed, &parseError ) )
+    bool parsedOk = false;
+    try
+    {
+      parsedOk = reader->parse( raw.constData(), raw.constData() + raw.size(), &parsed, &parseError );
+    }
+    catch ( const Json::Exception & )
+    {
+      parsedOk = false;
+    }
+    if ( !parsedOk )
       return SpatialToolResult::failure( "invalid STAC result JSON: " + parseError,
                                          "INVALID_PARAMETER", "VALIDATION" );
     searchResponse = std::move( parsed );

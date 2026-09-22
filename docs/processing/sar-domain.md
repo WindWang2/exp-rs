@@ -102,7 +102,7 @@ geometry, bounded bilinear/nearest samplers); streaming driver:
 2. **Products** (fixed five-band Float32, order in
    `SICNU_SAR_GEOCODE_BANDS`): `backscatter` (resampled radiometry in the
    input's own declared domain — pass calibrated sigma0), `gamma0`
-   (= backscatter · sin θ0 / sin θL, Ulander 1996 area factor from REAL
+   (= backscatter · sin θL / sin θ0, Ulander 1996 projected-area factor from REAL
    per-pixel geometry — distinct from the constant-geometry plane-fit model
    of `rs:sar_terrain_flatten`), `incidence` (ellipsoid reference θ0),
    `local_incidence` (terrain facet θL), `layover_shadow`
@@ -491,7 +491,9 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    `rs:sar_speckle` propagates them so filtering a derived product does not
    silently drop its state.
 3. **Terrain family input contract.** `rs:sar_terrain_flatten` and
-   `rs:sar_terrain_correction` apply `sigma0·cosθ0/cosθi`, which is only
+   `rs:sar_terrain_correction` apply `sigma0·sinθi/sinθ0` (Ulander 1996 /
+   Small 2011 eq. 5 projected-area RTC factor, the same token `rs:sar_geocode`'s
+   gamma0 band carries), which is only
    lawful for sigma0 input. A declared `gamma0`/`beta0`/`dn`, a derived token,
    a conflicting declaration (`SICNU_SAR_CALIBRATION` vs
    `SICNU_RADIOMETRIC_STATE` disagreeing) or an unrecognized token is a typed

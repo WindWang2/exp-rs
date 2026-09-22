@@ -118,7 +118,8 @@ bool isIr2OperatorBound( const QString &operatorId )
 NodeExecutor makeRegistryNodeExecutor()
 {
     return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
-               const QString &runDirectory ) -> NodeExecutionResult {
+               const QString &runDirectory,
+               const std::atomic<bool> *cancelRequested ) -> NodeExecutionResult {
         // Unbound refusal runs BEFORE port→param mapping — mapping never
         // turns an unbound node into synthetic success.
         const Ir2OperatorBinding binding = classifyIr2OperatorBinding( node.operatorId );
@@ -219,6 +220,13 @@ NodeExecutor makeRegistryNodeExecutor()
                 QFile::remove( stale );
 
         sicnu::operators::RSOperatorContext context;
+        // #1152: wire the run's cooperative cancellation flag into the
+        // operator context (the workflow_runtime.cpp pattern) so
+        // requestCancel() aborts a long-running registry operator mid-run;
+        // without it cancel and dock-close froze the GUI thread for the
+        // node's full duration and then discarded the completed artifact.
+        if ( cancelRequested )
+            context.setCancelFlag( const_cast<std::atomic<bool> *>( cancelRequested ) );
         try
         {
             const Json::Value resultJson = op->execute( params, context );

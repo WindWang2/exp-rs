@@ -359,5 +359,83 @@
     "limitations": [
       "Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"
     ]
-  }
+  },
+{
+  "id": "rs:gaofen_import",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "side_effects": true,
+  "limitations": [
+    "Writes derived products beside the source archive",
+    "L1A products are not orthorectified; georeference before pixel-level analysis"
+  ]
+},
+{
+  "id": "rs:hj_import",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "side_effects": true,
+  "limitations": [
+    "Writes derived products beside the source archive",
+    "L1A products are not orthorectified; georeference before pixel-level analysis"
+  ]
+},
+{
+  "id": "rs:zy3_import",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "side_effects": true,
+  "limitations": [
+    "Writes derived products beside the source archive",
+    "L1A products are not orthorectified; georeference before pixel-level analysis"
+  ]
+},
+{
+  "id": "rs:solar_geometry",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "resource": { "cost_class": "light", "large_raster_safe": true },
+  "limitations": [
+    "Spencer 1971 closed forms are accurate to ~0.01°; scene-centre approximation ignores within-scene variation"
+  ]
+},
+{
+  "id": "rs:brdf_normalization",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "resource": { "cost_class": "medium", "large_raster_safe": true },
+  "limitations": [
+    "Ross-Thick/Li-Sparse-Reciprocal normalization needs per-band kernel weights and sun/view angles; extrapolating far from the observed geometry is unreliable"
+  ]
+},
+{
+  "id": "rs:radiometric_qa",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["qa"],
+  "modality": ["optical"],
+  "artifacts": { "output": {"kind": "raster", "dtype": "uint16"} },
+  "limitations": ["Flag semantics are product-specific (QA_RADSAT bit layouts differ across sensors)"]
+},
+{
+  "id": "rs:quality_mosaic",
+  "family": "preprocess",
+  "extends": "family:preprocess",
+  "intents": ["preprocess"],
+  "modality": ["optical"],
+  "resource": { "cost_class": "heavy", "large_raster_safe": true },
+  "limitations": [
+    "Seamline/feathering choices change downstream statistics; keep the provenance band for traceability"
+  ]
+}
 ]

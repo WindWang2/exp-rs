@@ -47,7 +47,7 @@ Json::Value makeDemInputContract() {
 Json::Value RsSarTerrainFlattenOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
-    props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power)");
+    props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power). Legacy undeclared rasters are processed under the documented sigma0/linear assumption; DN or beta0 legacy content produces a wrong gamma0 (calibrate first, rs:sar_calibrate)");
     props["input"]["x-rs-contract"] = makeSarInputContract();
     props["output"] = makeOutputParam("output",
                                      "Output 2-band raster: gamma0 (band 1) + validity mask "
@@ -285,6 +285,12 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     dst.setMetadataItem("SICNU_RADIOMETRIC_STATE", "gamma0");
     if ( stateCheck == sicnu::sar::SarStateCheck::OkUndeclared )
         dst.setMetadataItem("SICNU_SAR_STATE_ASSUMED", "sigma0_legacy_undeclared");
+    // #1165: the numeric domain carries the same assumption provenance — a
+    // legacy raster with no SICNU_SAR_DOMAIN is processed as linear power,
+    // and a legacy dB product would be exponentially mis-scaled under that
+    // assumption (downstream guards can see and warn on the flag).
+    if ( declaredDomain.isEmpty() )
+        dst.setMetadataItem("SICNU_SAR_DOMAIN_ASSUMED", "linear_power");
     dst.setMetadataItem("SICNU_SAR_LOOK_AZIMUTH_DEG",
                         QString::number(lookAzimuthDeg, 'g', 10));
 

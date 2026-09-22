@@ -107,6 +107,11 @@
           "type" : "string"
         },
         {
+          "name" : "provenance",
+          "required" : false,
+          "type" : "string"
+        },
+        {
           "name" : "scenes",
           "required" : false,
           "type" : "string"

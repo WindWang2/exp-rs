@@ -506,7 +506,7 @@ class ModelRuntimeRegistry
     /// sessions reserve their manifest estimate on the resolved device for
     /// the lifetime of their cache entry; the ledger is the admission
     /// authority behind device resolution (placement seam, not a scheduler).
-    VramLedger &vramLedger() { return m_ledger; }
+    VramLedger &vramLedger() { return *m_ledger; }
 
     // --- Platform 8.0 WP-B: policy + pressure observability ------------------
     /// Placement policy applied to every `auto` acquisition (default
@@ -548,6 +548,9 @@ class ModelRuntimeRegistry
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, CacheEntry> m_cache;
+    /// #1160: shared so the session reservation guards below can outlive
+    /// the registry object without dangling.
+    std::shared_ptr<VramLedger> m_ledger = std::make_shared<VramLedger>();
     struct ProviderEntry
     {
       ModelRuntimeFactory factory;
@@ -555,7 +558,7 @@ class ModelRuntimeRegistry
     };
     std::unordered_map<std::string, ProviderEntry> m_providers;
     std::optional<ModelHardwareCapabilities> m_hardwareOverride;
-    VramLedger m_ledger;
+
     DevicePlacementPolicy m_placementPolicy = DevicePlacementPolicy::LowestFitting;
     std::size_t m_maxSessions = 2;
     std::size_t m_totalLoaded = 0;

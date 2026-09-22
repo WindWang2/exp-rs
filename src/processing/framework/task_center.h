@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QMutex>
+#include <QSet>
 #include <QWaitCondition>
 #include <QPointer>
 #include <atomic>
@@ -816,6 +817,11 @@ private:
     /// Count of Cancelling tasks with an armed deadline — enforceCancelDeadlines
     /// early-outs on 0 so opportunistic calls cost one comparison.
     unsigned int m_armedCancelDeadlines = 0;
+    /// #1159: the armed-deadline INDEX — enforceCancelDeadlines scans only
+    /// these ids (transitions into/out of Cancelling keep it in sync with
+    /// the counter above), so the 25 ms watchdog tick and every onJobRecord
+    /// stay O(armed), never O(total tasks ever created).
+    QSet<long> m_armedCancelTaskIds;
     /// 12.0 D4 watchdog thread. Lock discipline: watchdogMain alternates
     /// m_watchdogMutex (cv wait) and m_mutex (enforce) — never holds one while
     /// acquiring the other, and scheduler code never touches m_watchdogMutex,

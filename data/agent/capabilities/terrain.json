@@ -40,5 +40,41 @@
     "intents": ["preprocess", "terrain"],
     "resource": { "cost_class": "medium", "large_raster_safe": true },
     "limitations": ["Illumination correction quality depends on DEM/scene co-registration"]
-  }
+  },
+{
+  "id": "rs:terrain_landform",
+  "family": "terrain",
+  "extends": "family:terrain",
+  "intents": ["terrain"],
+  "modality": ["dem"],
+  "verification": {
+    "expected_kind": "raster",
+    "checks": ["existence", "opens", "crs_matches", "dimensions", "class_domain"]
+  },
+  "limitations": [
+    "Landform class maps depend on the TPI/geomorphon window scales; record the scale parameters"
+  ]
+},
+{
+  "id": "rs:terrain_viewshed",
+  "family": "terrain",
+  "extends": "family:terrain",
+  "intents": ["terrain"],
+  "modality": ["dem"],
+  "resource": { "cost_class": "heavy", "large_raster_safe": true },
+  "limitations": [
+    "Viewshed truth depends on DEM resolution and the Earth-curvature/refraction setting; record both"
+  ]
+},
+{
+  "id": "rs:terrain_solar",
+  "family": "terrain",
+  "extends": "family:terrain",
+  "intents": ["terrain"],
+  "modality": ["dem"],
+  "resource": { "cost_class": "heavy", "large_raster_safe": true },
+  "limitations": [
+    "Shadow duration requires a faithful sun track; an explicit track overrides the date/latitude generator"
+  ]
+}
 ]

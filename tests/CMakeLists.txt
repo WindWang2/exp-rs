@@ -10187,6 +10187,9 @@ add_executable(test_object_identity
   test_object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost; workbench_host.cpp is
+  # Qt-only, so link the REAL implementation instead of stubbing it (the
+  # out-of-tree targets were link-broken since the Workbench 5.0 seam).
   ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_object_identity PRIVATE
@@ -11767,6 +11770,9 @@ set(SICNU_MISSION_RUNTIME_SOURCES
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_tool_authority.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost: link the real
+  # Qt-only implementation (the macro targets were link-broken without it).
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
   ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/mission_tools.cpp
   ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/spatial_tool_registry.cpp
   ${CMAKE_SOURCE_DIR}/src/agent/contracts/spatial_contracts.cpp

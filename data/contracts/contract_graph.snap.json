@@ -68,10 +68,22 @@
       "to" : "io:make_cog"
     },
     {
+      "from" : "io:metadata_patch",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:metadata_patch"
+    },
+    {
       "from" : "io:reproject",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/io.json",
       "to" : "io:reproject"
+    },
+    {
+      "from" : "io:subdatasets",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:subdatasets"
     },
     {
       "from" : "io:translate",
@@ -84,6 +96,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/io.json",
       "to" : "io:vector_convert"
+    },
+    {
+      "from" : "io:verify_dataset",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:verify_dataset"
     },
     {
       "from" : "io:warp",
@@ -204,6 +222,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral.json",
       "to" : "rs:band_ratio"
+    },
+    {
+      "from" : "rs:brdf_normalization",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:brdf_normalization"
     },
     {
       "from" : "rs:cem_detection",
@@ -410,6 +434,18 @@
       "to" : "rs:fusion_pca"
     },
     {
+      "from" : "rs:gaofen_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:gaofen_import"
+    },
+    {
+      "from" : "rs:hj_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:hj_import"
+    },
+    {
       "from" : "rs:image_enhancement",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/preprocess.json",
@@ -590,10 +626,22 @@
       "to" : "rs:qa_mask"
     },
     {
+      "from" : "rs:quality_mosaic",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:quality_mosaic"
+    },
+    {
       "from" : "rs:radiometric_calibration",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/preprocess.json",
       "to" : "rs:radiometric_calibration"
+    },
+    {
+      "from" : "rs:radiometric_qa",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:radiometric_qa"
     },
     {
       "from" : "rs:rasterize",
@@ -806,6 +854,12 @@
       "to" : "rs:sieve"
     },
     {
+      "from" : "rs:solar_geometry",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:solar_geometry"
+    },
+    {
       "from" : "rs:sparse_unmixing",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral_transform.json",
@@ -968,6 +1022,12 @@
       "to" : "rs:temporal_regularize"
     },
     {
+      "from" : "rs:temporal_sar_fusion",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_sar_fusion"
+    },
+    {
       "from" : "rs:temporal_seasonal_breaks",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/temporal.json",
@@ -1010,6 +1070,24 @@
       "to" : "rs:terrain_flow"
     },
     {
+      "from" : "rs:terrain_landform",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:terrain_landform"
+    },
+    {
+      "from" : "rs:terrain_solar",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:terrain_solar"
+    },
+    {
+      "from" : "rs:terrain_viewshed",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:terrain_viewshed"
+    },
+    {
       "from" : "rs:threshold_raster",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral.json",
@@ -1026,6 +1104,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/filter.json",
       "to" : "rs:zonal_stats"
+    },
+    {
+      "from" : "rs:zy3_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:zy3_import"
     },
     {
       "from" : "app.commandPalette",
@@ -3122,6 +3206,21 @@
       "origin" : "data/agent/capabilities/tools.json"
     },
     {
+      "id" : "cartography:diff_templates",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:explain",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:export",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
       "id" : "cartography:get_component",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/tools.json"
@@ -3163,6 +3262,11 @@
     },
     {
       "id" : "cartography:preflight",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:produce",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/tools.json"
     },
@@ -3442,7 +3546,17 @@
       "origin" : "data/agent/capabilities/io.json"
     },
     {
+      "id" : "io:metadata_patch",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
       "id" : "io:reproject",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:subdatasets",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/io.json"
     },
@@ -3453,6 +3567,11 @@
     },
     {
       "id" : "io:vector_convert",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:verify_dataset",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/io.json"
     },
@@ -3570,6 +3689,11 @@
       "id" : "rs:band_ratio",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:brdf_normalization",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
     },
     {
       "id" : "rs:cem_detection",
@@ -3742,6 +3866,16 @@
       "origin" : "data/agent/capabilities/fusion.json"
     },
     {
+      "id" : "rs:gaofen_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:hj_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
       "id" : "rs:image_enhancement",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/preprocess.json"
@@ -3892,7 +4026,17 @@
       "origin" : "data/agent/capabilities/preprocess.json"
     },
     {
+      "id" : "rs:quality_mosaic",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
       "id" : "rs:radiometric_calibration",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:radiometric_qa",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/preprocess.json"
     },
@@ -4072,6 +4216,11 @@
       "origin" : "data/agent/capabilities/filter.json"
     },
     {
+      "id" : "rs:solar_geometry",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
       "id" : "rs:sparse_unmixing",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/spectral_transform.json"
@@ -4207,6 +4356,11 @@
       "origin" : "data/agent/capabilities/temporal.json"
     },
     {
+      "id" : "rs:temporal_sar_fusion",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
       "id" : "rs:temporal_seasonal_breaks",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/temporal.json"
@@ -4242,6 +4396,21 @@
       "origin" : "data/agent/capabilities/terrain.json"
     },
     {
+      "id" : "rs:terrain_landform",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "rs:terrain_solar",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "rs:terrain_viewshed",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
       "id" : "rs:threshold_raster",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/spectral.json"
@@ -4255,6 +4424,11 @@
       "id" : "rs:zonal_stats",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:zy3_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
     },
     {
       "id" : "solution:describe",
@@ -5377,6 +5551,11 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "harness/ACQUISITION_DATES_MISSING",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/BAND_IDENTITY_MISMATCH",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5402,12 +5581,22 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/COMPLEX_BANDS_REQUIRED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/CRS_MISMATCH",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
     {
       "id" : "harness/DATASET_NOT_FOUND",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/DATES_NOT_ASCENDING",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5458,6 +5647,11 @@
     },
     {
       "id" : "harness/INVALID_RADIOMETRY",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/IO_ERROR",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5563,6 +5757,11 @@
     },
     {
       "id" : "harness/TRANSIENT_FAILURE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/UNWRAP_PROVIDER_UNAVAILABLE",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -7671,8 +7870,14 @@
       [
         "background",
         "input",
+        "interference",
+        "interferenceRef",
+        "libraryMaterials",
+        "libraryPath",
         "loading",
-        "output"
+        "output",
+        "target",
+        "targetRef"
       ],
       "id" : "rs:ace",
       "kind" : "operator",
@@ -7810,8 +8015,14 @@
       [
         "background",
         "input",
+        "interference",
+        "interferenceRef",
+        "libraryMaterials",
+        "libraryPath",
         "loading",
-        "output"
+        "output",
+        "target",
+        "targetRef"
       ],
       "id" : "rs:cem_detection",
       "kind" : "operator",
@@ -8410,8 +8621,14 @@
       [
         "background",
         "input",
+        "interference",
+        "interferenceRef",
+        "libraryMaterials",
+        "libraryPath",
         "loading",
-        "output"
+        "output",
+        "target",
+        "targetRef"
       ],
       "id" : "rs:matched_filter",
       "kind" : "operator",
@@ -8660,8 +8877,14 @@
       [
         "background",
         "input",
+        "interference",
+        "interferenceRef",
+        "libraryMaterials",
+        "libraryPath",
         "loading",
-        "output"
+        "output",
+        "target",
+        "targetRef"
       ],
       "id" : "rs:osp_detection",
       "kind" : "operator",
@@ -8859,8 +9082,12 @@
         "angleOut",
         "bands",
         "input",
+        "libraryMaterials",
+        "libraryPath",
         "metric",
-        "output"
+        "output",
+        "refs",
+        "refsRef"
       ],
       "id" : "rs:sam_classify",
       "kind" : "operator",
@@ -9346,9 +9573,13 @@
       [
         "bands",
         "collinearAngleDegrees",
+        "endmembers",
+        "endmembersRef",
         "errorOut",
         "input",
         "lambda",
+        "libraryMaterials",
+        "libraryPath",
         "maxIterations",
         "output",
         "sumToOnePenalty",
@@ -9422,7 +9653,11 @@
         "bands",
         "form",
         "input",
+        "libraryMaterials",
+        "libraryPath",
         "output",
+        "refs",
+        "refsRef",
         "scoreOut"
       ],
       "id" : "rs:spectral_similarity",
@@ -9447,8 +9682,12 @@
       "attributes" : 
       [
         "bands",
+        "endmembers",
+        "endmembersRef",
         "errorOut",
         "input",
+        "libraryMaterials",
+        "libraryPath",
         "method",
         "output"
       ],
@@ -9497,8 +9736,14 @@
       [
         "background",
         "input",
+        "interference",
+        "interferenceRef",
+        "libraryMaterials",
+        "libraryPath",
         "loading",
-        "output"
+        "output",
+        "target",
+        "targetRef"
       ],
       "id" : "rs:tcimf_detection",
       "kind" : "operator",
@@ -9758,6 +10003,7 @@
         "duplicate_policy",
         "minValidPerSeason",
         "output",
+        "provenance",
         "scenes",
         "season2EndDoy",
         "season2StartDoy",
@@ -9887,6 +10133,7 @@
         "compute_ci",
         "duplicate_policy",
         "output",
+        "provenance",
         "scenes",
         "tile_size"
       ],
@@ -9907,6 +10154,7 @@
         "method",
         "moving_average_window",
         "output",
+        "provenance",
         "robust_iterations",
         "scenes",
         "tile_size",
@@ -9943,6 +10191,7 @@
         "collection",
         "duplicate_policy",
         "output",
+        "provenance",
         "scenes",
         "tile_size"
       ],

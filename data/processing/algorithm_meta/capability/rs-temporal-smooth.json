@@ -168,6 +168,11 @@
           "type" : "string"
         },
         {
+          "name" : "provenance",
+          "required" : false,
+          "type" : "string"
+        },
+        {
           "default" : "3",
           "name" : "robust_iterations",
           "required" : false,

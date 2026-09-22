@@ -1541,6 +1541,18 @@ std::shared_ptr<ResourceEntry> applyTrustPolicy( CacheStore &cache, const std::s
     }
     else
     {
+      // #1162: an unprovable identity (weak/absent/multipart-"null" ETag —
+      // exactly the objects the identity layer supports) must still catch
+      // the one change signal a HEAD always carries: the SIZE. Serving old
+      // blocks under the NEW entry size is coherent-but-stale — mirror the
+      // http arm's size_mismatch fallback and drop the blocks instead.
+      if ( facts.hasSize && storedIdentity.hasSize
+           && facts.sizeBytes != storedIdentity.sizeBytes )
+      {
+        cache.invalidate( key );
+        return cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
+                                           vsiObjectIdentity( vsiPath, facts ) );
+      }
       if ( facts.hasSize )
         cache.updateEntrySize( entry, facts.sizeBytes );
       // A provable HEAD with a matching strong ETag is the VSI

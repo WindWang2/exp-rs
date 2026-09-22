@@ -429,6 +429,42 @@ TEST_CASE( "Seasonal decomposition recovers trend and climatology", "[temporal][
         REQUIRE( std::fabs( r.remainder[d] ) < 0.3 );
 }
 
+TEST_CASE( "Seasonal decomposition trend is time-regularized, not sample-indexed (#1166)",
+           "[temporal][decompose][issue1166]" )
+{
+    ensureApp();
+    // The SAME 12 y-values sampled once every day and once every 3 days:
+    // a sample-index trend returns BIT-IDENTICAL trends for both axes; a
+    // day-regularized penalty must treat the coarse series as a much
+    // smoother-in-time signal and differ.
+    std::vector<float> y;
+    for ( int i = 0; i < 12; ++i )
+        y.push_back( static_cast<float>( std::sin( 2.0 * M_PI * i / 12.0 ) + 0.02 * i ) );
+    std::vector<double> tDense, tCoarse;
+    std::vector<int> doyDense, doyCoarse;
+    for ( int i = 0; i < 12; ++i )
+    {
+        tDense.push_back( static_cast<double>( i ) );
+        tCoarse.push_back( 3.0 * static_cast<double>( i ) );
+        doyDense.push_back( ( 10 * i ) % 365 + 1 );
+        doyCoarse.push_back( ( 30 * i ) % 365 + 1 );
+    }
+
+    const DecompositionResult dense = seasonalDecompose( y, tDense, doyDense, 2.0, 4 );
+    const DecompositionResult coarse = seasonalDecompose( y, tCoarse, doyCoarse, 2.0, 4 );
+    REQUIRE( dense.trend.size() == 12 );
+    REQUIRE( coarse.trend.size() == 12 );
+
+    double maxDelta = 0.0;
+    for ( int i = 2; i < 10; ++i ) // interior: the penalty is one-sided at ends
+    {
+        REQUIRE( std::isfinite( dense.trend[i] ) );
+        REQUIRE( std::isfinite( coarse.trend[i] ) );
+        maxDelta = std::max( maxDelta, double( std::fabs( dense.trend[i] - coarse.trend[i] ) ) );
+    }
+    REQUIRE( maxDelta > 1e-4 );
+}
+
 // ---------------------------------------------------------------------------
 // Gap-fill kernel (Temporal 7.0): the interpolation math extracted from
 // rs:temporal_gap_fill — previously inlined in the operator with zero

@@ -475,6 +475,7 @@ void TaskCenter::shutdownForTests()
         m_manualQueued.clear();
         m_liveTaskCount = 0;
         m_armedCancelDeadlines = 0;
+        m_armedCancelTaskIds.clear();
         m_nextTaskId = 1;
         m_nextPipelineId = 1;
         m_waitCondition.wakeAll();
@@ -831,6 +832,7 @@ void TaskCenter::setCancelWatchdogMs( unsigned int timeoutMs )
         for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
             it->cancelDeadline = {};
         m_armedCancelDeadlines = 0;
+        m_armedCancelTaskIds.clear();
     }
     else
     {
@@ -852,6 +854,7 @@ void TaskCenter::setCancelWatchdogMs( unsigned int timeoutMs )
                                   : std::chrono::steady_clock::now();
             info.cancelDeadline = base + std::chrono::milliseconds( timeoutMs );
             ++armed;
+            m_armedCancelTaskIds.insert( it.key() );
         }
         m_armedCancelDeadlines += armed;
         if ( armed > 0 )
@@ -2160,12 +2163,14 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
          && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
     {
         ++m_armedCancelDeadlines;
+        m_armedCancelTaskIds.insert( task.taskId );
     }
     else if ( oldStatus == TaskStatus::Cancelling && task.status != TaskStatus::Cancelling
               && task.cancelDeadline != std::chrono::steady_clock::time_point{} )
     {
         task.cancelDeadline = {};
         --m_armedCancelDeadlines;
+        m_armedCancelTaskIds.remove( task.taskId );
     }
 
     // 9.0 M5: actual-usage observation — one RSS sample on every terminal
@@ -3310,8 +3315,15 @@ void TaskCenter::enforceCancelDeadlines()
         if ( m_armedCancelDeadlines == 0 )
             return; // one comparison when nothing is armed
         const auto now = std::chrono::steady_clock::now();
-        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        // #1159: iterate the armed index, not the whole task map — the
+        // aging-sweep design applied to the cancel deadline. setTaskStatusLocked
+        // below mutates the set, so the loop runs over a snapshot copy.
+        const QList<long> armedIds = m_armedCancelTaskIds.values();
+        for ( long armedId : armedIds )
         {
+            auto it = m_tasks.find( armedId );
+            if ( it == m_tasks.end() )
+                continue;
             AlgorithmTaskInfo &info = it.value();
             if ( info.status != TaskStatus::Cancelling
                  || info.cancelDeadline == std::chrono::steady_clock::time_point{}
@@ -3382,6 +3394,11 @@ bool isTransientExecutionError( const QString &error )
 
 bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
 {
+    // #1182: the user's cancel intent lives in TaskCenter (cancelReason +
+    // the Cancelling status); auto-retry must never resurrect a task the
+    // user asked to cancel, whatever the engine-side error class says.
+    if ( task.status == TaskStatus::Cancelling || task.cancelReason != TaskCancelReason::None )
+        return false;
     if ( m_maxAutoRetries <= 0 )
         return false;
     if ( task.autoRetryAttempts >= m_maxAutoRetries )

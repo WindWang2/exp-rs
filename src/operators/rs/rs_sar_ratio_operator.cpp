@@ -261,6 +261,33 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
                 "' (pair metric / texture); a ratio of derived products is not defined" );
     }
 
+    // #1165: consume the terrain family's assumption provenance — an input
+    // whose declared state/domain was ASSUMED (legacy undeclared raster)
+    // makes this quotient only as trustworthy as that assumption. Warn
+    // loudly and carry the flag forward so the artifact's consumers can see
+    // it (the key previously had writers but zero readers).
+    QString assumedProvenance;
+    for ( const GdalDatasetWrapper *input : { &srcA, &srcB } )
+    {
+        const QString assumed =
+            sicnu::sar::datasetMeta( *input, sicnu::sar::kRadiometricStateAssumedKey ).trimmed();
+        if ( !assumed.isEmpty() )
+            assumedProvenance = assumed;
+        const QString assumedDomain =
+            sicnu::sar::datasetMeta( *input, sicnu::sar::kDomainAssumedKey ).trimmed();
+        if ( !assumedDomain.isEmpty() )
+            assumedProvenance = assumedProvenance.isEmpty()
+                                    ? assumedDomain
+                                    : assumedProvenance + QLatin1String( "+" ) + assumedDomain;
+    }
+    if ( !assumedProvenance.isEmpty() )
+    {
+        context.logWarning( "input carries an ASSUMED radiometric state/domain ('" +
+                            assumedProvenance.toStdString() +
+                            "'); the pair metric inherits that assumption — verify the "
+                            "legacy input really is calibrated sigma0 in linear power" );
+    }
+
     // Declared sentinels on the analysis bands (NaN when undeclared).
     const float nodataA = sicnu::rs::bandNoDataSentinel(srcA, bandA);
     const float nodataB = sicnu::rs::bandNoDataSentinel(srcB, bandB);
@@ -272,6 +299,9 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError, "Cannot create output raster");
     }
     dst.setNoDataValue(std::numeric_limits<float>::quiet_NaN());
+    if ( !assumedProvenance.isEmpty() )
+        dst.setMetadataItem( sicnu::sar::kRadiometricStateAssumedKey,
+                             assumedProvenance );
 
     context.throwIfCancelled();
     const bool ok = sicnu::sar::ratioRaster(srcA, bandA, srcB, bandB, ratioParams,

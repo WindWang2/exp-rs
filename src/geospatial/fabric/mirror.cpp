@@ -32,7 +32,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <csignal>
 #endif
 
 namespace sicnu::geo
@@ -224,24 +229,34 @@ std::wstring wideFromUtf8( const std::string &text )
 }
 #endif
 
-/// Single-writer guard for one mirror directory (O_EXCL create; a crashed
-/// writer's lock is broken by age — the pid is recorded, liveness is not
-/// trusted, and the manifest itself is only ever replaced atomically).
+/// Single-writer guard for one mirror directory (O_EXCL create). The lock
+/// records the writer's pid + timestamp (#1163): a leftover lock is broken
+/// when its owner is provably dead, or — for an empty/unreadable pre-#1163
+/// leftover — when it is older than any legitimate pass could run. A live
+/// foreign writer is never stolen from, and the manifest itself is only
+/// ever replaced atomically.
 class MirrorWriterLock
 {
   public:
     explicit MirrorWriterLock( const std::string &mirrorDirectory )
         : mLockPath( mirrorDirectory + "/" + kMirrorLockFile )
     {
-#ifdef _WIN32
-      mHandle = CreateFileW( wideFromUtf8( mLockPath ).c_str(), GENERIC_WRITE, 0,
-                             nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr );
-      mHeld = mHandle != INVALID_HANDLE_VALUE;
-#else
-      mHandle = ::open( ( mirrorDirectory + "/" + kMirrorLockFile ).c_str(), O_WRONLY | O_CREAT | O_EXCL,
-                        0644 );
-      mHeld = mHandle >= 0;
-#endif
+      if ( tryAcquire() )
+        return;
+      // #1163: the acquisition failed against a leftover lock. Breaking it
+      // is justified only when the recorded writer is DEAD or the lock is
+      // older than any legitimate pass could run: a live foreign pid keeps
+      // the single-writer contract, and a fresh lock with an unreadable
+      // owner errs on the side of NOT stealing (recover by hand, the
+      // refusal names the file).
+      const StaleLockInfo stale = inspectStaleLock();
+      const bool breakable = stale.knownOwner ? !pidAlive( stale.ownerPid )
+                                              : stale.ageSeconds > kMaxLockAgeSeconds;
+      if ( !breakable )
+        return;
+      atomic_fs::removeFileQuiet( mLockPath );
+      if ( tryAcquire() )
+        mBrokeStaleLock = true;
     }
     ~MirrorWriterLock()
     {
@@ -255,14 +270,100 @@ class MirrorWriterLock
       atomic_fs::removeFileQuiet( mLockPath );
     }
     bool held() const { return mHeld; }
+    /// True when this acquisition broke a stale (crashed-writer) lock.
+    bool brokeStaleLock() const { return mBrokeStaleLock; }
 
   private:
+    /// A legitimate pass finishes in minutes; anything older was abandoned
+    /// by a crashed/killed writer.
+    static constexpr std::int64_t kMaxLockAgeSeconds = 3600;
+
+    struct StaleLockInfo
+    {
+      bool knownOwner = false;
+      long ownerPid = -1;
+      std::int64_t ageSeconds = -1;
+    };
+
+    bool tryAcquire()
+    {
+#ifdef _WIN32
+      mHandle = CreateFileW( wideFromUtf8( mLockPath ).c_str(), GENERIC_WRITE, 0,
+                             nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr );
+      mHeld = mHandle != INVALID_HANDLE_VALUE;
+#else
+      mHandle = ::open( mLockPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644 );
+      mHeld = mHandle >= 0;
+#endif
+      if ( mHeld )
+        stampOwner();
+      return mHeld;
+    }
+
+    /// Records this writer's pid + timestamp inside the lock so a later
+    /// crashed run is distinguishable from a live one.
+    void stampOwner()
+    {
+      const std::string stamp = std::to_string( static_cast<long>( ::getpid() ) ) + " " +
+                                std::to_string( std::time( nullptr ) ) + "\n";
+#ifdef _WIN32
+      // The pid form differs across platforms; the AGE fallback below
+      // still breaks crashed Windows writers.
+      (void)stamp;
+#else
+      if ( mHandle >= 0 )
+      {
+        const ssize_t written = ::write( mHandle, stamp.c_str(), stamp.size() );
+        (void)written;
+      }
+#endif
+    }
+
+    /// Reads pid + mtime from an existing lock. An EMPTY lock (a crash
+    /// between create and stamp, or a pre-#1163 leftover) has no known
+    /// owner — only the age rule can break it.
+    StaleLockInfo inspectStaleLock() const
+    {
+      StaleLockInfo info;
+      std::ifstream in( mLockPath );
+      if ( in )
+      {
+        long pid = -1;
+        std::int64_t stamp = 0;
+        if ( in >> pid >> stamp )
+        {
+          info.knownOwner = true;
+          info.ownerPid = pid;
+          info.ageSeconds = std::time( nullptr ) - stamp;
+        }
+      }
+      if ( info.ageSeconds < 0 )
+      {
+        struct ::stat st {};
+        if ( ::stat( mLockPath.c_str(), &st ) == 0 )
+          info.ageSeconds = std::time( nullptr ) - st.st_mtime;
+      }
+      return info;
+    }
+
+    static bool pidAlive( long pid )
+    {
+      if ( pid <= 0 )
+        return false;
+#ifdef _WIN32
+      return false; // no liveness probe on Windows — the age rule decides
+#else
+      return ::kill( static_cast<pid_t>( pid ), 0 ) == 0 || errno != ESRCH;
+#endif
+    }
+
 #ifdef _WIN32
     void *mHandle = nullptr;
 #else
     int mHandle = -1;
 #endif
     bool mHeld = false;
+    bool mBrokeStaleLock = false;
     std::string mLockPath;
 };
 
@@ -714,7 +815,7 @@ RepairCleanupResult repairCleanup( const std::string &mirrorDirectory )
   MirrorWriterLock lock( mirrorDirectory );
   if ( !lock.held() )
     throw GeoError( ErrorCode::PermissionDenied,
-                    "another writer holds this mirror directory (single-writer contract)" );
+                    "another writer holds this mirror directory (single-writer contract); a leftover 'writer.lock' from a crashed writer is broken automatically by pid liveness or age" );
   // Read the manifest UNDER the lock (P0 review fix): reading before the
   // lock would race a materialization pass that publishes new entries while
   // we wait — this cleanup would then drop their fresh chunk files as
@@ -847,7 +948,7 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
   MirrorWriterLock lock( mirrorDirectory );
   if ( !lock.held() )
     throw GeoError( ErrorCode::PermissionDenied,
-                    "another writer holds this mirror directory (single-writer contract)" );
+                    "another writer holds this mirror directory (single-writer contract); a leftover 'writer.lock' from a crashed writer is broken automatically by pid liveness or age" );
 
   Json::Value manifest = readManifest( mirrorDirectory );
   if ( !manifest.isObject() )
@@ -1255,7 +1356,7 @@ MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
   MirrorWriterLock lock( mirrorDirectory );
   if ( !lock.held() )
     throw GeoError( ErrorCode::PermissionDenied,
-                    "another writer holds this mirror directory (single-writer contract)" );
+                    "another writer holds this mirror directory (single-writer contract); a leftover 'writer.lock' from a crashed writer is broken automatically by pid liveness or age" );
   // Read the manifest UNDER the lock (P0 review fix): a pre-lock read races
   // a materialization pass publishing new entries while we wait for the
   // lock — this pass would delete their fresh chunk files as "orphans" and

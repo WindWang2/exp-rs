@@ -24,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <future>
 #include <thread>
 
 using namespace exprs;
@@ -893,6 +894,86 @@ TEST_CASE( "registry load drops the lock across host-process spawn (issue #928)"
     fs::remove_all( root );
 }
 
+TEST_CASE( "registry unload drops the lock across the sink revoke (issue #1156)",
+           "[plugin][registry][lockdrop][issue1156]" )
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "exprs_test_lockdrop_revoke";
+    fs::remove_all( root );
+    const fs::path pluginDir = root / "org.test.gated";
+    fs::create_directories( pluginDir );
+    {
+        std::ofstream manifest( ( pluginDir / "plugin.json" ).string(), std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.gated",
+            "name": "Gated",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [{ "id": "test:gated", "display_name": "Gated", "group": "test" }]
+        })";
+    }
+
+    // Sink whose revokePlugin blocks until a "bootstrap finished" gate is
+    // set — modelling PluginRuntimeHost::revokePluginContributions taking
+    // the host mutex while bootstrap still holds it across configure().
+    class GatedSink : public RecordingSink
+    {
+    public:
+        std::atomic<bool> *gate = nullptr;
+        void revokePlugin( const std::string &pluginId ) override
+        {
+            const auto deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::seconds( 5 );
+            while ( gate && !gate->load()
+                    && std::chrono::steady_clock::now() < deadline )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            RecordingSink::revokePlugin( pluginId );
+        }
+    };
+
+    std::atomic<bool> bootstrapDone{ false };
+    GatedSink sink;
+    sink.gate = &bootstrapDone;
+
+    PluginRegistryOptions options;
+    options.roots = { root.generic_string() };
+    PluginRegistry &registry = PluginRegistry::instance();
+    registry.setContributionSink( &sink );
+    registry.configure( options );
+    REQUIRE( registry.load( "org.test.gated" ) );
+
+    // Thread B: unload reaches the sink revoke. Pre-#1156 it held the
+    // registry mutex across the call, so the concurrent configure() below
+    // could never finish and open the gate — the documented AB-BA.
+    std::future<bool> unloadDone = std::async( std::launch::async,
+        [ &registry ] { return registry.unload( "org.test.gated" ); } );
+    // Let the unload reach the revoke (it may also win the race before it;
+    // the configure leg is the one that must never be blocked behind it).
+    std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+
+    // Thread A: bootstrap's configure() takes the registry mutex, then
+    // opens the gate so the revoke can finish.
+    std::future<bool> bootstrapDoneFuture = std::async( std::launch::async, [ & ] {
+        registry.configure( options );
+        bootstrapDone.store( true );
+        return true;
+    } );
+
+    REQUIRE( bootstrapDoneFuture.wait_for( std::chrono::seconds( 5 ) )
+             == std::future_status::ready );
+    REQUIRE( bootstrapDoneFuture.get() );
+    REQUIRE( unloadDone.wait_for( std::chrono::seconds( 5 ) )
+             == std::future_status::ready );
+    REQUIRE( unloadDone.get() );
+
+    registry.unloadAll();
+    registry.setContributionSink( nullptr );
+    fs::remove_all( root );
+}
+
 // ---------------------------------------------------------------------------
 // Track 13.0 WP1/WP2/WP3: atomic install-time upgrade, bounded snapshots, GC
 // ---------------------------------------------------------------------------
@@ -1384,6 +1465,71 @@ TEST_CASE( "snapshot sweep reclaims residue but keeps live and own-pid artifacts
     // The parked dest was restored (crash between the two renames).
     REQUIRE( fs::exists( snapRoot + "/last-good-y", ec ) );
     REQUIRE( fs::exists( snapRoot + "/unrelated-dir", ec ) );
+    fs::remove_all( root, ec );
+}
+
+TEST_CASE( "snapshot sweep restores a dead-owner upgrade snapshot into a partial install (#1157)",
+           "[plugin][snapshot][p13][issue1157]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_restore" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string pluginRoot = root + "/plugins";
+    const std::string pluginDir = pluginRoot + "/org.test.crashed";
+    fs::create_directories( pluginDir, ec );
+
+    // A healthy install: manifest + payload.
+    {
+        std::ofstream manifest( pluginDir + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.crashed",
+            "name": "Crashed",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": []
+        })";
+        std::ofstream payload( pluginDir + "/payload.txt", std::ios::trunc );
+        payload << "good-version-bytes";
+    }
+
+    // A VERIFIED upgrade snapshot owned by a certainly-dead pid (INT_MAX is
+    // beyond every pid_max): the process died mid-rollback.
+    const long deadPid = static_cast<long>( std::numeric_limits<int>::max() );
+    const std::string snapshotDir =
+        pluginSnapshotRoot( root ) + "/upgrade-org.test.crashed-" + std::to_string( deadPid );
+    const PluginSnapshotResult snap = capturePluginSnapshot(
+        pluginDir, snapshotDir, "org.test.crashed", PluginSnapshotBudget::fromEnvironment() );
+    REQUIRE( snap.ok() );
+
+    // Crash mid-rollback: restorePluginSnapshot had cleared part of the
+    // live directory when the process died — plugin.json is gone, a
+    // leftover half-written new file remains.
+    fs::remove( pluginDir + "/plugin.json", ec );
+    {
+        std::ofstream partial( pluginDir + "/partial-new.txt", std::ios::trunc );
+        partial << "half-written";
+    }
+
+    const int removed =
+        sweepPluginSnapshots( root, { "org.test.crashed" }, { pluginRoot } );
+    REQUIRE( removed >= 1 );
+    // The snapshot was consumed by the RESTORE, not deleted as residue: the
+    // install is whole again (verified bytes, marker excluded), the
+    // half-written file is gone, and no snapshot is left behind.
+    REQUIRE( fs::exists( pluginDir + "/plugin.json", ec ) );
+    REQUIRE_FALSE( fs::exists( pluginDir + "/partial-new.txt", ec ) );
+    REQUIRE_FALSE( fs::exists( snapshotDir, ec ) );
+    {
+        std::ifstream restored( pluginDir + "/payload.txt" );
+        std::string bytes( ( std::istreambuf_iterator<char>( restored ) ),
+                           std::istreambuf_iterator<char>() );
+        REQUIRE( bytes == "good-version-bytes" );
+    }
     fs::remove_all( root, ec );
 }
 

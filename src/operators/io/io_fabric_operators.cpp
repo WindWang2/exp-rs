@@ -220,6 +220,13 @@ Json::Value IoCubeWindowOperator::schema() const
   params["bandIndex"] = makeIntegerParam( "bandIndex", "Source band index inside each asset" );
   params["bandRole"] = makeStringParam( "bandRole", "Resolve bands by canonical role instead", "" );
   params["mirrorDirectory"] = makeStringParam( "mirrorDirectory", "Prefer token-matched mirror hits", "" );
+  // The window was declared required but never declared as a property —
+  // the projection gate (ContractDescriptor) refuses dangling requireds.
+  Json::Value window( Json::objectValue );
+  window["name"] = "window";
+  window["type"] = "object";
+  window["description"] = "Window {x,y,w,h} in the shared catalog grid (pixels)";
+  params["window"] = window;
   Json::Value root = makeRootSchema( "Read Cube Window", description(), params, Json::Value() );
   root["required"] = makeRequired( { "catalog", "output", "window" } );
   stampDeterminismGrade( root, determinismGrade() );

@@ -482,7 +482,28 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )
             {
+                // #1150: invalid pixels (non-finite or matching a declared
+                // band NoData) propagate to the output as NaN — the raster's
+                // NoData — exactly like rs:rx_anomaly. A finite sentinel
+                // (e.g. −9999) otherwise scores as an extreme finite outlier
+                // that poisons min/max and downstream thresholds.
                 const float *x = bip + p * bandCount;
+                bool valid = true;
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    if ( !std::isfinite( x[b] )
+                         || ( hasNoDataPerBand[static_cast<size_t>( b )]
+                              && x[b] == noDataPerBand[static_cast<size_t>( b )] ) )
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                if ( !valid )
+                {
+                    tileScores[p] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 tileScores[p] =
                     isOsp ? SpectralOsp::ospScore( x, ospFilter, bandCount, &scratch )
                     : isTcimf ? SpectralTcimf::tcimfScore( x, tcimfFilter, bandCount, &scratch )

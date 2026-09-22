@@ -353,9 +353,23 @@ Json::Value httpFetchJson( const std::string &url, const HttpFetchOptions &optio
   Json::Value parsed;
   Json::CharReaderBuilder builder;
   builder[ "collectComments" ] = false;
+  // #1155: the body is remote-origin (STAC/HTTP) content — a hostile or
+  // broken origin can nest deeply enough to overflow the reader stack
+  // (SIGSEGV) instead of failing cleanly. STAC documents are shallow; bound
+  // the recursion and catch jsoncpp's limit exception as a parse failure.
+  builder[ "stackLimit" ] = 64;
   std::string parseErrors;
   std::istringstream stream( text );
-  if ( !Json::parseFromStream( builder, stream, &parsed, &parseErrors ) )
+  bool parsedOk = false;
+  try
+  {
+    parsedOk = Json::parseFromStream( builder, stream, &parsed, &parseErrors );
+  }
+  catch ( const Json::Exception & )
+  {
+    parsedOk = false;
+  }
+  if ( !parsedOk )
   {
     Json::Value details;
     details["parse_error"] = parseErrors.substr( 0, 512 );

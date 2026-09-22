@@ -161,6 +161,13 @@ Json::Value RsTemporalSmoothOperator::schema() const
   setRange( windowDays, 1e-6, 36525.0 );
   props["window_days"] = windowDays;
   props["tile_size"] = makeIntegerParam( "tile_size", "Streaming tile size (pixels)", kDefaultTileSize );
+  // #1167: gap-fill provenance channel — code-2 (interpolated) samples are
+  // excluded from the statistics (n, CIs, MK S never see synthetic samples).
+  Json::Value provenanceParam = makeStringParam(
+      "provenance",
+      "Per-scene provenance rasters from rs:temporal_gap_fill (array, one per scene, acquisition-time-sorted order; pixel 1 = observed keeps the sample, 0/2 = excluded)", "" );
+  provenanceParam["type"] = "array";
+  props["provenance"] = provenanceParam;
   props["output"] = makeOutputParam( "output",
                                      "Smoothed GeoTIFF (one band per scene date: smoothed_<date>)",
                                      "tif" );
@@ -300,6 +307,13 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   if ( !readerError.isEmpty() )
     throw RSOperatorError( ErrorCode::GdalError, readerError.toStdString() );
 
+  // #1167: optional per-scene provenance channel (rs:temporal_gap_fill's
+  // provenance output) — interpolated/unavailable samples are EXCLUDED from
+  // the statistics instead of inflating n and tightening the CIs.
+  std::unique_ptr<temporal_input::ProvenanceChannel> provenance =
+      temporal_input::ProvenanceChannel::parse(
+          params, prepared.collection, reader.width(), reader.height() );
+
   std::vector<int> analysisBands( sceneCount, 1 );
   bool anyFallback = false;
   for ( int s = 0; s < sceneCount; ++s )
@@ -402,6 +416,7 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   // values are written back in place, so no second T-tile buffer is needed.
   std::vector<float> series( tilePixels * static_cast<size_t>( sceneCount ) );
   std::vector<float> tile( tilePixels );
+  std::vector<std::uint8_t> keepMask;  // #1167 provenance keep-mask tile
   std::vector<float> pixelSeries( static_cast<size_t>( sceneCount ) );
   std::vector<float> smoothed( static_cast<size_t>( sceneCount ), kNan );
 
@@ -411,6 +426,8 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
     int x = 0, y = 0, w = 0, h = 0;
     reader.tileRect( t, &x, &y, &w, &h );
     const size_t pixels = static_cast<size_t>( w ) * h;
+    if ( provenance )
+      keepMask.assign( pixels, 1 );
 
     for ( int s = 0; s < sceneCount; ++s )
     {
@@ -418,6 +435,16 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
         throw RSOperatorError( ErrorCode::GdalError,
                                "failed reading scene " +
                                    prepared.collection.scenes().at( s ).path.toStdString() );
+      if ( provenance )
+      {
+        if ( !provenance->readKeepMask( s, x, y, w, h, keepMask.data() ) )
+          throw RSOperatorError( ErrorCode::GdalError,
+                                 "failed reading provenance mask for scene " +
+                                     std::to_string( s ) );
+        for ( size_t i = 0; i < pixels; ++i )
+          if ( !keepMask[i] )
+            tile[i] = std::numeric_limits<float>::quiet_NaN();
+      }
       std::copy( tile.begin(), tile.begin() + static_cast<std::ptrdiff_t>( pixels ),
                  series.begin() + static_cast<std::ptrdiff_t>( s * tilePixels ) );
       context.throwIfCancelled();

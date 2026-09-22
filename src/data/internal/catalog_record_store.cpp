@@ -7,6 +7,8 @@
 
 #include "catalog_record_store.h"
 
+#include <algorithm>
+
 #include <QFileInfo>
 
 namespace sicnu::data::internal
@@ -369,8 +371,21 @@ void CatalogRecordStore::reindexSourceKey( AssetId id,
 void CatalogRecordStore::insertKeys( RecordShard &shard, int recordIndex,
                                      const QStringList &keys )
 {
+    // #1161: entries must stay ASCENDING in recordIndex — probeShard takes
+    // first() as the earliest-inserted match (the pinned legacy precedence).
+    // appends from append()/rebuildIndex() are naturally ordered, but
+    // resyncKeys() re-inserts a relocated record's keys at the vector tail,
+    // which used to invert precedence for a shared path key until an
+    // unrelated rebuild. Insert positionally instead.
     for ( const QString &key : keys )
-        shard.byKey[ key ].append( PathKeyEntry{ recordIndex } );
+    {
+        auto &entries = shard.byKey[ key ];
+        auto at = std::upper_bound( entries.begin(), entries.end(), recordIndex,
+                                    []( int index, const PathKeyEntry &entry ) {
+                                        return index < entry.recordIndex;
+                                    } );
+        entries.insert( at, PathKeyEntry{ recordIndex } );
+    }
 }
 
 void CatalogRecordStore::removeKeys( RecordShard &shard, int recordIndex )

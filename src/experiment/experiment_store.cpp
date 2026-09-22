@@ -587,20 +587,66 @@ sicnu::data::Result<void> writeRunInTxnLocked( sqlite3 *db, const ExperimentRun 
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             upsert.error( db ) ) );
     }
-    // Mirror the run row into the experiment's run list.
+    // Mirror the run row into the experiment's run list (#1172: the block
+    // used to only CHECK existence — run_ids stayed empty forever, so every
+    // surface reading run_count reported 0 and the prune's run-list rewrite
+    // was dead code). Read-modify-write inside this same transaction.
     {
-        Stmt experimentExists( db, QStringLiteral( "SELECT 1 FROM experiments WHERE id=?" ) );
-        if ( !experimentExists )
+        Stmt experimentSelect( db, QStringLiteral( "SELECT json FROM experiments WHERE id=?" ) );
+        if ( !experimentSelect )
         {
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
-                                                experimentExists.error( db ) ) );
+                                                experimentSelect.error( db ) ) );
         }
-        experimentExists.bind( 1, run.experimentId() );
-        if ( !experimentExists.stepRow() )
+        experimentSelect.bind( 1, run.experimentId() );
+        if ( !experimentSelect.stepRow() )
         {
             return ResultT::failure( storeDiag( QStringLiteral( "experiment.not_found" ),
                                                 QStringLiteral( "experiment %1 does not exist" )
                                                     .arg( run.experimentId() ) ) );
+        }
+        const QString experimentJson = experimentSelect.text( 0 );
+        QJsonDocument doc;
+        {
+            QJsonParseError parseError;
+            doc = QJsonDocument::fromJson( experimentJson.toUtf8(), &parseError );
+            if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
+                                                    QStringLiteral( "experiment %1 record cannot be parsed" )
+                                                        .arg( run.experimentId() ) ) );
+            }
+        }
+        QJsonObject root = doc.object();
+        QJsonArray runIds = root.value( QStringLiteral( "run_ids" ) ).toArray();
+        bool present = false;
+        for ( const QJsonValue &v : runIds )
+        {
+            if ( v.toString() == run.runId() )
+            {
+                present = true;
+                break;
+            }
+        }
+        if ( !present )
+        {
+            runIds.append( run.runId() );
+            root.insert( QStringLiteral( "run_ids" ), runIds );
+            Stmt experimentUpdate( db, QStringLiteral(
+                "UPDATE experiments SET json=? WHERE id=?" ) );
+            if ( !experimentUpdate )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                    experimentUpdate.error( db ) ) );
+            }
+            experimentUpdate.bind( 1,
+                                   QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) ) );
+            experimentUpdate.bind( 2, run.experimentId() );
+            if ( !experimentUpdate.step() )
+            {
+                return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                                    experimentUpdate.error( db ) ) );
+            }
         }
     }
     return ResultT::success();

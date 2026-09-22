@@ -132,6 +132,17 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                               "Cannot open input raster: " + inputPath);
     }
 
+    // #1147: declared-domain preflight — the DN formula sigma0 =
+    // (DN² − noise)/A² is a linear-power kernel; a dB-domain product
+    // (internal or legacy external) would be exponentially mis-scaled while
+    // the output confidently declares linear_power. Same refusal the six
+    // downstream family operators already implement.
+    if ( sicnu::sar::readDomain( src ) == QLatin1String( "db" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "input declares SICNU_SAR_DOMAIN=db; this operator's DN formula "
+                               "is linear power — convert with rs:sar_backscatter "
+                               "inputDomain=db first" );
+
     // Declared-contract preflight: this operator applies the DN formula
     // sigma0 = (DN² − noise)/A². Re-applying it to a product that already
     // declares a calibrated state would double-scale the radiometry, a derived
@@ -215,11 +226,20 @@ Json::Value RsSarCalibrateOperator::run(const Json::Value& params,
                               : QDir::cleanPath( QDir( baseDir ).filePath( declaredLut ) );
                 const QString canonicalBase = QDir( baseDir ).canonicalPath();
                 const QString canonicalLut = QFileInfo( lutPath ).canonicalFilePath();
-                const bool contained = baseDir != QDir::rootPath()
-                                       && ( ( !canonicalBase.isEmpty()
-                                              && !canonicalLut.isEmpty()
-                                              && canonicalLut.startsWith( canonicalBase + QLatin1Char( '/' ) ) )
-                                            || lutPath.startsWith( baseDir + QLatin1Char( '/' ) ) );
+                // #1164: the canonical comparison GOVERNS wherever it can be
+                // computed (a symlink inside the directory pointing outside
+                // resolves outside — refused); the lexical form is a FALLBACK
+                // for a LUT that does not exist yet / is on a dead link,
+                // never an alternative acceptance route.
+                bool contained = false;
+                if ( baseDir != QDir::rootPath() )
+                {
+                    if ( !canonicalBase.isEmpty() && !canonicalLut.isEmpty() )
+                        contained =
+                            canonicalLut.startsWith( canonicalBase + QLatin1Char( '/' ) );
+                    else
+                        contained = lutPath.startsWith( baseDir + QLatin1Char( '/' ) );
+                }
                 if ( !contained )
                 {
                     throw RSOperatorError(

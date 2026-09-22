@@ -58,4 +58,32 @@ PreparedTemporalRun prepareTemporalRun( const Json::Value &params, RSOperatorCon
                                         const std::vector<QString> &requiredRoles,
                                         const QString &analysisRole, int analysisBandOverride );
 
+/// #1167: optional per-scene provenance channel consumed by the downstream
+/// statistics operators (rs:temporal_smooth / trend / sen_trend /
+/// phenology). `provenance` is an array of raster paths, one per scene,
+/// given in the collection's ACQUISITION-TIME-SORTED order (the order
+/// TemporalCollection::scenes() reports). Pixel codes follow
+/// temporal::SampleProvenance: 1 (observed) keeps the sample; 0/2
+/// (unavailable/interpolated) EXCLUDES it from the statistics — synthetic
+/// samples must not inflate n, tighten Student-t/Sen CIs, or enter the MK S
+/// pairs. Grid identity with the scenes is enforced (typed refusal).
+class ProvenanceChannel
+{
+public:
+  /// Returns nullptr when the operator was given no `provenance` parameter;
+  /// throws RSOperatorError on a malformed/mismatched declaration.
+  static std::unique_ptr<ProvenanceChannel> parse( const Json::Value &params,
+                                                   const temporal::TemporalCollection &collection,
+                                                   int referenceWidth, int referenceHeight );
+  ~ProvenanceChannel();
+
+  /// Fills @a keep (w*h bytes) with 1 = keep, 0 = exclude for @a scene.
+  bool readKeepMask( int sceneIndex, int x, int y, int w, int h, std::uint8_t *keep );
+
+private:
+  ProvenanceChannel() = default;
+  struct Impl;
+  std::unique_ptr<Impl> m_impl;
+};
+
 } // namespace sicnu::operators::rs::temporal_input

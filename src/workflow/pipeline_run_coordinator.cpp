@@ -393,7 +393,8 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document, const
 NodeExecutor makeSyntheticNodeExecutor()
 {
     return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
-               const QString &runDirectory ) -> NodeExecutionResult {
+               const QString &runDirectory,
+               const std::atomic<bool> *cancelRequested ) -> NodeExecutionResult {
         NodeExecutionResult result;
         QDir().mkpath( runDirectory );
         const QString artifact =
@@ -608,7 +609,11 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
     m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
     m_state->finished = false;
     m_state->success = false;
-    m_state->cancelRequested = false;
+    // #1158: do NOT clear the cancel flag here. The previous run is
+    // terminal (its finalization cleared the flag), so a set flag can only
+    // be a requestCancel whose phase-2 hop is queued behind this start —
+    // wiping it would swallow that cancel (nodes completing before the hop
+    // would be recorded Succeeded with full artifact identity).
     m_state->statuses.clear();
     m_state->remainingParents.clear();
     m_state->provenancePath.clear();
@@ -655,9 +660,17 @@ void PipelineRunCoordinator::requestCancelOnAffinity()
 {
     // Cancelling an idle coordinator must not emit a phantom completion:
     // with no document loaded there is nothing to cancel and finalizeIfDone
-    // would emit "0 succeeded" for a run that never existed.
-    if ( m_state->def.nodes.isEmpty() )
+    // would emit "0 succeeded" for a run that never existed. The phase-1
+    // store this hop followed has already tripped the atomic — un-trip it
+    // HERE (#1158): clearing a lock-free foreign-writer flag anywhere on
+    // the start/resume paths swallowed cancels that raced the clear.
+    if ( m_state->def.nodes.isEmpty() || m_state->finished )
+    {
+        // Nothing to cancel (no document, or the loaded run is already
+        // terminal — finalizeIfDone's early return skips its own clear).
+        m_state->cancelRequested.store( false, std::memory_order_relaxed );
         return;
+    }
     markRemaining( ExecutionState::Cancelled );
     dispatchReadyNodes(); // nothing will be dispatched; drive finalization
     finalizeIfDone();
@@ -768,12 +781,18 @@ void PipelineRunCoordinator::dispatchReadyNodes()
         // The executor is copied into the worker: no shared mutable state
         // crosses the thread boundary, and no worker blocks on a peer node.
         NodeExecutor executor = m_state->executor;
+        // #1152: hand the run's cooperative cancel flag to the executor so
+        // requestCancel() aborts a long-running registry operator mid-run
+        // instead of freezing the GUI thread for the node's full duration.
+        // RunState's destructor drains the pool before destruction, so the
+        // pointer outlives every worker that can read it.
+        const std::atomic<bool> *cancelFlag = &m_state->cancelRequested;
         const qint64 startedAt = QDateTime::currentMSecsSinceEpoch();
         m_state->pool.start( [self, node, inputArtifacts, runDirectory, startedAt,
-                              executor = std::move( executor )]() {
+                              cancelFlag, executor = std::move( executor )]() {
             NodeExecutionResult result;
             if ( executor )
-                result = executor( node, inputArtifacts, runDirectory );
+                result = executor( node, inputArtifacts, runDirectory, cancelFlag );
             else
             {
                 // #1006 fail-closed: no bound executor means no silent
@@ -971,6 +990,12 @@ void PipelineRunCoordinator::finalizeIfDone()
             .arg( skipped )
             .arg( failed )
             .arg( cancelled ) );
+
+    // The run is terminal: the cancel flag describes THIS run only, so
+    // clear it now — never earlier (#1158). A foreign requestCancel that
+    // lands after this point takes the idle path, which clears its own
+    // phase-1 store.
+    m_state->cancelRequested.store( false, std::memory_order_relaxed );
 }
 
 void PipelineRunCoordinator::persistCheckpoint()
@@ -1036,13 +1061,11 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
         return fail( QStringLiteral( "a run is already active on this coordinator" ) );
 
-    // Clear any STALE cancel flag before the verification loop: an idle
-    // requestCancel (no run loaded) trips the atomic and returns without
-    // touching state, so without this reset the loop's cancel check would
-    // refuse a perfectly good resume (Track 13 review P1). A cancel that
-    // arrives DURING this resume still trips the flag via requestCancel's
-    // phase 1 and aborts at the loop checks below.
-    m_state->cancelRequested.store( false, std::memory_order_relaxed );
+    // #1158: no stale-clear before the verification loop. Stale flags can
+    // no longer exist (finalizeIfDone clears at terminal state; the idle
+    // requestCancel hop clears its own phase-1 store), so a set flag here
+    // is a LIVE cancel — the loop's checks abort on it and the commit
+    // below refuses when it is set.
 
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
@@ -1221,6 +1244,20 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     if ( restored.size() != resumedDef.nodes.size() )
         return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
 
+    // #1158: a cancel that landed during verification must not be wiped by
+    // the commit (the pre-fix clear swallowed it — already-dispatched nodes
+    // then recorded Succeeded with full artifact identity and poisoned the
+    // resume cache). Refuse the resume instead: nothing has run yet.
+    if ( m_state->cancelRequested.load( std::memory_order_relaxed ) )
+    {
+        // The cancel is honored by this refusal — nothing started, so
+        // consume it here rather than leaving it to poison the next resume
+        // (finalizeIfDone early-returns on the already-terminal state and
+        // would never clear it).
+        m_state->cancelRequested.store( false, std::memory_order_relaxed );
+        return fail( QStringLiteral( "resume cancelled before it started" ) );
+    }
+
     // All validation passed — commit to run state in one step. The attempt
     // counter continues from the checkpoint so this resume's provenance file
     // does not overwrite the record of the attempt it reuses artifacts from.
@@ -1231,7 +1268,6 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     m_state->checkpointPath = checkpointFilePath;
     m_state->finished = false;
     m_state->success = false;
-    m_state->cancelRequested = false;
     m_state->statuses = restored;
     m_state->remainingParents.clear();
     m_state->provenancePath.clear();

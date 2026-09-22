@@ -17,7 +17,18 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [],
+    "failure_modes" : [
+   {
+    "code" : "GRID_MISMATCH",
+    "when" : "the optical and SAR inputs are not on the same pixel grid",
+    "remedy" : "co-register both inputs first (rs:align or io:warp); the operator never resamples"
+   },
+   {
+    "code" : "INVALID_PARAMETER",
+    "when" : "a band name in the fusion band list is missing from one of the inputs",
+    "remedy" : "check band names against each input's wavelength metadata before running"
+   }
+  ],
     "family" : "temporal",
     "io" : 
     {
@@ -97,7 +108,7 @@
     "operator_group" : "temporal",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "",
+    "summary" : "Fuse co-registered optical and SAR temporal feature rasters into one stacked feature cube",
     "teaching_use" : {}
   },
   "description" : "Feature-level fusion of already-coregistered optical and SAR temporal feature rasters. Both inputs must share the SAME pixel grid (width, height, geotransform, CRS); the operator verifies the grid signature and concatenates bands as opt_<name> / sar_<name> with fusion provenance metadata. Registration, resampling and reprojection are NOT performed \u2014 a grid mismatch is a typed error, keeping 'coregister' and 'fuse' as separate, explicit steps.",
