@@ -95,15 +95,21 @@ of them and without touching the engine.
    one — budget/no-progress aborts and refusals are absorbing) resumes
    from its persisted journal, and only from a stage whose inputs are
    re-derived from the request (`goal_normalization`,
-   `data_state_snapshot`, `plan_request`): resuming at or after execution
-   would deliver or verify state the process never had. The machine
+   `data_state_snapshot`): everything from `plan_request` onward
+   dispatches on in-memory state the journal does not carry as values
+   (plan draft, snapshot, preflight report, execution outcome), so a
+   resume there would run real seams over default-constructed state and
+   fabricate a delivery — the session must restart instead. The machine
    rewinds to the journal's final stage with the replan count restored;
    the sequence, the decision numbering, the logical clock, the step
-   count, the no-progress failure keys, the approved repairs, and the
-   last failure code are all rebuilt from the journal; no seam is
-   re-invoked for work already recorded. The data-state snapshot is
+   count, and the journalled goal are rebuilt from the journal (at the
+   pre-plan stages the failure keys and approved repairs are empty by
+   construction); no seam is re-invoked for work already recorded. A
+   resumed session must restate the journalled goal — a different goal
+   is refused (`SESSION_GOAL_MISMATCH`). The data-state snapshot is
    re-taken as a read-only fact step (the harness session store's
-   staleness philosophy).
+   staleness philosophy). (Amended on hardening/agent-harness-session-autonomy
+   to describe the resume contract actually shipped in RS14-11.)
 
 ## Consequences
 

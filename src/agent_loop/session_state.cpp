@@ -25,7 +25,7 @@ struct Edge {
     std::string_view to;
 };
 
-constexpr std::array< Edge, 38 > kEdges = { {
+constexpr std::array< Edge, 37 > kEdges = { {
     // The happy chain.
     { stages::kGoalNormalization, stages::kDataStateSnapshot },
     { stages::kDataStateSnapshot, stages::kPlanRequest },

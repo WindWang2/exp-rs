@@ -75,8 +75,6 @@ ScientificAgentSession::ScientificAgentSession( SessionPolicy policy, Dependenci
         mClockValue = std::max( mClockValue, entry.at + 1 );
         if ( entry.event == "stage_enter" && isKnownStage( entry.stage ) )
             mVisitedStages.push_back( entry.stage );
-        if ( entry.event == "terminal" )
-            ++mStepCount;
         if ( !entry.decision )
             continue;
         mDecisions.push_back( *entry.decision );
@@ -220,6 +218,7 @@ SessionResult ScientificAgentSession::run( const SessionRunRequest &request )
     {
         DecisionRecord decision;
         decision.inputs[ "journalled_goal" ] = mGoal;
+        decision.inputs[ "requested_goal" ] = request.goal;
         decision.selected[ "action" ] = "refuse";
         decision.reason = "resumed session was run with a different goal";
         recordDecision( stages::kGoalNormalization, std::move( decision ) );

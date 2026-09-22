@@ -156,7 +156,9 @@ AutonomyPolicyParseResult parseAutonomyPolicy( const Json::Value &doc )
                     const bool allowedOnDeny = parsed.decision == "deny" &&
                         reasonCode.isString() &&
                         reasonCode.asString() == autonomy_reason_codes::kAllowed;
-                    if ( knownCode && !allowedOnDeny )
+                    if ( !reasonCode.isString() )
+                        result.errors.emplace_back( "policy.override.reason_code.not_string:" + capability );
+                    else if ( knownCode && !allowedOnDeny )
                         parsed.reasonCode = reasonCode.asString();
                     else
                         result.errors.emplace_back( "policy.override.reason_code.unknown:" + capability );

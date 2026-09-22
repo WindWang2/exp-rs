@@ -478,9 +478,18 @@ class DiagnoseRunTool final : public SpatialTool
         out["diagnosis"] = diagnosis;
         return SpatialToolResult::ok( std::move( out ) );
       }
-      seenProposalSignatures( runId ).insert( signature );
-      bounds["distinct_proposal_sets"] =
-          static_cast<Json::Int>( seenProposalSignatures( runId ).size() );
+      // Grow the per-run seen-set only while the diagnose budget is live:
+      // past the budget the proposals stop being actionable, so an
+      // adversarial caller must not be able to grow the (bounded) ledger
+      // by varying the plan document.
+      if ( attempts < kMaxDiagnoseAttempts )
+      {
+        std::set<std::string> &seen = seenProposalSignatures( runId );
+        constexpr size_t kMaxDistinctSignaturesPerRun = 16;
+        if ( seen.size() < kMaxDistinctSignaturesPerRun )
+            seen.insert( signature );
+        bounds["distinct_proposal_sets"] = static_cast<Json::Int>( seen.size() );
+      }
       lastProposalSignature( runId ) = signature;
 
       if ( attempts >= kMaxDiagnoseAttempts && !deduped.empty() )

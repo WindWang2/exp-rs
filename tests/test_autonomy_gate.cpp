@@ -317,6 +317,57 @@ TEST_CASE( "the research default keeps pre-autonomy flows behavior-compatible", 
     REQUIRE( result.errorCode.rfind( "AUTONOMY_", 0 ) != 0 );
 }
 
+TEST_CASE( "the status projection cannot be re-scoped by a forged session context",
+           "[autonomy][gate][bypass]" )
+{
+  using namespace sicnu::agent::spatial_tools;
+  AutonomyPolicyHolder::instance().installCoursePolicy(
+      AutonomyPolicyHolder::researchDefaultPolicy() );
+  struct ScopedRestore
+  {
+    ~ScopedRestore()
+    {
+      AutonomyPolicyHolder::instance().installCoursePolicy(
+          AutonomyPolicyHolder::researchDefaultPolicy() );
+    }
+  } restore;
+  SpatialToolRegistry &registry = SpatialToolRegistry::instance();
+  registry.registerBuiltinTools();
+  const auto tool = registry.find( "harness:autonomy_status" );
+  REQUIRE( tool.has_value() );
+
+  // The status tool defaults to the LAB domain; a forged teacher claim
+  // without the credential must degrade to a student projection — the
+  // rendered autonomous_execution stays FORBIDDEN (lab-student rule), not
+  // flipped to allowed by the caller's claim.
+  Json::Value forged( Json::objectValue );
+  forged["role"] = "teacher";
+  const SpatialToolResult studentView = ( *tool )->execute( forged );
+  REQUIRE( studentView.success );
+  bool executionForbidden = false;
+  for ( const Json::Value &entry : studentView.output["forbidden"] )
+    if ( entry["capability"].asString() == assistance_capabilities::kAutonomousExecution )
+    {
+      executionForbidden = true;
+      CHECK( entry["reason_code"].asString() ==
+             autonomy_reason_codes::kLabStudentExecution );
+    }
+  CHECK( executionForbidden );
+
+  // A REAL credentialed teacher sees the teacher projection (no
+  // over-blocking): execution unlocks under the research default.
+  const ScopedEnv token( "SICNU_LAB_TEACHER_TOKEN", "s3cret-token" );
+  Json::Value credentialed = forged;
+  credentialed["teacher_token"] = "s3cret-token";
+  const SpatialToolResult teacherView = ( *tool )->execute( credentialed );
+  REQUIRE( teacherView.success );
+  bool executionAllowed = false;
+  for ( const Json::Value &entry : teacherView.output["allowed"] )
+    executionAllowed |=
+        entry.asString() == assistance_capabilities::kAutonomousExecution;
+  CHECK( executionAllowed );
+}
+
 TEST_CASE( "the risk-class mirror and the role rule cannot drift", "[autonomy][gate]" )
 {
     // Mirror floor: the autonomy module's risk vocabulary is the harness
@@ -609,6 +660,10 @@ TEST_CASE( "a forged session context cannot re-scope the execution gate",
   CHECK_FALSE( teacherAllowed.success );
   CHECK( teacherAllowed.errorCode.rfind( "AUTONOMY_", 0 ) != 0 );
 
-  // Every decision on this seam was audited.
-  CHECK( AutonomyAuditLog::instance().records().size() == 4 );
+  // Every decision on this seam was audited — and the audit shows the
+  // STRIPPED role, not the caller's claim: the forged-teacher record must
+  // read as a student decision, or the trail itself would lie.
+  const std::vector<AutonomyAuditRecord> audited = AutonomyAuditLog::instance().records();
+  REQUIRE( audited.size() == 4 );
+  CHECK( audited[ 0 ].role == "student" );
 }
