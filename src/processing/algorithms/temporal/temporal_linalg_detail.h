@@ -240,8 +240,8 @@ inline float localPolynomialAt( const std::vector<float> &y,
 
 
 /// Robust scale σ̂ = 1.4826 · MAD(r) where MAD = median(|r − median(r)|).
-/// Even counts take the upper middle via nth_element (same convention as the
-/// Whittaker IRLS in temporal_smoothing.cpp). Empty input → 0.
+/// Even counts take the mean of the two middle elements (same convention as
+/// the Whittaker IRLS in temporal_smoothing.cpp). Empty input → 0.
 inline double madScale( std::vector<double> residuals )
 {
   if ( residuals.empty() )
