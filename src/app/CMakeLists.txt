@@ -162,6 +162,11 @@ add_executable(sicnu_geo_rs
     workbench/temporal_workbench_panel.cpp
     workbench/georef_dual_window.cpp
     workbench/dataset_experiment_panel.cpp
+    # Experiment Exploration Studio (teaching projection UI over study/fault/debugger)
+    experiment_studio/experiment_studio_dock.cpp
+    experiment_studio/experiment_studio_dock.h
+    experiment_studio/sensitivity_chart_widget.cpp
+    experiment_studio/sensitivity_chart_widget.h
     workbench/model_workbench_panel.cpp
     cartography/cartography_dock.cpp
 
@@ -417,6 +422,8 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::help_gui
     Sicnu::dataset
     Sicnu::experiment
+    Sicnu::study
+    Sicnu::experiment_studio
     # D5: desktop lab auto-recording surface + lab report builder (bridge
     # converts coordinator truth into experiment records).
     Sicnu::experiment_bridge

@@ -27,6 +27,7 @@
 #include "workbench/shutdown_policy.h"
 #include "workbench/temporal_workbench_panel.h"
 #include "workbench/dataset_experiment_panel.h"
+#include "experiment_studio/experiment_studio_dock.h"
 #include "workbench/model_workbench_panel.h"
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
@@ -595,6 +596,23 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             m_windowMenu->addAction( action );
     }
 
+
+    // ── Experiment Exploration Studio (study/fault/debugger projection) ──
+    // Teaching surface over Parameter Study + FaultLab + First Divergence.
+    // Owns no second sweep / thread pool; cancel propagates via TaskCenter.
+    m_experimentStudioDock = new sicnu::app::ExperimentStudioDock( this );
+    m_experimentStudioDock->setObjectName( QStringLiteral( "rsExperimentExplorationStudioDock" ) );
+    m_experimentStudioDock->setAllowedAreas( Qt::LeftDockWidgetArea |
+                                             Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_experimentStudioDock );
+    m_experimentStudioDock->hide();
+    if ( m_windowMenu )
+    {
+        if ( QAction *action = m_commandRegistry->action(
+                 QStringLiteral( "workbench.experimentExplorationStudio" ), true ) )
+            m_windowMenu->addAction( action );
+    }
+
     // ── Model bench (Workbench 7.0 §F) ────────────────────────────────
     // Catalog/readiness/manifest projection over ModelCatalog + ModelRuntime;
     // test inference submits rs:infer through TaskCenter (goal §F seam).
@@ -923,6 +941,16 @@ void QgisDesktopWindow::showDatasetExperimentBench()
     m_datasetExperimentPanel->raise();
     m_datasetExperimentPanel->activateWindow();
 }
+
+void QgisDesktopWindow::showExperimentExplorationStudio()
+{
+    if ( !m_experimentStudioDock )
+        return;
+    m_experimentStudioDock->show();
+    m_experimentStudioDock->raise();
+    m_experimentStudioDock->activateWindow();
+}
+
 
 void QgisDesktopWindow::showModelBench()
 {

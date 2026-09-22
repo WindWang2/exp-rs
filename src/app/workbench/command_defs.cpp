@@ -301,6 +301,13 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
+        RS_CMD( d, "workbench.experimentExplorationStudio", QObject::tr( "Experiment Exploration Studio" ),
+                QObject::tr( "Parameter sensitivity, spatial compare, fault teaching, first divergence" ),
+                "experiment_studio", QObject::tr( "Workbench" ) );
+        d.handler = [window] { window->showExperimentExplorationStudio(); };
+        registry->registerCommand( d );
+    }
+    {
         RS_CMD( d, "workbench.model", QObject::tr( "Model Workbench" ),
                 QObject::tr( "Browse the model catalog, readiness and submit test inference." ),
                 "model_builder", QObject::tr( "Workspace" ) );
