@@ -60,8 +60,39 @@ ScientificAgentSession::ScientificAgentSession( SessionPolicy policy, Dependenci
     : mPolicy( std::move( policy ) ), mDeps( deps ), mJournal( std::move( adopted ) ),
       mClock( std::move( clock ) ), mAttempt( attempt ), mDecisionSeq( decisionSeq )
 {
+    // Everything the continued loop needs is rebuilt from the journal — the
+    // resume() restriction below guarantees the machine is parked at a
+    // pre-plan stage, so the rebuildable state is exactly the evidence
+    // trail (decisions, visited stages, logical clock, goal) plus the
+    // cursor. Later-stage state (plan, snapshot, outcome) is deliberately
+    // NOT rebuilt: a journal parked past the plan seam is refused by
+    // resume(), because no value reconstruction can make a preflight over
+    // a default-constructed plan honest.
     const SessionJournal::ReplayResult replay = mJournal.replay();
     mMachine.rewindTo( replay.finalStage, replay.replanCount );
+    for ( const JournalEntry &entry : mJournal.entries() )
+    {
+        mClockValue = std::max( mClockValue, entry.at + 1 );
+        if ( entry.event == "stage_enter" && isKnownStage( entry.stage ) )
+            mVisitedStages.push_back( entry.stage );
+        if ( !entry.decision )
+            continue;
+        mDecisions.push_back( *entry.decision );
+        if ( entry.decision->stage == stages::kGoalNormalization )
+        {
+            const Json::Value &goal = entry.decision->inputs[ "goal" ];
+            if ( goal.isString() )
+                mGoal = goal.asString();
+        }
+    }
+    // Stage-enter iterations are counted too: the run()-entry note covers
+    // the first iteration and each enterStage() note covers one more, so
+    // the step budget continues where the cancelled session left off.
+    mStepCount += static_cast< int >(
+        std::count_if( mJournal.entries().begin(), mJournal.entries().end(),
+                       []( const JournalEntry &entry ) {
+                           return entry.event == "stage_enter";
+                       } ) );
 }
 
 std::optional< ScientificAgentSession > ScientificAgentSession::resume(
@@ -78,6 +109,16 @@ std::optional< ScientificAgentSession > ScientificAgentSession::resume(
     if ( !replay.terminalState.empty() && !resumableCancel )
         return std::nullopt; // terminal: nothing to resume
     if ( replay.finalStage.empty() || !isKnownStage( replay.finalStage ) )
+        return std::nullopt;
+    // Only the pre-plan stages are resumable. Everything from plan_request
+    // onward dispatches on in-memory state the journal does not carry as
+    // values (plan draft, data snapshot, preflight report, execution
+    // outcome); resuming there would run real seams over
+    // default-constructed state and fabricate a delivery this process
+    // never produced. A session parked that far restarts as a new session
+    // (its journal stays as evidence).
+    if ( replay.finalStage != stages::kGoalNormalization &&
+         replay.finalStage != stages::kDataStateSnapshot )
         return std::nullopt;
 
     int decisionSeq = 0;
@@ -169,12 +210,38 @@ SessionResult ScientificAgentSession::run( const SessionRunRequest &request )
 {
     SessionResult result;
     result.sessionId = mJournal.sessionId();
+
+    // One session narrates one mission. A resumed session must restate the
+    // journalled goal — a swapped goal would splice two missions into one
+    // evidence summary under shared budget counters.
+    if ( !mGoal.empty() && mGoal != request.goal )
+    {
+        DecisionRecord decision;
+        decision.inputs[ "journalled_goal" ] = mGoal;
+        decision.inputs[ "requested_goal" ] = request.goal;
+        decision.selected[ "action" ] = "refuse";
+        decision.reason = "resumed session was run with a different goal";
+        recordDecision( stages::kGoalNormalization, std::move( decision ) );
+        refuse( stop_reasons::kGoalMismatch );
+        result.ok = false;
+        result.terminalState = mMachine.terminalState();
+        result.stopReason = mStopReason;
+        result.summary = buildSummary();
+        result.journal = mJournal;
+        return result;
+    }
     mGoal = request.goal;
 
     // The machine starts at goal_normalization; record the entry so the
     // journal shows every stage the session visited, including the first.
-    note( "stage_enter", mMachine.stage(), Json::Value( Json::objectValue ) );
-    mVisitedStages.push_back( mMachine.stage() );
+    // A resumed session is already parked at its stage — the journal holds
+    // that stage_enter, and appending a second one would double-count the
+    // stage in replay-derived counters.
+    if ( mJournal.size() == 0 )
+    {
+        note( "stage_enter", mMachine.stage(), Json::Value( Json::objectValue ) );
+        mVisitedStages.push_back( mMachine.stage() );
+    }
 
     std::string policyError;
     if ( !mPolicy.validate( &policyError ) )
@@ -377,14 +444,21 @@ bool ScientificAgentSession::stagePreflight()
         return refuse( stop_reasons::kPreflightBlocked );
     }
 
-    if ( mPreflightReport.verdict == "fixable" )
+    // Fail-closed: a preflight implementation that reports verdict "ok"
+    // while still carrying repair proposals is treated as fixable — the
+    // proposals route through repair approval instead of being silently
+    // executed past. (Strictest-class proposals may never ride an ok
+    // verdict into execution.)
+    const bool fixable = mPreflightReport.verdict == "fixable" ||
+                         !mPreflightReport.proposals.empty();
+    if ( fixable )
     {
         if ( !executeMode && mPolicy.mode == RunMode::DryRun )
         {
             // dry_run reports what WOULD happen, including the approvals a
             // real run would need; it never applies repairs itself.
             DecisionRecord decision;
-            decision.inputs[ "verdict" ] = "fixable";
+            decision.inputs[ "verdict" ] = mPreflightReport.verdict;
             Json::Value proposals( Json::arrayValue );
             for ( const RepairProposal &proposal : mPreflightReport.proposals )
             {
@@ -465,8 +539,14 @@ bool ScientificAgentSession::stageRepairApproval()
 
     if ( !approved.empty() )
     {
+        // Same dedup discipline as stageDiagnose: the same rule id must
+        // never accumulate across replan rounds — duplicated ids would
+        // change the plan identity without changing the science and defeat
+        // the no-progress detector.
         for ( const std::string &ruleId : approved )
-            mApprovedRepairs.push_back( ruleId );
+            if ( std::find( mApprovedRepairs.begin(), mApprovedRepairs.end(), ruleId ) ==
+                 mApprovedRepairs.end() )
+                mApprovedRepairs.push_back( ruleId );
         return enterStage( stages::kReplan );
     }
 

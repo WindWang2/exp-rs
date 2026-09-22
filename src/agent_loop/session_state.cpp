@@ -25,7 +25,7 @@ struct Edge {
     std::string_view to;
 };
 
-constexpr std::array< Edge, 38 > kEdges = { {
+constexpr std::array< Edge, 37 > kEdges = { {
     // The happy chain.
     { stages::kGoalNormalization, stages::kDataStateSnapshot },
     { stages::kDataStateSnapshot, stages::kPlanRequest },
@@ -43,7 +43,6 @@ constexpr std::array< Edge, 38 > kEdges = { {
     { stages::kExecute, stages::kDiagnose },
     { stages::kDiagnose, stages::kReplan },
     { stages::kReplan, stages::kPlanRequest },
-    { stages::kDiagnose, terminal_states::kRefused },
     { stages::kDelivery, terminal_states::kDelivered },
     // A failed execution is diagnosed, never silently retried.
     // (execute → diagnose above.)

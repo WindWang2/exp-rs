@@ -58,6 +58,9 @@ inline constexpr const char *kResourceOverBudget = "RESOURCE_OVER_BUDGET";
 inline constexpr const char *kCancelled = "CANCELLED";
 inline constexpr const char *kTeachingRefusal = "TEACHING_REFUSAL";
 inline constexpr const char *kInvalidPlan = "INVALID_PLAN";
+/// A resumed session was run with a goal other than the journalled one:
+/// one session narrates one mission; a swapped goal must start a new one.
+inline constexpr const char *kGoalMismatch = "SESSION_GOAL_MISMATCH";
 } // namespace stop_reasons
 
 /// Machine-readable error codes for state-machine misuse.

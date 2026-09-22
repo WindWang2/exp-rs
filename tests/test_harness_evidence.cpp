@@ -445,3 +445,78 @@ TEST_CASE( "adversarial-review remediations hold", "[harness][evidence8][review]
         CHECK_FALSE( evidence::readVerificationEvidence( raster, "run-B" ).has_value() );
     }
 }
+
+TEST_CASE( "an unverifiable extent degrades to a warning, never a false FAIL",
+           "[harness][evidence][extent]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // A ROTATED geotransform is not an error: the coverage check simply
+    // cannot answer for it. The check must ride as an honest warning
+    // (PASS_WITH_WARNINGS) — escalating it to error severity fails a valid
+    // product for a property it never claimed.
+    GDALAllRegister();
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    const QString path = dir.filePath( QStringLiteral( "rotated.tif" ) );
+    GDALDataset *ds = driver->Create( path.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double rotatedGt[6] = { 500000.0, 30.0, 10.0, 5000000.0, 5.0, -30.0 };
+    ds->SetGeoTransform( rotatedGt );
+    OGRSpatialReference srs;
+    if ( srs.importFromEPSG( 32650 ) == OGRERR_NONE )
+    {
+        char *wkt = nullptr;
+        srs.exportToWkt( &wkt );
+        ds->SetProjection( wkt );
+        CPLFree( wkt );
+    }
+    float row[8] = {};
+    for ( int y = 0; y < 8; ++y )
+        ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, y, 8, 1, row, 8, 1, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+
+    VerificationExpectations expectations;
+    expectations.crs = "EPSG:32650";
+    Json::Value extent( Json::objectValue );
+    extent["xmin"] = 499990.0;
+    extent["ymin"] = 4999760.0;
+    extent["xmax"] = 500250.0;
+    extent["ymax"] = 5000010.0;
+    expectations.expectedExtent = extent;
+
+    const ArtifactVerification verified = verifyArtifact( path.toStdString(), expectations );
+    bool extentCheckFound = false;
+    for ( const VerificationCheck &check : verified.checks )
+        if ( check.check == "extent_covers_aoi" )
+        {
+            extentCheckFound = true;
+            INFO( "severity: " << check.severity );
+            CHECK( check.passed == false );
+            CHECK( check.severity == "warning" );
+        }
+    CHECK( extentCheckFound );
+    CHECK( verified.verdict == Verdict::PassWithWarnings );
+}
+
+TEST_CASE( "a completed run with no verifiable artifacts never reads as success",
+           "[harness][evidence][integrity]" )
+{
+    using namespace sicnu::workflow;
+    auto run = std::make_shared<WorkflowRun>();
+    REQUIRE( run->setRunId( "run-empty-outputs" ) );
+    StepPlan step;
+    step.stepId = "s1";
+    step.operatorId = "rs:contrast_stretch";
+    step.status = "Completed";
+    step.outputLayerPath = ""; // completed without an output path
+    run->setStepPlans( { step } );
+    run->forceSetState( WorkflowRunState::Completed );
+
+    // Observation surface (persistEvidence=false): strictly read-only.
+    const Json::Value doc = runResultDocument( run, nullptr, false );
+    CHECK( doc["status"].asString() == "failed" );
+    CHECK( doc["verification"]["verdict"].asString() == "FAIL" );
+    CHECK( doc["verification"]["reason"].asString().find( "claim without evidence" )
+           != std::string::npos );
+}

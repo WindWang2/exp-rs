@@ -197,3 +197,49 @@ TEST_CASE( "policy text parse reports typed errors without throwing", "[autonomy
     REQUIRE_FALSE( broken.ok );
     REQUIRE_FALSE( broken.errors.empty() );
 }
+
+TEST_CASE( "override reason codes come from the closed vocabulary only",
+           "[autonomy][policy]" )
+{
+    // A deny's reason_code rides verbatim into the decision and the audit
+    // log: a caller-chosen string would break the closed nine-code
+    // contract, so the parse refuses it (and "allowed" on a deny).
+    const Json::Value attacker = parseOrThrow( R"({
+      "schema": "sicnu.autonomy-policy/1",
+      "level": "L0",
+      "capability_overrides": {
+        "next_step_recommendation":
+            { "decision": "deny", "reason_code": "ATTACKER_CHOSEN_CODE" }
+      }
+    })" );
+    const AutonomyPolicyParseResult refused = parseAutonomyPolicy( attacker );
+    CHECK_FALSE( refused.ok );
+    bool unknownReported = false;
+    for ( const std::string &error : refused.errors )
+        unknownReported |= error.find( "reason_code.unknown" ) != std::string::npos;
+    CHECK( unknownReported );
+
+    const Json::Value allowedOnDeny = parseOrThrow( R"({
+      "schema": "sicnu.autonomy-policy/1",
+      "level": "L0",
+      "capability_overrides": {
+        "next_step_recommendation":
+            { "decision": "deny", "reason_code": "AUTONOMY_ALLOWED" }
+      }
+    })" );
+    CHECK_FALSE( parseAutonomyPolicy( allowedOnDeny ).ok );
+
+    const Json::Value known = parseOrThrow( R"({
+      "schema": "sicnu.autonomy-policy/1",
+      "level": "L0",
+      "capability_overrides": {
+        "next_step_recommendation":
+            { "decision": "deny", "reason_code": "AUTONOMY_COURSE_CAP" }
+      }
+    })" );
+    const AutonomyPolicyParseResult accepted = parseAutonomyPolicy( known );
+    CHECK( accepted.ok );
+    CHECK( accepted.policy.overrides.size() == 1 );
+    CHECK( accepted.policy.overrides[0].second.reasonCode ==
+           "AUTONOMY_COURSE_CAP" );
+}

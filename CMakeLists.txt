@@ -836,6 +836,10 @@ add_subdirectory(src/operators)
 # Contract Platform 9.0: canonical descriptors, contract graph and the
 # mechanical drift scanners (test/tooling side, zero product runtime cost).
 add_subdirectory(src/contracts)
+# RS14-11: evidence-first agent session orchestration — pure C++20 core
+# (state machine, decision records, journal, seams). The Qt-capable
+# production adapter and tool live in src/agent/tools.
+add_subdirectory(src/agent_loop)
 # RS14-01 Scientific Data Passport: versioned read-only scientific asset
 # state layer (Qt-free, jsoncpp-only core).
 add_subdirectory(src/scientific_state)

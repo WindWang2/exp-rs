@@ -277,10 +277,17 @@ ArtifactVerification verifyArtifact( const std::string &path,
         }
         else
         {
-          Json::Value note;
-          note["reason"] = "rotated or missing geotransform; coverage not verifiable";
-          addCheck( result.checks, "extent_covers_aoi", false,
-                    error_codes::kOutputInvalid, "warning", std::move( note ) );
+          // Coverage is NOT VERIFIABLE here, not wrong: the check rides as
+          // an honest warning (built directly — addCheck escalates every
+          // failed check to error severity, which would turn an
+          // unverifiable extent into a false FAIL).
+          VerificationCheck check;
+          check.check = "extent_covers_aoi";
+          check.passed = false;
+          check.severity = "warning";
+          check.code = error_codes::kOutputInvalid;
+          check.details["reason"] = "rotated or missing geotransform; coverage not verifiable";
+          result.checks.push_back( std::move( check ) );
         }
       }
 

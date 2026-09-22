@@ -1,6 +1,8 @@
 // src/agent/autonomy/autonomy_policy.cpp
 #include "agent/autonomy/autonomy_policy.h"
 
+#include "agent/autonomy/autonomy_decision.h"
+
 #include <algorithm>
 #include <set>
 
@@ -145,10 +147,21 @@ AutonomyPolicyParseResult parseAutonomyPolicy( const Json::Value &doc )
                 const Json::Value &reasonCode = entry[ "reason_code" ];
                 if ( !reasonCode.isNull() )
                 {
-                    if ( reasonCode.isString() )
+                    // The deny reason rides into decisions and the audit
+                    // log verbatim: only the closed reason-code vocabulary
+                    // may be injected, never a caller-chosen string — and
+                    // a deny never carries "allowed" as its reason.
+                    const bool knownCode = reasonCode.isString() &&
+                        isKnownAutonomyReasonCode( reasonCode.asString() );
+                    const bool allowedOnDeny = parsed.decision == "deny" &&
+                        reasonCode.isString() &&
+                        reasonCode.asString() == autonomy_reason_codes::kAllowed;
+                    if ( !reasonCode.isString() )
+                        result.errors.emplace_back( "policy.override.reason_code.not_string:" + capability );
+                    else if ( knownCode && !allowedOnDeny )
                         parsed.reasonCode = reasonCode.asString();
                     else
-                        result.errors.emplace_back( "policy.override.reason_code.not_string:" + capability );
+                        result.errors.emplace_back( "policy.override.reason_code.unknown:" + capability );
                 }
                 policy.overrides.emplace_back( capability, parsed );
             }
