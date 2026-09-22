@@ -2001,8 +2001,12 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   {
     if ( mSrcRaster )
     {
+      // #1180 / #1050 residual: settle before freeing the previous source
+      // layer (same contract as georef_dual_window).
+      if ( mSrcCanvas )
+        mSrcCanvas->stopRenderingAndSettle();
       mSrcSession->removeLayer( mSrcRaster );
-      delete mSrcRaster;
+      mSrcRaster->deleteLater();
       mSrcRaster = nullptr;
     }
     mSrcSession->addLayer( layer, true );

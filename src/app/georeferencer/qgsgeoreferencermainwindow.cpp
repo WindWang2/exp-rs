@@ -633,8 +633,13 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
   {
     if ( mRefRaster )
     {
+      // #1180 / #1050 residual: settle the canvas render job before freeing
+      // the previous layer — removeLayer alone only syncs the layer list;
+      // an in-flight parallel job still holds raw pointers into it.
+      if ( mDstCanvas )
+        mDstCanvas->stopRenderingAndSettle();
       mDstSession->removeLayer( mRefRaster );
-      delete mRefRaster;
+      mRefRaster->deleteLater();
       mRefRaster = nullptr;
       mDstRaster = nullptr;
     }
