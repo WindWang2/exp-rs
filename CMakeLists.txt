@@ -857,6 +857,8 @@ add_subdirectory(src/agent_loop)
 add_subdirectory(src/scientific_state)
 add_subdirectory(src/scientific_state/gdal)
 add_subdirectory(src/scientific_state/catalog)
+# Science Context Broker & Skill Router (Qt-free projection over passport/capability/recipe).
+add_subdirectory(src/science_context)
 # RS14 agent-benchmark: offline traces-in agent trajectory benchmark.
 # Plain C++20 + jsoncpp, no Qt (headless harness; see docs/agent/benchmark-harness.md).
 add_subdirectory(src/agentbench)
