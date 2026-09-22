@@ -71,3 +71,19 @@ version pin).
   score stable metrics (golden values pinned in test).
 - GREEN: `suite.{h,cpp}`, `data/agent/bench/**`, docs
   (`docs/agent/benchmark-harness.md`, `docs/integration.md`).
+
+## Shipped deltas vs the slice plan (review pass 1 reconciliation)
+
+- Fault mechanics shipped inside `fake_agent.cpp` (not `faults.{h,cpp}`);
+  the recovery METRIC ships in `evaluator.cpp` (not `metrics.{h,cpp}`).
+- Report tags shipped as `sicnu.agentbench.evaluation/v1` +
+  `sicnu.agentbench.suite_report/v1` (not a single `report/v1`).
+- `expected_evidence` may be empty (refusal/impossible tasks legitimately
+  deliver nothing); the verifier compares id, kind, declared path and
+  required fields.
+- `impossible_task` stays in the closed taxonomy but is reserved for the
+  live-capture seam; `failure_expectation` is advisory and surfaced in the
+  evaluation document.
+- Suite cap (400 entries) implemented in `runSuite`.
+- Integer parsing gates on isInt64 + explicit ranges (no jsoncpp
+  LogicError escapes); all serialization is to_chars-based (locale-free).

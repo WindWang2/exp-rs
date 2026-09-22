@@ -1,0 +1,62 @@
+{
+  "allowed_tools": [
+    "rs:ndvi",
+    "harness:verify"
+  ],
+  "case_id": "optical/ndvi-cloud-explain",
+  "description": "NDVI delivery with mandatory explanation",
+  "expected_evidence": [
+    {
+      "id": "ndvi-raster",
+      "kind": "raster",
+      "path": "work://case/ndvi.tif",
+      "require_in_explanation": true,
+      "required_fields": [
+        "mean"
+      ]
+    }
+  ],
+  "goal": "Deliver NDVI and explain the cloud handling in the final answer.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "ndvi-raster",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-explain",
+      "kind": "explanation_mentions",
+      "params": {
+        "phrase": "cloud mask"
+      },
+      "severity": "warning"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "optical",
+  "title": "NDVI delivery with mandatory explanation"
+}

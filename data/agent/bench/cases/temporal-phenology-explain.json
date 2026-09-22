@@ -1,0 +1,55 @@
+{
+  "allowed_tools": [
+    "temporal:smooth",
+    "temporal:gap_fill",
+    "harness:verify"
+  ],
+  "case_id": "temporal/phenology-explain",
+  "description": "Phenology reporting with mandatory explanation",
+  "expected_evidence": [
+    {
+      "id": "smooth-series",
+      "kind": "raster",
+      "require_in_explanation": true,
+      "required_fields": [
+        "nodata_fraction"
+      ]
+    }
+  ],
+  "goal": "Smooth the series and explain the phenological interpretation.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "smooth-series",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-explain",
+      "kind": "explanation_mentions",
+      "params": {
+        "phrase": "phenolog"
+      },
+      "severity": "warning"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "temporal",
+  "title": "Phenology reporting with mandatory explanation"
+}

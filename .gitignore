@@ -460,3 +460,7 @@ data/labs/_tmp/
 !.planning/rs14-06-experiment-debugger/
 .planning/rs14-06-experiment-debugger/*
 !.planning/rs14-06-experiment-debugger/*.md
+# RS14-14-agent-benchmark: track planning notes (markdown only; logs stay local).
+!.planning/RS14-14-agent-benchmark/
+.planning/RS14-14-agent-benchmark/*
+!.planning/RS14-14-agent-benchmark/*.md

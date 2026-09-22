@@ -1,0 +1,52 @@
+{
+  "allowed_tools": [
+    "temporal:smooth",
+    "temporal:gap_fill",
+    "harness:verify"
+  ],
+  "case_id": "temporal/budget-tight",
+  "description": "Smoothing under a tight call budget",
+  "expected_evidence": [
+    {
+      "id": "smooth-series",
+      "kind": "raster",
+      "required_fields": [
+        "nodata_fraction"
+      ]
+    }
+  ],
+  "goal": "Smooth the series using at most three tool calls.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "smooth-series",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-budget",
+      "kind": "budget_within",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 2,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 3
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "temporal",
+  "title": "Smoothing under a tight call budget"
+}

@@ -1,0 +1,77 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "temporal/budget-tight",
+  "explanation": "Smoothed the seasonal NDVI series; evidence smooth-series.",
+  "outcome_claim": {
+    "note": "call budget exhausted",
+    "success": false
+  },
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/budget-tight",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:smooth"
+    },
+    {
+      "evidence": "smooth-series",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02
+        },
+        "output_path": "work://case/smooth.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    },
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:smooth"
+    },
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:smooth"
+    }
+  ],
+  "stop_reason_override": "budget_exhausted"
+}

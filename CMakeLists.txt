@@ -816,6 +816,9 @@ add_subdirectory(src/contracts)
 add_subdirectory(src/scientific_state)
 add_subdirectory(src/scientific_state/gdal)
 add_subdirectory(src/scientific_state/catalog)
+# RS14 agent-benchmark: offline traces-in agent trajectory benchmark.
+# Plain C++20 + jsoncpp, no Qt (headless harness; see docs/agent/benchmark-harness.md).
+add_subdirectory(src/agentbench)
 # Read-only operator registry adapter for the help layer (CLI/GUI/tests).
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)

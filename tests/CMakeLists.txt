@@ -12050,3 +12050,150 @@ sicnu_add_sdk_test(test_scientific_state_fixtures)
 target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificState)
 sicnu_add_sdk_test(test_scientific_state_review)
 target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)
+# RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
+# (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
+add_executable(test_agentbench_core test_agentbench_core.cpp)
+target_link_libraries(test_agentbench_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_core)
+target_include_directories(test_agentbench_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_core PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_core TEST_PREFIX "test_agentbench_core::")
+
+# RS14 agent-benchmark Slice A: case schema contract.
+add_executable(test_agentbench_case test_agentbench_case.cpp)
+target_link_libraries(test_agentbench_case PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_case)
+target_include_directories(test_agentbench_case PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_case PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_case TEST_PREFIX "test_agentbench_case::")
+
+# RS14 agent-benchmark Slice B: trace schema + replay validation.
+add_executable(test_agentbench_trace test_agentbench_trace.cpp)
+target_link_libraries(test_agentbench_trace PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_trace)
+target_include_directories(test_agentbench_trace PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_trace PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_trace TEST_PREFIX "test_agentbench_trace::")
+
+# RS14 agent-benchmark Slice C: deterministic fake agent.
+add_executable(test_agentbench_fake test_agentbench_fake.cpp)
+target_link_libraries(test_agentbench_fake PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_fake)
+target_include_directories(test_agentbench_fake PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_fake PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_fake TEST_PREFIX "test_agentbench_fake::")
+
+# RS14 agent-benchmark Slice D: hidden-invariant oracle.
+add_executable(test_agentbench_invariants test_agentbench_invariants.cpp)
+target_link_libraries(test_agentbench_invariants PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_invariants)
+target_include_directories(test_agentbench_invariants PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_invariants PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_invariants TEST_PREFIX "test_agentbench_invariants::")
+
+# RS14 agent-benchmark Slice E: 8-metric evaluator + failure taxonomy.
+add_executable(test_agentbench_evaluator test_agentbench_evaluator.cpp)
+target_link_libraries(test_agentbench_evaluator PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_evaluator)
+target_include_directories(test_agentbench_evaluator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_evaluator PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_evaluator TEST_PREFIX "test_agentbench_evaluator::")
+
+# RS14 agent-benchmark Slice G: JSON + Markdown reports.
+add_executable(test_agentbench_report test_agentbench_report.cpp)
+target_link_libraries(test_agentbench_report PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_report)
+target_include_directories(test_agentbench_report PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_report PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_report TEST_PREFIX "test_agentbench_report::")
+
+# RS14 agent-benchmark Slice H: suite runner.
+add_executable(test_agentbench_suite test_agentbench_suite.cpp)
+target_link_libraries(test_agentbench_suite PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_suite)
+target_include_directories(test_agentbench_suite PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agentbench_suite PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_suite TEST_PREFIX "test_agentbench_suite::")
+
+# RS14 agent-benchmark Slice H: corpus validation (reads data/agent/bench).
+add_executable(test_agentbench_corpus test_agentbench_corpus.cpp)
+target_link_libraries(test_agentbench_corpus PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agentbench
+)
+sicnu_link_jsoncpp(test_agentbench_corpus)
+target_include_directories(test_agentbench_corpus PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_agentbench_corpus PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_agentbench_corpus PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_agentbench_corpus TEST_PREFIX "test_agentbench_corpus::")

@@ -1,0 +1,58 @@
+{
+  "allowed_tools": [
+    "rs:co_register",
+    "rs:change_detect",
+    "harness:verify"
+  ],
+  "case_id": "change/service-unavailable",
+  "description": "Change detection when the co-registration service is down",
+  "expected_evidence": [
+    {
+      "id": "change-map",
+      "kind": "raster",
+      "required_fields": [
+        "change_score"
+      ]
+    }
+  ],
+  "faults": [
+    {
+      "at_step": 0,
+      "kind": "tool_unavailable"
+    }
+  ],
+  "goal": "Deliver a change map; the co-registration tool may be unavailable.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "change-map",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 8000,
+    "max_tool_calls": 10
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "change",
+  "title": "Change detection when the co-registration service is down"
+}

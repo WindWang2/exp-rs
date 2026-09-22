@@ -1,0 +1,57 @@
+{
+  "agent": {
+    "name": "scripted-reference",
+    "version": "1.0.0"
+  },
+  "case_id": "temporal/gap-fill-transient",
+  "explanation": "Smoothed the seasonal NDVI series; evidence smooth-series.",
+  "schema": "sicnu.agentbench.script/v1",
+  "script_id": "ref/gap-fill-transient",
+  "seed": 7,
+  "steps": [
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "retry_once",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:gap_fill"
+    },
+    {
+      "input": {
+        "series": "work://case/ndvi-series"
+      },
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02,
+          "notes": "season profile"
+        },
+        "output_path": "work://case/smooth.tif"
+      },
+      "tokens": 120,
+      "tool": "temporal:smooth"
+    },
+    {
+      "evidence": "smooth-series",
+      "input": {},
+      "on_failure": "abort",
+      "payload": {
+        "fields": {
+          "nodata_fraction": 0.02
+        },
+        "output_path": "work://case/smooth.tif",
+        "verdict": "PASS"
+      },
+      "tokens": 120,
+      "tool": "harness:verify"
+    }
+  ]
+}

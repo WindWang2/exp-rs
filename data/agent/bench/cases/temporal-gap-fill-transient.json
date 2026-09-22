@@ -1,0 +1,58 @@
+{
+  "allowed_tools": [
+    "temporal:smooth",
+    "temporal:gap_fill",
+    "harness:verify"
+  ],
+  "case_id": "temporal/gap-fill-transient",
+  "description": "Gap filling under a transient failure",
+  "expected_evidence": [
+    {
+      "id": "smooth-series",
+      "kind": "raster",
+      "required_fields": [
+        "nodata_fraction"
+      ]
+    }
+  ],
+  "faults": [
+    {
+      "at_step": 0,
+      "kind": "transient_failure"
+    }
+  ],
+  "goal": "Gap-fill and smooth the series; a transient error may hit the gap-fill call.",
+  "initial_state": {
+    "workspace_roots": [
+      "work://case"
+    ]
+  },
+  "invariants": [
+    {
+      "dimension": "scientific",
+      "id": "sci-verdict",
+      "kind": "verdict_is",
+      "params": {
+        "evidence_id": "smooth-series",
+        "verdict": "PASS"
+      },
+      "severity": "error"
+    },
+    {
+      "dimension": "process",
+      "id": "proc-claim",
+      "kind": "claim_consistent",
+      "params": {},
+      "severity": "error"
+    }
+  ],
+  "minimal_steps": 3,
+  "resource_budget": {
+    "max_retries": 1,
+    "max_tokens": 6000,
+    "max_tool_calls": 8
+  },
+  "schema": "sicnu.agentbench.case/v1",
+  "task_family": "temporal",
+  "title": "Gap filling under a transient failure"
+}
