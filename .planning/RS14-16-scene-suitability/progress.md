@@ -62,3 +62,9 @@
 - Round 1（独立 reviewer）：无 P0；P1-1 DatasetFacts::fromJson 整数 UB（已修+变异 RED 锁定，commit 3580d4b7a8）；P1-2 agent surface 构建验证（进行中）；P2×4（两条文档注释已补，两条裁定 follow-up）；变异杀测试 5/5 有效；1000 场景实测 7.7ms（预算 50ms）；4 线程并发干净；8 个兄弟 RS14 track 零边界踩踏。
 - Round 2（re-review）：P1-1 修复双重验证通过，11 套件全绿（1385 assertions/111 cases），验证一致性/确定性/teaching 退化路径全 pass；新发现 3 个 P3（hashFromJson 诊断不带具体键、JSON 错误类型静默降级无专测、unicode round-trip 无专测）→ follow-up 不阻塞。**Verdict：可提 PR。**
 - follow-up 清单（非阻塞）：① assetState CamelCase 词汇第二副本下沉 sicnu::data；② goal fromJson 错误类型标量 typed 失败；③ 测量冲突档位第三档（可剔除证据，Marginal+明细）；④ P3-a/b/c。
+
+## P1-2 回收（2026-09-22，sicnu_agent 全量构建完成后）
+- `libsicnu_agent.so` + `test_data_platform_surface` + `test_surface_parity` 构建成功（含新 Sicnu::suitability 链接与薄壳接线）。
+- `test_data_platform_surface`：**5 cases / 105 assertions 全绿**（直调 handleDataPlatformTool 的 surface 契约）。
+- `test_surface_parity`：7/8 cases 绿；唯一失败是 CLI 子进程 leg（`:340 waitForStarted`）——`sicnu_geo_rs_cli` 二进制在本 worktree 的部分构建树中不存在（`build-dev/src/cli/` 无产物），属环境性缺失，与本改动无关；与本改动直接相关的 dispatch-probe leg（每个 data-platform def 必须有 handler、绝不 "unknown data-platform tool"）与投影 parity leg 全绿。CI 全量构建下该 leg 将正常执行。
+- capability drift 面：按构造未触碰（kDataPlatformPrefixes/knowledge 零改动）；#1151 既有红灯与本 track 无关。
