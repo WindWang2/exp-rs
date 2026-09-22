@@ -9,7 +9,7 @@
     "sensor": "SAR",
     "sensor_mode": "QPS",
     "processing_level": "L1A",
-    "radiometric_state": "digital_number",
+    "radiometric_state": "dn",
     "acquisition_time": "2022-11-21T10:23:45",
     "resolution_meters": 3.0,
     "orbit_id": "08871",

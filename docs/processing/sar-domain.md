@@ -511,6 +511,9 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    `SICNU_SAR_GEOCODE_BAND_STATES = sigma0,gamma0,incidence_deg,
    local_incidence_deg,mask_class` (the product is inherently mixed; one dataset
    token cannot describe five bands). `result.bandStates` mirrors the key.
+   Downstream operators that take a band index (`rs:sar_backscatter`,
+   `rs:sar_speckle`, `rs:sar_texture`, `rs:sar_calibrate`) consult this map and
+   refuse geometry/mask bands (and the whole stack for calibrate).
    On the legacy undeclared path the sigma0 assumption is persisted as
    `SICNU_SAR_STATE_ASSUMED=sigma0_legacy_undeclared` (same for the terrain
    operators), so downstream guards can see the assumption instead of trusting

@@ -670,7 +670,7 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
     // metres per row is a 1% grade rising toward the equator
     // (dz/dN = −0.01 m/m, α ≈ 0.57°). The near-nadir beam lays over on
     // every interior cell (θ0 ≤ 0.23° < α) and gamma0 carries the
-    // sinθ0/sinθL area factor. The grade stays shallow ON PURPOSE: at
+    // sinθL/sinθ0 area factor (NORLIM / Small 2011 eq. 5). The grade stays shallow ON PURPOSE: at
     // near-nadir geometry a height Δh moves the range position by Δh/30
     // pixels, and a taller ramp would carry its cells out of the swath
     // (honest NaN backscatter) instead of exercising the RTC product.
@@ -718,7 +718,7 @@ TEST_CASE( "rs:sar_geocode tilted DEM: layover class and gamma0 area factor from
             INFO( "tilted cell (" << x << "," << y << ")" );
             REQUIRE( mask[idx] == 1.0f );
             ++layoverCells;
-            // gamma0 = sigma0 · sin θ0 / sin θL evaluated per pixel with
+            // gamma0 = sigma0 · sin θL / sin θ0 evaluated per pixel with
             // the kernel's own local incidence — pins the operator's RTC
             // wiring (right factor, right band, right multiplication).
             const double theta0 = fix.incidenceDeg * M_PI / 180.0;

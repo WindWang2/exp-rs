@@ -50,6 +50,10 @@ inline const char *kRadiometricStateKey = "SICNU_RADIOMETRIC_STATE";
 /// input row, resolved relative to the declaring raster. Consumed by
 /// rs:sar_calibrate; no interpolation is applied.
 inline const char *kCalibrationLutKey = "SICNU_SAR_CALIBRATION_LUT";
+/// Per-band radiometric/geometry map written by rs:sar_geocode (comma-separated,
+/// same order as SICNU_SAR_GEOCODE_BANDS). Consumers must honour this when a
+/// band index selects a non-sigma0 product band.
+inline const char *kGeocodeBandStatesKey = "SICNU_SAR_GEOCODE_BAND_STATES";
 
 /// Derived (non-backscatter) SAR product states. They are written like every
 /// other SAR state token so the fail-closed guards reject them, but they are
@@ -75,8 +79,19 @@ double linearToDb( double power );
 /// 10^(db/10).
 double dbToLinear( double db );
 
-/// Normalizes a calibration token ("SIGMA0" → "sigma0"); "" when unknown.
+/// Normalizes a SAR calibration token ("SIGMA0" → "sigma0", "dn" → "dn");
+/// "" when unknown. Optical vocabulary token "digital_number" is NOT accepted
+/// here (shared SICNU_RADIOMETRIC_STATE key) — use modality-aware guards.
 QString normalizeCalibration( const QString &token );
+
+/// Band-aware radiometric state for mixed products (geocode five-band map).
+/// When SICNU_SAR_GEOCODE_BAND_STATES is present and @a band1Based is in range,
+/// returns that band's token; otherwise falls back to recognizedSarState(ds).
+QString effectiveBandRadiometricState( const GdalDatasetWrapper &ds, int band1Based );
+
+/// True when @a band1Based is a backscatter power band (sigma0/gamma0/beta0/dn)
+/// under the geocode band-states map or the dataset-level declaration.
+bool bandIsBackscatterState( const GdalDatasetWrapper &ds, int band1Based );
 
 /// Writes the standard SAR output metadata block onto a GDAL dataset handle
 /// (void* = GDALDatasetH). Never throws.
@@ -114,9 +129,9 @@ QString declaredCalibrationToken( const GdalDatasetWrapper &ds );
 /// back to SICNU_RADIOMETRIC_STATE); @a conflict is true when both keys are
 /// present and disagree — a conflicted declaration is never interpreted.
 /// NOTE: the shared SICNU_RADIOMETRIC_STATE key also carries the optical
-/// vocabulary (exp_radiometric::RadiometricState, uppercase). SAR products
-/// never mix the two; the conflict rule assumes a SAR-only vocabulary on both
-/// keys and refuses anything that disagrees.
+/// vocabulary (exp_radiometric::RadiometricState, including "digital_number").
+/// normalizeCalibration accepts only the SAR token "dn", not "digital_number",
+/// so an optical DN stamp cannot pass rs:sar_calibrate's guard.
 struct SarStateRead
 {
     QString calibration; ///< raw SICNU_SAR_CALIBRATION token (trimmed/lowered)

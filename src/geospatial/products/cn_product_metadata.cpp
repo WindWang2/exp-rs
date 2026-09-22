@@ -925,7 +925,7 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
 // ─── GF-3 SAR sidecar parsing (ADR 0159) ────────────────────────────────────
 // Declared-metadata level only: identity, mode, polarizations, imaging time,
 // resolution, orbit, level and incidence angle. Numeric-domain stays
-// digital_number; sigma0 calibration constants are NOT invented here. The
+// dn; sigma0 calibration constants are NOT invented here. The
 // polarization vocabulary is the four published SAR channels; anything else
 // is reported in parseDiagnostics, never silently dropped.
 
@@ -1027,11 +1027,11 @@ ProductMetadata parseCresdaSarXml( const std::string &xmlPath, const CnProductId
     if ( upperId.find( "L1A" ) != std::string::npos )
       product.processingLevel = "L1A";
   }
-  // SAR L1A pixels are complex-derived detected/SLC samples — the product
-  // layer only ever stamps digital_number; radiometric terrain/sigma0 steps
-  // belong to the SAR kernels and restate the domain themselves.
+  // SAR L1A pixels are complex-derived detected/SLC samples — stamp the SAR
+  // DN token ("dn"), not optical "digital_number", so rs:sar_calibrate's
+  // vocabulary guard cannot be satisfied by an optical DN product.
   if ( upperAscii( product.processingLevel ).find( "L1" ) != std::string::npos )
-    product.radiometricState = "digital_number";
+    product.radiometricState = "dn";
 
   product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "centertime" ) );
   if ( product.acquisitionTime.empty() )

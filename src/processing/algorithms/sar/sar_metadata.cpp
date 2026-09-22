@@ -7,6 +7,7 @@
 #include <gdal.h>
 
 #include <QFile>
+#include <QStringList>
 #include <QTextStream>
 
 #include <cmath>
@@ -17,9 +18,10 @@ namespace sicnu::sar
 bool isSarRadiometricState( const QString &state )
 {
   const QString s = state.toLower();
+  // "digital_number" is the optical vocabulary token on the shared
+  // SICNU_RADIOMETRIC_STATE key — not a SAR calibration state.
   return s == QLatin1String( "sigma0" ) || s == QLatin1String( "gamma0" ) ||
-         s == QLatin1String( "beta0" ) || s == QLatin1String( "dn" ) ||
-         s == QLatin1String( "digital_number" );
+         s == QLatin1String( "beta0" ) || s == QLatin1String( "dn" );
 }
 
 bool isSarDerivedState( const QString &state )
@@ -58,7 +60,8 @@ QString normalizeCalibration( const QString &token )
     return QStringLiteral( "gamma0" );
   if ( t == QLatin1String( "beta0" ) || t == QLatin1String( "beta" ) )
     return QStringLiteral( "beta0" );
-  if ( t == QLatin1String( "dn" ) || t == QLatin1String( "digital_number" ) )
+  // SAR DN only — optical "digital_number" must not bridge into this vocabulary.
+  if ( t == QLatin1String( "dn" ) )
     return QStringLiteral( "dn" );
   return QString();
 }
@@ -310,6 +313,31 @@ QString readDomain( const GdalDatasetWrapper &ds )
   if ( d == QLatin1String( "linear_power" ) || d == QLatin1String( "linear" ) )
     return QStringLiteral( "linear_power" );
   return QString();
+}
+
+
+QString effectiveBandRadiometricState( const GdalDatasetWrapper &ds, int band1Based )
+{
+  const QString map = datasetMeta( ds, kGeocodeBandStatesKey ).trimmed();
+  if ( !map.isEmpty() && band1Based >= 1 )
+  {
+    const QStringList parts = map.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    if ( band1Based <= parts.size() )
+      return parts[band1Based - 1].trimmed().toLower();
+  }
+  return recognizedSarState( ds );
+}
+
+bool bandIsBackscatterState( const GdalDatasetWrapper &ds, int band1Based )
+{
+  const QString token = effectiveBandRadiometricState( ds, band1Based );
+  if ( token.isEmpty() )
+    return true; // undeclared legacy: caller decides
+  const QString canonical = normalizeCalibration( token );
+  return canonical == QLatin1String( "sigma0" ) ||
+         canonical == QLatin1String( "gamma0" ) ||
+         canonical == QLatin1String( "beta0" ) ||
+         canonical == QLatin1String( "dn" );
 }
 
 } // namespace sicnu::sar
