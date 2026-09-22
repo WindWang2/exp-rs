@@ -404,3 +404,35 @@ TEST_CASE( "invalid roots and unparsable filters are typed, never guessed",
   bad.temporalEndUtc = "yesterday";
   REQUIRE_THROWS_AS( service.searchAll( bad ), GeoError );
 }
+
+TEST_CASE( "a 6-value bbox filters on its horizontal slice — never silently spatial-free",
+           "[io][fabric][catalog]" )
+{
+  // STAC bbox order is [w,s,e,n] or [w,s,minZ,e,n,maxZ] — the horizontal
+  // extent of a 6-value bbox lives at indices 0/1/3/4 (asset_query
+  // doctrine). A record outside the 2D slice must FAIL the filter; treating
+  // "not size 4" as "no spatial filter" made every legal 3D query return
+  // unrelated records on the record backends while the remote arm forwarded
+  // the very same query with its spatial arm intact.
+  std::vector<AssetRecord> records;
+  records.push_back( recordWith( "near", "2024-01-10T00:00:00Z", 5.0, true ) );   // [8,50,9,51]
+  AssetRecord far = recordWith( "far", "2024-01-11T00:00:00Z", 5.0, true );
+  far.minX = 0.0;
+  far.minY = 0.0;
+  far.maxX = 1.0;
+  far.maxY = 1.0;
+  records.push_back( far );
+  const CatalogService service = catalogServiceOverRecords( records );
+
+  CatalogQuery bboxQuery;
+  bboxQuery.bbox = { 7.5, 49.5, 0.0, 9.5, 51.5, 100.0 };   // [w,s,minZ,e,n,maxZ]
+  const CatalogService::SearchAllResult result = service.searchAll( bboxQuery );
+  REQUIRE( result.records.size() == 1 );   // "far" must not ride along
+  CHECK( result.records[0].id == "near" );
+
+  // Crossing is judged on the horizontal slice for either arity
+  // (west 9 > east 8 in slot 3 for a 6-value bbox).
+  CatalogQuery crossed;
+  crossed.bbox = { 9.0, 50.0, 0.0, 8.0, 51.0, 100.0 };
+  REQUIRE_THROWS_AS( service.searchAll( crossed ), GeoError );
+}
