@@ -1570,3 +1570,64 @@ TEST_CASE( "a non-canonical workspace root is announced and never leaks paths",
     // And no absolute path enters the document regardless.
     CHECK( !built->canonicalBytes().contains( fixture.dir.path().toUtf8() ) );
 }
+
+TEST_CASE( "an empty pinned digest is Unknown, never a silent pass",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+    // Historical rows can carry an empty dataset fingerprint, and the
+    // builder records what the run recorded. Blanking the pin's digest must
+    // not short-circuit the fingerprint comparison into an Ok — "no
+    // evidence" cannot verify a match, and Ok rolls the whole report up
+    // toward Exact on a machine whose data may have drifted.
+    QJsonObject root = ready.doc.root();
+    root.remove( QStringLiteral( "digest" ) );
+    QJsonArray inputs = root.value( QStringLiteral( "inputs" ) ).toArray();
+    QJsonObject pin = inputs.at( 0 ).toObject();
+    pin.insert( QStringLiteral( "digest" ), QString() );
+    inputs.replace( 0, pin );
+    root.insert( QStringLiteral( "inputs" ), inputs );
+    auto unverified = CapsuleDocument::finalize( root );
+    REQUIRE( unverified.has_value() );
+
+    const auto report = CapsuleReadiness::assess( unverified.take(), &ready.fixture.datasets,
+                                                  matchingHooks( ready.descriptor ),
+                                                  matchingReadinessHooks() );
+    bool sawUnknownDataset = false;
+    for ( const auto &check : report.checks )
+        if ( check.dependency == QLatin1String( "dataset_version" )
+             && check.status == sicnu::experiment::ReplayCheckStatus::Unknown )
+            sawUnknownDataset = true;
+    CHECK( sawUnknownDataset );
+    CHECK( report.level != sicnu::dataset::ReproductionLevel::Exact );
+}
+
+TEST_CASE( "diff treats sections outside the reader's vocabulary as identity-bearing",
+           "[capsule][diff]" )
+{
+    StoreFixture fixture;
+    REQUIRE( fixture.open() );
+    fixture.addExperiment();
+    const ExperimentRun run = fixture.addRun();
+    const CapsuleBuilder builder( fixture.experiments, fixture.datasets );
+    auto original = builder.build( run.runId(), fixedOptions() );
+    REQUIRE( original.has_value() );
+
+    // A capsule that grew an extra top-level section (annotation, future
+    // field, tampering — the diff cannot tell) and re-finalized: its digest
+    // differs, nothing in the whitelisted sections does. A walker that only
+    // visits the whitelist reported Identical across two different
+    // documents.
+    QJsonObject root = original->root();
+    root.remove( QStringLiteral( "digest" ) );
+    root.insert( QStringLiteral( "repro_notes" ),
+                 QJsonObject{ { QStringLiteral( "note" ), QStringLiteral( "appended" ) } } );
+    auto appended = CapsuleDocument::finalize( root );
+    REQUIRE( appended.has_value() );
+
+    const CapsuleDiffReport report =
+        CapsuleDiffReport::diff( original.take(), appended.take() );
+    CHECK( report.level == CapsuleDiffReport::Level::IdentityBreak );
+    CHECK( !report.sections.isEmpty() );
+}

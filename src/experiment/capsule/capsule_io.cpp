@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSaveFile>
 
 namespace sicnu::experiment::capsule
 {
@@ -116,13 +117,16 @@ Result<CapsuleExportReport> CapsuleIO::exportCapsule( const CapsuleDocument &doc
             QStringLiteral( "capsule.unwritable" ),
             QStringLiteral( "cannot create parent directory of %1" ).arg( path ) ) );
     }
-    QFile file( path );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate )
-         || file.write( bytes ) != bytes.size() )
+    // QSaveFile (same doctrine as the study report writer): a capsule is a
+    // complete, verifiable byte sequence — a failed write must leave the
+    // previous capsule intact instead of truncating it to a partial file.
+    QSaveFile file( path );
+    if ( !file.open( QIODevice::WriteOnly ) || file.write( bytes ) != bytes.size()
+         || !file.commit() )
     {
         return Result<CapsuleExportReport>::failure( failure(
             QStringLiteral( "capsule.unwritable" ),
-            QStringLiteral( "cannot write %1" ).arg( path ) ) );
+            QStringLiteral( "cannot write %1: %2" ).arg( path, file.errorString() ) ) );
     }
     CapsuleExportReport report;
     report.ok = true;

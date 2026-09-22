@@ -80,8 +80,15 @@ ReplayReadinessReport CapsuleReadiness::assess( const CapsuleDocument &doc,
                 check.detail = datasetStore ? QStringLiteral( "version %1 is not in this store" ).arg( id )
                                             : QStringLiteral( "no dataset store wired" );
             }
-            else if ( !recordedFingerprint.isEmpty()
-                      && record->fingerprint() != recordedFingerprint )
+            else if ( recordedFingerprint.isEmpty() )
+            {
+                // Same doctrine as the capability/plan checks: an empty pin
+                // cannot be compared, and "no evidence" must never roll up
+                // as Ok on a machine whose data may have drifted.
+                check.status = ReplayStatus::Unknown;
+                check.detail = QStringLiteral( "capsule pins no dataset fingerprint" );
+            }
+            else if ( record->fingerprint() != recordedFingerprint )
             {
                 check.status = ReplayStatus::Mismatched;
                 check.detail = QStringLiteral( "local fingerprint %1 != pinned %2" )
@@ -120,8 +127,12 @@ ReplayReadinessReport CapsuleReadiness::assess( const CapsuleDocument &doc,
                                    ? QStringLiteral( "manifest %1 is not in this store" ).arg( id )
                                    : QStringLiteral( "no dataset store wired" );
             }
-            else if ( !recordedFingerprint.isEmpty()
-                      && manifest->fingerprint() != recordedFingerprint )
+            else if ( recordedFingerprint.isEmpty() )
+            {
+                check.status = ReplayStatus::Unknown;
+                check.detail = QStringLiteral( "capsule pins no split fingerprint" );
+            }
+            else if ( manifest->fingerprint() != recordedFingerprint )
             {
                 check.status = ReplayStatus::Mismatched;
                 check.detail = QStringLiteral( "local fingerprint %1 != pinned %2" )

@@ -43,8 +43,15 @@ QString renderValue( const QJsonValue &value )
 
 QString kindOf( const QString &section )
 {
-    return kIdentitySections.contains( section ) ? QLatin1String( "identity" )
-                                                 : QLatin1String( "reported" );
+    if ( kIdentitySections.contains( section ) )
+        return QLatin1String( "identity" );
+    if ( kReportedSections.contains( section ) )
+        return QLatin1String( "reported" );
+    // Sections outside this reader's vocabulary are identity-bearing: two
+    // capsules that disagree on an appended or future section are not the
+    // same experiment, and silently calling them Identical would defeat the
+    // three-level contract.
+    return QLatin1String( "identity" );
 }
 
 /// Fast path: identical digests ⇒ Identical without section walking.
@@ -142,9 +149,19 @@ CapsuleDiffReport CapsuleDiffReport::diff( const CapsuleDocument &a, const Capsu
     if ( digestsEqual( a, b ) )
         return report; // Identical, no reasons needed
 
-    // Compare each top-level section (schema and digest are contract, not
-    // content — the shape gates own them).
+    // Compare EVERY top-level section of both documents: the whitelisted
+    // identity/reported sections plus anything this reader does not know.
+    // Only "digest" is exempt — it is derived content either side may
+    // re-finalize, and the fast path above already handled byte equality.
+    // (Ignoring unknown sections let a document with an appended section
+    // diff as Identical against its original.)
     QStringList sections = kIdentitySections + kReportedSections;
+    for ( const QString &key : a.root().keys() )
+        if ( key != QLatin1String( "digest" ) && !sections.contains( key ) )
+            sections.append( key );
+    for ( const QString &key : b.root().keys() )
+        if ( key != QLatin1String( "digest" ) && !sections.contains( key ) )
+            sections.append( key );
     sections.sort();
     for ( const QString &section : sections )
     {
