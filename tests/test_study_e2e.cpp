@@ -159,7 +159,8 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
                                     .value( QStringLiteral( "error" ) )
                                     .toObject()
                                     .value( QStringLiteral( "message" ) )
-                                    .toString() ) );
+                                    .toString() )
+                          .toStdString() );
         }
     }
     REQUIRE( summary.recordedCount == 9 );
