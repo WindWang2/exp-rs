@@ -1,4 +1,4 @@
-# ADR 0172 — Teaching Autonomy Ladder: the L0–L5 Gate Is Code, Before the Action
+# ADR 0176 — Teaching Autonomy Ladder: the L0–L5 Gate Is Code, Before the Action
 
 - Status: accepted (this track: RS14-12-teaching-autonomy)
 - Date: 2026-09-21
