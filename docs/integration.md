@@ -191,3 +191,65 @@ NOT a planning engine — scripts are explicit policies, not intelligence.
 - No engine execution; no network; no new CI.
 - Open issues in the avoid-list were not touched (see
   `.planning/RS14-14-agent-benchmark/recon.md` dedup matrix).
+
+---
+
+# Integration seams — RS14-07 Parameter Sensitivity & Uncertainty Studio ↔ platform
+
+The study layer (`src/study`, `Sicnu::study`) is complete and offline: specs,
+samplers, runner, analysis and the versioned report
+(`sicnu.studyspec.v1` / `sicnu.studyreport.v1`, see
+[experiments/parameter-studio.md](experiments/parameter-studio.md)). The
+production execution adapter (`src/study/bridge`, `Sicnu::study_bridge`) is
+wired into the build and consumed by the full-stack e2e test. The surfaces
+below are the DESIGNED wiring points for future tracks; none are built here.
+
+## 1. Agent / MCP surface (`study:*` tools)
+
+`StudyService`-style wiring belongs in the existing agent tool lane
+(`src/agent/data_platform_tools.cpp`, `surface_registry.cpp`), registering
+e.g. `study:spec_validate`, `study:run`, `study:report_read`. The reader side
+is already safe for that: `ParameterStudySpec::fromJson` refuses unknown
+fields/versions with typed `study.*` codes, and the report parses standalone.
+Nothing in `sicnu_study` links the agent stack, so the tools can call it
+without new cycles. Deliberately NOT registered here to avoid colliding with
+agent-surface tracks and the capability-mirror regeneration (#1151 stays
+someone else's fix).
+
+## 2. Teaching UI (workbench panel)
+
+`StudyRunRow` (`study_export.h`) is the DTO a `QAbstractTableModel` panel
+binds — thin-client pattern over the report projection (cf.
+`dataset_experiment_panel`, `processing_history_model` row-cap + truthful
+truncation). The panel renders rows/curves; it never derives business facts:
+status accounting and trend labels come from the report, not from widget
+logic. Sample wiring point: a study panel beside
+`dataset_experiment_panel`, loading `sicnu.studyreport.v1` documents via the
+tolerant report reader.
+
+## 3. Execution plane consumers
+
+`ExecutionPlaneStudyBackend` is opt-in: only surfaces that link
+`Sicnu::study_bridge` gain study execution. The bridge's commit policy
+(staged temp → stable rename, no catalog asset) and its ordering assumption
+(the study is the only payload builder for its task ids; foreign builders
+turn into typed `study.run_output_mismatch` failures) are documented in
+`study_execution_plane.h`. Future CLI (`study run --spec …`) should reuse the
+bridge rather than re-implementing a backend.
+
+## 4. Reproducibility capsule (RS14-17) and lab runtime
+
+A study report is a projection of `ExperimentStore` truth, so a capsule can
+wrap the report + the referenced runs without a new exporter: the report
+echoes the full spec (`spec_json`) and per-point parameters, which is the
+replay contract (same spec+seed ⇒ same pointIds). LabSpec labs can embed an
+exemplar spec (`examples/studies/*.sicnu-study.json`) as a lab step template.
+
+## Boundary rules honored by this track
+
+- No second registry/store/provenance: runs live in `ExperimentStore`, point
+  identity IS the matrix cellId, Pareto reuses `MatrixAggregator`.
+- No TaskCenter/Workflow/operator changes; the in-flight window is a
+  submission bound, not a scheduler.
+- Open issues in the avoid-list were not touched (see
+  `.planning/RS14-07-parameter-studio/recon.md` dedup matrix).
