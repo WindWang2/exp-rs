@@ -3205,6 +3205,14 @@ target_link_libraries(test_mlops9_version_dag PRIVATE Sicnu::dataset SQLite::SQL
 sicnu_add_test(test_mlops9_evidence TIMEOUT 300)
 target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# RS14-06 Experiment Debugger (ADR 0174): normalized run snapshots, step
+# alignment, first-divergence classification over recorded evidence. The
+# debugger lib carries its own deps (Sicnu::experiment/dataset/workflow);
+# SQLite is listed explicitly to match the experiment-suite convention.
+sicnu_add_test(test_experiment_debugger TIMEOUT 300)
+target_link_libraries(test_experiment_debugger PRIVATE
+  Sicnu::experiment_debugger Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
 # MLOps 9.0 scale & durability: 100k-run metadata stress, concurrent
 # readers/writer, corruption refusal, injected commit-fault recovery.
 # RUN_SERIAL: pays 100k single-row transactions by design.
