@@ -9139,6 +9139,9 @@ target_compile_definitions(test_workflow_cache_e2e PRIVATE
   SICNU_CLI_BINARY="${CMAKE_BINARY_DIR}/sicnu_geo_rs_cli"
 )
 sicnu_link_jsoncpp(test_workflow_cache_e2e)
+if(TARGET sicnu_geo_rs_cli)
+  add_dependencies(test_workflow_cache_e2e sicnu_geo_rs_cli)
+endif()
 sicnu_discover_tests(test_workflow_cache_e2e)
 endif()
 
@@ -9416,6 +9419,8 @@ target_compile_definitions(test_plugin_host_process PRIVATE
   SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
   SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
 )
+# #1186: target-scoped builds must build runtime-loaded fixtures first.
+add_dependencies(test_plugin_host_process isolation_plugin exprs_plugin_host_worker)
 
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
@@ -9431,6 +9436,7 @@ target_link_libraries(test_exprs_plugin_loader PRIVATE sicnu_sdk)
 target_compile_definitions(test_exprs_plugin_loader PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
+add_dependencies(test_exprs_plugin_loader hello_plugin)
 
 # POSIX-only test (setenv + /tmp path semantics); the Windows lane has no
 # equivalent coverage today. See test_help_* for the help-system suites.
@@ -11890,27 +11896,10 @@ target_include_directories(test_ensemble_parallel PRIVATE
 # the agent tool objects (spatial_tool_registry + contracts + mission_tools,
 # which are QGIS-free by construction).
 # ---------------------------------------------------------------------------
-set(SICNU_MISSION_RUNTIME_SOURCES
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_run_authority.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_tool_authority.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  # selection_context.cpp references WorkbenchHost: link the real
-  # Qt-only implementation (the macro targets were link-broken without it).
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/mission_tools.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/spatial_tool_registry.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/contracts/spatial_contracts.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/harness/harness_actions.cpp
-)
+# #1186: shared with mission-runtime-gate (cmake/SicnuMissionRuntimeSources.cmake)
+set(SICNU_MISSION_SRC_ROOT "${CMAKE_SOURCE_DIR}")
+include("${CMAKE_SOURCE_DIR}/cmake/SicnuMissionRuntimeSources.cmake")
+set(SICNU_MISSION_RUNTIME_SOURCES ${SICNU_MISSION_RUNTIME_SOURCES_FULL})
 
 function(sicnu_add_mission_runtime_test NAME)
   # The mission-runtime test sources live in mission-runtime-gate/tests/ (not

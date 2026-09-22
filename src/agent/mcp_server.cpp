@@ -557,7 +557,26 @@ void McpServer::handleRequest(const QVariantMap &request)
         return;
     }
 
-    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("MCP request: %1 (id=%2)").arg(method).arg(id.toString()));
+    // #1186: never echo client-controlled method/id verbatim — CRLF/ANSI can
+    // forge subsequent log lines. Keep a printable single-line scrub.
+    const auto scrub = []( QString text ) {
+      QString out;
+      out.reserve( text.size() );
+      for ( const QChar ch : text )
+      {
+        const ushort u = ch.unicode();
+        if ( u < 0x20 || u == 0x7F || u == 0x1B )
+          out += QLatin1Char( ' ' );
+        else
+          out += ch;
+      }
+      if ( out.size() > 128 )
+        out = out.left( 128 ) + QLatin1String( "…" );
+      return out;
+    };
+    SICNU_LOG_INFO( SicnuLogTags::MCP,
+                    QStringLiteral( "MCP request: %1 (id=%2)" )
+                      .arg( scrub( method ), scrub( id.toString() ) ) );
 
     if (method == QStringLiteral("initialize"))
     {

@@ -1086,7 +1086,12 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/qgsexpression_texts.cpp
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
+# #1186: tests/qt_modeltest has never shipped — refuse generate instead of
+# failing at compile with a missing source when ENABLE_MODELTEST is set.
 if(ENABLE_MODELTEST)
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/tests/qt_modeltest/modeltest.cpp")
+    message(FATAL_ERROR "ENABLE_MODELTEST requires tests/qt_modeltest (not present in this tree)")
+  endif()
   set(MODELTEST_SRCS
     ../../tests/qt_modeltest/modeltest.cpp
     ../../tests/qt_modeltest/dynamictreemodel.cpp

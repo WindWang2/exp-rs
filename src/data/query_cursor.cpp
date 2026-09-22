@@ -24,6 +24,14 @@ QString QueryCursor::encode( const QStringList &parts )
     // structure requirement (filter echo + at least one key column) holds.
     if ( parts.size() < 2 )
         return QString();
+    // #1186: the utility boundary owns field escaping — a raw id containing
+    // 0x1F would split the walk mid-iteration. Refuse rather than silently
+    // truncate; callers that need free-form text must escape first.
+    for ( const QString &part : parts )
+    {
+        if ( part.contains( kPartSeparator ) )
+            return QString();
+    }
     const QString payload = QStringLiteral( "v1" ) + kPartSeparator +
                             parts.join( kPartSeparator );
     // A 16-hex integrity prefix lets decode() reject truncation/forgery:
