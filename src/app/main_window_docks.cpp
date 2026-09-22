@@ -25,3 +25,1069 @@
 #include "widgets/guided_workflow_widget.h"
 #include "teaching/lab_cockpit_dock.h"
 #include "teaching_admin/teaching_admin_dock.h"
+#include "widgets/histogram_stretch_widget.h"
+#include "widgets/rs_toolbar_flow_host.h"
+#include "widgets/rs_empty_state_widget.h"
+
+#include <QVBoxLayout>
+#include <QStackedWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QSignalBlocker>
+#include <QTextBrowser>
+#include <QAction>
+#include <QEvent>
+#include <QHash>
+#include <QStatusBar>
+#include <QSettings>
+#include <QToolBar>
+#include <QSizePolicy>
+
+#include <memory>
+
+#include <qgsapplication.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingfavoritealgorithmmanager.h>
+#include <qgsbrowserdockwidget.h>
+#include <qgsbrowserguimodel.h>
+#include <qgsdockwidget.h>
+#include <qgsfilterlineedit.h>
+#include <qgsmapoverviewcanvas.h>
+#include <qgsmaplayer.h>
+#include <qgsproject.h>
+#include <qgsprocessingtoolboxtreeview.h>
+#include <qgsrasterlayer.h>
+#include <qgsgui.h>
+
+#ifdef SICNU_EMBED_PYTHON
+#include "python/sicnu_python_console.h"
+#include "widgets/python_script_editor.h"
+#endif
+
+void QgisDesktopWindow::setupDockWidgets()
+{
+    // View layer tree (Left) — presentation stack of the active Display View only.
+    // Project data identity lives in Data Manager (tabified with this dock).
+    m_layersDock = new QgsDockWidget( tr( "View Layers" ), this );
+    m_layersDock->setObjectName( "layersDock" ); // stable for saveState / layout
+    m_layersDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+
+    QWidget *layersContainer = new QWidget(m_layersDock);
+    QVBoxLayout *layersLayout = new QVBoxLayout(layersContainer);
+    layersLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_layersStack = new QStackedWidget(layersContainer);
+    m_layersStack->setObjectName(QStringLiteral("rsLayersStack"));
+
+    // Create QGIS C++ layer tree view
+    m_layerTreeView = new QgsLayerTreeView(m_layersStack);
+    m_layerTreeView->setHeaderHidden(false);
+    m_layersStack->addWidget(m_layerTreeView); // Index 0: Tree
+
+    m_layersEmptyState = new sicnu::RsEmptyStateWidget(
+        QStringLiteral( "l_yer_st_ck" ),
+        tr( "No layers yet" ),
+        tr( "Add or open remote-sensing rasters and vector data from the Data Management panel" ),
+        tr( "Add Layer..." ),
+        m_layersStack );
+    connect( m_layersEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
+        importLayer();
+    } );
+    m_layersStack->addWidget( m_layersEmptyState ); // Index 1: Empty State
+    m_layersStack->setCurrentIndex( 1 ); // Initially empty
+
+    layersLayout->addWidget(m_layersStack);
+
+    m_layersDock->setWidget(layersContainer);
+    addDockWidget(Qt::LeftDockWidgetArea, m_layersDock);
+
+    // Browser Panel (Left, below layers)
+    m_browserModel = new QgsBrowserGuiModel( this );
+    m_browserDock = new QgsBrowserDockWidget( tr( "File Browser" ), m_browserModel, this );
+    m_browserDock->setObjectName( "browserDock" );
+    m_browserDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::LeftDockWidgetArea, m_browserDock );
+
+    // Browser double-click / drag → add layer to project
+    connect(m_browserDock, &QgsBrowserDockWidget::openFile, this, [this](const QString &fileName, const QString &fileTypeHint) {
+        Q_UNUSED(fileTypeHint);
+        if (fileName.isEmpty()) return;
+        ( void ) m_activeViewHost->loadLayer( fileName );
+    });
+
+    // Tabify the left dock widgets
+    tabifyDockWidget(m_layersDock, m_browserDock);
+    m_layersDock->raise();
+    // Data Manager panel is created later in setupDataManagerPanel() once
+    // ProjectContext exists (setupDockWidgets runs before context creation).
+
+    // Processing Toolbox Panel (Right, with Overview)
+    m_processingDock = new QgsDockWidget( tr( "Processing Toolbox" ), this );
+    m_processingDock->setObjectName("processingDock");
+    m_processingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    // Container with search box + tree view
+    auto *toolboxContainer = new QWidget(m_processingDock);
+    auto *toolboxLayout = new QVBoxLayout(toolboxContainer);
+    toolboxLayout->setContentsMargins(0, 0, 0, 0);
+    toolboxLayout->setSpacing(2);
+
+    auto *searchEdit = new QgsFilterLineEdit(toolboxContainer);
+    searchEdit->setShowSearchIcon(true);
+    searchEdit->setPlaceholderText(tr("Search algorithms..."));
+    toolboxLayout->addWidget(searchEdit);
+
+    m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
+        QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
+    m_toolboxView->setRegistry( QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
+    toolboxLayout->addWidget(m_toolboxView);
+
+    m_processingDock->setWidget(toolboxContainer);
+    addDockWidget(Qt::RightDockWidgetArea, m_processingDock);
+
+    // Connect search filter
+    connect(searchEdit, &QgsFilterLineEdit::textChanged,
+            m_toolboxView, &QgsProcessingToolboxTreeView::setFilterString);
+
+#ifdef SICNU_EMBED_PYTHON
+    // Python Console (lazy-loaded on first use)
+    m_pythonDock = new QgsDockWidget(tr("Python Console"), this);
+    m_pythonDock->setObjectName("pythonDock");
+    m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
+    addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
+    m_pythonDock->hide(); // Hidden until first use
+
+    // Python Script Editor Dock (lazy-loaded on first use)
+    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python Script Editor"), this);
+    m_pythonScriptEditorDock->setObjectName("pythonScriptEditorDock");
+    m_pythonScriptEditorDock->setWidget(new QWidget(m_pythonScriptEditorDock)); // Placeholder
+    addDockWidget(Qt::BottomDockWidgetArea, m_pythonScriptEditorDock);
+    tabifyDockWidget(m_pythonDock, m_pythonScriptEditorDock);
+    m_pythonScriptEditorDock->hide(); // Hidden until first use
+#endif
+
+    // Double-click on algorithm in toolbox opens execution dialog
+    connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+        const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+        if (!alg)
+            return;
+
+        openProcessingAlgorithm(alg->id());
+    });
+
+    // Right-click context menu for favorites
+    m_toolboxView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_toolboxView, &QgsProcessingToolboxTreeView::customContextMenuRequested, this,
+        [this](const QPoint &pos) {
+            QModelIndex index = m_toolboxView->indexAt(pos);
+            const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+            if (!alg)
+                return;
+
+            QMenu menu(this);
+            QString algId = alg->id();
+
+            // Check if already in favorites
+            bool isFav = QgsGui::processingFavoriteAlgorithmManager()->isFavorite(algId);
+            if (isFav) {
+                QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
+                connect(removeFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            } else {
+                QAction *addFav = menu.addAction(tr("Add to Favorites"));
+                connect(addFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->add(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            }
+
+            // Open algorithm action
+            QAction *openAlg = menu.addAction(tr("Open Algorithm"));
+            connect(openAlg, &QAction::triggered, this, [this, algId]() {
+                openProcessingAlgorithm(algId);
+            });
+
+            menu.exec(m_toolboxView->viewport()->mapToGlobal(pos));
+        });
+
+
+    // Overview Panel (Right, tabified with Processing Toolbox)
+    m_overviewDock = new QgsDockWidget( tr( "Overview Map" ), this );
+    m_overviewDock->setObjectName("overviewDock");
+    m_overviewDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
+    m_overviewCanvas->enableAntiAliasing(true);
+    m_overviewDock->setWidget(m_overviewCanvas);
+    addDockWidget(Qt::RightDockWidgetArea, m_overviewDock);
+    tabifyDockWidget(m_processingDock, m_overviewDock);
+    m_processingDock->raise();
+
+    // Identify Results Panel (Right, tabified with Processing/Overview)
+    m_identifyDock = new QgsDockWidget(tr("Identify Features"), this);
+    m_identifyDock->setObjectName("identifyDock");
+    m_identifyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    m_identifyResults = new QTextBrowser(m_identifyDock);
+    m_identifyResults->setOpenExternalLinks(false);
+    m_identifyResults->setPlaceholderText(tr("Click features on the map with the Identify tool to see their details."));
+    m_identifyDock->setWidget(m_identifyResults);
+    addDockWidget(Qt::RightDockWidgetArea, m_identifyDock);
+    tabifyDockWidget(m_overviewDock, m_identifyDock);
+
+    // Spectral Profile Panel (Right, tabified with Identify Results)
+    m_spectralDock = new QgsDockWidget(tr("Spectral Curve"), this);
+    m_spectralDock->setObjectName("spectralDock");
+    m_spectralDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    m_spectralProfile = new SpectralProfileWidget(m_spectralDock);
+    m_spectralDock->setWidget(m_spectralProfile);
+    addDockWidget(Qt::RightDockWidgetArea, m_spectralDock);
+    tabifyDockWidget(m_identifyDock, m_spectralDock);
+
+    // Display stretch panel (renderer only — no export; like layer symbology stretch)
+    m_histogramStretchDock = new QgsDockWidget( tr( "Display Stretch" ), this );
+    m_histogramStretchDock->setObjectName( "histogramStretchDock" );
+    m_histogramStretchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+
+    m_histogramStretch = new HistogramStretchWidget( m_histogramStretchDock );
+    connect( m_histogramStretch, &HistogramStretchWidget::stretchApplied,
+             this, [this]
+    {
+        // The renderer is replaced by the stretch widget. Force the canvas to
+        // schedule a fresh map-render job after that replacement instead of
+        // relying solely on the layer repaint notification.
+        if ( m_mapCanvas )
+            m_mapCanvas->refresh();
+    } );
+    m_histogramStretchDock->setWidget( m_histogramStretch );
+    addDockWidget( Qt::RightDockWidgetArea, m_histogramStretchDock );
+    tabifyDockWidget( m_spectralDock, m_histogramStretchDock );
+    m_histogramStretchDock->hide();
+
+    // Spectral Workbench 11 (endmember/table panel; independent dock, hidden
+    // by default — the artifact path is loaded inside the panel).
+    m_spectralWorkbenchDock = new QgsDockWidget( tr( "Spectral Workbench 11" ), this );
+    m_spectralWorkbenchDock->setObjectName( "spectralWorkbenchDock" );
+    m_spectralWorkbenchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    m_spectralWorkbench = new SpectralWorkbenchPanel( m_spectralWorkbenchDock );
+    m_spectralWorkbenchDock->setWidget( m_spectralWorkbench );
+    addDockWidget( Qt::RightDockWidgetArea, m_spectralWorkbenchDock );
+    tabifyDockWidget( m_histogramStretchDock, m_spectralWorkbenchDock );
+    m_spectralWorkbenchDock->hide();
+
+    // Log Panel (Bottom, tabified)
+    m_logDock = new LogPanel(this);
+    m_logDock->setObjectName("logDock");
+    addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
+
+    // Unified Task Center projection panel (Bottom, tabified with Log).
+    // Hidden by default — open from Ribbon 任务 → 任务中心 when needed.
+    m_jobPanel = new RsJobPanel( this );
+    connect( m_jobPanel, &RsJobPanel::resultOpenRequested,
+             this, &QgisDesktopWindow::loadRasterLayer );
+    addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
+    tabifyDockWidget( m_logDock, m_jobPanel );
+    m_jobPanel->hide();
+    ProcessingJobAdapter::registerProcessingJobExecutor();
+
+    // Guided Workflow Panel (Right, tabified with processing)
+    auto *workflowWidget = new GuidedWorkflowWidget(this);
+    m_workflowDock = new QgsDockWidget(this);
+    m_workflowDock->setObjectName("workflowDock");
+    m_workflowDock->setWindowTitle(tr("Guided Workflow"));
+    m_workflowDock->setWidget(workflowWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
+    tabifyDockWidget(m_processingDock, m_workflowDock);
+
+    // Undergraduate Lab Cockpit (Course Home + Guided Lab Workspace)
+    {
+        auto *cockpit = new sicnu::app::teaching::LabCockpitDock( this );
+        m_labCockpitDock = new QgsDockWidget( this );
+        m_labCockpitDock->setObjectName( QStringLiteral( "labCockpitDock" ) );
+        m_labCockpitDock->setWindowTitle( tr( "遥感实验学习工作台" ) );
+        m_labCockpitDock->setWidget( cockpit );
+        addDockWidget( Qt::RightDockWidgetArea, m_labCockpitDock );
+        tabifyDockWidget( m_workflowDock, m_labCockpitDock );
+        m_labCockpitDock->hide();
+    }
+
+    // Teacher Authoring & Assessment Console (append-only; objectName distinct from #1237/#1238)
+    {
+        auto *admin = new sicnu::app::teaching_admin::TeachingAdminDock( this );
+        m_teachingAdminDock = new QgsDockWidget( this );
+        m_teachingAdminDock->setObjectName( QStringLiteral( "teachingAdminDock" ) );
+        m_teachingAdminDock->setWindowTitle( tr( "教学作者与评测控制台" ) );
+        m_teachingAdminDock->setWidget( admin );
+        addDockWidget( Qt::RightDockWidgetArea, m_teachingAdminDock );
+        tabifyDockWidget( m_workflowDock, m_teachingAdminDock );
+        m_teachingAdminDock->hide();
+    }
+
+    // Window menu — add dock toggle actions
+    // Data Manager toggle is added in setupDataManagerPanel() (created later).
+    if (m_windowMenu) {
+        m_windowMenu->addSeparator();
+        m_windowMenu->addAction(m_layersDock->toggleViewAction());
+        m_windowMenu->addAction(m_browserDock->toggleViewAction());
+        m_windowMenu->addAction(m_processingDock->toggleViewAction());
+        m_windowMenu->addAction(m_overviewDock->toggleViewAction());
+        m_windowMenu->addAction(m_identifyDock->toggleViewAction());
+        m_windowMenu->addAction(m_spectralDock->toggleViewAction());
+        m_windowMenu->addAction(m_histogramStretchDock->toggleViewAction());
+        if ( m_spectralWorkbenchDock )
+            m_windowMenu->addAction( m_spectralWorkbenchDock->toggleViewAction() );
+        m_windowMenu->addAction(m_logDock->toggleViewAction());
+        if ( m_jobPanel )
+          m_windowMenu->addAction( m_jobPanel->toggleViewAction() );
+        m_windowMenu->addAction(m_workflowDock->toggleViewAction());
+        if ( m_labCockpitDock )
+            m_windowMenu->addAction( m_labCockpitDock->toggleViewAction() );
+        if ( m_teachingAdminDock )
+            m_windowMenu->addAction( m_teachingAdminDock->toggleViewAction() );
+        // Task panel dock is created after setupDockWidgets (setupRibbonAndTaskPanel);
+        // its toggle action is added there once the dock exists.
+        m_windowMenu->addSeparator();
+
+#ifdef SICNU_EMBED_PYTHON
+        // Python Console (lazy-loaded) — use the dock's own toggleViewAction so
+        // the Window menu stays in sync with the panel popup (#1097).
+        {
+            QAction *pythonAction = m_pythonDock->toggleViewAction();
+            pythonAction->setText( tr( "Python Console" ) );
+            m_windowMenu->addAction( pythonAction );
+            connect( pythonAction, &QAction::toggled, this, [this]( bool visible ) {
+                if ( !visible )
+                    return;
+                if ( !m_pythonConsole )
+                {
+                    statusBar()->showMessage( tr( "Initializing Python..." ) );
+                    QWidget *placeholder = m_pythonDock->widget();
+                    m_pythonConsole = new SicnuPythonConsole( m_pythonDock );
+                    m_pythonDock->setWidget( m_pythonConsole.data() );
+                    if ( placeholder && placeholder != m_pythonConsole.data() )
+                        placeholder->deleteLater();
+                    statusBar()->showMessage( tr( "Python ready" ), 3000 );
+                }
+                m_pythonDock->raise();
+            } );
+        }
+
+        // Python Script Editor (lazy-loaded)
+        {
+            QAction *scriptEditorAction = m_pythonScriptEditorDock->toggleViewAction();
+            scriptEditorAction->setText( tr( "Python Script Editor" ) );
+            m_windowMenu->addAction( scriptEditorAction );
+            connect( scriptEditorAction, &QAction::toggled, this, [this]( bool visible ) {
+                if ( !visible )
+                    return;
+                if ( !m_pythonScriptEditor )
+                {
+                    statusBar()->showMessage( tr( "Initializing Python script editor..." ) );
+                    QWidget *placeholder = m_pythonScriptEditorDock->widget();
+                    m_pythonScriptEditor = new Sicnu::PythonScriptEditor( m_pythonScriptEditorDock );
+                    connect( m_pythonScriptEditor.data(), &Sicnu::PythonScriptEditor::statusMessage,
+                             this, [this]( const QString &message ) {
+                                 statusBar()->showMessage( message, 3000 );
+                             } );
+                    m_pythonScriptEditorDock->setWidget( m_pythonScriptEditor.data() );
+                    if ( placeholder && placeholder != m_pythonScriptEditor.data() )
+                        placeholder->deleteLater();
+                    statusBar()->showMessage( tr( "Python script editor ready" ), 3000 );
+                }
+                m_pythonScriptEditorDock->raise();
+            } );
+        }
+
+m_windowMenu->addSeparator();
+#endif
+        QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
+        connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
+    }
+}
+
+void QgisDesktopWindow::setupDataManagerPanel()
+{
+    // Must run after ProjectContext is created.
+    // Data Manager = project data catalog (elevated); layer tree = active view only.
+    if ( !m_projectContext || m_dataManagerPanel )
+        return;
+
+    // Workspace Governance 3.0 browser (Platform 3.0 Phase S): paged,
+    // virtualized view over the governance index — no per-asset widgets.
+    // Backed by the ProjectContext WorkspaceService (Data vs Results/History
+    // split: raw assets live in DataManagerPanel; governed entities here).
+    m_workspaceBrowserPanel = new sicnu::app::WorkspaceBrowserPanel( this );
+    m_workspaceBrowserPanel->setWorkspaceService(
+        &m_projectContext->workspaceService() );
+    m_workspaceBrowserDock = new QDockWidget( tr( "Workspace Governance" ), this );
+    m_workspaceBrowserDock->setWidget( m_workspaceBrowserPanel );
+    // Governance rows open on the map through the Data/Display seam.
+    connect( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,
+             this, [this]( const QString &path ) { loadRasterLayer( path ); } );
+    m_workspaceBrowserDock->setObjectName( QStringLiteral( "workspaceBrowserDock" ) );
+    addDockWidget( Qt::LeftDockWidgetArea, m_workspaceBrowserDock );
+    if ( m_dataManagerPanel )
+        tabifyDockWidget( m_dataManagerPanel, m_workspaceBrowserDock );
+    else if ( m_layersDock )
+        tabifyDockWidget( m_layersDock, m_workspaceBrowserDock );
+    m_workspaceBrowserDock->hide();
+
+    m_dataManagerPanel =
+        new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
+    m_dataManagerPanel->setWindowTitle( tr( "Data Management" ) );
+    addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
+    if ( m_layersDock )
+        tabifyDockWidget( m_layersDock, m_dataManagerPanel );
+    // Prefer catalog front after setup (product shell also raises it).
+    m_dataManagerPanel->raise();
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::importRequested,
+             this, [this]() { importLayer(); } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        // ActiveViewHost owns active-view display routing (Wave C).
+        if ( !m_activeViewHost
+             || !m_activeViewHost->displayAsset( assetId ) )
+        {
+            QMessageBox::warning(
+                this, tr( "Add to Display" ),
+                tr( "Cannot add the data assets to the current view." ) );
+        }
+    } );
+
+    auto unloadOne = [this]( sicnu::data::AssetId assetId, bool confirm ) -> bool {
+        if ( !m_projectContext )
+            return false;
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
+        if ( confirm )
+        {
+            QString detail = tr( "Unload this data asset from the project?" );
+            if ( !plan.activeLeases().isEmpty() )
+            {
+                detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
+                             "Continue with the cascading unload?" )
+                             .arg( plan.activeLeases().size() );
+            }
+            const auto choice = QMessageBox::question(
+                this, tr( "Unload Data Assets" ), detail,
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+            if ( choice != QMessageBox::Yes )
+                return false;
+        }
+        const sicnu::data::UnloadPlan confirmed =
+            plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
+        return static_cast<bool>( dataManager.unload( confirmed ) );
+    };
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
+             this, [this, unloadOne]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        // Confirm path: if the user accepts and unload fails, surface a warning.
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
+        QString detail = tr( "Unload this data asset from the project?" );
+        if ( !plan.activeLeases().isEmpty() )
+        {
+            detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
+                         "Continue with the cascading unload?" )
+                         .arg( plan.activeLeases().size() );
+        }
+        const auto choice = QMessageBox::question(
+            this, tr( "Unload Data Assets" ), detail,
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+        if ( choice != QMessageBox::Yes )
+            return;
+        if ( !unloadOne( assetId, false ) )
+        {
+            QMessageBox::warning(
+                this, tr( "Unload Data Assets" ),
+                tr( "This data asset cannot be unloaded." ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequestedMany,
+             this, [this, unloadOne]( const QList<sicnu::data::AssetId> &ids ) {
+        if ( ids.isEmpty() || !m_projectContext )
+            return;
+        const auto choice = QMessageBox::question(
+            this, tr( "Batch Unload" ),
+            tr( "Unload the selected %1 data assets from the project?\n"
+                "If display / processing references exist, their presentations are removed cascadingly." )
+              .arg( ids.size() ),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+        if ( choice != QMessageBox::Yes )
+            return;
+
+        int ok = 0;
+        int failed = 0;
+        for ( const sicnu::data::AssetId &id : ids )
+        {
+            if ( unloadOne( id, false ) )
+                ++ok;
+            else
+                ++failed;
+        }
+        if ( failed > 0 )
+        {
+            QMessageBox::warning(
+                this, tr( "Batch Unload" ),
+                tr( "Finished: %1 succeeded, %2 failed." ).arg( ok ).arg( failed ) );
+        }
+        else if ( statusBar() )
+        {
+            statusBar()->showMessage( tr( "Unloaded %1 data assets" ).arg( ok ), 4000 );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::promoteRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        const auto promoted = m_projectContext->dataManager().promote( assetId );
+        if ( !promoted )
+        {
+            QMessageBox::warning(
+                this, tr( "Promote to Project Persistent" ),
+                tr( "This temporary data asset cannot be promoted." ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::relocateRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const auto snapshot = dataManager.asset( assetId );
+        if ( !snapshot )
+        {
+            QMessageBox::warning( this, tr( "Re-link Missing Source" ),
+                                  tr( "This data asset cannot be found." ) );
+            return;
+        }
+        const QString oldPath = snapshot->source().canonicalSource;
+        const QString newPath = QFileDialog::getOpenFileName(
+            this, tr( "Re-link Missing Source — choose a new source file" ), oldPath,
+            tr( "All Supported Files (*.tif *.tiff *.vrt *.shp *.gpkg *.geojson);;" )
+              + tr( "Rasters (*.tif *.tiff *.vrt);;" )
+              + tr( "Vectors (*.shp *.gpkg *.geojson);;" )
+              + tr( "All Files (*)" ) );
+        if ( newPath.isEmpty() )
+            return;
+        sicnu::data::SourceDescriptor replacement = snapshot->source();
+        replacement.canonicalSource = newPath;
+        const auto result = dataManager.relocate(
+            sicnu::data::RelocateRequest{ assetId, replacement } );
+        if ( !result )
+        {
+            QString detail = tr( "This data asset cannot be re-linked." );
+            if ( !result.diagnostics().isEmpty() )
+                detail = result.diagnostics().constFirst().message;
+            QMessageBox::warning( this, tr( "Re-link Missing Source" ), detail );
+        }
+        else if ( statusBar() )
+        {
+            statusBar()->showMessage(
+                tr( "Re-linked asset %1 → %2" ).arg( assetId.toString() ).arg( newPath ), 5000 );
+        }
+    } );
+
+    if ( m_windowMenu )
+        m_windowMenu->addAction( m_dataManagerPanel->toggleViewAction() );
+}
+
+void QgisDesktopWindow::showDataManagerPanel()
+{
+    if ( !m_dataManagerPanel )
+        setupDataManagerPanel();
+    if ( !m_dataManagerPanel )
+        return;
+    m_dataManagerPanel->show();
+    m_dataManagerPanel->raise();
+}
+
+void QgisDesktopWindow::showAgentCopilot()
+{
+    if ( !m_agentCopilotDock )
+        return;
+    m_agentCopilotDock->show();
+    m_agentCopilotDock->raise();
+}
+
+void QgisDesktopWindow::setupRibbonAndTaskPanel()
+{
+    // Right-side task panel for atomic workflow tools (primary RS tool surface).
+    // Do not tabify with Processing Toolbox — that stack made two UIs fight for the
+    // same dock area. Processing stays available from 窗口 menu for experts.
+    m_taskPanel = new TaskPanelHost( this );
+    m_taskPanelDock = new QgsDockWidget( tr( "Tasks" ), this );
+    m_taskPanelDock->setObjectName( QStringLiteral( "rsTaskPanelDock" ) );
+    m_taskPanelDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    m_taskPanelDock->setWidget( m_taskPanel );
+    addDockWidget( Qt::RightDockWidgetArea, m_taskPanelDock );
+    // Start hidden; openWorkflowTool() shows it when a tool is chosen.
+    m_taskPanelDock->hide();
+
+    if ( m_windowMenu )
+        m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
+
+    // Single Task Center UI is the bottom RsJobPanel (rsJobPanelDock).
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
+             this, [this]( const QString &path ) {
+                 // Generic path open → DataManager + main Display View.
+                 ( void ) loadDataLayer( path );
+             } );
+
+    // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
+    m_sessionController = new WorkflowSessionController( this );
+    if ( m_projectContext )
+    {
+        m_sessionController->setDataManager( &m_projectContext->dataManager() );
+        // Workbench 9.0 M6: the task panel's enum provider reads the
+        // authoritative asset store for x-ui-enum-source "assets".
+        if ( auto *provider = m_taskPanel->enumProvider() )
+            provider->attachDataManager( &m_projectContext->dataManager() );
+    }
+    m_sessionController->registerBuiltins();
+    m_sessionController->bindPanel( m_taskPanel );
+
+    m_pipelineDock = new sicnu::workflow::gui::PipelineEditorDock( this );
+    addDockWidget( Qt::RightDockWidgetArea, m_pipelineDock );
+    m_pipelineDock->hide();
+
+    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
+    m_agentCopilotDock = agentCopilotDock;
+    addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
+    if ( m_projectContext )
+    {
+        agentCopilotDock->setContext( &m_projectContext->dataManager(),
+                                      m_activeViewHost->mapCanvas() );
+        // Workspace Governance 3.0 seam: governance tools read the
+        // project-scoped WorkspaceService through AgentServices.
+        sicnu::agent::AgentServices::instance().setWorkspaceService(
+            &m_projectContext->workspaceService() );
+    }
+    agentCopilotDock->hide();
+    // First-class surface: the copilot must be discoverable from the 窗口
+    // menu like every other panel (it is a QDockWidget, so it also joins the
+    // chrome right-click popup via createPopupMenu automatically).
+    if ( m_windowMenu )
+        m_windowMenu->addAction( agentCopilotDock->toggleViewAction() );
+
+    // Committed tool-call outputs are loaded by QgisDisplayManager auto-display
+    // on DataManager::assetAdded (the dispatcher commits via the injected
+    // DataManager); no explicit layer-request hookup is needed here.
+
+    connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,
+             this, [this]( const QJsonObject &planJson ) {
+                 if ( m_pipelineDock && m_pipelineDock->pipelineCanvas() )
+                 {
+                     m_pipelineDock->show();
+                     m_pipelineDock->raise();
+
+                     // Convert once through the shared QJson→Json::Value
+                     // helper (ADR 0048) before applying plan id/title
+                     // defaults.
+                     Json::Value cppPlan = sicnu::processing::jsonValueFromQJson( planJson );
+
+                     if ( !cppPlan.isMember( "id" ) )
+                         cppPlan["id"] = "agent_plan";
+                     if ( !cppPlan.isMember( "title" ) )
+                         cppPlan["title"] = "AI Agent Generated Workflow";
+
+                     sicnu::workflow::WorkflowDefinition def;
+                     std::string parseErr;
+                     if ( sicnu::workflow::workflowDefinitionFromJson( cppPlan, def, parseErr ) )
+                     {
+                         m_pipelineDock->pipelineCanvas()->loadWorkflowDefinition( def );
+                     }
+                 }
+             } );
+
+    m_sessionController->bindCanvas( m_pipelineDock->pipelineCanvas() );
+
+    connect( m_pipelineDock, &sicnu::workflow::gui::PipelineEditorDock::runFullWorkflowRequested,
+             m_sessionController, &WorkflowSessionController::runFullWorkflow );
+    connect( m_pipelineDock, &sicnu::workflow::gui::PipelineEditorDock::stopWorkflowRequested,
+             m_sessionController, &WorkflowSessionController::stopWorkflow );
+
+    connect( m_sessionController, &WorkflowSessionController::requestLoadRaster,
+             this, [this]( const QString &path ) {
+                 ( void ) loadDataLayer( path );
+             } );
+    connect( m_sessionController, &WorkflowSessionController::statusMessage,
+             this, [this]( const QString &msg ) {
+                 statusBar()->showMessage( msg, 5000 );
+             } );
+    connect( m_sessionController, &WorkflowSessionController::requestOpenWorkspace,
+             this, [this]( const QString &kind ) {
+                 if ( kind == QLatin1String( "obia" ) )
+                     openObiaWindow();
+                 else if ( kind == QLatin1String( "classify" ) )
+                     openClassificationWindow();
+             } );
+    // Result artifacts open on the map through the Data/Display seam.
+    connect( m_taskPanel, &TaskPanelHost::resultOpenRequested,
+             this, &QgisDesktopWindow::loadRasterLayer );
+    connect( m_taskPanel, &TaskPanelHost::closeClicked, this, [this]() {
+        if ( m_taskPanelDock )
+            m_taskPanelDock->hide();
+    } );
+
+    // ArcGIS Pro style: full-width top chrome ABOVE left/right docks.
+    // setMenuWidget() only gets a menubar-height slot in practice and compresses
+    // the ribbon; top-dock + setCorner(Top*Corner, TopDock) is the reliable
+    // way to 置顶拉通 across the whole window.
+    m_ribbonController = new RibbonController( this, this );
+    m_ribbonBar = m_ribbonController->createRibbonBar();
+    connect( m_ribbonController, &RibbonController::openWorkflowTool,
+             this, &QgisDesktopWindow::openWorkflowTool );
+    connect( m_ribbonController, &RibbonController::ribbonCollapsedChanged,
+             this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
+    // Restore the persisted collapse state (setter persists toggles).
+    {
+        QSettings settings;
+        if ( settings.value( QStringLiteral( "ribbon/collapsed" ), false ).toBool() )
+            m_ribbonController->setRibbonCollapsed( true );
+    }
+
+    auto *chrome = new QWidget;
+    chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
+    chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+    // Base: tabs(30) + content(96) = 126 (QAT inlined into tab row).
+    // + optional toolbar strip (0–2 × 32) under the ribbon.
+    constexpr int kRibbonOnlyH = 126;
+    chrome->setMinimumHeight( kRibbonOnlyH );
+
+    auto *chromeLay = new QVBoxLayout( chrome );
+    chromeLay->setContentsMargins( 0, 0, 0, 0 );
+    chromeLay->setSpacing( 0 );
+    chromeLay->addWidget( m_ribbonBar );
+
+    // Adaptive 1–2 row toolbar flow under the ribbon (draggable, resizable).
+    m_toolbarStrip = new QWidget( chrome );
+    m_toolbarStrip->setObjectName( QStringLiteral( "rsToolbarStrip" ) );
+    m_toolbarStrip->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+    m_toolbarStrip->setFixedHeight( 0 );
+    m_toolbarStrip->hide();
+    auto *stripLay = new QVBoxLayout( m_toolbarStrip );
+    stripLay->setContentsMargins( 0, 0, 0, 0 );
+    stripLay->setSpacing( 0 );
+    m_toolbarFlowHost = new RsToolbarFlowHost( m_toolbarStrip );
+    stripLay->addWidget( m_toolbarFlowHost );
+    connect( m_toolbarFlowHost, &RsToolbarFlowHost::geometryChanged, this, [this]() {
+        if ( m_layoutingToolbarsUnderRibbon )
+            return;
+        // Only adjust chrome height when user drags/resizes inside the flow host.
+        const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
+        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
+        constexpr int kRowH = 32;
+        m_toolbarStrip->setFixedHeight( stripH );
+        m_toolbarStrip->setMinimumHeight( stripH );
+        m_toolbarStrip->setMaximumHeight( 2 * kRowH );
+        if ( stripH > 0 )
+            m_toolbarStrip->show();
+        else
+            m_toolbarStrip->hide();
+        const int chromeH = kBaseChrome + stripH;
+        if ( m_topChrome )
+        {
+            m_topChrome->setFixedHeight( chromeH );
+            m_topChrome->setMinimumHeight( chromeH );
+            m_topChrome->setMaximumHeight( kBaseChrome + 2 * kRowH );
+            m_topChrome->updateGeometry();
+        }
+        if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
+        {
+            ribbonDock->setFixedHeight( chromeH );
+            ribbonDock->setMinimumHeight( chromeH );
+            ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
+            ribbonDock->updateGeometry();
+            resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
+        }
+    } );
+    chromeLay->addWidget( m_toolbarStrip );
+
+    m_topChrome = chrome;
+
+    // Ribbon right-click → panel/toolbar toggles (also on ribbon internals).
+    auto installChromeMenu = [this]( QWidget *w ) {
+        if ( !w )
+            return;
+        w->setContextMenuPolicy( Qt::CustomContextMenu );
+        connect( w, &QWidget::customContextMenuRequested, this,
+                 [this, w]( const QPoint &pos ) {
+                     QMenu *menu = createPopupMenu();
+                     if ( !menu )
+                         return;
+                     menu->setAttribute( Qt::WA_DeleteOnClose );
+                     menu->popup( w->mapToGlobal( pos ) );
+                 } );
+    };
+    installChromeMenu( chrome );
+
+    // Corners claim the top strip so the dock spans over left/right docks.
+    setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
+    setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
+
+    auto *ribbonDock = new QDockWidget( this );
+    ribbonDock->setObjectName( QStringLiteral( "rsRibbonDock" ) );
+    ribbonDock->setWindowTitle( QString() );
+    ribbonDock->setFeatures( QDockWidget::NoDockWidgetFeatures );
+    ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
+    ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) ); // no title chrome
+    ribbonDock->setWidget( chrome );
+    ribbonDock->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+    ribbonDock->setMinimumHeight( kRibbonOnlyH );
+    ribbonDock->setMaximumHeight( kRibbonOnlyH + 64 ); // + 2×32 toolbar rows
+    addDockWidget( Qt::TopDockWidgetArea, ribbonDock );
+    // Ensure no menu-widget leftovers steal vertical space.
+    setMenuWidget( nullptr );
+
+    // Adopt product toolbars into the chrome strip (below band rail).
+    layoutToolbarsUnderRibbon();
+}
+
+void QgisDesktopWindow::layoutToolbarsUnderRibbon()
+{
+    // Host product toolbars in RsToolbarFlowHost under the ribbon:
+    // 1–2 adaptive rows, each bar draggable + resizable.
+    //
+    // Never use QMainWindow TopToolBarArea — it stacks above top docks.
+    // Guard re-entry: show/hide syncs toggleViewAction and can loop.
+    if ( !m_toolbarStrip || !m_toolbarFlowHost || m_layoutingToolbarsUnderRibbon )
+        return;
+
+    m_layoutingToolbarsUnderRibbon = true;
+    struct LayoutGuard
+    {
+        bool &flag;
+        ~LayoutGuard() { flag = false; }
+    } guard{ m_layoutingToolbarsUnderRibbon };
+
+    const QList<QToolBar *> ordered = { m_mapToolsToolBar, m_digitizeToolBar };
+
+    QAction *mapToggle = m_mapToolsToolBar ? m_mapToolsToolBar->toggleViewAction() : nullptr;
+    QAction *digToggle = m_digitizeToolBar ? m_digitizeToolBar->toggleViewAction() : nullptr;
+    std::unique_ptr<QSignalBlocker> blockMap;
+    std::unique_ptr<QSignalBlocker> blockDig;
+    if ( mapToggle )
+        blockMap = std::make_unique<QSignalBlocker>( mapToggle );
+    if ( digToggle )
+        blockDig = std::make_unique<QSignalBlocker>( digToggle );
+
+    QHash<QToolBar *, bool> wantByBar;
+    for ( QToolBar *tb : ordered )
+    {
+        if ( !tb )
+            continue;
+        QAction *toggle = tb->toggleViewAction();
+        bool wantVisible = false;
+        const QVariant forced = tb->property( "rsWantVisible" );
+        if ( forced.isValid() )
+        {
+            wantVisible = forced.toBool();
+            tb->setProperty( "rsWantVisible", QVariant() );
+        }
+        else
+        {
+            wantVisible = toggle ? toggle->isChecked() : true;
+            if ( toggle && !toggle->isChecked() && !tb->isHidden() )
+                wantVisible = true;
+        }
+        wantByBar.insert( tb, wantVisible );
+        if ( toggle )
+            toggle->setChecked( wantVisible );
+    }
+
+    // Drop non-product main-window toolbars from restoreState.
+    for ( QToolBar *tb : findChildren<QToolBar *>() )
+    {
+        if ( !tb || tb == m_mapToolsToolBar || tb == m_digitizeToolBar )
+            continue;
+        tb->hide();
+        if ( toolBarArea( tb ) != Qt::NoToolBarArea )
+            removeToolBar( tb );
+    }
+    for ( QToolBar *tb : ordered )
+    {
+        if ( tb && toolBarArea( tb ) != Qt::NoToolBarArea )
+            removeToolBar( tb );
+        if ( tb )
+        {
+            tb->setWindowFlags( Qt::Widget );
+            tb->setMovable( false );
+            tb->setFloatable( false );
+            tb->setAllowedAreas( {} );
+        }
+    }
+
+    // Register bars once; subsequent layouts only update visibility / reflow.
+    if ( !m_toolbarFlowHost->hasProductToolbars() )
+        m_toolbarFlowHost->setProductToolbars( ordered );
+    m_toolbarFlowHost->applyVisibility( wantByBar );
+
+    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
+    constexpr int kRowH = 32;
+    const int stripH = m_toolbarFlowHost->usedHeight();
+
+    m_toolbarStrip->setFixedHeight( stripH );
+    m_toolbarStrip->setMinimumHeight( stripH );
+    m_toolbarStrip->setMaximumHeight( 2 * kRowH );
+    if ( stripH > 0 )
+        m_toolbarStrip->show();
+    else
+        m_toolbarStrip->hide();
+
+    const int chromeH = kBaseChrome + stripH;
+    if ( m_topChrome )
+    {
+        m_topChrome->setFixedHeight( chromeH );
+        m_topChrome->setMinimumHeight( chromeH );
+        m_topChrome->setMaximumHeight( kBaseChrome + 2 * kRowH );
+        m_topChrome->updateGeometry();
+    }
+    if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
+    {
+        ribbonDock->setFixedHeight( chromeH );
+        ribbonDock->setMinimumHeight( chromeH );
+        ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
+        ribbonDock->updateGeometry();
+        resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
+    }
+}
+
+void QgisDesktopWindow::applyProductShellLayout()
+{
+    // Product shell: full-width Ribbon on top; optional classic toolbars under it
+    // (max two rows — 导航与显示 / 数字化). Primary tools remain on the Ribbon.
+
+    // Full-width top strip over left/right docks.
+    setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
+    setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
+    setMenuWidget( nullptr );
+
+    // Default product bar: keep 导航与显示 on. Do NOT force-off 数字化 here —
+    // that wiped the user's context-menu toggle after every shell re-apply.
+    // Digitize default-off is set once in setupToolbars() / resetPanelLayout().
+    if ( m_mapToolsToolBar )
+    {
+        m_mapToolsToolBar->show();
+        if ( m_mapToolsToolBar->toggleViewAction() )
+            m_mapToolsToolBar->toggleViewAction()->setChecked( true );
+        m_mapToolsToolBar->setProperty( "rsWantVisible", true );
+    }
+    // Honor current digitize toggle (checked → second row).
+    if ( m_digitizeToolBar && m_digitizeToolBar->toggleViewAction() )
+    {
+        const bool digOn = m_digitizeToolBar->toggleViewAction()->isChecked();
+        m_digitizeToolBar->setProperty( "rsWantVisible", digOn );
+    }
+    layoutToolbarsUnderRibbon();
+
+    auto hideDock = []( QDockWidget *dock ) {
+        if ( dock )
+            dock->hide();
+    };
+    hideDock( m_processingDock );
+    hideDock( m_workflowDock );
+    hideDock( m_overviewDock );
+    hideDock( m_identifyDock );
+    hideDock( m_spectralDock );
+    hideDock( m_histogramStretchDock );
+    // Log stays available but collapsed by default to reduce vertical noise.
+    hideDock( m_logDock );
+    // Task Center (RsJobPanel) is on-demand — empty list should not steal map height.
+    // Open via Ribbon 任务 → 任务中心, or panel context menu.
+    hideDock( m_jobPanel );
+
+    // Left: Data Manager is the elevated catalog; view layer tree is secondary tab.
+    // Browser stays hidden until needed.
+    if ( m_browserDock )
+        m_browserDock->hide();
+    if ( m_layersDock )
+        m_layersDock->show();
+    // Data Manager = project data identity (ADR 0010). Raise over 视图图层.
+    if ( m_dataManagerPanel )
+    {
+        m_dataManagerPanel->show();
+        m_dataManagerPanel->raise();
+    }
+    else if ( m_layersDock )
+    {
+        m_layersDock->raise();
+    }
+
+    // Workflow tool host (rsTaskPanelDock) only when a tool is open.
+    hideDock( m_taskPanelDock );
+
+    // Pin ribbon dock to top with fixed product height.
+    if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
+    {
+        ribbonDock->setFeatures( QDockWidget::NoDockWidgetFeatures );
+        ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
+        if ( !ribbonDock->titleBarWidget() )
+            ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) );
+        ribbonDock->show();
+        addDockWidget( Qt::TopDockWidgetArea, ribbonDock );
+        ribbonDock->raise();
+    }
+    if ( m_topChrome )
+        m_topChrome->show();
+    // Re-apply toolbar strip geometry after dock height pin.
+    layoutToolbarsUnderRibbon();
+    if ( m_ribbonBar )
+        m_ribbonBar->show();
+
+    // Keep the detached action-host menubar hidden (never install it).
+    if ( m_hiddenMenuBar )
+    {
+        m_hiddenMenuBar->setNativeMenuBar( false );
+        m_hiddenMenuBar->setMaximumHeight( 0 );
+        m_hiddenMenuBar->hide();
+    }
+}
+
+void QgisDesktopWindow::refreshWorkflowLayerChoices()
+{
+    if ( !m_sessionController )
+        return;
+
+    QStringList ids;
+    QStringList names;
+    const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+    for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+    {
+        QgsMapLayer *layer = it.value();
+        if ( !layer || !qobject_cast<QgsRasterLayer *>( layer ) )
+            continue;
+        ids.append( it.key() );
+        names.append( layer->name() );
+    }
+    m_sessionController->setLayerChoices( ids, names );
+}
+
+void QgisDesktopWindow::openWorkflowTool( const QString &definitionId )
+{
+    if ( !m_sessionController || !m_taskPanelDock )
+        return;
+
+    refreshWorkflowLayerChoices();
+    m_sessionController->openTool( definitionId );
+    m_taskPanelDock->show();
+    m_taskPanelDock->raise();
+}
