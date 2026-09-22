@@ -5,6 +5,7 @@
 // growing a second copy.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -235,6 +236,30 @@ inline float localPolynomialAt( const std::vector<float> &y,
     xPow *= xEval;
   }
   return std::isfinite( value ) ? static_cast<float>( value ) : kNanF;
+}
+
+
+/// Robust scale σ̂ = 1.4826 · MAD(r) where MAD = median(|r − median(r)|).
+/// Even counts take the upper middle via nth_element (same convention as the
+/// Whittaker IRLS in temporal_smoothing.cpp). Empty input → 0.
+inline double madScale( std::vector<double> residuals )
+{
+  if ( residuals.empty() )
+    return 0.0;
+  const auto medianOf = []( std::vector<double> values ) {
+    const std::size_t m = values.size() / 2;
+    std::nth_element( values.begin(), values.begin() + static_cast<std::ptrdiff_t>( m ),
+                      values.end() );
+    if ( values.size() % 2 == 1 )
+      return values[m];
+    const double upper = values[m];
+    const double lower = *std::max_element( values.begin(), values.begin() + static_cast<std::ptrdiff_t>( m ) );
+    return 0.5 * ( lower + upper );
+  };
+  const double med = medianOf( residuals );
+  for ( double &r : residuals )
+    r = std::fabs( r - med );
+  return 1.4826 * medianOf( residuals );
 }
 
 } // namespace sicnu::temporal::detail

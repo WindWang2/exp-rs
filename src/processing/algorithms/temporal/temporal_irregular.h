@@ -73,8 +73,8 @@ std::vector<float> whittakerSmoothTime( const std::vector<float> &y,
                                         double lambda );
 
 /// Robust (IRLS) variant of whittakerSmoothTime: iteratively re-weights
-/// finite samples by a Cauchy kernel on the residual scale (3·1.4826·median
-/// |r|, same convention as whittakerSmoothRobust). @a iterations is clamped
+/// finite samples by a Cauchy kernel on the residual scale (3·1.4826·MAD(r),
+/// same convention as whittakerSmoothRobust). @a iterations is clamped
 /// to [1, 10].
 std::vector<float> whittakerSmoothTimeRobust( const std::vector<float> &y,
                                               const std::vector<double> &tDays,

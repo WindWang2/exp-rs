@@ -186,20 +186,16 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
       result.fitted = fitted;
       return result;
     }
-    // IRLS: Huber-style weights from 1.5·MAD scale.
+    // IRLS: Huber-style weights from 1.5·MAD scale (median |r − median(r)|).
     std::vector<double> residuals;
     residuals.reserve( count );
     for ( int i = 0; i < n; ++i )
     {
       if ( weights[i] <= 0.0 )
         continue;
-      residuals.push_back( std::abs( static_cast<double>( y[i] ) - fitted[i] ) );
+      residuals.push_back( static_cast<double>( y[i] ) - fitted[i] );
     }
-    std::sort( residuals.begin(), residuals.end() );
-    const double mad = residuals.empty()
-                         ? 0.0
-                         : residuals[residuals.size() / 2];
-    const double scale = 1.4826 * mad;
+    const double scale = detail::madScale( residuals );
     const double delta = ( scale > 1e-9 ? 1.5 * scale : 1e6 );
     for ( int i = 0; i < n; ++i )
     {
@@ -229,20 +225,18 @@ std::vector<float> whittakerSmoothRobust( const std::vector<float> &y,
   std::vector<float> z = whittakerSmooth( y, weights, lambda );
   for ( int iter = 1; iter < maxIter; ++iter )
   {
-    // Residual scale from the current fit (median |r| of finite samples).
-    std::vector<double> absRes;
-    absRes.reserve( static_cast<size_t>( n ) );
+    // Residual scale from the current fit: σ̂ = 1.4826 · MAD(r).
+    std::vector<double> residuals;
+    residuals.reserve( static_cast<size_t>( n ) );
     for ( int i = 0; i < n; ++i )
     {
       if ( std::isfinite( y[i] ) && std::isfinite( z[static_cast<size_t>( i )] ) )
-        absRes.push_back( std::abs( static_cast<double>( y[i] ) -
-                                    z[static_cast<size_t>( i )] ) );
+        residuals.push_back( static_cast<double>( y[i] ) -
+                             z[static_cast<size_t>( i )] );
     }
-    if ( absRes.empty() )
+    if ( residuals.empty() )
       break;
-    std::sort( absRes.begin(), absRes.end() );
-    const double mad = absRes[absRes.size() / 2];
-    const double k = std::max( 3.0 * 1.4826 * mad, 1e-9 );
+    const double k = std::max( 3.0 * detail::madScale( residuals ), 1e-9 );
     bool changed = false;
     for ( int i = 0; i < n; ++i )
     {
@@ -313,41 +307,10 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
   out.pos = doyOf[posIdx];
   const double threshold = minV + crossingFraction * ( maxV - minV );
 
-  int sosIdx = -1;
-  int eosIdx = -1;
-  for ( int k = 0; k < static_cast<int>( idx.size() ); ++k )
-  {
-    if ( y[idx[k]] >= threshold )
-    {
-      sosIdx = idx[k];
-      break;
-    }
-  }
-  for ( int k = static_cast<int>( idx.size() ) - 1; k >= 0; --k )
-  {
-    if ( y[idx[k]] >= threshold )
-    {
-      eosIdx = idx[k];
-      break;
-    }
-  }
-  if ( sosIdx < 0 || eosIdx < 0 )
-    return out;
-  out.sos = doyOf[sosIdx];
-  out.eos = doyOf[eosIdx];
-
-  // LOS in days over the t axis (season may wrap: negative span + 365.25).
-  double span = tDays[eosIdx] - tDays[sosIdx];
-  if ( span < 0.0 )
-    span += 365.25;
-  out.los = span;
-
-  // Limb metrics (Temporal Phenology 12.0, WP4): green-up / senescence rates
-  // and midpoints. Crossings of the 20%/50%/80% amplitude levels are located
-  // on the real day axis (linear interpolation inside the bracketing
-  // segment), so irregular cadence is handled exactly. A crossing that only
-  // occurs outside the sampled limb (e.g. the window opens mid-ramp) leaves
-  // the metric undefined (NaN / -1) — never extrapolated.
+  // Limb + SOS/EOS crossings share one interpolated semantics (D16 / WP4):
+  // locate the level on the real day axis inside the bracketing segment, then
+  // map back to DOY. Quantized-to-sample SOS/EOS previously disagreed with the
+  // interpolated midpoints; both now use the same crossingTime + doyAt path.
   const auto posOf = [&]( int sampleIdx ) -> int {
     for ( int k = 0; k < static_cast<int>( idx.size() ); ++k )
       if ( idx[static_cast<size_t>( k )] == sampleIdx )
@@ -356,54 +319,80 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
   };
   const int pk = posOf( posIdx );
   const int lastK = static_cast<int>( idx.size() ) - 1;
+
+  // First upward (rising limb) or downward (falling limb) crossing of
+  // @a level within idx range (loK, hiK]; returns the interpolated crossing
+  // time in tDays units, NaN when absent. Bracket indices are reported for
+  // the doy mapping below.
+  const auto crossingTime = [&]( int loK, int hiK, double level, bool rising,
+                                 int *i0Out, int *i1Out ) -> double {
+    for ( int k = loK + 1; k <= hiK; ++k )
+    {
+      const double v0 = y[idx[static_cast<size_t>( k - 1 )]];
+      const double v1 = y[idx[static_cast<size_t>( k )]];
+      const bool cross = rising ? ( v0 < level && v1 >= level )
+                                : ( v0 >= level && v1 < level );
+      if ( !cross )
+        continue;
+      const double t0 = tDays[idx[static_cast<size_t>( k - 1 )]];
+      const double t1 = tDays[idx[static_cast<size_t>( k )]];
+      if ( !( t1 > t0 ) )
+        continue; // duplicate instant: degenerate crossing time — skip
+      const double frac = ( level - v0 ) / ( v1 - v0 );
+      if ( i0Out ) *i0Out = idx[static_cast<size_t>( k - 1 )];
+      if ( i1Out ) *i1Out = idx[static_cast<size_t>( k )];
+      return t0 + frac * ( t1 - t0 );
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+  };
+  // Maps an interpolated crossing time back to a day-of-year by linear
+  // interpolation of the bracketing samples' doys. Year-boundary brackets use
+  // yearLen 366 when either endpoint is day 366 (leap), else 365 — avoids the
+  // prior +365 unwrap that collapsed leap Dec-31 brackets one day early.
+  const auto doyAt = [&]( double t, int i0, int i1 ) -> double {
+    const int d0 = doyOf[static_cast<size_t>( i0 )];
+    const int d1raw = doyOf[static_cast<size_t>( i1 )];
+    const int yearLen = ( d0 == 366 || d1raw == 366 ) ? 366 : 365;
+    int d1 = d1raw;
+    if ( d1 < d0 )
+      d1 += yearLen;
+    const double t0 = tDays[static_cast<size_t>( i0 )];
+    const double t1 = tDays[static_cast<size_t>( i1 )];
+    const double frac = ( t1 > t0 ) ? ( t - t0 ) / ( t1 - t0 ) : 0.0;
+    int d = static_cast<int>( std::lround( d0 + frac * ( d1 - d0 ) ) );
+    if ( d > yearLen )
+      d -= yearLen;
+    if ( d < 1 )
+      d += yearLen;
+    return static_cast<double>( d );
+  };
+
+  // SOS / EOS at the same crossingFraction used for the threshold (interpolated).
+  int sosI0 = -1, sosI1 = -1, eosI0 = -1, eosI1 = -1;
+  double tSos = std::numeric_limits<double>::quiet_NaN();
+  double tEos = std::numeric_limits<double>::quiet_NaN();
+  if ( pk >= 0 )
+  {
+    tSos = crossingTime( 0, pk, threshold, true, &sosI0, &sosI1 );
+    tEos = crossingTime( pk, lastK, threshold, false, &eosI0, &eosI1 );
+  }
+  if ( !std::isfinite( tSos ) || !std::isfinite( tEos ) || sosI0 < 0 || eosI0 < 0 )
+    return out;
+  out.sos = doyAt( tSos, sosI0, sosI1 );
+  out.eos = doyAt( tEos, eosI0, eosI1 );
+
+  // LOS in days over the t axis (season may wrap: negative span + 365.25).
+  double span = tEos - tSos;
+  if ( span < 0.0 )
+    span += 365.25;
+  out.los = span;
+
   if ( pk >= 0 )
   {
     const double amp = maxV - minV;
     const double v20 = minV + 0.20 * amp;
     const double v50 = minV + 0.50 * amp;
     const double v80 = minV + 0.80 * amp;
-
-    // First upward (rising limb) or downward (falling limb) crossing of
-    // @a level within idx range (loK, hiK]; returns the interpolated crossing
-    // time in tDays units, NaN when absent. Bracket indices are reported for
-    // the doy mapping below.
-    const auto crossingTime = [&]( int loK, int hiK, double level, bool rising,
-                                   int *i0Out, int *i1Out ) -> double {
-      for ( int k = loK + 1; k <= hiK; ++k )
-      {
-        const double v0 = y[idx[static_cast<size_t>( k - 1 )]];
-        const double v1 = y[idx[static_cast<size_t>( k )]];
-        const bool cross = rising ? ( v0 < level && v1 >= level )
-                                  : ( v0 >= level && v1 < level );
-        if ( !cross )
-          continue;
-        const double t0 = tDays[idx[static_cast<size_t>( k - 1 )]];
-        const double t1 = tDays[idx[static_cast<size_t>( k )]];
-        if ( !( t1 > t0 ) )
-          continue; // duplicate instant: degenerate crossing time — skip
-        const double frac = ( level - v0 ) / ( v1 - v0 );
-        if ( i0Out ) *i0Out = idx[static_cast<size_t>( k - 1 )];
-        if ( i1Out ) *i1Out = idx[static_cast<size_t>( k )];
-        return t0 + frac * ( t1 - t0 );
-      }
-      return std::numeric_limits<double>::quiet_NaN();
-    };
-    // Maps an interpolated crossing time back to a day-of-year by linear
-    // interpolation of the bracketing samples' doys (year-boundary brackets
-    // counted modulo 365; leap Dec-31 brackets may land one day early).
-    const auto doyAt = [&]( double t, int i0, int i1 ) -> double {
-      const int d0 = doyOf[static_cast<size_t>( i0 )];
-      int d1 = doyOf[static_cast<size_t>( i1 )];
-      if ( d1 < d0 )
-        d1 += 365;
-      const double t0 = tDays[static_cast<size_t>( i0 )];
-      const double t1 = tDays[static_cast<size_t>( i1 )];
-      const double frac = ( t1 > t0 ) ? ( t - t0 ) / ( t1 - t0 ) : 0.0;
-      const int d = static_cast<int>( std::lround( d0 + frac * ( d1 - d0 ) ) );
-      // Unwrap only values shifted past the year end by the +365 bracket
-      // correction — d == 366 is a valid leap-year day-of-year, not a wrap.
-      return static_cast<double>( d > 366 ? d - 365 : d );
-    };
 
     int i0 = -1, i1 = -1;
     if ( pk > 0 )
