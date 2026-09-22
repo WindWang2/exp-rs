@@ -91,3 +91,14 @@ Verdict: **READY**, no P0. Findings and disposition:
 - P3.3 doc numbering/formula scope → fixed (this file + 01-recon.md).
 - P3.4 decompose value-level E2E at the new default λ → added
   (`[p3-review]`: trend ≈ base, seasonal carries ±5 annual swing).
+
+## Closure
+
+- Final verification: 21 suites × 2 consecutive passes, all green
+  (temporal_fit/irregular/change/core/calendar/phenology_extraction/
+  bfast_harmonic_breaks/phenology_multi/uncertainty/algorithms/selection/
+  operators_ti11/regions/operators_10/workspace/agent_tools/d16_trend/
+  d16_tools/d16_phenology_e2e/spatiotemporal_contracts/capability_drift).
+- Commits 7e4b01ed8..e7e15f16a on hardening/temporal-change-phenology
+  (rebased onto master a9dc33fa7 — master did not move during the slice).
+- PR #1244 created 2026-09-23. NOT merged; online CI not awaited.
