@@ -108,6 +108,10 @@ class ExperimentStore
         /// removable (their provenance links survive). Setting false deletes
         /// the run's lineage edges with it, atomically.
         bool keepWithRunLineage = true;
+        /// Runs cited by an immutable benchmark_results row are never
+        /// removable (#1173). Setting false is not supported as a cascade
+        /// delete of benchmark rows — refuse prune of cited runs instead.
+        bool keepWithBenchmarkCitation = true;
 
         QJsonObject toJson() const;
     };
@@ -126,9 +130,10 @@ class ExperimentStore
     /// Executes a plan inside ONE transaction: every id is re-checked for
     /// eligibility at execution time, so a stale plan shrinks — it can never
     /// over-delete. Run rows, their metric records, promotion rows (when
-    /// !keepPromoted), lineage edges (when !keepWithRunLineage) and the
+    /// !keepPromoted), lineage edges (when !keepWithRunLineage), and the
     /// affected experiments' run_id lists are updated atomically: no phantom
-    /// references survive a prune.
+    /// references survive a prune. Runs cited by benchmark_results are
+    /// refused when keepWithBenchmarkCitation (default).
     sicnu::data::Result<qint64> executeRunPrune( const RunPrunePlan &plan );
 
     // --- metric records -----------------------------------------------------------

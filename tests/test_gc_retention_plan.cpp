@@ -272,3 +272,43 @@ TEST_CASE( "experiment run retention: prune plan equals executed deletions; "
     CHECK( store.runById( QStringLiteral( "linked-run" ) ).has_value() );
     CHECK( !store.runById( QStringLiteral( "twin-b" ) ).has_value() );
 }
+
+TEST_CASE( "experiment run retention: benchmark-cited runs are not pruned (#1173)",
+           "[gc][experiment][oracle][issue1173]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp-bench.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId(
+        sicnu::experiment::ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "bench-cite" ) );
+    experiment.runIds() = QStringList{ QStringLiteral( "cited-run" ),
+                                       QStringLiteral( "free-run" ) };
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    REQUIRE( store
+                 .upsertRunsBatch( { makeRun( QStringLiteral( "cited-run" ),
+                                              experiment.experimentId(), 1 ),
+                                     makeRun( QStringLiteral( "free-run" ),
+                                              experiment.experimentId(), 2 ) } )
+                 .has_value() );
+
+    BenchmarkResult result;
+    result.setResultId( QStringLiteral( "br-1" ) );
+    result.setBenchmarkId( QStringLiteral( "bench-a" ) );
+    result.setBenchmarkVersion( 1 );
+    result.setExperimentRunId( QStringLiteral( "cited-run" ) );
+    REQUIRE( store.saveBenchmarkResult( result ).has_value() );
+
+    ExperimentStore::RunPrunePolicy policy;
+    policy.collapseIdentityTwins = false;
+    const auto plan = store.planRunPrune( policy );
+    REQUIRE( plan.has_value() );
+    CHECK( plan->runIds == QStringList{ QStringLiteral( "free-run" ) } );
+    CHECK( !plan->runIds.contains( QStringLiteral( "cited-run" ) ) );
+
+    REQUIRE( store.executeRunPrune( *plan ).has_value() );
+    CHECK( store.runById( QStringLiteral( "cited-run" ) ).has_value() );
+    CHECK( !store.runById( QStringLiteral( "free-run" ) ).has_value() );
+    CHECK( store.benchmarkResultById( QStringLiteral( "br-1" ) ).has_value() );
+}
