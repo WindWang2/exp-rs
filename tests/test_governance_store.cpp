@@ -556,3 +556,163 @@ TEST_CASE( "GovernanceStore relationship writes roll back when a step fails",
     plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_member_del" ) ) );
     REQUIRE( store.removeDataset( ds.id.toString() ).operator bool() );
 }
+
+TEST_CASE( "resultsDependingOnAssets stays correct beyond the SQLite variable limit",
+           "[governance][store][impact]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    ResultRecord r;
+    r.id = ResultId::generate();
+    r.semanticType = ResultSemanticType::Classification;
+    r.header.name = QStringLiteral( "impact" );
+    ResultInput first;
+    first.assetId = QStringLiteral( "asset-first" );
+    ResultInput last;
+    last.assetId = QStringLiteral( "asset-last" );
+    r.inputs.append( first );
+    r.inputs.append( last );
+    REQUIRE( store.upsertResult( r ).operator bool() );
+
+    // A hub asset's downstream set is width-unbounded and can exceed the
+    // engine's host-parameter limit; the query must chunk the IN-list instead
+    // of failing open with a silently empty answer. 251k entries also crosses
+    // the raised default of newer SQLite builds (250000) so the pre-chunking
+    // implementation fails this probe on current systems too, not just on
+    // distros shipping the historical 999/32766 limits.
+    QStringList affected;
+    affected.reserve( 251000 );
+    for ( int i = 0; i < 251000; ++i )
+        affected.append( QStringLiteral( "hub-%1" ).arg( i, 6, 10, QLatin1Char( '0' ) ) );
+    affected[ 0 ] = QStringLiteral( "asset-first" );
+    affected[ 250999 ] = QStringLiteral( "asset-last" );
+
+    const QVector<ResultRecord> hits = store.resultsDependingOnAssets( affected );
+    REQUIRE( hits.size() == 1 );
+    CHECK( hits.first().id == r.id );
+
+    // The bounded sibling keeps its semantics.
+    CHECK( store.resultsDependingOnAsset( QStringLiteral( "asset-last" ) ).size() == 1 );
+}
+
+TEST_CASE( "GovernanceStore batch writes roll back when any step fails — "
+           "aliases, tags, run outputs, experiment variants and removal",
+           "[governance][store][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "gov.db" ) );
+    GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    // Aliases: a failing alias insert must not commit the asset mirror row —
+    // an asset that cannot be resolved by path is a half-written identity.
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_alias BEFORE INSERT ON aliases"
+                                         " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    GovernedAsset a = makeAsset( QStringLiteral( "asset-a" ), QStringLiteral( "a.tif" ) );
+    CHECK_FALSE( store.upsertAsset( a ).operator bool() );
+    CHECK_FALSE( store.assetById( QStringLiteral( "asset-a" ) ).has_value() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_alias" ) ) );
+    REQUIRE( store.upsertAsset( a ).operator bool() );
+    REQUIRE( store.assetByPath( a.canonicalSource )->assetId == QStringLiteral( "asset-a" ) );
+
+    // Tags: a failing tag insert must not commit a partial tag set (nor the
+    // delete of the previous set).
+    plantTrigger( dbPath, QStringLiteral(
+        "CREATE TRIGGER fail_second_tag BEFORE INSERT ON tags"
+        " WHEN (SELECT COUNT(*) FROM tags WHERE entity_kind='asset'"
+        "       AND entity_id='asset-a') >= 1"
+        " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.setTags( QStringLiteral( "asset" ), QStringLiteral( "asset-a" ),
+                                { QStringLiteral( "keep" ), QStringLiteral( "drop" ) } ).operator bool() );
+    CHECK( store.tagsOf( QStringLiteral( "asset" ), QStringLiteral( "asset-a" ) ).isEmpty() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_second_tag" ) ) );
+    REQUIRE( store.setTags( QStringLiteral( "asset" ), QStringLiteral( "asset-a" ),
+                            { QStringLiteral( "keep" ), QStringLiteral( "drop" ) } ).operator bool() );
+    REQUIRE( store.tagsOf( QStringLiteral( "asset" ), QStringLiteral( "asset-a" ) ).size() == 2 );
+
+    // Run outputs: a failing link insert must not commit a partial batch.
+    RunRecord run1;
+    run1.id = QStringLiteral( "run-1" );
+    run1.state = QStringLiteral( "Succeeded" );
+    RunRecord run2;
+    run2.id = QStringLiteral( "run-2" );
+    run2.state = QStringLiteral( "Succeeded" );
+    REQUIRE( store.upsertRun( run1 ).operator bool() );
+    REQUIRE( store.upsertRun( run2 ).operator bool() );
+    plantTrigger( dbPath, QStringLiteral(
+        "CREATE TRIGGER fail_second_link BEFORE INSERT ON run_outputs"
+        " WHEN (SELECT COUNT(*) FROM run_outputs) >= 1"
+        " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.addRunOutputs( { { QStringLiteral( "run-1" ), QStringLiteral( "asset-a" ) },
+                                        { QStringLiteral( "run-2" ), QStringLiteral( "asset-a" ) } } ).operator bool() );
+    CHECK( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.isEmpty() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_second_link" ) ) );
+    REQUIRE( store.addRunOutputs( { { QStringLiteral( "run-1" ), QStringLiteral( "asset-a" ) },
+                                    { QStringLiteral( "run-2" ), QStringLiteral( "asset-a" ) } } ).operator bool() );
+    REQUIRE( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.size() == 1 );
+    REQUIRE( store.runById( QStringLiteral( "run-2" ) )->outputAssetIds.size() == 1 );
+
+    // Experiment variants: a failing variant insert must not commit the
+    // cleared-out previous variant set (silent provenance loss).
+    ExperimentRecord exp;
+    exp.id = ExperimentId::generate();
+    exp.header.name = QStringLiteral( "sweep" );
+    ExperimentVariant baseline;
+    baseline.key = QStringLiteral( "baseline" );
+    exp.variants.append( baseline );
+    REQUIRE( store.upsertExperiment( exp ).operator bool() );
+    plantTrigger( dbPath, QStringLiteral(
+        "CREATE TRIGGER fail_variant BEFORE INSERT ON experiment_variants"
+        " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    ExperimentVariant sweep;
+    sweep.key = QStringLiteral( "sweep-v2" );
+    exp.variants.clear();
+    exp.variants.append( sweep );
+    CHECK_FALSE( store.upsertExperiment( exp ).operator bool() );
+    REQUIRE( store.experimentById( exp.id.toString() ).has_value() );
+    REQUIRE( store.experimentById( exp.id.toString() )->variants.size() == 1 );
+    CHECK( store.experimentById( exp.id.toString() )->variants.first().key ==
+           QLatin1String( "baseline" ) );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_variant" ) ) );
+    REQUIRE( store.upsertExperiment( exp ).operator bool() );
+    REQUIRE( store.experimentById( exp.id.toString() )->variants.first().key ==
+             QLatin1String( "sweep-v2" ) );
+
+    // Experiment removal: a failing variant delete must not strip the parent
+    // row (a committed half-removal leaves orphan variant rows behind).
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_variant_del BEFORE DELETE ON"
+                                         " experiment_variants"
+                                         " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.removeExperiment( exp.id.toString() ).operator bool() );
+    REQUIRE( store.experimentById( exp.id.toString() ).has_value() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_variant_del" ) ) );
+    REQUIRE( store.removeExperiment( exp.id.toString() ).operator bool() );
+    CHECK_FALSE( store.experimentById( exp.id.toString() ).has_value() );
+}
+
+TEST_CASE( "GovernanceStore same-batch path move resolves by final state",
+           "[governance][store][assets]" )
+{
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+
+    GovernedAsset a = makeAsset( QStringLiteral( "asset-a" ), QStringLiteral( "move" ) );
+    REQUIRE( store.upsertAsset( a ).operator bool() );
+
+    // One batch hands a's canonical path to b while a moves elsewhere.
+    GovernedAsset b = makeAsset( QStringLiteral( "asset-b" ), QStringLiteral( "move" ) );
+    GovernedAsset aMoved = makeAsset( QStringLiteral( "asset-a" ), QStringLiteral( "q" ) );
+    const auto result = store.upsertAssets( { b, aMoved } );
+    REQUIRE( result.operator bool() );
+    CHECK( result.diagnostics().isEmpty() );
+
+    REQUIRE( store.assetByPath( QStringLiteral( "/data/move.tif" ) ).has_value() );
+    CHECK( store.assetByPath( QStringLiteral( "/data/move.tif" ) )->assetId ==
+           QLatin1String( "asset-b" ) );
+    REQUIRE( store.assetByPath( QStringLiteral( "/data/q.tif" ) ).has_value() );
+    CHECK( store.assetByPath( QStringLiteral( "/data/q.tif" ) )->assetId ==
+           QLatin1String( "asset-a" ) );
+}

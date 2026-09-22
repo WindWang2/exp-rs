@@ -142,10 +142,23 @@ class ArtifactStore
     /// Trash-state artifacts with zero references and lastTouch older than
     /// @p lastTouchCutoffMs (epoch ms). These are safe to delete physically;
     /// after the caller deletes payload bytes it should call forget() to drop
-    /// the metadata row.
+    /// the metadata rows.
     QVector<ArtifactRecord> reapable( qint64 lastTouchCutoffMs ) const;
-    /// Removes the metadata row (call AFTER deleting payload bytes).
-    Result<void> forget( const QString &artifactId );
+
+    /// Removal policy (mirrors GovernanceStore::RemoveAssetPolicy): Refuse
+    /// fails with `artifact.referenced` while any pin exists — the check runs
+    /// INSIDE the removal transaction, so a reference attached between a
+    /// reapable() plan and this execute still stops the drop. Cascade drops
+    /// the refs too: the explicit GC finishing path for an artifact whose
+    /// payload bytes the caller already removed.
+    enum class ForgetItemPolicy
+    {
+        Refuse,
+        Cascade,
+    };
+    /// Removes the metadata rows (call AFTER deleting payload bytes).
+    Result<void> forget( const QString &artifactId,
+                         ForgetItemPolicy policy = ForgetItemPolicy::Refuse );
 
     // -- Maintenance ----------------------------------------------------------
     qint64 count() const;
