@@ -29,6 +29,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -1028,6 +1029,14 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
   } finalFlushGuard{ [ & ] { flushManifest( manifest, /*force=*/true ); } };
 
   std::size_t chunkWindow = options.chunkWindow == 0 ? 64 : options.chunkWindow;
+  // Asset hints resolve through one map built per walk (same shape as the
+  // prefetch/query-planner byId maps) — a linear cube.assets() scan per
+  // chunk is O(chunks × assets) and dwarfs the chunk work on wide plans.
+  std::unordered_map<std::string, const VirtualCubeAssetIndexEntry *> assetsById;
+  assetsById.reserve( cube.assetCount() );
+  for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
+    assetsById.emplace( entry.record.id, &entry );
+
   for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
   {
     if ( cancel.cancelled() )
@@ -1053,12 +1062,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
 
       // Resolve the hinted asset (the FirstWins owner of this time step).
       const VirtualCubeAssetIndexEntry *asset = nullptr;
-      for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
-        if ( entry.record.id == request.assetIdHint )
-        {
-          asset = &entry;
-          break;
-        }
+      {
+        const auto found = assetsById.find( request.assetIdHint );
+        if ( found != assetsById.end() )
+          asset = found->second;
+      }
       if ( asset == nullptr )
       {
         outcome.status = "failed";
@@ -1232,7 +1240,9 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           written = static_cast<std::uint64_t>( size );
         } );
 
-        Json::Value entry = manifest[token];
+        Json::Value &entry = manifest[token];   // in place — a copy-out/copy-in
+        // of this token's whole chunk map per mirrored chunk is O(chunks²)
+        // of JSON node copies on one-asset mirrors.
         entry[key]["file"] = key + ".tif";
         entry[key]["bytes"] = static_cast<Json::UInt64>( written );
         entry[key]["assetId"] = asset->record.id;
@@ -1251,7 +1261,6 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         // 12.0 materialization stamp (additive): prune's age basis. Entries
         // written before 12.0 lack it and simply never age-expire.
         entry[key]["writtenUtc"] = nowIso8601Utc();
-        manifest[token] = entry;
 
         // Throttled flush (11.0): the manifest publishes after every 32nd
         // mirrored chunk and unconditionally at the end of the walk.
