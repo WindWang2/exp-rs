@@ -1,0 +1,23 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "lab16_accuracy_assessment",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "inputs": [
+    {
+      "path": "data/labs/_tmp/landcover/landcover_classified.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py landcover --out data/labs/_tmp --seed 42",
+      "sensor_truth": "32x32 Byte class map, classes 1..4 by row bands (rows 0-7/8-23/24-27/28-31), truth-NoData block rows 16-17 x cols 0-15; EPSG:4326, 0.001 deg pixels, origin (100, 40), nodata 0; classified stand-in merges class 3 into class 2 (closed-form OA 864/992)"
+    },
+    {
+      "path": "data/labs/_tmp/landcover/landcover_truth.tif",
+      "role": "truth",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py landcover --out data/labs/_tmp --seed 42",
+      "sensor_truth": "32x32 Byte class map, classes 1..4 by row bands (rows 0-7/8-23/24-27/28-31), truth-NoData block rows 16-17 x cols 0-15; EPSG:4326, 0.001 deg pixels, origin (100, 40), nodata 0; classified stand-in merges class 3 into class 2 (closed-form OA 864/992)",
+      "notes": "grading-adjacent truth twin; the pinned grading oracle is the committed tests/fixtures/lab/landcover_truth.tif"
+    }
+  ]
+}

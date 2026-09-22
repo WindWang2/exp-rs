@@ -1,0 +1,651 @@
+{
+  "schema": "sicnu.curriculum/1",
+  "id": "undergraduate_rs",
+  "title": "Remote Sensing Undergraduate Course Pack",
+  "title_zh": "遥感科学与技术本科实验课程",
+  "audience_zh": "遥感科学与技术/地理信息科学本科三四年级；已完成测量学与程序设计基础。模块按先修 DAG 递进，全部实验数据离线可取（committed fixture 或固定种子生成）。",
+  "note_zh": "本清单是 LabSpec/lab-registry/packs/grading 契约链之上的教学组织层：只引用、不复制实验内容；lab 内容、判分与数据部署仍以各自契约文件为唯一权威。m08 引用 temporal track 拥有的外部实验（lab-registry out_of_scope），只读、不判分。",
+  "modules": [
+    {
+      "id": "m01_rs_data_basics",
+      "index": 1,
+      "title": "RS Data and Metadata",
+      "title_zh": "遥感数据与波段/元数据",
+      "summary_zh": "建立『先元数据、后分析』的工作习惯：波段角色、CRS、dtype、像元尺寸与 NoData 是所有后续实验的合同。学生学会填写数据护照，用波段子集（rs:extract_bands）与重采样（rs:resample）亲手改变两类身份字段，并在每一步之后核对身份。",
+      "learning_outcomes": [
+        "能独立读出并解释一景影像的波段数、CRS、dtype、像元尺寸与 NoData 声明",
+        "能区分波段身份（extract_bands 改变）与网格身份（resample 改变）两类处理事故",
+        "能推演波段错位（如红/近红外用反）与网格错位（像元尺寸/CRS 不匹配）对下游产品的定性影响"
+      ],
+      "prerequisite_modules": [],
+      "estimated_effort_minutes": 120,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab15_data_inspection",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab15_data_inspection"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握数据护照五字段（波段/CRS/dtype/像元尺寸/NoData）的阅读与解释",
+              "掌握 rs:extract_bands 的 1-based 波段语义与输出顺序",
+              "掌握 rs:resample 对网格身份的改变及其观测尺度语义"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "凭目视颜色猜波段角色，不读元数据",
+                "why_zh": "标准假彩色与真彩色显示常常互换，RGB 通道映射不等于波段角色",
+                "check_zh": "对照 pack 的 sensor_truth 波段角色表逐一波段核对"
+              },
+              {
+                "mistake_zh": "对类别图用 bilinear 重采样",
+                "why_zh": "连续核在类别值之间插值出从未存在的『半类』，类别图必须用 near/mode exact-pick 核",
+                "check_zh": "对分类图重采样后检查直方图是否出现非整类别值"
+              },
+              {
+                "mistake_zh": "重采样后行列数变了以为数据坏了",
+                "why_zh": "行列数变化是重采样的预期结果；空间覆盖与 CRS 不变才是应核对的不变量",
+                "check_zh": "核对四至范围与 CRS 而不是行列数"
+              }
+            ],
+            "grading_hook_zh": "本模块以数据护照（实验记录）评价，不设机器判分；证据是两次 inspect 报告的对账记录。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m02_preprocessing",
+      "index": 2,
+      "title": "Radiometric and Geometric Preprocessing",
+      "title_zh": "预处理：辐射定标、几何纠正与镶嵌",
+      "summary_zh": "从原始观测到可分析影像的两类纠偏：辐射上回答『DN 是什么物理量』，几何上回答『这个像元在哪里』。镶嵌实验把多景统一到同一网格。",
+      "learning_outcomes": [
+        "能解释 DN→辐亮度/反射率定标链及增益偏移的物理来源",
+        "能执行并验证几何纠正（GCP、重采样、CRS 变换）并说明重采样误差",
+        "能识别镶嵌接边错位的辐射与几何两类成因"
+      ],
+      "prerequisite_modules": [
+        "m01_rs_data_basics"
+      ],
+      "estimated_effort_minutes": 360,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab06_georeferencing",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab06_georeferencing"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 GCP 选取原则（均匀分布、地物清晰、数量与阶次匹配）",
+              "理解多项式阶次、GCP 数量与 RMS 误差的制约关系",
+              "会用重采样前后特征点位置差评估几何质量"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "GCP 全部挤在影像一角",
+                "why_zh": "多项式外推远离 GCP 质心时误差爆炸，边缘变形不可控",
+                "check_zh": "检查 GCP 分布图与四角误差报告，外围必须有控制点"
+              },
+              {
+                "mistake_zh": "只看 RMS 达标就接受纠正结果",
+                "why_zh": "RMS 是控制点上的均值，检查点（独立 GCP）上的误差才是泛化证据",
+                "check_zh": "留出 20% GCP 作检查点，比较检查点误差与拟合 RMS"
+              }
+            ],
+            "grading_hook_zh": "判分检查纠正后影像的 CRS、网格与检查点误差上界。"
+          }
+        },
+        {
+          "lab_id": "lab08_atmospheric_correction",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab08_atmospheric_correction"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "理解大气散射（尤其瑞利/米氏）对蓝光波段的选择性影响",
+              "掌握 DN→表观辐亮度→表观反射率的定标链",
+              "能用暗目标法（DOS）估计并去除路径辐亮度"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "跳过定标直接在 DN 上做大气回减",
+                "why_zh": "增益/偏移未去除时减一个常数在物理上不对应任何散射量",
+                "check_zh": "对比定标前后的光谱曲线形状变化"
+              },
+              {
+                "mistake_zh": "把暗目标反射率估成 0",
+                "why_zh": "真实暗目标仍有 1%–2% 反射率，估 0 会过校正产生负反射率",
+                "check_zh": "检查纠正后暗像元是否出现系统性负值"
+              }
+            ],
+            "grading_hook_zh": "判分检查定标链数值与暗目标估计的闭合差。"
+          }
+        },
+        {
+          "lab_id": "lab10_mosaic",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab10_mosaic"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握镶嵌的网格统一、色彩平衡与接缝线三个环节",
+              "理解直方图匹配在接边辐射一致性中的作用"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "忽略色彩平衡直接拼接",
+                "why_zh": "两景时相/光照差异在接缝处形成亮度台阶，被误认为地物界线",
+                "check_zh": "跨接缝取同名地物样点对比 DN 差"
+              }
+            ],
+            "grading_hook_zh": "判分检查镶嵌网格完整性与接缝两侧辐射连续性。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m03_indices_bandmath",
+      "index": 3,
+      "title": "Spectral Indices and Band Math",
+      "title_zh": "指数与波段运算/派生",
+      "summary_zh": "把物理问题翻译成波段表达式：植被/水体/built-up 指数、PCA 降维与地形派生。强调量纲、值域与饱和效应。",
+      "learning_outcomes": [
+        "能推导 NDVI/EVI/NDWI 的波段表达式并说明值域物理含义",
+        "能用 PCA 解释多波段相关性并选择有效成分",
+        "能从 DEM 派生坡度坡向并说明地形对辐射的调制"
+      ],
+      "prerequisite_modules": [
+        "m02_preprocessing"
+      ],
+      "estimated_effort_minutes": 330,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab02_spectral_analysis",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab02_spectral_analysis"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 NDVI 的物理机制（叶绿素吸收红光、海绵组织反射 NIR）",
+              "掌握 rs:spectral_index 与 rs:band_math 两条计算路径",
+              "能用值域检查发现波段错位"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "红/近红外波段号写反",
+                "why_zh": "OLI 与 ETM+ 波段顺序不同，复制旧实验参数导致系统性符号错误",
+                "check_zh": "水体 NDVI 应为负——正值即波段错位"
+              },
+              {
+                "mistake_zh": "直接比较两景不同时相的 NDVI 绝对值",
+                "why_zh": "大气与光照差异未归一化时，差异混入物候之外的噪声",
+                "check_zh": "用直方图对比两景 NDVI 分布形态"
+              }
+            ],
+            "grading_hook_zh": "判分规则 ndvi_basics/ndvi_bandpair 对 NDVI 值域与波段对做逐像元已知答案对账。"
+          }
+        },
+        {
+          "lab_id": "lab09_pca_analysis",
+          "role": "core",
+          "estimated_effort_minutes": 110,
+          "required_data_packs": [
+            "lab09_pca_analysis"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "理解 PCA 的方差最大化与波段去相关本质",
+              "能把主成分载荷与物理波段角色对应起来"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "把前三个主成分当 RGB 直接解译颜色",
+                "why_zh": "PC 符号与载荷组合不唯一，颜色没有物理对应",
+                "check_zh": "读载荷表解释每个 PC 的物理构成"
+              }
+            ],
+            "grading_hook_zh": "判分检查成分方差贡献率与载荷符号一致性。"
+          }
+        },
+        {
+          "lab_id": "lab05_terrain_analysis",
+          "role": "core",
+          "estimated_effort_minutes": 100,
+          "required_data_packs": [
+            "lab05_terrain_analysis"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 Horn 法坡度坡向的邻域差分推导",
+              "理解地形对入射角的调制是山区辐射校正的根源"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "度与弧度混用",
+                "why_zh": "三角函数输入输出单位不一致导致坡度系统性偏差",
+                "check_zh": "已知解析面（z=2x）的坡度应为 atan(2)≈63.4°，逐像元对账"
+              }
+            ],
+            "grading_hook_zh": "判分规则 terrain_slope 用解析面已知答案逐像元检查。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m04_enhancement_filtering",
+      "index": 4,
+      "title": "Image Enhancement and Filtering",
+      "title_zh": "图像增强与滤波",
+      "summary_zh": "从辐射与几何都可信的影像出发，掌握点域拉伸、空间域卷积（平滑/锐化）与融合增强的原理和适用边界，理解『增强是为了人眼判读，不是为了让结果好看』。",
+      "learning_outcomes": [
+        "能为给定判读任务选择并论证拉伸/滤波组合，说出每种方法的辐射语义代价",
+        "能解释卷积核尺寸与边缘保持/噪声压制之间的权衡，并用直方图证据支撑判断",
+        "能说明融合增强中空间与光谱分辨率的交换关系，识别光谱失真的典型症状"
+      ],
+      "prerequisite_modules": [
+        "m02_preprocessing"
+      ],
+      "estimated_effort_minutes": 220,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab01_image_enhancement",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab01_image_enhancement"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握线性/非线性灰度拉伸对直方图形态的改变，并能预测其效果",
+              "掌握均值/高斯平滑与 Sobel 梯度算子的卷积语义",
+              "建立『增强改变辐射语义，分类前慎用』的判断习惯"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "拉伸后直接把输出当作反射率影像继续做指数计算",
+                "why_zh": "对比度拉伸破坏了 DN→辐亮度的线性关系，NDVI 等指数的物理意义失效",
+                "check_zh": "对拉伸影像与原影像分别计算 NDVI，观察值域差异并解释来源"
+              },
+              {
+                "mistake_zh": "滤波核越大越好，一路调到 15×15",
+                "why_zh": "大核在压噪的同时把道路、田坎等细线性地物抹掉，信息损失不可逆",
+                "check_zh": "对比 3×3 与 9×9 高斯结果中线性地物的边缘宽度"
+              },
+              {
+                "mistake_zh": "把 Sobel 输出当灰度影像看而不做梯度方向解释",
+                "why_zh": "Sobel 给的是梯度幅值，亮处=边缘，均匀区域≈0，不是『更亮的地物』",
+                "check_zh": "在水体内部与田块边界各取一个均匀窗口，比较均值差异"
+              }
+            ],
+            "grading_hook_zh": "判分读取 output/labs/lab01 下的拉伸与滤波产物，检查值域、边缘保持与直方图形态三类断言。"
+          }
+        },
+        {
+          "lab_id": "lab07_image_fusion",
+          "role": "core",
+          "estimated_effort_minutes": 100,
+          "required_data_packs": [
+            "lab07_image_fusion"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "理解全色与多光谱的分辨率互补关系及配准前提",
+              "掌握融合的『空间注入』本质，能比较融合前后的光谱保真度"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "跳过配准直接融合",
+                "why_zh": "亚像素级错位会在融合结果里产生彩色镶边，被误认为『细节增强』",
+                "check_zh": "在融合结果的高对比边缘处放大 8 倍检查彩色镶边"
+              },
+              {
+                "mistake_zh": "用融合影像的光谱值做定量反演",
+                "why_zh": "多数融合方法不保证光谱保真，反演结果系统性偏移",
+                "check_zh": "对同一植被区比较融合前后 NDVI 直方图"
+              }
+            ],
+            "grading_hook_zh": "判分检查融合产物的波段数、空间尺寸与光谱保真断言。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m05_classification",
+      "index": 5,
+      "title": "Image Classification",
+      "title_zh": "分类：监督、非监督与对象级",
+      "summary_zh": "从像元到对象：监督/非监督分类的训练样本纪律、特征空间直觉，以及 OBIA 的分割-特征-分类链。本模块的输出在 m06 被定量审判。",
+      "learning_outcomes": [
+        "能规划训练样本（类别完整、纯像元、独立性）并解释每条纪律的统计理由",
+        "能区分监督与非监督流程的适用场景并执行 kmeans/监督分类",
+        "能说明对象级分类相对逐像元分类的椒盐噪声优势与过分割风险"
+      ],
+      "prerequisite_modules": [
+        "m03_indices_bandmath"
+      ],
+      "estimated_effort_minutes": 240,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab03_classification",
+          "role": "core",
+          "estimated_effort_minutes": 130,
+          "required_data_packs": [
+            "lab03_classification"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握监督分类的样本-特征-决策全链路与参数语义",
+              "理解训练样本质量对结果的决定性（垃圾进垃圾出）"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "训练样本混入混合像元",
+                "why_zh": "纯度不足的样本把类间边界抹糊，决策面系统性偏移",
+                "check_zh": "对训练区做光谱可分性（J-M 距离）检查后再训练"
+              },
+              {
+                "mistake_zh": "用训练样本评价精度",
+                "why_zh": "同一样本既当教练又当考官，精度被系统性高估",
+                "check_zh": "在 m06 用独立真值图重新评价本实验的分类结果"
+              }
+            ],
+            "grading_hook_zh": "判分规则 landcover_classify 对提交的分类图做 OA≥0.85 与 κ≥0.75 双下限审判。"
+          }
+        },
+        {
+          "lab_id": "lab11_obia_classification",
+          "role": "core",
+          "estimated_effort_minutes": 110,
+          "required_data_packs": [
+            "lab11_obia_classification"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握分割尺度参数与地物目标尺寸的匹配关系",
+              "理解对象特征（形状/纹理/光谱）相对像元光谱的信息增量"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "分割尺度一刀切",
+                "why_zh": "单一尺度无法同时匹配细碎道路与大块农田，过/欠分割都毁掉后续分类",
+                "check_zh": "对两类目标分别评估对象边界贴合度"
+              }
+            ],
+            "grading_hook_zh": "判分检查对象边界的拓扑合法性与分类类别值域。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m06_accuracy_assessment",
+      "index": 6,
+      "title": "Accuracy Assessment",
+      "title_zh": "精度评价",
+      "summary_zh": "分类不是终点，回答『分得有多准』才是。用不一致图、混淆矩阵、OA 与 Kappa 把分类质量变成可解释的数字，并理解类别级精度与总体精度的差异。",
+      "learning_outcomes": [
+        "能从分类图与真值图构建不一致图并用统计核对已知答案",
+        "能手工推导混淆矩阵并计算 OA、Kappa 与类别级生产者/用户精度",
+        "能解释 OA 被多数类抬高的机制与 Kappa 的修正逻辑"
+      ],
+      "prerequisite_modules": [
+        "m05_classification"
+      ],
+      "estimated_effort_minutes": 120,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab16_accuracy_assessment",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab16_accuracy_assessment"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 feature_stack → band_math(abs) → inspect 的逐像元对比链",
+              "掌握混淆矩阵的行/列语义与 OA、κ 的闭式计算",
+              "建立『精度评价上限是真值质量』的元认知"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "混淆矩阵行列语义颠倒",
+                "why_zh": "行真值/列分类（或反之）没有全局约定时，生产者/用户精度互换",
+                "check_zh": "用本实验闭式答案对账：第 3 类行全错并入第 2 类列"
+              },
+              {
+                "mistake_zh": "把 NoData 像元计为正确或错误",
+                "why_zh": "无效像元必须从混淆矩阵剔除，否则分母污染全部精度指标",
+                "check_zh": "有效像元数应为 992（1024 − 32），对不上先查 NoData 处理"
+              },
+              {
+                "mistake_zh": "差值当作类别号解译",
+                "why_zh": "|C−T| 的数值大小不等于错误严重度（类别编码无序），错 2 类不比错 1 类『糟一倍』",
+                "check_zh": "用混淆矩阵而非差值幅度讨论错误结构"
+              }
+            ],
+            "grading_hook_zh": "判分规则 accuracy_agreement 对不一致图做网格/值域/有效像元/逐像元已知答案五重断言；混淆矩阵推导写在实验记录中人工评阅。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m07_change_detection",
+      "index": 7,
+      "title": "Change Detection",
+      "title_zh": "变化检测：光学与 SAR",
+      "summary_zh": "双时相对比的科学：从差值/比值到阈值法与 Otsu，再到 SAR 相干斑抑制后的 dB 对数比。强调配准前提与『检出率-虚警率』权衡。",
+      "learning_outcomes": [
+        "能执行并论证双时相变化检测的配准、辐射一致性与阈值三前提",
+        "能用检出率与虚警率评价检测结果而非只看『变化图好看』",
+        "能说明 SAR 变化检测相对光学云鲁棒的原因与斑点噪声代价"
+      ],
+      "prerequisite_modules": [
+        "m05_classification"
+      ],
+      "estimated_effort_minutes": 250,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab04_change_detection",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "lab04_change_detection"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握差值/比值/变化向量三类光学变化检测方法",
+              "掌握 Otsu 自动阈值的前提与失效场景"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "两期影像辐射基准不一致就直接差值",
+                "why_zh": "定标差异在差值图里与真实变化混叠，阈值法把系统偏差当变化检出",
+                "check_zh": "用确认未变化区（水体）的差值分布做零点校验"
+              }
+            ],
+            "grading_hook_zh": "判分规则 change_detect 对变化掩膜的命中与虚警做已知答案对账。"
+          }
+        },
+        {
+          "lab_id": "lab12_sar_processing",
+          "role": "core",
+          "estimated_effort_minutes": 130,
+          "required_data_packs": [
+            "sar_processing"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "理解相干斑的乘性噪声模型与 ENL 度量",
+              "掌握 SAR 定标与 dB 对数比 + Otsu 的变化检测链",
+              "认识同一校准常数对两期可比性的意义"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "在未滤波的强度图上直接做差值",
+                "why_zh": "斑点噪声的乘性结构使差值图噪声与变化信号不可分",
+                "check_zh": "对比 Lee 滤波前后 ENL 与变化图虚警率"
+              },
+              {
+                "mistake_zh": "两期使用不同校准常数",
+                "why_zh": "定标差异是乘性的，dB 对数比后变成一个常量偏移污染阈值",
+                "check_zh": "核对两期 sigma0 的均值一致性"
+              }
+            ],
+            "grading_hook_zh": "判分规则 sar_processing 对 ENL 下限、变化命中率与虚警上限做已知答案断言。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m08_temporal_phenology",
+      "index": 8,
+      "title": "Time Series and Phenology",
+      "title_zh": "时间序列与物候",
+      "summary_zh": "从双时相走向全年节律：NDVI 时序重构、物候参数（生长季起点/终点/峰值）提取。本模块的实验由 temporal track 拥有，课程包只读引用。",
+      "learning_outcomes": [
+        "能解读 NDVI 时序曲线的物候语义（返青、 peak、枯黄）",
+        "能说明云污染与时序重构（滤波/插值）的必要性",
+        "能将物候参数与耕地类型/干扰事件关联解释"
+      ],
+      "prerequisite_modules": [
+        "m07_change_detection"
+      ],
+      "estimated_effort_minutes": 120,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab8_temporal_analysis",
+          "role": "external",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "temporal_analysis"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 12 期 NDVI 时序的物候段划分",
+              "掌握时序平滑对云噪声的压制作用"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "把云污染造成的 NDVI 骤降当真实胁迫",
+                "why_zh": "单期异常是时序问题不是生态问题，必须结合邻近期判断",
+                "check_zh": "对异常期做前后邻域比对与云掩膜核对"
+              }
+            ],
+            "grading_hook_zh": "外部实验：判分由 temporal track 的 temporal_analysis.rules 承担，本课程包不复制其判分事实。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m09_hyperspectral_intro",
+      "index": 9,
+      "title": "Hyperspectral Introduction",
+      "title_zh": "高光谱入门（选修）",
+      "summary_zh": "从多光谱的几个宽波段到高光谱的几十个窄波段：MNF 降维、端元提取与 SAM/SID 光谱匹配、线性解混。选修模块，依赖 m03 的变换思想。",
+      "learning_outcomes": [
+        "能说明高光谱与多光谱在诊断性吸收特征识别上的本质差异",
+        "能执行 MNF 降维并用 PPI 提取端元",
+        "能用 SAM/SID 做光谱匹配并解释解混的丰度约束"
+      ],
+      "prerequisite_modules": [
+        "m03_indices_bandmath"
+      ],
+      "estimated_effort_minutes": 130,
+      "optional": true,
+      "labs": [
+        {
+          "lab_id": "lab13_hyperspectral_analysis",
+          "role": "core",
+          "estimated_effort_minutes": 130,
+          "required_data_packs": [
+            "hyperspectral_analysis"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握 MNF 相对 PCA 在噪声分选上的优势",
+              "掌握 SAM 光谱角对光照条件的鲁棒性来源"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "不做降噪直接做端元提取",
+                "why_zh": "噪声波段放大端元误判，PPI 结果随噪声漂移",
+                "check_zh": "对比 MNF 前后 PPI 端元的光谱曲线平滑度"
+              }
+            ],
+            "grading_hook_zh": "判分规则 hyperspectral_analysis 对类别标签的空间一致性做 zone 断言。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "m10_cartography",
+      "index": 10,
+      "title": "Cartographic Output",
+      "title_zh": "成果制图与整饰",
+      "summary_zh": "把分析结果变成合规地图：专题数据组织、符号与注记、图面要素完整性检查。精度评价（m06）的结论应在图面中如实呈现。",
+      "learning_outcomes": [
+        "能组织专题制图的数据分层与符号化方案",
+        "能执行地图合规检查（图例、比例尺、指北针、数据源注记）",
+        "能把精度指标如实写入图面注记而不是隐藏"
+      ],
+      "prerequisite_modules": [
+        "m06_accuracy_assessment"
+      ],
+      "estimated_effort_minutes": 120,
+      "optional": false,
+      "labs": [
+        {
+          "lab_id": "lab14_cartographic_mapping",
+          "role": "core",
+          "estimated_effort_minutes": 120,
+          "required_data_packs": [
+            "cartographic_mapping"
+          ],
+          "teacher_notes": {
+            "objectives_zh": [
+              "掌握专题图的图层组织与视觉层次",
+              "掌握 MapSpec 合规检查的机器可读产出"
+            ],
+            "common_mistakes_zh": [
+              {
+                "mistake_zh": "图例与实际分类色带不一致",
+                "why_zh": "手工改色后图例不联动，读者按错误图例解译——制图事故",
+                "check_zh": "用 cartography:validate/预检输出核对图例条目与类表一致"
+              },
+              {
+                "mistake_zh": "隐藏低精度类别的图面表达",
+                "why_zh": "精度信息选择性展示违反制图伦理；分类精度应随图注记",
+                "check_zh": "图面注记包含 OA/κ 与真值来源说明"
+              }
+            ],
+            "grading_hook_zh": "判分规则 cartographic_mapping 对 MapSpec 合规性（图例、页面几何、注记）做 file_check 断言。"
+          }
+        }
+      ]
+    }
+  ],
+  "forward_references": [
+    {
+      "capability": "rs:infer",
+      "reason_zh": "深度模型推理需要 ONNX 权重；仓库遵循离线约束不提交模型文件，故本课程不承诺 rs:infer 可用。离线可完成的『推理与验证』教学链由 m05（监督分类）+ m06（精度评价）承载。",
+      "wiring": "docs/integration.md#model-inference"
+    }
+  ]
+}

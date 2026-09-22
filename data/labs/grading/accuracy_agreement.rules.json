@@ -1,0 +1,83 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "accuracy_agreement",
+  "title": "Accuracy assessment — disagreement map against committed truth",
+  "artifact": {
+    "kind": "raster"
+  },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 20,
+      "severity": "blocking",
+      "params": {
+        "epsg": 4326,
+        "width": 32,
+        "height": 32,
+        "band_count": 1,
+        "pixel_size_x": 0.001,
+        "pixel_size_y": 0.001,
+        "pixel_size_tolerance": 1e-09
+      },
+      "derivation": "Lab grid contract: the disagreement map must inherit the 32x32 Byte class-map grid at 0.001 deg (same as tests/fixtures/lab/landcover_truth.tif)."
+    },
+    {
+      "id": "range.disagreement_bounds",
+      "kind": "range",
+      "weight": 20,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "min": 0.0,
+        "max": 3.0,
+        "max_violation_ratio": 0.0
+      },
+      "derivation": "D = |C - T| over class codes 1..4, so 0 <= D <= 3 with equality only for 1-vs-4 confusions; this scene's errors are all |2-3| = 1."
+    },
+    {
+      "id": "layout.valid_pixels",
+      "kind": "band_layout",
+      "weight": 25,
+      "severity": "blocking",
+      "params": {
+        "band_count": 1,
+        "min_valid_fraction": 0.96
+      },
+      "derivation": "Truth-NoData block (rows 16-17 x cols 0-15 = 32 px) must stay excluded: 992/1024 = 0.96875 valid. Floor 0.96 admits NoData-propagating and zero-filled chains alike; the exact-value oracle is agree.* below."
+    },
+    {
+      "id": "find.errors",
+      "kind": "spatial_agreement",
+      "weight": 15,
+      "severity": "blocking",
+      "params": {
+        "band": 1,
+        "truth": {
+          "path": "../../../tests/fixtures/lab/landcover_truth.tif"
+        },
+        "truth_positive": 3,
+        "artifact_positive": 1,
+        "min_hit_rate": 1.0
+      },
+      "derivation": "Closed form: the classified stand-in maps truth class 3 (rows 24-27, 4x32 px) to class 2, so exactly the 128 class-3 pixels carry D = |2-3| = 1. A correct disagreement map must flag ALL of them (hit rate 1.0)."
+    },
+    {
+      "id": "find.no_false_alarm",
+      "kind": "spatial_agreement",
+      "weight": 20,
+      "severity": "blocking",
+      "params": {
+        "band": 1,
+        "truth": {
+          "path": "../../../tests/fixtures/lab/landcover_truth.tif"
+        },
+        "truth_positive": 3,
+        "artifact_positive": 1,
+        "max_false_alarm_rate": 0.0
+      },
+      "derivation": "Every non-class-3 valid pixel agrees (D = 0) and the NoData block carries 0, so no pixel outside truth class 3 may show D = 1 — a correct map has false-alarm rate exactly 0."
+    }
+  ]
+}

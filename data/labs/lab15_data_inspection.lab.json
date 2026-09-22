@@ -1,0 +1,100 @@
+{
+  "spec_version": 2,
+  "id": "lab15_data_inspection",
+  "title": "RS Data Inspection",
+  "title_zh": "遥感数据体检：波段、元数据与网格身份",
+  "objective": "Read a raster's machine-readable identity — band roles, CRS, dtype, pixel size — before doing any analysis.",
+  "objective_zh": "拿到一景影像，先做『数据体检』：从数据源属性（或 gdalinfo / io:inspect 工具）读出波段数、CRS、数据类型、像元尺寸与 NoData 声明；用 rs:extract_bands 做波段子集（波段身份变化），再用 rs:resample 做像元尺寸变化（网格身份变化），每一步之后核对身份。本实验建立『先元数据、后分析』的工作习惯——后续所有实验的第一步都应是它。",
+  "prerequisites": [
+    {
+      "path": "data/samples/landsat_sample.tif",
+      "note": "7 波段合成 Landsat 样本（OLI 波段顺序；GDAL 波段 1..7 = coastal/blue/green/red/nir/swir1/swir2；EPSG:32648，30 m 像元，256×256）"
+    }
+  ],
+  "prerequisite_knowledge": [
+    "栅格数据模型（行列、波段、地理变换）",
+    "坐标参考系统 CRS 的基本概念"
+  ],
+  "principles": [
+    {
+      "heading": "元数据即合同",
+      "body": "一景影像的波段数、dtype、NoData 声明与 CRS 是后续所有处理的合同：波段号错 → 指数错；dtype 错 → 缩放错；CRS 错 → 叠加错。合成样本的合同：EPSG:32648（UTM 48N）、30 m 像元、256×256、7 波段。任何处理前后都应重新核对这个合同。",
+      "formulas": [
+        "DN_reflectance = DN · scale + offset（dtype 与缩放声明必须在分析前核对）",
+        "输出列数 = 源列数 × (源像元尺寸 ÷ 目标像元尺寸)（重采样网格换算）"
+      ]
+    },
+    {
+      "heading": "波段身份与网格身份",
+      "body": "rs:extract_bands 改变波段身份：子集继承源网格与 CRS，但波段计数与角色表随之改变。rs:resample 改变网格身份：像元尺寸与行列数改变，而 CRS 与空间覆盖近似保持。两类操作对应两类最常见的『处理事故』——波段错位与网格错位。",
+      "formulas": []
+    }
+  ],
+  "glossary": [
+    { "term": "metadata", "term_zh": "元数据", "definition_zh": "描述数据本身属性（波段、CRS、dtype、NoData）的数据。" },
+    { "term": "band", "term_zh": "波段", "definition_zh": "栅格中同一地理网格上的一个通道。" },
+    { "term": "CRS", "term_zh": "坐标参考系统", "definition_zh": "把像元行列映射到地球位置的数学约定。" },
+    { "term": "pixel size", "term_zh": "像元尺寸", "definition_zh": "一个像元对应的地面尺寸；重采样改变它而不改变空间覆盖。" }
+  ],
+  "steps": [
+    {
+      "title": "Load the sample scene",
+      "title_zh": "加载样本影像",
+      "description_zh": "通过 File > Add Raster Layer... 加载 data/samples/landsat_sample.tif。先目视猜一下：哪一个是植被、哪一个是水体？稍后用波段语义证据检验你的猜测。",
+      "action": "addRasterLayer",
+      "teaching_note": "目视先猜、证据后验——这是遥感判读的基本节奏。",
+      "completion_hint": "影像显示在地图画布上。"
+    },
+    {
+      "title": "Write the data passport",
+      "title_zh": "读取元数据，填写数据护照",
+      "description_zh": "不运行任何算子：打开图层数据源属性（或在命令行用 gdalinfo / io:inspect 工具），抄下并解释五个字段——波段数、CRS（EPSG 代码）、dtype、像元尺寸、NoData 声明。回答：30 m 像元在地面上对应多大一块地？7 个波段的 OLI 顺序里 NIR 是第几个？",
+      "teaching_note": "本平台 io:inspect 算子可以机器可读地输出同一份合同；本步骤刻意手动，是为了强迫你逐字段阅读而非复制粘贴。",
+      "completion_hint": "数据护照五字段齐全，NIR=波段 5 有依据。"
+    },
+    {
+      "title": "Extract the NIR band",
+      "title_zh": "抽取近红外子集",
+      "description_zh": "执行 rs:extract_bands，bands=[5]（OLI 波段顺序下 NIR 是 GDAL 波段 5），输出 outputs/lab15_nir.tif。这是后续植被指数实验的输入习惯：先声明波段角色，再动手计算。",
+      "operator_id": "rs:extract_bands",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "bands": [5],
+        "output": "outputs/lab15_nir.tif"
+      },
+      "teaching_note": "bands 数组的顺序就是输出波段顺序；抽多个波段时可借此重排。",
+      "completion_hint": "outputs/lab15_nir.tif 生成。"
+    },
+    {
+      "title": "Verify the band identity changed",
+      "title_zh": "核对波段身份变化",
+      "description_zh": "重新打开 outputs/lab15_nir.tif 的数据源属性：波段数应为 1，CRS、像元尺寸、行列数应与源一致。任何不一致都说明链路有问题——先修链路，再谈分析。",
+      "teaching_note": "处理前后的身份核对是本实验的核心方法论。",
+      "completion_hint": "子集波段数=1、其余身份字段与源一致。"
+    },
+    {
+      "title": "Coarsen the grid by resampling",
+      "title_zh": "重采样：改变网格身份",
+      "description_zh": "对 NIR 子集执行 rs:resample，resolution=60（米），输出 outputs/lab15_nir_60m.tif。核对：行列数应减半（256→128），像元尺寸翻倍，空间覆盖不变，CRS 不变。这就是『重采样改变网格身份而不改变波段身份』。",
+      "operator_id": "rs:resample",
+      "params": {
+        "input": "outputs/lab15_nir.tif",
+        "resolution": 60,
+        "resampling": "bilinear",
+        "output": "outputs/lab15_nir_60m.tif"
+      },
+      "teaching_note": "重采样改变了观测尺度：60 m 像元里混入的是 4 个 30 m 像元的信息，细线性地物开始消失——这是后面滤波实验的伏笔。",
+      "completion_hint": "outputs/lab15_nir_60m.tif 为 128×128@60 m。"
+    }
+  ],
+  "expected_artifacts": [
+    { "path": "outputs/lab15_nir.tif", "kind": "raster", "note_zh": "NIR 单波段子集（30 m）" },
+    { "path": "outputs/lab15_nir_60m.tif", "kind": "raster", "note_zh": "重采样后的 NIR（60 m）" }
+  ],
+  "thinking_questions": [
+    "重采样把像元从 30 m 放大到 60 m：空间覆盖、CRS、波段数、行列数四个身份字段各发生了什么？",
+    "对类别图（如分类结果）重采样为什么必须用 exact-pick 核（near/mode）而不用 bilinear？",
+    "两个 dtype 都是 Byte 的影像能直接相减吗？缩放声明扮演什么角色？",
+    "如果一景影像没有声明 NoData，你怎么从统计特征里发现它其实有无效区域？"
+  ]
+}

@@ -57,6 +57,14 @@ add_library(sicnu_agent SHARED
   harness/tool_shortlist.h
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
+  harness/curriculum_catalog.cpp
+  harness/curriculum_catalog.h
+  harness/curriculum_progress.cpp
+  harness/curriculum_progress.h
+  harness/curriculum_availability.cpp
+  harness/curriculum_availability.h
+  harness/curriculum_registry_probe.cpp
+  harness/curriculum_registry_probe.h
   harness/capability_catalog.cpp
   harness/capability_catalog.h
   harness/capability_relations.cpp
