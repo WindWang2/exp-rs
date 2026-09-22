@@ -1328,3 +1328,39 @@ TEST_CASE( "concurrent close of a live worker leaves no orphan entries",
     REQUIRE( liveWorkerEntries( *stack.runtime ) == 0 );
     REQUIRE( registry.loadedPluginIds().empty() );
 }
+
+// ---------------------------------------------------------------------------
+// Hardening 15/20: the POSIX spawn path must pre-check the worker binary —
+// a missing worker used to burn the FULL handshake timeout and surface as a
+// misleading IpcProtocolError instead of the typed HostProcessUnavailable the
+// Windows branch already produced.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "missing worker binary fails fast with a typed diagnostic (hardening 15/20)",
+           "[hostprocess][p15]" )
+{
+    sicnu::plugins::PluginHostProcessSession::SpawnOptions options;
+    options.workerPath = "/nonexistent/sicnu/exprs_plugin_host_worker_missing";
+    options.pluginId = "org.exprs.test.missing-worker-p15";
+    options.handshakeTimeoutMs = 500;
+
+    exprs::PluginDiagnosticLog diagnostics;
+    const auto started = std::chrono::steady_clock::now();
+    const auto session = sicnu::plugins::PluginHostProcessSession::spawn( options, diagnostics );
+    const auto elapsedMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now()
+                                                               - started )
+            .count();
+
+    REQUIRE( session == nullptr );
+    // Fast typed refusal, nowhere near the (irrelevant) handshake deadline.
+    CHECK( elapsedMs < 4000 );
+    bool typedFailure = false;
+    for ( const PluginDiagnostic &item : diagnostics.items() )
+    {
+        if ( item.code == PluginDiagnosticCode::HostProcessUnavailable
+             && item.message.find( "not found" ) != std::string::npos )
+            typedFailure = true;
+    }
+    CHECK( typedFailure );
+}

@@ -904,6 +904,11 @@ TEST_CASE( "registry unload drops the lock across the sink revoke (issue #1156)"
     fs::create_directories( pluginDir );
     {
         std::ofstream manifest( ( pluginDir / "plugin.json" ).string(), std::ios::trunc );
+        // Hardening 15/20: the fixture drifted behind the validator — the
+        // missing capabilities block and the missing operator `external`
+        // section made configure() mark the plugin Broken BEFORE the test
+        // body ran, so the #1156 AB-BA regression oracle never executed
+        // (load failed on the first REQUIRE).
         manifest << R"({
             "manifest_version": 1,
             "id": "org.test.gated",
@@ -912,7 +917,12 @@ TEST_CASE( "registry unload drops the lock across the sink revoke (issue #1156)"
             "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
             "abi_version": 1,
             "entrypoint_kind": "manifest",
-            "operators": [{ "id": "test:gated", "display_name": "Gated", "group": "test" }]
+            "capabilities": ["operator", "external_tools"],
+            "permissions": ["external_process", "filesystem_read"],
+            "operators": [{ "id": "test:gated", "display_name": "Gated", "group": "test",
+                "inputs": [{ "name": "text", "type": "string", "required": true }],
+                "external": { "argv": ["/bin/echo", "-n", "ECHO:", "${text}"],
+                              "timeout_seconds": 30 } }]
         })";
     }
 

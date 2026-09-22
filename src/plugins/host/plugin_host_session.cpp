@@ -139,6 +139,19 @@ std::shared_ptr<PluginHostProcessSession> PluginHostProcessSession::spawn(
                          "worker binary not found: " + options.workerPath, options.pluginId );
         return {};
     }
+#else
+    // Hardening 15/20: same pre-check as the Windows branch. Without it a
+    // missing/unreachable worker only surfaced after the FULL handshake
+    // timeout as a misleading IpcProtocolError — and a broken install path
+    // burned the whole respawn budget on guaranteed-to-fail spawns.
+    if ( ::access( options.workerPath.c_str(), X_OK ) != 0 )
+    {
+        diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
+                         PluginDiagnosticSeverity::Error,
+                         "worker binary not found or not executable: " + options.workerPath,
+                         options.pluginId );
+        return {};
+    }
 #endif
 
     auto session = std::shared_ptr<PluginHostProcessSession>( new PluginHostProcessSession() );

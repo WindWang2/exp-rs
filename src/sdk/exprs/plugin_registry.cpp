@@ -14,6 +14,11 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_validator.h"
@@ -872,12 +877,21 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
             mSink->revokePlugin( pluginId );
         if ( mHostProcessRuntime && !gDestructing )
         {
-            if ( !mHostProcessRuntime->unloadPlugin( pluginId, mDiagnostics ) )
-                mDiagnostics.add( PluginDiagnosticCode::LibraryLoadFailed,
-                                  PluginDiagnosticSeverity::Warning,
-                                  "host-process worker did not shut down cleanly; "
-                                  "process was killed",
-                                  pluginId );
+            // Teardown diagnostics are collected locally and merged under the
+            // registry lock: the lock is deliberately dropped here (#1156) and
+            // PluginDiagnosticLog::add is an unsynchronized push_back.
+            PluginDiagnosticLog teardownLog;
+            if ( !mHostProcessRuntime->unloadPlugin( pluginId, teardownLog ) )
+                teardownLog.add( PluginDiagnosticCode::LibraryLoadFailed,
+                                 PluginDiagnosticSeverity::Warning,
+                                 "host-process worker did not shut down cleanly; "
+                                 "process was killed",
+                                 pluginId );
+            if ( !teardownLog.items().empty() )
+            {
+                std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+                mDiagnostics.merge( teardownLog );
+            }
         }
         return true;
     }
@@ -968,7 +982,13 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
         mSink->revokePlugin( pluginId );
     if ( !mLoader )
         mLoader = std::make_unique<PluginLoader>();
-    mLoader->unload( unloaded, mDiagnostics );
+    PluginDiagnosticLog teardownLog;
+    mLoader->unload( unloaded, teardownLog );
+    if ( !teardownLog.items().empty() )
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        mDiagnostics.merge( teardownLog );
+    }
     return true;
 }
 
@@ -1931,6 +1951,7 @@ void PluginRegistry::unloadAll()
     // the entry capture happen under one short critical section per
     // plugin; contributions are still revoked before each dlclose.
     std::vector<LoadedPlugin> toUnload;
+    PluginDiagnosticLog teardownLog;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         if ( !mLoader )
@@ -1974,7 +1995,15 @@ void PluginRegistry::unloadAll()
         if ( mSink && !gDestructing )
             mSink->revokePlugin( entry.pluginId );
         if ( mLoader )
-            mLoader->unload( entry, mDiagnostics );
+            mLoader->unload( entry, teardownLog );
+    }
+    // PluginDiagnosticLog::add is an unsynchronized push_back — collect the
+    // teardown evidence in a local log and merge under the registry lock
+    // (same idiom as load()'s teardown merge above).
+    if ( !teardownLog.items().empty() )
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        mDiagnostics.merge( teardownLog );
     }
     std::vector<std::string> busyIds;
     {
@@ -1989,14 +2018,25 @@ void PluginRegistry::unloadAll()
                 busyIds.push_back( id );
         }
     }
+    // cancelPluginDrain takes the runtime-host mutex — it must stay OUT of
+    // the registry lock (#1156 AB-BA). The bookkeeping then happens in one
+    // pass while THIS thread holds gRegistryMutex: record() hands out a
+    // pointer into mRecords without holding the lock on the caller's side
+    // (#943), so the dereference and the state/diagnostic writes are only
+    // safe under the lock (a concurrent refresh() reallocates mRecords).
     for ( const std::string &id : busyIds )
     {
         if ( mSink )
             mSink->cancelPluginDrain( id );
-        if ( PluginRecord *entry = record( id ) )
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        for ( const std::string &id : busyIds )
         {
-            if ( entry->state == PluginState::Quiescing )
-                entry->state = PluginState::Loaded;
+            PluginRecord *entry = record( id );
+            if ( !entry || entry->state != PluginState::Quiescing )
+                continue; // a concurrent unload() completed it in between
+            entry->state = PluginState::Loaded;
             if ( !gDestructing )
             {
                 entry->diagnostics.add( PluginDiagnosticCode::PluginInUse,
@@ -2085,7 +2125,19 @@ void PluginRegistry::saveUserIndex() const
         std::error_code error;
         std::filesystem::create_directories( parent, error );
     }
-    const std::string temp = path + ".tmp";
+    // Hardening 15/20: the temp file is process-unique. The shared fixed
+    // "<index>.tmp" let two processes (GUI + CLI, or two CLIs) interleave
+    // ofstream writes into the SAME file; both then renamed a torn document
+    // over the index and the next load silently reset the user's disable set.
+    // In-process writers are serialized by gRegistryMutex; the pid suffix only
+    // separates processes, mirroring the per-pid staging idiom the package and
+    // snapshot code already use.
+#ifdef _WIN32
+    const long pid = static_cast<long>( ::GetCurrentProcessId() );
+#else
+    const long pid = static_cast<long>( ::getpid() );
+#endif
+    const std::string temp = path + ".tmp." + std::to_string( pid );
     {
         std::ofstream output( temp, std::ios::trunc );
         if ( !output )
