@@ -18,9 +18,10 @@ namespace
     "asset_id, source_key, canonical_source, kind, state, persistence," \
     " display_name, parent_collection_id, acquisition_ms, revision, metadata_json"
 
-Diagnostic catalogDiag( QString code, QString message )
+Diagnostic catalogDiag( QString code, QString message,
+                        DiagnosticSeverity severity = DiagnosticSeverity::Error )
 {
-    return Diagnostic{ std::move( code ), std::move( message ), DiagnosticSeverity::Error };
+    return Diagnostic{ std::move( code ), std::move( message ), severity };
 }
 
 class Stmt
@@ -212,6 +213,7 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
+    QVector<Diagnostic> collisions;
     if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.transaction" ),
                                                    QStringLiteral( "cannot begin transaction" ) ) );
@@ -229,15 +231,47 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
             "  metadata_json=excluded.metadata_json, updated_ms=excluded.updated_ms" );
         Stmt delAlias( m_impl->db, "DELETE FROM aliases WHERE asset_id=?" );
         Stmt insAlias( m_impl->db, "INSERT OR REPLACE INTO aliases(path, asset_id) VALUES(?,?)" );
+        Stmt owner( m_impl->db, "SELECT asset_id FROM aliases WHERE path=?" );
         Stmt delTag( m_impl->db, "DELETE FROM tags WHERE asset_id=?" );
         Stmt insTag( m_impl->db, "INSERT OR IGNORE INTO tags(asset_id, tag) VALUES(?,?)" );
-        if ( !up || !delAlias || !insAlias || !delTag || !insTag )
+        if ( !up || !delAlias || !insAlias || !owner || !delTag || !insTag )
         {
             m_impl->exec( "ROLLBACK" );
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.prepare" ),
                                                        QStringLiteral( "statement prepare failed" ) ) );
         }
+        auto insertAlias = [ & ]( const QString &path, const QString &assetId ) -> bool
+        {
+            // Alias ownership is single-writer (symmetry with GovernanceStore
+            // #758-2): a collision keeps the existing owner and surfaces a
+            // diagnostic instead of a silent INSERT OR REPLACE steal that
+            // would make the previous owner unreachable by path. A probe
+            // step ERROR fails closed (an alias write failure), never as
+            // "unowned".
+            owner.reset();
+            owner.bind( 1, path );
+            const int probeRc = sqlite3_step( owner.get() );
+            if ( probeRc == SQLITE_ROW && owner.text( 0 ) != assetId )
+            {
+                collisions.append( catalogDiag(
+                    QStringLiteral( "catalog.alias_collision" ),
+                    QStringLiteral( "%1 is already owned by asset %2; ownership was kept for %2" )
+                        .arg( path, owner.text( 0 ) ),
+                    DiagnosticSeverity::Warning ) );
+                return true;  // skip the insert, keep the batch going
+            }
+            if ( probeRc != SQLITE_ROW && probeRc != SQLITE_DONE )
+                return false;
+            insAlias.reset();
+            insAlias.bind( 1, path );
+            insAlias.bind( 2, assetId );
+            return insAlias.step();
+        };
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        // Two-phase batch: every asset's row, alias release and tags are
+        // written BEFORE any new alias claim is probed, so a same-batch path
+        // move (A hands /p to B in one call) resolves by the batch's final
+        // state instead of by row order.
         for ( const CatalogAsset &asset : assets )
         {
             up.reset();
@@ -267,29 +301,6 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
                 return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
                                                            QStringLiteral( "alias delete failed for asset %1" ).arg( asset.assetId ) ) );
             }
-            insAlias.reset();
-            insAlias.bind( 1, asset.canonicalSource );
-            insAlias.bind( 2, asset.assetId );
-            if ( !insAlias.step() )
-            {
-                m_impl->exec( "ROLLBACK" );
-                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
-                                                           QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
-            }
-            for ( const QString &alias : asset.aliases )
-            {
-                if ( alias == asset.canonicalSource )
-                    continue;
-                insAlias.reset();
-                insAlias.bind( 1, alias );
-                insAlias.bind( 2, asset.assetId );
-                if ( !insAlias.step() )
-                {
-                    m_impl->exec( "ROLLBACK" );
-                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
-                                                               QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
-                }
-            }
             delTag.reset();
             delTag.bind( 1, asset.assetId );
             if ( !delTag.step() )
@@ -311,6 +322,27 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
                 }
             }
         }
+        for ( const CatalogAsset &asset : assets )
+        {
+            if ( !asset.canonicalSource.isEmpty()
+                 && !insertAlias( asset.canonicalSource, asset.assetId ) )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                           QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
+            }
+            for ( const QString &alias : asset.aliases )
+            {
+                if ( alias == asset.canonicalSource || alias.isEmpty() )
+                    continue;
+                if ( !insertAlias( alias, asset.assetId ) )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                               QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
+                }
+            }
+        }
     }
     if ( !m_impl->exec( "COMMIT" ) )
     {
@@ -320,7 +352,7 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
                                                    QStringLiteral( "commit failed" ) ) );
     }
-    return Result<void>::success();
+    return Result<void>::success( collisions );
 }
 
 Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )

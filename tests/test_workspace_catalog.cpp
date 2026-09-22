@@ -267,3 +267,75 @@ TEST_CASE( "WorkspaceCatalog stays fast at 100k records", "[workspace_catalog][p
     }
     REQUIRE( pageMs < kPageLimitMs );
 }
+
+TEST_CASE( "WorkspaceCatalog alias ownership keeps the existing owner on collision",
+           "[workspace_catalog][alias]" )
+{
+    QTemporaryDir dir;
+    WorkspaceCatalog catalog;
+    REQUIRE( catalog.open( dir.filePath( QStringLiteral( "catalog.db" ) ) ) );
+
+    CatalogAsset a;
+    a.assetId = QStringLiteral( "asset-a" );
+    a.canonicalSource = QStringLiteral( "/data/claim.tif" );
+    a.kind = QStringLiteral( "raster" );
+    a.state = QStringLiteral( "Ready" );
+    a.persistence = QStringLiteral( "project" );
+    a.displayName = QStringLiteral( "First claim" );
+    a.revision = 1;
+    REQUIRE( catalog.upsertAsset( a ).operator bool() );
+
+    // A second asset claiming the same canonical path must not silently
+    // steal the alias (byPath would resolve to the hijacker and the first
+    // asset would become unreachable by path — GovernanceStore #758-2 fixed
+    // the same asymmetry).
+    CatalogAsset b = a;
+    b.assetId = QStringLiteral( "asset-b" );
+    b.displayName = QStringLiteral( "Second claim" );
+    const auto result = catalog.upsertAsset( b );
+    REQUIRE( result.operator bool() );
+    REQUIRE( result.diagnostics().size() == 1 );
+    CHECK( result.diagnostics().first().code == QStringLiteral( "catalog.alias_collision" ) );
+
+    REQUIRE( catalog.byPath( QStringLiteral( "/data/claim.tif" ) ).has_value() );
+    CHECK( catalog.byPath( QStringLiteral( "/data/claim.tif" ) )->assetId ==
+           QLatin1String( "asset-a" ) );
+    // The challenger keeps its own row (only the contested alias is skipped).
+    REQUIRE( catalog.byId( QStringLiteral( "asset-b" ) ).has_value() );
+}
+
+TEST_CASE( "WorkspaceCatalog same-batch path move resolves by final state",
+           "[workspace_catalog][alias]" )
+{
+    QTemporaryDir dir;
+    WorkspaceCatalog catalog;
+    REQUIRE( catalog.open( dir.filePath( QStringLiteral( "catalog.db" ) ) ) );
+
+    CatalogAsset a;
+    a.assetId = QStringLiteral( "asset-a" );
+    a.canonicalSource = QStringLiteral( "/data/move.tif" );
+    a.kind = QStringLiteral( "raster" );
+    a.state = QStringLiteral( "Ready" );
+    a.persistence = QStringLiteral( "project" );
+    a.revision = 1;
+    REQUIRE( catalog.upsertAsset( a ).operator bool() );
+
+    // One batch hands /data/move.tif from A to B while A moves to /q:
+    // the batch's FINAL state must win, not row order (a per-row probe
+    // would skip B as "colliding" and then A's release drops the path).
+    CatalogAsset b = a;
+    b.assetId = QStringLiteral( "asset-b" );
+    b.canonicalSource = QStringLiteral( "/data/move.tif" );
+    CatalogAsset aMoved = a;
+    aMoved.canonicalSource = QStringLiteral( "/data/q.tif" );
+    const auto result = catalog.upsertAssets( { b, aMoved } );
+    REQUIRE( result.operator bool() );
+    CHECK( result.diagnostics().isEmpty() );
+
+    REQUIRE( catalog.byPath( QStringLiteral( "/data/move.tif" ) ).has_value() );
+    CHECK( catalog.byPath( QStringLiteral( "/data/move.tif" ) )->assetId ==
+           QLatin1String( "asset-b" ) );
+    REQUIRE( catalog.byPath( QStringLiteral( "/data/q.tif" ) ).has_value() );
+    CHECK( catalog.byPath( QStringLiteral( "/data/q.tif" ) )->assetId ==
+           QLatin1String( "asset-a" ) );
+}

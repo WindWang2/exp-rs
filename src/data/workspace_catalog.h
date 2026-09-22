@@ -69,9 +69,16 @@ class WorkspaceCatalog
     bool isOpen() const { return m_impl != nullptr; }
 
     /// Upserts by assetId. @p aliases and @p tags replace the stored sets.
+    /// Success may carry `catalog.alias_collision` Warning diagnostics: a
+    /// path already owned by ANOTHER asset keeps its existing owner (the
+    /// challenger's claim is skipped) instead of the legacy silent steal.
+    /// Empty canonical/alias paths are skipped, never stored.
     Result<void> upsertAsset( const CatalogAsset &asset );
 
-    /// Bulk upsert inside one transaction (bulk import path).
+    /// Bulk upsert inside one transaction (bulk import path). Two-phase:
+    /// rows and alias releases first, alias claims second, so a path handed
+    /// from one batch asset to another resolves by the batch's final state.
+    /// Alias-collision warnings as in upsertAsset().
     Result<void> upsertAssets( const QVector<CatalogAsset> &assets );
 
     Result<void> removeAsset( const QString &assetId );
