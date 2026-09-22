@@ -1408,7 +1408,18 @@ long WorkflowRunCoordinator::pipelineIdForRun( const std::string &runId ) const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     const auto it = m_pipelineByRunId.find( runId );
-    return it != m_pipelineByRunId.end() ? it->second : -1;
+    if ( it != m_pipelineByRunId.end() )
+        return it->second;
+    // Terminal runs drop the reverse map so resume can re-bind (#1097), but
+    // m_runsByPipeline retains history. Mission reconcile must still resolve
+    // a finished run — otherwise Running tasks go Stale forever with a lost
+    // success verdict (#1228 / #1186 item 34).
+    for ( const auto &kv : m_runsByPipeline )
+    {
+        if ( kv.second && kv.second->runId() == runId )
+            return kv.first;
+    }
+    return -1;
 }
 
 std::vector<std::shared_ptr<WorkflowRun>> WorkflowRunCoordinator::runs() const

@@ -10,6 +10,7 @@
 #include "main_window.h"
 
 #include <QDateTime>
+#include <QFileSystemWatcher>
 
 #include "app/help/help_system_controller.h"
 #include "panels/data_manager_panel.h"
@@ -30,6 +31,7 @@
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
 #include "workbench/mission_runtime_store.h"
+#include "workbench/mission_context_store.h"
 #include "workbench/mission_run_resolver.h"
 #include "workbench/mission_timeline_panel.h"
 #include "workbench/mission_tool_host_install.h"
@@ -1023,14 +1025,21 @@ void QgisDesktopWindow::refreshMissionRuntime()
     // F4: m_mission is the live context this window owns (studio publishes
     // write into it) — a refresh takes the TIMELINE from the authority and
     // leaves that document alone, unless the disk document belongs to a
-    // different mission (project switched under us) or we have none yet.
+    // different mission (project switched under us), we have none yet, or
+    // the agent advanced the authority past this window (#1228 item 34).
     // A successful load clears the poison: the authority decodes again, so a
     // repaired sidecar must un-block the mission save without a reopen.
     m_missionRuntime.authorityCorrupt = false;
     const sicnu::app::MissionTimeline previous = m_missionRuntime.timeline;
-    const bool adoptContext = m_mission.missionId.isEmpty()
-                              || ( !state.context.missionId.isEmpty()
-                                   && state.context.missionId != m_mission.missionId );
+    const bool adoptContext =
+        m_mission.missionId.isEmpty()
+        || ( !state.context.missionId.isEmpty()
+             && state.context.missionId != m_mission.missionId )
+        || ( !state.context.missionId.isEmpty()
+             && state.context.missionId == m_mission.missionId
+             && ( state.timeline.revision() > previous.revision()
+                  || ( state.timeline.revision() == previous.revision()
+                       && state.timeline.lastEventSeq() > previous.lastEventSeq() ) ) );
     if ( adoptContext )
         m_mission = state.context;
     m_missionRuntime.timeline = state.timeline;
@@ -1052,6 +1061,37 @@ void QgisDesktopWindow::refreshMissionRuntime()
                                           state.timeline.revision(),
                                           state.timeline.lastEventSeq() );
     }
+
+    armMissionSidecarWatcher();
+}
+
+void QgisDesktopWindow::armMissionSidecarWatcher()
+{
+    // #1228 / #1186 item 34: agent `mission:*` tools write the sidecar out of
+    // process; without a watcher the GUI only sees those commits on manual
+    // refresh / project save. Re-arm on every successful refresh (Windows
+    // QFileSystemWatcher drops replaced files).
+    const QString projectPath = QgsProject::instance()->fileName();
+    const QString side = sicnu::app::missionSidecarPathForProject( projectPath );
+    if ( !m_missionSidecarWatcher )
+    {
+        m_missionSidecarWatcher = new QFileSystemWatcher( this );
+        connect( m_missionSidecarWatcher, &QFileSystemWatcher::fileChanged, this,
+                 &QgisDesktopWindow::onMissionSidecarChanged );
+    }
+    const QStringList watched = m_missionSidecarWatcher->files();
+    if ( !watched.isEmpty() )
+        m_missionSidecarWatcher->removePaths( watched );
+    if ( !side.isEmpty() && QFileInfo::exists( side ) )
+        m_missionSidecarWatcher->addPath( side );
+}
+
+void QgisDesktopWindow::onMissionSidecarChanged( const QString &path )
+{
+    Q_UNUSED( path );
+    // Debounce-free: refresh re-arms the watch and is cheap relative to an
+    // agent commit. Ignore if the project path no longer matches.
+    refreshMissionRuntime();
 }
 
 void QgisDesktopWindow::showMissionTimelinePanel()

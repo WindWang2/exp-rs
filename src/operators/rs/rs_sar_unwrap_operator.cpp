@@ -392,7 +392,10 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
     json["output"] = outputPath;
     json["provider"] = provider;
     json["unwrappedPixels"] = Json::Value::Int64( result.unwrappedCount );
-    json["totalPixels"] = Json::Value::Int64( static_cast<long>( width ) * height );
+    // Use 64-bit math: on LLP64 (Windows) long is 32-bit and width*height
+    // overflows past 2^31 pixels (#1228 / #1186).
+    json["totalPixels"] = Json::Value::Int64( static_cast<std::int64_t>( width )
+                                             * static_cast<std::int64_t>( height ) );
     context.reportProgress( 1.0, "Unwrapping complete" );
     return json;
 }
