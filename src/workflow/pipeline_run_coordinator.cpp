@@ -6,6 +6,7 @@
 #include "workflow/workflow_dag_analyzer.h"
 #include "workflow/workflow_limits.h"
 #include "workflow/workflow_provenance.h"
+#include "workflow/workflow_run_lock.h"
 
 #include "runtime/observability/fault_point.h"
 
@@ -483,6 +484,21 @@ struct PipelineRunCoordinator::RunState
     // overwrite the record of the attempt it reuses artifacts from.
     int attempt = 0;
 
+    // Cross-process resume ownership (#727 parity): held from a successful
+    // resumeOnAffinity commit until the run finalizes. Engine-2 holds the
+    // same primitive (WorkflowRunLock) for the same reason — two processes
+    // resuming one checkpoint would both execute the non-cached remainder
+    // and overwrite each other's checkpoints. Null when idle (fresh startRun
+    // mints a fresh runId, so there is nothing to own).
+    std::unique_ptr<WorkflowRunLock> runLock;
+
+    // Depth of onNodeFinished frames live on the affinity thread. The whole-
+    // file hash pumps the event loop, so the destructor's drain functor can
+    // run RE-ENTRANTLY inside an onNodeFinished frame; the destructor waits
+    // for this to reach zero before freeing m_state (Track 13 contract: a
+    // foreign-thread destruction is safe).
+    std::atomic<int> affinityBusy{ 0 };
+
     ~RunState() { pool.waitForDone(); }
 };
 
@@ -509,6 +525,22 @@ PipelineRunCoordinator::~PipelineRunCoordinator()
         // a dying object; the worker lambdas additionally hold a QPointer.
         QCoreApplication::removePostedEvents( this );
     } );
+    // The drain above may have executed INSIDE an onNodeFinished frame — the
+    // whole-file hash pumps this thread's event loop, so the BlockingQueued
+    // drain is serviced re-entrantly and returns while the hash (and every
+    // m_state touch after it) is still on the affinity stack. Freeing
+    // m_state here would be a use-after-free; wait for the frame(s) to
+    // unwind instead. The cancel flag tripped above bounds the wait to one
+    // hash chunk. On the affinity thread itself the stack unwinds before the
+    // member destruction below, so waiting would be both wrong and
+    // deadlock-prone there.
+    if ( QThread::currentThread() != thread() )
+    {
+        while ( m_state->affinityBusy.load( std::memory_order_acquire ) > 0 )
+            QThread::msleep( 1 );
+        // Late emissions from the unwinding frame must not outlive `this`.
+        QCoreApplication::removePostedEvents( this );
+    }
 }
 
 void PipelineRunCoordinator::setExecutor( NodeExecutor executor )
@@ -615,11 +647,32 @@ bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, co
     if ( !dag.isAcyclic )
         return fail( dag.errorMessage );
 
+    // Own the fresh run like Engine-2 owns a fresh pipeline (#727 parity): a
+    // peer resuming this run's checkpoint mid-flight must be refused instead
+    // of double-executing the remaining nodes against the same artifact
+    // paths. The lock is acquired BEFORE any m_state mutation so the refused
+    // path leaves the coordinator reusable. A fresh UUID colliding with a
+    // live holder is practically impossible — if it happens, refuse.
+    const QString freshRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    auto freshLock = std::make_unique<WorkflowRunLock>(
+        WorkflowRunLock::lockPathForRun( QDir( runDirectory ).absolutePath(),
+                                         freshRunId.toStdString() ) );
+    {
+        QString heldByPid;
+        if ( freshLock->tryAcquire( &heldByPid ) != WorkflowRunLock::TryResult::Acquired )
+            return fail( QStringLiteral( "run '%1' in '%2' is already owned by a live process (pid %3)" )
+                             .arg( freshRunId, runDirectory,
+                                   heldByPid.isEmpty() ? QStringLiteral( "?" ) : heldByPid ) );
+    }
+
     // Fresh state.
     m_state->def = runDef;
     m_state->runDirectory = runDirectory;
-    m_state->runId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    m_state->runId = freshRunId;
     m_state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( m_state->runId ) );
+    // Ownership of the fresh run: released when this run finalizes or the
+    // coordinator is destroyed.
+    m_state->runLock = std::move( freshLock );
     m_state->finished = false;
     m_state->success = false;
     // #1158: do NOT clear the cancel flag here. The previous run is
@@ -840,6 +893,16 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
     if ( m_state->shuttingDown.load( std::memory_order_relaxed ) )
         return;
 
+    // Counted for the destructor: the whole-file hash below pumps the event
+    // loop, so the destructor's drain functor can run RE-ENTRANTLY inside
+    // this frame — the destructor must not free m_state until it unwinds.
+    m_state->affinityBusy.fetch_add( 1, std::memory_order_acq_rel );
+    struct BusyGuard
+    {
+        std::atomic<int> &flag;
+        ~BusyGuard() { flag.fetch_sub( 1, std::memory_order_release ); }
+    } busyGuard{ m_state->affinityBusy };
+
     NodeStatusSnapshot &snapshot = m_state->statuses[nodeId];
     snapshot.elapsedMs = elapsedMs;
 
@@ -914,6 +977,12 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
     // Release the node's children (frontier bookkeeping). Non-Succeeded
     // terminations still decrement: the skip cascade is decided from the
     // recorded parent states inside dispatchReadyNodes.
+    // A drain that ran inside the hash pump marks a coordinator under
+    // destruction: abandon the completion here instead of persisting and
+    // emitting from a dying object (the destructor's busy-wait keeps the
+    // accesses above memory-safe either way).
+    if ( m_state->shuttingDown.load( std::memory_order_relaxed ) )
+        return;
     for ( const EdgeFact &edge : m_state->def.edges )
     {
         if ( edge.sourceNodeId != nodeId )
@@ -967,6 +1036,11 @@ void PipelineRunCoordinator::finalizeIfDone()
     }
     m_state->success = success;
     persistCheckpoint();
+
+    // The run is terminal: release the resume-ownership lock AFTER the final
+    // checkpoint persist — a peer process may re-verify this checkpoint from
+    // here on, but never against a half-published terminal state.
+    m_state->runLock.reset();
 
     // Provenance (WP5/D9): one queryable lineage record per terminal ATTEMPT,
     // emitted for successes AND failures — audits need the failure paths
@@ -1161,6 +1235,30 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     const QMap<QString, QString> recomputed = WorkflowPlanOptimizer::computeLineageSignatures( resumedDef );
     const QString runDirectory = document.value( QLatin1String( "runDirectory" ) ).toString();
     const QString canonicalRunDir = QDir( runDirectory ).canonicalPath();
+
+    // Cross-process resume ownership (#727 parity): the checkpoint's runId is
+    // the ownership handle. Two processes resuming the same document would
+    // both execute the non-cached remainder and overwrite each other's
+    // checkpoints; the second resume is refused while the first holds the
+    // lock (Engine-2 holds the same primitive for the same reason). Acquired
+    // BEFORE the artifact verification loop so a refused peer fails fast,
+    // released when this run finalizes. Every fail path below runs before the
+    // commit, so the local unique_ptr releases on any rejection.
+    auto acquiredLock = std::make_unique<WorkflowRunLock>(
+        WorkflowRunLock::lockPathForRun( QDir( runDirectory ).absolutePath(),
+                                         runId.toStdString() ) );
+    {
+        QString heldByPid;
+        const WorkflowRunLock::TryResult acquired = acquiredLock->tryAcquire( &heldByPid );
+        if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner )
+            return fail( QStringLiteral( "checkpoint '%1' is owned by a live process (pid %2) — resume refused" )
+                             .arg( checkpointFilePath,
+                                   heldByPid.isEmpty() ? QStringLiteral( "?" ) : heldByPid ) );
+        if ( acquired == WorkflowRunLock::TryResult::Error )
+            return fail( QStringLiteral( "cannot lock checkpoint '%1' for resumption" )
+                             .arg( checkpointFilePath ) );
+    }
+
     QHash<QString, NodeStatusSnapshot> restored;
     restored.reserve( nodes.size() );
     for ( const QJsonValue &value : nodes )
@@ -1280,6 +1378,10 @@ bool PipelineRunCoordinator::resumeOnAffinity( const QString &checkpointFilePath
     m_state->def = resumedDef;
     m_state->runDirectory = runDirectory;
     m_state->runId = runId;
+    // Ownership transfers to the run state: the lock releases when this run
+    // finalizes (finalizeIfDone), when a fresh startRun clears it, or when
+    // the coordinator is destroyed.
+    m_state->runLock = std::move( acquiredLock );
     // #1186: attempt-less v1.1 checkpoints must resume as attempt 2 (default
     // 1 + 1), not attempt 1 — otherwise provenance overwrites the original
     // attempt's canonical record under the same path.
