@@ -21,21 +21,37 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 namespace sicnu::workflow {
 namespace {
 
-Json::Value qJsonObjectToJsonCpp( const QJsonObject &object )
+/// Qt→jsoncpp parameter conversion. Returns nullopt when the document cannot
+/// be converted: QJsonDocument::fromJson accepts nesting depths this build's
+/// jsoncpp refuses (its default stackLimit is far below Qt's parse depth), and
+/// an over-limit tree makes CharReader::parse THROW Json::Exception rather
+/// than return false. Running the operator on the empty-object fallback used
+/// to be both fail-open (defaults executed as if the user configured nothing)
+/// and, in the throwing window, a crash — the exception escaped the executor
+/// into the QThreadPool worker.
+std::optional<Json::Value> qJsonObjectToJsonCpp( const QJsonObject &object )
 {
     Json::Value parsed;
     Json::CharReaderBuilder builder;
     std::string errs;
     const QByteArray bytes = QJsonDocument( object ).toJson( QJsonDocument::Compact );
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &parsed, &errs ) )
-        return Json::Value( Json::objectValue );
+    try
+    {
+        if ( !reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &parsed, &errs ) )
+            return std::nullopt;
+    }
+    catch ( const Json::Exception & )
+    {
+        return std::nullopt;
+    }
     if ( !parsed.isObject() )
-        return Json::Value( Json::objectValue );
+        return std::nullopt;
     return parsed;
 }
 
@@ -58,12 +74,15 @@ QString extractOutputPath( const Json::Value &result, const QString &fallbackPat
 
 /// The node id is interpolated into the default artifact file name: reject
 /// separators and traversal components so it can never leave the run dir.
+/// ':' is refused because on NTFS the first colon forks an Alternate Data
+/// Stream — the artifact bytes land on an invisible stream of a different
+/// file instead of the declared output.
 bool isSafeNodeId( const QString &nodeId )
 {
     if ( nodeId.isEmpty() )
         return false;
     return !nodeId.contains( QLatin1Char( '/' ) ) && !nodeId.contains( QLatin1Char( '\\' ) )
-           && !nodeId.contains( QLatin1String( ".." ) );
+           && !nodeId.contains( QLatin1String( ".." ) ) && !nodeId.contains( QLatin1Char( ':' ) );
 }
 
 /// Canonical absolute path of the run directory (resolves symlinks, "." and
@@ -133,8 +152,8 @@ NodeExecutor makeRegistryNodeExecutor()
         {
             NodeExecutionResult refused;
             refused.errorMessage =
-                QStringLiteral( "ir2.operator_failed: unsafe nodeId '%1' (no path separators "
-                                "or traversal components allowed)" )
+                QStringLiteral( "ir2.operator_failed: unsafe nodeId '%1' (no path separators, "
+                                "traversal components or ':' allowed)" )
                     .arg( node.nodeId );
             return refused;
         }
@@ -149,7 +168,20 @@ NodeExecutor makeRegistryNodeExecutor()
         const QString defaultOutput =
             QDir( runRoot ).filePath( QStringLiteral( "%1.out.tif" ).arg( node.nodeId ) );
 
-        Json::Value params = qJsonObjectToJsonCpp( node.parameters );
+        const std::optional<Json::Value> converted = qJsonObjectToJsonCpp( node.parameters );
+        if ( !converted.has_value() )
+        {
+            // Fail-closed: an unconvertible parameter tree must never reach
+            // the operator as an empty set — that executed defaults and
+            // published a success the user never asked for.
+            NodeExecutionResult refused;
+            refused.errorMessage =
+                QStringLiteral( "ir2.operator_failed: parameters of node '%1' cannot be "
+                                "converted to operator JSON (nesting too deep?)" )
+                    .arg( node.nodeId );
+            return refused;
+        }
+        Json::Value params = std::move( *converted );
         applyIr2InputPortMapping( node, inputArtifacts, params );
         if ( !params.isMember( "output" ) || !params["output"].isString()
              || params["output"].asString().empty() )
