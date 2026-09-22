@@ -56,10 +56,13 @@ enum class DiagnosticFamily
     Dataset,    ///< dataset quality / leakage finding codes
     Preflight,  ///< scientific preflight / MapSpec check codes
     Rs,         ///< curated remote-sensing issue pages (e.g. sar geometry)
+    Env,        ///< environment doctor findings (GDAL/PROJ/data dir/temp/SSL)
 };
 
 /// Stable family name ↔ enum mapping shared by the catalog and content store
-/// ("harness" | "operator" | "geospatial" | "dataset" | "preflight" | "rs").
+/// ("harness" | "operator" | "geospatial" | "dataset" | "preflight" | "rs" |
+///  "env"). Every name below must also be produced by the catalog, otherwise
+/// pages emitted with that family are dropped as "unknown diagnostic family".
 QString diagnosticFamilyName( DiagnosticFamily family );
 std::optional<DiagnosticFamily> diagnosticFamilyFromName( const QString &name );
 

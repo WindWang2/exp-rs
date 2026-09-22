@@ -42,6 +42,8 @@ QString diagnosticFamilyName( DiagnosticFamily family )
         return QStringLiteral( "preflight" );
     case DiagnosticFamily::Rs:
         return QStringLiteral( "rs" );
+    case DiagnosticFamily::Env:
+        return QStringLiteral( "env" );
     }
     return QStringLiteral( "rs" );
 }
@@ -60,6 +62,8 @@ std::optional<DiagnosticFamily> diagnosticFamilyFromName( const QString &name )
         return DiagnosticFamily::Preflight;
     if ( name == QLatin1String( "rs" ) )
         return DiagnosticFamily::Rs;
+    if ( name == QLatin1String( "env" ) )
+        return DiagnosticFamily::Env;
     return std::nullopt;
 }
 

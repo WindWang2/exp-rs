@@ -30,6 +30,12 @@
  *          gate reports 12 unknown-family errors, one per authored page, which
  *          is the authoritative count. Corrected 2026-09-20.)
  *
+ *         CLOSED 2026-09-22 (this track owns src/help/**): DiagnosticFamily
+ *         gained the Env enumerator and diagnosticFamilyFromName() the "env"
+ *         branch, so the 12 pages register. The pin below moved from
+ *         `unknown == {"env"}` to `unknown.empty()`, and the resolution case
+ *         ([e8b]) now asserts the user-visible property directly.
+ *
  *   The defect class is the same in both cases: the platform faithfully
  *   records the mismatch, and no gate reads the record. This lane reads it.
  *
@@ -71,9 +77,14 @@
 
 #include <json/json.h>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <regex>
 #include <set>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -92,14 +103,66 @@ QString contentDir()
 /// DiagnosticFamily in src/help/help_id.h. It is duplicated HERE on purpose:
 /// the gate must fail when the producer ships a family the consumer does not
 /// know, and reading the enum from the same header would hide exactly that.
+///
+/// E-8b closed 2026-09-22: "env" was authored by 12 pages and emitted by
+/// env_doctor/cli_env_doctor while DiagnosticFamily had no Env enumerator,
+/// so every env page was rejected at load. Adding "env" here without adding
+/// the enumerator makes the gate red again — the mirror only tracks reality.
 const std::set<QString> &consumerFamilies()
 {
     static const std::set<QString> kFamilies = {
         QStringLiteral( "harness" ),   QStringLiteral( "operator" ),
         QStringLiteral( "geospatial" ), QStringLiteral( "dataset" ),
         QStringLiteral( "preflight" ), QStringLiteral( "rs" ),
+        QStringLiteral( "env" ),
     };
     return kFamilies;
+}
+
+/// Every `diagnostic.<family>.<code>` string literal in the in-tree sources.
+///
+/// The producers carry the id verbatim (src/geospatial/doctor/env_doctor.cpp,
+/// src/cli/cli_env_doctor.cpp), so the literal set IS the emitted set. It is
+/// extracted here rather than pinned: a new producer that emits an id with no
+/// shipped page fails this gate without anyone maintaining a list.
+///
+/// Not routed through sicnu::contracts::text_scan::findMatches on purpose —
+/// that helper skips matches inside string literals, which is precisely where
+/// these ids live.
+std::set<QString> emittedDiagnosticIds()
+{
+    static const std::regex kPattern( R"RX("diagnostic\.([a-z0-9]+)\.([a-z0-9_]+)")RX" );
+
+    std::set<QString> ids;
+    const std::filesystem::path srcRoot = std::filesystem::path( sourceRoot() ) / "src";
+    if ( !std::filesystem::is_directory( srcRoot ) )
+        return ids;
+
+    // Non-throwing iteration: an unreadable directory must not turn the whole
+    // gate into an uncaught std::filesystem_error.
+    std::error_code ec;
+    for ( std::filesystem::recursive_directory_iterator it( srcRoot, ec ), end; it != end;
+          it.increment( ec ) )
+    {
+        if ( ec )
+            break;
+        if ( !it->is_regular_file() )
+            continue;
+        const auto ext = it->path().extension();
+        if ( ext != ".cpp" && ext != ".h" && ext != ".hpp" )
+            continue;
+        std::ifstream input( it->path() );
+        if ( !input )
+            continue;
+        const std::string text( ( std::istreambuf_iterator<char>( input ) ),
+                                std::istreambuf_iterator<char>() );
+        for ( std::sregex_iterator m( text.begin(), text.end(), kPattern ), mEnd; m != mEnd; ++m )
+        {
+            const std::string literal = ( *m )[0].str();
+            ids.insert( QString::fromStdString( literal.substr( 1, literal.size() - 2 ) ) );
+        }
+    }
+    return ids;
 }
 
 } // namespace
@@ -170,16 +233,65 @@ TEST_CASE( "every diagnostic family in the shipped data is one the consumer reso
         UNSCOPED_INFO( "family declared in data but unresolvable by the consumer: "
                        << family.toStdString() );
 
-    // E-8b (`env`) is a KNOWN, documented, out-of-scope defect: the fix is an
-    // Env enumerator in src/help/help_id.h, which this track does not own.
-    // Assert the *shape* of the known gap so it cannot silently grow, and fail
-    // loudly on any NEW unknown family.
-    CHECK( unknown == std::set<QString>{ QStringLiteral( "env" ) } );
+    // E-8b (`env`) is CLOSED: DiagnosticFamily gained an Env enumerator, so
+    // no family the corpus ships is unresolvable any more. The pin is kept at
+    // "no unknown family" — it was only ever relaxed to {"env"} to keep the
+    // lane green while the fix lived in another module's ownership.
+    CHECK( unknown.empty() );
 
     // Every unknown family we tolerate must at least be one the consumer
     // vocabulary genuinely lacks — guard against the list masking a typo.
     for ( const QString &family : unknown )
         CHECK( consumerFamilies().count( family ) == 0 );
+}
+
+TEST_CASE( "every diagnostic id the sources emit resolves to a shipped page",
+           "[helpintegrity12][o11][e8b]" )
+{
+    // E-8b closure. The defect was not "a page was missing": 12 env pages
+    // shipped and 13 call sites emitted their ids verbatim, and the loader
+    // still dropped every one of them because DiagnosticFamily had no Env
+    // enumerator. A corpus-shape gate (page count, id uniqueness) cannot see
+    // that — only a producer→consumer resolution check can. So this case
+    // asserts the property the *user* depends on: an id printed by env-doctor
+    // resolves to prose in the registry.
+    const auto result = sicnu::help::HelpContentStore::loadFromDirectory( contentDir() );
+
+    const std::set<QString> emitted = emittedDiagnosticIds();
+    INFO( "diagnostic ids emitted by src/: " << emitted.size() );
+
+    // Non-vacuity: a scanner that silently stopped finding call sites must
+    // not turn this into a green no-op (the E-15 lesson).
+    REQUIRE( emitted.size() >= 10 );
+
+    std::set<QString> unresolved;
+    for ( const QString &id : emitted )
+    {
+        const sicnu::help::HelpDescriptor *d = result.registry.find( id );
+        if ( !d )
+        {
+            unresolved.insert( id );
+            continue;
+        }
+        // A resolved id must carry its diagnostic payload: an empty shell
+        // page renders as a blank lookup, which is the user-visible symptom.
+        if ( !d->diagnostic.has_value() )
+            unresolved.insert( id );
+    }
+
+    for ( const QString &id : unresolved )
+        UNSCOPED_INFO( "emitted diagnostic id does not resolve to a page: "
+                       << id.toStdString() );
+
+    CHECK( unresolved.empty() );
+
+    // The family the emitters use must be one the consumer resolves — this is
+    // the assertion that fails when DiagnosticFamily loses an enumerator.
+    for ( const QString &id : emitted )
+    {
+        const QString family = id.section( u'.', 1, 1 );
+        CHECK( consumerFamilies().count( family ) == 1 );
+    }
 }
 
 TEST_CASE( "no diagnostic id is registered twice in the shipped data",

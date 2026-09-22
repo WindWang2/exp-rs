@@ -7,17 +7,36 @@ command layer below is additive.
 
 ## Commands
 
+The table is the complete command surface — `tests/test_cli_command_surface.cpp`
+gates it against `isCliCommand()`/`dispatchCliCommand()` in
+`src/cli/cli_commands.cpp`, so a command added to the code without a row (or a
+row without a dispatch branch) fails the suite.
+
 | command | sub-commands |
 |---|---|
 | `algorithms` | `list`, `search [text] [--group g] [--tag a,b] [--purpose p] [--task f] [--modality m] [--input-type T] [--output-type T] [--large-raster-safe] [--limit n] [--cursor n]`, `schema <id>` |
-| `run` | `run <operator-id> [--param k=v ...] [--params-file f]` |
-| `pipeline` | `run <file>`, `validate <file>`, `resume <run_id>` |
+| `run` | `<operator-id> [--param k=v ...] [--params-file f]` |
+| `pipeline` | `run <file.json>`, `validate <file>`, `resume <run_id>` |
 | `workflow` | `run <file>`, `validate <file>`, `list-runs`, `resume <id>` |
-| `plugin` | `list`, `validate <dir>`, `doctor <dir>`, `enable <id>`, `disable <id>`, `install <dir>`, `uninstall <id>`, `inspect <id>` |
+| `plugin` | `list`, `validate <plugin-dir>`, `doctor <plugin-dir>`, `test <plugin-dir>`, `enable <id>`, `disable <id>`, `install <package-dir>`, `uninstall <id>`, `inspect <id>`, `index`, `debug-bundle <id>` |
 | `models` | `list`, `inspect <name>` |
-| `project` | `info <file.qgs\|.qgz>` |
 | `catalog` | `export <dir>` |
+| `project` | `info`, `validate`, `health`, `search`, `migrate`, `relink`, `lineage`, `import`, `export-manifest`, `audit` (each `<file.qgz\|.qgs>`) |
+| `data` | `inspect`, `doctor`, `probe`, `capabilities`, `product describe`, `plan`, `stac <dataset>`, `identity <url>`, `cache status\|clear\|<url> [--bytes N]`, `cube plan\|window <spec.json> [-o out.tif]`, `mirror materialize\|stats …` |
 | `data-providers` | (lists registered providers) |
+| `dataset` | `create`, `inspect`, `validate`, `diff`, `stats`, `list`, `version`, `label-schema`, `split`, `leakage` |
+| `experiment` | `create`, `inspect`, `compare`, `list`, `run` |
+| `reproduce` | `export`, `validate`, `inspect` |
+| `lab` | `--lab <id\|.rules.json> --grade <artifact>`, `--lab <id> --batch <dir>`, `--self-check`, `--report` |
+| `env-doctor` | (no sub-command; `--json` only — see `docs/deployment/env-doctor.md`) |
+| `tools` | `list`, `search <query>`, `schema <tool-id>` |
+| `batch` | `run <manifest.json\|jsonl> [--fail-fast] [--dry-run]`, `validate <manifest.json\|jsonl>` |
+| `passport` | `--path <file> [--json] [--teaching] [--diff <passport.json>]` |
+
+Global flags are parsed by the command layer, so they must appear **after** the
+command (`sicnu_geo_rs_cli algorithms list --json`); placed before it they reach
+the legacy flag parser and are rejected as unknown options. `--offline` is the
+one exception — it is stripped before routing and is accepted in any position.
 
 ## Machine-readable output
 

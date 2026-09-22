@@ -9463,6 +9463,12 @@ sicnu_add_sdk_test(test_exprs_ipc)
 sicnu_add_sdk_test(test_plugin_capabilities)
 # Plugin-platform 8.0: declarative out-of-process UI schema contract.
 sicnu_add_sdk_test(test_plugin_ui_schema)
+# Public SDK install surface: installed-header include closure + the
+# four-site plugin API version parity. Reads the source tree only.
+sicnu_add_sdk_test(test_sdk_public_surface)
+# CLI 3.0 public command surface: accepted ↔ dispatched ↔ documented parity.
+# Reads src/cli/cli_commands.cpp + docs/headless/README.md (source tree only).
+sicnu_add_sdk_test(test_cli_command_surface)
 
 sicnu_add_test(test_exprs_workflow_schema)
 target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
@@ -11709,8 +11715,17 @@ sicnu_add_test(test_verification_env_12)
 target_link_libraries(test_verification_env_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_env_12)
 
-sicnu_add_test(test_help_integrity_12)
-target_link_libraries(test_help_integrity_12 PRIVATE sicnu_contracts)
+# O-11 (help/diagnostic corpus integrity). The lane touches only Sicnu::help
+# + jsoncpp + Qt Core: it reads data/help/** from the source tree through
+# HelpContentStore and asserts on the load result. It used to ride the heavy
+# sicnu_add_test link set (qgis_gui / sicnu_operators / sicnu_agent /
+# sicnu_workflow_runtime), which is pure build cost for a corpus gate and
+# made it one of the slowest executables in the suite. Same assertions,
+# same tags — only the link inputs changed.
+sicnu_add_help_test(test_help_integrity_12)
+target_compile_definitions(test_help_integrity_12 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 sicnu_link_jsoncpp(test_help_integrity_12)
 
 # E-13: a byte comparison cannot tell "content moved" from "the graph no longer

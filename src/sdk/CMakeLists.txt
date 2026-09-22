@@ -83,6 +83,9 @@ set( EXPRS_SDK_INCLUDE_HEADERS
   exprs/plugin_discovery.h
   exprs/plugin_loader.h
   exprs/plugin_registry.h
+  # Required by exprs/plugin_registry.h: including the shipped registry header
+  # out of tree fails without it — see tests/test_sdk_public_surface.cpp, S-1.
+  exprs/plugin_host_runtime.h
   exprs/plugin_interface.h
   exprs/plugin_package.h
   exprs/plugin_snapshot.h
