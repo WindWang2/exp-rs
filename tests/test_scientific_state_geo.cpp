@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -137,6 +138,38 @@ TEST_CASE( "north-up geotransform derives pixel size and extent as inferred clai
     REQUIRE( extentClaim.kind == ClaimKind::Inferred );
     REQUIRE( hasNote( state, "geometry.pixel_size_from_geotransform" ) );
     REQUIRE( hasNote( state, "geometry.extent_from_geotransform" ) );
+}
+
+TEST_CASE( "non-finite geotransform yields typed unknowns and a self-readable document",
+           "[scientific_state][review2][p1_nonfinite]" )
+{
+    // RED on master: a NaN axis scale flowed through as pixel_size = NaN,
+    // which serializes to JSON null — a document this module's own readers
+    // reject (InvalidField). The fix grounds nothing and records the gap.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.geometry.hasGeoTransform = true;
+    dataset.geometry.geoTransform = { 440720.0, std::numeric_limits<double>::quiet_NaN(),
+                                      0.0, 3751320.0, 0.0, -60.0 };
+    dataset.geometry.width = 2;
+    dataset.geometry.height = 2;
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !state.geometry.hasGeoTransform );
+    REQUIRE( !state.geometry.hasPixelSize );
+    REQUIRE( claimFor( state, "geometry.pixel_size" ).kind == ClaimKind::Unknown );
+    REQUIRE( unknownsContain( state, "geometry.pixel_size" ) );
+    REQUIRE( claimFor( state, "geometry.extent" ).kind == ClaimKind::Unknown );
+    REQUIRE( unknownsContain( state, "geometry.extent" ) );
+    REQUIRE( hasNote( state, "geometry.geotransform_not_finite" ) );
+
+    // The passport must survive its own round trip.
+    RemoteSensingAssetState decoded;
+    AssetStateError error;
+    REQUIRE( assetStateFromJson( serializeState( state ), decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::None );
 }
 
 TEST_CASE( "rotated geotransform yields the four-corner bounding box, not a normalized extent",

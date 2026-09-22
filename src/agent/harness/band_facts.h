@@ -51,6 +51,11 @@ std::string crsOf( const Json::Value &understanding );
 
 GridFacts gridFacts( const Json::Value &understanding );
 
+/// True for the closed list of geographic (unprojected, degree-based) authids
+/// shared by the harness fact layers. A WKT-only or unknown CRS is NOT
+/// recognized — callers must treat the units as unknown, not as meters.
+bool isGeographicAuthid( const std::string &crs );
+
 std::string radiometricState( const Json::Value &understanding );
 
 std::string modalityOf( const Json::Value &understanding );

@@ -832,50 +832,72 @@ void resolveGeometry( RemoteSensingAssetState &state, const DatasetFacts &datase
 
     if ( geometry.hasGeoTransform )
     {
-        state.geometry.hasGeoTransform = true;
-        state.geometry.geoTransform = geometry.geoTransform;
+        bool geotransformFinite = true;
+        for ( double term : geometry.geoTransform )
+            geotransformFinite = geotransformFinite && std::isfinite( term );
 
-        state.geometry.hasPixelSize = true;
-        state.geometry.pixelSizeX = std::fabs( geometry.geoTransform[1] );
-        state.geometry.pixelSizeY = std::fabs( geometry.geoTransform[5] );
-        MergedValue pixelSize;
-        pixelSize.present = true;
-        pixelSize.kind = ClaimKind::Inferred;
-        pixelSize.sources = { "gdal:geo_transform" };
-        appendClaim( state, "geometry.pixel_size", pixelSize );
-        addNote( state, "geometry.pixel_size_from_geotransform", "geometry.pixel_size",
-                 "pixel size derived from the geotransform axis scales" );
-
-        if ( hasSize )
+        if ( !geotransformFinite )
         {
-            const double gt0 = geometry.geoTransform[0];
-            const double gt1 = geometry.geoTransform[1];
-            const double gt2 = geometry.geoTransform[2];
-            const double gt3 = geometry.geoTransform[3];
-            const double gt4 = geometry.geoTransform[4];
-            const double gt5 = geometry.geoTransform[5];
-            const double xs[4] = { gt0,
-                                   gt0 + geometry.width * gt1,
-                                   gt0 + geometry.height * gt2,
-                                   gt0 + geometry.width * gt1 + geometry.height * gt2 };
-            const double ys[4] = { gt3,
-                                   gt3 + geometry.width * gt4,
-                                   gt3 + geometry.height * gt5,
-                                   gt3 + geometry.width * gt4 + geometry.height * gt5 };
-            state.geometry.hasExtent = true;
-            state.geometry.minX = *std::min_element( xs, xs + 4 );
-            state.geometry.maxX = *std::max_element( xs, xs + 4 );
-            state.geometry.minY = *std::min_element( ys, ys + 4 );
-            state.geometry.maxY = *std::max_element( ys, ys + 4 );
+            // A corrupt header can hand us NaN/inf geotransform terms. They
+            // cannot ground pixel size or extent, and carrying them further
+            // would poison the passport: NaN serializes to null and
+            // infinities to non-strict JSON — documents this module itself
+            // would refuse to re-read. Record the gap instead (typed
+            // unknowns + note), never the garbage values.
+            addUnknown( state, "geometry.pixel_size" );
+            if ( hasSize )
+                addUnknown( state, "geometry.extent" );
+            addNote( state, "geometry.geotransform_not_finite", "geometry.geo_transform",
+                     "geotransform carries non-finite terms; pixel size and extent are "
+                     "not derivable" );
+        }
+        else
+        {
+            state.geometry.hasGeoTransform = true;
+            state.geometry.geoTransform = geometry.geoTransform;
 
-            MergedValue extent;
-            extent.present = true;
-            extent.kind = ClaimKind::Inferred;
-            extent.sources = { "gdal:geo_transform" };
-            appendClaim( state, "geometry.extent", extent );
-            addNote( state, "geometry.extent_from_geotransform", "geometry.extent",
-                     "extent derived as the geotransform bounding box of the four image "
-                     "corners (rotation terms included)" );
+            state.geometry.hasPixelSize = true;
+            state.geometry.pixelSizeX = std::fabs( geometry.geoTransform[1] );
+            state.geometry.pixelSizeY = std::fabs( geometry.geoTransform[5] );
+            MergedValue pixelSize;
+            pixelSize.present = true;
+            pixelSize.kind = ClaimKind::Inferred;
+            pixelSize.sources = { "gdal:geo_transform" };
+            appendClaim( state, "geometry.pixel_size", pixelSize );
+            addNote( state, "geometry.pixel_size_from_geotransform", "geometry.pixel_size",
+                     "pixel size derived from the geotransform axis scales" );
+
+            if ( hasSize )
+            {
+                const double gt0 = geometry.geoTransform[0];
+                const double gt1 = geometry.geoTransform[1];
+                const double gt2 = geometry.geoTransform[2];
+                const double gt3 = geometry.geoTransform[3];
+                const double gt4 = geometry.geoTransform[4];
+                const double gt5 = geometry.geoTransform[5];
+                const double xs[4] = { gt0,
+                                       gt0 + geometry.width * gt1,
+                                       gt0 + geometry.height * gt2,
+                                       gt0 + geometry.width * gt1 + geometry.height * gt2 };
+                const double ys[4] = { gt3,
+                                       gt3 + geometry.width * gt4,
+                                       gt3 + geometry.height * gt5,
+                                       gt3 + geometry.width * gt4 + geometry.height * gt5 };
+                state.geometry.hasExtent = true;
+                state.geometry.minX = *std::min_element( xs, xs + 4 );
+                state.geometry.maxX = *std::max_element( xs, xs + 4 );
+                state.geometry.minY = *std::min_element( ys, ys + 4 );
+                state.geometry.maxY = *std::max_element( ys, ys + 4 );
+
+                MergedValue extent;
+                extent.present = true;
+                extent.kind = ClaimKind::Inferred;
+                extent.sources = { "gdal:geo_transform" };
+                appendClaim( state, "geometry.extent", extent );
+                addNote( state, "geometry.extent_from_geotransform", "geometry.extent",
+                         "extent derived as the geotransform bounding box of the four image "
+                         "corners (rotation terms included)" );
+            }
         }
     }
 

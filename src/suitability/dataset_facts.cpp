@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace sicnu::suitability
 {
@@ -54,6 +55,22 @@ sicnu::data::Result<QHash<QString, qint64>> hashFromJson( const QJsonObject &jso
         hash.insert( it.key(), value.value() );
     }
     return sicnu::data::Result<QHash<QString, qint64>>::success( hash );
+}
+
+/// Extent doubles follow the Slice G standard: anything non-finite (or not a
+/// number at all) fails typed instead of silently becoming 0 or ±inf — an
+/// infinite extent would poison the spatial criteria and serialize to null.
+sicnu::data::Result<double> finiteDouble( const QJsonValue &value, const QString &key )
+{
+    const double raw = value.toDouble( std::numeric_limits<double>::quiet_NaN() );
+    if ( !std::isfinite( raw ) )
+    {
+        return sicnu::data::Result<double>::failure( sicnu::data::Diagnostic{
+            QStringLiteral( "suitability.facts_invalid" ),
+            QStringLiteral( "%1 is not a finite number" ).arg( key ),
+            sicnu::data::DiagnosticSeverity::Error } );
+    }
+    return sicnu::data::Result<double>::success( raw );
 }
 
 QStringList stringArrayFromJson( const QJsonArray &array )
@@ -174,10 +191,26 @@ sicnu::data::Result<DatasetFacts> DatasetFacts::fromJson( const QJsonObject &jso
     facts.hasExtent = json.value( QStringLiteral( "has_extent" ) ).toBool( false );
     if ( facts.hasExtent )
     {
-        facts.minX = json.value( QStringLiteral( "min_x" ) ).toDouble();
-        facts.minY = json.value( QStringLiteral( "min_y" ) ).toDouble();
-        facts.maxX = json.value( QStringLiteral( "max_x" ) ).toDouble();
-        facts.maxY = json.value( QStringLiteral( "max_y" ) ).toDouble();
+        auto minX = finiteDouble( json.value( QStringLiteral( "min_x" ) ),
+                                  QStringLiteral( "min_x" ) );
+        auto minY = finiteDouble( json.value( QStringLiteral( "min_y" ) ),
+                                  QStringLiteral( "min_y" ) );
+        auto maxX = finiteDouble( json.value( QStringLiteral( "max_x" ) ),
+                                  QStringLiteral( "max_x" ) );
+        auto maxY = finiteDouble( json.value( QStringLiteral( "max_y" ) ),
+                                  QStringLiteral( "max_y" ) );
+        if ( !minX.has_value() )
+            return sicnu::data::Result<DatasetFacts>::failure( minX.diagnostics() );
+        if ( !minY.has_value() )
+            return sicnu::data::Result<DatasetFacts>::failure( minY.diagnostics() );
+        if ( !maxX.has_value() )
+            return sicnu::data::Result<DatasetFacts>::failure( maxX.diagnostics() );
+        if ( !maxY.has_value() )
+            return sicnu::data::Result<DatasetFacts>::failure( maxY.diagnostics() );
+        facts.minX = minX.value();
+        facts.minY = minY.value();
+        facts.maxX = maxX.value();
+        facts.maxY = maxY.value();
     }
 
     facts.hasTemporalExtent = json.value( QStringLiteral( "has_temporal_extent" ) ).toBool( false );

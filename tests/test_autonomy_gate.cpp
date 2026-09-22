@@ -667,3 +667,46 @@ TEST_CASE( "a forged session context cannot re-scope the execution gate",
   REQUIRE( audited.size() == 4 );
   CHECK( audited[ 0 ].role == "student" );
 }
+
+TEST_CASE( "skip_preflight can no longer bypass a blocked intent preflight",
+           "[autonomy][gate][review2][preflight]" )
+{
+    // RED on master: skip_preflight=true skipped preflightIntent entirely,
+    // so a plan whose inputs do not even resolve compiled and submitted with
+    // executed=true — any caller could override a blocked verdict,
+    // contradicting the scientific_preflight.h contract ("blocked plans are
+    // refused; the LLM cannot override"). The gate is unconditional for
+    // typed intents now; plans without an intent keep their natural bypass.
+    using namespace sicnu::agent::spatial_tools;
+    AutonomyPolicyHolder::instance().installCoursePolicy(
+        AutonomyPolicyHolder::researchDefaultPolicy() );
+    SpatialToolRegistry &registry = SpatialToolRegistry::instance();
+    registry.registerBuiltinTools();
+    const auto tool = registry.find( "harness:execute_plan" );
+    REQUIRE( tool.has_value() );
+
+    Json::Value step( Json::objectValue );
+    step["id"] = "s1";
+    step["operator_id"] = "rs:contrast_stretch";
+    Json::Value steps( Json::arrayValue );
+    steps.append( step );
+    Json::Value slot( Json::objectValue );
+    slot["name"] = "primary";
+    slot["ref"] = "/definitely/not/here.tif";
+    Json::Value inputs( Json::arrayValue );
+    inputs.append( slot );
+    Json::Value plan( Json::objectValue );
+    plan["kind"] = "execution_plan";
+    plan["schema_version"] = "2.0";
+    plan["intent"] = "preprocess";
+    plan["inputs"] = inputs;
+    plan["steps"] = steps;
+    Json::Value input( Json::objectValue );
+    input["plan"] = plan;
+    input["skip_preflight"] = true;
+
+    const SpatialToolResult result = ( *tool )->execute( input );
+    REQUIRE( result.success );
+    REQUIRE( result.output["executed"].asBool() == false );
+    REQUIRE( result.output["preflight"]["verdict"].asString() == "blocked" );
+}

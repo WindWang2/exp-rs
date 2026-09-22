@@ -152,3 +152,30 @@ TEST_CASE( "metadata caps surface as an explicit note, never silently",
         hasNote = hasNote || note.code == "facts.metadata_truncated";
     REQUIRE( hasNote );
 }
+
+TEST_CASE( "non-finite doubles are typed InvalidField, never a self-unreadable document",
+           "[scientific_state][review2][p1_nonfinite]" )
+{
+    // RED on master: jsoncpp parses 1e+9999 into +inf, isNumeric() accepted
+    // it, and the state re-serialized it to a non-strict token that strict
+    // parsers (and our own NaN->null re-read path) reject. Fail closed at
+    // the reader instead.
+    const RemoteSensingAssetState state;
+    const Json::Value doc = assetStateToJson( state );
+
+    Json::Value mutated = doc;
+    mutated[ "geometry" ][ "pixel_size_x" ] = 1e+9999;
+    RemoteSensingAssetState decoded;
+    AssetStateError error;
+    REQUIRE( !assetStateFromJson( mutated, decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( error.message.find( "finite" ) != std::string::npos );
+
+    Json::Value mutatedNoData = doc;
+    mutatedNoData[ "bands" ].append( Json::Value( Json::objectValue ) );
+    mutatedNoData[ "bands" ][ 0 ][ "no_data_value" ] = -1e+9999;
+    RemoteSensingAssetState decodedBand;
+    AssetStateError bandError;
+    REQUIRE( !assetStateFromJson( mutatedNoData, decodedBand, bandError ) );
+    REQUIRE( bandError.code == StateErrorCode::InvalidField );
+}
