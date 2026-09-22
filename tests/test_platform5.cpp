@@ -999,6 +999,85 @@ TEST_CASE( "Eval: preflight packs route the Platform 5.0 intents deterministical
   CHECK_FALSE( isKnownIntent( "warp" ) );
 }
 
+TEST_CASE( "Eval: preflight reads grid facts from inspect-shaped docs",
+           "[platform5][eval][preflight][review2]" )
+{
+  using sicnu::agent::harness::PreflightInput;
+  using sicnu::agent::harness::runScientificPreflight;
+
+  // RED on master: the raster_inspect tool emits `size` {width,height} and
+  // `pixel_size` {x,y} OBJECTS, but gridFacts parsed only the array shape —
+  // every grid check silently saw zeros on inspect-derived inputs. These
+  // cases pin the object shape end to end through the rule packs.
+  const auto gridInput = []( const std::string &name, int width, int height, double px ) {
+    Json::Value understanding( Json::objectValue );
+    understanding["path"] = "/eval/" + name + ".tif";
+    understanding["modality"] = "optical";
+    understanding["radiometric_state"] = "surface_reflectance";
+    Json::Value size( Json::objectValue );
+    size["width"] = width;
+    size["height"] = height;
+    understanding["size"] = size;
+    Json::Value pixel( Json::objectValue );
+    pixel["x"] = px;
+    pixel["y"] = px;
+    understanding["pixel_size"] = pixel;
+    understanding["crs"] = "EPSG:32650";
+    PreflightInput input;
+    input.name = name;
+    input.reference = understanding["path"].asString();
+    input.understanding = understanding;
+    return input;
+  };
+
+  // Size mismatch blocks; resolution-only mismatch is a repairable warning,
+  // which makes "fixable" a reachable verdict again.
+  const auto sizeClash = runScientificPreflight(
+    "change", { gridInput( "pre", 100, 100, 30.0 ), gridInput( "post", 200, 100, 30.0 ) } );
+  CHECK( sizeClash.verdict == "blocked" );
+  CHECK( hasIssueCode( sizeClash, "Raster size mismatch" ) );
+
+  const auto resample = runScientificPreflight(
+    "change", { gridInput( "pre", 100, 100, 10.0 ), gridInput( "post", 100, 100, 30.0 ) } );
+  CHECK( resample.verdict == "fixable" );
+  CHECK( hasIssueCode( resample, "resample to a shared grid" ) );
+}
+
+TEST_CASE( "Eval: empty temporal facts and degree-based windows degrade honestly",
+           "[platform5][eval][preflight][review2]" )
+{
+  using sicnu::agent::harness::PreflightInput;
+  using sicnu::agent::harness::runScientificPreflight;
+
+  // RED on master: a declared-but-empty temporal_facts object found the
+  // with-facts branch, ran zero checks, and emitted nothing — the min-scene
+  // demand was bypassable with "temporal_facts": {}.
+  PreflightInput emptyFactsInput;
+  emptyFactsInput.name = "primary";
+  emptyFactsInput.reference = "/eval/collection.tif";
+  emptyFactsInput.understanding = evalInput( "primary", "optical", Json::Value(), "" ).understanding;
+  emptyFactsInput.temporalFacts = Json::Value( Json::objectValue );
+  const auto emptyFacts = runScientificPreflight( "phenology", { emptyFactsInput } );
+  CHECK( hasIssueCode( emptyFacts, "no usable scene_count" ) );
+
+  // RED on master: a degree-based pixel size (EPSG:4326) was compared
+  // against a meter window, calling every geographic scene "finer than the
+  // model's recommended minimum".
+  PreflightInput geo = evalInput( "primary", "optical", Json::Value(), "" );
+  geo.understanding["crs"] = "EPSG:4326";
+  Json::Value geoPixel( Json::objectValue );
+  geoPixel["x"] = 8.98e-5;
+  geoPixel["y"] = 8.98e-5;
+  geo.understanding["pixel_size"] = geoPixel;
+  Json::Value manifest( Json::objectValue );
+  manifest["name"] = "model.test.geo";
+  manifest["min_resolution_meters"] = 10.0;
+  geo.modelManifest = manifest;
+  const auto geoWindow = runScientificPreflight( "inference", { geo } );
+  CHECK( hasIssueCode( geoWindow, "cannot be verified" ) );
+  CHECK_FALSE( hasIssueCode( geoWindow, "finer than the model" ) );
+}
+
 TEST_CASE( "Solution registry reload invalidates on directory change (no stale cache)",
            "[platform5][solution][scale]" )
 {
