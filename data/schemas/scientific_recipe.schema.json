@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sicnu-geo-rs/schemas/scientific_recipe.schema.json",
+  "title": "SICNU GEO RS ScientificRecipe",
+  "description": "Versioned agent-consumable skill compiled from (or hand-authored alongside) a LabSpec lab. Captures goal pattern, required asset predicates, ordered stages with verifier hooks, preflight requirements, allowed alternatives, evidence requirements and teaching-origin metadata. recipe_id namespace 'lab.*' is disjoint from harness_recipe 'harness.*' (data/agent/recipes/). The C++ validator src/recipes/recipe_validator.cpp is authoritative; this schema mirrors it for external tooling. Normative notes: human_only stages are deliberate teaching boundaries, not defects; verifier hooks are descriptors evaluated by the grading/verifier layers, never executed by the recipe layer.",
+  "type": "object",
+  "required": [
+    "schema",
+    "recipe_id",
+    "title",
+    "goal_pattern",
+    "teaching_origin",
+    "required_assets",
+    "stages",
+    "preflight"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "sicnu.scientific_recipe/1"
+    },
+    "recipe_id": {
+      "type": "string",
+      "pattern": "^lab\\.[a-z0-9_]+$"
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "title_zh": { "type": "string" },
+    "description": { "type": "string" },
+    "goal_pattern": {
+      "type": "object",
+      "required": ["intent", "keywords_en", "keywords_zh", "modality"],
+      "additionalProperties": false,
+      "properties": {
+        "intent": { "type": "string", "minLength": 1 },
+        "keywords_en": { "type": "array", "items": { "type": "string" } },
+        "keywords_zh": { "type": "array", "items": { "type": "string" } },
+        "modality": {
+          "type": "string",
+          "enum": ["optical", "sar", "hyperspectral", "temporal", "terrain", "cartography", "general"]
+        }
+      }
+    },
+    "teaching_origin": {
+      "type": "object",
+      "required": ["kind", "lab_id", "compiled_by"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["labspec_d2", "labspec_d3", "authored"] },
+        "lab_id": { "type": "string", "minLength": 1 },
+        "spec_version": { "type": "integer", "enum": [1, 2] },
+        "source_schema": { "type": "string" },
+        "source_path": { "type": "string" },
+        "source_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "wrapper_path": { "type": "string" },
+        "compiled_by": { "type": "string" },
+        "objective": { "type": "string" },
+        "objective_zh": { "type": "string" },
+        "theme": { "type": "string" },
+        "audience": { "type": "string" },
+        "duration_minutes": { "type": "integer", "minimum": 0 },
+        "prerequisite_knowledge": { "type": "array", "items": { "type": "string" } },
+        "glossary_terms": { "type": "array", "items": { "type": "string" } },
+        "principle_headings": { "type": "array", "items": { "type": "string" } },
+        "operator_roles": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "required_assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "predicate"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["raster", "vector", "file"] },
+          "predicate": {
+            "type": "object",
+            "required": ["path", "must_exist"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "must_exist": { "type": "boolean" }
+            }
+          },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "index", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "index": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string", "enum": ["operator", "human_only", "reflection"] },
+          "title": { "type": "string" },
+          "title_zh": { "type": "string" },
+          "description_zh": { "type": "string" },
+          "operator_id": { "type": "string", "pattern": "^(rs|gdal|otb|opencv|io|gdal_tools):[a-z0-9_]+$" },
+          "params": { "type": "object" },
+          "operator_known": { "type": "boolean" },
+          "action": { "type": "string" },
+          "boundary": { "type": "string", "enum": ["ui_action", "manual", "reflection", "judgment"] },
+          "human_only": { "type": "boolean" },
+          "reason": { "type": "string" },
+          "prompt": { "type": "string" },
+          "hint": { "type": "string" },
+          "teaching_note": { "type": "string" },
+          "headless_note": { "type": "string" },
+          "completion_hint": { "type": "string" },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "verifier_hooks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["artifact_exists", "completion_hint", "lab_rules", "grading_pipeline", "expected_claim"]
+                },
+                "target": { "type": "string" },
+                "artifact_kind": { "type": "string", "enum": ["raster", "vector", "file"] },
+                "text": { "type": "string" },
+                "ref": { "type": "string" },
+                "claim": { "type": "string" },
+                "artifact": { "type": "string" },
+                "tolerance_note": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "required": ["required_operators", "required_assets"],
+      "additionalProperties": false,
+      "properties": {
+        "required_operators": { "type": "array", "items": { "type": "string" } },
+        "required_assets": { "type": "array", "items": { "type": "string" } },
+        "param_bounds": { "type": "object" }
+      }
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "operator_id", "param", "choices"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string", "const": "param_values" },
+          "operator_id": { "type": "string" },
+          "param": { "type": "string" },
+          "choices": { "type": "array", "minItems": 2 },
+          "note_zh": { "type": "string" }
+        }
+      }
+    },
+    "verifier_hooks": {
+      "description": "Lab-scoped hooks (grading refs, expected claims) — evaluated after the last stage by the verifier layer; identical item shape to stage-level verifier_hooks.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["artifact_exists", "completion_hint", "lab_rules", "grading_pipeline", "expected_claim"]
+          },
+          "target": { "type": "string" },
+          "artifact_kind": { "type": "string", "enum": ["raster", "vector", "file"] },
+          "text": { "type": "string" },
+          "ref": { "type": "string" },
+          "claim": { "type": "string" },
+          "artifact": { "type": "string" },
+          "tolerance_note": { "type": "string" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "enum": ["raster", "vector", "file"] },
+              "note_zh": { "type": "string" }
+            }
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "string" },
+              "artifact": { "type": "string" },
+              "tolerance_note": { "type": "string" }
+            }
+          }
+        },
+        "grading_rules": { "type": "string" },
+        "grading_pipeline": { "type": "string" },
+        "grading_intent_ref": { "type": "string" },
+        "data_spec": { "type": "string" },
+        "pipeline_runner": { "type": "string" }
+      }
+    },
+    "compilation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stages_total": { "type": "integer", "minimum": 0 },
+        "stages_operator": { "type": "integer", "minimum": 0 },
+        "stages_human_only": { "type": "integer", "minimum": 0 },
+        "stages_reflection": { "type": "integer", "minimum": 0 },
+        "coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "diagnostics": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
