@@ -18,6 +18,9 @@
 #include <gdal.h>
 #include <QScopeGuard>
 
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
+
 void RasterMergeBandsAlgorithm::initAlgorithm( const QVariantMap & )
 {
     addParameter( new QgsProcessingParameterMultipleLayers( QStringLiteral( "INPUT_LAYERS" ), QObject::tr( "Input layers" ),
@@ -43,7 +46,7 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
     if ( rasterLayers.isEmpty() )
         throw QgsProcessingException( QObject::tr( "No valid raster layers found" ) );
 
-    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    const QString destTarget = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
 
     feedback->setProgressText( QObject::tr( "Merging raster bands..." ) );
 
@@ -119,6 +122,11 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
         gdalType = ( gdalType == GDT_Unknown ) ? blockType : GDALDataTypeUnion( gdalType, blockType );
     }
 
+    // Stage beside the destination, publish atomically on success (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( destTarget );
+    if ( !staged )
+        throw QgsProcessingException( QObject::tr( "Could not allocate a staging path next to %1" ).arg( destTarget ) );
+    const QString dest = staged->stagedPath();
     const QByteArray destUtf8 = dest.toUtf8();
     // dataset_unique_ptr closes the dataset on every exit path (including
     // non-QgsProcessingException).
@@ -167,12 +175,24 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
             throw QgsProcessingException( QObject::tr( "Error writing band %1" ).arg( b + 1 ) );
         feedback->setProgress( 50.0 + 50.0 * ( b + 1 ) / totalBands );
     }
-    hOutDs.reset();
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): the per-band GF_Write checks only covered the
+    // driver's cache. A failed final flush must fail the run and remove the
+    // partial output — deleteOutputOnFailure is still armed on this path.
+    QString closeError;
+    if ( !closeDatasetFailClosed( hOutDs.release(), &closeError ) )
+    {
+        throw QgsProcessingException( closeError.isEmpty()
+                                          ? QObject::tr( "Failed to flush merged output %1" ).arg( destTarget )
+                                          : closeError );
+    }
     deleteOutputOnFailure.dismiss();
+    if ( !staged->publish( nullptr ) )
+        throw QgsProcessingException( QObject::tr( "Failed to publish merged output %1" ).arg( destTarget ) );
 
     feedback->setProgress( 100 );
 
     QVariantMap results;
-    results[QStringLiteral( "OUTPUT" )] = dest;
+    results[QStringLiteral( "OUTPUT" )] = destTarget;
     return results;
 }

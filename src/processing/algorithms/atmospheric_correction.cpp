@@ -3,6 +3,7 @@
 #include "math_utils.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
 #include "core/sicnu_logging.h"
 
 #include <QDomDocument>
@@ -406,10 +407,19 @@ bool quac(const float *const *dnBands, float *const *outBands,
     return true;
 }
 
-bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
+bool processFileMultiBand(const QString &sourcePath, const QString &targetPath,
                           int method, QString *errorMessage,
                           const std::function<void(double, const QString &)> &progress)
 {
+    // Publish through staging: the writer below targets a staged path beside
+    // the target, published atomically only on success — a failed run can
+    // neither leave a partial product at the target nor destroy the previous
+    // result there (GUI/CLI direct paths bypass the OutputCommitter) (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     if (method != Method::Quac) {
         if (errorMessage)
             *errorMessage = QStringLiteral("processFileMultiBand: unsupported method %1").arg(method);
@@ -551,15 +561,46 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
             progress(0.5 + 0.45 * (b + 1) / bandCount, QStringLiteral("QUAC write band %1").arg(b + 1));
     }
 
+    // The GTiff driver defers edge-tile writes to GDALClose: a close-time
+    // flush failure (disk full, quota, dropped mount) must fail the run and
+    // remove the partial output instead of sitting silently under a success
+    // report (GUI/CLI direct paths bypass the OutputCommitter) (#617).
+    QString closeError;
+    if (!outDataset.closeWithError(&closeError)) {
+        QFile::remove(outputPath);
+        if (errorMessage)
+            *errorMessage = closeError.isEmpty()
+                                ? QStringLiteral("QUAC: failed to flush output")
+                                : closeError;
+        return false;
+    }
+
+    // Atomic publish over the target: the previous result is replaced only
+    // now that the new one is complete and flushed.
+    QString publishError;
+    if (!staged->publish(&publishError)) {
+        if (errorMessage)
+            *errorMessage = publishError.isEmpty()
+                                ? QStringLiteral("QUAC: failed to publish output")
+                                : publishError;
+        return false;
+    }
+
     if (progress)
         progress(1.0, QStringLiteral("QUAC complete"));
     return true;
 }
 
-bool processFile(const QString &sourcePath, const QString &outputPath,
+bool processFile(const QString &sourcePath, const QString &targetPath,
                  int bandNum, int method, float gain, float bias,
                  float airmass, QString *errorMessage)
 {
+    // Publish through staging (same contract as processFileMultiBand above).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
         if (errorMessage)
@@ -679,10 +720,33 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         return false;
     }
 
+    // Same close-time flush gate as the QUAC path above: GDALClose is where
+    // the GTiff driver reports deferred write failures.
+    {
+        QString closeError;
+        if (!outDataset.closeWithError(&closeError)) {
+            QFile::remove(outputPath);
+            if (errorMessage)
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral("Failed to flush output for band %1").arg(bandNum)
+                                    : closeError;
+            return false;
+        }
+    }
+
+    QString publishError;
+    if (!staged->publish(&publishError)) {
+        if (errorMessage)
+            *errorMessage = publishError.isEmpty()
+                                ? QStringLiteral("Failed to publish output for band %1").arg(bandNum)
+                                : publishError;
+        return false;
+    }
+
     return true;
 }
 
-bool processFileDos(const QString &sourcePath, const QString &outputPath,
+bool processFileDos(const QString &sourcePath, const QString &targetPath,
                     int bandNum, int method,
                     const RadiometricCalibration::BandCoefficients &coeffs,
                     RadiometricCalibration::SensorType sensor,
@@ -702,6 +766,12 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
             *errorMessage = QStringLiteral("Landsat DOS requires a finite sun elevation");
         return false;
     }
+
+    // Publish through staging (same contract as processFileMultiBand above).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
 
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
@@ -813,6 +883,25 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
                                 ? QStringLiteral("Failed to stream band %1").arg(bandNum)
                                 : tileError;
         QFile::remove(outputPath);
+        return false;
+    }
+    {
+        QString closeError;
+        if (!outDataset.closeWithError(&closeError)) {
+            QFile::remove(outputPath);
+            if (errorMessage)
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral("Failed to flush output for band %1").arg(bandNum)
+                                    : closeError;
+            return false;
+        }
+    }
+    QString publishError;
+    if (!staged->publish(&publishError)) {
+        if (errorMessage)
+            *errorMessage = publishError.isEmpty()
+                                ? QStringLiteral("Failed to publish output for band %1").arg(bandNum)
+                                : publishError;
         return false;
     }
     return true;
