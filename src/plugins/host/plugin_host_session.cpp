@@ -75,20 +75,23 @@ bool ConcurrencyGate::acquire( int timeoutMs )
                 mPeakActive = mActive;
             return true;
         }
-        if ( mWaiters.front() != ticket )
-        {
-            // Someone ahead of us is waiting; they take precedence.
-            mCv.wait( lock );
-            continue;
-        }
         if ( std::chrono::steady_clock::now() >= deadline )
         {
-            // Bounded refusal: leave the queue (we are the front, so this
-            // cannot starve anyone behind us).
-            mWaiters.pop_front();
+            // #1186: non-front waiters used to ignore the deadline (unbounded
+            // mCv.wait). Always honour it — erase this ticket wherever it sits.
+            for ( auto it = mWaiters.begin(); it != mWaiters.end(); ++it )
+            {
+                if ( *it == ticket )
+                {
+                    mWaiters.erase( it );
+                    break;
+                }
+            }
             mCv.notify_all();
             return false;
         }
+        // Someone ahead of us is waiting, or no free slot yet — wait with the
+        // same deadline either way (#1186).
         mCv.wait_until( lock, deadline );
     }
 }
