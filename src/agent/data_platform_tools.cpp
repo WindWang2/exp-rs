@@ -1038,14 +1038,19 @@ constexpr qint64 kMaxCatalogScan = 10000;
 QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVersionId &versionId,
                                            qint64 maxRows = kMaxCatalogScan )
 {
+    // #1184: walk with samplesPageCursor (keyset) — OFFSET paging re-read
+    // O(offset) rows per page and silently stalled large catalogs. The scan
+    // still caps at kMaxCatalogScan; callers must surface scan_capped.
     QVector<SampleCatalogRow> rows;
-    qint64 offset = 0;
+    QString cursor;
     while ( static_cast<qint64>( rows.size() ) < maxRows )
     {
-        const auto page = store.samplesPage( versionId, offset, DatasetStore::kMaxPageSize );
-        if ( !page || page.value().second.isEmpty() )
+        const qint64 pageLimit = qMin<qint64>(
+            DatasetStore::kMaxPageSize, maxRows - static_cast<qint64>( rows.size() ) );
+        const auto page = store.samplesPageCursor( versionId, cursor, pageLimit );
+        if ( !page || page.value().samples.isEmpty() )
             break;
-        for ( const SampleRecord &sample : page.value().second )
+        for ( const SampleRecord &sample : page.value().samples )
         {
             SampleCatalogRow row;
             row.sampleId = sample.sampleId();
@@ -1070,10 +1075,10 @@ QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVer
             }
             row.crs = sample.crs();
             rows.append( row );
-            if ( static_cast<qint64>( rows.size() ) >= maxRows )
-                break;
         }
-        offset += page.value().second.size();
+        if ( page.value().nextCursor.isEmpty() )
+            break;
+        cursor = page.value().nextCursor;
     }
     return rows;
 }
@@ -1232,6 +1237,8 @@ QVariantMap datasetSampleQuery( const QVariantMap &args )
     data.insert( QStringLiteral( "matched" ), page.totalMatched );
     data.insert( QStringLiteral( "scanned" ), qint64( rows.size() ) );
     data.insert( QStringLiteral( "scan_capped" ), qint64( rows.size() ) >= kMaxCatalogScan );
+    data.insert( QStringLiteral( "truncated" ), qint64( rows.size() ) >= kMaxCatalogScan );
+    data.insert( QStringLiteral( "universe_total" ), store->sampleCount( versionId ) );
     data.insert( QStringLiteral( "summary_by_class" ), byClass );
     data.insert( QStringLiteral( "pseudo_label_count" ), summary.pseudoLabelCount );
     return finishPage( data, page.totalMatched, cursor, limit );
