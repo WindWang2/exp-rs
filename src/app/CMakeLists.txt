@@ -165,6 +165,10 @@ add_executable(sicnu_geo_rs
     workbench/model_workbench_panel.cpp
     cartography/cartography_dock.cpp
 
+    # Teacher Authoring & Assessment Console (parallel-safe vs #1237/#1238)
+    teaching_admin/teaching_admin_dock.cpp
+    teaching_admin/teaching_admin_dock.h
+
     # Workbench 10.0 — Visual Analytics component platform
     visualanalytics/va_source.cpp
     visualanalytics/va_chart_widget.cpp
@@ -417,6 +421,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::help_gui
     Sicnu::dataset
     Sicnu::experiment
+    Sicnu::teaching_admin
     # D5: desktop lab auto-recording surface + lab report builder (bridge
     # converts coordinator truth into experiment records).
     Sicnu::experiment_bridge

@@ -584,6 +584,8 @@ private:
     QgsDockWidget *m_logDock = nullptr;
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
+    // Teacher Authoring Console (#teaching-admin; parallel-safe vs lab cockpit)
+    QgsDockWidget *m_teachingAdminDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
     QDockWidget *m_agentCopilotDock = nullptr;
 

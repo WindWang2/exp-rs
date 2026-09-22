@@ -754,6 +754,9 @@ add_subdirectory(src/experiment)
 # Parameter Sensitivity & Uncertainty Studio (RS14-07): studies the existing
 # experiment/execution authorities — never a second store or scheduler.
 add_subdirectory(src/study)
+# Teacher Authoring & Assessment Console (Qt Core orchestration leaf).
+# Parallel to #1237 teaching / #1238 experiment_studio — owns teaching_admin only.
+add_subdirectory(src/teaching_admin)
 # RS14-06 Experiment Debugger (ADR 0174): read-only first-divergence
 # projection over recorded run evidence. Leaf over Sicnu::experiment +
 # sicnu_workflow read surfaces; consumers are opt-in (tests, future CLI/GUI).

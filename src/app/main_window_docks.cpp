@@ -23,6 +23,7 @@
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/spectral_workbench_panel.h"
 #include "widgets/guided_workflow_widget.h"
+#include "teaching_admin/teaching_admin_dock.h"
 #include "widgets/histogram_stretch_widget.h"
 #include "widgets/rs_toolbar_flow_host.h"
 #include "widgets/rs_empty_state_widget.h"
@@ -309,6 +310,18 @@ void QgisDesktopWindow::setupDockWidgets()
     addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
     tabifyDockWidget(m_processingDock, m_workflowDock);
 
+    // Teacher Authoring & Assessment Console (append-only; objectName distinct from #1237/#1238)
+    {
+        auto *admin = new sicnu::app::teaching_admin::TeachingAdminDock( this );
+        m_teachingAdminDock = new QgsDockWidget( this );
+        m_teachingAdminDock->setObjectName( QStringLiteral( "teachingAdminDock" ) );
+        m_teachingAdminDock->setWindowTitle( tr( "教学作者与评测控制台" ) );
+        m_teachingAdminDock->setWidget( admin );
+        addDockWidget( Qt::RightDockWidgetArea, m_teachingAdminDock );
+        tabifyDockWidget( m_workflowDock, m_teachingAdminDock );
+        m_teachingAdminDock->hide();
+    }
+
     // Window menu — add dock toggle actions
     // Data Manager toggle is added in setupDataManagerPanel() (created later).
     if (m_windowMenu) {
@@ -326,6 +339,8 @@ void QgisDesktopWindow::setupDockWidgets()
         if ( m_jobPanel )
           m_windowMenu->addAction( m_jobPanel->toggleViewAction() );
         m_windowMenu->addAction(m_workflowDock->toggleViewAction());
+        if ( m_teachingAdminDock )
+            m_windowMenu->addAction( m_teachingAdminDock->toggleViewAction() );
         // Task panel dock is created after setupDockWidgets (setupRibbonAndTaskPanel);
         // its toggle action is added there once the dock exists.
         m_windowMenu->addSeparator();
