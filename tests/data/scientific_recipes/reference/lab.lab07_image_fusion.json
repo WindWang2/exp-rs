@@ -1,0 +1,114 @@
+{
+  "goal_pattern": {
+    "intent": "image_fusion",
+    "keywords_en": [],
+    "keywords_zh": [],
+    "modality": "optical"
+  },
+  "preflight": {
+    "required_assets": [],
+    "required_operators": []
+  },
+  "recipe_id": "lab.lab07_image_fusion",
+  "required_assets": [
+    {
+      "id": "primary",
+      "kind": "file",
+      "predicate": {
+        "must_exist": true,
+        "path": "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema": "sicnu.scientific_recipe/1",
+  "stages": [
+    {
+      "boundary": "manual",
+      "human_only": true,
+      "id": "understand_fusion",
+      "index": 0,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "能说出全色与多光谱数据各自的优缺点。"
+        }
+      ]
+    },
+    {
+      "id": "brovey",
+      "index": 1,
+      "kind": "operator",
+      "operator_id": "rs:image_fusion",
+      "params": {
+        "method": "brovey",
+        "ms": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab07_brovey.tif",
+        "pan": "data/samples/landsat_sample.tif"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab07_brovey.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "融合影像空间细节提升。"
+        }
+      ]
+    },
+    {
+      "id": "ihs",
+      "index": 2,
+      "kind": "operator",
+      "operator_id": "rs:image_fusion",
+      "params": {
+        "method": "ihs",
+        "ms": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab07_ihs.tif",
+        "pan": "data/samples/landsat_sample.tif"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab07_ihs.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "能够比较两种融合结果的光谱差异。"
+        }
+      ]
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_1",
+      "index": 3,
+      "kind": "reflection",
+      "prompt": "为什么融合结果的色彩会偏离原始多光谱影像？哪种方法失真更小？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_2",
+      "index": 4,
+      "kind": "reflection",
+      "prompt": "融合前是否需要对全色与多光谱影像做配准？配准误差会带来什么伪影？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_3",
+      "index": 5,
+      "kind": "reflection",
+      "prompt": "PCA 融合用第几主成分替换全色影像？为什么？"
+    }
+  ],
+  "teaching_origin": {
+    "compiled_by": "sicnu.lab2recipe/1",
+    "kind": "labspec_d2",
+    "lab_id": "lab07_image_fusion"
+  },
+  "title": "Image Fusion",
+  "title_zh": "影像融合"
+}

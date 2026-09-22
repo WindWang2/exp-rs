@@ -1,0 +1,164 @@
+{
+  "evidence": {
+    "artifacts": [
+      {
+        "kind": "raster",
+        "path": "outputs/lab02_ndvi.tif"
+      },
+      {
+        "kind": "raster",
+        "path": "outputs/lab02_band_ratio.tif"
+      }
+    ],
+    "grading_pipeline": "data/pipelines/landsat_ndvi.json"
+  },
+  "goal_pattern": {
+    "intent": "spectral_analysis",
+    "keywords_en": [],
+    "keywords_zh": [],
+    "modality": "optical"
+  },
+  "preflight": {
+    "required_assets": [],
+    "required_operators": []
+  },
+  "recipe_id": "lab.lab02_spectral_analysis",
+  "required_assets": [
+    {
+      "id": "primary",
+      "kind": "file",
+      "predicate": {
+        "must_exist": true,
+        "path": "data/samples/landsat_sample.tif"
+      }
+    }
+  ],
+  "schema": "sicnu.scientific_recipe/1",
+  "stages": [
+    {
+      "action": "addRasterLayer",
+      "boundary": "ui_action",
+      "human_only": true,
+      "id": "load",
+      "index": 0,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "影像已加载并显示在地图画布上。"
+        }
+      ]
+    },
+    {
+      "action": "identifyFeatures",
+      "boundary": "ui_action",
+      "human_only": true,
+      "id": "profiles",
+      "index": 1,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "能够看到不同地物类型呈现不同的光谱曲线。"
+        }
+      ]
+    },
+    {
+      "id": "ndvi",
+      "index": 2,
+      "kind": "operator",
+      "operator_id": "rs:spectral_index",
+      "params": {
+        "index": "NDVI",
+        "input": "data/samples/landsat_sample.tif",
+        "nir": 5,
+        "output": "outputs/lab02_ndvi.tif",
+        "red": 4
+      },
+      "verifier_hooks": [
+        {
+          "artifact_kind": "raster",
+          "kind": "artifact_exists",
+          "target": "outputs/lab02_ndvi.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "输出栅格中植被区域呈高值，水体呈负值。"
+        }
+      ]
+    },
+    {
+      "id": "ratio",
+      "index": 3,
+      "kind": "operator",
+      "operator_id": "rs:band_math",
+      "params": {
+        "expression": "b5 / b4",
+        "input": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab02_band_ratio.tif"
+      },
+      "verifier_hooks": [
+        {
+          "artifact_kind": "raster",
+          "kind": "artifact_exists",
+          "target": "outputs/lab02_band_ratio.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "比值影像中植被区域呈高值。"
+        }
+      ]
+    },
+    {
+      "action": "openComparisonDialog",
+      "boundary": "ui_action",
+      "human_only": true,
+      "id": "compare",
+      "index": 4,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "高 NDVI 值与影像中的绿色植被区域一一对应。"
+        }
+      ]
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_1",
+      "index": 5,
+      "kind": "reflection",
+      "prompt": "为什么植被在 NIR 波段反射率高而在 Red 波段反射率低？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_2",
+      "index": 6,
+      "kind": "reflection",
+      "prompt": "NDVI 与简单波段比值 b5/b4 在抑制地形阴影方面有何差异？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_3",
+      "index": 7,
+      "kind": "reflection",
+      "prompt": "若影像未做大气校正，NDVI 的计算结果可能受哪些因素影响？"
+    }
+  ],
+  "teaching_origin": {
+    "compiled_by": "sicnu.lab2recipe/1",
+    "kind": "labspec_d2",
+    "lab_id": "lab02_spectral_analysis"
+  },
+  "title": "Spectral Analysis",
+  "title_zh": "光谱指数与波段运算",
+  "verifier_hooks": [
+    {
+      "kind": "grading_pipeline",
+      "ref": "data/pipelines/landsat_ndvi.json"
+    }
+  ]
+}

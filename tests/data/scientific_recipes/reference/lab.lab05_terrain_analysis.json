@@ -1,0 +1,113 @@
+{
+  "goal_pattern": {
+    "intent": "terrain_analysis",
+    "keywords_en": [],
+    "keywords_zh": [],
+    "modality": "terrain"
+  },
+  "preflight": {
+    "required_assets": [],
+    "required_operators": []
+  },
+  "recipe_id": "lab.lab05_terrain_analysis",
+  "required_assets": [
+    {
+      "id": "primary",
+      "kind": "file",
+      "predicate": {
+        "must_exist": true,
+        "path": "data/samples/dem_sample.tif"
+      }
+    }
+  ],
+  "schema": "sicnu.scientific_recipe/1",
+  "stages": [
+    {
+      "action": "addRasterLayer",
+      "boundary": "ui_action",
+      "human_only": true,
+      "id": "load_dem",
+      "index": 0,
+      "kind": "human_only",
+      "verifier_hooks": [
+        {
+          "kind": "completion_hint",
+          "text": "DEM 已加载并显示高程拉伸效果。"
+        }
+      ]
+    },
+    {
+      "id": "hillshade",
+      "index": 1,
+      "kind": "operator",
+      "operator_id": "rs:terrain_analysis",
+      "params": {
+        "input": "data/samples/dem_sample.tif",
+        "output": "outputs/lab05_hillshade.tif",
+        "product": "hillshade"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab05_hillshade.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "阴影影像呈现明显的立体感。"
+        }
+      ]
+    },
+    {
+      "id": "slope",
+      "index": 2,
+      "kind": "operator",
+      "operator_id": "rs:terrain_analysis",
+      "params": {
+        "input": "data/samples/dem_sample.tif",
+        "output": "outputs/lab05_slope.tif",
+        "product": "slope"
+      },
+      "verifier_hooks": [
+        {
+          "kind": "artifact_exists",
+          "target": "outputs/lab05_slope.tif"
+        },
+        {
+          "kind": "completion_hint",
+          "text": "坡度影像中陡坡呈亮色。"
+        }
+      ]
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_1",
+      "index": 3,
+      "kind": "reflection",
+      "prompt": "山体阴影中光照方位角的选择会如何影响地形表现？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_2",
+      "index": 4,
+      "kind": "reflection",
+      "prompt": "坡度计算对 DEM 分辨率和噪声有什么要求？"
+    },
+    {
+      "boundary": "reflection",
+      "human_only": true,
+      "id": "reflect_3",
+      "index": 5,
+      "kind": "reflection",
+      "prompt": "除坡度、坡向外，DEM 还能派生哪些地形因子（如 TRI、TPI）？各用于什么场景？"
+    }
+  ],
+  "teaching_origin": {
+    "compiled_by": "sicnu.lab2recipe/1",
+    "kind": "labspec_d2",
+    "lab_id": "lab05_terrain_analysis"
+  },
+  "title": "Terrain Analysis",
+  "title_zh": "地形分析"
+}
