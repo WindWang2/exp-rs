@@ -396,7 +396,9 @@ bool ExecutionFacts::fromJson( const Json::Value &value, std::string &error )
     return false;
   if ( value.isMember( "elapsedMs" ) )
   {
-    if ( !value["elapsedMs"].isIntegral() )
+    // isInt64() (not just isIntegral()) so a uint64 beyond 2^63-1 — for
+    // which asInt64() would throw — is a typed refusal instead.
+    if ( !value["elapsedMs"].isInt64() || value["elapsedMs"].isBool() )
     {
       error = context + ": elapsedMs must be an integer";
       return false;

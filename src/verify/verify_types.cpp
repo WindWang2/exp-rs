@@ -52,9 +52,12 @@ bool isReal( const Json::Value &value )
 bool isCount( const Json::Value &value )
 {
     // A count is a non-negative integer; JSON bool is not a number in jsoncpp.
+    // Range-limited to what asInt64() can read back without throwing: a
+    // uint64 above 2^63-1 passes isIntegral() but makes the later numeric
+    // reads escape as Json::LogicError.
     if ( !value.isIntegral() || value.isBool() )
         return false;
-    return value.asInt64() >= 0;
+    return value.isInt64() && value.asInt64() >= 0;
 }
 
 bool isHex64( const std::string &text )
@@ -104,6 +107,11 @@ void validateStateInvariant( const Json::Value &params, const std::string &where
         }
         if ( !isString( expectation["key"] ) || expectation["key"].asString().empty() )
             errors.push_back( at( where, "expectation 'key' must be a non-empty string" ) );
+        if ( !isString( expectation["op"] ) )
+        {
+            errors.push_back( at( where, "expectation 'op' must be a string" ) );
+            continue;
+        }
         const std::string op = expectation["op"].asString();
         if ( !contains( kStateOps, op ) )
             errors.push_back( at( where, "expectation 'op' '" + op + "' is outside the closed vocabulary" ) );
@@ -130,7 +138,8 @@ void validateArtifactType( const Json::Value &params, const std::string &where,
 {
     if ( !isString( params["path"] ) || params["path"].asString().empty() )
         errors.push_back( at( where, "'path' must be a non-empty string" ) );
-    if ( !contains( kArtifactKinds, params["kind"].asString() ) )
+    if ( !isString( params["kind"] ) ||
+         !contains( kArtifactKinds, params["kind"].asString() ) )
         errors.push_back( at( where, "'kind' must be one of raster|vector|table|json|sidecar" ) );
 }
 
@@ -262,6 +271,11 @@ void validateRelational( const Json::Value &params, const std::string &where,
             errors.push_back( at( where, "each relation must be an object" ) );
             continue;
         }
+        if ( !isString( relation["op"] ) )
+        {
+            errors.push_back( at( where, "relation 'op' must be a string" ) );
+            continue;
+        }
         const std::string op = relation["op"].asString();
         if ( !contains( kRelationOps, op ) )
         {
@@ -338,7 +352,9 @@ void validateReproducibility( const Json::Value &params, const std::string &wher
     const bool hasLeft = isString( params["leftPath"] ) && !params["leftPath"].asString().empty();
     const bool hasRight = isString( params["rightPath"] ) && !params["rightPath"].asString().empty();
 
-    if ( params.isMember( "fingerprintAlgorithm" ) && params["fingerprintAlgorithm"].asString() != "sha256" )
+    if ( params.isMember( "fingerprintAlgorithm" ) &&
+         ( !isString( params["fingerprintAlgorithm"] ) ||
+           params["fingerprintAlgorithm"].asString() != "sha256" ) )
         errors.push_back( at( where, "'fingerprintAlgorithm' supports only 'sha256'" ) );
 
     if ( hasLeft || hasRight )
@@ -495,6 +511,31 @@ bool parseStatusWire( const std::string &wire, VerificationStatus &out )
     return true;
 }
 
+/// The canonical seal refuses bodies carrying non-finite numbers: jsoncpp's
+/// writer would emit NaN as `null` (indistinguishable from a real null under
+/// the digest) and infinities as `1e+9999` (a token other parsers may read as
+/// 0 or reject). A body that cannot be sealed honestly must not exist.
+bool containsNonFiniteNumber( const Json::Value &value )
+{
+    switch ( value.type() )
+    {
+    case Json::realValue:
+        return !std::isfinite( value.asDouble() );
+    case Json::arrayValue:
+        for ( const Json::Value &element : value )
+            if ( containsNonFiniteNumber( element ) )
+                return true;
+        return false;
+    case Json::objectValue:
+        for ( const Json::Value &member : value )
+            if ( containsNonFiniteNumber( member ) )
+                return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -549,6 +590,11 @@ std::vector<std::string> validateSpec( const VerificationSpec &spec )
 
 std::string canonicalJsonText( const Json::Value &value )
 {
+    // Refusal sentinel: a body with non-finite numbers gets no canonical
+    // text at all (digest() mirrors this with an empty digest) instead of
+    // sealing NaN/null ambiguity or a parser-divergent `1e+9999`.
+    if ( containsNonFiniteNumber( value ) )
+        return {};
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "";
     builder["commentStyle"] = "None";
@@ -693,7 +739,8 @@ bool parseSpec( const std::string &text, VerificationSpec &out, std::string &err
 
 std::string specDigest( const VerificationSpec &spec )
 {
-    return sha256Hex( canonicalJsonText( specToJson( spec ) ) );
+    const std::string text = canonicalJsonText( specToJson( spec ) );
+    return text.empty() ? std::string{} : sha256Hex( text );
 }
 
 // ---------------------------------------------------------------------------
@@ -734,16 +781,19 @@ bool VerificationEvidence::fromCanonicalJson( const Json::Value &json, std::stri
     parsed.source = json["source"].asString();
     parsed.observed = json["observed"];
     parsed.expected = json["expected"];
+    if ( json.isMember( "hasSampling" ) && !json["hasSampling"].isBool() )
+        return fail( "'hasSampling' must be a boolean" );
     const bool hasSampling = json.isMember( "hasSampling" ) && json["hasSampling"].asBool();
     const bool hasPoints = json.isMember( "sampledPoints" );
     if ( hasSampling != hasPoints )
         return fail( "'hasSampling' and 'sampledPoints' must appear together" );
     if ( hasSampling )
     {
-        if ( !json["sampledPoints"].isUInt64() && !json["sampledPoints"].isIntegral() )
+        const Json::Value &points = json["sampledPoints"];
+        if ( !points.isUInt64() && ( !points.isIntegral() || points.asInt64() < 0 ) )
             return fail( "'sampledPoints' must be a non-negative integer" );
         parsed.hasSampling = true;
-        parsed.sampledPoints = static_cast<std::size_t>( json["sampledPoints"].asUInt64() );
+        parsed.sampledPoints = static_cast<std::size_t>( points.asUInt64() );
     }
     *this = std::move( parsed );
     error.clear();
@@ -807,7 +857,10 @@ Json::Value VerificationReport::toCanonicalJson() const
 
 std::string VerificationReport::digest() const
 {
-    return sha256Hex( canonicalJsonText( toCanonicalJson() ) );
+    const std::string text = canonicalJsonText( toCanonicalJson() );
+    // An empty canonical text is the non-finite refusal sentinel: an
+    // unsealable body must not masquerade as sha256("")-sealed.
+    return text.empty() ? std::string{} : sha256Hex( text );
 }
 
 bool VerificationReport::fromCanonicalJson( const Json::Value &json, VerificationReport &out,
@@ -826,6 +879,8 @@ bool VerificationReport::fromCanonicalJson( const Json::Value &json, Verificatio
         return fail( std::string( "schema marker must be " ) + kReportSchema );
     if ( !isString( json["specId"] ) || !isString( json["scope"] ) || !isString( json["specDigest"] ) )
         return fail( "'specId'/'scope'/'specDigest' must be strings" );
+    if ( !isHex64( json["specDigest"].asString() ) )
+        return fail( "'specDigest' must be a 64-char hex sha256" );
 
     VerificationStatus overall;
     if ( !isString( json["overall"] ) || !parseStatusWire( json["overall"].asString(), overall ) )
@@ -835,6 +890,14 @@ bool VerificationReport::fromCanonicalJson( const Json::Value &json, Verificatio
     if ( !counts.isObject() || counts.size() != 3 || !counts.isMember( "pass" ) ||
          !counts.isMember( "fail" ) || !counts.isMember( "indeterminate" ) )
         return fail( "'counts' must carry pass/fail/indeterminate" );
+    // Numbers only: a count of any other JSON type (or a negative one) must be
+    // refused before the derived-count comparison reads it.
+    for ( const char *member : { "pass", "fail", "indeterminate" } )
+    {
+        const Json::Value &count = counts[member];
+        if ( !count.isUInt64() && ( !count.isIntegral() || count.asInt64() < 0 ) )
+            return fail( std::string( "'counts." ) + member + "' must be a non-negative integer" );
+    }
 
     if ( !json["checks"].isArray() )
         return fail( "'checks' must be an array" );

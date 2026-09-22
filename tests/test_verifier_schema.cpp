@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <functional>
 #include <sstream>
 #include <string>
@@ -607,4 +608,207 @@ TEST_CASE( "error code vocabulary classifies e_/i_ prefixes", "[verify][schema][
     REQUIRE_FALSE( isIndeterminateCode( kCodeInvalidSpec ) );
     REQUIRE( isIndeterminateCode( kCodeProviderMissing ) );
     REQUIRE( isIndeterminateCode( kCodeDigestUnavailable ) );
+}
+
+// ---------------------------------------------------------------------------
+// Hostile shapes: typed refusal, never an escaping exception
+// (hardening/verifier-grader-explain-evidence — fail-closed contract)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "hostile spec params are typed validation errors, not exceptions",
+           "[verify][schema][hostile]" )
+{
+    VerificationSpec spec = validSpec();
+
+    SECTION( "state.invariant op of object type" )
+    {
+        Json::Value params( Json::objectValue );
+        params["expectations"] = Json::Value( Json::arrayValue );
+        Json::Value expectation( Json::objectValue );
+        expectation["key"] = "stage";
+        expectation["op"] = Json::Value( Json::objectValue ); // hostile: not a string
+        params["expectations"].append( expectation );
+        spec.checks = { makeCheck( "s1", "state.invariant", params ) };
+        REQUIRE_FALSE( validateSpec( spec ).empty() );
+    }
+
+    SECTION( "relational.consistency op of array type" )
+    {
+        Json::Value params( Json::objectValue );
+        params["relations"] = Json::Value( Json::arrayValue );
+        Json::Value relation( Json::objectValue );
+        relation["left"] = "a";
+        relation["op"] = Json::Value( Json::arrayValue ); // hostile: not a string
+        relation["right"] = "b";
+        params["relations"].append( relation );
+        spec.checks = { makeCheck( "r1", "relational.consistency", params ) };
+        REQUIRE_FALSE( validateSpec( spec ).empty() );
+    }
+
+    SECTION( "artifact.type kind of object type" )
+    {
+        Json::Value params( Json::objectValue );
+        params["path"] = "out.gpkg";
+        params["kind"] = Json::Value( Json::objectValue ); // hostile: not a string
+        spec.checks = { makeCheck( "t1", "artifact.type", params ) };
+        REQUIRE_FALSE( validateSpec( spec ).empty() );
+    }
+
+    SECTION( "reproducibility.digest fingerprintAlgorithm of object type" )
+    {
+        Json::Value params( Json::objectValue );
+        params["path"] = "out.tif";
+        params["expectedDigest"] = std::string( 64, 'a' );
+        params["fingerprintAlgorithm"] = Json::Value( Json::objectValue ); // hostile
+        spec.checks = { makeCheck( "d1", "reproducibility.digest", params ) };
+        REQUIRE_FALSE( validateSpec( spec ).empty() );
+    }
+
+    SECTION( "counts beyond int64 range are typed validation errors" )
+    {
+        SECTION( "artifact.exists minBytes" )
+        {
+            Json::Value params( Json::objectValue );
+            params["path"] = "out.tif";
+            params["minBytes"] = Json::Value( Json::UInt64( 1ULL ) << 63 );
+            spec.checks = { makeCheck( "e1", "artifact.exists", params ) };
+            REQUIRE_FALSE( validateSpec( spec ).empty() );
+        }
+        SECTION( "artifact.grid width must not throw on the numeric read" )
+        {
+            Json::Value params( Json::objectValue );
+            params["path"] = "out.tif";
+            params["width"] = Json::Value( Json::UInt64( 1ULL ) << 63 );
+            spec.checks = { makeCheck( "g1", "artifact.grid", params ) };
+            REQUIRE_FALSE( validateSpec( spec ).empty() );
+        }
+    }
+
+    SECTION( "and the full parseSpec path stays typed end to end" )
+    {
+        const std::string text = R"({"schema":"sicnu.verification.spec/1","specId":"s",)"
+                                 R"("scope":"node","checks":[{"checkId":"c1",)"
+                                 R"("kind":"state.invariant","params":{"expectations":[)"
+                                 R"({"key":"k","op":{"nested":true}}]}]})";
+        VerificationSpec parsed;
+        std::string error;
+        std::vector<std::string> validationErrors;
+        REQUIRE_FALSE( parseSpec( text, parsed, error, validationErrors ) );
+        REQUIRE_FALSE( error.empty() );
+    }
+}
+
+TEST_CASE( "hostile evidence shapes are typed refusals, not exceptions",
+           "[verify][schema][hostile]" )
+{
+    VerificationEvidence evidence;
+    evidence.source = "grid:out.tif";
+    evidence.observed["width"] = 512;
+    evidence.expected["width"] = 512;
+
+    SECTION( "non-bool hasSampling refused" )
+    {
+        Json::Value doc = evidence.toCanonicalJson();
+        doc["hasSampling"] = "yes"; // hostile: string
+        VerificationEvidence parsed;
+        std::string error;
+        REQUIRE_FALSE( parsed.fromCanonicalJson( doc, error ) );
+        REQUIRE_FALSE( error.empty() );
+    }
+
+    SECTION( "negative sampledPoints refused (no unsigned wrap-around)" )
+    {
+        Json::Value doc = evidence.toCanonicalJson();
+        doc["hasSampling"] = true;
+        doc["sampledPoints"] = -5; // hostile: negative
+        VerificationEvidence parsed;
+        std::string error;
+        REQUIRE_FALSE( parsed.fromCanonicalJson( doc, error ) );
+    }
+}
+
+TEST_CASE( "the canonical seal refuses non-finite bodies and non-hex spec digests",
+           "[verify][schema][hostile]" )
+{
+    using S = VerificationStatus;
+
+    SECTION( "an in-memory infinity makes the report unsealable, not NaN-as-null" )
+    {
+        std::vector<VerificationCheckResult> checks( 1 );
+        checks[0].checkId = "c1";
+        checks[0].kind = "artifact.grid";
+        checks[0].status = S::Pass;
+        VerificationEvidence evidence;
+        evidence.source = "grid:out.tif";
+        evidence.observed["nodataFraction"] = HUGE_VAL; // +inf, in-memory only
+        checks[0].evidence = evidence;
+        const VerificationReport report =
+            buildReport( "spec.x", "node", std::string( 64, 'a' ), checks );
+        // Pre-fix behavior sealed `1e+9999` (parser-divergent) with a valid
+        // digest; the seal must refuse instead.
+        CHECK( report.digest().empty() );
+    }
+
+    SECTION( "healthy reports keep a full digest" )
+    {
+        std::vector<VerificationCheckResult> checks( 1 );
+        checks[0].checkId = "c1";
+        checks[0].kind = "artifact.exists";
+        checks[0].status = S::Pass;
+        const VerificationReport report =
+            buildReport( "spec.x", "node", std::string( 64, 'a' ), checks );
+        CHECK( report.digest().size() == 64 );
+    }
+
+    SECTION( "a non-hex specDigest is refused on the wire" )
+    {
+        std::vector<VerificationCheckResult> checks( 1 );
+        checks[0].checkId = "c1";
+        checks[0].kind = "artifact.exists";
+        checks[0].status = S::Pass;
+        const VerificationReport report =
+            buildReport( "spec.x", "node", std::string( 64, 'a' ), checks );
+        Json::Value doc = report.toCanonicalJson();
+        doc["specDigest"] = "not-a-digest";
+        VerificationReport parsed;
+        std::string error;
+        REQUIRE_FALSE( VerificationReport::fromCanonicalJson( doc, parsed, error, "" ) );
+        CHECK( error.find( "specDigest" ) != std::string::npos );
+    }
+}
+
+TEST_CASE( "hostile report counts are typed refusals, not exceptions",
+           "[verify][schema][hostile]" )
+{
+    using S = VerificationStatus;
+    std::vector<VerificationCheckResult> checks( 1 );
+    checks[0].checkId = "c1";
+    checks[0].kind = "artifact.exists";
+    checks[0].status = S::Pass;
+    const VerificationReport report = buildReport( "spec.x", "node", std::string( 64, 'a' ), checks );
+    const Json::Value doc = report.toCanonicalJson();
+    VerificationReport parsed;
+    std::string error;
+
+    SECTION( "string-typed count refused" )
+    {
+        Json::Value hostile = doc;
+        hostile["counts"]["pass"] = "1";
+        REQUIRE_FALSE( VerificationReport::fromCanonicalJson( hostile, parsed, error, "" ) );
+        REQUIRE_FALSE( error.empty() );
+    }
+
+    SECTION( "object-typed count refused" )
+    {
+        Json::Value hostile = doc;
+        hostile["counts"]["fail"] = Json::Value( Json::objectValue );
+        REQUIRE_FALSE( VerificationReport::fromCanonicalJson( hostile, parsed, error, "" ) );
+    }
+
+    SECTION( "negative count refused" )
+    {
+        Json::Value hostile = doc;
+        hostile["counts"]["indeterminate"] = -1;
+        REQUIRE_FALSE( VerificationReport::fromCanonicalJson( hostile, parsed, error, "" ) );
+    }
 }

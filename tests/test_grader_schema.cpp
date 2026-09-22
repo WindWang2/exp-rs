@@ -3,7 +3,8 @@
 // only. Covers: SHA-256 (NIST vectors), canonical JSON (sorted members,
 // shortest round-trip numbers, non-finite refusal), strict parsing, closed
 // enum vocabularies, rubric/evidence/report serde + validation (fail closed,
-// typed paths), report digest binding, engine refusal of invalid documents.
+// typed paths), report digest binding, engine refusal of invalid documents,
+// and hostile-shape typed refusals.
 //
 // RED-first record: at stub stage every serde/canonical/digest case failed
 // (stubs return typed Internal errors / empty spellings for the parsers).
@@ -578,4 +579,208 @@ TEST_CASE( "engine refuses invalid documents without producing a report", "[grad
     CHECK_FALSE( outcome.ok );
     CHECK_FALSE( outcome.error.ok() );
     CHECK( outcome.error.code != GraderErrorCode::Internal );
+}
+
+// ---------------------------------------------------------------------------
+// Hostile shapes: typed refusal, never an escaping exception (and no
+// fabricated digest over an uncanonicalizable body).
+// hardening/verifier-grader-explain-evidence — fail-closed contract.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "hostile documents are typed refusals, never exceptions", "[grader][schema][hostile]" )
+{
+    auto err = noopError();
+
+    SECTION( "rubric schema member of array type" )
+    {
+        Json::Value doc = rubricJson();
+        doc["schema"] = Json::Value{ Json::arrayValue };
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+        CHECK_FALSE( err.ok() );
+    }
+
+    SECTION( "rubric schema member of object type" )
+    {
+        Json::Value doc = rubricJson();
+        doc["schema"] = Json::Value{ Json::objectValue };
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "budgets.maxCriteria of string type" )
+    {
+        Json::Value doc = rubricJson();
+        doc["budgets"] = Json::Value{ Json::objectValue };
+        doc["budgets"]["maxCriteria"] = "many";
+        doc["budgets"]["maxEvidenceItems"] = Json::Value{ Json::arrayValue };
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+        CHECK_FALSE( err.ok() );
+    }
+
+    SECTION( "evidence schema member of array type" )
+    {
+        Json::Value doc = evidenceJson();
+        doc["schema"] = Json::Value{ Json::arrayValue };
+        REQUIRE_NOTHROW( GradeEvidence::fromJson( doc, err ) );
+        CHECK_FALSE( GradeEvidence::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "report schema member of object type" )
+    {
+        GradeReport report;
+        report.rubricId = "lab03-supervised";
+        report.rubricRevision = 1;
+        report.score = 10.0;
+        report.totalPoints = 100.0;
+        report.passingScore = 60.0;
+        report.verdict = ReportVerdict::Fail;
+        Json::Value doc = report.toJson();
+        doc["schema"] = Json::Value{ Json::objectValue };
+        REQUIRE_NOTHROW( GradeReport::fromJson( doc, err ) );
+        CHECK_FALSE( GradeReport::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "budgets.maxCriteria beyond int32 is a typed refusal" )
+    {
+        Json::Value doc = rubricJson();
+        doc["budgets"] = Json::Value{ Json::objectValue };
+        doc["budgets"]["maxCriteria"] = Json::Value( Json::Int64( 5000000000LL ) );
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+        CHECK( err.path == "budgets.maxCriteria" );
+    }
+
+    SECTION( "budgets.maxEvidenceItems that would wrap to 1 if truncated" )
+    {
+        // 2^32 + 1: naive Int64->int narrowing produces 1, which passes every
+        // >= 1 budget check — the wrap must be refused instead.
+        Json::Value doc = rubricJson();
+        doc["budgets"] = Json::Value{ Json::objectValue };
+        doc["budgets"]["maxEvidenceItems"] = Json::Value( Json::UInt64( 4294967297ULL ) );
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "budgets of non-object type is a typed refusal" )
+    {
+        Json::Value doc = rubricJson();
+        doc["budgets"] = 5;
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "revision beyond int32 is a typed refusal" )
+    {
+        Json::Value doc = rubricJson();
+        doc["revision"] = Json::Value( Json::Int64( 5000000000LL ) );
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "stage.minDistinct beyond int32 is a typed refusal" )
+    {
+        Json::Value doc = rubricJson();
+        doc["dimensions"][0]["criteria"][0]["stage"]["minDistinct"] =
+            Json::Value( Json::Int64( 5000000000LL ) );
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "fact.minCount beyond int32 is a typed refusal" )
+    {
+        Json::Value doc = rubricJson();
+        Json::Value criterion{ Json::objectValue };
+        criterion["criterionId"] = "fact-x";
+        criterion["maxPoints"] = 100.0;
+        criterion["kind"] = "fact";
+        criterion["evidenceKey"] = "state";
+        criterion["fact"] = Json::Value{ Json::objectValue };
+        criterion["fact"]["minCount"] = Json::Value( Json::Int64( 5000000000LL ) );
+        doc["dimensions"][0]["criteria"][0] = criterion;
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "requiredFacts holding an uncanonicalizable value is a typed refusal" )
+    {
+        // jsoncpp parses 1e999 to a non-finite double WITHOUT a parse error;
+        // the silent canonicalization used to turn the fact into "".
+        Json::Value doc = rubricJson();
+        Json::Value criterion{ Json::objectValue };
+        criterion["criterionId"] = "fact-x";
+        criterion["maxPoints"] = 100.0;
+        criterion["kind"] = "fact";
+        criterion["evidenceKey"] = "state";
+        criterion["fact"] = Json::Value{ Json::objectValue };
+        criterion["fact"]["requiredFacts"] = Json::Value{ Json::objectValue };
+        criterion["fact"]["requiredFacts"]["ratio"] = Json::Value( 1e999 );
+        doc["dimensions"][0]["criteria"][0] = criterion;
+        REQUIRE_NOTHROW( GradingRubric::fromJson( doc, err ) );
+        CHECK_FALSE( GradingRubric::fromJson( doc, err ).has_value() );
+        CHECK( err.message.find( "ratio" ) != std::string::npos );
+    }
+
+    SECTION( "report rubricRef.revision beyond int32 is a typed refusal" )
+    {
+        GradeReport report;
+        report.rubricId = "lab03-supervised";
+        report.rubricRevision = 1;
+        report.score = 10.0;
+        report.totalPoints = 100.0;
+        report.passingScore = 60.0;
+        report.verdict = ReportVerdict::Fail;
+        Json::Value doc = report.toJson();
+        doc["rubricRef"]["revision"] = Json::Value( Json::UInt64( 9999999999ULL ) );
+        REQUIRE_NOTHROW( GradeReport::fromJson( doc, err ) );
+        CHECK_FALSE( GradeReport::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "report hostile score type is a refusal, not a silent zero" )
+    {
+        GradeReport report;
+        report.rubricId = "lab03-supervised";
+        report.rubricRevision = 1;
+        report.score = 87.5;
+        report.totalPoints = 100.0;
+        report.passingScore = 60.0;
+        report.verdict = ReportVerdict::Pass;
+        Json::Value doc = report.toJson();
+        doc["score"] = "abc";
+        REQUIRE_NOTHROW( GradeReport::fromJson( doc, err ) );
+        CHECK_FALSE( GradeReport::fromJson( doc, err ).has_value() );
+    }
+
+    SECTION( "parseJsonStrict survives a deep nesting bomb as typed refusal" )
+    {
+        const std::string bomb( 40000, '[' );
+        err = {};
+        REQUIRE_FALSE( parseJsonStrict( bomb, err ).has_value() );
+        CHECK( err.code == GraderErrorCode::InvalidJson );
+    }
+}
+
+TEST_CASE( "report over an uncanonicalizable body carries no fabricated digest",
+           "[grader][schema][hostile]" )
+{
+    auto err = noopError();
+    GradeReport report;
+    report.subject.experimentId = "exp-1";
+    report.rubricId = "lab03-supervised";
+    report.rubricRevision = 1;
+    report.score = std::nan( "" ); // non-finite: canonicalization must refuse
+    report.totalPoints = 100.0;
+    report.passingScore = 60.0;
+    report.verdict = ReportVerdict::Fail;
+
+    const Json::Value doc = report.toJson();
+    // The fabricated-digest fail-open: sha256("") used to be embedded for a
+    // body that cannot be canonicalized — a digest that can never verify.
+    const std::string digest = doc["digest"].asString();
+    CHECK( digest.empty() );
+    CHECK_FALSE( report.verifyDigest( err ) );
+
+    // Well-formed reports keep the sealed-digest behavior (the pre-existing
+    // digest-binding test pins that surface).
 }

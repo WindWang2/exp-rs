@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -36,11 +37,33 @@ bool finiteNumberMember( const Json::Value &doc, const char *key, double &out )
     return true;
 }
 
-std::string canonicalFactString( const Json::Value &value )
+/// Reads a JSON number that must land in `int`: both type- and RANGE-checked.
+/// jsoncpp's `asInt()` THROWS for |v| beyond 2^31-1 even when `isIntegral()`
+/// is true, and widening to Int64 then narrowing would silently wrap
+/// (4294967297 -> 1, past every `>= 1` validation) — so the fit is tested
+/// explicitly and a hostile magnitude is a typed refusal, never an exception
+/// or a wrapped value.
+bool boundedIntMember( const Json::Value &object, const char *key, int &out )
 {
-    GraderError ignored;
-    auto canonical = canonicalizeJson( value, ignored );
-    return canonical.value_or( std::string{} );
+    if ( !object.isMember( key ) || object[key].isBool() )
+        return false;
+    const Json::Value &value = object[key];
+    if ( value.isUInt64() )
+    {
+        const Json::UInt64 magnitude = value.asUInt64();
+        if ( magnitude > static_cast<Json::UInt64>( std::numeric_limits<int>::max() ) )
+            return false;
+        out = static_cast<int>( magnitude );
+        return true;
+    }
+    if ( !value.isIntegral() || !value.isInt64() )
+        return false;
+    const Json::Int64 signedValue = value.asInt64();
+    if ( signedValue < std::numeric_limits<int>::min() ||
+         signedValue > std::numeric_limits<int>::max() )
+        return false;
+    out = static_cast<int>( signedValue );
+    return true;
 }
 
 bool parseStageExpectation( const Json::Value &doc, const std::string &path, StageExpectation &out, GraderError &error )
@@ -87,12 +110,13 @@ bool parseStageExpectation( const Json::Value &doc, const std::string &path, Sta
             }
         }
         if ( stage.isMember( "minDistinct" ) ) {
-            if ( !stage["minDistinct"].isIntegral() || stage["minDistinct"].asInt() < 1 ) {
+            int minDistinct = 0;
+            if ( !boundedIntMember( stage, "minDistinct", minDistinct ) || minDistinct < 1 ) {
                 error = makeError( GraderErrorCode::SchemaShapeInvalid, "minDistinct must be an integer >= 1",
                                    path + ".stage.minDistinct" );
                 return false;
             }
-            out.minDistinct = stage["minDistinct"].asInt();
+            out.minDistinct = minDistinct;
         }
     } else {
         out.expectedState = "Completed";
@@ -185,16 +209,30 @@ bool parseFactExpectation( const Json::Value &doc, const std::string &path, cons
                                path + "." + member + ".requiredFacts" );
             return false;
         }
-        for ( const auto &key : required.getMemberNames() )
-            out.requiredFacts[key] = canonicalFactString( required[key] );
+        for ( const auto &key : required.getMemberNames() ) {
+            // Fail visibly: an uncanonicalizable fact value (e.g. 1e999,
+            // which jsoncpp parses to a non-finite double with no parse
+            // error) must not silently become the unmatchable empty string.
+            GraderError canonicalError;
+            auto canonical = canonicalizeJson( required[key], canonicalError );
+            if ( !canonical.has_value() ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "requiredFacts['" + key + "'] cannot be canonicalized: " +
+                                       canonicalError.message,
+                                   path + "." + member + ".requiredFacts." + key );
+                return false;
+            }
+            out.requiredFacts[key] = *canonical;
+        }
     }
     if ( facts.isMember( "minCount" ) ) {
-        if ( !facts["minCount"].isIntegral() || facts["minCount"].asInt() < 1 ) {
+        int minCount = 0;
+        if ( !boundedIntMember( facts, "minCount", minCount ) || minCount < 1 ) {
             error = makeError( GraderErrorCode::SchemaShapeInvalid, std::string( member ) + ".minCount must be an integer >= 1",
                                path + "." + member + ".minCount" );
             return false;
         }
-        out.minCount = facts["minCount"].asInt();
+        out.minCount = minCount;
     }
     return true;
 }
@@ -872,8 +910,8 @@ std::optional<GradingRubric> GradingRubric::fromJson( const Json::Value &doc, Gr
         error = makeError( GraderErrorCode::SchemaShapeInvalid, "rubric document must be a JSON object" );
         return std::nullopt;
     }
-    if ( !doc.isMember( "schema" ) ) {
-        error = makeError( GraderErrorCode::SchemaShapeInvalid, "rubric document is missing its schema member", "schema" );
+    if ( !doc.isMember( "schema" ) || !doc["schema"].isString() ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "rubric schema must be a string member", "schema" );
         return std::nullopt;
     }
     if ( doc["schema"].asString() != kRubricSchemaId ) {
@@ -888,11 +926,17 @@ std::optional<GradingRubric> GradingRubric::fromJson( const Json::Value &doc, Gr
         error = makeError( GraderErrorCode::SchemaShapeInvalid, "rubricId must be a non-empty string", "rubricId" );
         return std::nullopt;
     }
-    if ( !doc.isMember( "revision" ) || !doc["revision"].isIntegral() ) {
+    if ( !doc.isMember( "revision" ) ) {
         error = makeError( GraderErrorCode::SchemaShapeInvalid, "revision must be an integer", "revision" );
         return std::nullopt;
     }
-    rubric.revision = doc["revision"].asInt();
+    int revision = 0;
+    if ( !boundedIntMember( doc, "revision", revision ) ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                           "revision must be an integer within 32-bit range", "revision" );
+        return std::nullopt;
+    }
+    rubric.revision = revision;
     if ( doc.isMember( "title" ) )
         stringMember( doc, "title", rubric.title );
     if ( !finiteNumberMember( doc, "totalPoints", rubric.totalPoints ) ) {
@@ -1125,12 +1169,34 @@ std::optional<GradingRubric> GradingRubric::fromJson( const Json::Value &doc, Gr
         }
     }
 
-    if ( doc.isMember( "budgets" ) && doc["budgets"].isObject() ) {
-        const Json::Value &budgetsJson = doc["budgets"];
-        if ( budgetsJson.isMember( "maxCriteria" ) )
-            rubric.budgets.maxCriteria = budgetsJson["maxCriteria"].asInt();
-        if ( budgetsJson.isMember( "maxEvidenceItems" ) )
-            rubric.budgets.maxEvidenceItems = budgetsJson["maxEvidenceItems"].asInt();
+    if ( doc.isMember( "budgets" ) ) {
+        if ( !doc["budgets"].isObject() ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid, "budgets must be an object", "budgets" );
+            return std::nullopt;
+        }
+        // jsoncpp's asInt() throws for |v| beyond 2^31-1 even when
+        // isIntegral() is true — budgets are read through a bounded reader so
+        // a hostile magnitude is a typed refusal, never an exception.
+        int maxCriteria = 0;
+        if ( doc["budgets"].isMember( "maxCriteria" ) ) {
+            if ( !boundedIntMember( doc["budgets"], "maxCriteria", maxCriteria ) ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "budgets.maxCriteria must be an integer within 32-bit range",
+                                   "budgets.maxCriteria" );
+                return std::nullopt;
+            }
+            rubric.budgets.maxCriteria = maxCriteria;
+        }
+        if ( doc["budgets"].isMember( "maxEvidenceItems" ) ) {
+            int maxEvidenceItems = 0;
+            if ( !boundedIntMember( doc["budgets"], "maxEvidenceItems", maxEvidenceItems ) ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "budgets.maxEvidenceItems must be an integer within 32-bit range",
+                                   "budgets.maxEvidenceItems" );
+                return std::nullopt;
+            }
+            rubric.budgets.maxEvidenceItems = maxEvidenceItems;
+        }
     }
 
     if ( !rubric.validate( error ) )
@@ -1232,8 +1298,8 @@ std::optional<GradeEvidence> GradeEvidence::fromJson( const Json::Value &doc, Gr
         error = makeError( GraderErrorCode::SchemaShapeInvalid, "evidence document must be a JSON object" );
         return std::nullopt;
     }
-    if ( !doc.isMember( "schema" ) ) {
-        error = makeError( GraderErrorCode::SchemaShapeInvalid, "evidence document is missing its schema member", "schema" );
+    if ( !doc.isMember( "schema" ) || !doc["schema"].isString() ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "evidence schema must be a string member", "schema" );
         return std::nullopt;
     }
     if ( doc["schema"].asString() != kEvidenceSchemaId ) {
@@ -1414,7 +1480,11 @@ Json::Value GradeReport::toJson() const
     } else {
         GraderError ignored;
         const auto body = canonicalizeJson( doc, ignored );
-        doc["digest"] = sha256Hex( body.value_or( std::string{} ) );
+        // Fail visible: a body that cannot be canonicalized (non-finite
+        // numbers) gets NO digest — an unverifiable report must not
+        // masquerade as digest-sealed with a sha256 of the empty string.
+        // verifyDigest() and fromJson() consumers refuse empty digests.
+        doc["digest"] = body.has_value() ? sha256Hex( *body ) : std::string{};
     }
     return doc;
 }
@@ -1425,8 +1495,8 @@ std::optional<GradeReport> GradeReport::fromJson( const Json::Value &doc, Grader
         error = makeError( GraderErrorCode::SchemaShapeInvalid, "report document must be a JSON object" );
         return std::nullopt;
     }
-    if ( !doc.isMember( "schema" ) ) {
-        error = makeError( GraderErrorCode::SchemaShapeInvalid, "report document is missing its schema member", "schema" );
+    if ( !doc.isMember( "schema" ) || !doc["schema"].isString() ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "report schema must be a string member", "schema" );
         return std::nullopt;
     }
     if ( doc["schema"].asString() != kReportSchemaId ) {
@@ -1444,14 +1514,35 @@ std::optional<GradeReport> GradeReport::fromJson( const Json::Value &doc, Grader
     if ( doc.isMember( "rubricRef" ) && doc["rubricRef"].isObject() ) {
         const Json::Value &ref = doc["rubricRef"];
         stringMember( ref, "rubricId", report.rubricId );
-        if ( ref.isMember( "revision" ) && ref["revision"].isIntegral() )
-            report.rubricRevision = ref["revision"].asInt();
+        if ( ref.isMember( "revision" ) ) {
+            int revision = 0;
+            if ( !boundedIntMember( ref, "revision", revision ) ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "rubricRef.revision must be an integer within 32-bit range",
+                                   "rubricRef.revision" );
+                return std::nullopt;
+            }
+            report.rubricRevision = revision;
+        }
         stringMember( ref, "digest", report.rubricDigest );
     }
     stringMember( doc, "evidenceDigest", report.evidenceDigest );
-    finiteNumberMember( doc, "score", report.score );
-    finiteNumberMember( doc, "totalPoints", report.totalPoints );
-    finiteNumberMember( doc, "passingScore", report.passingScore );
+    // A present-but-non-numeric score/totalPoints/passingScore is a typed
+    // refusal — silently defaulting it to 0.0 would put a fabricated number
+    // into the value object (digest binding stays the tamper gate either
+    // way; absent members keep their defaults for schema tolerance).
+    if ( doc.isMember( "score" ) && !finiteNumberMember( doc, "score", report.score ) ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "score must be a finite number", "score" );
+        return std::nullopt;
+    }
+    if ( doc.isMember( "totalPoints" ) && !finiteNumberMember( doc, "totalPoints", report.totalPoints ) ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "totalPoints must be a finite number", "totalPoints" );
+        return std::nullopt;
+    }
+    if ( doc.isMember( "passingScore" ) && !finiteNumberMember( doc, "passingScore", report.passingScore ) ) {
+        error = makeError( GraderErrorCode::SchemaShapeInvalid, "passingScore must be a finite number", "passingScore" );
+        return std::nullopt;
+    }
     std::string verdictSpelling;
     if ( stringMember( doc, "verdict", verdictSpelling ) ) {
         if ( verdictSpelling == "pass" )
