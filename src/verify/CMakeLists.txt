@@ -40,3 +40,19 @@ else()
         target_link_libraries( sicnu_verifier PUBLIC jsoncpp_lib )
     endif()
 endif()
+
+# Layer guard — deliberately LAST in this file so it observes every link
+# declared above. The verifier leaf stays dependency-free (jsoncpp only):
+# facts arrive through the probe interfaces in verify_context.h; any
+# sicnu/Qt/GDAL link would couple the verification contract to a second
+# authority and re-create the workflow_run_coordinator library cycle the
+# header forbids. Adding a link below this guard defeats it — keep new links
+# in the resolution block above and let this check judge them.
+get_target_property( SICNU_VERIFIER_LINK_LIBRARIES sicnu_verifier LINK_LIBRARIES )
+set( SICNU_VERIFIER_ALLOWED_LINKS jsoncpp jsoncpp_lib )
+foreach( SICNU_VERIFIER_LINK IN LISTS SICNU_VERIFIER_LINK_LIBRARIES )
+    if ( NOT SICNU_VERIFIER_LINK IN_LIST SICNU_VERIFIER_ALLOWED_LINKS )
+        message( FATAL_ERROR
+            "sicnu_verifier must link jsoncpp only — found '${SICNU_VERIFIER_LINK}' (dependency-free leaf, ADR 0172)" )
+    endif()
+endforeach()

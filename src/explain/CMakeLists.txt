@@ -42,13 +42,14 @@ target_link_libraries(sicnu_explain
     jsoncpp
 )
 
-# Layer guard: the explanation core must stay GUI/engine/operator free.
-# Facts enter through sicnu::explain source interfaces implemented by
-# adapters; anything else couples explanation composition to the shell or
-# the processing engines and invites a second source of truth.
+# Layer guard: the explanation core must stay GUI/engine/operator free, and
+# it must never link the verifier or the grader — explanations cite their
+# reports as facts, they do not re-run verification or grading (the three
+# evidence semantics stay separate authorities; only a layer above may
+# compose them).
 foreach(SICNU_EXPLAIN_FORBIDDEN_LINK Qt6::Core Qt6::Widgets Qt6::Network
     qgis_core qgis_gui Sicnu::app Sicnu::operators Sicnu::help
-    Sicnu::workflow_runtime Sicnu::data)
+    Sicnu::workflow_runtime Sicnu::data sicnu_verifier sicnu_grader)
   get_target_property(SICNU_EXPLAIN_DIRECT_LINKS sicnu_explain LINK_LIBRARIES)
   if(SICNU_EXPLAIN_FORBIDDEN_LINK IN_LIST SICNU_EXPLAIN_DIRECT_LINKS)
     message(FATAL_ERROR
