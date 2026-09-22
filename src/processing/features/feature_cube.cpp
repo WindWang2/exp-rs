@@ -109,7 +109,15 @@ bool writeSidecar( const QString &sidecarPath, const QString &json )
   QFile f( sidecarPath );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     return false;
-  return f.write( json.toUtf8() ) >= 0;
+  // write() >= 0 accepts SHORT writes (partial JSON sidecar): require the
+  // full payload and a clean flush/close (#1043 contract).
+  const QByteArray payload = json.toUtf8();
+  if ( f.write( payload ) != payload.size() )
+    return false;
+  if ( !f.flush() )
+    return false;
+  f.close();
+  return f.error() == QFileDevice::NoError;
 }
 } // namespace
 

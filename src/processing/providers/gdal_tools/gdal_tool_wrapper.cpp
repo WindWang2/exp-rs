@@ -119,13 +119,23 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
             {
                 if ( type == QgsProcessingParameterFileDestination::typeName() && !capturedStdout.isEmpty() )
                 {
+                    // A short write or failed close (disk full) must not pass
+                    // the existence check below as a "produced" output: drop
+                    // the partial file and let the missing-output check fail
+                    // the run (#1043 contract).
                     QFile file( outPath );
+                    bool written = false;
                     if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
                     {
                         QTextStream stream( &file );
                         stream << QString::fromUtf8( capturedStdout );
+                        stream.flush();
+                        written = ( stream.status() == QTextStream::Ok )
+                                  && ( file.error() == QFileDevice::NoError );
                         file.close();
                     }
+                    if ( !written && QFileInfo::exists( outPath ) )
+                        QFile::remove( outPath );
                 }
             }
 
