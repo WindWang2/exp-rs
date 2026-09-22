@@ -41,6 +41,13 @@ struct CheckedPath
     /// other platforms). Callers that hit MAX_PATH pressure may open with
     /// this; sidecar math stays on `raw`/`canonical`.
     std::string longPathSpelling;
+
+    /// #1186: path GDAL/OS should open — prefers longPathSpelling when set so
+    /// the mitigation is no longer dead code.
+    const std::string &openPath() const
+    {
+      return longPathSpelling.empty() ? raw : longPathSpelling;
+    }
 };
 
 /// Validates a read-side path parameter. Throws GeoError(InvalidArgument)

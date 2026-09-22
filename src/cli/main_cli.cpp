@@ -24,6 +24,10 @@
 #include "plugins/framework/plugin_runtime_host.h"
 
 #include <QCoreApplication>
+
+#ifdef Q_OS_WIN
+#  include <windows.h>
+#endif
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QFileInfo>
@@ -65,6 +69,11 @@ struct ShutdownGuard {
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    // #1186: UTF-8 console so non-ASCII paths/names are not OEM-garbled.
+    SetConsoleOutputCP( CP_UTF8 );
+    SetConsoleCP( CP_UTF8 );
+#endif
     std::signal( SIGINT, handleSignal );
     std::signal( SIGTERM, handleSignal );
 

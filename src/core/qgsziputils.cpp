@@ -73,12 +73,30 @@ bool QgsZipUtils::unzip( const QString &zipFilename, const QString &dir, QString
     const int count = zip_get_num_entries( z, ZIP_FL_UNCHANGED );
     if ( count != -1 )
     {
+      // #1186: bound entry count + declared uncompressed sizes (zip bombs).
+      constexpr int kMaxZipEntries = 4096;
+      constexpr size_t kMaxZipEntryBytes = 256ull * 1024ull * 1024ull;
+      constexpr size_t kMaxZipTotalBytes = 512ull * 1024ull * 1024ull;
+      if ( count > kMaxZipEntries )
+      {
+        QgsMessageLog::logMessage( QObject::tr( "Zip has %1 entries; refusing above %2" ).arg( count ).arg( kMaxZipEntries ) );
+        zip_close( z );
+        return false;
+      }
       struct zip_stat stat;
+      size_t totalBytes = 0;
 
       for ( int i = 0; i < count; i++ )
       {
         zip_stat_index( z, i, 0, &stat );
         const size_t len = stat.size;
+        if ( len > kMaxZipEntryBytes || totalBytes + len > kMaxZipTotalBytes )
+        {
+          QgsMessageLog::logMessage( QObject::tr( "Zip entry size bound exceeded (entry %1, declared %2 bytes)" ).arg( i ).arg( static_cast<qulonglong>( len ) ) );
+          zip_close( z );
+          return false;
+        }
+        totalBytes += len;
 
         struct zip_file *file = zip_fopen_index( z, i, 0 );
         const std::unique_ptr< char[] > buf( new char[len] );

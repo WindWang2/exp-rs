@@ -97,7 +97,7 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
     details["intent"] = plan.intent;
     details["known"] = "ndvi|evi|savi|ndre|ndwi|mndwi|ndsi|nbr|dnbr|ndbi|bsi|water|flood|"
                        "sar_water|sar_flood|sar|ship|change|sar_change|temporal|terrain|"
-                       "classify|accuracy|qa|preprocess|inference|phenology";
+                       "classify|accuracy|qa|preprocess|inference|phenology|zonal";
     error = HarnessError::make( error_codes::kInvalidPlan, "Unknown intent", details );
     return false;
   }

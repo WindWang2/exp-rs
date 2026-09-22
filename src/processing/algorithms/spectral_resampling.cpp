@@ -116,8 +116,14 @@ bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBand
         for ( int i = 0; i < srcBands; ++i )
         {
             const float sVal = src[i];
+            // #1186: do not skip non-finite source bands — match the linear
+            // kernel so holes propagate as NaN instead of confident GUI matches.
             if ( !std::isfinite( sVal ) )
-                continue;
+            {
+                out[t] = nan;
+                sumWeight = 0.0;
+                break;
+            }
             const float diff = srcWl[i] - targetWl;
             if ( std::abs( diff ) > 3.5f * fwhm )
                 continue;

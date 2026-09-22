@@ -161,6 +161,11 @@ Json::Value manifestSnapshot( const std::string &mirrorDirectory )
       return it->second.value;
   }
   Json::Value parsed = readManifest( mirrorDirectory );
+  // #1186: do not cache a NULL (unreadable/corrupt) snapshot under the current
+  // (size,mtime) — a transient Windows sharing-violation open failure would
+  // stick as "manifest corrupt" until the file is rewritten.
+  if ( parsed.isNull() )
+    return parsed;
   std::lock_guard<std::mutex> lock( g_manifestCacheMutex );
   // Cap the cache: manifest rewrites allocate a new snapshot; the map only
   // needs the few directories this process replays from.
