@@ -19,6 +19,7 @@
 #include "experiment/debugger/snapshot_builder.h"
 #include "experiment/debugger/step_aligner.h"
 #include "experiment/debugger/first_divergence.h"
+#include "experiment/debugger/equivalence.h"
 #include "catch2/catch_approx.hpp"
 
 #include "experiment_debugger_fixtures.h"
@@ -955,3 +956,253 @@ TEST_CASE( "Slice C: analysis is deterministic across repeated runs",
     REQUIRE( second.has_value() );
     REQUIRE( first->toJson() == second->toJson() );
 }
+
+// ============================================================================
+// Slice D — equivalence profiles + invariant references
+// ============================================================================
+
+namespace
+{
+
+EquivalenceProfile profileWithTolerance()
+{
+    EquivalenceProfile profile;
+    profile.profileId = QStringLiteral( "lab-tolerances" );
+    EquivalenceProfile::Rule tolerance;
+    tolerance.kind = EquivalenceProfile::RuleKind::ParamTolerance;
+    tolerance.ruleId = QStringLiteral( "threshold-window" );
+    tolerance.op = QStringLiteral( "rs:threshold_calc" );
+    tolerance.keys = QStringList{ QStringLiteral( "threshold" ) };
+    tolerance.tolerance = 0.05;
+    profile.rules.append( tolerance );
+    return profile;
+}
+
+} // namespace
+
+TEST_CASE( "Slice D: operator group rule accepts a different but declared-equal operator",
+           "[debugger][sliceD]" )
+{
+    EquivalenceProfile profile;
+    profile.profileId = QStringLiteral( "prep" );
+    EquivalenceProfile::Rule group;
+    group.kind = EquivalenceProfile::RuleKind::OperatorGroup;
+    group.ruleId = QStringLiteral( "stretch-group" );
+    group.operators = QStringList{ QStringLiteral( "rs:stretch_linear" ),
+                                   QStringLiteral( "rs:histogram_equalize" ) };
+    profile.rules.append( group );
+
+    StepEvidence refEvidence = threeStep( { QStringLiteral( "prep" ), QStringLiteral( "classify" ) },
+                                          { QStringLiteral( "rs:stretch_linear" ), QStringLiteral( "rs:classify" ) } );
+    StepEvidence studentEvidence = threeStep( { QStringLiteral( "prep" ), QStringLiteral( "classify" ) },
+                                              { QStringLiteral( "rs:histogram_equalize" ), QStringLiteral( "rs:classify" ) } );
+    studentEvidence.planSignature = QStringLiteral( "other-plan" );
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap, profile );
+    REQUIRE( alignment.has_value() );
+    REQUIRE( alignment->matches.size() == 2 );
+    REQUIRE( alignment->matches.front().kind == StepMatch::Kind::EquivalentRule );
+    REQUIRE( alignment->matches.front().equivalenceRuleId == QStringLiteral( "stretch-group" ) );
+
+    ExperimentRun refRun = makeStoredRun( QStringLiteral( "run-ref" ) );
+    ExperimentRun stuRun = makeStoredRun( QStringLiteral( "run-stu" ) );
+    auto withProfile = FirstDivergenceAnalyzer::analyze( refRun, stuRun, refSnap, stuSnap, profile );
+    REQUIRE( withProfile.has_value() );
+    // The accepted match never masks reality: it is recorded as an
+    // alternative-path finding naming the rule, and with nothing else
+    // differing the verdict is "equivalent" (firstDivergence stays empty).
+    REQUIRE( withProfile->verdict == QStringLiteral( "equivalent" ) );
+    REQUIRE( !withProfile->hasFirstDivergence );
+    bool ruleRecorded = false;
+    for ( const DivergenceFinding &finding : withProfile->additionalFindings )
+        if ( finding.kind == DivergenceKind::EquivalentAlternativePath
+             && finding.equivalenceRuleId == QStringLiteral( "stretch-group" ) )
+            ruleRecorded = true;
+    REQUIRE( ruleRecorded );
+}
+
+TEST_CASE( "Slice D: without a profile the same difference is a real divergence",
+           "[debugger][sliceD]" )
+{
+    // Same evidence as above, NO profile — nothing silently accepts it.
+    InMemoryEvidenceSource refSource, stuSource;
+    StepEvidence refEvidence = threeStep( { QStringLiteral( "prep" ), QStringLiteral( "classify" ) },
+                                          { QStringLiteral( "rs:stretch_linear" ), QStringLiteral( "rs:classify" ) } );
+    StepEvidence studentEvidence = threeStep( { QStringLiteral( "prep" ), QStringLiteral( "classify" ) },
+                                              { QStringLiteral( "rs:histogram_equalize" ), QStringLiteral( "rs:classify" ) } );
+    studentEvidence.planSignature = QStringLiteral( "other-plan" );
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    auto alignment = StepAligner::align( refSnap, stuSnap );
+    REQUIRE( alignment.has_value() );
+    // The classify step still matches (same operator); the prep step does not.
+    REQUIRE( alignment->matches.size() == 1 );
+    REQUIRE( alignment->matches.front().referenceStepId == QStringLiteral( "classify" ) );
+    REQUIRE( alignment->unmatchedReference.contains( QStringLiteral( "prep" ) ) );
+    REQUIRE( alignment->unmatchedStudent.contains( QStringLiteral( "prep" ) ) );
+}
+
+TEST_CASE( "Slice D: parameter tolerance accepts within-window and reports outside-window",
+           "[debugger][sliceD]" )
+{
+    EquivalenceProfile profile = profileWithTolerance();
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = buildSnapshot( refSource, QStringLiteral( "run-ref" ),
+                                         checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                             thresholdParams( 0.35 ) ) );
+    // Within the 0.05 window: accepted despite a different params hash.
+    RunSnapshot nearSnap = buildSnapshot( stuSource, QStringLiteral( "run-near" ),
+                                          checkpointPipeline( QStringLiteral( "eeee" ),
+                                                              thresholdParams( 0.38 ) ) );
+    // Outside the window: reported as a real parameter divergence.
+    RunSnapshot farSnap = buildSnapshot( stuSource, QStringLiteral( "run-far" ),
+                                         checkpointPipeline( QStringLiteral( "ffff" ),
+                                                             thresholdParams( 0.62 ) ) );
+
+    ExperimentRun refRun = makeStoredRun( QStringLiteral( "run-ref" ) );
+    ExperimentRun nearRun = makeStoredRun( QStringLiteral( "run-near" ) );
+    ExperimentRun farRun = makeStoredRun( QStringLiteral( "run-far" ) );
+
+    auto accepted = FirstDivergenceAnalyzer::analyze( refRun, nearRun, refSnap, nearSnap, profile );
+    REQUIRE( accepted.has_value() );
+    // A within-window difference is declared equivalent by the profile; the
+    // acceptance is recorded as a named finding, not silently swallowed.
+    REQUIRE( accepted->verdict == QStringLiteral( "equivalent" ) );
+    REQUIRE( !accepted->hasFirstDivergence );
+    bool toleranceRecorded = false;
+    for ( const DivergenceFinding &finding : accepted->additionalFindings )
+        if ( finding.kind == DivergenceKind::EquivalentAlternativePath
+             && finding.equivalenceRuleId == QStringLiteral( "threshold-window" ) )
+            toleranceRecorded = true;
+    REQUIRE( toleranceRecorded );
+
+    auto rejected = FirstDivergenceAnalyzer::analyze( refRun, farRun, refSnap, farSnap, profile );
+    REQUIRE( rejected.has_value() );
+    REQUIRE( rejected->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+}
+
+TEST_CASE( "Slice D: geometry-key differences classify as geometry divergence",
+           "[debugger][sliceD]" )
+{
+    EquivalenceProfile profile;
+    profile.profileId = QStringLiteral( "geometry" );
+    EquivalenceProfile::Rule geometry;
+    geometry.kind = EquivalenceProfile::RuleKind::GeometryKeys;
+    geometry.ruleId = QStringLiteral( "warp-geometry" );
+    geometry.op = QStringLiteral( "rs:warp" );
+    geometry.keys = QStringList{ QStringLiteral( "target_crs" ), QStringLiteral( "resampling" ) };
+    profile.rules.append( geometry );
+
+    QJsonObject refParams;
+    refParams.insert( QStringLiteral( "target_crs" ), QStringLiteral( "EPSG:4326" ) );
+    refParams.insert( QStringLiteral( "resampling" ), QStringLiteral( "nearest" ) );
+    QJsonObject studentParams;
+    studentParams.insert( QStringLiteral( "target_crs" ), QStringLiteral( "EPSG:32649" ) );
+    studentParams.insert( QStringLiteral( "resampling" ), QStringLiteral( "bilinear" ) );
+
+    StepEvidence refEvidence = threeStep( { QStringLiteral( "warp" ) }, { QStringLiteral( "rs:warp" ) } );
+    refEvidence.steps.first().parameters = refParams;
+    StepEvidence studentEvidence = threeStep( { QStringLiteral( "warp" ) }, { QStringLiteral( "rs:warp" ) } );
+    studentEvidence.steps.first().parameters = studentParams;
+    studentEvidence.planSignature = QStringLiteral( "other-plan" );
+
+    InMemoryEvidenceSource refSource, stuSource;
+    RunSnapshot refSnap = snapshotFromEvidence( refSource, QStringLiteral( "run-ref" ), refEvidence );
+    RunSnapshot stuSnap = snapshotFromEvidence( stuSource, QStringLiteral( "run-stu" ), studentEvidence );
+
+    ExperimentRun refRun = makeStoredRun( QStringLiteral( "run-ref" ) );
+    ExperimentRun stuRun = makeStoredRun( QStringLiteral( "run-stu" ) );
+    auto report = FirstDivergenceAnalyzer::analyze( refRun, stuRun, refSnap, stuSnap, profile );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::GeometryAlignmentDivergence );
+}
+
+TEST_CASE( "Slice D: profile documents are strict and versioned",
+           "[debugger][sliceD]" )
+{
+    EquivalenceProfile profile = profileWithTolerance();
+    auto parsed = EquivalenceProfile::fromJson( profile.toJson() );
+    REQUIRE( parsed.has_value() );
+    REQUIRE( parsed->toJson() == profile.toJson() );
+
+    QJsonObject foreign = profile.toJson();
+    foreign.insert( QLatin1String( "kind" ), QStringLiteral( "wrong.kind" ) );
+    REQUIRE( !EquivalenceProfile::fromJson( foreign ).has_value() );
+
+    // Duplicate rule ids are rejected.
+    EquivalenceProfile duplicate = profileWithTolerance();
+    duplicate.rules.append( duplicate.rules.front() );
+    REQUIRE( !EquivalenceProfile::fromJson( duplicate.toJson() ).has_value() );
+}
+
+TEST_CASE( "Slice D: invariant reference evaluates honestly, gaps are named",
+           "[debugger][sliceD]" )
+{
+    QVector<Invariant> invariants;
+    Invariant metricOk;
+    metricOk.kind = Invariant::Kind::MetricWithin;
+    metricOk.invariantId = QStringLiteral( "area-sane" );
+    metricOk.metricPath = QStringLiteral( "area_km2" );
+    metricOk.minValue = 0.0;
+    metricOk.maxValue = 100.0;
+    invariants.append( metricOk );
+
+    Invariant noForbidden;
+    noForbidden.kind = Invariant::Kind::NoStepOfOperator;
+    noForbidden.invariantId = QStringLiteral( "no-direct-classify" );
+    noForbidden.operatorId = QStringLiteral( "rs:supervised_classification" );
+    invariants.append( noForbidden );
+
+    Invariant enoughSteps;
+    enoughSteps.kind = Invariant::Kind::StepCountAtLeast;
+    enoughSteps.invariantId = QStringLiteral( "full-pipeline" );
+    enoughSteps.stepCount = 3;
+    invariants.append( enoughSteps );
+
+    InMemoryEvidenceSource source;
+    RunSnapshot snapshot = buildSnapshot( source, QStringLiteral( "run-stu" ),
+                                          checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                              thresholdParams( 0.35 ) ) );
+    QJsonObject metrics;
+    metrics.insert( QStringLiteral( "area_km2" ), 42.5 );
+    snapshot.setMetrics( metrics );
+
+    auto checks = evaluateInvariants( invariants, snapshot );
+    REQUIRE( checks.size() == 3 );
+    REQUIRE( checks.at( 0 ).passed );
+    REQUIRE( checks.at( 1 ).passed );
+    REQUIRE( checks.at( 2 ).passed );
+
+    // Missing metric → unevaluable gap, never a silent pass. (Explicit copy:
+    // QVector::operator<< mutates in place and would pollute the later
+    // analyzeAgainstInvariants assertions.)
+    Invariant missingMetric = metricOk;
+    missingMetric.invariantId = QStringLiteral( "kappa-sane" );
+    missingMetric.metricPath = QStringLiteral( "overall_accuracy" );
+    QVector<Invariant> extended = invariants;
+    extended.append( missingMetric );
+    auto withGap = evaluateInvariants( extended, snapshot );
+    REQUIRE( withGap.size() == 4 );
+    REQUIRE( !withGap.last().evaluable );
+    REQUIRE( !withGap.last().passed );
+
+    auto report = analyzeAgainstInvariants( snapshot, invariants );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "equivalent" ) );
+
+    QJsonObject badMetrics;
+    badMetrics.insert( QStringLiteral( "area_km2" ), 4200.0 );
+    snapshot.setMetrics( badMetrics );
+    auto failing = analyzeAgainstInvariants( snapshot, invariants );
+    REQUIRE( failing.has_value() );
+    REQUIRE( failing->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( failing->hasFirstDivergence );
+    REQUIRE( failing->firstDivergence.evidence.front().contains( QStringLiteral( "area-sane" ) ) );
+}
+

@@ -56,3 +56,17 @@
   parameter fixtures had physically impossible equal downstream digests. Fixed fixtures; the
   immaterial-missing-step (Low confidence) path remains reachable for genuinely equal outputs.
 - 26/26 pass (188 assertions) incl. A+B regression.
+
+### Slice D — GREEN (2026-09-22)
+- EquivalenceProfile (operator_group / param_tolerance / geometry_keys; strict versioned parsing,
+  unique rule ids) + InvariantSet (metric_within / no_step_of_operator / step_count_at_least /
+  final_digest_equals) + profile-aware aligner/analyzer overloads.
+- DESIGN NOTE: commutative_siblings was dropped during implementation analysis — pure order
+  differences are structurally absorbed by topological normalization + content-digest matching;
+  genuinely rewired dataflow must be reported, not blessed. Documented in equivalence.h + ADR.
+- Profile semantics settled by tests: a profile-accepted difference yields verdict "equivalent"
+  with a NAMED finding (rule id); firstDivergence stays empty (consistent with Slice C).
+- Analyzer now aligns through the profile overload when one is given (caught by the operator-group
+  test: the plain aligner left the rule-matched step unmatched → phantom missing_preprocessing).
+- Test-side: QVector::operator<< mutation polluted later assertions — explicit copy.
+- 32/32 pass (236 assertions) incl. A+B+C regression.

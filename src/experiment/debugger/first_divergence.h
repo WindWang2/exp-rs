@@ -102,6 +102,8 @@ struct FirstDivergenceReport
     bool operator==( const FirstDivergenceReport & ) const = default;
 };
 
+class EquivalenceProfile;
+
 class FirstDivergenceAnalyzer
 {
   public:
@@ -117,6 +119,19 @@ class FirstDivergenceAnalyzer
         const RunSnapshot &student,
         const FirstDivergenceOptions &options = {} );
 
+    /// Profile-aware overload: parameter differences accepted by a declared
+    /// rule become EquivalentAlternativePath findings naming the rule;
+    /// differences confined to declared geometry keys classify as
+    /// GeometryAlignmentDivergence. Uncovered differences report exactly as
+    /// in the plain overload — profiles can only ACCEPT differences, never
+    /// create or hide them.
+    static sicnu::data::Result<FirstDivergenceReport> analyze(
+        const ExperimentRun &referenceRun,
+        const ExperimentRun &studentRun,
+        const RunSnapshot &reference,
+        const RunSnapshot &student,
+        const EquivalenceProfile &profile,
+        const FirstDivergenceOptions &options = {} );
 };
 
 } // namespace sicnu::experiment::debugger

@@ -81,6 +81,8 @@ struct AlignmentBudget
     int maxComparisons = kDefaultMaxAlignmentComparisons;
 };
 
+class EquivalenceProfile;
+
 class StepAligner
 {
   public:
@@ -91,6 +93,13 @@ class StepAligner
                                                        const RunSnapshot &student,
                                                        const AlignmentBudget &budget = {} );
 
+    /// Profile-aware overload: candidates whose operator differs may still
+    /// match through a declared operator-group rule; such matches carry
+    /// kind EquivalentRule and the accepting rule id.
+    static sicnu::data::Result<AlignmentResult> align( const RunSnapshot &reference,
+                                                       const RunSnapshot &student,
+                                                       const EquivalenceProfile &profile,
+                                                       const AlignmentBudget &budget = {} );
 };
 
 } // namespace sicnu::experiment::debugger

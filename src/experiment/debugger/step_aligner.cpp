@@ -3,6 +3,8 @@
 
 #include "step_aligner.h"
 
+#include "equivalence.h"
+
 #include <QJsonArray>
 #include <QSet>
 #include <algorithm>
@@ -64,6 +66,27 @@ ParentCoverage parentCoverage( const StepSnapshot &step, const QSet<QString> &ma
 
 } // namespace
 
+namespace
+{
+
+/// Operator-equivalence check: identical operator (sentinel), or a declared
+/// group rule id; empty when the candidate cannot be accepted.
+QString acceptingRule( const EquivalenceProfile *profile, const QString &refOp,
+                       const QString &candidateOp )
+{
+    if ( refOp == candidateOp )
+        return QStringLiteral( "operator_identity" );
+    if ( profile )
+    {
+        const QString ruleId = profile->operatorGroupRuleId( refOp, candidateOp );
+        if ( !ruleId.isEmpty() )
+            return ruleId;
+    }
+    return {};
+}
+
+} // namespace
+
 QJsonObject StepMatch::toJson() const
 {
     return matchToJson( *this );
@@ -103,9 +126,13 @@ QJsonObject AlignmentResult::toJson() const
     return json;
 }
 
-Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
-                                            const RunSnapshot &student,
-                                            const AlignmentBudget &budget )
+namespace
+{
+
+Result<AlignmentResult> alignImpl( const RunSnapshot &reference,
+                                   const RunSnapshot &student,
+                                   const EquivalenceProfile *profile,
+                                   const AlignmentBudget &budget )
 {
     AlignmentResult result;
 
@@ -176,7 +203,9 @@ Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
                     QStringLiteral( "alignment exceeded %1 candidate comparisons" )
                         .arg( budget.maxComparisons ),
                     DiagnosticSeverity::Error } );
-            if ( studentStep.operatorId != refStep.operatorId )
+            const QString candidateRule = acceptingRule( profile, refStep.operatorId,
+                                                         studentStep.operatorId );
+            if ( candidateRule.isEmpty() )
                 continue;
 
             const ParentCoverage refCoverage =
@@ -233,7 +262,13 @@ Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
         studentToRef.insert( chosen->stepId, refStep.stepId );
 
         StepMatch match;
-        match.kind = StepMatch::Kind::Structural;
+        const QString matchRule = acceptingRule( profile, refStep.operatorId, chosen->operatorId );
+        match.kind = matchRule == QStringLiteral( "operator_identity" )
+                         ? StepMatch::Kind::Structural
+                         : StepMatch::Kind::EquivalentRule;
+        match.equivalenceRuleId = match.kind == StepMatch::Kind::EquivalentRule
+                                      ? matchRule
+                                      : QString();
         match.referenceStepId = refStep.stepId;
         match.studentStepId = chosen->stepId;
         match.parentCoverageComplete = coverageComplete;
@@ -248,6 +283,23 @@ Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
             result.unmatchedReference << refStep.stepId;
 
     return Result<AlignmentResult>::success( result );
+}
+
+} // namespace
+
+Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
+                                            const RunSnapshot &student,
+                                            const AlignmentBudget &budget )
+{
+    return alignImpl( reference, student, nullptr, budget );
+}
+
+Result<AlignmentResult> StepAligner::align( const RunSnapshot &reference,
+                                            const RunSnapshot &student,
+                                            const EquivalenceProfile &profile,
+                                            const AlignmentBudget &budget )
+{
+    return alignImpl( reference, student, &profile, budget );
 }
 
 } // namespace sicnu::experiment::debugger

@@ -5,6 +5,8 @@
 
 #include "first_divergence.h"
 
+#include "equivalence.h"
+
 #include <QHash>
 #include <QJsonArray>
 #include <QSet>
@@ -193,11 +195,15 @@ namespace
 
 } // namespace
 
-Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
+namespace
+{
+
+Result<FirstDivergenceReport> analyzeImpl(
     const ExperimentRun &referenceRun,
     const ExperimentRun &studentRun,
     const RunSnapshot &reference,
     const RunSnapshot &student,
+    const EquivalenceProfile *profile,
     const FirstDivergenceOptions &options )
 {
     FirstDivergenceReport report;
@@ -269,8 +275,9 @@ Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
         return Result<FirstDivergenceReport>::success( report );
     }
 
-    // ── Alignment + single topological walk ──
-    auto alignmentResult = StepAligner::align( reference, student );
+    // ── Alignment + single topological walk (profile-aware when given) ──
+    auto alignmentResult = profile ? StepAligner::align( reference, student, *profile )
+                                   : StepAligner::align( reference, student );
     if ( !alignmentResult.has_value() )
         return Result<FirstDivergenceReport>::failure( alignmentResult.diagnostics() );
     const AlignmentResult alignment = alignmentResult.take();
@@ -371,6 +378,30 @@ Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
         const bool coverage = parentCoverageComplete.value( refStep.stepId, true );
         const bool upstream = parentsVerified( refStep );
 
+        // Matches accepted by a declared operator-group rule are recorded,
+        // never silent — but they are not divergences.
+        QString matchRuleId;
+        for ( const StepMatch &match : alignment.matches )
+            if ( match.referenceStepId == refStep.stepId
+                 && match.kind == StepMatch::Kind::EquivalentRule )
+            {
+                matchRuleId = match.equivalenceRuleId;
+                break;
+            }
+        if ( !matchRuleId.isEmpty() )
+        {
+            DivergenceFinding finding;
+            finding.kind = DivergenceKind::EquivalentAlternativePath;
+            finding.referenceStepId = refStep.stepId;
+            finding.studentStepId = studentId;
+            finding.confidence = CausalConfidence::Medium;
+            finding.equivalenceRuleId = matchRuleId;
+            finding.evidence
+                << QStringLiteral( "step matched through equivalence rule '%1'" )
+                       .arg( matchRuleId );
+            findings.append( { finding, { order, 2 } } );
+        }
+
         // 1. Missing/extra producers visible through incomplete coverage.
         if ( !coverage )
         {
@@ -445,15 +476,68 @@ Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
 
         if ( paramsPresentBoth && !paramsEqual )
         {
-            DivergenceFinding finding;
-            finding.kind = DivergenceKind::ParameterDivergence;
-            finding.referenceStepId = refStep.stepId;
-            finding.studentStepId = studentId;
-            finding.confidence = upstream ? CausalConfidence::High : CausalConfidence::Medium;
-            finding.evidence
-                << QStringLiteral( "params_hash: reference=%1 student=%2" )
-                       .arg( refStep.paramsHash, studentStep->paramsHash );
-            findings.append( { finding, { order, 3 } } );
+            bool reportedAtParamsPosition = false;
+            if ( profile && !refStep.parameters.isEmpty() && !studentStep->parameters.isEmpty() )
+            {
+                QStringList differingKeys;
+                QString acceptedRuleId;
+                const bool accepted = profile->paramsEquivalent(
+                    refStep.operatorId, refStep.parameters, studentStep->parameters,
+                    &differingKeys, &acceptedRuleId );
+                if ( accepted )
+                {
+                    // Accepted by a declared rule — recorded, never silent.
+                    DivergenceFinding finding;
+                    finding.kind = DivergenceKind::EquivalentAlternativePath;
+                    finding.referenceStepId = refStep.stepId;
+                    finding.studentStepId = studentId;
+                    finding.confidence = CausalConfidence::Medium;
+                    finding.equivalenceRuleId = acceptedRuleId;
+                    finding.evidence
+                        << QStringLiteral( "parameter difference accepted by rule '%1'" )
+                               .arg( acceptedRuleId );
+                    findings.append( { finding, { order, 3 } } );
+                    reportedAtParamsPosition = true;
+                }
+                else if ( !differingKeys.isEmpty() )
+                {
+                    const QStringList geometryKeys = profile->geometryKeysFor( refStep.operatorId );
+                    bool allGeometry = !geometryKeys.isEmpty();
+                    for ( const QString &key : differingKeys )
+                        if ( !geometryKeys.contains( key ) )
+                        {
+                            allGeometry = false;
+                            break;
+                        }
+                    if ( allGeometry )
+                    {
+                        DivergenceFinding finding;
+                        finding.kind = DivergenceKind::GeometryAlignmentDivergence;
+                        finding.referenceStepId = refStep.stepId;
+                        finding.studentStepId = studentId;
+                        finding.confidence = upstream ? CausalConfidence::High
+                                                      : CausalConfidence::Medium;
+                        finding.evidence
+                            << QStringLiteral( "geometry parameter keys differ: %1" )
+                                   .arg( differingKeys.join( QLatin1String( ", " ) ) );
+                        findings.append( { finding, { order, 3 } } );
+                        reportedAtParamsPosition = true;
+                    }
+                }
+            }
+
+            if ( !reportedAtParamsPosition )
+            {
+                DivergenceFinding finding;
+                finding.kind = DivergenceKind::ParameterDivergence;
+                finding.referenceStepId = refStep.stepId;
+                finding.studentStepId = studentId;
+                finding.confidence = upstream ? CausalConfidence::High : CausalConfidence::Medium;
+                finding.evidence
+                    << QStringLiteral( "params_hash: reference=%1 student=%2" )
+                           .arg( refStep.paramsHash, studentStep->paramsHash );
+                findings.append( { finding, { order, 3 } } );
+            }
         }
         else if ( !paramsPresentBoth && lineagePresentBoth && !lineageEqual )
         {
@@ -622,6 +706,29 @@ Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
     report.hasFirstDivergence = firstSubstantive >= 0;
 
     return Result<FirstDivergenceReport>::success( report );
+}
+
+} // namespace
+
+Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
+    const ExperimentRun &referenceRun,
+    const ExperimentRun &studentRun,
+    const RunSnapshot &reference,
+    const RunSnapshot &student,
+    const FirstDivergenceOptions &options )
+{
+    return analyzeImpl( referenceRun, studentRun, reference, student, nullptr, options );
+}
+
+Result<FirstDivergenceReport> FirstDivergenceAnalyzer::analyze(
+    const ExperimentRun &referenceRun,
+    const ExperimentRun &studentRun,
+    const RunSnapshot &reference,
+    const RunSnapshot &student,
+    const EquivalenceProfile &profile,
+    const FirstDivergenceOptions &options )
+{
+    return analyzeImpl( referenceRun, studentRun, reference, student, &profile, options );
 }
 
 } // namespace sicnu::experiment::debugger

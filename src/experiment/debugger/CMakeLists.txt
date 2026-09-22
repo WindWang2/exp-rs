@@ -9,6 +9,8 @@ qt_add_library(sicnu_experiment_debugger STATIC
   step_aligner.h
   first_divergence.cpp
   first_divergence.h
+  equivalence.cpp
+  equivalence.h
   debugger_types.h
 )
 
