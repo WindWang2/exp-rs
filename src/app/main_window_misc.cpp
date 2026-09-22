@@ -408,6 +408,8 @@ void QgisDesktopWindow::resetPanelLayout()
         addDockWidget( Qt::RightDockWidgetArea, m_histogramStretchDock );
     if ( m_workflowDock )
         addDockWidget( Qt::RightDockWidgetArea, m_workflowDock );
+    if ( m_teachingAdminDock )
+        addDockWidget( Qt::RightDockWidgetArea, m_teachingAdminDock );
     if ( m_logDock )
         addDockWidget( Qt::BottomDockWidgetArea, m_logDock );
 

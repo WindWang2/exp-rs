@@ -12622,3 +12622,22 @@ function(sicnu_add_teaching_test NAME)
 endfunction()
 
 sicnu_add_teaching_test(test_teaching_lab_cockpit)
+# ── Teacher Authoring & Assessment Console (Catch2 + Sicnu::teaching_admin) ──
+function(sicnu_add_teaching_admin_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::teaching_admin
+    Qt6::Core
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+  sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+endfunction()
+sicnu_add_teaching_admin_test(test_teaching_admin_core)
