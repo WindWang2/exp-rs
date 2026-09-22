@@ -504,7 +504,10 @@ Result<QString> labReportHtml( const QJsonObject &document )
                     "<div class=\"thumbfig\"><img class=\"thumb\" alt=\"%1\" src=\"%2\">"
                     "<br>%3</div>\n" )
                     .arg( htmlEscape( thumbnail.value( "sourcePath" ).toString() ),
-                          thumbnail.value( "dataUrl" ).toString(),
+                          // Escaped like every other interpolated field: the
+                          // validator's data: prefix check still admits URLs
+                          // that continue with HTML metacharacters.
+                          htmlEscape( thumbnail.value( "dataUrl" ).toString() ),
                           htmlEscape( thumbnail.value( "sourcePath" ).toString() ) );
     }
 

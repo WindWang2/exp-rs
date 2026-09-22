@@ -338,3 +338,45 @@ TEST_CASE( "pareto dominance handles mixed objective directions",
     REQUIRE( pareto.contains( points.at( 1 ).pointId ) );
     REQUIRE( pareto.contains( points.at( 2 ).pointId ) );
 }
+
+TEST_CASE( "analysis keeps cancelled as its own point status", "[study][analysis]" )
+{
+    Fixture fix;
+    fix.ensureExperiment( QStringLiteral( "exp-analysis" ) );
+    const auto spec = oatSpec();
+    const auto points = sampleStudyPoints( spec ).value();
+    REQUIRE( points.size() == 5 );
+
+    // One point's only run is cancelled by the abort drain (the recorder's
+    // truthful lifecycle records Cancelled). The report has a dedicated
+    // cancelled bucket fed from point statuses — a projection that folds
+    // Cancelled into "failed" leaves that bucket dead code while the same
+    // document's stopped_reason says "cancelled".
+    const StudyPoint &point = points.first();
+    sicnu::experiment::RunStartRequest request;
+    request.experimentId = spec.experimentId;
+    request.algorithmId = spec.algorithmId;
+    request.parameters = point.parameters;
+    request.seed = point.seed;
+    request.executionRef = QStringLiteral( "fixture-%1-cancelled" ).arg( point.pointId );
+    const auto runId = fix.recorder.startRun( request );
+    REQUIRE( runId.has_value() );
+    REQUIRE( fix.recorder
+                 .markCancelled( runId.value(), QStringLiteral( "study aborted" ) )
+                 .has_value() );
+    REQUIRE( fix.ledger.link( point.pointId, runId.value() ).has_value() );
+
+    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysis.points.size() == points.size() );
+    bool checked = false;
+    for ( const PointAggregate &aggregate : analysis.points )
+    {
+        if ( aggregate.pointId != point.pointId )
+            continue;
+        REQUIRE( aggregate.status == QStringLiteral( "cancelled" ) );
+        REQUIRE( aggregate.metrics.value( QStringLiteral( "maskedPercent" ) ).runCount
+                 == 0 ); // a cancelled run contributes NO data
+        checked = true;
+    }
+    REQUIRE( checked );
+}

@@ -31,6 +31,12 @@ using sicnu::data::Result;
 /// Bump when the serialized summary layout changes.
 inline constexpr int kSpatialSummarySchemaVersion = 1;
 
+/// Upper bound on pixels the GDAL summarizer buffers whole (two float
+/// vectors = 8 bytes/pixel ≈ 2 GiB at the cap). Beyond it the module refuses
+/// with study.spatial_too_large instead of throwing bad_alloc past the
+/// Result model; larger mosaics are a tiling task, not a bigger buffer.
+inline constexpr qint64 kMaxSpatialComparePixels = 1LL << 28;
+
 struct SpatialDifferenceSummary
 {
     QString baselinePath;

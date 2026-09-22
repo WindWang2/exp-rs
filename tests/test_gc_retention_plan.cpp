@@ -312,3 +312,44 @@ TEST_CASE( "experiment run retention: benchmark-cited runs are not pruned (#1173
     CHECK( !store.runById( QStringLiteral( "free-run" ) ).has_value() );
     CHECK( store.benchmarkResultById( QStringLiteral( "br-1" ) ).has_value() );
 }
+
+TEST_CASE( "experiment run retention: keepWithBenchmarkCitation=false cannot strand"
+           " a benchmark citation",
+           "[gc][experiment][oracle]" )
+{
+    // The header contract: a cascade delete of benchmark rows is not
+    // supported, so citation protection is unconditional — a policy that
+    // honored false would prune a cited run and leave the immutable
+    // benchmark_results row pointing at a phantom (the #1217 defect class).
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp-bench-false.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId(
+        sicnu::experiment::ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "bench-cite-false" ) );
+    experiment.runIds() = QStringList{ QStringLiteral( "cited-run" ) };
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    REQUIRE( store
+                 .upsertRunsBatch( { makeRun( QStringLiteral( "cited-run" ),
+                                              experiment.experimentId(), 1 ) } )
+                 .has_value() );
+
+    BenchmarkResult result;
+    result.setResultId( QStringLiteral( "br-false-1" ) );
+    result.setBenchmarkId( QStringLiteral( "bench-a" ) );
+    result.setBenchmarkVersion( 1 );
+    result.setExperimentRunId( QStringLiteral( "cited-run" ) );
+    REQUIRE( store.saveBenchmarkResult( result ).has_value() );
+
+    ExperimentStore::RunPrunePolicy policy;
+    policy.collapseIdentityTwins = false;
+    policy.keepWithBenchmarkCitation = false;
+    const auto plan = store.planRunPrune( policy );
+    REQUIRE( plan.has_value() );
+    CHECK( plan->runIds.isEmpty() );
+
+    REQUIRE( store.executeRunPrune( *plan ).has_value() );
+    CHECK( store.runById( QStringLiteral( "cited-run" ) ).has_value() );
+    CHECK( store.benchmarkResultById( QStringLiteral( "br-false-1" ) ).has_value() );
+}

@@ -8,6 +8,8 @@
 
 #include "study/study_spec.h"
 
+#include <limits>
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -307,4 +309,16 @@ TEST_CASE( "StudyMetricSpec direction roundtrips", "[study][spec]" )
     REQUIRE( parsed.value().objectiveMetrics.at( 0 ).name == QStringLiteral( "maskedPercent" ) );
     REQUIRE_FALSE( parsed.value().objectiveMetrics.at( 0 ).maximize );
     REQUIRE( parsed.value().validate().has_value() );
+}
+
+TEST_CASE( "dimension range refuses an overflowing span", "[study][spec]" )
+{
+    // Both endpoints are finite and min < max, but max − min overflows to
+    // +inf: the sampling ladder would produce inf values (and NaN at the
+    // first rung, 0 * inf) that poison matrixCellId identity and the
+    // submitted parameters. The derived span must be finite too.
+    auto spec = validSpec();
+    spec.dimensions[0].minValue = -std::numeric_limits<double>::max();
+    spec.dimensions[0].maxValue = std::numeric_limits<double>::max();
+    REQUIRE( hasCode( spec.validate(), QStringLiteral( "study.spec_invalid_dimension_range" ) ) );
 }

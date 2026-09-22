@@ -8,7 +8,7 @@
 // Semantics honesty:
 //   - a metric a run did not report is never imputed (runCount reflects it);
 //   - status vocabulary matches the matrix authority ("recorded", "missing",
-//     "failed", "partial", "in_progress");
+//     "failed", "cancelled", "partial", "in_progress");
 //   - the Pareto set is the matrix authority's dominance logic (reused, not
 //     reimplemented); minimized objective metrics are compared on inverted
 //     values (documented);

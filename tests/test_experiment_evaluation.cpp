@@ -1166,3 +1166,194 @@ TEST_CASE( "reproduction bundle imports offline: integrity gates, identity "
 
     CHECK( target.runById( QStringLiteral( "run-src" ) )->seed() == 123 );
 }
+
+TEST_CASE( "secret redaction reaches arrays nested inside arrays", "[experiment][identity]" )
+{
+    // The redaction pass once stopped at objects behind ONE array level;
+    // the lab report side already needed a deep pass of its own. Every
+    // export boundary shares RunEnvironment::redactSecretKeys, so it must
+    // recurse the same shapes the capsule validator's scanTree recurses.
+    QJsonObject inner;
+    inner.insert( QStringLiteral( "api_key" ), QStringLiteral( "sk-live-123" ) );
+    QJsonArray outer;
+    outer.append( QJsonValue( QJsonArray{ inner } ) );
+    QJsonObject payload;
+    payload.insert( QStringLiteral( "layers" ), outer );
+
+    const QJsonObject redacted = RunEnvironment::redactSecretKeys( payload );
+    const QJsonObject reached = redacted.value( QStringLiteral( "layers" ) )
+                                    .toArray()
+                                    .at( 0 )
+                                    .toArray()
+                                    .at( 0 )
+                                    .toObject();
+    REQUIRE( reached.value( QStringLiteral( "api_key" ) ).toString()
+             == QStringLiteral( "***" ) );
+}
+
+TEST_CASE( "metric records refuse foreign layout versions", "[experiment][metrics]" )
+{
+    // evaluation.h promises: readers refuse foreign versions rather than
+    // silently reinterpreting documents. A missing key stays readable as
+    // v1 (records written before the field existed).
+    MetricRecord record;
+    record.runId = QStringLiteral( "run-metrics-version" );
+    record.metrics = QJsonObject{ { QStringLiteral( "overallAccuracy" ), 0.75 } };
+
+    QJsonObject foreign = record.toJson();
+    foreign.insert( QStringLiteral( "metrics_schema_version" ), 99 );
+    const auto refused = MetricRecord::fromJson( foreign );
+    REQUIRE( !refused.has_value() );
+    bool typedVersion = false;
+    for ( const auto &diagnostic : refused.diagnostics() )
+        if ( diagnostic.code == QStringLiteral( "evaluation.version" ) )
+            typedVersion = true;
+    REQUIRE( typedVersion );
+
+    QJsonObject legacy = record.toJson();
+    legacy.remove( QStringLiteral( "metrics_schema_version" ) );
+    const auto readable = MetricRecord::fromJson( legacy );
+    REQUIRE( readable.has_value() );
+    CHECK( readable.value().metricsSchemaVersion == 1 );
+}
+
+TEST_CASE( "artifact sizes above the int range round-trip through the store",
+           "[experiment][identity]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-big" ) );
+    experiment.setName( QStringLiteral( "big artifacts" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    // toJson writes qint64; reading back through toInt() silently folded
+    // 3 GiB down to the -1 default (and replay_readiness then skipped the
+    // size-verified check for it).
+    ExperimentRun run = makeRun( QStringLiteral( "run-big" ), QStringLiteral( "exp-big" ) );
+    ExperimentRun::Artifact artifact;
+    artifact.path = QStringLiteral( "out/dem.tif" );
+    artifact.role = QStringLiteral( "primary" );
+    artifact.digest = QStringLiteral( "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" );
+    artifact.sizeBytes = 3221225472LL; // 3 GiB
+    run.artifacts().append( artifact );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    const auto loaded = store.runById( QStringLiteral( "run-big" ) );
+    REQUIRE( loaded.has_value() );
+    REQUIRE( loaded->artifacts().size() == 1 );
+    CHECK( loaded->artifacts().first().sizeBytes == 3221225472LL );
+}
+
+TEST_CASE( "a run that moves experiments keeps listing columns and"
+           " run-id mirrors consistent",
+           "[experiment][store]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment first;
+    first.setExperimentId( QStringLiteral( "exp-a" ) );
+    first.setName( QStringLiteral( "A" ) );
+    REQUIRE( store.upsertExperiment( first ).has_value() );
+    Experiment second;
+    second.setExperimentId( QStringLiteral( "exp-b" ) );
+    second.setName( QStringLiteral( "B" ) );
+    REQUIRE( store.upsertExperiment( second ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-move" ), QStringLiteral( "exp-a" ) );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    // experiment_id is not part of the frozen execution identity, so a
+    // start-time upsert (Created → Running) that also re-homes the run is
+    // legal — and every index the store keeps must follow the body, not
+    // trail behind it (listRuns filters on columns; run_count reads mirrors).
+    run.setExperimentId( QStringLiteral( "exp-b" ) );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    const auto inOld = store.listRuns( QStringLiteral( "exp-a" ), {}, {} );
+    REQUIRE( inOld.has_value() );
+    CHECK( inOld.value().second.isEmpty() );
+
+    const auto inNew = store.listRuns( QStringLiteral( "exp-b" ), {}, {} );
+    REQUIRE( inNew.has_value() );
+    REQUIRE( inNew.value().second.size() == 1 );
+    CHECK( inNew.value().second.first().runId() == QStringLiteral( "run-move" ) );
+    CHECK( inNew.value().second.first().status() == RunStatus::Running );
+
+    const auto oldExperiment = store.experimentById( QStringLiteral( "exp-a" ) );
+    REQUIRE( oldExperiment.has_value() );
+    CHECK( !oldExperiment->runIds().contains( QStringLiteral( "run-move" ) ) );
+    const auto newExperiment = store.experimentById( QStringLiteral( "exp-b" ) );
+    REQUIRE( newExperiment.has_value() );
+    CHECK( newExperiment->runIds().contains( QStringLiteral( "run-move" ) ) );
+}
+
+TEST_CASE( "bundle integrity gate: an emptied checksums.txt never passes vacuously",
+           "[experiment][repro]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    ReproductionBundleExporter exporter( experiments, datasets );
+
+    // The bundle is otherwise JUDGEABLE: its dataset pin resolves with a
+    // matching fingerprint, so the pre-#hardening validator — whose
+    // checksum loop silently never ran on an emptied table — walked all the
+    // document checks and returned BestEffort with a "bundle checksums
+    // verified" reason in the list. Integrity must gate FIRST and FAIL on a
+    // zero-entry table.
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const auto versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    const QString bundle = dir.filePath( QStringLiteral( "bundle" ) );
+    REQUIRE( QDir( bundle ).mkpath( QStringLiteral( "." ) ) );
+    const auto writeFile = [&bundle]( const QString &name, const QByteArray &content ) {
+        QFile file( QDir( bundle ).filePath( name ) );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        REQUIRE( file.write( content ) == content.size() );
+    };
+    writeFile( QStringLiteral( "manifest.json" ),
+               QJsonDocument( QJsonObject{ { QStringLiteral( "schema_version" ), 1 } } ).toJson() );
+    writeFile( QStringLiteral( "run_config.json" ),
+               QJsonDocument( QJsonObject{
+                   { QStringLiteral( "run_id" ), QStringLiteral( "run-x" ) },
+                   { QStringLiteral( "determinism" ), QStringLiteral( "strict" ) },
+                   { QStringLiteral( "dataset_version_id" ), committed->versionId() },
+                   { QStringLiteral( "dataset_fingerprint" ), committed->fingerprint() } } )
+                   .toJson() );
+    writeFile( QStringLiteral( "environment.json" ), QByteArray( "{}" ) );
+    // The post-tamper shape: zero verifiable entries.
+    writeFile( QStringLiteral( "checksums.txt" ), QByteArray() );
+
+    ReproductionHooks hooks;
+    const auto validation = exporter.validateBundle( bundle, hooks );
+    CHECK( validation.level == ReproductionLevel::Impossible );
+    bool missingCoverage = false;
+    for ( const QString &reason : validation.reasons )
+        if ( reason.contains( QLatin1String( "does not cover" ) ) )
+            missingCoverage = true;
+    REQUIRE( missingCoverage );
+
+    // A table naming files it does not verify, or files the directory does
+    // not contain, is an integrity signal too — not noise to skip.
+    writeFile( QStringLiteral( "checksums.txt" ),
+               QByteArray( "deadbeef  run_config.json\n" ) );
+    const auto truncated = exporter.validateBundle( bundle, hooks );
+    CHECK( truncated.level == ReproductionLevel::Impossible );
+}

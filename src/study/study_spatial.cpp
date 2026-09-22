@@ -192,6 +192,14 @@ Result<SpatialDifferenceSummary> GdalRasterDifferenceSummarizer::summarize(
     const int width = baseline->GetRasterXSize();
     const int height = baseline->GetRasterYSize();
     const qint64 count = static_cast<qint64>( width ) * height;
+    if ( count > kMaxSpatialComparePixels )
+        return Result<SpatialDifferenceSummary>::failure(
+            spatialError( QStringLiteral( "study.spatial_too_large" ),
+                          QStringLiteral( "raster holds %1 pixels; whole-raster"
+                                          " comparison caps at %2 — tile the input"
+                                          " instead" )
+                              .arg( count )
+                              .arg( kMaxSpatialComparePixels ) ) );
 
     QVector<float> baselineBuffer( count );
     QVector<float> runBuffer( count );

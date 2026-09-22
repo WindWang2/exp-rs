@@ -3,6 +3,7 @@
 
 #include "step_aligner.h"
 
+#include "debugger_types.h"
 #include "equivalence.h"
 
 #include <QJsonArray>
@@ -239,6 +240,10 @@ Result<AlignmentResult> alignImpl( const RunSnapshot &reference,
                 firstAcceptable = &studentStep;
             const bool contentIdenticalPair =
                 !refStep.outputDigest.isEmpty()
+                // kDigestModeUnknown ("") means the recorded evidence carries
+                // no recognizable digest — two equal unclassifiable strings
+                // are not byte-identical content and must not win pairing.
+                && refStep.digestMode != QLatin1String( kDigestModeUnknown )
                 && refStep.outputDigest == studentStep.outputDigest
                 && refStep.digestMode == studentStep.digestMode;
             if ( contentIdenticalPair && contentIdentical == nullptr )

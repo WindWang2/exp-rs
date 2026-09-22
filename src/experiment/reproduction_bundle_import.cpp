@@ -6,7 +6,6 @@
 // never observed the execution never fabricates a terminal lifecycle.
 #include "reproduction_bundle_import.h"
 
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -43,65 +42,6 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
         return std::nullopt;
     }
     return document.object();
-}
-
-/// Documents the importer actually parses; every one of them must be
-/// covered by checksums.txt — a manifest that omits the files it wants the
-/// consumer to trust defeats the integrity gate.
-const char *kRequiredBundleMembers[] = {
-    "manifest.json", "run_config.json", "environment.json",
-};
-
-/// Verifies checksums.txt against the bundle contents (the same
-/// "integrity first" rule as validateBundle) AND that every required member
-/// is listed in it.
-bool verifyChecksums( const QDir &dir, QStringList *reasons )
-{
-    QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
-    if ( !checksumFile.open( QIODevice::ReadOnly ) )
-    {
-        reasons->append( QStringLiteral( "checksums.txt missing" ) );
-        return false;
-    }
-    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
-                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
-    QStringList listed;
-    for ( const QString &line : lines )
-    {
-        const int split = line.indexOf( QStringLiteral( "  " ) );
-        if ( split <= 0 )
-            continue;
-        const QString digest = line.left( split );
-        const QString name = line.mid( split + 2 );
-        listed.append( name );
-        // Path traversal guard: bundle members are relative names inside the
-        // directory, never absolute paths or ../ escapes.
-        if ( name.startsWith( QLatin1Char( '/' ) ) || name.contains( QLatin1String( ".." ) ) )
-        {
-            reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
-            return false;
-        }
-        QFile member( dir.filePath( name ) );
-        if ( !member.open( QIODevice::ReadOnly ) ||
-             QString::fromUtf8(
-                 QCryptographicHash::hash( member.readAll(), QCryptographicHash::Sha256 )
-                     .toHex() ) != digest )
-        {
-            reasons->append( QStringLiteral( "checksum mismatch: %1" ).arg( name ) );
-            return false;
-        }
-    }
-    for ( const char *member : kRequiredBundleMembers )
-    {
-        if ( !listed.contains( QLatin1String( member ) ) )
-        {
-            reasons->append( QStringLiteral( "checksums.txt does not cover %1" )
-                                 .arg( QLatin1String( member ) ) );
-            return false;
-        }
-    }
-    reasons->append( QStringLiteral( "bundle checksums verified" ) );
-    return true;
 }
 
 } // namespace
@@ -141,10 +81,11 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         return report;
     }
 
-    // 1. Integrity gate: tampered bundles never reach the store.
+    // 1. Integrity gate: tampered bundles never reach the store. Shared
+    // with validateBundle — one verifier, one required-members contract.
     {
         QStringList integrityReasons;
-        if ( !verifyChecksums( dir, &integrityReasons ) )
+        if ( !verifyBundleChecksums( options.bundleDir, &integrityReasons ) )
         {
             report.warnings.append( integrityReasons );
             return report;

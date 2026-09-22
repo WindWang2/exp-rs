@@ -628,6 +628,18 @@ Result<MetricRecord> MetricRecord::fromJson( const QJsonObject &json )
     record.metricsHash = json.value( QStringLiteral( "metrics_hash" ) ).toString();
     record.metricsSchemaVersion =
         json.value( QStringLiteral( "metrics_schema_version" ) ).toInteger( 1 );
+    // Layout contract (evaluation.h): readers refuse foreign versions rather
+    // than silently reinterpreting documents. A missing key reads as v1 —
+    // records written before the field existed stay readable.
+    if ( record.metricsSchemaVersion != kMetricsSchemaVersion )
+    {
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "evaluation.version" ),
+            QStringLiteral( "metrics layout version %1 not supported (expected %2)" )
+                .arg( record.metricsSchemaVersion )
+                .arg( kMetricsSchemaVersion ),
+            DiagnosticSeverity::Error } );
+    }
     if ( record.runId.isEmpty() )
     {
         return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
