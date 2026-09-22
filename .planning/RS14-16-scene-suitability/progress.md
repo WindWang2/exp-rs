@@ -57,3 +57,8 @@
 - H4：integration.md（track-local 接线点文档）落地。
 - 最终套件（11 个，全部绿）：core 68/11、spatial 195/18、spectral 93/10、temporal 79/13、labels 115/24、store_provider 226/5、profiles 92/10、adversarial 350/21、uncertainty 50/7、teaching 76/5、agent_tools 26/5（assertions/cases）。
 - observed：sicnu_agent + test_data_platform_surface/test_surface_parity 全量构建耗时长（qgis_core ~1000+ TU，-j1），后台进行中，PR 前回收结果；test_capability_drift 在 master 本就红（#1151），本 track 不新增红灯 case。
+
+## Review Gate 记录（2026-09-22）
+- Round 1（独立 reviewer）：无 P0；P1-1 DatasetFacts::fromJson 整数 UB（已修+变异 RED 锁定，commit 3580d4b7a8）；P1-2 agent surface 构建验证（进行中）；P2×4（两条文档注释已补，两条裁定 follow-up）；变异杀测试 5/5 有效；1000 场景实测 7.7ms（预算 50ms）；4 线程并发干净；8 个兄弟 RS14 track 零边界踩踏。
+- Round 2（re-review）：P1-1 修复双重验证通过，11 套件全绿（1385 assertions/111 cases），验证一致性/确定性/teaching 退化路径全 pass；新发现 3 个 P3（hashFromJson 诊断不带具体键、JSON 错误类型静默降级无专测、unicode round-trip 无专测）→ follow-up 不阻塞。**Verdict：可提 PR。**
+- follow-up 清单（非阻塞）：① assetState CamelCase 词汇第二副本下沉 sicnu::data；② goal fromJson 错误类型标量 typed 失败；③ 测量冲突档位第三档（可剔除证据，Marginal+明细）；④ P3-a/b/c。
