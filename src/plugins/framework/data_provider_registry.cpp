@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "data_provider_registry.h"
 
+#include <algorithm>
+
 namespace sicnu::plugins {
 
 DataProviderRegistry &DataProviderRegistry::instance()
