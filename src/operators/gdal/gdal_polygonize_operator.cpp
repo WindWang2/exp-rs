@@ -19,6 +19,8 @@
 
 #include <cmath>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace sicnu::operators::gdal {
 
 namespace {
@@ -206,17 +208,16 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
     }
 
     if (workPath != outputPath) {
-        removeVectorFiles(qOutputPath);
-        if (!QFile::rename(QString::fromStdString(workPath), qOutputPath)) {
+        // #1174: sidecars-first / main-last with .bak rollback — do NOT delete
+        // the previous output before publish (the old delete-then-rename path
+        // destroyed the last good group on rename failure).
+        try {
+            sicnu::geo::atomic_fs::publishStagedGroup(workPath, outputPath);
+        } catch (const sicnu::geo::GeoError &ex) {
             removeVectorFiles(QString::fromStdString(workPath));
-            throw RSOperatorError(ErrorCode::GdalError, "Failed to publish polygonize output to: " + outputPath);
-        }
-        if (outFi.suffix().toLower() == QLatin1String("shp")) {
-            const QString workBase = QFileInfo(QString::fromStdString(workPath)).path() + QLatin1Char('/') + QFileInfo(QString::fromStdString(workPath)).completeBaseName();
-            const QString outBase = outFi.path() + QLatin1Char('/') + outFi.completeBaseName();
-            for (const char *extStr : {".dbf", ".shx", ".prj", ".cpg"}) {
-                QFile::rename(workBase + QString::fromLatin1(extStr), outBase + QString::fromLatin1(extStr));
-            }
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  std::string("Failed to publish polygonize output to: ") + outputPath
+                                      + " (" + ex.what() + ")");
         }
     }
 

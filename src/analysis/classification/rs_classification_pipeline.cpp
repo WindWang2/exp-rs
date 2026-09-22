@@ -29,6 +29,8 @@
 #include <limits>
 #include <vector>
 
+#include "geospatial/util/atomic_fs.h"
+
 #include <cpl_string.h>
 #include <gdal_priv.h>
 
@@ -1365,53 +1367,31 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       QStringLiteral( "Failed to flush destination dataset cache to disk" ) );
   }
 
-  QFile::remove( config.outputRaster );
-  if ( !QFile::rename( tempOutputPath, config.outputRaster ) )
+  // #1174: publish the classification trio as one atomic group — dependents
+  // (probability / uncertainty) FIRST, label raster LAST as the completeness
+  // marker. Crash between renames previously left NEW label + STALE prob.
   {
-    QFile::remove( tempOutputPath );
-    if ( !tempProbPath.isEmpty() )
-      QFile::remove( tempProbPath );
-    if ( !tempUncPath.isEmpty() )
-      QFile::remove( tempUncPath );
-    result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
-    result.errorMessage = QStringLiteral( "Failed to finalize output raster: %1" ).arg( config.outputRaster );
-    return result;
-  }
-  if ( writeProb )
-  {
-    QFile::remove( config.probabilityOutput );
-    // Fail closed, mirroring the label and uncertainty branches (#1052):
-    // an unchecked rename reported success while the probability output was
-    // missing or a stale raster from a previous run. On failure the label
-    // raster (already renamed above) and every temp still on disk are
-    // removed — a failed run publishes nothing (#1052 review P2-1).
-    if ( !QFile::rename( tempProbPath, config.probabilityOutput ) )
+    std::vector<std::pair<std::string, std::string>> members;
+    if ( writeUnc )
+      members.emplace_back( tempUncPath.toStdString(), config.uncertaintyOutput.toStdString() );
+    if ( writeProb )
+      members.emplace_back( tempProbPath.toStdString(), config.probabilityOutput.toStdString() );
+    members.emplace_back( tempOutputPath.toStdString(), config.outputRaster.toStdString() );
+    try
     {
-      QFile::remove( tempProbPath );
+      sicnu::geo::atomic_fs::publishStagedMembers( members );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
+    {
+      QFile::remove( tempOutputPath );
+      if ( !tempProbPath.isEmpty() )
+        QFile::remove( tempProbPath );
       if ( !tempUncPath.isEmpty() )
         QFile::remove( tempUncPath );
-      QFile::remove( config.outputRaster );
       result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
       result.errorMessage =
-        QStringLiteral( "Failed to finalize probability raster: %1" )
-          .arg( config.probabilityOutput );
-      return result;
-    }
-  }
-  if ( writeUnc )
-  {
-    QFile::remove( config.uncertaintyOutput );
-    if ( !QFile::rename( tempUncPath, config.uncertaintyOutput ) )
-    {
-      QFile::remove( tempUncPath );
-      // Label and probability rasters were already published above; remove
-      // them too so the failed run leaves no outputs behind.
-      QFile::remove( config.outputRaster );
-      QFile::remove( config.probabilityOutput );
-      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
-      result.errorMessage =
-        QStringLiteral( "Failed to finalize uncertainty raster: %1" )
-          .arg( config.uncertaintyOutput );
+        QStringLiteral( "Failed to finalize classification outputs: %1" )
+          .arg( QString::fromUtf8( ex.what() ) );
       return result;
     }
   }

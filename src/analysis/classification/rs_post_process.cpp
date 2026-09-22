@@ -25,6 +25,8 @@
 #include <utility>
 #include <vector>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace
 {
 
@@ -722,39 +724,21 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
     return false;
   }
 
-  // Rename over the target only after the dataset is fully written (#285).
-  // When the destination already exists, OGR Rename returns CE_Failure;
-  // fall back to removing the existing dataset first (#404).
-  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
-    return true;
-  // Best-effort cleanup of destination layer files
-  drv->Delete( vectorPath.toUtf8().constData() );
-  // Retry OGR Rename now that destination is cleared (#418)
-  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
-    return true;
-
-  // Move temp dataset files into destination (handling multi-file OGR bundles like .shx, .dbf, .prj) (#418)
-  const QString tmpBase = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".tmp~" );
-  const QString dstBase = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
-  static const char *const kExts[] = { ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qpj", ".fix", ".qix", ".sbn", ".sbx", "" };
-  bool movedAny = false;
-  for ( const char *ext : kExts )
+  // #1174: atomic_fs group publish (sidecars FIRST, main LAST, .bak rollback).
+  // Never drv->Delete the previous output before publish — that destroyed the
+  // last good group when the subsequent rename failed.
+  try
   {
-    const QString tFile = ( *ext == '\0' ) ? tmpPath : ( tmpBase + QLatin1String( ext ) );
-    const QString dFile = ( *ext == '\0' ) ? vectorPath : ( dstBase + QLatin1String( ext ) );
-    if ( QFile::exists( tFile ) )
-    {
-      QFile::remove( dFile );
-      if ( QFile::rename( tFile, dFile ) )
-        movedAny = true;
-    }
-  }
-  if ( movedAny && QFile::exists( vectorPath ) )
+    sicnu::geo::atomic_fs::publishStagedGroup( tmpPath.toStdString(), vectorPath.toStdString() );
     return true;
-
-  drv->Delete( tmpPath.toUtf8().constData() );
-  setErr( err, QStringLiteral( "Failed to move vector output into place: %1" ).arg( vectorPath ) );
-  return false;
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    drv->Delete( tmpPath.toUtf8().constData() );
+    setErr( err, QStringLiteral( "Failed to move vector output into place: %1 (%2)" )
+                   .arg( vectorPath, QString::fromUtf8( ex.what() ) ) );
+    return false;
+  }
 }
 
 bool RsPostProcess::saveClassMetaData( const QString &rasterPath, const QHash<int, RsClassDef> &defs, QString *err )

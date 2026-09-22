@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace sicnu::operators::runtime {
 
 namespace {
@@ -232,76 +234,18 @@ void writeDetectionVector( const std::vector<DetectionBox> &boxes,
   }
   GDALClose( outDs );
 
-  // Publish: back up any previous output, rename the stage files onto the
-  // caller's path (sidecars checked — a shapefile without .shx is invalid),
-  // and restore the backup if any step fails.
-  const QString finalPath = QString::fromStdString( outputPath );
-  const bool isShp = outFi.suffix().toLower() == QLatin1String( "shp" );
-  auto sidecarPaths = [ & ]( const QString &main ) {
-    const QFileInfo fi( main );
-    const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
-    QStringList paths;
-    if ( isShp )
-      for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg" } )
-        paths << base + QString::fromLatin1( ext );
-    return paths;
-  };
-  const QStringList finalSidecars = sidecarPaths( finalPath );
-  const QStringList workSidecars = sidecarPaths( workPath );
-
-  auto publishAll = [ & ]() -> bool {
-    if ( !QFile::rename( workPath, finalPath ) )
-      return false;
-    for ( int i = 0; i < workSidecars.size(); ++i )
-    {
-      if ( QFile::exists( workSidecars[i] )
-           && !QFile::rename( workSidecars[i], finalSidecars[i] ) )
-        return false;
-    }
-    return true;
-  };
-
-  // Move the previous output (main + sidecars) aside.
-  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
-  QStringList backupSidecars;
-  for ( const QString &sidecar : finalSidecars )
-    backupSidecars << sidecar + QStringLiteral( ".prev~" );
-  const bool hadExisting = QFile::exists( finalPath );
-  if ( hadExisting )
+  // #1174: atomic_fs group publish (sidecars FIRST, main LAST, .bak rollback).
+  try
   {
-    removeVectorFiles( backupPath );
-    if ( !QFile::rename( finalPath, backupPath ) )
-    {
-      removeVectorFiles( workPath );
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "failed to back up the previous detection output: " + outputPath );
-    }
-    for ( int i = 0; i < finalSidecars.size(); ++i )
-    {
-      if ( QFile::exists( finalSidecars[i] ) )
-        QFile::rename( finalSidecars[i], backupSidecars[i] );
-    }
+    sicnu::geo::atomic_fs::publishStagedGroup( workPath.toStdString(), outputPath );
   }
-
-  if ( !publishAll() )
+  catch ( const sicnu::geo::GeoError &ex )
   {
     removeVectorFiles( workPath );
-    removeVectorFiles( finalPath ); // a partial publish must not look like a result
-    if ( hadExisting )
-    {
-      QFile::rename( backupPath, finalPath );
-      for ( int i = 0; i < backupSidecars.size(); ++i )
-      {
-        if ( QFile::exists( backupSidecars[i] ) )
-          QFile::rename( backupSidecars[i], finalSidecars[i] );
-      }
-    }
     throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "failed to publish detection output to: " + outputPath );
+                           std::string( "failed to publish detection output to: " ) + outputPath
+                               + " (" + ex.what() + ")" );
   }
-  removeVectorFiles( backupPath );
-  for ( const QString &sidecar : backupSidecars )
-    QFile::remove( sidecar );
 }
 
 std::string DetectionTileEngine::checkContract( const ModelInfo &model )

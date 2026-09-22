@@ -418,6 +418,84 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
     removeFileQuiet( targetSidecars[i] + ".bak" );
 }
 
+
+void publishStagedMembers( const std::vector<std::pair<std::string, std::string>> &members )
+{
+  // Filter to pairs whose staged file exists; skip missing staged (callers may
+  // list optional dependents). Publishing an empty filtered set is a no-op.
+  std::vector<std::pair<std::string, std::string>> live;
+  live.reserve( members.size() );
+  for ( const auto &m : members )
+  {
+    if ( fileExists( m.first ) )
+      live.push_back( m );
+  }
+  if ( live.empty() )
+    return;
+
+  std::vector<bool> hadTarget( live.size(), false );
+  std::vector<std::string> published;
+  auto cleanup = [ & ]( const std::string &failedName ) {
+    for ( const std::string &done : published )
+      removeFileQuiet( done );
+    // Restore backups for every member that had a prior target (main first
+    // among restores when it is last in live — walk reverse so main restores
+    // before dependents that may reference it? Actually restore in reverse
+    // publish order: last published removed first above; restore originals
+    // in original index order with main (last) restored first for presence).
+    if ( !live.empty() )
+    {
+      const std::size_t mainIdx = live.size() - 1;
+      const std::string mainBackup = live[mainIdx].second + ".bak";
+      if ( hadTarget[mainIdx] && fileExists( mainBackup ) )
+      {
+        removeFileQuiet( live[mainIdx].second );
+        if ( !moveFileQuiet( mainBackup, live[mainIdx].second ) )
+          throw GeoError( ErrorCode::IoError,
+                          "group publish failed at " + failedName +
+                              "; the previous main file could not be restored from " + mainBackup );
+      }
+      for ( std::size_t i = 0; i + 1 < live.size(); ++i )
+      {
+        const std::string backup = live[i].second + ".bak";
+        if ( hadTarget[i] && fileExists( backup ) )
+        {
+          removeFileQuiet( live[i].second );
+          moveFileQuiet( backup, live[i].second );
+        }
+      }
+    }
+    for ( const auto &m : live )
+      removeFileQuiet( m.second + ".bak" );
+    Json::Value details;
+    details["failed_member"] = failedName;
+    throw GeoError( ErrorCode::IoError, "group publish failed at " + failedName + "; target group rolled back", details );
+  };
+
+  for ( std::size_t i = 0; i < live.size(); ++i )
+  {
+    hadTarget[i] = fileExists( live[i].second );
+    if ( hadTarget[i] )
+    {
+      const std::string backup = live[i].second + ".bak";
+      removeFileQuiet( backup );
+      if ( !moveFileQuiet( live[i].second, backup ) )
+        cleanup( live[i].second );
+    }
+    try
+    {
+      publishStagedFile( live[i].first, live[i].second );
+    }
+    catch ( const GeoError & )
+    {
+      cleanup( live[i].second );
+    }
+    published.push_back( live[i].second );
+  }
+  for ( const auto &m : live )
+    removeFileQuiet( m.second + ".bak" );
+}
+
 void writeFileAtomic( const std::string &targetPath, const std::function<void( const std::string &stagedPath )> &writer )
 {
   const std::string staged = stagedPathFor( targetPath );
