@@ -238,6 +238,25 @@ bool denylistNameLooksSecret( const QString &name )
 {
     return nameLooksSecret( name );
 }
+
+/// Deep redaction for values reached through arrays, including arrays nested
+/// inside arrays — the capsule validator's scanTree recurses those shapes in
+/// full, so the redaction pass must not stop one level short of it (a
+/// parameter like {"layers": [[{"api_key": "..."}]]} would otherwise sail
+/// through every export boundary unredacted).
+QJsonValue redactValueDeep( const QJsonValue &value )
+{
+    if ( value.isObject() )
+        return RunEnvironment::redactSecretKeys( value.toObject() );
+    if ( value.isArray() )
+    {
+        QJsonArray redacted;
+        for ( const QJsonValue &item : value.toArray() )
+            redacted.append( redactValueDeep( item ) );
+        return redacted;
+    }
+    return value;
+}
 bool denylistValueLooksSecret( const QString &value )
 {
     return valueLooksSecret( value );
@@ -271,15 +290,7 @@ QJsonObject RunEnvironment::redactSecretKeys( const QJsonObject &json )
         }
         if ( value.isArray() )
         {
-            QJsonArray redactedArray;
-            for ( const QJsonValue &item : value.toArray() )
-            {
-                if ( item.isObject() )
-                    redactedArray.append( redactSecretKeys( item.toObject() ) );
-                else
-                    redactedArray.append( item );
-            }
-            out.insert( it.key(), redactedArray );
+            out.insert( it.key(), redactValueDeep( value ) );
             continue;
         }
         out.insert( it.key(), nameLooksSecret( it.key() ) ? QStringLiteral( "***" ) : value );
@@ -534,7 +545,7 @@ Result<ExperimentRun> ExperimentRun::fromJson( const QJsonObject &json )
         artifact.path = item.value( QStringLiteral( "path" ) ).toString();
         artifact.role = item.value( QStringLiteral( "role" ) ).toString();
         artifact.digest = item.value( QStringLiteral( "digest" ) ).toString();
-        artifact.sizeBytes = item.value( QStringLiteral( "size_bytes" ) ).toInt( -1 );
+        artifact.sizeBytes = item.value( QStringLiteral( "size_bytes" ) ).toInteger( -1 );
         run.m_artifacts.append( artifact );
     }
     run.m_metrics = json.value( QStringLiteral( "metrics" ) ).toObject();
