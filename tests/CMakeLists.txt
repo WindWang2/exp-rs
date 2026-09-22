@@ -11882,3 +11882,38 @@ target_include_directories(test_spectral_background_raster PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
 )
 sicnu_discover_tests(test_spectral_background_raster)
+
+# =============================================================================
+# RS14-01 Scientific Data Passport: unified scientific asset state layer.
+# Core contracts run in the jsoncpp-only lane (no Qt, no QGIS, no GDAL);
+# the GDAL facts collector gets its own io-lane target once it lands.
+# =============================================================================
+sicnu_add_sdk_test(test_scientific_state_core)
+target_link_libraries(test_scientific_state_core PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_resolver)
+target_link_libraries(test_scientific_state_resolver PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_geo)
+target_link_libraries(test_scientific_state_geo PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_provenance)
+target_link_libraries(test_scientific_state_provenance PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_diff)
+target_link_libraries(test_scientific_state_diff PRIVATE Sicnu::ScientificState)
+
+sicnu_add_sdk_test(test_scientific_state_teaching)
+target_link_libraries(test_scientific_state_teaching PRIVATE Sicnu::ScientificState)
+
+sicnu_add_io_test(test_scientific_state_gdal)
+target_link_libraries(test_scientific_state_gdal PRIVATE Sicnu::ScientificStateGdal)
+
+# RS14-01 Slice F4: catalog adapter — Qt lane (real DataManager + GDAL).
+sicnu_add_test(test_scientific_state_catalog)
+target_link_libraries(test_scientific_state_catalog PRIVATE
+  Sicnu::ScientificState
+  Sicnu::ScientificStateCatalog
+  Sicnu::ScientificStateGdal
+)
+set_target_properties(test_scientific_state_catalog PROPERTIES AUTOMOC ON)
+sicnu_add_sdk_test(test_scientific_state_fixtures)
+target_link_libraries(test_scientific_state_fixtures PRIVATE Sicnu::ScientificState)
+sicnu_add_sdk_test(test_scientific_state_review)
+target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificState)

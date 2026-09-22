@@ -1,0 +1,108 @@
+{
+  "acquisition": {},
+  "assumptions": [
+    "radiometric.unit assumed digital_number (missing marker; FSM default)"
+  ],
+  "bands": [
+    {
+      "data_type": "Float32",
+      "index": 1
+    }
+  ],
+  "claims": [
+    {
+      "kind": "unknown",
+      "path": "acquisition.time"
+    },
+    {
+      "kind": "unknown",
+      "path": "bands[1].role"
+    },
+    {
+      "kind": "unknown",
+      "path": "geometry.crs"
+    },
+    {
+      "kind": "assumed",
+      "note": "FSM default: missing marker means digital_number",
+      "path": "radiometric.unit"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.instrument"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.modality"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.platform"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.processing_level"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.product_family"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.product_id"
+    },
+    {
+      "kind": "unknown",
+      "path": "sensor.sensor_key"
+    },
+    {
+      "kind": "inferred",
+      "note": "0 of 1 bands declare a NoData value",
+      "path": "validity.no_data_policy"
+    }
+  ],
+  "confidence": 0.167,
+  "geometry": {
+    "height": 2,
+    "width": 2
+  },
+  "identity": {
+    "kind": "unknown",
+    "lifecycle": "unknown",
+    "source_path": "/home/kevin/project/exp-rs-wt-rs14-data-passport/build-rs14-passport/bare.tif"
+  },
+  "model_derived": {},
+  "notes": [
+    {
+      "code": "radiometric.fsm_default",
+      "detail": "no declared radiometric state; FSM default digital_number applied",
+      "path": "radiometric.unit"
+    }
+  ],
+  "provenance": {},
+  "radiometric": {
+    "unit": "digital_number"
+  },
+  "schema": "sicnu.asset_state.v1",
+  "sensor": {
+    "modality": "unknown"
+  },
+  "temporal": {
+    "refs": []
+  },
+  "unknowns": [
+    "acquisition.time",
+    "bands[1].role",
+    "geometry.crs",
+    "sensor.instrument",
+    "sensor.modality",
+    "sensor.platform",
+    "sensor.processing_level",
+    "sensor.product_family",
+    "sensor.product_id",
+    "sensor.sensor_key"
+  ],
+  "validity": {
+    "no_data_policy": "undeclared"
+  }
+}

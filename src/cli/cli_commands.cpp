@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "cli_commands.h"
 #include "cli_tool_commands.h"
+#include "cli_passport_commands.h"
 
 #include "cli_env_doctor.h"
 
@@ -2636,7 +2637,9 @@ bool isCliCommand( const QString &firstArg )
                                            // Deployment 11.0 (F19): first-run env self-check.
                                            "env-doctor",
                                            // Surface-11: union discovery + batch manifests.
-                                           "tools", "batch" };
+                                           "tools", "batch",
+                                           // RS14-01: read-only scientific asset passport.
+                                           "passport" };
     return kCommands.contains( firstArg );
 }
 
@@ -2678,6 +2681,8 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandEnvDoctor( std::move( args ), io );
     if ( command == "tools" )
         return commandTools( std::move( args ), io );
+    if ( command == "passport" )
+        return sicnu::cli::commandPassport( std::move( args ), io );
     if ( command == "batch" )
         return commandBatch( std::move( args ), io );
     if ( command == "catalog" )
