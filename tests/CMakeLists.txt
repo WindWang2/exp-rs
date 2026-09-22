@@ -12005,6 +12005,158 @@ target_include_directories(test_spectral_background_raster PRIVATE
 )
 sicnu_discover_tests(test_spectral_background_raster)
 
+# RS14 suitability assessor tests (pure science-core leaf; no qgis/gdal).
+qt_add_executable(test_suitability_core
+  test_suitability_core.cpp
+)
+target_link_libraries(test_suitability_core PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_core)
+
+qt_add_executable(test_suitability_spatial
+  test_suitability_spatial.cpp
+)
+target_link_libraries(test_suitability_spatial PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_spatial PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_spatial)
+
+qt_add_executable(test_suitability_spectral
+  test_suitability_spectral.cpp
+)
+target_link_libraries(test_suitability_spectral PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_spectral PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_spectral)
+
+qt_add_executable(test_suitability_temporal
+  test_suitability_temporal.cpp
+)
+target_link_libraries(test_suitability_temporal PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_temporal PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_temporal)
+
+qt_add_executable(test_suitability_labels
+  test_suitability_labels.cpp
+)
+target_link_libraries(test_suitability_labels PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_labels PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_labels)
+
+qt_add_executable(test_suitability_store_provider
+  test_suitability_store_provider.cpp
+)
+target_link_libraries(test_suitability_store_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_suitability_store_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_store_provider)
+
+qt_add_executable(test_suitability_profiles
+  test_suitability_profiles.cpp
+)
+target_link_libraries(test_suitability_profiles PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_profiles PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_profiles)
+
+qt_add_executable(test_suitability_adversarial
+  test_suitability_adversarial.cpp
+)
+target_link_libraries(test_suitability_adversarial PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_suitability_adversarial PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_adversarial)
+
+qt_add_executable(test_suitability_uncertainty
+  test_suitability_uncertainty.cpp
+)
+target_link_libraries(test_suitability_uncertainty PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_uncertainty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_uncertainty)
+
+qt_add_executable(test_suitability_teaching
+  test_suitability_teaching.cpp
+)
+target_link_libraries(test_suitability_teaching PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_teaching PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_teaching)
+
+# RS14 Slice H3: the suitability agent adapter lives INSIDE sicnu_suitability
+# precisely so this suite needs no qgis/agent link; the agent-side dispatch
+# shell in data_platform_tools.cpp forwards here (surface parity is covered by
+# the existing test_surface_parity suite; capability-drift files are
+# deliberately untouched — #1151 avoidance).
+qt_add_executable(test_suitability_agent_tools
+  test_suitability_agent_tools.cpp
+)
+target_link_libraries(test_suitability_agent_tools PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_agent_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_agent_tools)
 # =============================================================================
 # RS14-01 Scientific Data Passport: unified scientific asset state layer.
 # Core contracts run in the jsoncpp-only lane (no Qt, no QGIS, no GDAL);

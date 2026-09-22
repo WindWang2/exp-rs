@@ -254,6 +254,7 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_operators
   Sicnu::dataset
   Sicnu::experiment
+  Sicnu::suitability
   Sicnu::experiment_bridge
   sicnu_workflow
   Sicnu::help

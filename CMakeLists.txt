@@ -747,6 +747,9 @@ add_subdirectory(src/grader)
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
 # link Sicnu::dataset / Sicnu::experiment.
 add_subdirectory(src/dataset)
+# Scene/Dataset Suitability Assessor (RS14): goal-vs-data fit report before any
+# compute. Pure science-core leaf over Sicnu::data/Sicnu::dataset vocabulary.
+add_subdirectory(src/suitability)
 add_subdirectory(src/experiment)
 # Parameter Sensitivity & Uncertainty Studio (RS14-07): studies the existing
 # experiment/execution authorities — never a second store or scheduler.

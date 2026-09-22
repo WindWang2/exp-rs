@@ -1,0 +1,57 @@
+#pragma once
+
+// suitability_assessor.h — the assess entry point: goal + subject in,
+// versioned report out.
+//
+// The assessor is a pure function over its inputs: it opens nothing and
+// injects nothing. Failure modes are typed (never silent truncation or a
+// guessed subject).
+
+#include "../data/data_result.h"
+#include "dataset_facts.h"
+#include "scene_candidate.h"
+#include "suitability_goal.h"
+#include "suitability_report.h"
+
+#include <QString>
+#include <QVector>
+
+#include <optional>
+
+namespace sicnu::suitability
+{
+
+class SuitabilityDataProvider;
+
+class SuitabilityAssessor
+{
+    public:
+        /// Upper bound on scenes per assessment; the rectangle-union and
+        /// sweep budgets are sized for this cap. Callers pre-filter or sample.
+        static inline constexpr int kMaxScenes = 1000;
+
+        struct Inputs
+        {
+            SuitabilityGoal goal;
+            QVector<SceneCandidate> scenes;
+            /// Optional dataset statistics; fuses with @p scenes as evidence.
+            std::optional<DatasetFacts> facts;
+            /// Optional subject identifier when assessing a dataset version.
+            QString datasetVersionId;
+            /// Optional facts channel. Consulted only when no explicit facts
+            /// were given and a dataset version names the subject; a provider
+            /// failure is typed upward — a named dataset is never silently
+            /// assessed without its facts. Not owned.
+            const SuitabilityDataProvider *provider = nullptr;
+        };
+
+        /// Typed failures: goal resolution failures pass through unchanged
+        /// ("suitability.goal_invalid"/"suitability.profile_unknown"),
+        /// "suitability.too_many_scenes" above kMaxScenes, and
+        /// "suitability.empty_subject" when neither scenes nor a
+        /// datasetVersionId nor dataset facts (with identity) nor an AOI
+        /// identifies anything to assess.
+        static sicnu::data::Result<SuitabilityReport> assess( const Inputs &inputs );
+};
+
+} // namespace sicnu::suitability

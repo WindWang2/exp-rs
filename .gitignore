@@ -140,6 +140,10 @@ vendor/
 !.planning/lab-spec-data-driven/
 .planning/lab-spec-data-driven/*
 !.planning/lab-spec-data-driven/*.md
+# RS14 scene-suitability track planning notes (markdown only).
+!.planning/RS14-16-scene-suitability/
+.planning/RS14-16-scene-suitability/*
+!.planning/RS14-16-scene-suitability/*.md
 # Fault injection lab track planning notes (RS14-13; markdown only).
 !.planning/RS14-13-fault-injection-labs/
 .planning/RS14-13-fault-injection-labs/*
