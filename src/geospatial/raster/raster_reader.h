@@ -48,6 +48,14 @@ inline bool operator==( const RasterWindow &a, const RasterWindow &b )
 /// not intersect the raster at all (out of bounds on any side).
 bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window );
 
+/// The one NoData comparison authority: reports whether `value` matches the
+/// band's declared sentinel, in the band's STORAGE precision (#874 — Float32
+/// bands compare after narrowing both sides) and NaN-exact for NaN sentinels
+/// (`NaN == NaN` is false, so a bare `==` never matches them). Window reads
+/// return stored values, so callers scatter/filtering on declared NoData must
+/// go through this instead of a raw comparison.
+bool bandSentinelMatches( const BandInfo &info, double value );
+
 /// Overview selection policy (5.0). Algorithms default to `Exact` — a
 /// silently-sampled overview is a wrong-answer factory. Preview/UI surfaces
 /// may opt into `Nearest` explicitly; `Auto` defers to the driver.

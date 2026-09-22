@@ -278,3 +278,72 @@ TEST_CASE( "offline refusal and cached-path helpers follow the layer contracts",
   RemoteRangeCache::uninstall();
   CHECK( RemoteRangeCache::installed() == false );
 }
+
+TEST_CASE( "nested credential windows hand the cache fingerprint back to the outer window",
+           "[io][fabric][object_store][identity]" )
+{
+  // Exact restore, same discipline as the config-key journal: closing the
+  // inner window must restore the still-open outer window's OWN fingerprint.
+  // Resetting to the empty context silently re-keys the outer principal's
+  // fetches into the shared (context-less) keyspace — the cross-principal
+  // merge D-1102 exists to prevent.
+  ObjectStoreCredentials outerCreds;
+  outerCreds.accessKeyId = "AKIA_TEST_OUTER";
+  outerCreds.secretAccessKey = "outer-secret";
+  outerCreds.region = "us-west-2a";
+  ObjectStoreCredentials innerCreds;
+  innerCreds.accessKeyId = "AKIA_TEST_INNER";
+  innerCreds.secretAccessKey = "inner-secret";
+  innerCreds.region = "us-west-2a";
+
+  const std::string outerContext = objectStoreCredentialContext( "/vsis3/", outerCreds );
+  const std::string innerContext = objectStoreCredentialContext( "/vsis3/", innerCreds );
+  REQUIRE( !outerContext.empty() );
+  REQUIRE( outerContext != innerContext );
+  REQUIRE( currentRangeCacheCredentialContext().empty() );
+
+  {
+    ScopedObjectStoreCredentials outer( "/vsis3/", outerCreds );
+    CHECK( currentRangeCacheCredentialContext() == outerContext );
+    {
+      ScopedObjectStoreCredentials inner( "/vsis3/", innerCreds );
+      CHECK( currentRangeCacheCredentialContext() == innerContext );
+    }
+    // The outer window is still open and must still be keyed as itself.
+    CHECK( currentRangeCacheCredentialContext() == outerContext );
+  }
+  CHECK( currentRangeCacheCredentialContext().empty() );
+  CHECK( activeScopedCredentialWindows() == 0 );
+}
+
+TEST_CASE( "closing the LAST credential window always lands the context at empty",
+           "[io][fabric][object_store][identity]" )
+{
+  // Non-LIFO interleaving (outside the D-1003 contract, but it must not
+  // REGRESS): A opens, B opens, A closes, B closes. B's exact-restore would
+  // pin A's fingerprint — a principal with no live window — into the
+  // process-global context, merging every later unwindowed fetch into A's
+  // cache partition. The at-rest answer is the shared empty context.
+  ObjectStoreCredentials credsA;
+  credsA.accessKeyId = "AKIA_TEST_A";
+  credsA.secretAccessKey = "a-secret";
+  credsA.region = "us-west-2a";
+  ObjectStoreCredentials credsB;
+  credsB.accessKeyId = "AKIA_TEST_B";
+  credsB.secretAccessKey = "b-secret";
+  credsB.region = "us-west-2a";
+  const std::string contextA = objectStoreCredentialContext( "/vsis3/", credsA );
+  const std::string contextB = objectStoreCredentialContext( "/vsis3/", credsB );
+  REQUIRE( contextA != contextB );
+
+  ScopedObjectStoreCredentials *a = new ScopedObjectStoreCredentials( "/vsis3/", credsA );
+  {
+    ScopedObjectStoreCredentials b( "/vsis3/", credsB );
+    CHECK( currentRangeCacheCredentialContext() == contextB );
+    delete a;   // A closes while B is live: B stays keyed as itself
+    CHECK( currentRangeCacheCredentialContext() == contextB );
+  }
+  // B was the LAST window: at rest the context must be empty, never A's.
+  CHECK( currentRangeCacheCredentialContext().empty() );
+  CHECK( activeScopedCredentialWindows() == 0 );
+}

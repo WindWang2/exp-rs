@@ -224,6 +224,9 @@ class ScopedObjectStoreCredentials
     std::string mOwnContext;                          ///< cache-context fingerprint
                                                       ///< this window installed
                                                       ///< (D-1102)
+    std::string mPriorContext;                        ///< cache-context fingerprint
+                                                      ///< live before this window
+                                                      ///< opened (exact restore)
 };
 
 /// Diagnostic count of currently-open credential windows (tests observe

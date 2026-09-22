@@ -478,6 +478,7 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
   // account are never served to another. The fingerprint is a non-secret
   // shape hash; nothing credential-shaped ever leaves this call.
   mOwnContext = objectStoreCredentialContext( vsiPrefix, credentials );
+  mPriorContext = currentRangeCacheCredentialContext();
   setRangeCacheCredentialContext( mOwnContext );
 }
 
@@ -500,10 +501,19 @@ ScopedObjectStoreCredentials::~ScopedObjectStoreCredentials()
     VSICurlClearCache();
   // Drop OUR fingerprint only (nested/overlapping windows are outside the
   // D-1003 contract, but clearing unconditionally would yank a live
-  // sibling's context out from under it).
+  // sibling's context out from under it). Exact restore, like the config
+  // journal above: a still-open OUTER window gets its own fingerprint back —
+  // resetting to empty would re-key the outer principal's fetches into the
+  // shared context-less keyspace, the cross-principal merge D-1102 forbids.
+  // When this is the LAST window there is no sibling left to hand anything
+  // to: restoring a (possibly already-closed) prior principal's fingerprint
+  // would pin it into the process-global context for every later unwindowed
+  // fetch — also a cross-context merge — so the at-rest answer is empty.
   const std::string current = currentRangeCacheCredentialContext();
   if ( !mOwnContext.empty() && current == mOwnContext )
-    setRangeCacheCredentialContext( std::string() );
+    setRangeCacheCredentialContext( gActiveCredentialWindows.load() == 1
+                                      ? std::string()
+                                      : mPriorContext );
   gActiveCredentialWindows.fetch_sub( 1 );
 }
 

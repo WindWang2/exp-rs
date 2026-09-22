@@ -106,7 +106,9 @@ bool extractNextLink( const Json::Value &document, std::string &method, std::str
       body = link["body"];
     // "merge": the body is a DELTA over the original request body (STAC API
     // spec) — the caller merges before sending. Absent/false replaces it.
-    merge = link.isMember( "merge" ) && link["merge"].asBool();
+    // Non-bool merge is inert (asBool throws Json::LogicError on strings and
+    // objects, and a hostile link must not abort the walk).
+    merge = link.isMember( "merge" ) && link["merge"].isBool() && link["merge"].asBool();
     return true;
   }
   return false;
@@ -259,8 +261,12 @@ void stampItemProvenance( StacItem &item, const std::string &url )
   {
     for ( const Json::Value &link : links )
     {
-      if ( link.isObject() && link.isMember( "rel" ) && link["rel"].asString() == "self"
-           && link.isMember( "href" ) && link["href"].isString() )
+      // Foreign-typed rel/href are inert (extractNextLink doctrine): asString
+      // on an object/array throws Json::LogicError — a plain std::exception
+      // the search walk never catches — so one poisoned link must never be
+      // able to kill the whole page parse.
+      if ( link.isObject() && link["rel"].isString() && link["rel"].asString() == "self"
+           && link["href"].isString() )
       {
         item.sourceHref = resolveReference( url, link["href"].asString() );
         return;

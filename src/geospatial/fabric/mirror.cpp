@@ -29,6 +29,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -1028,6 +1029,14 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
   } finalFlushGuard{ [ & ] { flushManifest( manifest, /*force=*/true ); } };
 
   std::size_t chunkWindow = options.chunkWindow == 0 ? 64 : options.chunkWindow;
+  // Asset hints resolve through one map built per walk (same shape as the
+  // prefetch/query-planner byId maps) — a linear cube.assets() scan per
+  // chunk is O(chunks × assets) and dwarfs the chunk work on wide plans.
+  std::unordered_map<std::string, const VirtualCubeAssetIndexEntry *> assetsById;
+  assetsById.reserve( cube.assetCount() );
+  for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
+    assetsById.emplace( entry.record.id, &entry );
+
   for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
   {
     if ( cancel.cancelled() )
@@ -1053,12 +1062,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
 
       // Resolve the hinted asset (the FirstWins owner of this time step).
       const VirtualCubeAssetIndexEntry *asset = nullptr;
-      for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
-        if ( entry.record.id == request.assetIdHint )
-        {
-          asset = &entry;
-          break;
-        }
+      {
+        const auto found = assetsById.find( request.assetIdHint );
+        if ( found != assetsById.end() )
+          asset = found->second;
+      }
       if ( asset == nullptr )
       {
         outcome.status = "failed";
@@ -1232,11 +1240,18 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           written = static_cast<std::uint64_t>( size );
         } );
 
-        Json::Value entry = manifest[token];
-        entry[key]["file"] = key + ".tif";
-        entry[key]["bytes"] = static_cast<Json::UInt64>( written );
-        entry[key]["assetId"] = asset->record.id;
-        entry[key]["window"] = [ & ] {
+        // The chunk's entry is assembled in a local and attached to the
+        // token's map in ONE move AFTER the payload proof: an in-place
+        // partial write here used to leave a sha256-less entry behind when
+        // the hash threw — replay would then (correctly) treat the chunk as
+        // corrupt while the already-present check kept any later pass from
+        // repairing it. Still O(1) per chunk — the quadratic cost was
+        // copying the token's whole map per chunk, not building one entry.
+        Json::Value chunk;
+        chunk["file"] = key + ".tif";
+        chunk["bytes"] = static_cast<Json::UInt64>( written );
+        chunk["assetId"] = asset->record.id;
+        chunk["window"] = [ & ] {
           Json::Value w( Json::arrayValue );
           w.append( sourceWindow.xOff );
           w.append( sourceWindow.yOff );
@@ -1244,14 +1259,17 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           w.append( sourceWindow.height );
           return w;
         }();
-        entry[key]["timeUtc"] = request.timeUtc;
+        chunk["timeUtc"] = request.timeUtc;
         // 11.0 integrity checksum: replay can demand a payload proof before
         // serving (size checks are cheap; this is the strong form).
-        entry[key]["sha256"] = fileSha256Hex( target );
+        chunk["sha256"] = fileSha256Hex( target );
         // 12.0 materialization stamp (additive): prune's age basis. Entries
         // written before 12.0 lack it and simply never age-expire.
-        entry[key]["writtenUtc"] = nowIso8601Utc();
-        manifest[token] = entry;
+        chunk["writtenUtc"] = nowIso8601Utc();
+        Json::Value &entry = manifest[token];   // attach in place — never copy
+        // the token's whole chunk map out and back in per chunk (that was
+        // O(chunks²) of JSON node copies on one-asset mirrors).
+        entry[key] = std::move( chunk );
 
         // Throttled flush (11.0): the manifest publishes after every 32nd
         // mirrored chunk and unconditionally at the end of the walk.

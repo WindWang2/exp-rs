@@ -242,12 +242,17 @@ bool recordMatchesBbox( const AssetRecord &record, const CatalogQuery &query )
 {
   if ( query.bbox.empty() )
     return true;
-  if ( query.bbox.size() != 4 )
-    return true;   // 3D bboxes: spatial filter degrades to 2D below via validate()
+  if ( query.bbox.size() != 4 && query.bbox.size() != 6 )
+    return true;   // foreign shapes are validate()'s to refuse
+  // STAC bbox order is [w,s,e,n] or [w,s,minZ,e,n,maxZ] — the horizontal
+  // extent of a 6-value bbox lives at indices 0/1/3/4 (asset_query
+  // doctrine). A legal 3D query must keep its spatial arm on the record
+  // backends; otherwise the remote arm filters while the local arm does not.
+  const std::size_t eastIndex = query.bbox.size() == 6 ? 3 : 2;
   if ( !record.hasBbox )
     return false;
-  return record.maxX >= query.bbox[0] && record.minX <= query.bbox[2] &&
-         record.maxY >= query.bbox[1] && record.minY <= query.bbox[3];
+  return record.maxX >= query.bbox[0] && record.minX <= query.bbox[eastIndex] &&
+         record.maxY >= query.bbox[1] && record.minY <= query.bbox[eastIndex + 1];
 }
 
 /// The one filter entry point over records (all backends).
@@ -314,11 +319,14 @@ void CatalogQuery::validate() const
                       std::to_string( bbox.size() ) );
   if ( bbox.size() >= 4 )
   {
-    // Horizontal bounds in the STAC order [w,s,e,n]: west/east and
-    // south/north must not cross (a 3D slice validates like a 2D one).
+    // Horizontal bounds in the STAC order [w,s,e,n] (+ [minZ,maxZ] in 3D):
+    // west/east and south/north must not cross. The east slot is 3 for a
+    // 6-value bbox — index 2 is minZ there, so comparing west against it
+    // used to reject legal 3D queries whose west bound sits above zero.
+    const double east = bbox[bbox.size() == 6 ? 3 : 2];
     const double minY = bbox[1];
     const double maxY = bbox[bbox.size() == 6 ? 4 : 3];
-    if ( bbox[0] > bbox[2] || minY > maxY )
+    if ( bbox[0] > east || minY > maxY )
       throw GeoError( ErrorCode::InvalidArgument, "catalog query bbox bounds cross" );
   }
   if ( !temporalStartUtc.empty() )
