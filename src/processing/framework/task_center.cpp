@@ -2224,6 +2224,7 @@ void TaskCenter::forgetDerivedTaskStateLocked( long taskId )
     dropReadyCandidateLocked( taskId );
     m_incompleteParentCount.remove( taskId );
     m_manualQueued.removeAll( taskId );
+    m_fusedChains.remove( taskId );
 }
 
 /// Reviewed P2 fix: drops estimate/dims cache entries ONLY for tasks that
@@ -3240,6 +3241,14 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
                 info.errorMessage = strandedReason;
                 info.endTime = QDateTime::currentDateTimeUtc();
                 info.logBuffer.append( strandedReason );
+                // Drop the listener map immediately — waiting for
+                // clearCompletedTasks leaked jobId→taskId for the lifetime of
+                // the terminal task entry.
+                if ( !info.jobId.empty() )
+                {
+                    m_taskByJobId.remove( info.jobId );
+                    info.jobId.clear();
+                }
                 updatePipelineForTaskLocked( targetId );
                 queueTaskUpdatedLocked( targetId );
                 fireCallbacks = true;
@@ -3460,6 +3469,9 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             info.cancelRequestStamp = {};
             info.cancelDeadline = {};
             info.cancelReason = TaskCancelReason::None;
+            // Fresh attempt: clear the prior run's start stamp so ExecutionEnd
+            // telemetry measures this retry, not wall time since first attempt.
+            info.runStartStamp = {};
             if ( !deadJobId.empty() )
                 m_taskByJobId.remove( deadJobId );
             // The retried run records fresh identity: drop the failed
@@ -4158,8 +4170,26 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                                            findOutputPathInParams( params ) );
         }
 
-        // Phase C: bind the fused head to its member tasks so completion of
-        // the head completes the members with the tail payload.
+        if ( pipeInfo.stepToTaskId.isEmpty() )
+        {
+            pipeInfo.isCompleted = true;
+            if ( def.steps.empty() )
+            {
+                pipeInfo.isFailed = false;
+            }
+            else
+            {
+                pipeInfo.isFailed = true;
+                pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
+            }
+            m_pipelines[pipelineId] = pipeInfo;
+            m_waitCondition.wakeAll();
+            return pipelineId;
+        }
+
+        // Phase C: bind the fused head only after the pipeline has dispatchable
+        // steps — binding before the empty-step failure return leaked entries
+        // in m_fusedChains for failed fused heads.
         if ( fusedPlan.stepIds.size() >= 2 )
         {
             FusedChainBinding binding;
@@ -4177,23 +4207,6 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 if ( headTaskId > 0 )
                     m_fusedChains[headTaskId] = binding;
             }
-        }
-
-        if ( pipeInfo.stepToTaskId.isEmpty() )
-        {
-            pipeInfo.isCompleted = true;
-            if ( def.steps.empty() )
-            {
-                pipeInfo.isFailed = false;
-            }
-            else
-            {
-                pipeInfo.isFailed = true;
-                pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
-            }
-            m_pipelines[pipelineId] = pipeInfo;
-            m_waitCondition.wakeAll();
-            return pipelineId;
         }
 
         m_pipelines[pipelineId] = pipeInfo;

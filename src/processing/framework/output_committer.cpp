@@ -174,15 +174,11 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
   // Supports cross-filesystem boundaries (QFile::rename fallback to copy+remove).
   // A failure midway rolls everything back to keep the stable tree free of
   // half-published datasets.
-  auto moveOrCopy = []( const QString &from, const QString &to ) -> bool {
-    if ( QFile::rename( from, to ) )
-      return true;
-    if ( QFile::copy( from, to ) )
-    {
-      QFile::remove( from );
-      return true;
-    }
-    return false;
+  // Always COPY into staging so a mid-group failure leaves the just-computed
+  // temp in place for diagnosis (documented contract). Temps are removed only
+  // after the full publish group succeeds.
+  auto stageTo = []( const QString &from, const QString &to ) -> bool {
+    return QFile::copy( from, to );
   };
 
   const bool isInPlace = ( request.tempPath == request.stablePath )
@@ -221,7 +217,7 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
         publishOk = false;
         break;
       }
-      if ( !moveOrCopy( pair.from, staging ) || !QFile::rename( staging, pair.to ) )
+      if ( !stageTo( pair.from, staging ) || !QFile::rename( staging, pair.to ) )
       {
         publishOk = false;
         // A failed cross-filesystem copy can leave a partial <stable>.new
@@ -240,7 +236,8 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
     if ( !publishOk )
     {
       // Roll back already-published pairs: remove the new file, restore the
-      // .old backup - the pre-commit stable state survives intact.
+      // .old backup - the pre-commit stable state survives intact. Temps that
+      // were only copied (not renamed) remain for diagnosis.
       for ( int i = stagedOld.size() - 1; i >= 0; --i )
       {
         QFile::remove( published[i] );
@@ -251,6 +248,12 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
         QStringLiteral( "output.publish_failed" ),
         QStringLiteral( "Failed to publish output to %1" )
           .arg( request.stablePath ) ) );
+    }
+    // Full publish succeeded — consume temps (rename already did; copy left them).
+    for ( const PublishPair &pair : publishes )
+    {
+      if ( QFile::exists( pair.from ) )
+        QFile::remove( pair.from );
     }
   }
 
