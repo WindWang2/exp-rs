@@ -756,6 +756,11 @@ add_subdirectory(src/study)
 # projections). Qt-core leaf over Sicnu::data; reads authoritative catalogs
 # through narrow source interfaces, never links the app/operator layers.
 add_subdirectory(src/help)
+# Explainable Scientific Workflow (RS14-15, ADR 0167): per-step explanation
+# schema, authored-guidance store, builder and hallucination-guard validator.
+# Pure C++20 + jsoncpp leaf; authoritative facts enter through narrow source
+# interfaces implemented by src/explain/adapters (added after src/workflow).
+add_subdirectory(src/explain)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
