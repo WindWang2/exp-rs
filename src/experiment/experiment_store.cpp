@@ -135,8 +135,32 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
     m_storePath = dbPath;
     if ( !m_impl->exec( "PRAGMA journal_mode=WAL", errorOut ) ||
          !m_impl->exec( "PRAGMA synchronous=NORMAL", errorOut ) ||
-         !m_impl->exec( "PRAGMA busy_timeout=5000", errorOut ) ||
-         !m_impl->exec(
+         !m_impl->exec( "PRAGMA busy_timeout=5000", errorOut ) )
+    {
+        close();
+        return false;
+    }
+    // Schema gate BEFORE DDL (read-only forward tolerance must not mutate a
+    // newer store via CREATE TABLE IF NOT EXISTS / index rebuilds).
+    {
+        QMutexLocker lock( &m_impl->mutex );
+        Stmt stmt( db, QStringLiteral( "SELECT value FROM exp_meta WHERE key='schema_version'" ) );
+        if ( stmt && stmt.stepRow() )
+        {
+            const QString existing = stmt.text( 0 );
+            if ( !existing.isEmpty()
+                 && existing != QLatin1String( kExperimentStoreSchemaVersion ) )
+            {
+                m_impl->readOnly = true;
+                if ( errorOut )
+                    *errorOut = QStringLiteral(
+                        "experiment schema %1 is newer than supported (%2); opened read-only" )
+                                    .arg( existing, QLatin1String( kExperimentStoreSchemaVersion ) );
+                return true;
+            }
+        }
+    }
+    if ( !m_impl->exec(
              "CREATE TABLE IF NOT EXISTS exp_meta("
              "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
              errorOut ) ||
@@ -235,30 +259,27 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
         return false;
     }
 
-    QString existing;
+    // Stamp schema version when missing (fresh / pre-version stores only —
+    // newer schemas already returned read-only above).
     {
         QMutexLocker lock( &m_impl->mutex );
         Stmt stmt( db, QStringLiteral( "SELECT value FROM exp_meta WHERE key='schema_version'" ) );
-        if ( stmt && stmt.stepRow() )
-            existing = stmt.text( 0 );
-    }
-    if ( existing.isEmpty() )
-    {
-        if ( !m_impl->exec(
-                 QStringLiteral(
-                     "INSERT OR REPLACE INTO exp_meta(key,value) VALUES('schema_version','%1')" )
-                     .arg( kExperimentStoreSchemaVersion )
-                     .toUtf8()
-                     .constData(),
-                 errorOut ) )
+        const bool have = stmt && stmt.stepRow() && !stmt.text( 0 ).isEmpty();
+        if ( !have )
         {
-            close();
-            return false;
+            lock.unlock();
+            if ( !m_impl->exec(
+                     QStringLiteral(
+                         "INSERT OR REPLACE INTO exp_meta(key,value) VALUES('schema_version','%1')" )
+                         .arg( kExperimentStoreSchemaVersion )
+                         .toUtf8()
+                         .constData(),
+                     errorOut ) )
+            {
+                close();
+                return false;
+            }
         }
-    }
-    else if ( existing != QLatin1String( kExperimentStoreSchemaVersion ) )
-    {
-        m_impl->readOnly = true;
     }
     return true;
 }
@@ -449,6 +470,27 @@ sicnu::data::Result<void> ExperimentStore::deleteExperiment( const QString &expe
             return ResultT::failure( storeDiag(
                 QStringLiteral( "experiment.delete_refused" ),
                 QStringLiteral( "experiment %1 still has runs" ).arg( experimentId ) ) );
+        }
+    }
+    {
+        // Drop lineage edges that name this experiment so deleteExperiment
+        // does not leave dangling experiment_lineage rows.
+        Stmt edges( m_impl->db, QStringLiteral(
+            "DELETE FROM experiment_lineage WHERE (from_kind='experiment' AND from_id=?)"
+            " OR (to_kind='experiment' AND to_id=?)" ) );
+        if ( !edges )
+        {
+            m_impl->rollback();
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                edges.error( m_impl->db ) ) );
+        }
+        edges.bind( 1, experimentId );
+        edges.bind( 2, experimentId );
+        if ( !edges.step() )
+        {
+            m_impl->rollback();
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                                edges.error( m_impl->db ) ) );
         }
     }
     Stmt stmt( m_impl->db, QStringLiteral( "DELETE FROM experiments WHERE id=?" ) );
@@ -1046,12 +1088,12 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
 qint64 ExperimentStore::runCount() const
 {
     if ( !m_impl )
-        return 0;
+        return -1; // closed store: fail closed (was 0, which looked empty)
     QMutexLocker lock( &m_impl->mutex );
     Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM experiment_runs" ) );
     if ( count && count.stepRow() )
         return count.i64( 0 );
-    return 0;
+    return -1; // query error: fail closed, not "empty"
 }
 
 QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
@@ -1067,33 +1109,58 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
         return ids;
     limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
     QMutexLocker lock( &m_impl->mutex );
+    // One deferred read transaction so OFFSET pages share a single snapshot
+    // under concurrent writers (skip/dup risk with per-page implicit snapshots).
+    m_impl->exec( "BEGIN", nullptr );
     constexpr qint64 kPage = 200;
-    qint64 offset = 0;
+    qint64 lastCreatedMs = 0;
+    QString lastRunId;
+    bool pastFirstPage = false;
+    // Keyset pagination after the first page: (created_ms, run_id) avoids
+    // OFFSET drift entirely under concurrent writers.
     while ( qint64( ids.size() ) < limit )
     {
-        Stmt stmt( m_impl->db, QStringLiteral(
-            "SELECT run_id, json FROM experiment_runs ORDER BY created_ms, run_id"
-            " LIMIT ? OFFSET ?" ) );
+        Stmt stmt( m_impl->db,
+                   !pastFirstPage
+                       ? QStringLiteral(
+                             "SELECT run_id, json, created_ms FROM experiment_runs"
+                             " ORDER BY created_ms, run_id LIMIT ?" )
+                       : QStringLiteral(
+                             "SELECT run_id, json, created_ms FROM experiment_runs"
+                             " WHERE (created_ms > ?) OR (created_ms = ? AND run_id > ?)"
+                             " ORDER BY created_ms, run_id LIMIT ?" ) );
         if ( !stmt )
             break;
-        stmt.bind( 1, kPage );
-        stmt.bind( 2, offset );
+        if ( !pastFirstPage )
+        {
+            stmt.bind( 1, kPage );
+        }
+        else
+        {
+            stmt.bind( 1, lastCreatedMs );
+            stmt.bind( 2, lastCreatedMs );
+            stmt.bind( 3, lastRunId );
+            stmt.bind( 4, kPage );
+        }
         bool pageEmpty = true;
+        int rows = 0;
         while ( stmt.stepRow() )
         {
             pageEmpty = false;
-            // Structured member read (#1056): a raw substring needle never
-            // matches refs whose characters JSON escaping rewrites (quotes,
-            // backslashes, control chars), so one execution could silently
-            // record duplicate runs. Parse each row and compare the member.
+            ++rows;
+            lastRunId = stmt.text( 0 );
+            lastCreatedMs = stmt.i64( 2 );
             const QJsonObject row = textToJson( stmt.text( 1 ) );
             if ( row.value( QStringLiteral( "execution_ref" ) ).toString() == executionRef )
-                ids.append( stmt.text( 0 ) );
+                ids.append( lastRunId );
+            if ( qint64( ids.size() ) >= limit )
+                break;
         }
-        if ( pageEmpty )
+        if ( pageEmpty || rows < kPage )
             break;
-        offset += kPage;
+        pastFirstPage = true;
     }
+    m_impl->exec( "COMMIT", nullptr );
     return ids;
 }
 

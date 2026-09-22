@@ -373,7 +373,17 @@ Result<QString> ExperimentRunBridge::handleExecutionEvent( const ExecutionEvent 
         // thousands of executions in one process does not need its oldest
         // warm entries (they fall back to the store's cold-path scan).
         if ( m_runIdByExecution.size() >= kMaxLiveRefs )
-            m_runIdByExecution.clear();
+        {
+            // Evict half (hash iteration order) instead of clear-all — avoids
+            // an O(n) cold re-warm storm on the next ~10k events.
+            int remaining = m_runIdByExecution.size() / 2;
+            for ( auto it = m_runIdByExecution.begin();
+                  it != m_runIdByExecution.end() && remaining > 0; )
+            {
+                it = m_runIdByExecution.erase( it );
+                --remaining;
+            }
+        }
         m_runIdByExecution.insert( event.executionRef, started.value() );
         m_pinsByExecution.remove( event.executionRef );
         return started;
