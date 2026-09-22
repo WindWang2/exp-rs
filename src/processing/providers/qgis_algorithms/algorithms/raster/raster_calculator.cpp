@@ -13,6 +13,8 @@
 #include <qgscoordinatereferencesystem.h>
 
 #include <processing/algorithms/band_math.h>
+#include <processing/gdal/gdal_dataset_wrapper.h>
+#include <processing/gdal/staged_raster_output.h>
 
 #include <gdal.h>
 #include <cpl_conv.h>
@@ -38,7 +40,14 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     if ( expression.isEmpty() )
         throw QgsProcessingException( QObject::tr( "Expression is empty" ) );
 
-    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    // Stage beside the destination, publish atomically on success: a failed
+    // or cancelled run can neither leave a partial product at the destination
+    // nor destroy the previous result there (#617).
+    const QString destTarget = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    auto staged = sicnu::processing::makeStagedRasterOutput( destTarget );
+    if ( !staged )
+        throw QgsProcessingException( QObject::tr( "Could not allocate a staging path next to %1" ).arg( destTarget ) );
+    const QString dest = staged->stagedPath();
 
     feedback->setProgressText( QObject::tr( "Evaluating raster expression..." ) );
 
@@ -181,11 +190,27 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
         }
     }
 
-    GDALClose( outDs );
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): the per-row GF_Write checks only covered the
+    // driver's cache. A failed final flush must fail the run and remove the
+    // partial output, never report success (#617, #1043 contract).
+    QString closeError;
+    if ( !closeDatasetFailClosed( outDs, &closeError ) )
+    {
+        VSIUnlink( dest.toUtf8().constData() );
+        throw QgsProcessingException( closeError.isEmpty()
+                                          ? QObject::tr( "Failed to flush output raster %1" ).arg( destTarget )
+                                          : closeError );
+    }
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish output raster %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 
     QVariantMap results;
-    results[QStringLiteral( "OUTPUT" )] = dest;
+    results[QStringLiteral( "OUTPUT" )] = destTarget;
     return results;
 }

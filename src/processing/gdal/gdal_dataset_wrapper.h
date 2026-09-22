@@ -40,6 +40,17 @@ GDALDatasetH createOutputTiff(const QString &path,
                                QString *errorMessage = nullptr);
 
 /**
+ * Close a raw GDAL dataset handle and surface deferred flush/write failures
+ * (e.g. ENOSPC while the GTiff driver flushes edge tiles during GDALClose).
+ * The same fail-closed contract as GdalDatasetWrapper::closeWithError, for
+ * call sites that own a raw GDALDatasetH. The handle is always consumed.
+ * @param dataset      Handle to close (nullptr is a no-op that succeeds)
+ * @param errorMessage If non-null, receives the error description on failure
+ * @return true when the close flushed cleanly, false on a deferred failure
+ */
+bool closeDatasetFailClosed(GDALDatasetH dataset, QString *errorMessage = nullptr);
+
+/**
  * Geotransform and projection info extracted from a GDAL dataset.
  */
 struct GeoInfo {

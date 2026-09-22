@@ -143,13 +143,22 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
 
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
-            proc.kill();
-            feedback->reportError(QObject::tr("Tool execution canceled by user."));
-            return {};
+            // Grace ladder (#618): terminate first, escalate to kill — and
+            // THROW: an empty result map reads as success with no output on
+            // the direct QGIS path.
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool execution canceled by user.");
+            if (feedback) {
+                feedback->reportError(err);
+            }
+            throw QgsProcessingException(err);
         }
         if (watchdog.elapsed() > kWatchdogMs) {
-            proc.kill();
-            proc.waitForFinished(5000);
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
             const QString err = QObject::tr("Tool timed out after 30 minutes and was terminated.");
             if (feedback) {
                 feedback->reportError(err);
@@ -167,6 +176,18 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
     proc.waitForFinished();
     const QByteArray stdoutData = proc.readAllStandardOutput();
     const QByteArray stderrData = proc.readAllStandardError();
+
+    // A signal-killed tool reports exitCode() == 0 with CrashExit — treating
+    // it as success published whatever partial stdout had arrived.
+    if (proc.exitStatus() == QProcess::CrashExit) {
+        const QString err = QObject::tr("Tool crashed (killed by signal): %1")
+                                .arg(QString::fromUtf8(stderrData.isEmpty() ? stdoutData : stderrData));
+        if (feedback) {
+            feedback->reportError(err);
+        }
+        SICNU_LOG_WARN(SicnuLogTags::GDAL, err);
+        throw QgsProcessingException(err);
+    }
 
     if (proc.exitCode() != 0) {
         const QString err = QObject::tr("Tool failed with exit code %1: %2")
@@ -193,9 +214,23 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
             SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
             throw QgsProcessingException(err);
         }
+        // A short write or failed close (disk full) must not pass for
+        // success: remove the partial file and fail (#1043 contract).
         QTextStream stream(&file);
         stream << QString::fromUtf8(stdoutData);
+        stream.flush();
+        const bool writeOk = ( stream.status() == QTextStream::Ok )
+                             && ( file.error() == QFileDevice::NoError );
         file.close();
+        if (!writeOk) {
+            file.remove();
+            const QString err = QObject::tr("Failed to write output file (short write or flush failure): %1").arg(outputPath);
+            if (feedback) {
+                feedback->reportError(err);
+            }
+            SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
+            throw QgsProcessingException(err);
+        }
     }
 
     SICNU_LOG_SUCCESS(SicnuLogTags::GDAL,

@@ -326,3 +326,148 @@ TEST_CASE( "fault matrix: checkpoint publish (rename) failure keeps the old "
     const auto tmpResidue = ckDir.entryList( { QStringLiteral( "*.tmp*" ) }, QDir::Files );
     REQUIRE( tmpResidue.isEmpty() );
 }
+
+// ---------------------------------------------------------------------------
+// GDAL close-time flush failures (processing output integrity)
+//
+// The GTiff driver defers edge-tile writes to GDALClose, so a disk-full /
+// quota failure at final flush surfaces ONLY there. Every raster-producing
+// processing entry must fail truthfully and remove the partial output
+// instead of reporting success with a truncated file (#617/#703 contract).
+// ---------------------------------------------------------------------------
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/algorithms/atmospheric_correction.h"
+
+namespace
+{
+/// Writes a minimal valid two-band GeoTIFF (16×16 Float32, deterministic
+/// gradient values) — rich enough for the QUAC streaming statistics path,
+/// which refuses constant/range-less scenes.
+QString writeSyntheticTwoBandTiff( const QString &path, float baseValue )
+{
+    Q_UNUSED( baseValue );
+    GDALAllRegister();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    constexpr int W = 16, H = 16;
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 2, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+    GDALSetGeoTransform( ds, gt );
+    for ( int band = 1; band <= 2; ++band )
+    {
+        GDALRasterBandH b = GDALGetRasterBand( ds, band );
+        for ( int row = 0; row < H; ++row )
+        {
+            std::vector<float> line( W );
+            for ( int col = 0; col < W; ++col )
+                line[col] = 10.0f + 40.0f * band + static_cast<float>( row * W + col );
+            GDALRasterIO( b, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+        }
+    }
+    GDALClose( ds );
+    return path;
+}
+} // namespace
+
+TEST_CASE( "fault matrix: injected close-flush failure is surfaced by "
+           "closeWithError / closeDatasetFailClosed",
+           "[fault][gdal_wrapper]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // Unarmed path: a clean close still succeeds (the probe is inert).
+    const QString healthy = writeSyntheticTiff( dir.filePath( QStringLiteral( "healthy.tif" ) ) );
+    {
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( healthy ) );
+        QString err;
+        REQUIRE( ds.closeWithError( &err ) );
+        REQUIRE( err.isEmpty() );
+    }
+
+    // Armed path: the injected CPL failure after GDALClose must come back
+    // out of closeWithError — a deferred flush failure is never silent.
+    const QString armed = writeSyntheticTiff( dir.filePath( QStringLiteral( "armed.tif" ) ) );
+    {
+        GdalDatasetWrapper ds;
+        REQUIRE( ds.open( armed ) );
+        armFault( { "gdal_wrapper.close_flush", Mode::NextN, 1, {} } );
+        QString err;
+        REQUIRE_FALSE( ds.closeWithError( &err ) );
+        REQUIRE( err.contains( "close-time flush failure" ) );
+        // The dataset handle is consumed either way: a second close is a no-op.
+        REQUIRE( ds.closeWithError( nullptr ) );
+    }
+
+    // The raw-handle variant carries the same contract (raw-handle writers
+    // in satellite_products / qgis raster algorithms rely on it).
+    const QString raw = writeSyntheticTiff( dir.filePath( QStringLiteral( "raw.tif" ) ) );
+    GDALAllRegister();
+    GDALDatasetH ds = GDALOpen( raw.toUtf8().constData(), GA_Update );
+    REQUIRE( ds != nullptr );
+    armFault( { "gdal_wrapper.close_flush", Mode::NextN, 1, {} } );
+    QString rawErr;
+    REQUIRE_FALSE( closeDatasetFailClosed( ds, &rawErr ) );
+    REQUIRE( rawErr.contains( "close-time flush failure" ) );
+}
+
+TEST_CASE( "fault matrix: QUAC multi-band output fails truthfully on a "
+           "close-time flush failure and removes the partial file",
+           "[fault][atmospheric_correction]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString source = writeSyntheticTwoBandTiff( dir.filePath( QStringLiteral( "stack.tif" ) ), 0.0f );
+    const QString output = dir.filePath( QStringLiteral( "quac_out.tif" ) );
+    QString error;
+
+    // Phase 1: the healthy run must succeed and produce the output.
+    const bool healthyOk = AtmosphericCorrection::processFileMultiBand(
+        source, output, AtmosphericCorrection::Quac, &error, {} );
+    INFO( "QUAC error: " << error.toStdString() );
+    REQUIRE( healthyOk );
+    REQUIRE( QFile::exists( output ) );
+    REQUIRE( error.isEmpty() );
+    const QByteArray healthyBytes = [&] {
+        QFile f( output );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+
+    // Phase 2: armed close-flush fault → the run must FAIL TRUTHFULLY
+    // (false return, non-empty diagnostic) and the previous good output at
+    // the target path must survive BYTE-IDENTICAL: the staged write never
+    // touched the target, and the failed staged file is discarded.
+    const QByteArray oldBytes = healthyBytes;
+    armFault( { "gdal_wrapper.close_flush", Mode::NextN, 1, {} } );
+    error.clear();
+    REQUIRE_FALSE( AtmosphericCorrection::processFileMultiBand(
+        source, output, AtmosphericCorrection::Quac, &error, {} ) );
+    REQUIRE_FALSE( error.isEmpty() );
+    REQUIRE( QFile::exists( output ) );
+    const QByteArray survivedBytes = [&] {
+        QFile f( output );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+    REQUIRE( survivedBytes == oldBytes );
+
+    // No staged residue (*.tmp*) may survive the failure either.
+    {
+        QDir outDir( dir.path() );
+        const auto residue = outDir.entryList( { QStringLiteral( "*.tmp*" ) }, QDir::Files );
+        REQUIRE( residue.isEmpty() );
+    }
+
+    // Phase 3: disarmed again → the same call succeeds (the fault only ever
+    // gated the failure branch, never the algorithm itself).
+    REQUIRE( AtmosphericCorrection::processFileMultiBand(
+        source, output, AtmosphericCorrection::Quac, &error, {} ) );
+    REQUIRE( QFile::exists( output ) );
+}

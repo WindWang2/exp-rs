@@ -7,6 +7,7 @@
 #include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
+#include "processing/gdal/staged_raster_output.h"
 #include <QFile>
 #include <gdal.h>
 
@@ -661,10 +662,19 @@ struct StatsAccumulator {
 } // anonymous namespace
 
 bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString &msPath,
-                                           const QString &outputPath,
+                                           const QString &targetPath,
                                            const NativeFusionParams &params,
                                            QString *errorMessage )
 {
+    // Publish through staging: the writer below targets a staged path beside
+    // the target, published atomically only on success — a failed run can
+    // neither leave a partial product at the target nor destroy the previous
+    // result there (GUI/CLI direct paths bypass the OutputCommitter) (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     GdalDatasetWrapper panDataset;
     if ( !panDataset.open( panPath ) )
     {
@@ -907,6 +917,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // GDALClose is where the GTiff driver reports deferred write
+        // failures: the output only counts as kept when the close flushed
+        // clean (the guard removes the partial file otherwise) (#617).
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
+        }
         outputGuard.keep = true;
     return true;
     }
@@ -971,6 +1002,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         return false;
                 }
             }
+        }
+        // GDALClose is where the GTiff driver reports deferred write
+        // failures: the output only counts as kept when the close flushed
+        // clean (the guard removes the partial file otherwise) (#617).
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
         }
         outputGuard.keep = true;
     return true;
@@ -1072,6 +1124,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         return false;
                 }
             }
+        }
+        // GDALClose is where the GTiff driver reports deferred write
+        // failures: the output only counts as kept when the close flushed
+        // clean (the guard removes the partial file otherwise) (#617).
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
         }
         outputGuard.keep = true;
     return true;
@@ -1310,6 +1383,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // GDALClose is where the GTiff driver reports deferred write
+        // failures: the output only counts as kept when the close flushed
+        // clean (the guard removes the partial file otherwise) (#617).
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
+        }
         outputGuard.keep = true;
     return true;
     }
@@ -1467,6 +1561,27 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // GDALClose is where the GTiff driver reports deferred write
+        // failures: the output only counts as kept when the close flushed
+        // clean (the guard removes the partial file otherwise) (#617).
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
+        }
         outputGuard.keep = true;
     return true;
     }
@@ -1562,6 +1677,25 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         return false;
                 }
             }
+        }
+        // Same close-time flush gate as the other fusion methods.
+        QString closeError;
+        if ( !outDataset.closeWithError( &closeError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral( "Failed to flush fused output" )
+                                    : closeError;
+            return false;
+        }
+        QString publishError;
+        if ( !staged->publish( &publishError ) )
+        {
+            if ( errorMessage )
+                *errorMessage = publishError.isEmpty()
+                                    ? QStringLiteral( "Failed to publish fused output" )
+                                    : publishError;
+            return false;
         }
         outputGuard.keep = true;
         return true;

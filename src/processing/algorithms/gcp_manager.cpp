@@ -413,7 +413,11 @@ bool GcpManager::saveToCsv(const QString& filePath) const
                << ',' << numberToString(pt.residualX) << ',' << numberToString(pt.residualY)
                << ',' << numberToString(pt.residualTotal) << ',' << (pt.enabled ? "1" : "0") << '\n';
     }
-    return true;
+    // A truncated CSV on a full disk must not report success: flush and
+    // surface stream/file errors (short writes used to pass silently).
+    stream.flush();
+    return stream.status() == QTextStream::Ok
+           && file.error() == QFileDevice::NoError;
 }
 
 bool GcpManager::loadFromCsv(const QString& filePath)

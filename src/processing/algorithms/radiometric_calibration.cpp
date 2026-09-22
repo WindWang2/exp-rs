@@ -4,6 +4,7 @@
 #include "satellite_products.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
 #include "core/sicnu_logging.h"
 
 #include <QDomDocument>
@@ -659,12 +660,20 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
 // File-level processing
 // ---------------------------------------------------------------------------
 
-bool processFile(const QString &sourcePath, const QString &outputPath,
+bool processFile(const QString &sourcePath, const QString &targetPath,
                  const QString &metadataPath, int method,
                  const QList<int> &bandIndices,
                  QString *errorMessage,
                  const std::function<void(double, const QString &)> &progress)
 {
+    // Publish through staging: a failed calibration can neither leave a
+    // partial product at the target nor destroy the previous result there
+    // (GUI/CLI direct paths bypass the OutputCommitter) (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     if (method < 0 || method > 2) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Unknown radiometric calibration method: %1").arg(method);
@@ -845,6 +854,32 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                                     : tileError;
             return false;
         }
+    }
+
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): the streaming writes above only landed in the
+    // driver's cache, so a silent close failure would publish a truncated
+    // raster as a successful calibration (GUI/CLI direct paths bypass the
+    // OutputCommitter) (#617).
+    {
+        QString closeError;
+        if (!outDataset.closeWithError(&closeError)) {
+            QFile::remove(outputPath);
+            if (errorMessage)
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral("Failed to flush calibrated output")
+                                    : closeError;
+            return false;
+        }
+    }
+
+    QString publishError;
+    if (!staged->publish(&publishError)) {
+        if (errorMessage)
+            *errorMessage = publishError.isEmpty()
+                                ? QStringLiteral("Failed to publish calibrated output")
+                                : publishError;
+        return false;
     }
 
     if (progress)

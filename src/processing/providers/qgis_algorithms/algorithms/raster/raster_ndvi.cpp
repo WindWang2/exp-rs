@@ -14,6 +14,8 @@
 #include <qgscoordinatereferencesystem.h>
 
 #include "processing/algorithms/spectral_indices.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
 #include "processing/providers/qgis_algorithms/algorithms/toolbox_raster_preflight.h"
 
 #include <gdal.h>
@@ -42,7 +44,12 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     if ( !nirLayer || !nirLayer->dataProvider() )
         throw QgsProcessingException( invalidRasterError( parameters, QStringLiteral( "NIR_BAND" ) ) );
 
-    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    // Stage beside the destination, publish atomically on success (#617).
+    const QString destTarget = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+    auto staged = sicnu::processing::makeStagedRasterOutput( destTarget );
+    if ( !staged )
+        throw QgsProcessingException( QObject::tr( "Could not allocate a staging path next to %1" ).arg( destTarget ) );
+    const QString dest = staged->stagedPath();
 
     feedback->setProgressText( QObject::tr( "Calculating NDVI..." ) );
 
@@ -151,11 +158,26 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
         }
     }
 
-    GDALClose( dataset );
+    // Same close-time flush gate as raster_calculator: the per-row GF_Write
+    // checks only covered the driver's cache — GDALClose is where deferred
+    // write failures (disk full, quota) surface.
+    QString closeError;
+    if ( !closeDatasetFailClosed( dataset, &closeError ) )
+    {
+        VSIUnlink( dest.toUtf8().constData() );
+        throw QgsProcessingException( closeError.isEmpty()
+                                          ? QObject::tr( "Failed to flush NDVI output %1" ).arg( destTarget )
+                                          : closeError );
+    }
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+        throw QgsProcessingException( publishError.isEmpty()
+                                          ? QObject::tr( "Failed to publish NDVI output %1" ).arg( destTarget )
+                                          : publishError );
 
     feedback->setProgress( 100 );
 
     QVariantMap results;
-    results[QStringLiteral( "OUTPUT" )] = dest;
+    results[QStringLiteral( "OUTPUT" )] = destTarget;
     return results;
 }

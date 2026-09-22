@@ -455,6 +455,14 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   catch ( const QgsProcessingException &e )
   {
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    // A wrapper that aborts on cancel throws ("Tool execution canceled by
+    // user") — rethrow the TYPED Cancelled error, not a generic failure, so
+    // a cancelled job is classified as cancelled downstream (#1043). Cancel
+    // deliberately WINS over a coincident genuine failure message: a
+    // cancelled run's diagnosis is its cancellation.
+    if ( ( isCancelledFn && isCancelledFn() ) || feedback.isCanceled() )
+      throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                               "Processing algorithm cancelled during run: " + mDesc.id );
     throw std::runtime_error( e.what().toStdString() );
   }
   catch ( const std::exception &e )
@@ -463,11 +471,17 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     // chance to clean up partial work — swallowing it here would leak it
     // (#1043).
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    if ( ( isCancelledFn && isCancelledFn() ) || feedback.isCanceled() )
+      throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                               "Processing algorithm cancelled during run: " + mDesc.id );
     throw std::runtime_error( e.what() );
   }
   catch ( ... )
   {
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    if ( ( isCancelledFn && isCancelledFn() ) || feedback.isCanceled() )
+      throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                               "Processing algorithm cancelled during run: " + mDesc.id );
     throw;
   }
 

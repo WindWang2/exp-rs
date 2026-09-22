@@ -4,6 +4,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
+#include "processing/gdal/staged_raster_output.h"
 #include <gdal.h>
 #include <cmath>
 #include <algorithm>
@@ -1563,9 +1564,16 @@ ImageEnhancement::MnfResult ImageEnhancement::mnf(
     return result;
 }
 
-bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &outputPath,
+bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &targetPath,
                                       int numComponents, QString *errorMessage)
 {
+    // Publish through staging: a failed run can neither leave a partial
+    // product at the target nor destroy the previous result there (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
         if (errorMessage)
@@ -1755,12 +1763,33 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
         }
     }
 
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): a silent close failure must not pass for success.
+    {
+        QString closeError;
+        if (!outDataset.closeWithError(&closeError)) {
+            if (errorMessage)
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral("Failed to flush PCA output")
+                                    : closeError;
+            return false;
+        }
+    }
+    if (!staged->publish(errorMessage))
+        return false;
     return true;
 }
 
-bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &outputPath,
+bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &targetPath,
                                       int numComponents, QString *errorMessage)
 {
+    // Publish through staging: a failed run can neither leave a partial
+    // product at the target nor destroy the previous result there (#617).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString &outputPath = staged->stagedPath();
+
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
         if (errorMessage)
@@ -2036,5 +2065,19 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
         }
     }
 
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): a silent close failure must not pass for success.
+    {
+        QString closeError;
+        if (!outDataset.closeWithError(&closeError)) {
+            if (errorMessage)
+                *errorMessage = closeError.isEmpty()
+                                    ? QStringLiteral("Failed to flush MNF output")
+                                    : closeError;
+            return false;
+        }
+    }
+    if (!staged->publish(errorMessage))
+        return false;
     return true;
 }

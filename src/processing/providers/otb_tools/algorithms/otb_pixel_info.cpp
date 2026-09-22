@@ -3,8 +3,10 @@
 #include "tools/tool_path_manager.h"
 
 #include <processing/qgsprocessingparameters.h>
+#include <qgsexception.h>
 #include <qgsrasterlayer.h>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QProcess>
 
 void OtbPixelInfoAlgorithm::initAlgorithm(const QVariantMap &configuration)
@@ -37,15 +39,18 @@ QVariantMap OtbPixelInfoAlgorithm::processAlgorithm(const QVariantMap &parameter
                                                      QgsProcessingContext &context,
                                                      QgsProcessingFeedback *feedback)
 {
+    // Fail closed (#1043 contract): every failure below throws — an empty
+    // result map reads as success with no output, so "OTB not installed" or
+    // a tool crash used to complete the task as a successful no-op.
     QString program = ToolPathManager::instance().otbToolPath(applicationName());
-    if (program.isEmpty()) {
-        if (feedback)
-            feedback->reportError(QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
-        return {};
-    }
+    if (program.isEmpty())
+        throw QgsProcessingException(
+            QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
 
     QStringList args = buildArgs(parameters, context, feedback);
-    if (args.isEmpty()) return {};
+    if (args.isEmpty())
+        throw QgsProcessingException(
+            QObject::tr("OTB application '%1' produced no command line.").arg(applicationName()));
 
     if (feedback)
         feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
@@ -68,18 +73,31 @@ QVariantMap OtbPixelInfoAlgorithm::processAlgorithm(const QVariantMap &parameter
 
     proc.start(program, args);
 
-    if (!proc.waitForStarted(5000)) {
-        if (feedback)
-            feedback->reportError(QObject::tr("Failed to start OTB application: %1").arg(proc.errorString()));
-        return {};
-    }
+    if (!proc.waitForStarted(5000))
+        throw QgsProcessingException(
+            QObject::tr("Failed to start OTB application: %1").arg(proc.errorString()));
 
+    // Watchdog + graceful cancel ladder (#618): terminate first so multi-GB
+    // OTB writes can flush, escalate to kill after a grace period, and
+    // classify a signal death as a crash (a killed tool reports exitCode 0).
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 timeoutMs = 60 * 60 * 1000; // OTB composites can be long
     QByteArray allOutput;
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
-            proc.kill();
-            feedback->reportError(QObject::tr("OTB application canceled by user."));
-            return {};
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            throw QgsProcessingException(QObject::tr("OTB application canceled by user."));
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            throw QgsProcessingException(
+                QObject::tr("OTB application timed out after %1 s and was terminated.")
+                    .arg(timeoutMs / 1000));
         }
         proc.waitForReadyRead(100);
         QByteArray output = proc.readAllStandardOutput();
@@ -96,14 +114,14 @@ QVariantMap OtbPixelInfoAlgorithm::processAlgorithm(const QVariantMap &parameter
             feedback->pushInfo(QString::fromUtf8(finalOutput));
     }
 
-    if (proc.exitCode() != 0) {
-        if (feedback) {
-            feedback->reportError(QObject::tr("OTB application failed with exit code %1: %2")
+    if (proc.exitStatus() == QProcess::CrashExit)
+        throw QgsProcessingException(QObject::tr("OTB application crashed (killed by signal)."));
+
+    if (proc.exitCode() != 0)
+        throw QgsProcessingException(
+            QObject::tr("OTB application failed with exit code %1: %2")
                 .arg(proc.exitCode())
                 .arg(QString::fromUtf8(allOutput).trimmed()));
-        }
-        return {};
-    }
 
     QVariantMap results;
     results["OUTPUT"] = QObject::tr("Pixel info retrieved successfully");

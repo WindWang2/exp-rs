@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/staged_raster_output.h"
 
 #include "geospatial/products/cn_product_metadata.h"
 #include "geospatial/products/product_adapters.h"
@@ -1511,10 +1512,17 @@ bool discoverProduct(const QString& path, ProductInfo* out,
 
 bool stackToGeoTiff(const ProductInfo& product,
                     const QStringList& bandNames,
-                    const QString& outputPath,
+                    const QString& targetPath,
                     QString* errorMessage,
                     const std::function<void(double, const QString&)>& progress)
 {
+    // Publish through staging: a failed stack can neither leave a partial
+    // product at the target nor destroy the previous result there (#703).
+    auto staged = sicnu::processing::makeStagedRasterOutput( targetPath, errorMessage );
+    if ( !staged )
+        return false;
+    const QString outputPath = staged->stagedPath();
+
     if (product.bands.isEmpty()) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Product has no bands to stack");
@@ -1870,7 +1878,28 @@ bool stackToGeoTiff(const ProductInfo& product,
         }
     }
 
-    GDALClose(outDs);
+    // GDALClose is where the GTiff driver reports deferred write failures
+    // (disk full, quota): the per-band GF_Write checks above only covered
+    // the driver's cache. A failed final flush must fail the stack and
+    // remove the partial file, not report success (#703 contract).
+    QString closeError;
+    if ( !closeDatasetFailClosed( outDs, &closeError ) )
+    {
+        return failRemovingPartial(
+            errorMessage,
+            closeError.isEmpty()
+                ? QStringLiteral( "Failed to flush stacked output" )
+                : closeError );
+    }
+    QString publishError;
+    if ( !staged->publish( &publishError ) )
+    {
+        if ( errorMessage )
+            *errorMessage = publishError.isEmpty()
+                                ? QStringLiteral( "Failed to publish stacked output" )
+                                : publishError;
+        return false;
+    }
     if (progress)
         progress(1.0, QStringLiteral("Stack complete"));
     return true;
