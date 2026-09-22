@@ -16,6 +16,16 @@ using namespace sicnu::agent::spatial_tools;
 
 namespace {
 
+Json::Value objectSchema( Json::Value properties, Json::Value required )
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  schema["properties"] = std::move( properties );
+  if ( required.isArray() && !required.empty() )
+    schema["required"] = std::move( required );
+  return schema;
+}
+
 /// Read-only projection of the effective policy. The session layer
 /// (role/domain/policy overrides) is host-injected — the input schema omits
 /// it so a composing model is never invited to claim authority.
