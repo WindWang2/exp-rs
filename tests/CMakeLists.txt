@@ -9574,6 +9574,46 @@ sicnu_add_test(test_contract_platform_9)
 target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_platform_9)
 
+# RS14-11: evidence-first agent session core (pure C++; no Qt/GDAL link).
+add_executable(test_agent_loop_core test_agent_loop_core.cpp)
+target_link_libraries(test_agent_loop_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_core)
+
+# RS14-11: seam interfaces, deterministic offline doubles, session policy.
+add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
+target_link_libraries(test_agent_loop_seams PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_seams)
+
+# RS14-11: session driver — dry-run / plan-only / execute-with-verify modes.
+add_executable(test_agent_loop_modes test_agent_loop_modes.cpp)
+target_link_libraries(test_agent_loop_modes PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_modes)
+
+# RS14-11: full-loop E2E on deterministic offline doubles (slices D/E/F).
+add_executable(test_agent_loop_e2e test_agent_loop_e2e.cpp)
+target_link_libraries(test_agent_loop_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_e2e)
+
+# RS14-11: journal restart/resume of a cancelled session.
+add_executable(test_agent_loop_resume test_agent_loop_resume.cpp)
+target_link_libraries(test_agent_loop_resume PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_resume)
+
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
