@@ -611,14 +611,21 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
 
   // Rename the fully written temp file over the target. GTiff/HFA/GPKG all
   // support GDALDriver::Rename (POSIX rename when driverCreateCopyFileSet is
-  // unset); fall back to a best-effort move and report only if that fails.
-  // The previous output survives any failure before this point (#285).
+  // unset); fall back to atomic_fs publish (ReplaceFileW / MoveFileExW) so a
+  // Windows sharing-violation cannot delete-then-fail (#1178 / #285).
   if ( drv->Rename( path.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
     return true;
-  if ( ( !QFile::exists( path ) || QFile::remove( path ) ) && QFile::rename( tmpPath, path ) )
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedFile( tmpPath.toStdString(), path.toStdString() );
     return true;
-  setErr( err, QStringLiteral( "Failed to move output into place: %1" ).arg( path ) );
-  return false;
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    setErr( err, QStringLiteral( "Failed to move output into place: %1 (%2)" )
+                   .arg( path, QString::fromUtf8( ex.what() ) ) );
+    return false;
+  }
 }
 
 bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &vectorPath,

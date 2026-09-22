@@ -107,7 +107,7 @@ WorkerExecutionConfig workerExecutionConfigFromEnvironment()
 {
     WorkerExecutionConfig config;
     config.mode = modeFromString( qEnvironmentVariable( "SICNU_WORKER_EXECUTION" ) );
-    config.workerProgram = QString::fromLocal8Bit( qgetenv( "SICNU_WORKER_PROGRAM" ) );
+    config.workerProgram = qEnvironmentVariable( "SICNU_WORKER_PROGRAM" );
     bool ok = false;
     const int requested = qEnvironmentVariableIntValue( "SICNU_WORKER_MAX_CONCURRENT", &ok );
     if ( ok && requested > 0 )

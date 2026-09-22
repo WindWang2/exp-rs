@@ -8,6 +8,8 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace
 {
 
@@ -125,25 +127,19 @@ RsEditPersistence::ExportResult RsEditPersistence::exportLayer( QgsVectorLayer *
         return result;
     }
 
-    // POSIX rename(2) replaces an existing target atomically — no window
-    // where the previous good export is already gone. Qt may refuse the
-    // replacement on platforms without that guarantee, so removal is a
-    // FALLBACK only (documented: atomic on POSIX).
-    if ( !QFile::rename( written, targetPath ) && QFile::exists( targetPath ) )
+    // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW). Never
+    // remove-then-rename — a locked target must fail closed.
+    try
     {
-        if ( !QFile::remove( targetPath ) || !QFile::rename( written, targetPath ) )
-        {
-            removeTemp( tempPath );
-            removeTemp( written );
-            result.error = QStringLiteral( "could not replace existing target file" );
-            return result;
-        }
+        sicnu::geo::atomic_fs::publishStagedFile( written.toStdString(),
+                                                  targetPath.toStdString() );
     }
-    else if ( !QFile::exists( targetPath ) )
+    catch ( const sicnu::geo::GeoError &ex )
     {
         removeTemp( tempPath );
         removeTemp( written );
-        result.error = QStringLiteral( "atomic rename onto the target failed" );
+        result.error = QStringLiteral( "could not publish target file: %1" )
+                         .arg( QString::fromUtf8( ex.what() ) );
         return result;
     }
 

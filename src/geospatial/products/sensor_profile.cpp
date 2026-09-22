@@ -20,12 +20,20 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
+
+#ifdef _WIN32
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
 
 namespace sicnu::geo
 {
@@ -56,13 +64,50 @@ bool isDirectoryLocal( const std::string &path )
 
 bool readFileText( const std::string &path, std::string &out )
 {
-  std::ifstream in( path, std::ios::binary );
+  // Open via u8path so Windows uses the wide API (#1178) — a narrow
+  // ifstream round-trips non-ASCII paths through the ANSI code page.
+  std::ifstream in( fs::u8path( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
   std::ostringstream buffer;
   buffer << in.rdbuf();
   out = buffer.str();
   return true;
+}
+
+/// UTF-8 process environment value. Windows: GetEnvironmentVariableW → UTF-8
+/// (std::getenv returns ACP bytes that corrupt fs::u8path). Elsewhere: getenv.
+std::string utf8Getenv( const char *name )
+{
+  if ( !name || !*name )
+    return {};
+#ifdef _WIN32
+  const int nameWideLen = MultiByteToWideChar( CP_UTF8, 0, name, -1, nullptr, 0 );
+  if ( nameWideLen <= 0 )
+    return {};
+  std::wstring nameWide( static_cast<std::size_t>( nameWideLen ), L'\0' );
+  MultiByteToWideChar( CP_UTF8, 0, name, -1, nameWide.data(), nameWideLen );
+  const DWORD needed = GetEnvironmentVariableW( nameWide.c_str(), nullptr, 0 );
+  if ( needed == 0 )
+    return {};
+  std::wstring valueWide( needed, L'\0' );
+  const DWORD written = GetEnvironmentVariableW( nameWide.c_str(), valueWide.data(), needed );
+  if ( written == 0 || written >= needed )
+    return {};
+  valueWide.resize( written );
+  const int utf8Len = WideCharToMultiByte( CP_UTF8, 0, valueWide.data(),
+                                           static_cast<int>( valueWide.size() ),
+                                           nullptr, 0, nullptr, nullptr );
+  if ( utf8Len <= 0 )
+    return {};
+  std::string out( static_cast<std::size_t>( utf8Len ), '\0' );
+  WideCharToMultiByte( CP_UTF8, 0, valueWide.data(), static_cast<int>( valueWide.size() ),
+                       out.data(), utf8Len, nullptr, nullptr );
+  return out;
+#else
+  const char *raw = std::getenv( name );
+  return ( raw && *raw ) ? std::string( raw ) : std::string();
+#endif
 }
 
 // Schema 2.0 (ADR 0159): v1 stays readable with its historical rules; v2
@@ -78,10 +123,10 @@ constexpr std::size_t kMaxFamilyFiles = 32;
 /// compiled source dir).
 std::string resolveDataSubdir( const char *relativeDir )
 {
-  const char *envDataDir = std::getenv( "SICNU_DATA_DIR" );
-  if ( envDataDir && *envDataDir )
+  const std::string envDataDir = utf8Getenv( "SICNU_DATA_DIR" );
+  if ( !envDataDir.empty() )
   {
-    const std::string candidate = std::string( envDataDir ) + "/" + relativeDir;
+    const std::string candidate = envDataDir + "/" + relativeDir;
     if ( isDirectoryLocal( candidate ) )
       return candidate;
   }

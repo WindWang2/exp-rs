@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <sstream>
 
+#include "geospatial/util/atomic_fs.h"
+
 namespace sicnu::agent::cartography {
 
 namespace {
@@ -194,21 +196,25 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
     if ( !temp.flush() )
         return fail( QStringLiteral( "cannot flush the temporary manifest" ) );
 
-    // Rename through the open handle: QTemporaryFile::rename closes,
-    // renames and clears auto-remove in one step. (Closing first would let
-    // autoRemove unlink the temp file before the move — the exporter path
-    // in export.cpp only survives that because the exporter rewrites the
-    // temp file after close().)
+    // Prefer QTemporaryFile::rename (closes + clears auto-remove). On
+    // Windows overwrite refusal, fall through to atomic_fs publish rather
+    // than remove+rename (#1178).
     if ( !temp.rename( finalPath ) )
     {
         const QString tempPath = temp.fileName();
-        if ( !QFile::exists( finalPath ) )
-            return fail( QStringLiteral( "cannot move the manifest into place at '%1'" ).arg( finalPath ) );
-        if ( !QFile::remove( finalPath ) || !QFile::rename( tempPath, finalPath ) )
-            return fail( QStringLiteral( "cannot replace the manifest at '%1'" ).arg( finalPath ) );
+        try
+        {
+            sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(),
+                                                      finalPath.toStdString() );
+        }
+        catch ( const sicnu::geo::GeoError &ex )
+        {
+            return fail( QStringLiteral( "cannot publish the manifest at '%1': %2" )
+                           .arg( finalPath, QString::fromUtf8( ex.what() ) ) );
+        }
     }
-    // The rename moved the tracked file itself: a still-set autoRemove would
-    // unlink the DELIVERED manifest at scope exit.
+    // The rename/publish moved the tracked file itself: a still-set
+    // autoRemove would unlink the DELIVERED manifest at scope exit.
     temp.setAutoRemove( false );
     return true;
 }

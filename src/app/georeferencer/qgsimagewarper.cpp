@@ -37,6 +37,8 @@
 #include <QFileInfo>
 #include <QString>
 
+#include "geospatial/util/atomic_fs.h"
+
 using namespace Qt::StringLiterals;
 
 QgsImageWarper::QgsImageWarper() = default;
@@ -464,37 +466,24 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
 
   if ( result.status == WarpStatus::Ok )
   {
-    // Rename temp to final output atomically.
-    // #1093b: never delete the previous good output before the new file is in
-    // place — stage it aside as .old~, restore on rename failure, and only
-    // remove the backup after the new output lands.
+    // #1178 / #1093b: publish via atomic_fs (ReplaceFileW / MoveFileExW). Never
+    // delete-then-rename — a locked target must fail closed with the previous
+    // good output intact.
     if ( !tmpOutput.isEmpty() && tmpOutput != output )
     {
-      const QString backup = output + QStringLiteral( ".old~" );
-      if ( QFile::exists( output ) )
+      try
       {
-        QFile::remove( backup );
-        if ( !QFile::rename( output, backup ) )
-        {
-          result.status = WarpStatus::GdalError;
-          result.errorMessage = QStringLiteral( "Failed to stage previous output aside for atomic replace" );
-          QFile::remove( tmpOutput );
-          result.durationMs = static_cast<int>( timer.elapsed() );
-          return result;
-        }
+        sicnu::geo::atomic_fs::publishStagedFile( tmpOutput.toStdString(), output.toStdString() );
       }
-      if ( !QFile::rename( tmpOutput, output ) )
+      catch ( const sicnu::geo::GeoError &ex )
       {
-        // Put the previous output back if we moved it; drop the failed temp.
-        if ( QFile::exists( backup ) )
-          QFile::rename( backup, output );
         result.status = WarpStatus::GdalError;
-        result.errorMessage = QStringLiteral( "Failed to rename temp output to final path" );
+        result.errorMessage = QStringLiteral( "Failed to publish warped output: %1" )
+                                .arg( QString::fromUtf8( ex.what() ) );
         QFile::remove( tmpOutput );
         result.durationMs = static_cast<int>( timer.elapsed() );
         return result;
       }
-      QFile::remove( backup );
     }
     QFileInfo fi( output );
     result.outputBytes = fi.size();
