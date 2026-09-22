@@ -1,5 +1,6 @@
 // rs_classifier_mlp.cpp — OBIA Artificial Neural Network (ANN_MLP) classifier backend.
 #include "rs_classifier_mlp.h"
+#include "rs_classifier_labels_sidecar.h"
 #include <QDebug>
 #include <QFile>
 #include <QJsonArray>
@@ -256,15 +257,18 @@ bool RsMlpBackend::save( const QString &path ) const
 {
   if ( !RsClassifierCvBackend<cv::ml::ANN_MLP>::save( path ) )
     return false;
+  // #1175: fail-closed labels sidecar (see RF).
   if ( mClassLabels.empty() )
-    return true;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     return true;
   QJsonArray arr;
   for ( int i = 0; i < mClassLabels.rows; ++i )
     arr.append( mClassLabels.at<int>( i, 0 ) );
-  f.write( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  if ( !sicnu::classification::labels_sidecar::writePair(
+         path, QJsonDocument( arr ) ) )
+  {
+    QFile::remove( path );
+    return false;
+  }
   return true;
 }
 
@@ -272,14 +276,12 @@ bool RsMlpBackend::load( const QString &path )
 {
   if ( !RsClassifierCvBackend<cv::ml::ANN_MLP>::load( path ) )
     return false;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.open( QIODevice::ReadOnly ) )
-    return true;
-  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
-  if ( !doc.isArray() )
-    return true;
-  const QJsonArray arr = doc.array();
-  if ( arr.isEmpty() )
+  QJsonArray arr;
+  using LS = sicnu::classification::labels_sidecar::LoadStatus;
+  const LS status = sicnu::classification::labels_sidecar::loadArray( path, arr );
+  if ( status == LS::Failed )
+    return false;
+  if ( status == LS::LegacyMissing )
     return true;
   mClassLabels.create( static_cast<int>( arr.size() ), 1, CV_32S );
   for ( int i = 0; i < arr.size(); ++i )

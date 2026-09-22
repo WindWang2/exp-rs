@@ -1,5 +1,6 @@
 // rs_classifier_random_forest.cpp — OBIA Random Forest classifier backend.
 #include "rs_classifier_random_forest.h"
+#include "rs_classifier_labels_sidecar.h"
 #include <QDebug>
 #include <QFile>
 #include <QJsonArray>
@@ -192,16 +193,19 @@ bool RsRandomForestBackend::save( const QString &path ) const
 {
   if ( !RsClassifierCvBackend<cv::ml::RTrees>::save( path ) )
     return false;
-  // Persist label map alongside the OpenCV model (companion JSON).
+  // #1175: {model, labels} is one fail-closed pair — never leave a model
+  // without its stamped sidecar when labels were trained.
   if ( mClassLabels.empty() )
     return true;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-    return true; // model saved; labels sidecar is best-effort
   QJsonArray arr;
   for ( int i = 0; i < mClassLabels.rows; ++i )
     arr.append( mClassLabels.at<int>( i, 0 ) );
-  f.write( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  if ( !sicnu::classification::labels_sidecar::writePair(
+         path, QJsonDocument( arr ) ) )
+  {
+    QFile::remove( path );
+    return false;
+  }
   return true;
 }
 
@@ -209,14 +213,12 @@ bool RsRandomForestBackend::load( const QString &path )
 {
   if ( !RsClassifierCvBackend<cv::ml::RTrees>::load( path ) )
     return false;
-  QFile f( path + QStringLiteral( ".labels.json" ) );
-  if ( !f.open( QIODevice::ReadOnly ) )
-    return true; // no sidecar yet (older models)
-  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
-  if ( !doc.isArray() )
-    return true;
-  const QJsonArray arr = doc.array();
-  if ( arr.isEmpty() )
+  QJsonArray arr;
+  using LS = sicnu::classification::labels_sidecar::LoadStatus;
+  const LS status = sicnu::classification::labels_sidecar::loadArray( path, arr );
+  if ( status == LS::Failed )
+    return false;
+  if ( status == LS::LegacyMissing )
     return true;
   mClassLabels.create( static_cast<int>( arr.size() ), 1, CV_32S );
   for ( int i = 0; i < arr.size(); ++i )
