@@ -151,7 +151,9 @@ struct VerificationReport
     /// sha256 over this canonical text — a field carrying its own hash is
     /// unrepresentable).
     Json::Value toCanonicalJson() const;
-    /// sha256 over the canonical report text.
+    /// sha256 over the canonical report text. Empty string = refusal
+    /// sentinel: the body carries a non-finite number and cannot be sealed
+    /// (an unsealable report must not masquerade as sha256("")-sealed).
     std::string digest() const;
 
     /// Strict inverse of toCanonicalJson + digest re-verification: a
@@ -175,7 +177,16 @@ VerificationReport buildReport( const std::string &specId, const std::string &sc
 
 /// Deterministic JSON text: compact, no comments, sorted object keys,
 /// doubles at 12 significant digits (0.1+0.2 == 0.3 in this text space —
-/// digests are stable across evaluation orders).
+/// digests are stable across evaluation orders). A body containing a
+/// non-finite number returns the EMPTY string as a refusal sentinel: the
+/// writer would otherwise seal NaN as `null` (digest-indistinguishable from
+/// a real null) and infinities as `1e+9999` (parser-divergent).
+///
+/// Honest binding limit: the 12-significant-digit space DELIBERATELY merges
+/// doubles that differ beyond 12 digits, so the seal detects structural
+/// edits, not sub-precision perturbation of an observed metric value — the
+/// digest is an order-stability and tamper-EVIDENCE seal, not a
+/// sub-digit-precision tamper lock.
 std::string canonicalJsonText( const Json::Value &value );
 
 } // namespace sicnu::verify

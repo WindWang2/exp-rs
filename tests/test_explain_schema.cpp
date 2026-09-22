@@ -400,6 +400,18 @@ TEST_CASE( "execution facts require machine evidence", "[explain][schema][halluc
   REQUIRE( !parsed.fromJson( json, error ) );
 }
 
+TEST_CASE( "hostile integer magnitudes are typed refusals", "[explain][schema][hostile]" )
+{
+  // 2^63 passes isIntegral() but makes asInt64() throw — the refusal must be
+  // typed instead of an escaping Json::LogicError.
+  Json::Value json = sampleExplanation().toJson();
+  json["execution"]["elapsedMs"] = Json::Value( Json::UInt64( 1ULL ) << 63 );
+  StepExplanation parsed;
+  std::string error;
+  REQUIRE( !parsed.fromJson( json, error ) );
+  REQUIRE( error.find( "elapsedMs" ) != std::string::npos );
+}
+
 TEST_CASE( "malformed evidence links inside explanations are refused", "[explain][schema]" )
 {
   Json::Value json = sampleExplanation().toJson();

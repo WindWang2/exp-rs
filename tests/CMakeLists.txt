@@ -12554,3 +12554,22 @@ target_include_directories(test_processing_error_paths PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_processing_error_paths)
+
+# Evidence-semantics seam (hardening/verifier-grader-explain-evidence):
+# composes the verifier and grader leaves ABOVE themselves — a real
+# sicnu_verifier report projected into a grader verifier_verdict evidence
+# item. The leaf libraries stay unlinked from each other (layer guards in
+# src/grader + src/explain); this is the only place they meet. Test-lane
+# registration for the three schema files arrives via PR #1246.
+add_executable(test_evidence_seam test_evidence_seam.cpp)
+target_link_libraries(test_evidence_seam PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+  sicnu_verifier
+)
+sicnu_link_jsoncpp(test_evidence_seam)
+target_include_directories(test_evidence_seam PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_evidence_seam TEST_PREFIX "test_evidence_seam::")
