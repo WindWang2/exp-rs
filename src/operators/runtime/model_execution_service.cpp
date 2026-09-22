@@ -199,17 +199,9 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
                            "scene classification runs the single-input path — it classifies "
                              "ONE scene in ONE forward pass; multi-feed/detection requests "
                              "are different tasks" );
-  // Platform 10.0: task INTENT gates. A task adapter carries a canonical EO
-  // task; the resolved model's manifest must agree — running a detection
-  // manifest through rs:classify would silently misread the outputs.
-  if ( !request.requiredEoTask.empty()
-       && sicnu::operators::canonicalEoTask( model.task ) != request.requiredEoTask )
-    throw RSOperatorError(
-      ErrorCode::InvalidInputData,
-      "model '" + model.name + "' declares task '" + model.task
-        + "' which carries no '" + request.requiredEoTask
-        + "' contract — this operator requires a model whose canonical task is '"
-        + request.requiredEoTask + "' (fix the manifest task or pick the matching operator)" );
+  // (Platform 10.0 task INTENT gate: enforced once, BEFORE the ensemble
+  // route at the top of this function — #1226. The pre-route gate covers the
+  // non-ensemble path too, so a second copy here would be dead code.)
   rejectUnwiredContracts( model, request.namedInputs );
   if ( !multiInput )
     preflightFeatureCube( model, request.inputPath );

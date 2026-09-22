@@ -577,3 +577,73 @@ TEST_CASE( "rs:embedding reports the feature dimension and mean vector", "[model
   // The feature stack IS the embedding product: bounded, georeferenced.
   CHECK( stats.outWidth == 32 );
 }
+
+// ---------------------------------------------------------------------------
+// Hardening 15/20: a sidecar-publish failure must restore the previous
+// product WITH its provenance sidecar — the old code unlinked the old
+// sidecar before the new one landed and never restored it, downgrading a
+// verified product to MissingSidecar on rollback.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "a sidecar failure keeps the previous raster product and its provenance (hardening 15/20)",
+           "[models][seam][publish][p15]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = writeRaster( dir, QStringLiteral( "p15-roll-in.tif" ), 16, 16 );
+  const QString output = dir.filePath( QStringLiteral( "p15-roll-out.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  const QString weights = dir.filePath( QStringLiteral( "p15-plane.onnx" ) );
+  {
+    QFile f( weights );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "p15-plane-weights" ) );
+  }
+  std::string regError;
+  REQUIRE( ModelCatalog::instance().registerManifestJson(
+    R"({"name": "p15-plane-model", "task": "segmentation", "framework": "planefw",
+        "artifact": {"path": ")" + weights.toStdString() + R"("}})",
+    "session", &regError ) );
+
+  auto runSegment = [ & ]() {
+    const auto op = RSOperatorRegistry::instance().create( "rs:segment" );
+    REQUIRE( op );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["model"] = "p15-plane-model";
+    params["output"] = output.toStdString();
+    RSOperatorContext context;
+    return op->run( params, context );
+  };
+
+  // First run publishes the product + its provenance sidecar (Platform 8.0).
+  REQUIRE_NOTHROW( runSegment() );
+  REQUIRE( fileExists( output ) );
+  REQUIRE( fileExists( sidecar ) );
+  QFile originalSidecar( sidecar );
+  REQUIRE( originalSidecar.open( QIODevice::ReadOnly ) );
+  const QByteArray originalBytes = originalSidecar.readAll();
+  originalSidecar.close();
+
+  // Second run with the sidecar stage forced to fail (a DIRECTORY occupies
+  // the stage path, so the stage write cannot succeed): the run must throw
+  // AND the previous product+sidecar pair must come back intact.
+  {
+    const QString hostileStage = output + QStringLiteral( ".prov.json.stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    REQUIRE_THROWS( runSegment() );
+    CHECK( fileExists( output ) );
+    CHECK( fileExists( sidecar ) );
+    QFile restoredSidecar( sidecar );
+    REQUIRE( restoredSidecar.open( QIODevice::ReadOnly ) );
+    CHECK( restoredSidecar.readAll() == originalBytes );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".tmp~" ) ) );
+    QDir().rmdir( hostileStage );
+  }
+
+  // With the obstacle gone the run succeeds and republishes normally.
+  REQUIRE_NOTHROW( runSegment() );
+  CHECK( fileExists( sidecar ) );
+  ModelCatalog::instance().unregister( "p15-plane-model" );
+}

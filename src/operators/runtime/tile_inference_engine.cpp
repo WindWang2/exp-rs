@@ -2230,21 +2230,37 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to back up the previous output before publishing: " + outputPath );
   }
+  // Platform 8.0: a published raster inference product always carries its
+  // provenance sidecar. Hardening 15/20: the OLD sidecar is PARKED next to
+  // the parked product BEFORE the new product lands — the crash invariant
+  // the original comment promised (a crash can only leave a MISSING sidecar,
+  // never a stale/mismatched one; the old code removed the sidecar only
+  // after the product swap, leaving a stale-sidecar window), and a
+  // sidecar-publish failure now restores the previous product WITH its
+  // sidecar instead of downgrading a verified product to MissingSidecar
+  // (the detection publish guard already behaves this way).
+  const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
+  const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  const bool hadSidecar = QFile::exists( oldSidecarPath );
+  if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
+  {
+    QFile::remove( stagePath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath ); // best-effort restore of the old result
+    throw RSOperatorError(
+      ErrorCode::FileNotWritable,
+      "failed to back up the previous provenance sidecar before publishing: " + outputPath );
+  }
   if ( !QFile::rename( stagePath, finalPath ) )
   {
     QFile::remove( stagePath );
+    if ( hadSidecar )
+      QFile::rename( sidecarBackupPath, oldSidecarPath );
     if ( hadExisting )
       QFile::rename( backupPath, finalPath ); // best-effort restore of the old result
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish output raster to: " + outputPath );
   }
-  // Platform 8.0: a published raster inference product always carries its
-  // provenance sidecar. Ordering: the OLD sidecar is removed BEFORE the new
-  // product lands (a crash can then only leave a MISSING sidecar, never a
-  // stale/mismatched one), and the old product's backup is kept until the
-  // new sidecar is in — a sidecar failure restores the previous product
-  // instead of destroying it (same invariant as the raster publish).
-  QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
   stats.tilesProcessed = done; // counters finalized BEFORE the document build
   {
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {} );
@@ -2254,9 +2270,13 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       QFile::remove( finalPath );
       if ( hadExisting )
         QFile::rename( backupPath, finalPath ); // restore the previous good product
+      if ( hadSidecar )
+        QFile::rename( sidecarBackupPath, oldSidecarPath ); // ...with its sidecar
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
+  if ( hadSidecar )
+    QFile::remove( sidecarBackupPath );
   QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
@@ -2574,6 +2594,22 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
       probabilities[static_cast<std::size_t>( c )] =
         std::clamp( scores[static_cast<std::size_t>( c )], 0.0, 1.0 );
   }
+  // Hardening 15/20: fail closed on non-finite scores. std::clamp passes NaN
+  // through, a single NaN logit poisons the whole softmax denominator, and a
+  // NaN probability used to be published verbatim (or silently elected class
+  // 0 under weighted voting, because NaN never wins a `>` comparison).
+  // classifyScene is the shared core for the single-model writer AND every
+  // ensemble member, so this one gate protects both lanes — the scene lane
+  // now matches the raster combine's NaN poisoning and WBF's non-finite box
+  // gate.
+  for ( double value : probabilities )
+  {
+    if ( !std::isfinite( value ) )
+      throw RSOperatorError(
+        ErrorCode::ComputationError,
+        "model produced non-finite class scores (NaN/Inf) — refusing to publish "
+        "a scene classification built on them" );
+  }
   m_lastScene = SceneClassificationResult{
     probabilities, scores,
     confidenceSemantics.empty() ? std::string( "probability" ) : confidenceSemantics,
@@ -2652,6 +2688,13 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
   }
   if ( !m_lastEoPreflight.isNull() )
     doc["eo_preflight"] = m_lastEoPreflight;
+  // Hardening 15/20: the durable artifact carries the same top-level identity
+  // fields the service returns in its payload — they used to exist only on
+  // the in-memory copy AFTER this publish, so the on-disk document silently
+  // lacked them.
+  doc["backend"] = m_runtime->backendName();
+  doc["device"] = m_runtime->deviceName();
+  doc["model_ref"] = m_model.stableId();
 
   publishClassificationArtifact( doc, outputPath );
 
@@ -3892,18 +3935,31 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to back up the previous output before publishing: " + outputPath );
   }
+  // Platform 8.0: same provenance contract as the single-input publish
+  // (hardening 15/20: park the old sidecar before the product swap and
+  // restore it on any failure — see the single-input site for the rationale).
+  const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
+  const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  const bool hadSidecar = QFile::exists( oldSidecarPath );
+  if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
+  {
+    QFile::remove( stagePath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath );
+    throw RSOperatorError(
+      ErrorCode::FileNotWritable,
+      "failed to back up the previous provenance sidecar before publishing: " + outputPath );
+  }
   if ( !QFile::rename( stagePath, finalPath ) )
   {
     QFile::remove( stagePath );
+    if ( hadSidecar )
+      QFile::rename( sidecarBackupPath, oldSidecarPath );
     if ( hadExisting )
       QFile::rename( backupPath, finalPath );
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish output raster to: " + outputPath );
   }
-  // Platform 8.0: same provenance contract and ordering as the single-input
-  // publish (old sidecar removed before the product lands; backup kept until
-  // the new sidecar is in).
-  QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
   stats.tilesProcessed = done; // counters finalized BEFORE the document build
   {
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats,
@@ -3914,9 +3970,13 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       QFile::remove( finalPath );
       if ( hadExisting )
         QFile::rename( backupPath, finalPath ); // restore the previous good product
+      if ( hadSidecar )
+        QFile::rename( sidecarBackupPath, oldSidecarPath ); // ...with its sidecar
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
+  if ( hadSidecar )
+    QFile::remove( sidecarBackupPath );
 
   // Platform 10.0: EO domain preflight per feed — enforced against each
   // feed's BOUND contract and ITS effective band selection, after the
