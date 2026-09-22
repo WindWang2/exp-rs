@@ -245,3 +245,68 @@ TEST_CASE( "CommandRegistry: repeat shortcut install for one command warns, neve
   REQUIRE( again == first );
   REQUIRE( again->shortcut() == QKeySequence::Refresh );
 }
+
+// ── Hardening: shortcut reservations across unregister (reload contract) ───
+
+namespace
+{
+
+CommandDefinition shortcutCommand( const QString &id, const QKeySequence &shortcut )
+{
+  CommandDefinition d;
+  d.id = id;
+  d.title = id;
+  d.description = id;
+  d.shortcut = shortcut;
+  d.handler = [] {};
+  return d;
+}
+
+} // namespace
+
+TEST_CASE( "CommandRegistry: unregistering a shortcut-carrying command frees its canonical key",
+           "[command_registry][shortcuts][reload]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+  const QKeySequence shortcut( Qt::CTRL | Qt::SHIFT | Qt::Key_9 );
+
+  REQUIRE( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.x.probe" ), shortcut ) ) );
+  REQUIRE( registry.unregisterCommandsMatching( QStringLiteral( "plugin.x." ) ) == 1 );
+
+  // Reload generation: the plugin contract is "drop the previous generation
+  // first, then register". The key reservation used to survive unregister,
+  // so the re-register was rejected as a duplicate shortcut and the reloaded
+  // plugin silently lost its binding.
+  REQUIRE( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.x.probe" ), shortcut ) ) );
+
+  // A fresh unrelated shortcut still registers normally.
+  REQUIRE( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.x.other" ),
+                     QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_8 ) ) ) );
+}
+
+TEST_CASE( "CommandRegistry: unregister keeps reservations of commands outside the prefix",
+           "[command_registry][shortcuts][reload]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+  const QKeySequence key9( Qt::CTRL | Qt::SHIFT | Qt::Key_9 );
+  const QKeySequence key8( Qt::CTRL | Qt::SHIFT | Qt::Key_8 );
+
+  REQUIRE( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.x.probe" ), key9 ) ) );
+  REQUIRE( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.y.keep" ), key8 ) ) );
+
+  REQUIRE( registry.unregisterCommandsMatching( QStringLiteral( "plugin.x." ) ) == 1 );
+
+  // plugin.y.keep survived, so key8 must stay reserved…
+  CHECK( !registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.z.clash" ), key8 ) ) );
+  // …while the freed key9 is re-registrable.
+  CHECK( registry.registerCommand(
+    shortcutCommand( QStringLiteral( "plugin.z.fresh" ), key9 ) ) );
+}
