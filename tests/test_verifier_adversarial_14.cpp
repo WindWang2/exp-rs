@@ -39,6 +39,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -115,6 +116,66 @@ class UniformProvider : public StateProvider,
   private:
     Availability m_answer;
 };
+
+/// A check whose params declare the numeric domain @p declaredDomain for the
+/// state token @p subject. Unlike makeCheck() this one is answerable: with a
+/// provider that reports a domain, it evaluates to Pass or Fail rather than
+/// Indeterminate, which is what budget-truncation cases need.
+VerificationCheck makeStateCheck( const std::string &id, const std::string &subject,
+                                  const std::string &declaredDomain )
+{
+    VerificationCheck check;
+    check.id = id;
+    check.kind = checkKindToWire( CheckKind::StateInvariant );
+    check.title = "adversarial " + id;
+    check.subject = SubjectRef{ "node", subject };
+    check.params = Json::Value( Json::objectValue );
+    check.params["expect"] = Json::Value( Json::objectValue );
+    check.params["expect"]["numeric_domain"] = declaredDomain;
+    return check;
+}
+
+/// Reports a numeric domain per subject so a check can actually conclude.
+/// Subjects named "probe0"/"probe1" answer "linear"; "probe2" answers "db".
+/// A check declaring "db" for probe2 therefore Passes; one declaring anything
+/// else for it Fails -- which is exactly the disagreement a truncating run
+/// would hide.
+class StateDomainProvider : public StateProvider
+{
+  public:
+    Availability tryGet( const std::string &subject, StateSnapshot &out,
+                         std::string & ) const override
+    {
+        if ( subject == "probe2" )
+        {
+            out.numericDomain = "db";
+        }
+        else if ( subject == "probe0" || subject == "probe1" )
+        {
+            out.numericDomain = "linear";
+        }
+        else
+        {
+            return Availability::Missing;
+        }
+        return Availability::Found;
+    }
+};
+
+/// Wired inputs for a provider that only implements the state seam. The other
+/// four seams are deliberately left null: a budget case must not depend on
+/// them, and leaving them out proves the code does not quietly need them.
+///
+/// Distinctly named rather than an overload of inputsWith(): both providers
+/// derive from StateProvider, so an overload set would be ambiguous at the
+/// call site for the state-only one.
+VerificationInputs stateOnlyInputs( const StateProvider &state )
+{
+    VerificationInputs inputs;
+    inputs.state = &state;
+    inputs.sourceId = "adversarial-fixture";
+    return inputs;
+}
 
 /// Builds a wired input bundle pointing at @p provider. The provider must
 /// outlive the inputs; callers keep it in a local shared_ptr.
@@ -293,24 +354,181 @@ TEST_CASE( "adversarial G-8: exhausting the check budget is never a truncated pa
     // Truncation is the subtle fail-open: run the first N checks, drop the
     // rest, report on what ran. The dropped checks are exactly the ones that
     // might have failed.
+    //
+    // This case has to construct checks that WOULD Pass and WOULD Fail, because
+    // the whole point is what happens to the ones that get dropped. An earlier
+    // version of this test used checks with empty params, which this family
+    // answers Indeterminate regardless of budget -- so `status != Pass` held
+    // whether or not truncation worked, and disabling the budget check entirely
+    // left the suite green. The assertions below are written to fail in exactly
+    // that situation.
+    //
+    // StateDomainProvider answers "linear" for c0/c1 and "db" for c2, matching
+    // the declared domains of c0/c1 and contradicting c2's. With maxChecks = 2,
+    // c2 is the check the budget drops.
     VerificationSpec spec;
     spec.specId = "over-budget";
     spec.specVersion = "1";
     spec.budget.maxChecks = 2;
 
-    for ( int i = 0; i < 5; ++i )
-    {
-        spec.checks.push_back(
-            makeCheck( "c" + std::to_string( i ), checkKindToWire( CheckKind::StateInvariant ) ) );
-    }
+    spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) );
+    spec.checks.push_back( makeStateCheck( "c1", "probe1", "linear" ) );
+    spec.checks.push_back( makeStateCheck( "c2", "probe2", "sigma0_db" ) );
 
-    const UniformProvider provider( Availability::Found );
-    const VerificationReport report = runSpec( spec, inputsWith( provider ) );
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ) );
 
-    // Either the run refuses up front, or the unevaluated checks are reported
-    // as Indeterminate. What must NOT happen is a Pass covering only the first
-    // two checks while three were silently dropped.
+    REQUIRE( report.results.size() == 3 );
+
+    // The first two were evaluated and genuinely passed. If they had not, the
+    // rest of this test would prove nothing about truncation.
+    REQUIRE( report.results[0].status == CheckStatus::Pass );
+    REQUIRE( report.results[1].status == CheckStatus::Pass );
+
+    // The third check was never evaluated, and says so with a typed code -- not
+    // by being absent, which a caller could read as "nothing to report".
+    REQUIRE( report.results[2].status == CheckStatus::Indeterminate );
+    REQUIRE( report.results[2].failureCode == failure_codes::kBudgetExceeded );
+
+    // The overrun is visible in the report, so a reader cannot mistake a
+    // partial run for a complete one.
+    REQUIRE( report.budgetUsage.exceeded );
+    REQUIRE( report.budgetUsage.checksUnevaluated == 1 );
+
+    // And critically: the dropped check must not vanish from the verdict.
     REQUIRE( report.outcome.status != CheckStatus::Pass );
+}
+
+TEST_CASE( "adversarial G-8b: the node budget is enforced, not just serialised",
+           "[verifier14][adversarial][failopen]" )
+{
+    // Budget has five fields. Each one must be COMPARED somewhere in
+    // check_runner.cpp; a field that only appears in toJson/fromJson advertises
+    // a bound the run does not hold. This case and the three below it exist so
+    // that every field has at least one assertion that fails when its
+    // comparison is removed -- an untested limit is an undeclared limit.
+    VerificationSpec spec;
+    spec.specId = "node-budget";
+    spec.specVersion = "1";
+    spec.budget.maxNodes = 1;
+
+    spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) );
+
+    NodeCheckMap nodeChecks;
+    nodeChecks["node-a"] = { "c0" };
+    nodeChecks["node-b"] = { "c0" };   // second node exceeds maxNodes = 1
+
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ), nodeChecks );
+
+    REQUIRE( nodeChecks.size() == 2 );
+    REQUIRE( report.budgetUsage.nodes == 2 );
+    REQUIRE( report.budgetUsage.exceeded );
+    REQUIRE( report.outcome.status != CheckStatus::Pass );
+
+    // The overrun must be named. Without this the caller sees a non-Pass verdict
+    // with no indication that the cause is a self-imposed ceiling rather than a
+    // defect in the data.
+    const std::vector<std::string> &codes = report.outcome.failureCodes;
+    REQUIRE( std::find( codes.begin(), codes.end(), failure_codes::kBudgetExceeded ) !=
+             codes.end() );
+}
+
+TEST_CASE( "adversarial G-8c: the string budget stops an over-long check id or title",
+           "[verifier14][adversarial][failopen]" )
+{
+    // Titles and ids travel into reports, logs and UI rows. An unbounded one is
+    // a cheap way to make a consumer allocate without limit.
+    VerificationSpec spec;
+    spec.specId = "string-budget";
+    spec.specVersion = "1";
+    spec.budget.maxStringChars = 16;
+
+    spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) );
+
+    VerificationCheck longId = makeStateCheck( "c1", "probe0", "linear" );
+    longId.id = std::string( 64, 'x' );   // 64 > 16
+    spec.checks.push_back( longId );
+
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ) );
+
+    REQUIRE( report.results.size() == 2 );
+    // The well-formed check still runs; one bad check must not poison the rest.
+    REQUIRE( report.results[0].status == CheckStatus::Pass );
+    REQUIRE( report.results[1].status == CheckStatus::Indeterminate );
+    REQUIRE( report.results[1].failureCode == failure_codes::kSpecInvalid );
+    REQUIRE( report.budgetUsage.exceeded );
+}
+
+TEST_CASE( "adversarial G-8d: the depth budget refuses a nested params bomb",
+           "[verifier14][adversarial][failopen]" )
+{
+    // jsoncpp depth bombs have hit this repo twice (#1154, #1155). The guard is
+    // a REFUSAL before recursion, so the check must be Indeterminate with a
+    // spec-level code -- never a crash and never a Pass.
+    VerificationSpec spec;
+    spec.specId = "depth-budget";
+    spec.specVersion = "1";
+    spec.budget.maxDepth = 2;
+
+    spec.checks.push_back( makeStateCheck( "c0", "probe0", "linear" ) );
+
+    VerificationCheck deep = makeStateCheck( "c1", "probe0", "linear" );
+    Json::Value nested{ Json::objectValue };
+    Json::Value *cursor = &nested;
+    for ( int level = 0; level < 8; ++level )   // depth 8 > 2
+    {
+        ( *cursor )["down"] = Json::Value( Json::objectValue );
+        cursor = &( *cursor )["down"];
+    }
+    deep.params["expect"]["extra"] = nested;
+    spec.checks.push_back( deep );
+
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ) );
+
+    REQUIRE( report.results.size() == 2 );
+    REQUIRE( report.results[0].status == CheckStatus::Pass );
+    REQUIRE( report.results[1].status == CheckStatus::Indeterminate );
+    REQUIRE( report.results[1].failureCode == failure_codes::kSpecInvalid );
+    // The peak depth is recorded even though the check was refused, so an
+    // operator can see how far over the ceiling the input actually was.
+    REQUIRE( report.budgetUsage.maxDepthSeen > spec.budget.maxDepth );
+    REQUIRE( report.budgetUsage.exceeded );
+}
+
+TEST_CASE( "adversarial G-8e: the evidence-byte budget distrusts an oversized record",
+           "[verifier14][adversarial][failopen]" )
+{
+    // A provider handing back an enormous evidence record is not telling us
+    // more; it is exhausting the budget. The check it fed becomes Indeterminate
+    // rather than being trusted on oversized input.
+    VerificationSpec spec;
+    spec.specId = "bytes-budget";
+    spec.specVersion = "1";
+    spec.budget.maxEvidenceBytes = 256;
+
+    // A StateInvariant check against a subject carrying a huge declared domain
+    // produces evidence proportional to that string.
+    VerificationCheck fat = makeStateCheck( "c0", "probe0", "linear" );
+    const std::string hugeDomain( 4096, 'd' );
+    fat.params["expect"]["numeric_domain"] = hugeDomain;
+    spec.checks.push_back( fat );
+
+    const StateDomainProvider provider;
+    const VerificationReport report = runSpec( spec, stateOnlyInputs( provider ) );
+
+    REQUIRE( report.results.size() == 1 );
+    REQUIRE( report.results[0].status == CheckStatus::Indeterminate );
+    REQUIRE( report.budgetUsage.maxEvidenceBytes > spec.budget.maxEvidenceBytes );
+    REQUIRE( report.budgetUsage.exceeded );
+
+    // The byte ceiling must be attributed to the BUDGET, not read as a data
+    // defect: the numbers are fine, the record is simply too large to trust.
+    const std::vector<std::string> &codes = report.outcome.failureCodes;
+    REQUIRE( std::find( codes.begin(), codes.end(), failure_codes::kBudgetExceeded ) !=
+             codes.end() );
 }
 
 // ---------------------------------------------------------------------------

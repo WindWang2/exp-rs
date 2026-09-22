@@ -4,6 +4,7 @@
 
 #include "verification/canonical_json.h"
 #include "verification/digest.h"
+#include "verification/failure_codes.h"
 #include "verification/spec.h"
 
 #include <algorithm>
@@ -539,12 +540,57 @@ VerificationReport buildReport( const VerificationSpec &spec,
     report.budgetUsage = usage;
     report.budgetUsage.nodes = nodeChecks.size();
 
-    for ( const auto &entry : nodeChecks )
+    // No node structure means "one implicit scope", not "no scopes at all".
+    //
+    // These two are easily confused and the difference is load-bearing. If the
+    // caller supplied no node mapping, the spec's checks still happened and the
+    // task outcome must be rolled up from them; leaving report.nodes empty would
+    // make rollUpTask() return Indeterminate with NO blocking node, so an agent
+    // reading blockingNodes to decide what to replan would see an empty list and
+    // could not tell "everything passed" from "something failed and nothing
+    // carries it". That is the same genre of dishonesty as inventing a pass.
+    //
+    // Explicitly-supplied node structure is used as given. A mapping that is
+    // present but names a node with no checks is left alone: rollUpNode() has
+    // its own answer for a node whose postcondition is empty, and this function
+    // is not the place to overrule it.
+    if ( nodeChecks.empty() )
     {
-        report.nodes.push_back( rollUpNode( entry.first, entry.second, results, policy ) );
+        std::vector<std::string> ids;
+        ids.reserve( results.size() );
+        for ( const CheckResult &result : results )
+        {
+            ids.push_back( result.checkId );
+        }
+        const std::string nodeId = spec.specId.empty() ? std::string( "task" ) : spec.specId;
+        report.nodes.push_back( rollUpNode( nodeId, ids, results, policy ) );
+        report.budgetUsage.nodes = 1;
+    }
+    else
+    {
+        for ( const auto &entry : nodeChecks )
+        {
+            report.nodes.push_back( rollUpNode( entry.first, entry.second, results, policy ) );
+        }
+        report.budgetUsage.nodes = nodeChecks.size();
     }
     report.outcome = rollUpTask( report.nodes );
     report.status = report.outcome.status;
+
+    // A budget overrun is a limitation on the run, not a property of the data.
+    // If it is recorded only in `budgetUsage`, a caller can read `status ==
+    // Pass` off a report whose own accounting says "I could not evaluate
+    // everything I was asked to" -- the truncation fail-open, relocated from
+    // the lattice into the bookkeeping. The check-level limits already push
+    // their dropped checks to Indeterminate, so the roll-up catches them; the
+    // NODE limit is enforced before any check runs and has no such carrier,
+    // which is exactly why it needs this.
+    if ( usage.exceeded && report.status == CheckStatus::Pass )
+    {
+        report.status = CheckStatus::Indeterminate;
+        report.outcome.status = CheckStatus::Indeterminate;
+        addUniqueSorted( report.outcome.failureCodes, failure_codes::kBudgetExceeded );
+    }
 
     Json::Value byStatus{ Json::objectValue };
     byStatus["pass"] = 0;

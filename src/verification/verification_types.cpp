@@ -161,7 +161,6 @@ Json::Value Budget::toJson() const
     json["max_evidence_bytes"] = static_cast<Json::Int64>( maxEvidenceBytes );
     json["max_depth"] = maxDepth;
     json["max_string_chars"] = static_cast<Json::Int64>( maxStringChars );
-    json["max_witness_elements"] = static_cast<Json::Int64>( maxWitnessElements );
     return json;
 }
 
@@ -184,8 +183,7 @@ bool Budget::fromJson( const Json::Value &json, Budget &out, std::string &error 
     if ( !requireCount( json, "max_checks", loaded.maxChecks, loaded.maxChecks, error ) ||
          !requireCount( json, "max_nodes", loaded.maxNodes, loaded.maxNodes, error ) ||
          !requireCount( json, "max_evidence_bytes", loaded.maxEvidenceBytes, loaded.maxEvidenceBytes, error ) ||
-         !requireCount( json, "max_string_chars", loaded.maxStringChars, loaded.maxStringChars, error ) ||
-         !requireCount( json, "max_witness_elements", loaded.maxWitnessElements, loaded.maxWitnessElements, error ) )
+         !requireCount( json, "max_string_chars", loaded.maxStringChars, loaded.maxStringChars, error ) )
     {
         return false;
     }

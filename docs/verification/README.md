@@ -94,8 +94,16 @@ The module builds as `sicnu_verification`; the seven lanes link it (and, being
 Qt-free, link neither Qt nor QGIS):
 
 ```
-ctest -R test_verifier_          # all seven lanes
+ctest -R "^test_verifier_(core|checks|provenance|packs|render|drift|adversarial)_14::"   # all seven lanes
+ctest -R "^test_verifier_checks_14::"                                                    # just one
 ```
+
+Every lane passes `TEST_PREFIX`, the repo's D15 convention, so each discovered
+case is named `<target>::<case>`. Anchor the regex on `^` and the trailing `::`:
+`ctest -R test_verifier_` also matches a test *binary* by prefix, so a future
+track that adds a target sharing that prefix would be silently swept into the
+gate — and a gate that selects more than it means to reports success for work it
+never ran.
 
 | Lane | Covers |
 | --- | --- |

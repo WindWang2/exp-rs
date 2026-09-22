@@ -77,6 +77,32 @@ inputs.artifact = &myArtifactProvider;   // unset members are Missing, never "tr
 inputs.sourceId = "ndvi-product-pipeline";
 ```
 
+### Each provider already has exactly one source of truth
+
+The five interfaces exist as five (not one) because each can be satisfied by a
+single existing structure in this repository. When you wire your own, you are
+writing an adapter over one of these — not inventing a new vocabulary:
+
+| Provider | Existing source of truth | What it supplies |
+| --- | --- | --- |
+| `StateProvider` | `facts::radiometricState` / `facts::SarFacts::calibration` (`src/agent/harness/band_facts.h:54`, `:61-67`; `band_facts.cpp:127`) | `numericDomain`, `radiometricState` |
+| `ArtifactProvider` | The closed `kFactKeys` table (`src/agent/harness/workflow_ir.cpp:41`), mirrored as `mirroredFactKeys()` | The `facts` object, keyed by that vocabulary |
+| `MetricProvider` | `experiment::MetricRecord` / `BenchmarkMetricDelta` (`src/experiment/evaluation.h:215`, `benchmark_definition.h:118`) | `MetricValue` (`value` + `unit`) |
+| `ProvenanceProvider` | `experiment::EvidenceCompleteness` (`src/experiment/evidence.h:35`) | `ProvenanceDimension` — the shape is mirrored on purpose, so the adapter moves fields rather than reinterpreting them (`providers.h:65-67`) |
+| `DigestProvider` | `data::ExecutionFingerprint` (`src/data/execution_fingerprint.h:79`) and `geospatial::sha256Hex` (`src/geospatial/util/sha256.h:56`) | `DigestRecord` (`algorithm` + `digest`) |
+
+Two consequences worth stating plainly:
+
+- **`DigestRecord::algorithm` is not decoration.** `ExecutionFingerprint`
+  stores a full 256-bit SHA-256, and `sha256Hex` is the repo's only hasher; but
+  a record whose algorithm you cannot name is *incomparable*, not unequal. The
+  reproducibility checker returns `Indeterminate` in that case rather than
+  `Fail` (`checks_reproducibility.cpp:10-12`).
+- **The provider's `static_cast`-free purity is load-bearing.** `providers.h`
+  is the only place the core touches the outside world, and every method
+  returns plain data. That is why the library is testable headless and why its
+  test lanes link neither `Qt6::Core` nor `qgis_core`.
+
 Three rules that are easy to get wrong:
 
 1. **Return `Missing`, not an empty object.** `facts = Json::Value{}` with

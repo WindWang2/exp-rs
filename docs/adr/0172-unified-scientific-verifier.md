@@ -90,7 +90,7 @@ re-implemented, so the repo's one-hash rule stays true.
 | --- | --- | --- |
 | Core semantics | `status_lattice`, `failure_codes`, `canonical_json`, `verification_types`, `spec`, `digest` | The lattice, the closed 18-code table, canonical bytes |
 | Evidence | `availability`, `evidence`, `providers` | The three-valued provider seam and evidence records |
-| Execution | `check_runner`, `report` | Dispatch, budget enforcement, two-level roll-up |
+| Execution | `check_runner`, `report`, `availability`, `evidence` | Dispatch, budget enforcement, two-level roll-up; the three-valued seam (`Found`/`Missing`/`Refused`) and the provenance record attached to every conclusion |
 | Families | `checks_state`, `checks_artifact`, `checks_numeric`, `checks_relational`, `checks_provenance`, `checks_reproducibility`, `checks_cross_output` | One file per family |
 | Composition | `pack`, `packs_builtin` | Versioned bundles; projection from the contract registry |
 | Presentation | `render_teaching`, `render_agent` | The same verdict in two vocabularies |

@@ -54,6 +54,13 @@ bool checkKindOf( const struct VerificationCheck &check, CheckKind &out );
 /// Resource envelope for one verification run. Every field has a default, and
 /// exceeding any of them is a typed refusal rather than a silent slowdown
 /// (see the resource-budget rules in plan.md section 8).
+///
+/// Every field here is ENFORCED somewhere in check_runner.cpp. A budget field
+/// that is only serialised is worse than no field at all: it advertises a bound
+/// the run does not actually hold, so a caller who sets it to protect themselves
+/// gets no protection and no warning. The former `maxWitnessElements` was
+/// exactly that -- nothing in the module produced witness elements, so the cap
+/// bounded nothing -- and it was removed rather than left as decoration.
 struct Budget
 {
     std::size_t maxChecks = 256;
@@ -61,7 +68,6 @@ struct Budget
     std::size_t maxEvidenceBytes = 1024u * 1024u;
     int maxDepth = 32;
     std::size_t maxStringChars = 4096;
-    std::size_t maxWitnessElements = 5000;
 
     Json::Value toJson() const;
     static bool fromJson( const Json::Value &json, Budget &out, std::string &error );
