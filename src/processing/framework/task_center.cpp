@@ -2504,8 +2504,17 @@ void TaskCenter::processNextQueuedTasks()
             // start, every deeper candidate is blocked too — the pre-9.0
             // O(1) saturated behavior. (Capacity can only be consumed, never
             // gained, within one pass, so the flag cannot go stale favorably.)
+            // The popped head MUST return to the heap before breaking: an
+            // entry dropped here kept its m_readySerial, so the aging sweep
+            // saw a live candidate that no heap entry backed — an
+            // already-top-priority candidate (or aging disabled) would never
+            // be re-examined and would strand in Queued after the slots
+            // freed (regression: tc12 saturated fast-path oracle).
             if ( !transientCapacityAtPassStart )
+            {
+                requeue.push_back( entry );
                 break;
+            }
             globalHoldReason = QStringLiteral( "Global worker slots exhausted." );
             resourceBlockedIds.append( entry.taskId );
             requeue.push_back( entry );
@@ -2887,6 +2896,17 @@ void TaskCenter::flushPendingLaunches()
             QMutexLocker preLock( &m_mutex );
             if ( !m_tasks.contains( launch.taskId ) || isTerminalStatus( m_tasks[launch.taskId].status ) )
                 continue; // canceled between staging and dispatch — never submit
+            // Retired-identity sweep (review follow-up to the auto-retry
+            // cancel): if an earlier attempt's jobId still maps here (a late
+            // record re-attached it inside the resurrection window), retire
+            // it so exactly one live job dispatches records to this task.
+            for ( auto mapIt = m_taskByJobId.begin(); mapIt != m_taskByJobId.end(); )
+            {
+                if ( mapIt.value() == launch.taskId && mapIt.key() != jobId )
+                    mapIt = m_taskByJobId.erase( mapIt );
+                else
+                    ++mapIt;
+            }
             m_taskByJobId[jobId] = launch.taskId;
             m_tasks[launch.taskId].jobId = jobId;
         }
@@ -3474,6 +3494,20 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
             info.runStartStamp = {};
             if ( !deadJobId.empty() )
                 m_taskByJobId.remove( deadJobId );
+            // #702 symmetry with the permanent-failure path below: the dead
+            // attempt's engine job must be cancelled, or an externally-driven
+            // transient report (markTaskFailed is public — GUI async runner)
+            // leaves it running beside the resurrected task, producing into
+            // the same outputs. Engine cancel of an already-terminal job is a
+            // harmless no-op (the listener path lands here too).
+            if ( !deadJobId.empty() )
+                jobCancelTargets.emplace_back( deadJobId, taskId );
+            // Fresh log/progress dedup keys: the dead attempt's forwarded
+            // counts must not suppress the retry's early records (delta
+            // records restart at engine index 0; a stale `seen` silently
+            // dropped the resurrected attempt's log lines).
+            m_forwardedLogCounts.remove( taskId );
+            m_lastForwardedProgress.remove( taskId );
             // The retried run records fresh identity: drop the failed
             // attempt's fingerprint bookkeeping (the legacy removals below
             // do not run on this early-return path). Also drop chained-edge /
@@ -3553,7 +3587,14 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
     flushPendingLaunches();
     flushPendingSignals();
     if ( autoRetried )
-        return; // the re-dispatch is staged + flushed; no terminal bookkeeping
+    {
+        // The re-dispatch is staged + flushed; no terminal bookkeeping. The
+        // dead attempt's job still needs its cancel dispatched (lock-free
+        // engine call), exactly like the terminal paths below.
+        dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                                QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
+        return;
+    }
 
     unlinkScratchOutputs( scratchPathsToUnlink );
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
