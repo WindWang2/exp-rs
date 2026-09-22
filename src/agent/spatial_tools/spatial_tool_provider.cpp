@@ -43,9 +43,15 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     const bool isIo = ( spatial->name().rfind( "io:", 0 ) == 0 );
     // Mission Runtime 13.0: the mission:* tools join the catalog surface.
     const bool isMission = ( spatial->name().rfind( "mission:", 0 ) == 0 );
+    // Platform 5.0 solution knowledge + cartography-declared style/template
+    // families: registered into the same registry, so they must be listed
+    // here or they stay agent-invisible (ghost surfaces).
+    const bool isSolution = ( spatial->name().rfind( "solution:", 0 ) == 0 );
+    const bool isStyle = ( spatial->name().rfind( "style:", 0 ) == 0 );
+    const bool isTemplate = ( spatial->name().rfind( "template:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
          !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo &&
-         !isMission )
+         !isMission && !isSolution && !isStyle && !isTemplate )
       continue;
 
     AgentTool tool;
@@ -62,6 +68,9 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isEditing         ? "editing"
                  : isIo              ? "io"
                  : isMission         ? "mission"
+                 : isSolution        ? "solution"
+                 : isStyle           ? "style"
+                 : isTemplate        ? "template"
                                      : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();

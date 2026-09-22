@@ -16,6 +16,9 @@
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -416,4 +419,151 @@ TEST_CASE( "reproducibility:inspect degrades honestly", "[agent][mcp][data_platf
         if ( check.toMap().value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "missing" ) )
             sawMissing = true;
     CHECK( sawMissing );
+}
+
+// --- workspace containment (hardening agent-mcp-tool-surface) ----------------
+
+namespace
+{
+
+/// Saves/restores SICNU_MCP_WORKSPACE and the CWD around a containment test:
+/// the process-wide settings must survive REQUIRE failures for the other
+/// cases in this binary.
+struct ContainmentGuard
+{
+    QByteArray oldWorkspace = qgetenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8() );
+    QString oldCwd = QDir::currentPath();
+
+    ~ContainmentGuard()
+    {
+        if ( oldWorkspace.isEmpty() )
+            qunsetenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8() );
+        else
+            qputenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8(), oldWorkspace );
+        QDir::setCurrent( oldCwd );
+    }
+};
+
+} // namespace
+
+TEST_CASE(
+    "dataset: tools anchor relative store paths to SICNU_MCP_WORKSPACE",
+    "[agent][mcp][data_platform][containment]" )
+{
+    // Regression (relative-path containment mismatch): the MCP gate validated
+    // <workspace>/<relative> while the store opener opened the RAW argument —
+    // CWD-relative. With CWD != workspace the SQLite file was created OUTSIDE
+    // the sandbox despite the gate approving it (fail-open). After the fix the
+    // opened path IS the validated path.
+    using sicnu::agent::handleDataPlatformTool;
+
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE( workspace.isValid() );
+    REQUIRE( outside.isValid() );
+    REQUIRE( QDir( workspace.path() ).mkpath( QStringLiteral( "anchored" ) ) );
+
+    ContainmentGuard guard;
+    REQUIRE( QDir::setCurrent( outside.path() ) );
+    qputenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8(),
+             workspace.path().toUtf8() );
+
+    // Relative dataset_db: opens (and creates) inside the workspace.
+    QVariantMap args;
+    args.insert( QStringLiteral( "dataset_db" ), QStringLiteral( "anchored/dataset.db" ) );
+    handleDataPlatformTool( QStringLiteral( "dataset:list" ), args );
+    REQUIRE( QDir( workspace.path() ).exists( QStringLiteral( "anchored/dataset.db" ) ) );
+    REQUIRE( !QFile::exists( outside.filePath( QStringLiteral( "anchored/dataset.db" ) ) ) );
+
+    // Control: with the sandbox UNSET the relative path is CWD-relative again
+    // (documented identity behavior — anchoring is not applied).
+    qunsetenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8() );
+    QVariantMap control;
+    control.insert( QStringLiteral( "dataset_db" ), QStringLiteral( "control.db" ) );
+    handleDataPlatformTool( QStringLiteral( "dataset:list" ), control );
+    REQUIRE( QFile::exists( outside.filePath( QStringLiteral( "control.db" ) ) ) );
+    REQUIRE( !QDir( workspace.path() ).exists( QStringLiteral( "control.db" ) ) );
+}
+
+TEST_CASE(
+    "reproducibility:inspect reports out-of-workspace artifacts unavailable without probing them",
+    "[agent][mcp][data_platform][containment][repro]" )
+{
+    // Regression (artifact-oracle containment): the artifactAvailable hook
+    // stat()-ed paths recorded in DB rows — never part of the argument tree,
+    // so the argument-level gate never saw them. A recorded host path outside
+    // the sandbox leaked existence and size into the readiness report. The
+    // hook now answers "unavailable" for out-of-sandbox paths WITHOUT probing
+    // them, and answers truthfully for in-sandbox paths.
+    using sicnu::agent::handleDataPlatformTool;
+
+    QTemporaryDir workspace;
+    QTemporaryDir host;
+    REQUIRE( workspace.isValid() );
+    REQUIRE( host.isValid() );
+
+    // A real file OUTSIDE the sandbox and a real file INSIDE it.
+    const QString outsideArtifact = host.filePath( QStringLiteral( "outside_artifact.tif" ) );
+    const QString insideArtifact = workspace.filePath( QStringLiteral( "inside_artifact.tif" ) );
+    REQUIRE( QFile( outsideArtifact ).open( QIODevice::WriteOnly ) );
+    REQUIRE( QFile( insideArtifact ).open( QIODevice::WriteOnly ) );
+
+    SeededStore seeded;
+    sicnu::experiment::ExperimentStore experimentStore;
+    REQUIRE( experimentStore.open( seeded.fixture.experimentDb ) );
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "11111111-2222-4333-8444-555555555555" ) );
+    experiment.setName( QStringLiteral( "repro-containment" ) );
+    experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experimentStore.upsertExperiment( experiment ).has_value() );
+
+    sicnu::experiment::ExperimentRun run;
+    run.setRunId( QStringLiteral( "cccccccc-dddd-4333-8444-555555555555" ) );
+    run.setExperimentId( experiment.experimentId() );
+    run.setAlgorithmId( QStringLiteral( "rs:spectral_index" ) );
+    run.setDatasetVersionId( seeded.versionId );
+    run.setSplitManifestId( seeded.manifestId );
+    run.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+    sicnu::experiment::ExperimentRun::Artifact outside;
+    outside.path = outsideArtifact;
+    outside.role = QStringLiteral( "primary" );
+    outside.sizeBytes = QFileInfo( outsideArtifact ).size();
+    sicnu::experiment::ExperimentRun::Artifact inside;
+    inside.path = insideArtifact;
+    inside.role = QStringLiteral( "sidecar" );
+    inside.sizeBytes = QFileInfo( insideArtifact ).size();
+    run.artifacts().append( outside );
+    run.artifacts().append( inside );
+    REQUIRE( experimentStore.upsertRun( run ).has_value() );
+
+    const auto artifactStatus = []( const QVariantMap &report, const QString &path ) -> QString {
+        for ( const auto &check : report.value( QStringLiteral( "checks" ) ).toList() )
+        {
+            const QVariantMap entry = check.toMap();
+            if ( entry.value( QStringLiteral( "dependency" ) ).toString() ==
+                 QStringLiteral( "artifact:%1" ).arg( path ) )
+                return entry.value( QStringLiteral( "status" ) ).toString();
+        }
+        return QStringLiteral( "<absent>" );
+    };
+
+    ContainmentGuard guard;
+    REQUIRE( QDir::setCurrent( host.path() ) );
+    qputenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8(), workspace.path().toUtf8() );
+
+    QVariantMap args = baseArgs( seeded.fixture.datasetDb );
+    args.insert( QStringLiteral( "experiment_db" ), seeded.fixture.experimentDb );
+    args.insert( QStringLiteral( "run" ), run.runId() );
+    const auto report = handleDataPlatformTool( QStringLiteral( "reproducibility:inspect" ), args );
+    // Out-of-sandbox artifact: unavailable (never probed, presence not leaked).
+    CHECK( artifactStatus( report, outsideArtifact ) == QStringLiteral( "missing" ) );
+    // In-sandbox artifact: truthfully available.
+    CHECK( artifactStatus( report, insideArtifact ) == QStringLiteral( "ok" ) );
+
+    // Control: no sandbox configured — the existing truth-telling behavior
+    // (probe everything recorded) is unchanged.
+    qunsetenv( QStringLiteral( "SICNU_MCP_WORKSPACE" ).toUtf8() );
+    const auto unconfined = handleDataPlatformTool( QStringLiteral( "reproducibility:inspect" ), args );
+    CHECK( artifactStatus( unconfined, outsideArtifact ) == QStringLiteral( "ok" ) );
+    CHECK( artifactStatus( unconfined, insideArtifact ) == QStringLiteral( "ok" ) );
 }

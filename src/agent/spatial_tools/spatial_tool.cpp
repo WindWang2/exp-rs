@@ -37,7 +37,18 @@
 #include "../contracts/spatial_contracts.h"
 #include "mission_tools.h"
 
+#include <atomic>
+
 namespace sicnu::agent::spatial_tools {
+
+namespace {
+// Once-per-process guard for registerBuiltinTools(): the MCP routing consults
+// the registry on every unknown-prefix call, and each consult used to rebuild
+// every builtin tool object (~130 constructions per io: call) and rely on
+// emplace() failures to dedupe. reset() clears the flag so an explicit
+// registry wipe re-registers on the next call.
+std::atomic<bool> gBuiltinToolsInstalled{ false };
+} // namespace
 
 void SpatialToolRegistry::reset()
 {
@@ -45,12 +56,15 @@ void SpatialToolRegistry::reset()
     std::lock_guard<std::mutex> lock( mMutex );
     mTools.clear();
   }
+  gBuiltinToolsInstalled.store( false, std::memory_order_release );
   // registerBuiltinTools() locks mMutex itself — call it after releasing.
   registerBuiltinTools();
 }
 
 void SpatialToolRegistry::registerBuiltinTools()
 {
+  if ( gBuiltinToolsInstalled.load( std::memory_order_acquire ) )
+    return;
   static const std::vector<SpatialToolPtr> kBuiltinTools = {
     std::make_shared<RasterInspectTool>(),
     // D13 · Radiometric Spectral Workbench: agent spectral tools.
@@ -122,6 +136,7 @@ void SpatialToolRegistry::registerBuiltinTools()
   // Mission Runtime 13.0: the real mission:* tool objects over the
   // single-authority mission runtime store.
   registerMissionTools();
+  gBuiltinToolsInstalled.store( true, std::memory_order_release );
 }
 
 } // namespace sicnu::agent::spatial_tools
