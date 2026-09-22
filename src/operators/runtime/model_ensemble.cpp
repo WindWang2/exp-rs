@@ -799,7 +799,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     DetectionFusionContract fusion;
     fusion.iouThreshold = ensembleModel.ensemble.detection.iouThreshold;
     fusion.skipBoxThreshold = ensembleModel.ensemble.detection.skipBoxThreshold;
-    const DetectionFusionResult fused = fuseDetectionsWbf( contributions, fusion );
+    const DetectionFusionResult fused = fuseDetectionsWbf(
+      contributions, fusion, CancelProbe( [ &context ]() { context.throwIfCancelled(); } ) );
 
     // The final writer applies the INPUT raster's geotransform once.
     GdalDatasetWrapper input;

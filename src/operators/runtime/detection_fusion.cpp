@@ -99,7 +99,8 @@ std::string DetectionFusionContract::validate() const
 }
 
 DetectionFusionResult fuseDetectionsWbf( const std::vector<DetectionMemberBoxes> &members,
-                                         const DetectionFusionContract &contract )
+                                         const DetectionFusionContract &contract,
+                                         const CancelProbe &cancelled )
 {
   DetectionFusionResult result;
   result.memberSurviving.assign( members.size(), 0 );
@@ -159,8 +160,14 @@ DetectionFusionResult fuseDetectionsWbf( const std::vector<DetectionMemberBoxes>
   // cluster.
   std::vector<Cluster> clusters;
   clusters.reserve( pooled.size() );
+  // #1176: cancellation probe every 256 pooled boxes (F-OPS-5 NMS pattern).
+  // The cluster scan remains O(N²) for the no-merge cliff; cancel lets a long
+  // ensemble run fail closed instead of freezing the host for minutes.
+  std::size_t pooledIndex = 0;
   for ( const PooledBox &entry : pooled )
   {
+    if ( cancelled && ( pooledIndex++ % 256 == 0 ) )
+      cancelled();
     std::size_t best = clusters.size();
     double bestIou = contract.iouThreshold; // strictly greater required
     for ( std::size_t c = 0; c < clusters.size(); ++c )

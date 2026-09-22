@@ -147,32 +147,30 @@ const AssetRecord *CatalogRecordStore::find( AssetId id ) const
 
 bool CatalogRecordStore::locate( AssetId id, int &shardOut, int &recOut ) const
 {
+    // #1176: O(1) per shard via byId.
+    const QString key = id.toString();
     const int sealed = sealedCount();
     for ( int i = 0; i < sealed; ++i )
     {
         const RecordShard &shard = *( *m_sealed )[ i ];
-        for ( int j = 0; j < static_cast<int>( shard.records.size() ); ++j )
+        catalogScaleCounters().recordVisits.fetch_add( 1, std::memory_order_relaxed );
+        const auto it = shard.byId.constFind( key );
+        if ( it != shard.byId.constEnd() )
         {
-            catalogScaleCounters().recordVisits.fetch_add( 1, std::memory_order_relaxed );
-            if ( shard.records[ j ].snapshot.id() == id )
-            {
-                shardOut = i;
-                recOut = j;
-                return true;
-            }
+            shardOut = i;
+            recOut = it.value();
+            return true;
         }
     }
     if ( m_tail )
     {
-        for ( int j = 0; j < static_cast<int>( m_tail->records.size() ); ++j )
+        catalogScaleCounters().recordVisits.fetch_add( 1, std::memory_order_relaxed );
+        const auto it = m_tail->byId.constFind( key );
+        if ( it != m_tail->byId.constEnd() )
         {
-            catalogScaleCounters().recordVisits.fetch_add( 1, std::memory_order_relaxed );
-            if ( m_tail->records[ j ].snapshot.id() == id )
-            {
-                shardOut = sealed;
-                recOut = j;
-                return true;
-            }
+            shardOut = sealed;
+            recOut = it.value();
+            return true;
         }
     }
     return false;
@@ -406,8 +404,12 @@ void CatalogRecordStore::removeKeys( RecordShard &shard, int recordIndex )
 void CatalogRecordStore::rebuildIndex( RecordShard &shard )
 {
     shard.byKey.clear();
+    shard.byId.clear();
     for ( int i = 0; i < static_cast<int>( shard.records.size() ); ++i )
+    {
         insertKeys( shard, i, shard.keys.value( i ) );
+        shard.byId.insert( shard.records[ i ].snapshot.id().toString(), i );
+    }
 }
 
 AssetRecord *CatalogRecordStore::findMutable( AssetId id )
@@ -445,6 +447,7 @@ void CatalogRecordStore::append( AssetRecord record )
     tail.records.append( std::move( record ) );
     tail.keys.append( keys );
     insertKeys( tail, index, keys );
+    tail.byId.insert( id.toString(), index );
     m_bySourceKey.insert( identity, id );
     ++m_size;
 }
