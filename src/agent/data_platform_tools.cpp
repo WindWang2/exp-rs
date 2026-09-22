@@ -23,6 +23,10 @@
 #include "experiment/experiment_types.h"
 #include "experiment/replay_readiness.h"
 #include "experiment/reproduction_bundle.h"
+// RS14 suitability tools: the adapter lives INSIDE sicnu_suitability so it is
+// testable without linking the agent library; this file only registers and
+// dispatches (see suitability/suitability_agent_adapter.h for the contract).
+#include "suitability/suitability_agent_adapter.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -1466,6 +1470,15 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
             { "bundle", "string", "Bundle directory", true },
             { "model_available", "boolean", "Declare the recorded model resolvable", false },
             { "algorithm_available", "boolean", "Declare the recorded algorithm executable", false } } },
+        { "suitability:assess",
+          "Assess whether a dataset version and/or scene candidates fit an experiment goal BEFORE any compute is spent. Returns a versioned report (per-criterion levels, gaps, uncertainty sources) verbatim plus a content digest, derived gap list and teaching narrative.",
+          { { "goal", "string", "Goal JSON document", true },
+            { "dataset_db", "string", "Dataset store database path", false },
+            { "dataset_version_id", "string", "Dataset version id to assess (requires dataset_db)", false },
+            { "scenes", "string", "SceneCandidate JSON array", false } } },
+        { "suitability:profiles",
+          "List the built-in suitability task profiles and their default requirements (explicit goal values always override these).",
+          { { "profile", "string", "one profile key; omit for all", false } } },
     };
     return defs;
 }
@@ -1475,7 +1488,8 @@ bool isDataPlatformTool( const QString &toolId )
     return toolId.startsWith( QLatin1String( "dataset:" ) ) ||
            toolId.startsWith( QLatin1String( "experiment:" ) ) ||
            toolId.startsWith( QLatin1String( "reproducibility:" ) ) ||
-           toolId.startsWith( QLatin1String( "benchmark:" ) );
+           toolId.startsWith( QLatin1String( "benchmark:" ) ) ||
+           toolId.startsWith( QLatin1String( "suitability:" ) );
 }
 
 QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &arguments )
@@ -1524,6 +1538,10 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
         return reproducibilityExport( arguments );
     if ( toolId == QLatin1String( "reproducibility:validate" ) )
         return reproducibilityValidate( arguments );
+    if ( toolId == QLatin1String( "suitability:assess" ) )
+        return sicnu::suitability::agent_adapter::suitabilityAssess( arguments );
+    if ( toolId == QLatin1String( "suitability:profiles" ) )
+        return sicnu::suitability::agent_adapter::suitabilityProfiles( arguments );
     fail( QStringLiteral( "unknown data-platform tool: %1" ).arg( toolId ) );
 }
 

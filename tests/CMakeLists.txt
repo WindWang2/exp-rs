@@ -12011,3 +12011,21 @@ target_include_directories(test_suitability_teaching PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_suitability_teaching)
+
+# RS14 Slice H3: the suitability agent adapter lives INSIDE sicnu_suitability
+# precisely so this suite needs no qgis/agent link; the agent-side dispatch
+# shell in data_platform_tools.cpp forwards here (surface parity is covered by
+# the existing test_surface_parity suite; capability-drift files are
+# deliberately untouched — #1151 avoidance).
+qt_add_executable(test_suitability_agent_tools
+  test_suitability_agent_tools.cpp
+)
+target_link_libraries(test_suitability_agent_tools PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_suitability
+)
+target_include_directories(test_suitability_agent_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_suitability_agent_tools)
