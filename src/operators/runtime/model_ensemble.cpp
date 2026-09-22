@@ -1748,6 +1748,9 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   }
   const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
   const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  // Pre-clean the parked-sidecar slot (Windows rename does not overwrite —
+  // a crash-stranded slot would wedge every later publish of this path).
+  QFile::remove( sidecarBackupPath );
   const bool hadSidecar = QFile::exists( oldSidecarPath );
   if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
   {
@@ -1760,6 +1763,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   }
   if ( !QFile::rename( stagePath, finalPath ) )
   {
+    QFile::remove( stagePath );
     if ( hadSidecar )
       QFile::rename( sidecarBackupPath, oldSidecarPath );
     if ( hadExisting )
@@ -1790,8 +1794,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       QFile::rename( sidecarBackupPath, oldSidecarPath );
     throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
   }
-  if ( hadSidecar )
-    QFile::remove( sidecarBackupPath );
+  QFile::remove( sidecarBackupPath ); // unconditional: also clears crash litter
   if ( hadExisting )
     QFile::remove( backupPath );
 

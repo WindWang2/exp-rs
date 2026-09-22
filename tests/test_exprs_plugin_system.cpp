@@ -986,5 +986,5 @@ TEST_CASE( "user index save survives a stale fixed-name temp (hardening 15/20)",
     buffer << input.rdbuf();
     CHECK( buffer.str().find( "org.test.p15.index" ) != std::string::npos );
 
-    ::system( ( "rm -rf " + indexPath + ".tmp " + root ).c_str() );
+    ::system( ( "rm -rf " + indexPath + " " + indexPath + ".tmp* " + root ).c_str() );
 }

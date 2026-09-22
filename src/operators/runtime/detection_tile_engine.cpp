@@ -257,6 +257,13 @@ std::string DetectionTileEngine::checkContract( const ModelInfo &model )
   if ( model.preprocess.resize != "to_input" || model.input.width <= 0 || model.input.height <= 0 )
     return "detection models must declare preprocess.resize=to_input with input.width/height "
            "(the head decodes boxes in the fixed input frame)";
+  // #646 discipline (hardening 15/20): the multimodal-only preprocess knobs
+  // are refused exactly like the single-input and scene engines — never
+  // silently ignored.
+  if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
+       || !std::isnan( model.preprocess.clampMax ) )
+    return "preprocess.pad / clamp_min / clamp_max are executed by the multi-input engine; "
+           "this detection model must drop them from the manifest";
   return {};
 }
 

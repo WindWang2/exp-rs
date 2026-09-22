@@ -2149,6 +2149,15 @@ void PluginRegistry::saveUserIndex() const
         root["disabled"] = disabled;
         Json::StyledWriter writer;
         output << writer.write( root );
+        output.close();
+        if ( !output.good() )
+        {
+            // A failed write (ENOSPC ...) must NOT be renamed over the real
+            // index — that would install a torn document and silently reset
+            // the user's disable set on next load.
+            std::remove( temp.c_str() );
+            return;
+        }
     }
     std::error_code renameError;
     std::filesystem::rename( temp, path, renameError );

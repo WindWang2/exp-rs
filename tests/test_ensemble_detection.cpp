@@ -1085,8 +1085,20 @@ TEST_CASE( "all-zero-weight detection ensembles refuse before any member forward
   // Statically undefined weights: the typed refusal moved BEFORE member
   // acquisition/execution (it used to fire in the combine pass, after every
   // member had already run).
-  REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference( request, context ),
-                     RSOperatorError );
+  // Pin the ACTUAL refusal (see the raster-lane oracle): the message must be
+  // the weight-sum verdict so the forwards==0 assertion cannot pass for an
+  // unrelated pre-member failure.
+  bool refusedForWeights = false;
+  try
+  {
+    ( void )sicnu::operators::runtime::runModelInference( request, context );
+    FAIL( "zero-weight detection ensemble did not refuse" );
+  }
+  catch ( const RSOperatorError &e )
+  {
+    refusedForWeights = e.message().find( "weights sum to zero" ) != std::string::npos;
+  }
+  CHECK( refusedForWeights );
   CHECK( guardA.forwards->load() == 0 );
   CHECK( guardB.forwards->load() == 0 );
   CHECK_FALSE( QFile::exists( output ) );

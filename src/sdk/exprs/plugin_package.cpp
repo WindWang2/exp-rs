@@ -328,6 +328,7 @@ class CrossProcessInstallLock
         }
         const auto deadline = std::chrono::steady_clock::now()
                               + std::chrono::milliseconds( kInstallLockTimeoutMs );
+        bool lockBusy = false;
         for ( ;; )
         {
             if ( ::flock( m_fd, LOCK_EX | LOCK_NB ) == 0 )
@@ -336,12 +337,17 @@ class CrossProcessInstallLock
                 continue;
             if ( errno != EWOULDBLOCK )
                 break;
+            lockBusy = true;
             if ( std::chrono::steady_clock::now() >= deadline )
                 break;
             std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         }
-        error = "another process holds the install lock at " + m_path
-                + " (waited " + std::to_string( kInstallLockTimeoutMs ) + " ms)";
+        // Distinguish "another process holds it" from a real acquire error —
+        // the "(waited ...)" claim is only true when the deadline was hit.
+        error = lockBusy
+                  ? "another process holds the install lock at " + m_path + " (waited "
+                        + std::to_string( kInstallLockTimeoutMs ) + " ms)"
+                  : "cannot acquire install lock at " + m_path;
         ::close( m_fd );
         m_fd = -1;
         return false;

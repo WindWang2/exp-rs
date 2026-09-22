@@ -907,11 +907,21 @@ TEST_CASE( "all-zero-weight ensembles refuse before any member forward (hardenin
   // member session is acquired or run — the members used to be fully
   // executed (VRAM reserved, full raster passes) before the combine pass
   // noticed the zero weight sum.
-  REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference(
-                       rasterRequest( input.toStdString(), output.toStdString(),
-                                      "cnt-ens-zero" ),
-                       context ),
-                     RSOperatorError );
+  // Pin the ACTUAL refusal (not any earlier static failure): the message
+  // must be the weight-sum verdict, so the oracle cannot pass vacuously if
+  // some other pre-member gate starts refusing first.
+  bool refusedForWeights = false;
+  try
+  {
+    ( void )sicnu::operators::runtime::runModelInference(
+      rasterRequest( input.toStdString(), output.toStdString(), "cnt-ens-zero" ), context );
+    FAIL( "zero-weight ensemble did not refuse" );
+  }
+  catch ( const RSOperatorError &e )
+  {
+    refusedForWeights = e.message().find( "weights sum to zero" ) != std::string::npos;
+  }
+  CHECK( refusedForWeights );
   CHECK( guardA.forwards->load() == 0 );
   CHECK( guardB.forwards->load() == 0 );
   CHECK_FALSE( QFile::exists( output ) );

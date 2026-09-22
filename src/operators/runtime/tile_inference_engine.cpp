@@ -2241,6 +2241,11 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // (the detection publish guard already behaves this way).
   const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
   const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  // Pre-clean the parked-sidecar slot: Windows rename does not overwrite, so
+  // a slot stranded by a crash between park and product swap would wedge
+  // every later publish of this output path (same pre-clean the product
+  // backup already performs).
+  QFile::remove( sidecarBackupPath );
   const bool hadSidecar = QFile::exists( oldSidecarPath );
   if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
   {
@@ -2275,8 +2280,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
   }
-  if ( hadSidecar )
-    QFile::remove( sidecarBackupPath );
+  QFile::remove( sidecarBackupPath ); // unconditional: also clears crash litter
   QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled inference complete" );
   stats.tilesProcessed = done;
@@ -3940,6 +3944,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   // restore it on any failure — see the single-input site for the rationale).
   const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
   const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  // Pre-clean the parked-sidecar slot: Windows rename does not overwrite, so
+  // a slot stranded by a crash between park and product swap would wedge
+  // every later publish of this output path (same pre-clean the product
+  // backup already performs).
+  QFile::remove( sidecarBackupPath );
   const bool hadSidecar = QFile::exists( oldSidecarPath );
   if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
   {
