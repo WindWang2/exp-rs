@@ -74,6 +74,7 @@ struct DetectionFusionResult
 /// Never throws for empty/degenerate input; a contract violation is a typed
 /// error from the caller's manifest validation (see validate()).
 DetectionFusionResult fuseDetectionsWbf( const std::vector<DetectionMemberBoxes> &members,
-                                         const DetectionFusionContract &contract );
+                                         const DetectionFusionContract &contract,
+                                         const CancelProbe &cancelled = {} );
 
 } // namespace sicnu::operators::runtime

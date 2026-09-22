@@ -136,6 +136,8 @@ struct RecordShard
     QVector<QStringList> keys;
     /// tier-prefixed key → owning entries, each list ordered by insertion seq.
     QHash<QString, QVector<PathKeyEntry>> byKey;
+    /// #1176: AssetId → record index within this shard (O(1) find by id).
+    QHash<QString, int> byId;
 };
 
 /// The catalog's authoritative record container (WP1 + WP2).
