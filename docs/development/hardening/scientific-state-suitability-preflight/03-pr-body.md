@@ -11,9 +11,24 @@ Per the host operator's mid-run instruction, **no local build or test
 execution was performed** in this slice. Every regression oracle below
 documents its RED side as a source-level trace on master (file:line, why
 the old code cannot satisfy the assertion); CI provides the first green
-run. Static review (implementation self-review + independent adversarial
-review) replaced the local build loop. Full evidence:
+run. Static verification replaced the local build loop: implementation
+self-review plus an independent adversarial review that additionally
+re-validated all five modified translation units with `-fsyntax-only`
+under the project's real compile flags (`build-dev/compile_commands.json`)
+— all clean — and traced every verdict-flip vector against the existing
+suites (none flip; see `02-test-ledger.md`). Full evidence:
 `docs/development/hardening/scientific-state-suitability-preflight/02-test-ledger.md`.
+
+## Independent review gate
+
+The adversarial reviewer returned **PROCEED-WITH-FIXES**; findings: 4×
+PASS (using-declarations, control flow, `<cmath>`, verdict-flip matrix,
+autonomy-test traces) and one FAIL that is the dedup dependency itself —
+`test_preflight_report_schema` stays a build-graph orphan on this branch
+until **#1246** lands (its registration intentionally lives there after
+the dedup). Merge order: #1246 first, or this PR immediately after it.
+The reviewer's P3 (stale `skip_preflight` doc in
+`docs/agent/scientific-preflight.md`) is fixed in this branch.
 
 ## What was broken and what this fixes
 
