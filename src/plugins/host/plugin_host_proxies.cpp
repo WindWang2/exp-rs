@@ -37,10 +37,15 @@ bool tryRecovery( PluginHostSessionEntry &entry )
     bool expected = false;
     if ( !entry.respawnArmed.compare_exchange_strong( expected, true ) )
         return false; // recovery already in flight; caller fails typed
+    // #1186: clear respawnArmed even when respawn() throws — otherwise recovery
+    // stays dead for this entry for the process lifetime.
+    struct ArmGuard
+    {
+        std::atomic<bool> &armed;
+        ~ArmGuard() { armed.store( false, std::memory_order_release ); }
+    } guard{ entry.respawnArmed };
     PluginDiagnosticLog recoveryLog;
-    const bool recovered = entry.runtime->respawn( entry.pluginId, entry, recoveryLog );
-    entry.respawnArmed = false;
-    return recovered;
+    return entry.runtime->respawn( entry.pluginId, entry, recoveryLog );
 }
 
 Json::Value typedFailure( const char *code, const std::string &message )

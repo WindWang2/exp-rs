@@ -174,12 +174,25 @@ class DetectionPublishGuard
         throw RSOperatorError( ErrorCode::FileNotWritable,
                                "detection ensemble could not back up the previous product: "
                                  + finalPath.toStdString() );
+      // #1186: sidecar / companion backup failures used to be ignored — a
+      // failed backup left the previous product unrestorable on rollback.
       for ( const QString &sidecar : detectionSidecars( m_final ) )
-        if ( QFile::exists( sidecar ) )
-          QFile::rename( sidecar, sidecar + QStringLiteral( ".ensemble-prev~" ) );
+      {
+        if ( !QFile::exists( sidecar ) )
+          continue;
+        if ( !QFile::rename( sidecar, sidecar + QStringLiteral( ".ensemble-prev~" ) ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable,
+                                 "detection ensemble could not back up sidecar: "
+                                   + sidecar.toStdString() );
+      }
       if ( QFile::exists( m_final + QStringLiteral( ".prov.json" ) ) )
-        QFile::rename( m_final + QStringLiteral( ".prov.json" ),
-                       m_backup + QStringLiteral( ".prov.json" ) );
+      {
+        if ( !QFile::rename( m_final + QStringLiteral( ".prov.json" ),
+                             m_backup + QStringLiteral( ".prov.json" ) ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable,
+                                 "detection ensemble could not back up provenance sidecar: "
+                                   + finalPath.toStdString() );
+      }
     }
     ~DetectionPublishGuard()
     {
@@ -796,6 +809,17 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     contributions.reserve( runs.size() );
     for ( MemberRun &run : runs )
       contributions.push_back( DetectionMemberBoxes{ run.weight, std::move( run.boxes ) } );
+    // #1186: all-zero-weight detection ensembles used to publish an empty
+    // product; raster/scene paths typed-refuse — match that here.
+    {
+      double detectionWeightSum = 0.0;
+      for ( const DetectionMemberBoxes &c : contributions )
+        detectionWeightSum += c.weight;
+      if ( !( detectionWeightSum > 0.0 ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "ensemble weights sum to zero - the combination is undefined "
+                                 "(declare at least one positive weight)" );
+    }
     DetectionFusionContract fusion;
     fusion.iouThreshold = ensembleModel.ensemble.detection.iouThreshold;
     fusion.skipBoxThreshold = ensembleModel.ensemble.detection.skipBoxThreshold;
@@ -836,6 +860,17 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     fusionJson["boxes_clustered"] = static_cast<Json::UInt64>( fused.boxesClustered );
     fusionJson["boxes_merged"] = static_cast<Json::UInt64>( fused.boxesMerged );
     fusionJson["detections"] = static_cast<Json::UInt64>( fused.clusters );
+    // ADR 0171: per-member surviving/merged counts (#1186).
+    Json::Value surviving( Json::arrayValue );
+    Json::Value merged( Json::arrayValue );
+    for ( std::size_t i = 0; i < fused.memberSurviving.size(); ++i )
+    {
+      surviving.append( static_cast<Json::UInt64>( fused.memberSurviving[i] ) );
+      const std::size_t m = i < fused.memberMerged.size() ? fused.memberMerged[i] : 0;
+      merged.append( static_cast<Json::UInt64>( m ) );
+    }
+    fusionJson["member_surviving"] = surviving;
+    fusionJson["member_merged"] = merged;
     provenance["fusion"] = fusionJson;
     // A vector product: the output block describes features, not a grid.
     provenance["output"]["format"] = "vector";
