@@ -21,9 +21,12 @@ void collectMetadataItems( CSLConstList metadata, const std::string &sourcePrefi
 {
     if ( !metadata )
         return;
-    std::size_t collected = 0;
-    for ( CSLConstList entry = metadata; *entry && collected < kMaxCollectedMetadataItems;
-          ++entry, ++collected )
+    // Scan every entry: the cap is MetadataItems' contract (add() drops
+    // beyond it and counts), not this loop's. Bounding iterations here
+    // truncated >cap files silently while dropped() stayed 0 — the
+    // "truncation is never silent" rule broke exactly for the files large
+    // enough to matter.
+    for ( CSLConstList entry = metadata; *entry; ++entry )
     {
         const std::string item = *entry;
         const std::size_t equals = item.find( '=' );

@@ -77,6 +77,17 @@ bool readDouble( const Json::Value &node, const char *key, double &out, AssetSta
             return false;
         }
         out = node[key].asDouble();
+        // Non-finite doubles cannot survive a strict JSON round trip: NaN
+        // serializes to null (which these readers then reject) and
+        // infinities serialize to non-strict tokens like 1e+9999. Reject
+        // them at the door instead of accepting a document the module
+        // itself could never re-read.
+        if ( !std::isfinite( out ) )
+        {
+            error.code = StateErrorCode::InvalidField;
+            error.message = std::string( "field '" ) + key + "' must be a finite number";
+            return false;
+        }
     }
     return true;
 }
