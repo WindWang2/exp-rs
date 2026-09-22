@@ -317,7 +317,7 @@ PhenologyExtractor::fitDoubleLogistic( const std::vector<float> &y,
     // Initialize from the mid-level threshold crossings (τ sits exactly on
     // the 0.5 rising/falling crossings when the opposite flank is flat).
     DoubleLogisticParams init;
-    const PhenologyMetrics mid = extractDynamicThreshold( y, tDays, 0.5, 1, 365 );
+    const PhenologyMetrics mid = extractDynamicThreshold( y, tDays, 0.5, 1, 366 );
     double tMin = ts.front();
     double tMax = ts.back();
     double yMin = ys.front();
@@ -589,7 +589,9 @@ std::vector<PhenologyMetrics> PhenologyExtractor::extractMultiCycle(
 
         std::vector<float> segY( ySorted.begin() + segBegin, ySorted.begin() + segEnd + 1 );
         std::vector<double> segT( tSorted.begin() + segBegin, tSorted.begin() + segEnd + 1 );
-        PhenologyMetrics m = extractDynamicThreshold( segY, segT, thresholdFraction, 1, 365 );
+        // Widest doy window (1..366): doyOf emits a day-366 leap bucket and a
+        // [1,365] window silently dropped those samples from their own season.
+        PhenologyMetrics m = extractDynamicThreshold( segY, segT, thresholdFraction, 1, 366 );
         if ( m.valid )
             results.push_back( m );
     }

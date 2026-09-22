@@ -33,7 +33,10 @@ using temporal::TemporalTileReader;
 namespace
 {
 constexpr int kDefaultTileSize = 256;
-constexpr double kDefaultTrendLambda = 1e4;
+// Day-axis Whittaker scale (#1166): cutoff period above ~2 years at any
+// cadence, so the annual cycle is regularized into the seasonal component
+// instead of the trend (the pre-#1200 index-axis 1e4 ate the annual signal).
+constexpr double kDefaultTrendLambda = 1e8;
 constexpr int kDefaultSeasonalWindowDays = 15;
 constexpr int kTypicalSceneEstimate = 8;
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
@@ -291,6 +294,36 @@ Json::Value RsTemporalDecomposeOperator::run( const Json::Value &params, RSOpera
     if ( time.valid )
       doyOf[s] =
           QDateTime::fromMSecsSinceEpoch( time.epochMillis, QTimeZone::utc() ).date().dayOfYear();
+  }
+  // The trend kernel needs a fully timed, strictly increasing day axis.
+  // keep_all duplicates make the time metric degenerate and an untimed scene
+  // degrades to day offset 0; both previously reached the kernel unvalidated,
+  // silently publishing an all-NaN trend with a fabricated all-zero seasonal
+  // band. Fail fast, before any output is created (same contract as
+  // rs:temporal_smooth's day-axis methods).
+  for ( int s = 0; s < sceneCount; ++s )
+  {
+    if ( !prepared.collection.scenes().at( s ).time.valid )
+      throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "rs:temporal_decompose requires a fully timed collection; scene " +
+              prepared.collection.scenes().at( s ).path.toStdString() +
+              " has no acquisition time" );
+    if ( s > 0 && !( tDays[static_cast<size_t>( s )] >
+                     tDays[static_cast<size_t>( s - 1 )] ) )
+    {
+      const auto dateOf = [&]( int idx ) {
+        const auto &t = prepared.collection.scenes().at( static_cast<size_t>( idx ) ).time;
+        return t.valid ? t.dateString().toStdString() : "no time";
+      };
+      throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "rs:temporal_decompose requires strictly increasing scene times; scenes " +
+              std::to_string( s ) + " (" + dateOf( s ) + ") and " +
+              std::to_string( s + 1 ) + " (" + dateOf( s + 1 ) +
+              ") share an instant — use duplicate_policy=reject or run "
+              "rs:temporal_regularize first" );
+    }
   }
 
   const int width = reader.width();

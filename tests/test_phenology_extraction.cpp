@@ -306,3 +306,32 @@ TEST_CASE( "Cross-year season length is the plain axis difference",
     REQUIRE( m.los == Approx( 2.0 * c ).margin( 3.0 ) );
     REQUIRE( m.los == Approx( m.eos - m.sos ).margin( 1e-9 ) );
 }
+
+// ---------------------------------------------------------------------------
+// Hardening track temporal-change-phenology (19/20): the internal day axis
+// (doyOf = floor(fmod(t, 365.25)) + 1) carries a day-366 leap bucket. Season
+// extraction inside multi-cycle segmentation must use the widest window
+// [1, 366] — same convention as phenologyThreshold's callers — so a sample
+// landing on day 366 is never silently dropped from its own season.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Multi-cycle extraction keeps day-366 (leap bucket) samples",
+           "[phenology][hardening-tcp19]" )
+{
+    // A season whose TRUE peak sits on day 366 (t = 365.1 on the 365.25
+    // axis): dropping the peak sample used to demote the season to the
+    // 0.4 shoulder and shift POS/EOS onto the wrong limb.
+    const std::vector<double> t = { 300.0, 330.0, 350.0, 365.1, 380.0, 410.0, 440.0 };
+    const std::vector<float> y = { 0.1f, 0.2f, 0.4f, 1.0f, 0.4f, 0.2f, 0.1f };
+
+    const auto results = PhenologyExtractor::extractMultiCycle( y, t, 1, 0.5 );
+    REQUIRE( results.size() == 1 );
+    const auto &m = results.front();
+    REQUIRE( m.valid );
+    REQUIRE( m.peakVal == Approx( 1.0 ).margin( 1e-6 ) );
+    REQUIRE( m.pos == Approx( 365.1 ).margin( 1e-9 ) );
+    // The rising crossing is bracketed by the day-365 and day-366 samples.
+    REQUIRE( m.sos > 350.0 );
+    REQUIRE( m.sos < 365.1 );
+    REQUIRE( m.eos > m.pos );
+}

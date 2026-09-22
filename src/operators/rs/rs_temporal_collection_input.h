@@ -60,9 +60,13 @@ PreparedTemporalRun prepareTemporalRun( const Json::Value &params, RSOperatorCon
 
 /// #1167: optional per-scene provenance channel consumed by the downstream
 /// statistics operators (rs:temporal_smooth / trend / sen_trend /
-/// phenology). `provenance` is an array of raster paths, one per scene,
-/// given in the collection's ACQUISITION-TIME-SORTED order (the order
-/// TemporalCollection::scenes() reports). Pixel codes follow
+/// phenology). `provenance` is either the rs:temporal_gap_fill
+/// provenance_output artifact passed ONCE (multi-band GeoTIFF whose
+/// prov_<date> bands map 1:1 onto the collection), or an array of raster
+/// paths, one per scene, given in the collection's
+/// ACQUISITION-TIME-SORTED order (the order TemporalCollection::scenes()
+/// reports). A named-but-mismatched prov_<date> raster is a typed refusal,
+/// never a silent band-1 read. Pixel codes follow
 /// temporal::SampleProvenance: 1 (observed) keeps the sample; 0/2
 /// (unavailable/interpolated) EXCLUDES it from the statistics — synthetic
 /// samples must not inflate n, tighten Student-t/Sen CIs, or enter the MK S

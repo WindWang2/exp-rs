@@ -197,7 +197,8 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
             t[static_cast<std::size_t>( m )] = monthMidDoy( m );
         }
         const sicnu::temporal::PhenologyMetrics metrics =
-            sicnu::temporal::PhenologyExtractor::extractDynamicThreshold( values, t, 0.2, 1, 365 );
+            // Widest doy window (1..366): doyOf can emit the day-366 leap bucket.
+            sicnu::temporal::PhenologyExtractor::extractDynamicThreshold( values, t, 0.2, 1, 366 );
         if ( !metrics.valid )
             return rejected( "phenology order violated or season undefined" );
 

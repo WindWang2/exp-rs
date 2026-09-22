@@ -304,7 +304,6 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
   }
   out.base = minV;
   out.amplitude = maxV - minV;
-  out.pos = doyOf[posIdx];
   const double threshold = minV + crossingFraction * ( maxV - minV );
 
   // Limb + SOS/EOS crossings share one interpolated semantics (D16 / WP4):
@@ -375,9 +374,28 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
   {
     tSos = crossingTime( 0, pk, threshold, true, &sosI0, &sosI1 );
     tEos = crossingTime( pk, lastK, threshold, false, &eosI0, &eosI1 );
+    // Edge anchoring (the legacy quantized contract): a window that OPENS at
+    // or above the threshold has no rising bracket before the peak, yet the
+    // season demonstrably starts there — SOS anchors at the window's first
+    // sample and the rising limb metrics stay undefined (never fabricated).
+    // Symmetrically for a window that ends at/above the threshold. A flat
+    // season (threshold == min == max) resolves through the same equality.
+    if ( !std::isfinite( tSos ) && y[idx.front()] >= threshold )
+    {
+      tSos = tDays[idx.front()];
+      sosI0 = idx.front();
+      sosI1 = idx.front();
+    }
+    if ( !std::isfinite( tEos ) && y[idx.back()] >= threshold )
+    {
+      tEos = tDays[idx.back()];
+      eosI0 = idx.back();
+      eosI1 = idx.back();
+    }
   }
   if ( !std::isfinite( tSos ) || !std::isfinite( tEos ) || sosI0 < 0 || eosI0 < 0 )
-    return out;
+    return out; // pos stays -1 (undefined): never a fabricated peak doy
+  out.pos = doyOf[posIdx];
   out.sos = doyAt( tSos, sosI0, sosI1 );
   out.eos = doyAt( tEos, eosI0, eosI1 );
 
@@ -708,7 +726,7 @@ DecompositionResult seasonalDecompose( const std::vector<float> &y,
   // cadence-dependent (cloud-clustered acquisitions under-smoothed dense
   // stretches); the tDays parameter the operator accepts and documents is
   // what the penalty must be regularized on.
-  out.trend = whittakerSmoothTime( y, tDays, {}, trendLambda > 0.0 ? trendLambda : 1e4 );
+  out.trend = whittakerSmoothTime( y, tDays, {}, trendLambda > 0.0 ? trendLambda : 1e8 );
 
   // Seasonal: doy climatology of the detrended series, smoothed circularly.
   std::vector<double> sumByDoy( 366, 0.0 );
