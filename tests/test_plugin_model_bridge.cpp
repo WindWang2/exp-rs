@@ -7,6 +7,7 @@
 // session must never see an overlap, and the acquire-time refusal/generation
 // semantics stay wired through the registry seam.
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -19,6 +20,7 @@
 
 #include "operators/framework/model_catalog.h"
 #include "operators/runtime/model_runtime.h"
+#include "plugins/framework/plugin_execution_barrier.h"
 #include "plugins/framework/plugin_model_runtime_bridge.h"
 
 #include <QFile>
@@ -194,21 +196,25 @@ TEST_CASE( "concurrent infer on one shared plugin session is serialized (complet
     CHECK_FALSE( fixture.overlapped->load() );
 }
 
-TEST_CASE( "unloading invalidates a held bridge session by generation, not by race "
+TEST_CASE( "unload closes the barrier: a held bridge session refuses by generation, not by race "
            "(completion 13/15)",
            "[plugins][bridge][concurrency][p13c]" )
 {
-    // The adapter refuses a session whose plugin generation moved — pinned
-    // here so the serialization work cannot regress the barrier contract
-    // (#747) it sits behind.
+    // The adapter captures the plugin's generation at construction and must
+    // refuse a session whose generation moved — unload/reload does exactly
+    // that at the barrier (close + open bumps the generation), so a stale
+    // adapter held elsewhere fails typed instead of touching unmapped
+    // plugin memory (#747 contract, exercised here for the model lane).
     BridgeFixture fixture;
     QTemporaryDir dir;
     auto session = fixture.acquireSession( dir );
     REQUIRE( session );
-    // No unload was performed: the session stays usable (generation intact).
+
+    sicnu::plugins::PluginExecutionBarrier::instance().close( "org.bridge.test" );
+    sicnu::plugins::PluginExecutionBarrier::instance().open( "org.bridge.test" );
+
     int dims[4] = { 1, 2, 4, 4 };
     cv::Mat blob( 4, dims, CV_32F, cv::Scalar( 1.0f ) );
-    cv::Mat result;
-    REQUIRE_NOTHROW( result = session->infer( blob ) );
-    CHECK( !result.empty() );
+    REQUIRE_THROWS_WITH( session->infer( blob ),
+                         Catch::Matchers::ContainsSubstring( "no longer usable" ) );
 }
