@@ -115,6 +115,9 @@ class OperationsCoordinator {
     BridgedDiagnoser mBridgedDiagnoser;
     std::atomic<bool> mPauseRequested{false};
     std::atomic<bool> mCancelRequested{false};
+    // Control/mutable state below is NOT atomic: pause/cancel are safe to
+    // request cross-thread, but setPendingRepairApproval/lastResult (like
+    // run() itself) belong to the driver's coordinator thread.
     bool mPendingRepairApproval = false;
     std::optional<OpsRunResult> mLastResult;
 };

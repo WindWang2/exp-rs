@@ -4,33 +4,6 @@
 #include <chrono>
 
 namespace sicnu::agent_ops {
-namespace {
-
-/// Longest run of the same non-empty diagnose root cause at the tail of the
-/// recorded decisions — the journal-evidence projection of "no progress".
-int tailIdenticalFailureCount(const sicnu::agent_loop::EvidenceSummary &summary)
-{
-    std::string last;
-    int count = 0;
-    for (const auto &dec : summary.decisions)
-    {
-        if (dec.stage != "diagnose")
-            continue;
-        const std::string code = dec.inputs.get("root_cause_code", "").asString();
-        if (code.empty())
-            continue;
-        if (code == last)
-            ++count;
-        else
-        {
-            last = code;
-            count = 1;
-        }
-    }
-    return count;
-}
-
-} // namespace
 
 OperationsCoordinator::OperationsCoordinator(Dependencies deps,
                                              LiveSessionRecorder::Options recorderOptions)
@@ -75,7 +48,8 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
         BenchmarkPersistDocument doc;
         doc.suiteId = "live-session";
         doc.suiteVersion = "1";
-        doc.resultId = "bpr-live-" + out.session.sessionId;
+        doc.resultId = "bpr-live-" + out.session.sessionId + "-" +
+                       std::to_string(out.session.summary.journalEntries);
         doc.status = out.ok ? "completed" : "failed";
         doc.summary["session_id"] = out.session.sessionId;
         doc.summary["outcome"] = out.session.summary.outcome;
@@ -170,6 +144,13 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     if (seams.diagnoser)
         seams.diagnoser = &mBridgedDiagnoser;
 
+    // One-shot: the surface-recorded repair approval is consumed by this
+    // launch whatever the outcome — the human gate must re-arm explicitly,
+    // otherwise a single approval would silence the science-changing repair
+    // gate for every later session.
+    const bool pendingApproval = mPendingRepairApproval;
+    mPendingRepairApproval = false;
+
     sicnu::agent_loop::SessionPolicy policy = request.policy;
     policy.maxReplans = request.budgets.maxReplans;
     policy.noProgressThreshold = request.budgets.noProgressThreshold;
@@ -179,6 +160,9 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     sicnu::agent_loop::ScientificAgentSession session(policy, seams);
     if (mCancelRequested.load())
         session.requestCancel();
+    // The bridge cache is evidence about one diagnose invocation only; a
+    // stale entry from a previous session must never be attributed here.
+    mBridgedDiagnoser.resetLastDiagnostic();
 
     // Note: pause is checked at launch (above); cancel remains the hard stop
     // inside the loop. AgentLoop owns the state machine while it runs.
@@ -192,64 +176,64 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     std::optional<RecoveryDecision> recovery;
     if (!result.ok)
     {
-        // Structured evidence first, in decreasing strength: the bridged
-        // diagnoser saw the real runtime/verification/diagnosis during the
-        // run; next a reconstructed verification FAIL (the only verifier
-        // signal SessionResult carries) through the evidence bridge. No
-        // structured source -> no typed root cause -> nullopt.
-        DiagnosticInputs inputs;
-        if (result.summary.verificationVerdict == "FAIL")
+        // The loop's typed stop reason is what actually terminated the
+        // session: it is always the headline root cause. Structured
+        // evidence — the live bridge diagnostic, the journal's own diagnose
+        // records, the bare verification verdict — attaches as sources and
+        // raises confidence; it never overrides the terminal fact and never
+        // invents repairability. Post-hoc recovery stays advisory (ask).
+        OpDiagnostic d;
+        d.code = "ops.session.FAILED";
+        d.rootCauseCode = result.stopReason.empty() ? "SESSION_FAILED" : result.stopReason;
+        d.repairable = false;
+        d.retryable = false;
+        d.advisoryNext = recovery_action::kAsk;
+        d.sources["session"]["stop_reason"] = d.rootCauseCode;
+
+        bool structured = false;
+        if (mBridgedDiagnoser.lastOpsDiagnostic())
+        {
+            // Bridge evidence from THIS run (the cache was reset at launch).
+            d.sources["bridge"] = mBridgedDiagnoser.lastOpsDiagnostic()->toJson();
+            structured = true;
+        }
+        else
+        {
+            for (const auto &dec : result.summary.decisions)
+            {
+                if (dec.stage != "diagnose" ||
+                    dec.inputs.get("root_cause_code", "").asString().empty())
+                    continue;
+                d.sources["journal_diagnose"] = dec.toJson();
+                d.evidence["decision_id"] = dec.decisionId;
+                structured = true;
+            }
+        }
+        if (!structured && result.summary.verificationVerdict == "FAIL")
         {
             sicnu::agent_loop::VerificationReport vr;
             vr.verdictValue = "FAIL";
+            DiagnosticInputs inputs;
             inputs.verification = vr;
-        }
-        if (mBridgedDiagnoser.lastOpsDiagnostic())
-            diag = mBridgedDiagnoser.lastOpsDiagnostic();
-        else
-            diag = mDiagnostic.diagnose(inputs);
-
-        if (!diag)
-        {
-            // Journal-decision fallback: the loop's own diagnose records carry
-            // a typed root_cause_code — project it, never invent repairability
-            // from it (proposals are the only repair evidence, and decisions
-            // do not carry proposals).
-            for (const auto &dec : result.summary.decisions)
+            auto verification = mDiagnostic.diagnose(inputs);
+            if (verification)
             {
-                if (dec.stage != "diagnose")
-                    continue;
-                OpDiagnostic d;
-                d.code = "ops.diagnose.FROM_JOURNAL";
-                d.rootCauseCode = dec.inputs.get("root_cause_code", "").asString();
-                if (d.rootCauseCode.empty())
-                    continue;
-                d.confidence = 0.6;
-                d.repairable = false;
-                d.retryable = false;
-                d.advisoryNext = recovery_action::kAsk;
-                d.summary = dec.reason;
-                d.evidence["decision_id"] = dec.decisionId;
-                diag = d;
+                d.sources["verification"] = verification->toJson();
+                structured = true;
             }
         }
 
-        if (!diag)
+        d.confidence = structured ? 0.6 : 0.3;
+        if (!structured)
         {
-            // No structured diagnostic evidence exists. The loop's typed stop
-            // reason is still evidence; repairability is not.
-            OpDiagnostic d;
-            d.code = "ops.session.FAILED";
-            d.rootCauseCode = result.stopReason.empty() ? "SESSION_FAILED" : result.stopReason;
-            d.confidence = 0.3;
-            d.repairable = false;
-            d.retryable = false;
-            d.advisoryNext = recovery_action::kAsk;
             d.summary = "session failed without structured diagnostic evidence";
-            d.sources["session"]["stop_reason"] = d.rootCauseCode;
             d.evidence["evidence_unavailable"] = true;
-            diag = d;
         }
+        else
+        {
+            d.summary = "session failed: stop reason with structured evidence attached";
+        }
+        diag = d;
 
         RecoveryContext ctx;
         ctx.budgets = request.budgets;
@@ -258,13 +242,17 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         ctx.intent = request.session.intent;
         ctx.cancelRequested = mCancelRequested.load();
         ctx.leadingRiskClass = request.leadingRepairRiskClass;
-        ctx.humanApprovedRepair = request.approvePendingRepair || mPendingRepairApproval;
+        ctx.humanApprovedRepair = request.approvePendingRepair || pendingApproval;
         ctx.autonomyPolicy = mDeps.autonomyPolicy;
         ctx.replanCount = 0;
         for (const auto &s : result.summary.stages)
             if (s == "replan")
                 ++ctx.replanCount;
-        ctx.identicalFailureCount = tailIdenticalFailureCount(result.summary);
+        // No-progress: the loop's own plan-identity detector is authoritative
+        // (it already ran inside the session); the post-hoc recovery bridge
+        // does not re-derive a second, weaker definition. Drivers that have
+        // their own cross-session evidence may set identicalFailureCount via
+        // evaluateRecovery().
         if (request.budgets.wallClockMs > 0)
             ctx.elapsedMs = static_cast<long long>(elapsedMs);
         recovery = mRecovery.decide(*diag, ctx);
@@ -322,6 +310,7 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     }
     if (mCancelRequested.load())
         resumed->requestCancel();
+    mBridgedDiagnoser.resetLastDiagnostic();
 
     // The loop restarts at the journal's final stage (pre-plan only) and
     // re-executes no journalled work; run() must restate the journalled goal.

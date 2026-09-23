@@ -2,16 +2,38 @@
 #include "agent_ops/delivery_assembler.h"
 #include "agentbench/trace.h"
 
+#include <cstdint>
+#include <cstdio>
+
 namespace sicnu::agent_ops {
 namespace {
 
-/// Portable basename ref: strips the longest leading directory component for
-/// both POSIX and Windows separators, so an export document never leaks
-/// absolute machine paths.
+/// Stable 8-hex FNV-1a fingerprint over the full path (same scheme the
+/// loop uses for plan identity).
+std::string pathFingerprint(const std::string &canonical)
+{
+    std::uint64_t hash = 1469598103934665603ULL; // FNV-1a offset basis
+    for (const unsigned char c : canonical)
+    {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    char buffer[9];
+    std::snprintf(buffer, sizeof(buffer), "%08llx", static_cast<unsigned long long>(hash));
+    return std::string(buffer, 8);
+}
+
+/// Portable ref: strips the longest leading directory component (POSIX and
+/// Windows separators) so an export never leaks absolute machine paths, and
+/// disambiguates basename collisions with a stable path fingerprint —
+/// /r1/out.tif and /r2/out.tif stay distinguishable. A path that is already
+/// a bare relative name passes through untouched.
 std::string basenameRef(const std::string &path)
 {
     const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string::npos ? path : path.substr(slash + 1);
+    if (slash == std::string::npos)
+        return path;
+    return path.substr(slash + 1) + "@" + pathFingerprint(path);
 }
 
 } // namespace
@@ -46,13 +68,14 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
         d.provenance["artifacts"].append(art);
     }
 
-    // Pull plan / run ids from decisions when present.
+    // Pull plan / run ids from decisions when present. The loop records
+    // submitted runs as decision.inputs["run_id"].
     for (const auto &dec : result.summary.decisions)
     {
         if (dec.selected.isMember("plan_id"))
             d.plan["plan_id"] = dec.selected["plan_id"];
-        if (dec.selected.isMember("run_id"))
-            d.runIds.append(dec.selected["run_id"]);
+        if (dec.inputs.isMember("run_id"))
+            d.runIds.append(dec.inputs["run_id"]);
         if (dec.selected.isMember("action"))
         {
             const std::string action = dec.selected["action"].asString();

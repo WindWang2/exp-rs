@@ -13,9 +13,9 @@ Json::Value ReconcileResult::toJson() const
     doc["stage"] = stage;
     doc["terminal_state"] = terminalState;
     Json::Value runs(Json::arrayValue);
-    for (const auto &id : successfulRunIds)
+    for (const auto &id : submittedRunIds)
         runs.append(id);
-    doc["successful_run_ids"] = runs;
+    doc["submitted_run_ids"] = runs;
     doc["details"] = details;
     return doc;
 }
@@ -35,8 +35,10 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
     r.details["entries"] = static_cast<Json::UInt64>(journal.size());
 
     // Collect run ids from the loop's recorded wire shape: the execute
-    // stage records the submission as decision.inputs["run_id"] with
-    // selected["action"] == "run" (scientific_agent_session stageExecute).
+    // stage records the SUBMISSION as decision.inputs["run_id"] with
+    // selected["action"] == "run" (scientific_agent_session stageExecute),
+    // before any outcome exists — so these are submitted runs, not
+    // successful ones.
     for (const auto &entry : journal.entries())
     {
         if (!entry.decision || entry.stage != "execute")
@@ -47,7 +49,7 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
         {
             const std::string runId = decision.inputs["run_id"].asString();
             if (!runId.empty())
-                r.successfulRunIds.insert(runId);
+                r.submittedRunIds.insert(runId);
         }
     }
 
@@ -62,10 +64,12 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
     }
 
     // Loop authority (ScientificAgentSession::resume): only PRE-PLAN stages
-    // carry enough journalled state to resume; anything from plan_request
+    // carry enough journalled state to resume; everything from plan_request
     // onward would run real seams over default-constructed state and
-    // fabricate a delivery, so the loop refuses it. The reconciler
-    // projects that contract instead of inventing a second one.
+    // fabricate a delivery, so the loop refuses it. The reconciler mirrors
+    // that contract for non-terminal journals (it stays deliberately
+    // conservative on terminal ones: a cancelled pre-plan abort could
+    // resume, but restarting as a new session is always safe).
     if (replay.finalStage == "goal_normalization" ||
         replay.finalStage == "data_state_snapshot")
     {
@@ -90,7 +94,7 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
     r.details["resume_constraint"] =
         "agent_loop resumes only goal_normalization/data_state_snapshot; "
         "restart as a new session";
-    r.details["recorded_run_ids"] = static_cast<Json::UInt64>(r.successfulRunIds.size());
+    r.details["submitted_run_ids"] = static_cast<Json::UInt64>(r.submittedRunIds.size());
     return r;
 }
 

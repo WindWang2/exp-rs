@@ -104,8 +104,13 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     }
     if (action == "resume")
     {
+        // The loop refuses a resume whose run() does not restate the
+        // journalled goal (SESSION_GOAL_MISMATCH) — and a goal-less attempt
+        // would overwrite the parked journal with the refused terminal one.
+        // Requiring the goal here fails the request before anything runs.
         if (!args.isObject() || args.get("journal_directory", "").asString().empty() ||
-            args.get("session_id", "").asString().empty())
+            args.get("session_id", "").asString().empty() ||
+            args.get("goal", "").asString().empty())
             return errorDoc(action, "MISSING_ARGS");
         OpsRunRequest request;
         request.session.goal = args.get("goal", "").asString();
@@ -140,9 +145,11 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         if (!last)
             return errorDoc(action, "NO_SESSION");
         // The export payload IS the capsule document (drivers save it
-        // as-is); only the surface action tag is added.
+        // as-is); only the surface action tag and the response `ok` are
+        // added, so the usual driver check keeps working.
         doc = DeliveryAssembler().capsuleExportDocument(last->delivery);
         doc["action"] = action;
+        doc["ok"] = true;
         return doc;
     }
     if (action == "timeline")
@@ -167,7 +174,9 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     if (action == "actions")
         return sessionSurfaceActions();
 
-    return errorDoc(action, "UNKNOWN_ACTION");
+    Json::Value unknown = errorDoc(action, "UNKNOWN_ACTION");
+    unknown["args"] = args;
+    return unknown;
 }
 
 } // namespace sicnu::agent_ops

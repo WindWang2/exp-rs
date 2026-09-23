@@ -478,7 +478,7 @@ TEST_CASE("agent_ops resume reconciler projects loop resume authority (pre-plan 
     REQUIRE(afterExecute.ok);
     REQUIRE_FALSE(afterExecute.resumable);
     REQUIRE(afterExecute.reasonCode == "RESUME_PAST_PLAN_SEAM");
-    REQUIRE(afterExecute.successfulRunIds.count("run-abc") == 1);
+    REQUIRE(afterExecute.submittedRunIds.count("run-abc") == 1);
 }
 
 TEST_CASE("agent_ops coordinator resume surfaces the reconciler reason (no silent mismatch)",
@@ -600,7 +600,10 @@ TEST_CASE("agent_ops coordinator persists live trajectory refs through the bench
     REQUIRE(sink.saved().size() == 1);
     const auto &doc = sink.saved().front();
     REQUIRE(doc.status == "completed");
-    REQUIRE(doc.resultId == "bpr-live-" + out.session.sessionId);
+    // Result ids stay unique across resumes of the same session id: the
+    // adopted journal only grows, so the entry count disambiguates.
+    REQUIRE(doc.resultId == "bpr-live-" + out.session.sessionId + "-" +
+                                std::to_string(out.session.summary.journalEntries));
     REQUIRE(doc.summary["session_id"].asString() == out.session.sessionId);
     REQUIRE(doc.summary["trace_id"].asString() == out.trace->traceId);
     // Trajectory refs, not recomputed metrics: decision ids and evidence
@@ -613,6 +616,8 @@ TEST_CASE("agent_ops coordinator persists live trajectory refs through the bench
 
     REQUIRE(out.delivery.benchmarkRefs.size() == 1);
     REQUIRE(out.delivery.benchmarkRefs[0]["result_id"].asString() == doc.resultId);
+    // The loop's submitted runs surface in the delivery (real wire field).
+    REQUIRE(out.delivery.runIds.size() >= 1);
 
     // A failed session persists with a failed status (still real refs).
     FakeScenario bad;
@@ -686,12 +691,31 @@ TEST_CASE("agent_ops session surface implements every advertised action",
     REQUIRE_FALSE(noArgs["ok"].asBool());
     REQUIRE(noArgs["error"].asString() == "MISSING_ARGS");
 
+    // The journalled goal must be restated: a goal-less resume would be
+    // refused by the loop (SESSION_GOAL_MISMATCH) AFTER overwriting the
+    // parked journal with a refused terminal one.
+    Json::Value dirOnly(Json::objectValue);
+    dirOnly["journal_directory"] = "/tmp/agent_ops_whatever";
+    dirOnly["session_id"] = "sess-x";
+    auto noGoal = sessionSurfaceApply(coord, "resume", dirOnly);
+    REQUIRE_FALSE(noGoal["ok"].asBool());
+    REQUIRE(noGoal["error"].asString() == "MISSING_ARGS");
+
     // approve_repair records real pending state consumed by the next run.
     Json::Value approveArgs(Json::objectValue);
     approveArgs["approve"] = true;
     auto approved = sessionSurfaceApply(coord, "approve_repair", approveArgs);
     REQUIRE(approved["ok"].asBool());
     REQUIRE(coord.isPendingRepairApproval());
+
+    // The approval is one-shot: the next launch consumes it, so the
+    // science-changing repair gate re-arms for later sessions.
+    coord.clearPause();
+    coord.clearCancel();
+    REQUIRE_FALSE(coord.isCancelRequested());
+    auto consume = sessionSurfaceApply(coord, "run", runArgs);
+    REQUIRE(consume["ok"].asBool());
+    REQUIRE_FALSE(coord.isPendingRepairApproval());
 }
 
 TEST_CASE("agent_ops failed-session diagnostic stays inside the evidence", "[agent_ops][diagnostic]")
@@ -727,6 +751,117 @@ TEST_CASE("agent_ops failed-session diagnostic stays inside the evidence", "[age
     REQUIRE(out.lastRecovery);
     REQUIRE(out.lastRecovery->action == recovery_action::kAsk);
     REQUIRE(out.lastRecovery->reasonCode == "NEEDS_HUMAN");
+
+    // Refused sessions carry the typed stop reason on the outcome claim.
+    REQUIRE(out.delivery.claims.size() == 1);
+    REQUIRE(out.delivery.claims[0]["confidence"].asDouble() == 0.85);
+    REQUIRE(out.delivery.claims[0]["stop_reason"].asString() == "PREFLIGHT_BLOCKED");
+}
+
+TEST_CASE("agent_ops stale bridged diagnostic is not attributed to a later failure",
+          "[agent_ops][diagnostic]")
+{
+    // One coordinator, one attempt-scripted scenario: attempt 1 verifies
+    // FAIL and diagnoses CRS_MISMATCH (the bridge caches a diagnostic),
+    // attempt 2 is blocked at preflight. The refusal diagnostic must
+    // describe THIS failure from this session's evidence, never replay the
+    // cached verify-FAIL entry.
+    FakeScenario scenario;
+    scenario.preflight = {PreflightScript{"ok", {}}, PreflightScript{"blocked", {}}};
+    scenario.verification = {VerifyScript{"FAIL", ""}, VerifyScript{"FAIL", ""}};
+    scenario.diagnosis = {DiagnoseScript{"CRS_MISMATCH", {proposal("reproject")}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE_FALSE(out.ok);
+    REQUIRE(out.session.stopReason == "PREFLIGHT_BLOCKED");
+    REQUIRE(out.lastDiagnostic);
+    // The stop reason is the terminal fact and always the headline; the
+    // stale-cache bug would have surfaced ops.verify.MISSING_OUTPUT here.
+    REQUIRE(out.lastDiagnostic->code == "ops.session.FAILED");
+    REQUIRE(out.lastDiagnostic->rootCauseCode == "PREFLIGHT_BLOCKED");
+    REQUIRE_FALSE(out.lastDiagnostic->repairable);
+    REQUIRE(out.lastDiagnostic->advisoryNext == recovery_action::kAsk);
+    REQUIRE(out.lastDiagnostic->sources["session"]["stop_reason"].asString() ==
+            "PREFLIGHT_BLOCKED");
+    // The session's structured evidence (live bridge or journal diagnose
+    // record) is attached as a source, never discarded.
+    REQUIRE((out.lastDiagnostic->sources.isMember("bridge") ||
+             out.lastDiagnostic->sources.isMember("journal_diagnose")));
+}
+
+TEST_CASE("agent_ops benchmark sink failure is surfaced, never silent",
+          "[agent_ops][benchmark]")
+{
+    struct FailingSink : IBenchmarkResultSink
+    {
+        bool save(const BenchmarkPersistDocument &, std::string *error) override
+        {
+            if (error)
+                *error = "store offline";
+            return false;
+        }
+    };
+
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    FailingSink sink;
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    deps.benchmarkSink = &sink;
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE(out.ok); // session outcome stays authoritative
+    REQUIRE(out.benchmarkError == "store offline");
+    REQUIRE(out.delivery.benchmarkRefs.size() == 0);
+
+    auto status = sessionSurfaceStatus(out);
+    REQUIRE(status["benchmark_error"].asString() == "store offline");
+}
+
+TEST_CASE("agent_ops resume succeeds from a parked pre-plan journal", "[agent_ops][resume]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    const std::string dir = uniqueTemp("resume-preplan");
+    const std::string goal = "compute NDVI for the scene";
+
+    // Hand-build the journal the loop would have parked at the snapshot
+    // stage: goal normalization decision + stage enter, no terminal.
+    sicnu::agent_loop::DecisionRecord goalDecision;
+    goalDecision.decisionId = "dec-goal-1";
+    goalDecision.sessionId = "sess-preplan-resume";
+    goalDecision.stage = "goal_normalization";
+    goalDecision.reason = "goal accepted as stated: " + goal;
+    goalDecision.selected["action"] = "accept_goal";
+    goalDecision.inputs["goal"] = goal;
+
+    sicnu::agent_loop::SessionJournal parked("sess-preplan-resume");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("decision", "goal_normalization", {}, 2, goalDecision));
+    REQUIRE(parked.append("stage_enter", "data_state_snapshot", {}, 3));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(parked, dir, &err));
+
+    OpsRunRequest req;
+    req.session.goal = goal;
+    req.session.intent = "ndvi";
+    auto out = coord.resume(dir, "sess-preplan-resume", req);
+    REQUIRE(out.ok);
+    REQUIRE(out.delivery.outcome == "delivered");
 }
 
 TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
@@ -737,16 +872,28 @@ TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
     result.sessionId = "sess-portable";
     result.summary.outcome = "delivered";
     result.summary.verificationVerdict = "PASS";
-    result.summary.artifacts = {"/tmp/run42/out.tif", "relative.tif", "C:\\data\\win.tif"};
+    result.summary.artifacts = {"/tmp/run42/out.tif", "/r1/out.tif", "/r2/out.tif",
+                                "relative.tif", "C:\\data\\win.tif"};
 
     auto delivery = assembler.assemble(result, {});
-    REQUIRE(delivery.outputs.size() == 3);
+    REQUIRE(delivery.outputs.size() == 5);
     REQUIRE(delivery.outputs[0]["path"].asString() == "/tmp/run42/out.tif"); // local truth kept
-    REQUIRE(delivery.outputs[0]["portable_ref"].asString() == "out.tif");
-    REQUIRE(delivery.outputs[1]["portable_ref"].asString() == "relative.tif");
-    REQUIRE(delivery.outputs[2]["portable_ref"].asString() == "win.tif");
+    // Absolute paths become basename + stable path fingerprint: no machine
+    // paths leak, and same-basename artifacts stay distinguishable.
+    const std::string portable0 = delivery.outputs[0]["portable_ref"].asString();
+    REQUIRE(portable0.rfind("out.tif@", 0) == 0);
+    REQUIRE(portable0.find('/') == std::string::npos);
+    REQUIRE(portable0.find('\\') == std::string::npos);
+    REQUIRE(delivery.outputs[1]["portable_ref"].asString() !=
+            delivery.outputs[2]["portable_ref"].asString());
+    REQUIRE(delivery.outputs[3]["portable_ref"].asString() == "relative.tif");
+    const std::string portable4 = delivery.outputs[4]["portable_ref"].asString();
+    REQUIRE(portable4.rfind("win.tif@", 0) == 0);
+    REQUIRE(portable4.find('\\') == std::string::npos);
 
     auto capsule = assembler.capsuleExportDocument(delivery);
-    REQUIRE(capsule["outputs"][0]["portable_ref"].asString() == "out.tif");
+    REQUIRE(capsule["outputs"][0]["portable_ref"].asString() == portable0);
     REQUIRE(capsule["outputs"][0]["path"].isNull());
+    REQUIRE(capsule["outputs"][1]["portable_ref"].asString() ==
+            capsule["outputs"][1]["portable_ref"].asString());
 }
