@@ -805,6 +805,11 @@ add_subdirectory(src/runtime)
 # Scientific Fault Injection Lab Framework (RS14-13). Qt-free C++20 leaf over
 # jsoncpp only; placed after the runtime/data leaves, before consumers.
 add_subdirectory(src/faultlab)
+# Experiment Exploration Studio live-execution bridge: composes the REAL
+# providers (StudyRunner + execution spine, GDAL summarizer, debugger
+# evidence, faultlab sandbox, capsule IO) with the projection leaf. Opt-in
+# surface for the dock/tests; after every alias it links.
+add_subdirectory(src/experiment_studio/live)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)
