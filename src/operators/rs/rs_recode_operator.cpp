@@ -223,6 +223,26 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
     const int blockRows = std::max(1, std::min(256, height));
     const size_t blockSize = static_cast<size_t>(width) * blockRows;
 
+    // Float read windows deliver exact values for Byte/UInt16 label rasters,
+    // but a float NoData sentinel (e.g. -3.4e38) or NaN must never reach the
+    // int cast: converting an out-of-range float is UB (x86 cvttss2si yields
+    // INT_MIN), and the garbage would masquerade as a real class in a
+    // classification deliverable. Labels are integral by definition — refuse
+    // the run and point at the masking operators instead (parity with the
+    // majority filter's cast guard, #700).
+    auto toLabel = [&](float fv) -> int {
+        if (!std::isfinite(fv) || fv < -2147483648.0f || fv >= 2147483648.0f) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Label band contains a value that is not a float32-exact "
+                "integer class (NaN, infinity, a float sentinel, or a label "
+                "beyond the float32-exact int32 range). Recode expects an "
+                "integral class map — mask non-class pixels first "
+                "(rs:apply_mask / rs:qa_mask).");
+        }
+        return static_cast<int>(fv);
+    };
+
     // Pass 1: recoded value range. Input values are read through a float
     // window (GdalDatasetWrapper's conversion read): exact for Byte/UInt16
     // label rasters; Int32 labels beyond the float mantissa (> 2^24) would
@@ -241,8 +261,8 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
                                       "Failed to read label band: " + inputPath);
             }
             for (size_t i = 0; i < n; ++i) {
-                const int v = recodeMap.value(static_cast<int>(block[i]),
-                                              static_cast<int>(block[i]));
+                const int lbl = toLabel(block[i]);
+                const int v = recodeMap.value(lbl, lbl);
                 outMin = std::min(outMin, static_cast<double>(v));
                 outMax = std::max(outMax, static_cast<double>(v));
             }
@@ -298,8 +318,8 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
                                       "Failed to read label band: " + inputPath);
             }
             for (size_t i = 0; i < n; ++i) {
-                const int v = recodeMap.value(static_cast<int>(block[i]),
-                                              static_cast<int>(block[i]));
+                const int lbl = toLabel(block[i]);
+                const int v = recodeMap.value(lbl, lbl);
                 outBlock[i] = v;
             }
             const GdalBlockStream::Tile tile{0, y0, width, rows, 0, width, rows,
