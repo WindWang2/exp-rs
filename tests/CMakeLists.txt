@@ -359,6 +359,21 @@ sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
 
+# Cross-platform Completion: header-only portability primitives
+# (src/platform/portable.h). Lightest possible lane — Catch2 only, no sicnu
+# library, no Qt/QGIS/GDAL — so the UTF-8/path/pid contract compiles and
+# runs on every platform lane.
+add_executable(test_platform_portability test_platform_portability.cpp)
+target_link_libraries(test_platform_portability PRIVATE Catch2::Catch2WithMain)
+target_include_directories(test_platform_portability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_platform_portability PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_platform_portability)
+
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
 sicnu_add_test(test_offline_mode TIMEOUT 300)
