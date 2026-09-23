@@ -9770,6 +9770,20 @@ target_link_libraries(test_repair_planner_schema PRIVATE
 )
 sicnu_discover_tests(test_repair_planner_schema)
 
+# RS14-03 completion: requirement synthesis, provider-driven candidates,
+# auto policy, deterministic plan/result/fragment, teaching/agent views and
+# the tamper-evident planning state (Qt-free leaf; the integration case reads
+# the real capability knowledge documents).
+add_executable(test_repair_planner_completion test_repair_planner_completion.cpp)
+target_link_libraries(test_repair_planner_completion PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_repair_planner
+)
+target_compile_definitions(test_repair_planner_completion PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_repair_planner_completion)
+
 # RS14-20 Scientific Recipe Compiler (#1206): schema, compiler, validator,
 # registry, lookup, equivalence and the lab document/source contract —
 # Qt-free leaves over sicnu_recipes.
