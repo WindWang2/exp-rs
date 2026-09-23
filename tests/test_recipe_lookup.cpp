@@ -167,3 +167,33 @@ TEST_CASE( "JSON wire surface echoes the query and carries summaries", "[lookup]
   REQUIRE( out["hits"][0]["operator_stages"].asInt() == 2 );
   REQUIRE( out["query"]["intent"].asString() == "terrain_analysis" );
 }
+
+TEST_CASE( "Lookup tolerates hostile modality shapes admitted by the registry",
+           "[lookup][negative]" )
+{
+  // validateRecipe pins goal_pattern.intent's type but not modality's, so a
+  // non-string modality can be admitted; a modality query must score it,
+  // never throw (same untrusted-scan threat model as the registry suite).
+  const fs::path dir = fs::temp_directory_path() / "lookup_hostile_modality";
+  fs::remove_all( dir );
+  Json::Value bad = recipeWith( "lab.broken_modality", "ndvi", "optical", {}, {}, { "rs:x" } );
+  bad["goal_pattern"]["modality"] = Json::Value( Json::objectValue );
+  writeJson( dir / "bad.json", bad );
+  writeJson( dir / "good.json",
+             recipeWith( "lab.good", "ndvi", "optical", {}, {}, { "rs:x" } ) );
+
+  ScientificRecipeRegistry registry;
+  registry.setDirectory( dir.string() );
+  REQUIRE( registry.reload() == 2 ); // both admitted — modality is not type-checked
+
+  RecipeQuery q;
+  q.modality = "optical";
+  // Scoring a non-string modality contributes nothing (documented semantics:
+  // zero score is not a hit) — the point is that lookup neither throws nor
+  // promotes the broken doc.
+  const auto hits = searchRecipes( registry, q );
+  REQUIRE( hits.size() == 1 );
+  REQUIRE( hits[0].recipeId == "lab.good" );
+  REQUIRE( hits[0].score == 2.0 ); // only the modality match
+  fs::remove_all( dir );
+}

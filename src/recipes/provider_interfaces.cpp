@@ -22,7 +22,11 @@ void collectDocIds( const Json::Value &doc, std::vector<std::string> &ids )
 {
   auto take = [&ids]( const Json::Value &v )
   {
-    const std::string id = v.get( "id", "" ).asString();
+    // isString guard: asString() on a non-string id raises Json::LogicError,
+    // and sidecar directories are a scan surface like the recipe registry.
+    if ( !v[ "id" ].isString() )
+      return;
+    const std::string id = v[ "id" ].asString();
     if ( !id.empty() && id.rfind( "family:", 0 ) != 0 )
       ids.push_back( id );
   };
