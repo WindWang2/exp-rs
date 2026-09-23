@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/harness/intent_vocabulary.h"
+#include "agent/harness/workflow_ir.h"
 #include "contracts/scientific_contract.h"
 #include "planner/plan_ir_projection.h"
 #include "planner/planner_vocab.h"
@@ -47,19 +48,25 @@ TEST_CASE( "asset lifecycle mirror matches the scientific_state authority",
 TEST_CASE( "asset kinds and modalities intersect their workflow_ir authorities",
            "[scientific_planner][drift]" )
 {
-    // workflow_ir.h axes are the declared authorities (header-only data).
+    // workflow_ir.h axes are the declared authorities (header-only data);
+    // the pin reads the AUTHORITY CONSTANTS, so a harness rename fails here.
     // Planning subjects are spatial surfaces: raster/vector/model of the
     // artifact-kind axis plus the planner-added `collection` for multi-scene
     // bundles (historical plan.md §4.1). `table` (a RESULT surface, not a
     // planning subject) and `structured` have no planning semantics and are
     // deliberately absent — this pin makes the absences explicit.
-    for ( const char *kind : { "raster", "vector", "model", "collection" } )
-        CHECK( isKnownAssetKind( kind ) );
-    CHECK_FALSE( isKnownAssetKind( "table" ) );
-    CHECK_FALSE( isKnownAssetKind( "structured" ) );
+    namespace artifact_facts = sicnu::agent::harness::artifact_facts;
+    CHECK( isKnownAssetKind( artifact_facts::kKindRaster ) );
+    CHECK( isKnownAssetKind( artifact_facts::kKindVector ) );
+    CHECK( isKnownAssetKind( artifact_facts::kKindModel ) );
+    CHECK( isKnownAssetKind( "collection" ) ); // planner addition
+    CHECK_FALSE( isKnownAssetKind( artifact_facts::kKindTable ) );
+    CHECK_FALSE( isKnownAssetKind( artifact_facts::kKindStructured ) );
 
-    for ( const char *modality : { "optical", "sar", "dem", "unknown" } )
-        CHECK( isKnownVocabValue( kAssetModalities, modality ) );
+    CHECK( isKnownVocabValue( kAssetModalities, artifact_facts::kModalityOptical ) );
+    CHECK( isKnownVocabValue( kAssetModalities, artifact_facts::kModalitySar ) );
+    CHECK( isKnownVocabValue( kAssetModalities, artifact_facts::kModalityDem ) );
+    CHECK( isKnownVocabValue( kAssetModalities, artifact_facts::kModalityUnknown ) );
 }
 
 TEST_CASE( "projection domain map equals the contracts numeric-domain authority",

@@ -384,6 +384,82 @@ TEST_CASE( "review regression: producer bounds hold (assets, candidates, cost cl
         CHECK( validateScientificPlan( candidateReparse ).empty() );
     }
 
+    // (b2) the bound binds EVERY multi-asset loop: alignment gate (R1),
+    // calibration bridge (R2) and the no-import analyze fallback (R3) —
+    // each emitted plan must re-read through the fail-closed reader.
+    const auto nineReadyAssets = []( const char *crsB, const std::string &domain )
+    {
+        PlanningContext nine;
+        for ( int i = 0; i < 9; ++i )
+        {
+            PlannerAssetFacts asset;
+            asset.ref = "asset-" + std::to_string( 100 + i );
+            asset.kind = "raster";
+            asset.numericDomain = domain;
+            asset.crs = ( i % 2 == 0 ) ? "EPSG:32648" : crsB;
+            asset.resolutionM = 10.0;
+            asset.state = "ready";
+            nine.assets.push_back( asset );
+        }
+        return nine;
+    };
+    ScientificGoal boundsGoal = waterGoal();
+    boundsGoal.acceptanceCriteria.clear();
+
+    // R1: grid mismatch + alignment capability → alignment step overflow
+    {
+        PlanningContext nine = nineReadyAssets( "EPSG:32647", "reflectance" );
+        FakeProvider alignmentProvider;
+        alignmentProvider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+        alignmentProvider.add( "alignment", capability( "rs:align", "low", "", "" ) );
+        alignmentProvider.add( "analysis", capability( "rs:mndwi", "low", "", "index" ) );
+        alignmentProvider.add( "publication", capability( "io:translate", "low", "", "" ) );
+        const PlanningResult r =
+            planScientificWork( boundsGoal, nine, PlannerProviders{ &alignmentProvider } );
+        for ( const auto &step : r.primary()->steps )
+            CHECK( static_cast<int>( step.inputs.size() ) <= PlanLimits::kMaxInputsPerStep );
+        ScientificPlan reparse;
+        std::string err;
+        REQUIRE( scientificPlanFromJson( scientificPlanToJson( *r.primary() ), reparse, err ) );
+        CHECK( validateScientificPlan( reparse ).empty() );
+    }
+    // R2: dn assets + dn→features bridge + rs:change → calibration overflow
+    {
+        PlanningContext nine = nineReadyAssets( "EPSG:32648", "dn" );
+        FakeProvider bridgeProvider;
+        bridgeProvider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+        bridgeProvider.add( "calibration", capability( "rs:band_math", "medium", "dn", "features" ) );
+        bridgeProvider.add( "analysis", capability( "rs:change", "high", "features", "none" ) );
+        bridgeProvider.add( "publication", capability( "io:translate", "low", "", "" ) );
+        const PlanningResult r =
+            planScientificWork( boundsGoal, nine, PlannerProviders{ &bridgeProvider } );
+        for ( const auto &step : r.primary()->steps )
+        {
+            CHECK( static_cast<int>( step.inputs.size() ) <= PlanLimits::kMaxInputsPerStep );
+            CHECK( static_cast<int>( step.expectedTransitions.size() )
+                   <= PlanLimits::kMaxInputsPerStep );
+        }
+        ScientificPlan reparse;
+        std::string err;
+        REQUIRE( scientificPlanFromJson( scientificPlanToJson( *r.primary() ), reparse, err ) );
+        CHECK( validateScientificPlan( reparse ).empty() );
+    }
+    // R3: no import capability, any-input analysis → analyze-step overflow
+    {
+        PlanningContext nine = nineReadyAssets( "EPSG:32648", "reflectance" );
+        FakeProvider minimal;
+        minimal.add( "analysis", capability( "rs:mndwi", "low", "", "index" ) );
+        minimal.add( "publication", capability( "io:translate", "low", "", "" ) );
+        const PlanningResult r =
+            planScientificWork( boundsGoal, nine, PlannerProviders{ &minimal } );
+        for ( const auto &step : r.primary()->steps )
+            CHECK( static_cast<int>( step.inputs.size() ) <= PlanLimits::kMaxInputsPerStep );
+        ScientificPlan reparse;
+        std::string err;
+        REQUIRE( scientificPlanFromJson( scientificPlanToJson( *r.primary() ), reparse, err ) );
+        CHECK( validateScientificPlan( reparse ).empty() );
+    }
+
     // (c) calibration fact with unknown cost class: excluded, never planned.
     PlanningContext dnContext = twoDnAssets();
     FakeProvider lyingBridge;

@@ -195,6 +195,29 @@ std::optional<PlannerCapability> findBridge( const CapabilityProvider &provider,
     return *best;
 }
 
+/// Aggregated-overflow discipline shared by EVERY multi-asset input loop:
+/// cap a step's asset inputs at kMaxInputsPerStep and raise a typed blocking
+/// question for the remainder — never a silent truncation. @returns the
+/// (sorted, capped) refs the step may consume.
+std::vector<std::string> boundedAssetRefs( std::vector<std::string> refs,
+                                           std::vector<PlanOpenQuestion> &questions,
+                                           ScientificPlan &plan )
+{
+    std::sort( refs.begin(), refs.end() );
+    if ( static_cast<int>( refs.size() ) <= PlanLimits::kMaxInputsPerStep )
+        return refs;
+    questions.push_back( PlanOpenQuestion{
+        "", "decision_required", true,
+        std::to_string( refs.size() ) + " assets exceed the "
+            + std::to_string( PlanLimits::kMaxInputsPerStep )
+            + "-input step bound; the step stages the first "
+            + std::to_string( PlanLimits::kMaxInputsPerStep ) + " (sorted by ref)",
+        "split the goal or mosaic the assets first" } );
+    plan.verdict = "feasible_with_gaps";
+    refs.resize( PlanLimits::kMaxInputsPerStep );
+    return refs;
+}
+
 std::string stepIdFor( const std::string &role, int occurrence )
 {
     char buffer[16];
@@ -251,39 +274,17 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
             importStep.estimatedRamMb = importCapability->estimatedRamMb;
             importStep.deterministic = importCapability->deterministic;
             importStep.stepId = stepIdFor( "import", ++occurrence );
-            std::vector<const AssetView *> consumableSorted;
+            std::vector<std::string> importRefs;
             for ( const auto &view : assets )
             {
                 if ( view.consumable )
-                    consumableSorted.push_back( &view );
+                    importRefs.push_back( view.facts->ref );
             }
-            std::stable_sort( consumableSorted.begin(), consumableSorted.end(),
-                              []( const AssetView *a, const AssetView *b ) {
-                                  return a->facts->ref < b->facts->ref;
-                              } );
-            for ( const auto *view : consumableSorted )
+            for ( const auto &ref : boundedAssetRefs( std::move( importRefs ), questions, plan ) )
             {
-                if ( static_cast<int>( importStep.inputs.size() )
-                     >= PlanLimits::kMaxInputsPerStep )
-                {
-                    // Aggregated-overflow discipline: the plan keeps the
-                    // first N assets and raises a typed question for the
-                    // remainder — never a silent truncation.
-                    questions.push_back( PlanOpenQuestion{
-                        "", "decision_required", true,
-                        std::to_string( consumableSorted.size() )
-                            + " ready assets exceed the " +
-                            std::to_string( PlanLimits::kMaxInputsPerStep )
-                            + "-input step bound; the plan stages the first "
-                            + std::to_string( PlanLimits::kMaxInputsPerStep )
-                            + " (sorted by ref)",
-                        "split the goal or mosaic the assets first" } );
-                    plan.verdict = "feasible_with_gaps";
-                    break;
-                }
-                importStep.inputs.push_back( StepInput{ "", view->facts->ref, "input" } );
+                importStep.inputs.push_back( StepInput{ "", ref, "input" } );
                 importStep.preconditions.push_back(
-                    StepPrecondition{ "asset_state", view->facts->ref, "", 0,
+                    StepPrecondition{ "asset_state", ref, "", 0,
                                       "asset ready at plan time" } );
             }
             plan.steps.push_back( importStep );
@@ -335,11 +336,14 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
             alignStep.preconditions.push_back( StepPrecondition{
                 "grid", "", "", 0,
                 "cross-scene grid mismatch (crs/resolution) must be resolved first" } );
+            std::vector<std::string> alignRefs;
             for ( const auto &view : assets )
             {
                 if ( view.consumable )
-                    alignStep.inputs.push_back( StepInput{ "", view.facts->ref, "input" } );
+                    alignRefs.push_back( view.facts->ref );
             }
+            for ( const auto &ref : boundedAssetRefs( std::move( alignRefs ), questions, plan ) )
+                alignStep.inputs.push_back( StepInput{ "", ref, "input" } );
             plan.steps.push_back( alignStep );
             lastStepId = alignStep.stepId;
         }
@@ -378,15 +382,19 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
                 calibStep.estimatedRamMb = bridge->estimatedRamMb;
                 calibStep.deterministic = bridge->deterministic;
                 calibStep.stepId = stepIdFor( "preprocess", ++occurrence );
-                for ( auto &[ref, domain] : currentDomain )
+                std::vector<std::string> bridgeRefs;
+                for ( const auto &[ref, domain] : currentDomain )
                 {
                     if ( domain == fromDomain )
-                    {
-                        calibStep.inputs.push_back( StepInput{ "", ref, "input" } );
-                        calibStep.expectedTransitions.push_back(
-                            ExpectedTransition{ ref, fromDomain, requiredInput } );
-                        domain = requiredInput;
-                    }
+                        bridgeRefs.push_back( ref );
+                }
+                for ( const auto &ref :
+                      boundedAssetRefs( std::move( bridgeRefs ), questions, plan ) )
+                {
+                    calibStep.inputs.push_back( StepInput{ "", ref, "input" } );
+                    calibStep.expectedTransitions.push_back(
+                        ExpectedTransition{ ref, fromDomain, requiredInput } );
+                    currentDomain[ref] = requiredInput;
                 }
                 plan.steps.push_back( calibStep );
                 lastStepId = calibStep.stepId;
@@ -420,17 +428,29 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
                                       && ( context.mode.autonomy != "full"
                                            || context.mode.studentDecisionDefault );
         if ( !lastStepId.empty() )
+        {
             analyzeStep.inputs.push_back( StepInput{ lastStepId, "", "input" } );
+        }
         else
         {
+            std::vector<std::string> directRefs;
             for ( const auto &view : assets )
             {
                 if ( view.consumable )
-                    analyzeStep.inputs.push_back( StepInput{ "", view.facts->ref, "input" } );
+                    directRefs.push_back( view.facts->ref );
             }
+            for ( const auto &ref : boundedAssetRefs( std::move( directRefs ), questions, plan ) )
+                analyzeStep.inputs.push_back( StepInput{ "", ref, "input" } );
         }
+        std::vector<std::string> analysisRefs;
         for ( const auto &[ref, domain] : currentDomain )
         {
+            (void)domain;
+            analysisRefs.push_back( ref );
+        }
+        for ( const auto &ref : boundedAssetRefs( std::move( analysisRefs ), questions, plan ) )
+        {
+            const std::string &domain = currentDomain[ref];
             analyzeStep.preconditions.push_back(
                 StepPrecondition{ "numeric_domain", ref,
                                   requiredInput == "any" ? domain : requiredInput, 0,
