@@ -241,13 +241,25 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         }
     }
 
-    // Ungeoreferenced fallback: same dimensions only.
-    if (!inputGrid.hasGeoTransform && !maskGrid.hasGeoTransform) {
+    // Ungeoreferenced fallback: same dimensions only. compareGrids reports
+    // "compatible" whenever the CRS matches but a geotransform is missing on
+    // EITHER side, so a mask without georeferencing would otherwise be applied
+    // positionally with the co-registration claim silently unverified — the
+    // one-sided case must satisfy the same dimension contract as the
+    // both-unreferenced case.
+    if (!inputGrid.hasGeoTransform || !maskGrid.hasGeoTransform) {
         if (mask.width() != width || mask.height() != height) {
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
-                "Mask and input have different dimensions and neither is "
-                "georeferenced; cannot align the mask");
+                "Mask and input have different dimensions and their "
+                "co-registration cannot be verified (a geotransform is "
+                "missing); cannot align the mask");
+        }
+        if (inputGrid.hasGeoTransform != maskGrid.hasGeoTransform) {
+            context.logInfo(
+                "Exactly one of mask/input carries a geotransform; applying the "
+                "mask positionally (pixel-for-pixel). Co-registration is "
+                "assumed, not verified.");
         }
     }
 
