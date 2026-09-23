@@ -139,7 +139,9 @@ int costRankFromClass( const Json::Value &entry )
 }
 
 /// Candidate order: offerable first by (cost rank asc, operator id asc),
-/// refusals last by operator id. Deterministic.
+/// refusals last by operator id, then id. The final tie-break on the
+/// (positional, unique) id makes the order total, so equal-keyed entries
+/// cannot reorder across toolchains.
 bool candidateLess( const RepairAction &a, const RepairAction &b )
 {
     const bool aRefusal = !a.refusalCause.empty();
@@ -148,16 +150,18 @@ bool candidateLess( const RepairAction &a, const RepairAction &b )
         return !aRefusal;
     if ( a.cost.rank != b.cost.rank )
         return a.cost.rank < b.cost.rank;
-    return a.operatorId < b.operatorId;
+    if ( a.operatorId != b.operatorId )
+        return a.operatorId < b.operatorId;
+    return a.id < b.id;
 }
 
 RepairAction buildCandidate( const RepairRequirement &requirement,
                              const CandidateContract &contract, const Json::Value &entry,
-                             int candidateIndex )
+                             int candidateIndex, const std::string &contractKind )
 {
     RepairAction action;
     action.id = "ra-" + requirement.requirementId + "-" + std::to_string( candidateIndex );
-    action.ruleId = requirement.kind;
+    action.ruleId = contractKind; // the closed rule that produced the candidate
     action.kind = contract.kind;
     action.actionKey = contract.actionKey;
     action.riskClass = contract.riskClass;
@@ -229,7 +233,7 @@ RepairAction buildCandidate( const RepairRequirement &requirement,
 RepairAction buildDecisionCandidate( const RepairRequirement &requirement )
 {
     const CandidateContract &contract = candidateContractTable().at( requirement.kind );
-    return buildCandidate( requirement, contract, Json::Value(), 1 );
+    return buildCandidate( requirement, contract, Json::Value(), 1, requirement.kind );
 }
 
 Json::Value actionDocWithRequirement( const RepairAction &action )
@@ -265,15 +269,25 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         error = RepairError{ "invalid_input", "no findings to plan from" };
         return false;
     }
+    // Caps are fail-closed in ONE polarity: every cap must be a positive
+    // bound. Zero or negative values are nonsensical requests ("plan
+    // nothing", "unlimited" spellings), not silent escapes from the budget.
+    if ( options.maxRequirements < 1 || options.maxCandidatesPerRequirement < 1 ||
+         options.maxTotalCandidates < 1 )
+    {
+        error = RepairError{ "invalid_input",
+                             "planner caps must all be >= 1" };
+        return false;
+    }
 
     std::vector<RepairRequirement> requirements;
     if ( !synthesizeRequirements( findings, requirements, error ) )
         return false; // typed invalid_input from the synthesizer
 
-    // Budget: deterministic requirement truncation, counted.
-    const std::size_t maxRequirements =
-        options.maxRequirements > 0 ? static_cast<std::size_t>( options.maxRequirements )
-                                    : requirements.size();
+    // Budget: deterministic requirement truncation, counted — and never
+    // folded into a success: a plan that did not even consider all findings
+    // cannot claim full blocker resolution.
+    const std::size_t maxRequirements = static_cast<std::size_t>( options.maxRequirements );
     const bool requirementsTruncated = requirements.size() > maxRequirements;
     const std::size_t droppedRequirements = requirements.size() - maxRequirements;
     if ( requirementsTruncated )
@@ -289,6 +303,7 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
     plan.provenance["planner"] = kPlannerId;
     plan.provenance["source"] = "sicnu::repair/planner";
     plan.provenance["findings_digest"] = findingsDigest( findings );
+    plan.policy["domain"] = context.domain;
     plan.policy["role"] = context.role;
     plan.policy["allow_autonomous_exec"] = context.allowAutonomousExec;
     plan.policy["science_change_approved"] = context.scienceChangeApproved;
@@ -322,17 +337,46 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         // Provider-driven candidates, then deterministic ordering and caps.
         std::vector<RepairAction> candidates;
         bool providerServed = false;
-        if ( provider.knowsRequirementKind( requirement.kind ) )
+        // Closed alternative-family rule: an inconsistent radiometric state
+        // can legitimately be answered by masking invalid pixels first, so
+        // the provider's quality_mask family joins the candidate pool (the
+        // science_changing contracts keep them confirmation-gated).
+        const bool wantsMaskAlternatives = requirement.kind == requirement_kind::kRadiometricState;
+        if ( provider.knowsRequirementKind( requirement.kind ) ||
+             ( wantsMaskAlternatives &&
+               provider.knowsRequirementKind( requirement_kind::kQualityMask ) ) )
         {
-            const auto entries = provider.capabilitiesForRequirement( requirement.kind );
-            providerServed = !entries.empty();
             int candidateIndex = 1;
+            const auto entries = provider.capabilitiesForRequirement( requirement.kind );
+            providerServed = providerServed || !entries.empty();
             for ( const Json::Value &entry : entries )
                 candidates.push_back(
                     buildCandidate( requirement, candidateContractTable().at( requirement.kind ),
-                                    entry, candidateIndex++ ) );
+                                    entry, candidateIndex++, requirement.kind ) );
+            if ( wantsMaskAlternatives )
+            {
+                const auto maskEntries =
+                    provider.capabilitiesForRequirement( requirement_kind::kQualityMask );
+                providerServed = providerServed || !maskEntries.empty();
+                for ( const Json::Value &entry : maskEntries )
+                    candidates.push_back(
+                        buildCandidate( requirement,
+                                        candidateContractTable().at( requirement_kind::kQualityMask ),
+                                        entry, candidateIndex++,
+                                        requirement_kind::kQualityMask ) );
+            }
         }
-        std::sort( candidates.begin(), candidates.end(), candidateLess );
+        // Primary-family candidates rank ahead of equal-cost alternative
+        // families; the rest of the order is candidateLess (total).
+        const std::string primaryKind = requirement.kind;
+        std::stable_sort( candidates.begin(), candidates.end(),
+                          [primaryKind]( const RepairAction &a, const RepairAction &b ) {
+                              const bool aPrimary = a.ruleId == primaryKind;
+                              const bool bPrimary = b.ruleId == primaryKind;
+                              if ( aPrimary != bPrimary )
+                                  return aPrimary;
+                              return candidateLess( a, b );
+                          } );
 
         // Decision-only kinds never fall through silently: when no provider
         // candidate exists, the synthesized decision IS the offer. A fully
@@ -350,29 +394,28 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
             }
         }
 
-        // Budget: per-requirement cap, then the whole-plan candidate budget.
-        const std::size_t candidatesBeforeCap = candidates.size();
-        std::size_t perRequirementCap =
-            options.maxCandidatesPerRequirement > 0
-                ? static_cast<std::size_t>( options.maxCandidatesPerRequirement )
-                : candidates.size();
+        // Budget: per-requirement cap first, then the whole-plan candidate
+        // budget. Only a WHOLE-PLAN budget cut can starve a requirement into
+        // budget_exhausted; a per-requirement cap cut always keeps at least
+        // one candidate, so the requirement still resolves on its best offer
+        // (the cut is visible in bounds.truncated_candidates).
+        const int budgetBefore = totalCandidateBudget;
+        const std::size_t perRequirementCap =
+            static_cast<std::size_t>( options.maxCandidatesPerRequirement );
         if ( candidates.size() > perRequirementCap )
         {
             truncatedCandidates += static_cast<int>( candidates.size() - perRequirementCap );
             candidates.resize( perRequirementCap );
         }
-        if ( totalCandidateBudget >= 0 &&
-             static_cast<int>( candidates.size() ) > totalCandidateBudget )
+        bool planBudgetCut = false;
+        if ( static_cast<int>( candidates.size() ) > budgetBefore )
         {
             truncatedCandidates +=
-                static_cast<int>( candidates.size() ) - totalCandidateBudget;
-            candidates.resize( std::max( 0, totalCandidateBudget ) );
+                static_cast<int>( candidates.size() ) - budgetBefore;
+            planBudgetCut = true;
+            candidates.resize( std::max( 0, budgetBefore ) );
         }
-        totalCandidateBudget -= static_cast<int>( candidates.size() );
-        const bool budgetCutHere =
-            candidates.size() < candidatesBeforeCap && !candidates.empty();
-        const bool budgetCutToEmpty =
-            candidates.empty() && candidatesBeforeCap > 0;
+        totalCandidateBudget = budgetBefore - static_cast<int>( candidates.size() );
 
         // Selection: first offerable candidate; the rest stay as auditable
         // alternatives (refusals included — their contract explains why).
@@ -392,11 +435,10 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         {
             Json::Value entry( Json::objectValue );
             entry["requirement_id"] = requirement.requirementId;
-            if ( budgetCutHere || budgetCutToEmpty || decisionBlockedByBudget )
+            if ( planBudgetCut || decisionBlockedByBudget )
                 entry["cause"] = unresolved_cause::kBudgetExhausted;
             else if ( candidates.empty() )
-                entry["cause"] = providerServed ? unresolved_cause::kAllCandidatesRefused
-                                                : unresolved_cause::kNoCandidate;
+                entry["cause"] = unresolved_cause::kNoCandidate;
             else
                 entry["cause"] = unresolved_cause::kAllCandidatesRefused;
             entry["finding_code"] = requirement.findingCode;
@@ -405,7 +447,7 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
                 allBlockingResolved = false;
             policyEntry["candidate_id"] = "";
             policyEntry["decision"] = policy_decision::kNeedsConfirmation;
-            policyEntry["reason_code"] = entry["cause"];
+            policyEntry["cause"] = entry["cause"];
             plan.policy["per_candidate"].append( policyEntry );
             continue;
         }
@@ -421,11 +463,22 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
     }
 
     plan.bounds["truncated_candidates"] = truncatedCandidates;
+    if ( requirementsTruncated )
+    {
+        // Findings that were never considered cannot be claimed resolved.
+        Json::Value entry( Json::objectValue );
+        entry["requirement_id"] = "";
+        entry["cause"] = unresolved_cause::kBudgetExhausted;
+        entry["detail"] = std::to_string( droppedRequirements ) +
+                          " finding(s) dropped by the requirement budget";
+        plan.unresolved.push_back( entry );
+        allBlockingResolved = false;
+    }
     plan.resolvesAllBlockers = allBlockingResolved;
+    plan.subject = requirements.empty() ? std::string() : requirements.front().subject;
     if ( anySelected )
     {
         plan.status = plan_status::kPlanned;
-        plan.subject = requirements.empty() ? std::string() : requirements.front().subject;
     }
     else
     {
@@ -469,8 +522,9 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         bool resolved = false;
         for ( const RepairAction &action : plan.selected )
         {
-            if ( action.sourceFinding["requirement_id"].asString() ==
-                 requirement.requirementId )
+            if ( action.sourceFinding["requirement_id"].isString() &&
+                 action.sourceFinding["requirement_id"].asString() ==
+                     requirement.requirementId )
             {
                 resolved = true;
                 entry["selected_candidate_id"] = action.id;
@@ -481,22 +535,28 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         int alternativeCount = 0;
         for ( const Json::Value &alternative : plan.alternatives )
         {
-            if ( alternative["requirement_id"].asString() == requirement.requirementId )
+            if ( alternative["requirement_id"].isString() &&
+                 alternative["requirement_id"].asString() == requirement.requirementId )
                 ++alternativeCount;
         }
         entry["alternative_count"] = alternativeCount;
         entry["resolved"] = resolved;
         for ( const Json::Value &unresolved : plan.unresolved )
         {
-            if ( unresolved["requirement_id"].asString() == requirement.requirementId )
+            if ( unresolved["requirement_id"].isString() &&
+                 unresolved["requirement_id"].asString() == requirement.requirementId )
                 entry["cause"] = unresolved["cause"];
         }
         for ( const Json::Value &policyEntry : plan.policy["per_candidate"] )
         {
-            if ( policyEntry["requirement_id"].asString() == requirement.requirementId )
+            if ( policyEntry["requirement_id"].isString() &&
+                 policyEntry["requirement_id"].asString() == requirement.requirementId )
             {
                 entry["decision"] = policyEntry["decision"];
-                entry["reason_code"] = policyEntry["reason_code"];
+                if ( policyEntry.isMember( "reason_code" ) )
+                    entry["reason_code"] = policyEntry["reason_code"];
+                if ( policyEntry.isMember( "cause" ) )
+                    entry["cause"] = policyEntry["cause"];
             }
         }
         perRequirement.append( entry );
@@ -521,7 +581,8 @@ bool repairPlanFragment( const RepairPlan &plan, const std::string &requirementI
     const Json::Value *requirement = nullptr;
     for ( const Json::Value &entry : plan.requirements )
     {
-        if ( entry.isObject() && entry["requirement_id"].asString() == requirementId )
+        if ( entry.isObject() && entry["requirement_id"].isString() &&
+             entry["requirement_id"].asString() == requirementId )
         {
             requirement = &entry;
             break;
@@ -545,12 +606,14 @@ bool repairPlanFragment( const RepairPlan &plan, const std::string &requirementI
     Json::Value candidates( Json::arrayValue );
     for ( const RepairAction &action : plan.selected )
     {
-        if ( action.sourceFinding["requirement_id"].asString() == requirementId )
-            candidates.append( repairActionToJson( action ) );
+        if ( action.sourceFinding["requirement_id"].isString() &&
+             action.sourceFinding["requirement_id"].asString() == requirementId )
+            candidates.append( actionDocWithRequirement( action ) );
     }
     for ( const Json::Value &alternative : plan.alternatives )
     {
-        if ( alternative["requirement_id"].asString() == requirementId )
+        if ( alternative["requirement_id"].isString() &&
+             alternative["requirement_id"].asString() == requirementId )
             candidates.append( alternative );
     }
     fragment["candidates"] = candidates;

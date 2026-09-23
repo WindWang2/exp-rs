@@ -33,6 +33,8 @@
 #include "repair_planner/repair_view.h"
 #include "repair_planner/repair_state.h"
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
@@ -109,16 +111,25 @@ bool containsKeyRecursive( const Json::Value &node, const std::string &key )
   return false;
 }
 
-/// Loads the real capability-knowledge documents shipped in the repository.
+/// Loads the real capability-knowledge documents shipped in the repository
+/// (every file in data/agent/capabilities/, so the routing pin cannot be
+/// defeated by an id moving to a file this suite does not read).
 std::vector<Json::Value> loadRealCapabilityEntries( const std::string &sourceDir )
 {
-  const std::vector<std::string> files = { "preprocess.json", "geometric.json",
-                                           "temporal.json",  "inference.json",
-                                           "classify.json",  "sar.json" };
+  const std::string dir = sourceDir + "/data/agent/capabilities";
+  std::vector<std::string> files;
+  for ( const auto &item : std::filesystem::directory_iterator( dir ) )
+  {
+    if ( item.is_regular_file() && item.path().extension() == ".json" )
+      files.push_back( item.path().string() );
+  }
+  REQUIRE( files.size() >= 10 );
+  std::sort( files.begin(), files.end() );
+
   std::vector<Json::Value> entries;
   for ( const std::string &file : files )
   {
-    std::ifstream in( sourceDir + "/data/agent/capabilities/" + file );
+    std::ifstream in( file );
     REQUIRE( in.is_open() );
     Json::Value doc;
     Json::CharReaderBuilder builder;
@@ -312,6 +323,28 @@ TEST_CASE( "real capability knowledge documents drive candidates end to end",
   CHECK( !provider.capabilitiesForRequirement( "crs_align" ).empty() );
   CHECK( !provider.capabilitiesForRequirement( "radiometric_state" ).empty() );
 
+  // Drift pin: every operator id the closed routing table names must exist
+  // in the real knowledge documents — a renamed or removed operator turns
+  // this suite red instead of silently routing nothing.
+  {
+    std::set<std::string> allIds;
+    for ( const Json::Value &e : entries )
+      allIds.insert( e["id"].asString() );
+    for ( const char *kind :
+          { "crs_align", "grid_align", "radiometric_state", "calibration_domain",
+            "quality_mask", "band_role", "polarization_select", "temporal_align",
+            "model_contract", "dataset_substitution" } )
+    {
+      const auto ids = servingOperatorsForRequirement( kind );
+      CHECK( !ids.empty() );
+      for ( const std::string &id : ids )
+        CHECK( allIds.count( id ) == 1 );
+    }
+    CHECK( servingOperatorsForRequirement( "modality_check" ).empty() );
+    CHECK( servingOperatorsForRequirement( "training_data" ).empty() );
+    CHECK( servingOperatorsForRequirement( "categorical_check" ).empty() );
+  }
+
   // Family-default documents ("family:*") are not operators and must not be
   // offered as executable candidates.
   for ( const char *kind : { "grid_align", "crs_align", "radiometric_state",
@@ -373,10 +406,63 @@ TEST_CASE( "auto policy requires whitelist AND shape_preserving AND facts AND au
          policy_decision::kNeedsConfirmation );
   CHECK( evaluateRepairPolicy( auto_ok, noAutonomy ).reasonCode == "autonomy_not_allowed" );
 
+  // On the lab teaching surface the student gate is active: ONLY teacher and
+  // admin escape it (harness normalizeLabRole single truth) — a role the
+  // harness never hears of degrades to student there.
+  RepairPolicyContext lab = ctx;
+  lab.domain = "lab";
+  CHECK( evaluateRepairPolicy( auto_ok, lab ).decision ==
+         policy_decision::kTeachingOnly ); // researcher is a student in the lab
+  RepairPolicyContext labTeacher = lab;
+  labTeacher.role = "teacher";
+  CHECK( evaluateRepairPolicy( auto_ok, labTeacher ).decision ==
+         policy_decision::kAutoExecutable );
+  RepairPolicyContext labAdmin = lab;
+  labAdmin.role = "admin";
+  CHECK( evaluateRepairPolicy( auto_ok, labAdmin ).decision ==
+         policy_decision::kAutoExecutable );
+  for ( const char *role : { "", "student", "instructor", "researcher", "agent" } )
+  {
+    RepairPolicyContext labStudent = lab;
+    labStudent.role = role;
+    const RepairPolicyDecision d = evaluateRepairPolicy( auto_ok, labStudent );
+    CHECK( d.decision == policy_decision::kTeachingOnly );
+    CHECK( d.reasonCode == policy_reason::kStudentRole );
+  }
+
+  // Outside the lab the gate is inert (harness intentDomain discipline);
+  // autonomy remains the governing conjunct.
   RepairPolicyContext student = ctx;
   student.role = "";
   CHECK( evaluateRepairPolicy( auto_ok, student ).decision ==
-         policy_decision::kTeachingOnly );
+         policy_decision::kAutoExecutable );
+}
+
+TEST_CASE( "documented refusals are never auto-executable", "[repair][policy]" )
+{
+  RepairPolicyContext ctx;
+  ctx.role = "teacher";
+  ctx.domain = "lab";
+  ctx.allowAutonomousExec = true;
+
+  RepairAction refused = [] {
+    RepairAction a;
+    a.id = "ra-ref";
+    a.kind = action_kind::kCapabilityRef;
+    a.operatorId = "rs:align";
+    a.actionKey = "align_to_reference";
+    a.riskClass = repair_risk::kShapePreserving;
+    a.risk.riskClass = a.riskClass;
+    a.risk.severity = "low";
+    a.cost.rank = 3;
+    a.factsSufficient = true; // even with sufficient facts...
+    return a;
+  }();
+  refused.refusalCause = "cost_unknown"; // ...the refusal decides
+
+  const RepairPolicyDecision d = evaluateRepairPolicy( refused, ctx );
+  CHECK( d.decision == policy_decision::kNeedsConfirmation );
+  CHECK( d.reasonCode == policy_reason::kRefusalNotExecutable );
 }
 
 TEST_CASE( "science-changing candidates never become auto-executable, even when approved",
@@ -923,4 +1009,290 @@ TEST_CASE( "state accepts real plan/result pairs end to end (integration)",
   CHECK( state.verifyPlan( repairPlanToJson( out.plan ) ) ==
          RepairPlanningState::Verify::Match );
   CHECK( state.resultDigestMatches( out.result ) );
+}
+
+// ---------------------------------------------------------------------------
+// Review-follow-up regressions (adversarial review round 1)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "hostile JSON types surface typed errors, never exceptions",
+           "[repair][hostile]" )
+{
+  RepairError error;
+  Json::Value sink;
+
+  // Envelope readers: kind / schema_version of the wrong JSON type.
+  Json::Value plan;
+  plan["kind"] = Json::Value( Json::objectValue );
+  CHECK( !teachingRepairView( plan, sink, error ) );
+  CHECK( error.code == "invalid_document" );
+  Json::Value versioned;
+  versioned["kind"] = "repair_plan";
+  versioned["schema_version"] = Json::Value( Json::arrayValue );
+  CHECK( !agentRepairView( versioned, sink, error ) );
+  CHECK( error.code == "invalid_document" );
+
+  // The pre-existing envelope reader hardens the same way: a wrong-typed
+  // version is typed invalid, and a wrong-typed scalar degrades to the
+  // neutral value (slice A's lenient reader) instead of throwing.
+  Json::Value versionedDoc;
+  versionedDoc["kind"] = "repair_plan";
+  versionedDoc["schema_version"] = Json::Value( Json::objectValue );
+  RepairPlan parsed;
+  CHECK( !readRepairPlan( versionedDoc, parsed, error ) );
+  CHECK( error.code == "invalid_document" );
+
+  Json::Value schemaDoc;
+  schemaDoc["kind"] = "repair_plan";
+  schemaDoc["schema_version"] = "1.0";
+  schemaDoc["plan_id"] = Json::Value( Json::objectValue );
+  RepairPlan degraded;
+  CHECK( readRepairPlan( schemaDoc, degraded, error ) );
+  CHECK( degraded.planId.empty() );
+
+  // State reload: wrong types in the envelope, in records, in counters.
+  Json::Value state;
+  state["kind"] = Json::Value( Json::objectValue );
+  RepairPlanningState ignored;
+  CHECK( !RepairPlanningState::fromJson( state, ignored, error ) );
+  CHECK( error.code == "invalid_document" );
+
+  Json::Value state2;
+  state2["kind"] = "repair_planning_state";
+  state2["schema_version"] = "1.0";
+  state2["records"] = Json::Value( Json::arrayValue );
+  Json::Value badRecord;
+  badRecord["subject"] = Json::Value( Json::objectValue );
+  badRecord["findings_digest"] = "aaaaaaaaaaaaaaaa";
+  badRecord["plan_id"] = "srp-x";
+  badRecord["plan_fingerprint"] = "aaaaaaaaaaaaaaaa";
+  badRecord["status"] = "planned";
+  badRecord["sequence"] = 1;
+  state2["records"].append( badRecord );
+  state2["evicted"] = 0;
+  state2["state_digest"] = "aaaaaaaaaaaaaaaa";
+  CHECK( !RepairPlanningState::fromJson( state2, ignored, error ) );
+  CHECK( error.code == "invalid_document" );
+
+  Json::Value state3 = state2;
+  state3["records"][0]["subject"] = "asset-1";
+  state3["evicted"] = "none";
+  CHECK( !RepairPlanningState::fromJson( state3, ignored, error ) );
+  CHECK( error.code == "invalid_document" );
+
+  Json::Value state4 = state2;
+  state4["records"][0]["subject"] = "asset-1";
+  state4["evicted"] = 0;
+  state4["schema_version"] = "9.9";
+  CHECK( !RepairPlanningState::fromJson( state4, ignored, error ) );
+  CHECK( error.code == "unsupported_version" );
+
+  // verifyPlan and resultDigestMatches tolerate hostile documents.
+  RepairPlanningState emptyState;
+  Json::Value hostilePlan;
+  hostilePlan["kind"] = "repair_plan";
+  hostilePlan["schema_version"] = "1.0";
+  hostilePlan["plan_id"] = Json::Value( Json::objectValue );
+  CHECK( emptyState.verifyPlan( hostilePlan ) == RepairPlanningState::Verify::Unknown );
+  Json::Value hostileResult;
+  hostileResult["kind"] = Json::Value( Json::arrayValue );
+  CHECK( !emptyState.resultDigestMatches( hostileResult ) );
+
+  // Fragments over a hostile requirement_id member do not crash: the
+  // requirement array is pass-through, so a non-string id must be skipped,
+  // and an unknown id stays a typed error.
+  RepairPlan validPlan;
+  validPlan.intent = "i";
+  validPlan.subject = "s";
+  validPlan.status = plan_status::kPlanned;
+  Json::Value hostileRequirement;
+  hostileRequirement["requirement_id"] = Json::Value( Json::objectValue );
+  validPlan.requirements.append( hostileRequirement );
+  assignRepairPlanIdentity( validPlan );
+  Json::Value fragment;
+  CHECK( !repairPlanFragment( validPlan, "req-1", fragment, error ) );
+  CHECK( error.code == "invalid_input" );
+}
+
+TEST_CASE( "finding evidence carrying executable shapes cannot leak through "
+           "the teaching view", "[repair][view][leak]" )
+{
+  Json::Value finding = findingOf( "GRID_MISMATCH" );
+  finding["evidence"]["suggested_action"] = [] {
+    Json::Value a( Json::objectValue );
+    a["action"] = "reproject_to_reference";
+    a["arguments"]["reference"] = "TOPSECRET-REF.TIFF";
+    return a;
+  }();
+  finding["evidence"]["tool"] = "TOPSECRET-TOOL";
+
+  FakeProvider provider = standardProvider();
+  RepairPolicyContext ctx;
+  ctx.role = "student";
+  RepairPlannerOutcome out;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( { finding }, provider, ctx, RepairPlannerOptions{},
+                                    out, error ) );
+
+  Json::Value teaching;
+  REQUIRE( teachingRepairView( repairPlanToJson( out.plan ), teaching, error ) );
+  const std::string bytes = jsonToString( teaching );
+  CHECK( bytes.find( "TOPSECRET" ) == std::string::npos );
+  CHECK( !containsKeyRecursive( teaching, "suggested_action" ) );
+  CHECK( !containsKeyRecursive( teaching, "arguments" ) );
+  CHECK( !containsKeyRecursive( teaching, "tool" ) );
+  CHECK( !containsKeyRecursive( teaching, "action" ) );
+
+  // The agent view keeps the evidence (it is the auditable full contract).
+  Json::Value agent;
+  REQUIRE( agentRepairView( repairPlanToJson( out.plan ), agent, error ) );
+  CHECK( jsonToString( agent ).find( "TOPSECRET-REF.TIFF" ) != std::string::npos );
+}
+
+TEST_CASE( "planner caps are fail-closed in one polarity", "[repair][planner]" )
+{
+  FakeProvider provider = standardProvider();
+  RepairPolicyContext ctx;
+  RepairPlannerOutcome out;
+  RepairError error;
+
+  RepairPlannerOptions zeroReq;
+  zeroReq.maxRequirements = 0;
+  CHECK( !planRepairsForFindings( standardFindings(), provider, ctx, zeroReq, out,
+                                  error ) );
+  CHECK( error.code == "invalid_input" );
+
+  RepairPlannerOptions zeroPer;
+  zeroPer.maxCandidatesPerRequirement = 0;
+  CHECK( !planRepairsForFindings( standardFindings(), provider, ctx, zeroPer, out,
+                                  error ) );
+  CHECK( error.code == "invalid_input" );
+
+  RepairPlannerOptions zeroTotal;
+  zeroTotal.maxTotalCandidates = 0;
+  CHECK( !planRepairsForFindings( standardFindings(), provider, ctx, zeroTotal, out,
+                                  error ) );
+  CHECK( error.code == "invalid_input" );
+
+  RepairPlannerOptions negative;
+  negative.maxTotalCandidates = -1;
+  CHECK( !planRepairsForFindings( standardFindings(), provider, ctx, negative, out,
+                                  error ) );
+  CHECK( error.code == "invalid_input" );
+}
+
+TEST_CASE( "requirement truncation can never claim full blocker resolution",
+           "[repair][planner]" )
+{
+  FakeProvider provider = standardProvider();
+  RepairPolicyContext ctx;
+  ctx.role = "agent";
+
+  RepairPlannerOptions options;
+  options.maxRequirements = 1; // both findings are error-severity blockers
+
+  RepairPlannerOutcome out;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( standardFindings(), provider, ctx, options, out,
+                                   error ) );
+  CHECK( out.plan.status == plan_status::kPlanned );
+  CHECK( out.plan.resolvesAllBlockers == false );
+  bool hasBudgetUnresolved = false;
+  for ( const Json::Value &entry : out.plan.unresolved )
+  {
+    if ( entry["cause"].asString() == unresolved_cause::kBudgetExhausted )
+      hasBudgetUnresolved = true;
+  }
+  CHECK( hasBudgetUnresolved );
+}
+
+TEST_CASE( "a per-requirement cap cut is not reported as budget exhaustion",
+           "[repair][planner]" )
+{
+  FakeProvider provider;
+  // Four candidates for grid_align, all refused on cost — plus a cap of 2.
+  for ( const char *id : { "rs:a", "rs:b", "rs:c", "rs:d" } )
+  {
+    Json::Value noCost = gridCapability( id, "" );
+    noCost["resource"].removeMember( "cost_class" );
+    provider.add( "grid_align", noCost );
+  }
+
+  RepairPolicyContext ctx;
+  ctx.role = "agent";
+  RepairPlannerOptions options;
+  options.maxCandidatesPerRequirement = 2; // cap cuts, no whole-plan starvation
+
+  RepairPlannerOutcome out;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( { findingOf( "GRID_MISMATCH" ) }, provider, ctx,
+                                    options, out, error ) );
+  REQUIRE( out.plan.unresolved.size() == 1 );
+  CHECK( out.plan.unresolved[0]["cause"].asString() ==
+         unresolved_cause::kAllCandidatesRefused );
+  CHECK( out.plan.bounds["truncated_candidates"].asInt() == 2 );
+}
+
+TEST_CASE( "quality-mask candidates join radiometric requirements as "
+           "science-changing alternatives", "[repair][planner]" )
+{
+  FakeProvider provider;
+  provider.add( "radiometric_state", gridCapability( "rs:radiometric_calibration", "medium" ) );
+  provider.add( "quality_mask", gridCapability( "rs:qa_mask", "medium" ) );
+
+  RepairPolicyContext ctx;
+  ctx.role = "agent";
+
+  RepairPlannerOutcome out;
+  RepairError error;
+  REQUIRE( planRepairsForFindings( { findingOf( "INVALID_RADIOMETRY" ) }, provider, ctx,
+                                    RepairPlannerOptions{}, out, error ) );
+  REQUIRE( out.plan.selected.size() == 1 );
+  CHECK( out.plan.selected[0].operatorId == "rs:radiometric_calibration" );
+  CHECK( out.plan.selected[0].riskClass == repair_risk::kRadiometric );
+
+  REQUIRE( out.plan.alternatives.size() == 1 );
+  CHECK( out.plan.alternatives[0]["operator_id"].asString() == "rs:qa_mask" );
+  CHECK( out.plan.alternatives[0]["risk_class"].asString() ==
+         repair_risk::kScienceChanging );
+  CHECK( out.plan.alternatives[0]["requirement_id"].asString() == "req-1" );
+}
+
+TEST_CASE( "planning state reload rejects wrong versions and over-capacity history",
+           "[repair][state]" )
+{
+  RepairPlanningState state;
+  RepairError error;
+  RepairPlanningRecord record;
+  record.subject = "asset-1";
+  record.findingsDigest = "aaaaaaaaaaaaaaaa";
+  record.planId = "srp-1111222233334444";
+  record.planFingerprint = "1111222233334444";
+  record.status = plan_status::kPlanned;
+  record.sequence = 1;
+  REQUIRE( state.record( record, error ) );
+
+  Json::Value doc = state.toJson();
+
+  Json::Value wrongVersion = doc;
+  wrongVersion["schema_version"] = "9.9";
+  RepairPlanningState sink;
+  CHECK( !RepairPlanningState::fromJson( wrongVersion, sink, error ) );
+  CHECK( error.code == "unsupported_version" );
+
+  Json::Value overCapacity = doc;
+  overCapacity["records"] = Json::Value( Json::arrayValue );
+  for ( int i = 0; i < 9; ++i )
+  {
+    Json::Value r;
+    r["subject"] = "asset-" + std::to_string( i );
+    r["findings_digest"] = "aaaaaaaaaaaaaaaa";
+    r["plan_id"] = "srp-1111222233334444";
+    r["plan_fingerprint"] = "1111222233334444";
+    r["status"] = "planned";
+    r["sequence"] = i;
+    overCapacity["records"].append( r );
+  }
+  CHECK( !RepairPlanningState::fromJson( overCapacity, sink, error ) );
+  CHECK( error.code == "invalid_document" );
 }

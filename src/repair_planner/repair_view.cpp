@@ -5,10 +5,17 @@ namespace sicnu::repair {
 
 namespace {
 
-/// The closed executable-key vocabulary: a candidate's runnable surface.
-/// Everything else (risk, cost, before/after semantics, assumptions,
-/// information loss, refusal causes) stays visible in every view.
-const char *const kExecutableKeys[] = { "params", "operator_id", "action_key" };
+/// The closed executable-key vocabulary: everything that names or parameterizes
+/// a runnable surface. This covers the planner's own candidate fields AND the
+/// harness's executable wire shape ({action, arguments, tool,
+/// workbench_command}, suggestedAction/preparations), which producers may
+/// embed in pass-through payloads such as finding evidence. Everything else
+/// (risk, cost, before/after semantics, assumptions, information loss,
+/// refusal causes) stays visible.
+const char *const kExecutableKeys[] = {
+    "params",           "operator_id",   "action_key", "arguments",
+    "suggested_action", "action",        "tool",       "workbench_command",
+};
 
 Json::Value stripExecutableKeys( const Json::Value &node )
 {
@@ -48,13 +55,18 @@ bool isRepairPlanEnvelope( const Json::Value &doc, RepairError &error )
         error = RepairError{ "invalid_document", "repair plan must be a JSON object" };
         return false;
     }
-    if ( doc.get( "kind", "" ).asString() != kKind )
+    if ( !doc["kind"].isString() || doc["kind"].asString() != kKind )
     {
         error = RepairError{ "invalid_document",
                              std::string( "envelope kind must be '" ) + kKind + "'" };
         return false;
     }
-    if ( doc.get( "schema_version", "" ).asString() != kSchemaVersion )
+    if ( !doc["schema_version"].isString() )
+    {
+        error = RepairError{ "invalid_document", "schema_version must be a string" };
+        return false;
+    }
+    if ( doc["schema_version"].asString() != kSchemaVersion )
     {
         error = RepairError{ "unsupported_version",
                              "unsupported repair_plan schema version" };

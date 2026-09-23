@@ -47,6 +47,42 @@ Json::StreamWriterBuilder compactBuilder()
     return builder;
 }
 
+/// Hostile-shape discipline: a reader must answer typed errors, never throw.
+/// Scalar accessors return the type's neutral value when the document carries
+/// a different JSON type, so callers that require presence validate the
+/// result instead of catching exceptions.
+std::string stringMemberOr( const Json::Value &doc, const char *key )
+{
+    const Json::Value &value = doc[key];
+    return value.isString() ? value.asString() : std::string();
+}
+
+int intMemberOr( const Json::Value &doc, const char *key, int fallback )
+{
+    const Json::Value &value = doc[key];
+    return value.isInt() ? value.asInt() : fallback;
+}
+
+bool boolMemberOr( const Json::Value &doc, const char *key, bool fallback )
+{
+    const Json::Value &value = doc[key];
+    return value.isBool() ? value.asBool() : fallback;
+}
+
+const Json::Value &objectMemberOrEmpty( const Json::Value &doc, const char *key )
+{
+    static const Json::Value kEmpty( Json::objectValue );
+    const Json::Value &value = doc[key];
+    return value.isObject() ? value : kEmpty;
+}
+
+const Json::Value &arrayMemberOrEmpty( const Json::Value &doc, const char *key )
+{
+    static const Json::Value kEmpty( Json::arrayValue );
+    const Json::Value &value = doc[key];
+    return value.isArray() ? value : kEmpty;
+}
+
 std::vector<std::string> stringArrayFromJson( const Json::Value &doc, const char *key )
 {
     std::vector<std::string> out;
@@ -142,31 +178,32 @@ bool repairActionFromJson( const Json::Value &doc, RepairAction &action, RepairE
         return false;
     }
     action = RepairAction{};
-    action.id = doc.get( "id", "" ).asString();
-    action.ruleId = doc.get( "rule_id", "" ).asString();
-    action.kind = doc.get( "kind", "" ).asString();
-    action.operatorId = doc.get( "operator_id", "" ).asString();
-    action.actionKey = doc.get( "action_key", "" ).asString();
-    action.params = doc.get( "params", Json::Value( Json::objectValue ) );
-    action.riskClass = doc.get( "risk_class", "" ).asString();
-    action.beforeState = doc.get( "before_state", Json::Value( Json::objectValue ) );
-    action.afterState = doc.get( "after_state", Json::Value( Json::objectValue ) );
+    action.id = stringMemberOr( doc, "id" );
+    action.ruleId = stringMemberOr( doc, "rule_id" );
+    action.kind = stringMemberOr( doc, "kind" );
+    action.operatorId = stringMemberOr( doc, "operator_id" );
+    action.actionKey = stringMemberOr( doc, "action_key" );
+    action.params = objectMemberOrEmpty( doc, "params" );
+    action.riskClass = stringMemberOr( doc, "risk_class" );
+    action.beforeState = objectMemberOrEmpty( doc, "before_state" );
+    action.afterState = objectMemberOrEmpty( doc, "after_state" );
     action.informationLoss = stringArrayFromJson( doc, "information_loss" );
     action.assumptions = stringArrayFromJson( doc, "assumptions" );
     const Json::Value &cost = doc["cost"];
-    action.cost.rank = cost.isObject() ? cost.get( "rank", 0 ).asInt() : 0;
-    action.cost.costClass = cost.isObject() ? cost.get( "cost_class", "" ).asString() : "";
-    action.cost.notes = cost.isObject() ? cost.get( "notes", "" ).asString() : "";
+    action.cost.rank = cost.isObject() ? intMemberOr( cost, "rank", 0 ) : 0;
+    action.cost.costClass = cost.isObject() ? stringMemberOr( cost, "cost_class" ) : "";
+    action.cost.notes = cost.isObject() ? stringMemberOr( cost, "notes" ) : "";
     const Json::Value &risk = doc["risk"];
-    action.risk.riskClass = risk.isObject() ? risk.get( "risk_class", "" ).asString() : "";
-    action.risk.severity = risk.isObject() ? risk.get( "severity", "" ).asString() : "";
-    action.risk.irreversible = risk.isObject() ? risk.get( "irreversible", false ).asBool() : false;
-    action.risk.notes = risk.isObject() ? risk.get( "notes", "" ).asString() : "";
-    action.factsSufficient = doc.get( "facts_sufficient", true ).asBool();
-    action.refusalCause = doc.get( "refusal_cause", "" ).asString();
-    action.sourceFinding = doc.get( "source_finding", Json::Value( Json::objectValue ) );
-    action.factsUsed = doc.get( "facts_used", Json::Value( Json::objectValue ) );
-    action.missingFacts = doc.get( "missing_facts", Json::Value( Json::arrayValue ) );
+    action.risk.riskClass = risk.isObject() ? stringMemberOr( risk, "risk_class" ) : "";
+    action.risk.severity = risk.isObject() ? stringMemberOr( risk, "severity" ) : "";
+    action.risk.irreversible =
+        risk.isObject() ? boolMemberOr( risk, "irreversible", false ) : false;
+    action.risk.notes = risk.isObject() ? stringMemberOr( risk, "notes" ) : "";
+    action.factsSufficient = boolMemberOr( doc, "facts_sufficient", true );
+    action.refusalCause = stringMemberOr( doc, "refusal_cause" );
+    action.sourceFinding = objectMemberOrEmpty( doc, "source_finding" );
+    action.factsUsed = objectMemberOrEmpty( doc, "facts_used" );
+    action.missingFacts = arrayMemberOrEmpty( doc, "missing_facts" );
     return validateRepairAction( action, error );
 }
 
@@ -320,14 +357,19 @@ bool readRepairPlan( const Json::Value &doc, RepairPlan &plan, RepairError &erro
         error = RepairError{ "invalid_document", "repair plan must be a JSON object" };
         return false;
     }
-    const std::string kind = doc.get( "kind", "" ).asString();
+    const std::string kind = stringMemberOr( doc, "kind" );
     if ( kind != kKind )
     {
         error = RepairError{ "invalid_document",
                              std::string( "envelope kind must be '" ) + kKind + "'" };
         return false;
     }
-    const std::string version = doc.get( "schema_version", "" ).asString();
+    if ( doc.isMember( "schema_version" ) && !doc["schema_version"].isString() )
+    {
+        error = RepairError{ "invalid_document", "schema_version must be a string" };
+        return false;
+    }
+    const std::string version = stringMemberOr( doc, "schema_version" );
     if ( version != kSchemaVersion )
     {
         error = RepairError{ "unsupported_version",
@@ -335,14 +377,13 @@ bool readRepairPlan( const Json::Value &doc, RepairPlan &plan, RepairError &erro
         return false;
     }
     plan = RepairPlan{};
-    plan.planId = doc.get( "plan_id", "" ).asString();
-    plan.intent = doc.get( "intent", "" ).asString();
-    plan.subject = doc.get( "subject", "" ).asString();
-    plan.status = doc.get( "status", "" ).asString();
-    plan.resolvesAllBlockers = doc.get( "resolves_all_blockers", false ).asBool();
+    plan.planId = stringMemberOr( doc, "plan_id" );
+    plan.intent = stringMemberOr( doc, "intent" );
+    plan.subject = stringMemberOr( doc, "subject" );
+    plan.status = stringMemberOr( doc, "status" );
+    plan.resolvesAllBlockers = boolMemberOr( doc, "resolves_all_blockers", false );
 
-    const Json::Value &selected = doc["selected"];
-    if ( selected.isArray() )
+    const Json::Value &selected = arrayMemberOrEmpty( doc, "selected" );
     {
         for ( const Json::Value &entry : selected )
         {
@@ -352,17 +393,16 @@ bool readRepairPlan( const Json::Value &doc, RepairPlan &plan, RepairError &erro
             plan.selected.push_back( action );
         }
     }
-    const Json::Value &unresolved = doc["unresolved"];
-    if ( unresolved.isArray() )
+    const Json::Value &unresolved = arrayMemberOrEmpty( doc, "unresolved" );
     {
         for ( const Json::Value &entry : unresolved )
             plan.unresolved.push_back( entry );
     }
-    plan.requirements = doc.get( "requirements", Json::Value( Json::arrayValue ) );
-    plan.alternatives = doc.get( "alternatives", Json::Value( Json::arrayValue ) );
-    plan.policy = doc.get( "policy", Json::Value( Json::objectValue ) );
-    plan.bounds = doc.get( "bounds", Json::Value( Json::objectValue ) );
-    plan.provenance = doc.get( "provenance", Json::Value( Json::objectValue ) );
+    plan.requirements = arrayMemberOrEmpty( doc, "requirements" );
+    plan.alternatives = arrayMemberOrEmpty( doc, "alternatives" );
+    plan.policy = objectMemberOrEmpty( doc, "policy" );
+    plan.bounds = objectMemberOrEmpty( doc, "bounds" );
+    plan.provenance = objectMemberOrEmpty( doc, "provenance" );
     if ( doc.isMember( "no_safe_repair" ) && doc["no_safe_repair"].isObject() )
         plan.noSafeRepair = doc["no_safe_repair"];
     return true;

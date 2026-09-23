@@ -40,10 +40,23 @@ std::string stateDigest( const std::vector<RepairPlanningRecord> &records,
     return hex;
 }
 
+bool isHex16( const std::string &text )
+{
+    if ( text.size() != 16 )
+        return false;
+    for ( char c : text )
+    {
+        const bool hex = ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' );
+        if ( !hex )
+            return false;
+    }
+    return true;
+}
+
 bool validRecord( const RepairPlanningRecord &record )
 {
-    return !record.subject.empty() && record.findingsDigest.size() == 16 &&
-           !record.planId.empty() && record.planFingerprint.size() == 16 &&
+    return !record.subject.empty() && isHex16( record.findingsDigest ) &&
+           !record.planId.empty() && isHex16( record.planFingerprint ) &&
            isKnownPlanStatus( record.status );
 }
 
@@ -78,10 +91,11 @@ bool RepairPlanningState::record( const RepairPlanningRecord &record, RepairErro
         if ( existing.subject == record.subject &&
              existing.findingsDigest == record.findingsDigest )
         {
-            if ( existing.planFingerprint == record.planFingerprint )
+            if ( existing.planFingerprint == record.planFingerprint &&
+                 existing.planId == record.planId )
                 return true; // idempotent replay of the same planning outcome
             error = RepairError{ "invalid_state",
-                                 "conflicting plan fingerprint for the same "
+                                 "conflicting plan identity for the same "
                                  "(subject, findings digest)" };
             return false;
         }
@@ -125,10 +139,14 @@ RepairPlanningState::Verify RepairPlanningState::verifyPlan( const Json::Value &
 
 bool RepairPlanningState::resultDigestMatches( const Json::Value &resultDoc ) const
 {
-    if ( !resultDoc.isObject() || resultDoc.get( "kind", "" ).asString() != "repair_result" )
+    if ( !resultDoc.isObject() || !resultDoc["kind"].isString() ||
+         resultDoc["kind"].asString() != "repair_result" )
         return false;
-    const std::string planId = resultDoc.get( "plan_id", "" ).asString();
-    const std::string digest = resultDoc.get( "findings_digest", "" ).asString();
+    const std::string planId =
+        resultDoc["plan_id"].isString() ? resultDoc["plan_id"].asString() : std::string();
+    const std::string digest = resultDoc["findings_digest"].isString()
+                                   ? resultDoc["findings_digest"].asString()
+                                   : std::string();
     if ( planId.empty() || digest.empty() )
         return false;
     for ( const RepairPlanningRecord &record : mRecords )
@@ -170,9 +188,17 @@ bool RepairPlanningState::fromJson( const Json::Value &doc, RepairPlanningState 
                                     RepairError &error )
 {
     out = RepairPlanningState{};
-    if ( !doc.isObject() || doc.get( "kind", "" ).asString() != "repair_planning_state" )
+    if ( !doc.isObject() || !doc["kind"].isString() ||
+         doc["kind"].asString() != "repair_planning_state" )
     {
         error = RepairError{ "invalid_document", "not a repair_planning_state document" };
+        return false;
+    }
+    if ( !doc["schema_version"].isString() ||
+         doc["schema_version"].asString() != "1.0" )
+    {
+        error = RepairError{ "unsupported_version",
+                             "unsupported repair_planning_state schema version" };
         return false;
     }
     const Json::Value &records = doc["records"];
@@ -185,18 +211,22 @@ bool RepairPlanningState::fromJson( const Json::Value &doc, RepairPlanningState 
     std::set<std::pair<std::string, std::string>> seen;
     for ( const Json::Value &entry : records )
     {
-        if ( !entry.isObject() )
+        if ( !entry.isObject() || !entry["subject"].isString() ||
+             !entry["findings_digest"].isString() || !entry["plan_id"].isString() ||
+             !entry["plan_fingerprint"].isString() || !entry["status"].isString() ||
+             !entry["sequence"].isInt64() )
         {
-            error = RepairError{ "invalid_document", "record must be an object" };
+            error = RepairError{ "invalid_document",
+                                 "record fields have unexpected JSON types" };
             return false;
         }
         RepairPlanningRecord record;
-        record.subject = entry.get( "subject", "" ).asString();
-        record.findingsDigest = entry.get( "findings_digest", "" ).asString();
-        record.planId = entry.get( "plan_id", "" ).asString();
-        record.planFingerprint = entry.get( "plan_fingerprint", "" ).asString();
-        record.status = entry.get( "status", "" ).asString();
-        record.sequence = entry.get( "sequence", 0 ).asInt64();
+        record.subject = entry["subject"].asString();
+        record.findingsDigest = entry["findings_digest"].asString();
+        record.planId = entry["plan_id"].asString();
+        record.planFingerprint = entry["plan_fingerprint"].asString();
+        record.status = entry["status"].asString();
+        record.sequence = entry["sequence"].asInt64();
         if ( !validRecord( record ) )
         {
             error = RepairError{ "invalid_document", "record failed validation" };
@@ -211,13 +241,25 @@ bool RepairPlanningState::fromJson( const Json::Value &doc, RepairPlanningState 
         }
         parsed.push_back( record );
     }
-    const long long evicted = doc.get( "evicted", 0 ).asInt64();
+    if ( !doc["evicted"].isInt64() || !doc["state_digest"].isString() )
+    {
+        error = RepairError{ "invalid_document",
+                             "state counters have unexpected JSON types" };
+        return false;
+    }
+    const long long evicted = doc["evicted"].asInt64();
     if ( evicted < 0 )
     {
         error = RepairError{ "invalid_document", "negative eviction count" };
         return false;
     }
-    const std::string expectedDigest = doc.get( "state_digest", "" ).asString();
+    if ( parsed.size() > kCapacity )
+    {
+        error = RepairError{ "invalid_document",
+                             "record count exceeds the state capacity" };
+        return false;
+    }
+    const std::string expectedDigest = doc["state_digest"].asString();
     if ( expectedDigest != stateDigest( parsed, evicted ) )
     {
         error = RepairError{ "tampered_state",

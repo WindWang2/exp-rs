@@ -21,18 +21,15 @@ const std::set<std::string> &preparationActions()
     return kSet;
 }
 
-/// The planner's closed role vocabulary. "teacher"/"admin"/"instructor" are
-/// the lab teaching roles that escape the student gate (harness
-/// normalizeLabRole discipline); "researcher" and "agent" are the
-/// research/automation audiences this planner serves. EVERYTHING else —
-/// including "" — degrades to "student", the safe default: an unrecognized
-/// role never sees an auto-executable surface.
+/// The lab teaching constraint, mirrored byte-for-byte from the harness
+/// single truth (normalizeLabRole): ONLY "teacher" and "admin" escape the
+/// student default on the teaching surface. The planner invents no privilege
+/// roles: "instructor", "researcher", "agent" and "" are all students there,
+/// so a session the rest of the lab system treats as a student cannot obtain
+/// an auto-executable surface by declaring a different word.
 bool isStudentRole( const std::string &role )
 {
-    static const std::set<std::string> kNonStudent = {
-        "teacher", "admin", "instructor", "researcher", "agent",
-    };
-    return kNonStudent.count( role ) == 0;
+    return role != "teacher" && role != "admin";
 }
 
 } // namespace
@@ -52,9 +49,16 @@ bool isPreparationActionKey( const std::string &actionKey )
 RepairPolicyDecision evaluateRepairPolicy( const RepairAction &action,
                                            const RepairPolicyContext &context )
 {
-    // Teaching gate first: a student never sees an auto-executable surface,
-    // regardless of every other conjunct.
-    if ( isStudentRole( context.role ) )
+    // A documented refusal is never executable — the schema's own invariant,
+    // enforced here as the last line of defense (a refusal may still carry
+    // sufficient facts; the refusal cause, not the facts, decides).
+    if ( !action.refusalCause.empty() )
+        return { policy_decision::kNeedsConfirmation,
+                 policy_reason::kRefusalNotExecutable };
+
+    // Teaching gate, active on the lab surface only: a student never sees an
+    // auto-executable surface there, regardless of every other conjunct.
+    if ( context.domain == "lab" && isStudentRole( context.role ) )
         return { policy_decision::kTeachingOnly, policy_reason::kStudentRole };
 
     // Risk class is the hard ceiling: radiometric and science-changing

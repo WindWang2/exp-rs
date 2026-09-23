@@ -46,12 +46,21 @@ inline constexpr const char *kDecisionNotExecutable = "decision_not_executable";
 inline constexpr const char *kActionKeyNotPreparation = "action_key_not_preparation";
 inline constexpr const char *kFactsInsufficient = "facts_insufficient";
 inline constexpr const char *kAutonomyNotAllowed = "autonomy_not_allowed";
+inline constexpr const char *kRefusalNotExecutable = "refusal_not_executable";
 } // namespace policy_reason
 
 struct RepairPolicyContext
 {
-    /// Session role; "" and anything unrecognized degrade to "student" (the
-    /// safe default, mirroring harness normalizeLabRole).
+    /// Which surface the plan is being resolved for. "lab" activates the
+    /// teaching gate (mirror of the harness TeachingContext intentDomain
+    /// discipline); anything else — including "" — leaves it inert, exactly
+    /// as research flows resolve in the harness.
+    std::string domain;
+    /// Session role. ON THE TEACHING SURFACE ("lab") only "teacher" and
+    /// "admin" escape the student gate — byte-identical to the harness
+    /// normalizeLabRole table; every other word, including "" and words the
+    /// harness does not know, is a student there. Outside the lab the gate
+    /// is inert; autonomy remains the governing conjunct.
     std::string role;
     /// From the science-context autonomy constraints (L5+).
     bool allowAutonomousExec = false;

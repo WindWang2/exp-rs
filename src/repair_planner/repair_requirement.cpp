@@ -134,8 +134,17 @@ bool synthesizeRequirements( const std::vector<Json::Value> &findings,
             finding.isMember( "subject" ) && finding["subject"].isString()
                 ? finding["subject"].asString()
                 : std::string();
-        if ( finding.isMember( "evidence" ) && finding["evidence"].isObject() )
+        if ( finding.isMember( "evidence" ) )
+        {
+            if ( !finding["evidence"].isObject() )
+            {
+                error = RepairError{ "invalid_input",
+                                     "finding evidence must be a JSON object" };
+                out.clear();
+                return false;
+            }
             requirement.evidence = finding["evidence"];
+        }
 
         requirement.kind = requirementKindForFindingCode( requirement.findingCode );
         if ( requirement.kind.empty() )
@@ -154,7 +163,11 @@ bool synthesizeRequirements( const std::vector<Json::Value> &findings,
             return severityRank( a.severity ) > severityRank( b.severity );
         if ( a.findingCode != b.findingCode )
             return a.findingCode < b.findingCode;
-        return a.subject < b.subject;
+        if ( a.subject != b.subject )
+            return a.subject < b.subject;
+        // Final tie-break keeps the order total for findings equal on
+        // (severity, code, subject) but differing in evidence payloads.
+        return jsonToString( a.evidence ) < jsonToString( b.evidence );
     } );
 
     for ( std::size_t i = 0; i < out.size(); ++i )
