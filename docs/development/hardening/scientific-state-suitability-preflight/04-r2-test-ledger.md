@@ -62,3 +62,13 @@ untouched (oracles extend existing test files only).
 | P2 | `formatDate` buffer[11] truncated the year-10000 rollover to `"10000-01-0…"` (self-unreadable passport fact) | buffer[16] | geo `[r2]` "…survives the year-10000 zone rollover" (`9999-12-31T23:30:00-01:00` → `10000-01-01T00:30:00Z`) |
 | P2 | Equal counts without index alignment still paired a `{2,3}` file axis against a `{1,2}` mirror | Pairing additionally requires aligned 1-based indices; note detail updated | review `[r2]` "equal band counts with misaligned indices…" |
 | P3 | Decimal minutes `05:06.5` were re-weighted as a fraction of seconds | `.` after minutes (no SS) refused — outside the closed subset | geo `[r2]` "decimal minutes are outside the closed subset…" |
+
+## Review round 2 (same reviewer, fresh-eyes on the fixed tree) — READY
+
+All five counterexamples re-probed fixed; pointer bounds, offset magnitude
+(cap 86340 s) and the `sawSeconds` placement re-checked; both oracle files
+green (geo 171/37, review 39/10). Residual P3, recorded not fixed:
+`"0000-01-01T00:30:00+01:00"` crosses into the proleptic year −1 and
+canonicalizes to a `"-001-…"`-form no consumer re-parses — year-0000
+acquisition metadata is not a real input; if it ever becomes one, the
+closed subset should refuse years < 1 explicitly.
