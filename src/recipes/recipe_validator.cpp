@@ -65,6 +65,14 @@ bool isHookKind( const std::string &kind )
          kind == hook_kinds::kExpectedClaim;
 }
 
+/// asString() on an object/array raises Json::LogicError; registry scans feed
+/// hostile documents through this validator, so non-string values degrade to
+/// the empty string here and become typed diagnostics instead of exceptions.
+std::string stringOrEmpty( const Json::Value &node )
+{
+  return node.isString() ? node.asString() : std::string{};
+}
+
 bool isBoundary( const std::string &b )
 {
   return b == boundaries::kUiAction || b == boundaries::kManual ||
@@ -109,7 +117,7 @@ void checkHooks( const Json::Value &stage, const std::string &ctx,
   }
   for ( const auto &hook : stage["verifier_hooks"] )
   {
-    if ( !hook.isObject() || !isHookKind( hook.get( "kind", "" ).asString() ) )
+    if ( !hook.isObject() || !isHookKind( stringOrEmpty( hook[ "kind" ] ) ) )
       err( diags, diag_codes::kBadHookKind,
            ctx + ": " + stageId + " hook with unknown kind", "verifier_hooks",
            stageId );
@@ -129,10 +137,10 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
     return diags;
   }
 
-  const std::string id = recipe.get( "recipe_id", "" ).asString();
+  const std::string id = stringOrEmpty( recipe[ "recipe_id" ] );
   const std::string ctx = id.empty() ? "recipe" : "recipe " + id;
 
-  if ( recipe.get( "schema", "" ).asString() != kRecipeSchemaId )
+  if ( stringOrEmpty( recipe[ "schema" ] ) != kRecipeSchemaId )
     err( diags, diag_codes::kSchemaMismatch,
          ctx + ": schema must be '" + kRecipeSchemaId + "'", "schema" );
   if ( id.empty() || !validRecipeId( id ) )
@@ -179,7 +187,7 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
         err( diags, diag_codes::kMissingField, ctx + ": stage must be an object", "stages" );
         continue;
       }
-      const std::string sid = stage.get( "id", "" ).asString();
+      const std::string sid = stringOrEmpty( stage[ "id" ] );
       const bool sidFresh = !sid.empty() && !seen.count( sid );
       if ( sid.empty() )
         err( diags, diag_codes::kMissingField, ctx + ": stage without id", "stages[].id" );
@@ -187,7 +195,7 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
         err( diags, diag_codes::kDuplicateStageId, ctx + ": duplicate stage id " + sid,
              "stages[].id", sid );
 
-      const std::string kind = stage.get( "kind", "" ).asString();
+      const std::string kind = stringOrEmpty( stage[ "kind" ] );
       if ( !isStageKind( kind ) )
         err( diags, diag_codes::kBadStageKind,
              ctx + ": stage " + sid + " has unknown kind '" + kind + "'", "kind", sid );
@@ -201,12 +209,13 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
           err( diags, diag_codes::kMissingField,
                ctx + ": operator stage " + sid + " missing operator_id", "operator_id", sid );
       }
-      if ( kind == stage_kinds::kHumanOnly || stage.get( "human_only", false ).asBool() )
+      if ( kind == stage_kinds::kHumanOnly ||
+           ( stage[ "human_only" ].isBool() && stage[ "human_only" ].asBool() ) )
       {
-        if ( stage.isMember( "boundary" ) && !isBoundary( stage["boundary"].asString() ) )
+        if ( stage.isMember( "boundary" ) && !isBoundary( stringOrEmpty( stage[ "boundary" ] ) ) )
           err( diags, diag_codes::kBadStageKind,
                ctx + ": stage " + sid + " unknown boundary '" +
-                 stage["boundary"].asString() + "'",
+                 stringOrEmpty( stage[ "boundary" ] ) + "'",
                "boundary", sid );
       }
       if ( kind == stage_kinds::kReflection &&

@@ -111,9 +111,10 @@ RegistryView loadRegistry( const fs::path &registryPath )
     const Json::Value &entry = root["canonical"][canonicalId];
     if ( !entry.isObject() )
       continue;
-    const std::string source = entry.get( "source", "" ).asString();
-    if ( !source.empty() )
-      view.canonicalToSource[canonicalId] = source;
+    const Json::Value &source = entry[ "source" ];
+    // isString guard: asString() on a hostile non-string raises LogicError.
+    if ( source.isString() && !source.asString().empty() )
+      view.canonicalToSource[canonicalId] = source.asString();
     if ( entry["aliases"].isArray() )
       for ( const auto &alias : entry["aliases"] )
         if ( alias.isString() )

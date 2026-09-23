@@ -101,6 +101,52 @@ TEST_CASE( "Missing directory → unavailable status, typed problem", "[registry
   REQUIRE( registry.loadProblems().size() == 1 );
 }
 
+TEST_CASE( "Registry scans never throw on hostile JSON shapes", "[registry][negative]" )
+{
+  // The registry is a directory scanner: every file it reads is untrusted
+  // input, and a non-string schema/recipe_id must degrade to a load problem,
+  // not escape as Json::LogicError through asString().
+  const fs::path dir = fs::temp_directory_path() / "recipes_hostile";
+  fs::remove_all( dir );
+  fs::create_directories( dir );
+
+  // schema as an object
+  { std::ofstream out( dir / "obj_schema.json" ); out << R"({"schema": {"a": 1}})"; }
+  // recipe_id as an array
+  {
+    Json::Value bad = recipeWithId( "lab.arr" );
+    bad["recipe_id"] = Json::Value( Json::arrayValue );
+    writeJson( dir / "arr_id.json", bad );
+  }
+  // stage kind as an object
+  {
+    Json::Value bad = recipeWithId( "lab.kind" );
+    bad["recipe_id"] = "lab.kind";
+    bad["stages"][0]["kind"] = Json::Value( Json::objectValue );
+    writeJson( dir / "obj_kind.json", bad );
+  }
+  // hook kind as an object
+  {
+    Json::Value bad = recipeWithId( "lab.hook" );
+    Json::Value hook( Json::objectValue );
+    hook["kind"] = Json::Value( Json::objectValue );
+    bad["verifier_hooks"] = Json::Value( Json::arrayValue );
+    bad["verifier_hooks"].append( hook );
+    writeJson( dir / "obj_hook.json", bad );
+  }
+
+  ScientificRecipeRegistry registry;
+  registry.setDirectory( dir.string() );
+  REQUIRE( registry.reload() == 0 ); // nothing loads; nothing crashes
+  // With zero accepted recipes the registry reports unavailable (status()
+  // contract) even though the scan itself succeeded and collected problems.
+  REQUIRE( registry.status() == "unavailable" );
+  for ( const auto &problem : registry.loadProblems() )
+    WARN( "problem: " << problem );
+  REQUIRE( registry.loadProblems().size() == 4 );
+  fs::remove_all( dir );
+}
+
 TEST_CASE( "listRecipes pages are bounded and deterministic", "[registry]" )
 {
   const fs::path dir = fs::temp_directory_path() / "recipes_paged";
