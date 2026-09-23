@@ -1242,6 +1242,131 @@ class RunStatusTool final : public SpatialTool
     }
 };
 
+Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc )
+{
+  Json::Value confirmation( Json::objectValue );
+  const Json::Value mapOutput = plan.mapOutput;
+  const std::string layout = mapOutput.get( "layout_name", "" ).asString();
+  confirmation["layout"] = layout;
+
+  // 1. The plan step that produced the map output must have completed.
+  std::string fromStep = mapOutput.get( "from_step", "" ).asString();
+  if ( fromStep.empty() && plan.outputs.isArray() && plan.outputs.size() > 0 )
+    fromStep = plan.outputs[0].get( "from_step", "" ).asString();
+  bool stepCompleted = false;
+  for ( const auto &step : stepsDoc )
+  {
+    if ( step.get( "step_id", "" ).asString() == fromStep &&
+         step.get( "status", "" ).asString() == "Completed" )
+      stepCompleted = true;
+  }
+  if ( !stepCompleted && !fromStep.empty() )
+  {
+    confirmation["verdict"] = "FAIL";
+    confirmation["reason"] = "map-producing step did not complete: " + fromStep;
+    return confirmation;
+  }
+
+  // 2. MapSpec path: compose -> preflight -> bounded repair loop through the
+  // existing cartography tools (registry), then export gating.
+  const std::string verdictFail = verdictToStringWire( Verdict::Fail );
+  if ( mapOutput.isMember( "mapspec" ) )
+  {
+    auto compose = SpatialToolRegistry::instance().find( "cartography:compose" );
+    auto preflight = SpatialToolRegistry::instance().find( "cartography:preflight" );
+    auto repair = SpatialToolRegistry::instance().find( "cartography:repair" );
+    if ( !compose || !preflight )
+    {
+      confirmation["verdict"] = "FAIL";
+      confirmation["reason"] = "cartography tools unavailable";
+      return confirmation;
+    }
+    Json::Value composeInput;
+    composeInput["mapspec"] = mapOutput["mapspec"];
+    if ( !layout.empty() )
+      composeInput["layout_name"] = layout;
+    const SpatialToolResult composed = ( *compose )->execute( composeInput );
+    if ( !composed.success )
+    {
+      confirmation["verdict"] = verdictFail;
+      confirmation["reason"] = composed.error;
+      return confirmation;
+    }
+    if ( composed.output.isMember( "quality" ) )
+      confirmation["compose_quality"] = composed.output["quality"];
+    // Platform 8.0: the confirmation identifies WHAT was composed — the
+    // rendering-free structural digest and the declared template/component
+    // provenance come straight from cartography:compose (no second
+    // digest/provenance implementation here).
+    if ( composed.output.isMember( "structural_digest" ) )
+      confirmation["structural_digest"] = composed.output["structural_digest"];
+    if ( composed.output.isMember( "provenance" ) )
+      confirmation["provenance"] = composed.output["provenance"];
+    if ( composed.output.isMember( "declared_output" ) )
+      confirmation["declared_output"] = composed.output["declared_output"];
+
+    Json::Value preflightInput;
+    preflightInput["mapspec"] = mapOutput["mapspec"];
+    SpatialToolResult checked = ( *preflight )->execute( preflightInput );
+    int repairs = 0;
+    while ( checked.success && checked.output.isObject() &&
+            checked.output.get( "passed", true ).asBool() == false && repairs < 3 && repair )
+    {
+      Json::Value repairInput;
+      repairInput["mapspec"] = mapOutput["mapspec"];
+      repairInput["issues"] = checked.output.get( "issues", Json::Value( Json::arrayValue ) );
+      const SpatialToolResult repaired = ( *repair )->execute( repairInput );
+      if ( !repaired.success )
+        break;
+      checked = ( *preflight )->execute( preflightInput );
+      ++repairs;
+    }
+    confirmation["repair_passes"] = repairs;
+    const bool passed = checked.success && checked.output.isObject() &&
+                        checked.output.get( "passed", false ).asBool();
+    confirmation["verdict"] = passed ? verdictToStringWire( Verdict::Pass ) : verdictFail;
+    if ( checked.output.isObject() && checked.output.isMember( "quality_score" ) )
+      confirmation["quality_score"] = checked.output["quality_score"];
+    return confirmation;
+  }
+
+  // 3. Layout-only path: the referenced layout must exist and export must
+  // have been requested explicitly — presence checks only, no guessing.
+  if ( !layout.empty() )
+  {
+    auto listLayouts = SpatialToolRegistry::instance().find( "layout:list" );
+    bool layoutExists = false;
+    if ( listLayouts )
+    {
+      const SpatialToolResult listed = ( *listLayouts )->execute( Json::Value() );
+      if ( listed.success && listed.output.isObject() )
+      {
+        for ( const auto &entry : listed.output.get( "layouts", Json::Value( Json::arrayValue ) ) )
+        {
+          if ( entry.get( "name", "" ).asString() == layout )
+            layoutExists = true;
+        }
+      }
+    }
+    if ( !layoutExists )
+    {
+      confirmation["verdict"] = verdictFail;
+      confirmation["reason"] = "declared map layout does not exist: " + layout;
+      return confirmation;
+    }
+    confirmation["verdict"] = verdictToStringWire( Verdict::Pass );
+    confirmation["note"] = "layout exists; run cartography:preflight for full map QA";
+    return confirmation;
+  }
+
+  confirmation["verdict"] = verdictToStringWire( Verdict::PassWithWarnings );
+  confirmation["reason"] = "map_output declared without layout/mapspec — nothing to confirm";
+  return confirmation;
+}
+
+} // namespace
+
+
 Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRun> &run,
                                const AgentPlan *plan, bool persistEvidence )
 {
@@ -1578,130 +1703,6 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
   }
   return doc;
 }
-
-Json::Value confirmMapOutput( const AgentPlan &plan, const Json::Value &stepsDoc )
-{
-  Json::Value confirmation( Json::objectValue );
-  const Json::Value mapOutput = plan.mapOutput;
-  const std::string layout = mapOutput.get( "layout_name", "" ).asString();
-  confirmation["layout"] = layout;
-
-  // 1. The plan step that produced the map output must have completed.
-  std::string fromStep = mapOutput.get( "from_step", "" ).asString();
-  if ( fromStep.empty() && plan.outputs.isArray() && plan.outputs.size() > 0 )
-    fromStep = plan.outputs[0].get( "from_step", "" ).asString();
-  bool stepCompleted = false;
-  for ( const auto &step : stepsDoc )
-  {
-    if ( step.get( "step_id", "" ).asString() == fromStep &&
-         step.get( "status", "" ).asString() == "Completed" )
-      stepCompleted = true;
-  }
-  if ( !stepCompleted && !fromStep.empty() )
-  {
-    confirmation["verdict"] = "FAIL";
-    confirmation["reason"] = "map-producing step did not complete: " + fromStep;
-    return confirmation;
-  }
-
-  // 2. MapSpec path: compose -> preflight -> bounded repair loop through the
-  // existing cartography tools (registry), then export gating.
-  const std::string verdictFail = verdictToStringWire( Verdict::Fail );
-  if ( mapOutput.isMember( "mapspec" ) )
-  {
-    auto compose = SpatialToolRegistry::instance().find( "cartography:compose" );
-    auto preflight = SpatialToolRegistry::instance().find( "cartography:preflight" );
-    auto repair = SpatialToolRegistry::instance().find( "cartography:repair" );
-    if ( !compose || !preflight )
-    {
-      confirmation["verdict"] = "FAIL";
-      confirmation["reason"] = "cartography tools unavailable";
-      return confirmation;
-    }
-    Json::Value composeInput;
-    composeInput["mapspec"] = mapOutput["mapspec"];
-    if ( !layout.empty() )
-      composeInput["layout_name"] = layout;
-    const SpatialToolResult composed = ( *compose )->execute( composeInput );
-    if ( !composed.success )
-    {
-      confirmation["verdict"] = verdictFail;
-      confirmation["reason"] = composed.error;
-      return confirmation;
-    }
-    if ( composed.output.isMember( "quality" ) )
-      confirmation["compose_quality"] = composed.output["quality"];
-    // Platform 8.0: the confirmation identifies WHAT was composed — the
-    // rendering-free structural digest and the declared template/component
-    // provenance come straight from cartography:compose (no second
-    // digest/provenance implementation here).
-    if ( composed.output.isMember( "structural_digest" ) )
-      confirmation["structural_digest"] = composed.output["structural_digest"];
-    if ( composed.output.isMember( "provenance" ) )
-      confirmation["provenance"] = composed.output["provenance"];
-    if ( composed.output.isMember( "declared_output" ) )
-      confirmation["declared_output"] = composed.output["declared_output"];
-
-    Json::Value preflightInput;
-    preflightInput["mapspec"] = mapOutput["mapspec"];
-    SpatialToolResult checked = ( *preflight )->execute( preflightInput );
-    int repairs = 0;
-    while ( checked.success && checked.output.isObject() &&
-            checked.output.get( "passed", true ).asBool() == false && repairs < 3 && repair )
-    {
-      Json::Value repairInput;
-      repairInput["mapspec"] = mapOutput["mapspec"];
-      repairInput["issues"] = checked.output.get( "issues", Json::Value( Json::arrayValue ) );
-      const SpatialToolResult repaired = ( *repair )->execute( repairInput );
-      if ( !repaired.success )
-        break;
-      checked = ( *preflight )->execute( preflightInput );
-      ++repairs;
-    }
-    confirmation["repair_passes"] = repairs;
-    const bool passed = checked.success && checked.output.isObject() &&
-                        checked.output.get( "passed", false ).asBool();
-    confirmation["verdict"] = passed ? verdictToStringWire( Verdict::Pass ) : verdictFail;
-    if ( checked.output.isObject() && checked.output.isMember( "quality_score" ) )
-      confirmation["quality_score"] = checked.output["quality_score"];
-    return confirmation;
-  }
-
-  // 3. Layout-only path: the referenced layout must exist and export must
-  // have been requested explicitly — presence checks only, no guessing.
-  if ( !layout.empty() )
-  {
-    auto listLayouts = SpatialToolRegistry::instance().find( "layout:list" );
-    bool layoutExists = false;
-    if ( listLayouts )
-    {
-      const SpatialToolResult listed = ( *listLayouts )->execute( Json::Value() );
-      if ( listed.success && listed.output.isObject() )
-      {
-        for ( const auto &entry : listed.output.get( "layouts", Json::Value( Json::arrayValue ) ) )
-        {
-          if ( entry.get( "name", "" ).asString() == layout )
-            layoutExists = true;
-        }
-      }
-    }
-    if ( !layoutExists )
-    {
-      confirmation["verdict"] = verdictFail;
-      confirmation["reason"] = "declared map layout does not exist: " + layout;
-      return confirmation;
-    }
-    confirmation["verdict"] = verdictToStringWire( Verdict::Pass );
-    confirmation["note"] = "layout exists; run cartography:preflight for full map QA";
-    return confirmation;
-  }
-
-  confirmation["verdict"] = verdictToStringWire( Verdict::PassWithWarnings );
-  confirmation["reason"] = "map_output declared without layout/mapspec — nothing to confirm";
-  return confirmation;
-}
-
-} // namespace
 
 void registerPlanTools()
 {
