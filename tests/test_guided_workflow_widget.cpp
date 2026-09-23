@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -230,4 +231,297 @@ TEST_CASE( "Shipped labs load through the same path the widget uses", "[widget][
     INFO( errorStrings( result ).join( QStringLiteral( "; " ) ).toStdString() );
     REQUIRE( result.ok() );
     REQUIRE( result.labs.size() >= 10 );
+
+    // ADR 0166: the generated canonical LabSpec 2 documents (lab12–lab14,
+    // steps owned by the pipeline) must be loadable by the strict loader —
+    // they used to be refused ("steps must be a non-empty array"), pinning
+    // three typed error entries on top of the widget's workflow list.
+    QSet<QString> ids;
+    for ( const LabSpec &spec : result.labs )
+        ids.insert( spec.id );
+    REQUIRE( ids.contains( QStringLiteral( "lab12_sar_processing" ) ) );
+    REQUIRE( ids.contains( QStringLiteral( "lab13_hyperspectral_analysis" ) ) );
+    REQUIRE( ids.contains( QStringLiteral( "lab14_cartographic_mapping" ) ) );
+}
+
+// ---------------------------------------------------------------------------
+// Widget-level session-boundary oracles (hardening app-workbench-ui-shell).
+//
+// These drive the real GuidedWorkflowWidget offscreen: a lab directory under
+// SICNU_DATA_DIR, rows selected through the real QListWidget, and the
+// private slots invoked by name through the meta-object — the same calls the
+// buttons' clicked() signals dispatch. They pin the cross-experiment
+// boundary: selecting another workflow ends the active session. The stale
+// step cursor used to leak into the newly selected workflow, so Next could
+// declare a never-started workflow complete and Run indexed past its steps.
+//
+// These tests must stay declared AFTER the SICNU_DATA_DIR-free ones above:
+// the override is process-global while a ScopedLabDir lives.
+// ---------------------------------------------------------------------------
+
+#include <QApplication>
+#include <QListWidget>
+
+namespace {
+
+QApplication *ensureWidgetApp()
+{
+    if ( !QApplication::instance() )
+    {
+        static int argc = 1;
+        static char argv0[] = "test_guided_workflow_widget";
+        static char *argv[] = { argv0, nullptr };
+        return new QApplication( argc, argv );
+    }
+    return static_cast<QApplication *>( QApplication::instance() );
+}
+
+/// Points SICNU_DATA_DIR at a temp root holding data/labs for the widget's
+/// constructor-time loadWorkflows(); restores the previous value on scope
+/// exit.
+class ScopedLabDir
+{
+  public:
+    ScopedLabDir()
+        : m_previous( qgetenv( "SICNU_DATA_DIR" ) )
+    {
+        REQUIRE( m_dir.isValid() );
+        qputenv( "SICNU_DATA_DIR", m_dir.path().toUtf8() );
+    }
+    ~ScopedLabDir() { qputenv( "SICNU_DATA_DIR", m_previous ); }
+
+    QDir labsDir() const
+    {
+        const QDir root( m_dir.path() );
+        REQUIRE( QDir().mkpath( root.filePath( QStringLiteral( "data/labs" ) ) ) );
+        return QDir( root.filePath( QStringLiteral( "data/labs" ) ) );
+    }
+
+  private:
+    QTemporaryDir m_dir;
+    QByteArray m_previous;
+};
+
+/// 4-step lab whose step 1 is operator-bound (Run armed after one Next).
+QString boundaryLabA()
+{
+    return QStringLiteral( R"( {
+      "spec_version": 1,
+      "id": "lab91_boundary_a",
+      "title": "Boundary A",
+      "title_zh": "边界A",
+      "objective": "session boundary probe A",
+      "steps": [
+        { "title": "M0", "title_zh": "手动0", "description_zh": "手动步骤。" },
+        { "title": "Op1", "title_zh": "算子1", "description_zh": "算子步骤。",
+          "operator_id": "rs:spectral_index",
+          "params": { "input": "data/samples/landsat_sample.tif", "output": "outputs/ndvi.tif", "index": "NDVI" } },
+        { "title": "M2", "title_zh": "手动2", "description_zh": "手动步骤。" },
+        { "title": "M3", "title_zh": "手动3", "description_zh": "手动步骤。" }
+      ]
+    } )" );
+}
+
+/// N-step all-manual lab with the fixed id lab92_boundary_b.
+QString boundaryLabB( int steps )
+{
+    QString body = QStringLiteral( R"( {
+      "spec_version": 1,
+      "id": "lab92_boundary_b",
+      "title": "Boundary B",
+      "title_zh": "边界B",
+      "objective": "session boundary probe B",
+      "steps": [ )" );
+    for ( int i = 0; i < steps; ++i )
+    {
+        body += QStringLiteral(
+                    R"( { "title": "B%1", "title_zh": "B%1", "description_zh": "短实验。" } )" )
+                    .arg( i );
+        if ( i + 1 < steps )
+            body += QLatin1String( ", " );
+    }
+    body += QLatin1String( " ] }" );
+    return body;
+}
+
+} // namespace
+
+TEST_CASE( "Selecting another workflow ends the active session", "[widget][workflow][boundary]" )
+{
+    ensureWidgetApp();
+    ScopedLabDir labs;
+    const QDir dir = labs.labsDir();
+    writeFile( dir, QStringLiteral( "lab91_boundary_a.lab.json" ), boundaryLabA() );
+    writeFile( dir, QStringLiteral( "lab92_boundary_b.lab.json" ), boundaryLabB( 2 ) );
+
+    GuidedWorkflowWidget widget( nullptr );
+    REQUIRE( widget.loadErrorStrings().isEmpty() );
+    REQUIRE( widget.workflows().size() == 2 );
+
+    auto *list = widget.findChild<QListWidget *>();
+    REQUIRE( list != nullptr );
+
+    int completedCount = 0;
+    QObject::connect( &widget, &GuidedWorkflowWidget::workflowCompleted,
+                      [&completedCount] { ++completedCount; } );
+
+    // Start lab A (row 0) and advance once: active session on step 1.
+    list->setCurrentRow( 0 );
+    QMetaObject::invokeMethod( &widget, "onStartWorkflow" );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    REQUIRE( completedCount == 0 );
+
+    // Select lab B: the session boundary. The stale step cursor must not
+    // carry into B — Next on the never-started B used to satisfy its
+    // completion condition and declare the experiment complete.
+    list->setCurrentRow( 1 );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    REQUIRE( completedCount == 0 );
+}
+
+TEST_CASE( "Run This Step after switching workflows never indexes past the steps", "[widget][workflow][boundary]" )
+{
+    ensureWidgetApp();
+    ScopedLabDir labs;
+    const QDir dir = labs.labsDir();
+    writeFile( dir, QStringLiteral( "lab91_boundary_a.lab.json" ), boundaryLabA() );
+    writeFile( dir, QStringLiteral( "lab92_boundary_b.lab.json" ), boundaryLabB( 1 ) );
+
+    GuidedWorkflowWidget widget( nullptr );
+    REQUIRE( widget.loadErrorStrings().isEmpty() );
+    auto *list = widget.findChild<QListWidget *>();
+    REQUIRE( list != nullptr );
+
+    // Lab A step 1 is operator-bound: the session is active with cursor 1.
+    list->setCurrentRow( 0 );
+    QMetaObject::invokeMethod( &widget, "onStartWorkflow" );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+
+    // Switch to single-step lab B and press Run: the stale cursor must not
+    // index B's steps (used to be a QList out-of-range read — Q_ASSERT abort
+    // in debug builds, undefined behaviour in release).
+    list->setCurrentRow( 1 );
+    QMetaObject::invokeMethod( &widget, "onRunStepAction" );
+    SUCCEED( "Run This Step stayed in bounds after the workflow switch" );
+}
+
+// ---------------------------------------------------------------------------
+// Version-scoped steps contract (ADR 0146 / ADR 0166)
+// ---------------------------------------------------------------------------
+
+QString steplessV2Lab( const QString &id = QStringLiteral( "lab93_stepless_v2" ) )
+{
+    return QStringLiteral( R"( {
+      "spec_version": 2,
+      "id": "%1",
+      "title": "Stepless V2",
+      "title_zh": "无步骤V2",
+      "objective": "Pipeline-owned operator sequence probe."
+    } )" ).arg( id );
+}
+
+TEST_CASE( "The steps requirement is version-scoped", "[widget][workflow][labspec][versioning]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QDir dataDir( dir.filePath( QStringLiteral( "data/labs" ) ) );
+    REQUIRE( QDir().mkpath( dataDir.absolutePath() ) );
+
+    SECTION( "a v2 document without steps loads with an empty step list" )
+    {
+        writeFile( dataDir, QStringLiteral( "lab93_stepless_v2.lab.json" ), steplessV2Lab() );
+        const LabLoadResult result = loadLabSpecsFromDir( dataDir.path() );
+        INFO( errorStrings( result ).join( QStringLiteral( "; " ) ).toStdString() );
+        REQUIRE( result.ok() );
+        REQUIRE( result.labs.size() == 1 );
+        REQUIRE( result.labs.first().stepCount() == 0 );
+    }
+
+    SECTION( "a v2 document with an empty steps array is still refused" )
+    {
+        const QString body = steplessV2Lab() .replace(
+            QStringLiteral( "\"objective\": \"Pipeline-owned operator sequence probe.\"" ),
+            QStringLiteral( "\"objective\": \"Pipeline-owned operator sequence probe.\", \"steps\": []" ) );
+        writeFile( dataDir, QStringLiteral( "lab93_stepless_v2.lab.json" ), body );
+        const LabLoadResult result = loadLabSpecsFromDir( dataDir.path() );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "steps must be a non-empty array" ) ) );
+    }
+
+    SECTION( "a v1 document still requires steps" )
+    {
+        writeFile( dataDir, QStringLiteral( "lab94_stepless_v1.lab.json" ), steplessV2Lab( QStringLiteral( "lab94_stepless_v1" ) )
+                       .replace( QStringLiteral( "\"spec_version\": 2" ), QStringLiteral( "\"spec_version\": 1" ) ) );
+        const LabLoadResult result = loadLabSpecsFromDir( dataDir.path() );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "steps must be a non-empty array" ) ) );
+    }
+}
+
+TEST_CASE( "A pipeline-owned (stepless) lab is listed honestly, not as an error",
+           "[widget][workflow][boundary]" )
+{
+    ensureWidgetApp();
+    ScopedLabDir labs;
+    const QDir dir = labs.labsDir();
+    writeFile( dir, QStringLiteral( "lab93_stepless_v2.lab.json" ), steplessV2Lab() );
+    writeFile( dir, QStringLiteral( "lab91_boundary_a.lab.json" ), boundaryLabA() );
+
+    GuidedWorkflowWidget widget( nullptr );
+    REQUIRE( widget.loadErrorStrings().isEmpty() );
+    REQUIRE( widget.workflows().size() == 2 );
+
+    auto *list = widget.findChild<QListWidget *>();
+    REQUIRE( list != nullptr );
+
+    int startedCount = 0;
+    QObject::connect( &widget, &GuidedWorkflowWidget::workflowStarted,
+                      [&startedCount] { ++startedCount; } );
+
+    // Select the stepless lab: Start is disabled (nothing to walk) and
+    // invoking it directly must not start a ghost session.
+    list->setCurrentRow( 1 );
+    QMetaObject::invokeMethod( &widget, "onStartWorkflow" );
+    REQUIRE( startedCount == 0 );
+}
+
+TEST_CASE( "Positive control: a walkable lab completes end to end",
+           "[widget][workflow][boundary]" )
+{
+    // Guards against the inverse regression of the boundary oracles: an
+    // over-tight guard that turns Start/Next into total no-ops would keep
+    // every "nothing happened" assertion green. This walks lab A (4 steps)
+    // through Start → three Next → terminal Next and requires the full
+    // signal sequence: workflowStarted once, stepCompleted 0/1/2, then
+    // workflowCompleted exactly once.
+    ensureWidgetApp();
+    ScopedLabDir labs;
+    const QDir dir = labs.labsDir();
+    writeFile( dir, QStringLiteral( "lab91_boundary_a.lab.json" ), boundaryLabA() );
+
+    GuidedWorkflowWidget widget( nullptr );
+    REQUIRE( widget.loadErrorStrings().isEmpty() );
+    auto *list = widget.findChild<QListWidget *>();
+    REQUIRE( list != nullptr );
+
+    int startedCount = 0;
+    int completedCount = 0;
+    QVector<int> completedSteps;
+    QObject::connect( &widget, &GuidedWorkflowWidget::workflowStarted,
+                      [&startedCount] { ++startedCount; } );
+    QObject::connect( &widget, &GuidedWorkflowWidget::workflowCompleted,
+                      [&completedCount] { ++completedCount; } );
+    QObject::connect( &widget, &GuidedWorkflowWidget::stepCompleted,
+                      [&completedSteps]( int stepIndex ) { completedSteps << stepIndex; } );
+
+    list->setCurrentRow( 0 );
+    QMetaObject::invokeMethod( &widget, "onStartWorkflow" );
+    REQUIRE( startedCount == 1 );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    REQUIRE( completedCount == 0 ); // still on the last step, not done
+    QMetaObject::invokeMethod( &widget, "onNextStep" );
+    REQUIRE( completedCount == 1 );
+    REQUIRE( completedSteps == QVector<int>{ 0, 1, 2 } );
 }

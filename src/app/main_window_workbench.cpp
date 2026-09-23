@@ -1116,9 +1116,13 @@ void QgisDesktopWindow::armMissionSidecarWatcher()
 
 void QgisDesktopWindow::onMissionSidecarChanged( const QString &path )
 {
-    Q_UNUSED( path );
+    // A queued fileChanged for a PREVIOUS project's sidecar (disarmed via
+    // removePaths at a project boundary) can still arrive here; only a commit
+    // to the CURRENT project's sidecar may refresh this session.
+    if ( path != sicnu::app::missionSidecarPathForProject( QgsProject::instance()->fileName() ) )
+        return;
     // Debounce-free: refresh re-arms the watch and is cheap relative to an
-    // agent commit. Ignore if the project path no longer matches.
+    // agent commit.
     refreshMissionRuntime();
 }
 

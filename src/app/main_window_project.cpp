@@ -14,6 +14,7 @@
 #include "operators/framework/rs_operation_logger.h"
 #include "panels/data_manager_panel.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "workbench/mission_timeline_panel.h"
 
 #include <QCoreApplication>
 #include <QBuffer>
@@ -108,6 +109,31 @@ void stopLabRecording()
         s_labRecorder->setRecordingEnabled( false );
 }
 
+/// The session is empty (New Project, or Open Project past the point of no
+/// return): the previous project's mission must not survive the boundary.
+/// A live m_mission/m_missionRuntime left over from the old project used to
+/// leak across — the first save of the next project then hit the "no
+/// authority at the target path → first publication" branch of
+/// onProjectWrite and published the OLD mission into the NEW project's
+/// sidecar and project XML. Mirrors stopLabRecording()'s story boundary for
+/// the mission authority; the panel and the out-of-process sidecar watcher
+/// must follow the state, not keep presenting the dead project's timeline.
+void resetMissionSessionState( sicnu::app::MissionContext &mission,
+                               sicnu::app::MissionRuntimeState &runtime,
+                               sicnu::app::MissionTimelinePanel *panel,
+                               QFileSystemWatcher *watcher )
+{
+    mission = {};
+    runtime = {};
+    if ( panel )
+    {
+        panel->setTimeline( sicnu::app::MissionTimeline{} );
+        panel->setMissionHeader( QString(), sicnu::app::MissionStage::Import, 0, 0 );
+    }
+    if ( watcher && !watcher->files().isEmpty() )
+        watcher->removePaths( watcher->files() );
+}
+
 /// Thumbnails for the report, generated through the existing bounded raster
 /// preview path (overview-backed, no upsampling); PNG at ≤512 px long edge.
 QVector<sicnu::experiment::LabReportThumbnail> collectThumbnails( const QString &labId )
@@ -194,6 +220,9 @@ void QgisDesktopWindow::newProject()
     // The cleared project has no lab: stop recording so later runs cannot
     // land in the previous project's experiment store.
     stopLabRecording();
+    // Story boundary: the empty session owns no mission either.
+    resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
+                              m_missionSidecarWatcher );
 
     m_mapCanvas->setLayers({});
     m_mapCanvas->refresh();
@@ -274,6 +303,12 @@ void QgisDesktopWindow::openProject()
         // Session is empty now: stop lab recording so runs cannot land in the
         // previous project's experiments.db while we finish (or fail) the load.
         stopLabRecording();
+        // Story boundary for the mission authority too: whether the read below
+        // succeeds or fails, the previous project's mission must not leak into
+        // this session (a failed read used to keep it live here, and the next
+        // save published it into the next project's sidecar).
+        resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
+                                  m_missionSidecarWatcher );
 
         // Workspace Governance 3.0: the store must be open BEFORE the read so
         // the serializer can restore governed state from a v3 document (or run
@@ -335,6 +370,11 @@ void QgisDesktopWindow::saveProjectAs()
         {
             if ( m_projectContext )
                 m_projectContext->reopenWorkspaceStore( filePath );
+            // The mission sidecar now lives next to the NEW project file (the
+            // save itself wrote it): re-arm the out-of-process watcher on the
+            // new path, or agent commits land next to the new file without
+            // the GUI ever noticing while the old path kept triggering.
+            armMissionSidecarWatcher();
             updateWindowTitle();
             refreshWorkspaceBrowser();
             statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);

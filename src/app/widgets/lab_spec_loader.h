@@ -55,6 +55,10 @@ struct LabSpec
     QString titleZh;            ///< Chinese display title (中文标题).
     QString objective;          ///< Teaching objective, doubles as the list description.
     QList<LabDataRef> prerequisites;
+    /// Version-scoped: v1 requires a non-empty steps array (the guided walk
+    /// IS the product, ADR 0146); v2/v3 may omit steps entirely when the
+    /// operator sequence is pipeline-owned (ADR 0166), in which case this
+    /// list is empty. Present steps always validate identically.
     QList<LabStep> steps;
     QString gradingPipeline;    ///< Project-root relative path; empty when the lab is not graded.
     QStringList thinkingQuestions;

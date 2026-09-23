@@ -73,12 +73,37 @@ int CommandRegistry::unregisterCommandsMatching( const QString &prefix )
         if ( it.key().startsWith( prefix ) )
             doomed.append( it.key() );
     }
+    QStringList doomedShortcutKeys;
+    for ( const QString &id : doomed )
+    {
+        const CommandDefinition &def = m_commands[ id ];
+        if ( !def.shortcut.isEmpty() )
+            doomedShortcutKeys.append( def.shortcut.toString( QKeySequence::PortableText ) );
+    }
     for ( const QString &id : doomed )
     {
         if ( QAction *act = m_actions.take( id ) )
             act->deleteLater();
         m_shortcutOwners.remove( id );
         m_commands.remove( id );
+    }
+    // Release the dropped definitions' shortcut reservations, keeping any key
+    // a surviving command still owns — the plugin reload contract ("drop the
+    // previous generation first") requires the same canonical shortcut to be
+    // re-registrable, while a key owned outside the prefix stays reserved.
+    for ( const QString &key : doomedShortcutKeys )
+    {
+        bool stillOwned = false;
+        for ( auto it = m_commands.constBegin(); it != m_commands.constEnd(); ++it )
+        {
+            if ( it.value().shortcut.toString( QKeySequence::PortableText ) == key )
+            {
+                stillOwned = true;
+                break;
+            }
+        }
+        if ( !stillOwned )
+            m_shortcuts.remove( key );
     }
     if ( !doomed.isEmpty() )
         refreshAll();
