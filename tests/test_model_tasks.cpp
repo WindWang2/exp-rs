@@ -934,14 +934,32 @@ TEST_CASE( "a detection republish leaves no backup residue and recovers a crash-
 
   // A run killed between the park and the publish leaves the final path
   // ABSENT with the backup family present (crash orphan). The NEXT run must
-  // adopt the parked product back and republish over it — never strand the
-  // consumer with a missing product and a hidden backup.
+  // adopt the parked product back — proven with a run that FAILS at the
+  // sidecar publish: the adopted product+sidecar pair must be back at the
+  // final paths, byte-identical. Delete-and-republish (a vacuous pass:
+  // the ctor's litter pre-clean would also leave no residue) cannot produce
+  // this — a fresh run never publishes the OLD bytes.
+  const QByteArray preCrashProduct = readFileBytes( output );
+  const QByteArray preCrashSidecar = readFileBytes( sidecar );
   REQUIRE( QFile::rename( output, output + QStringLiteral( ".det-prev~" ) ) );
   REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".det-prev~.prov.json" ) ) );
   REQUIRE_FALSE( fileExists( output ) );
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    ModelExecutionRequest third = request;
+    REQUIRE_THROWS( sicnu::operators::runtime::runModelInference( third, context ) );
+    // Adoption brought the parked PAIR back before the publish failed.
+    CHECK( fileExists( output ) );
+    CHECK( readFileBytes( output ) == preCrashProduct );
+    CHECK( readFileBytes( sidecar ) == preCrashSidecar );
+    QDir().rmdir( hostileStage );
+  }
 
-  ModelExecutionRequest third = request;
-  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( third, context ) );
+  // And with the obstacle gone the lane publishes normally over the
+  // recovered product, leaving no residue.
+  ModelExecutionRequest fourth = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( fourth, context ) );
   CHECK( fileExists( output ) );
   CHECK( fileExists( sidecar ) );
   CHECK( residueCount( dir ) == 0 );

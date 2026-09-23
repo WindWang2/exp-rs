@@ -130,10 +130,10 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
   // this run then parks a consistent state (which disarm() then cleans).
   if ( !QFile::exists( m_final ) && QFile::exists( m_backup ) )
   {
-    if ( !QFile::rename( m_backup, m_final ) )
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "detection publish could not recover the previously parked "
-                               "product: " + finalPath.toStdString() );
+    // Companions and prov restore FIRST, the main file LAST: a crash
+    // mid-recovery leaves the main still parked, which is exactly the state
+    // the next run's adoption branch re-enters through — every crash suffix
+    // is recoverable (mirror of the park ladder).
     for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
     {
       const QString backupCompanion = companion + m_backupSuffix;
@@ -143,6 +143,10 @@ DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
     const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
     if ( QFile::exists( backupProv ) )
       QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+    if ( !QFile::rename( m_backup, m_final ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "detection publish could not recover the previously parked "
+                               "product: " + finalPath.toStdString() );
   }
 
   m_hadExisting = QFile::exists( m_final );
@@ -209,8 +213,9 @@ DetectionPublishGuard::~DetectionPublishGuard()
   QFile::remove( m_final + QStringLiteral( ".prov.json" ) );
   if ( !m_hadExisting )
     return;
-  // Restore the parked previous product: main first, then companions + prov.
-  QFile::rename( m_backup, m_final );
+  // Restore the parked previous product: companions + prov first, the main
+  // file LAST — a crash mid-restore leaves the main parked, i.e. exactly
+  // the state the next run's adoption branch re-enters through.
   for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
   {
     const QString backupCompanion = companion + m_backupSuffix;
@@ -220,6 +225,7 @@ DetectionPublishGuard::~DetectionPublishGuard()
   const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
   if ( QFile::exists( backupProv ) )
     QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+  QFile::rename( m_backup, m_final );
 }
 
 void DetectionPublishGuard::disarm()
