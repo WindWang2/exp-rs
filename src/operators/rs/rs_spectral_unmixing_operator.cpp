@@ -159,6 +159,12 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                   "Failed to create error output dataset: " + errorPath);
         errorDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
     }
+    // Close the GDAL handles before the guard removes paths: a removal while
+    // a dataset is open is a sharing violation on Windows (fail-open there).
+    partialGuard.setCloseFirst([&outDataset, &errorDataset] {
+        outDataset.closeWithError(nullptr);
+        errorDataset.closeWithError(nullptr);
+    });
 
     std::vector<float> tilePixels(tileWidth * tileHeight * static_cast<size_t>(nBands));
     std::vector<float> bandData(tileWidth * tileHeight);

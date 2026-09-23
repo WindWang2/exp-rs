@@ -241,6 +241,9 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outputPath);
     PartialOutputGuard partialGuard(QString::fromStdString(outputPath));
+    // Close the GDAL handle before the guard removes the path: a removal
+    // while the dataset is open is a sharing violation on Windows.
+    partialGuard.setCloseFirst([&out] { out.closeWithError(nullptr); });
 
     GDALDatasetH outHandle = static_cast<GDALDatasetH>( out.dataset() );
     std::vector<float> row(static_cast<size_t>(width), 0.0f);

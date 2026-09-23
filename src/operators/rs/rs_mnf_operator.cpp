@@ -286,6 +286,9 @@ Json::Value RsMnfOperator::run(const Json::Value& params, RSOperatorContext& con
     if (!transformOut.empty())
         guardedPaths.append(QString::fromStdString(transformOut));
     PartialOutputGuard partialGuard(guardedPaths);
+    // Close the GDAL handle before the guard removes paths: a removal while
+    // the dataset is open is a sharing violation on Windows (fail-open there).
+    partialGuard.setCloseFirst([&outDataset] { outDataset.closeWithError(nullptr); });
     for (int c = 0; c < numComponents; ++c)
         outDataset.setBandNoDataValue(c + 1, std::numeric_limits<float>::quiet_NaN());
 
