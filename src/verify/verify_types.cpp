@@ -400,9 +400,12 @@ void validateCrossOutput( const Json::Value &params, const std::string &where,
     {
         if ( params.isMember( field ) )
         {
-            if ( params[field].isBool() )
+            // Only a TRUE pin binds anything: `sameGrid: false` claims to
+            // constrain while judging nothing — the vacuous check the
+            // oracle-potency doctrine forbids.
+            if ( params[field].isBool() && params[field].asBool() )
                 ++constraints;
-            else
+            else if ( !params[field].isBool() )
                 errors.push_back( at( where, std::string( "'" ) + field + "' must be a boolean" ) );
         }
     }
@@ -779,6 +782,11 @@ bool parseSpec( const std::string &text, VerificationSpec &out, std::string &err
     }
     error.clear();
     return true;
+}
+
+bool jsonCarriesNonFiniteNumber( const Json::Value &value )
+{
+    return containsNonFiniteNumber( value );
 }
 
 std::string specDigest( const VerificationSpec &spec )

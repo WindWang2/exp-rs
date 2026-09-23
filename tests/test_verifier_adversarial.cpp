@@ -347,6 +347,32 @@ TEST_CASE( "mutation oracle: hostile params cannot pass even with providers atta
         REQUIRE_FALSE( pass( result ) );
         REQUIRE( result.code == kCodeInvalidSpec );
     }
+    SECTION( "a false boolean pin binds nothing and is vacuous" )
+    {
+        Json::Value p( Json::objectValue );
+        Json::Value outputs( Json::arrayValue );
+        Json::Value o1( Json::objectValue );
+        o1["path"] = "w.tif";
+        Json::Value o2( Json::objectValue );
+        o2["path"] = "other.tif";
+        outputs.append( o1 );
+        outputs.append( o2 );
+        p["outputs"] = outputs;
+        p["sameGrid"] = false;
+        // validateSpec refuses it at the door...
+        VerificationCheckSpec vacuous = check( "co", "cross.output.consistency", p );
+        REQUIRE( validateSpec( [ & ] {
+            VerificationSpec s;
+            s.specId = "spec.vacuous";
+            s.scope = "node";
+            s.checks.push_back( vacuous );
+            return s;
+        }() )[0].find( "vacuous" ) != std::string::npos );
+        // ...and the single-check backstop refuses it identically.
+        const VerificationCheckResult result = evaluateCheck( vacuous, context );
+        REQUIRE_FALSE( pass( result ) );
+        REQUIRE( result.code == kCodeInvalidSpec );
+    }
 }
 
 TEST_CASE( "an honest PASS stays sealable when an unpinned observed fact is non-finite",
@@ -571,6 +597,71 @@ TEST_CASE( "mutation oracle: an evaluator removed from the dispatch table goes r
         const VerificationContext context;
         const VerificationCheckResult result = evaluateCheck( check( "x", kind, Json::Value( Json::objectValue ) ), context );
         REQUIRE( result.status != VerificationStatus::Pass );
+    }
+}
+
+TEST_CASE( "reader interlock: report and outcome readers refuse identical hostile check results",
+           "[verify][adversarial][G]" )
+{
+    // Locks the duplicated per-check parsing rules in
+    // TaskOutcome::fromCanonicalJson and VerificationReport::fromCanonicalJson
+    // to evolve together: every mutation below must be rejected by BOTH.
+    std::vector<VerificationCheckResult> checks;
+    checks.push_back( result( "a", "metric.range", VerificationStatus::Fail, kCodeMetricOutOfRange, "out" ) );
+    checks.push_back( result( "b", "artifact.exists", VerificationStatus::Pass ) );
+    const VerificationReport report = buildReport( "spec.interlock", "node", std::string( 64, 'a' ), checks );
+    const Json::Value reportBody = report.toCanonicalJson();
+
+    TaskOutcome outcome;
+    outcome.taskSpecId = "spec.interlock.task";
+    outcome.taskSpecDigest = std::string( 64, 'b' );
+    outcome.taskChecks = checks;
+    outcome.overall = VerificationStatus::Fail;
+    const Json::Value outcomeBody = outcome.toCanonicalJson();
+
+    const auto bothRefuse = [ & ]( Json::Value reportHostile, Json::Value outcomeHostile ) {
+        VerificationReport reportOut;
+        std::string reportError;
+        const bool reportOk =
+            VerificationReport::fromCanonicalJson( reportHostile, reportOut, reportError, "" );
+        TaskOutcome outcomeOut;
+        std::string outcomeError;
+        const bool outcomeOk =
+            TaskOutcome::fromCanonicalJson( outcomeHostile, outcomeOut, outcomeError, "" );
+        return !reportOk && !outcomeOk;
+    };
+
+    SECTION( "pass carrying a code" )
+    {
+        Json::Value rh = reportBody;
+        rh["checks"][1]["code"] = kCodeMetricOutOfRange;
+        Json::Value oh = outcomeBody;
+        oh["taskChecks"][1]["code"] = kCodeMetricOutOfRange;
+        REQUIRE( bothRefuse( rh, oh ) );
+    }
+    SECTION( "fail without a code" )
+    {
+        Json::Value rh = reportBody;
+        rh["checks"][0].removeMember( "code" );
+        Json::Value oh = outcomeBody;
+        oh["taskChecks"][0].removeMember( "code" );
+        REQUIRE( bothRefuse( rh, oh ) );
+    }
+    SECTION( "code class contradicting the status" )
+    {
+        Json::Value rh = reportBody;
+        rh["checks"][0]["status"] = "pass";
+        Json::Value oh = outcomeBody;
+        oh["taskChecks"][0]["status"] = "pass";
+        REQUIRE( bothRefuse( rh, oh ) );
+    }
+    SECTION( "unknown check field" )
+    {
+        Json::Value rh = reportBody;
+        rh["checks"][0]["extra"] = 1;
+        Json::Value oh = outcomeBody;
+        oh["taskChecks"][0]["extra"] = 1;
+        REQUIRE( bothRefuse( rh, oh ) );
     }
 }
 

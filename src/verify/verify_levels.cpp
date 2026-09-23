@@ -154,6 +154,13 @@ const std::set<std::string> &outcomeNodeFields()
     return fields;
 }
 
+const std::set<std::string> &outcomeCheckFields()
+{
+    static const std::set<std::string> fields = { "checkId", "kind", "status", "code", "message",
+                                                  "evidence" };
+    return fields;
+}
+
 bool hasUnknownField( const Json::Value &object, const std::set<std::string> &allowed, std::string &unknown )
 {
     for ( const std::string &member : object.getMemberNames() )
@@ -204,6 +211,10 @@ bool TaskOutcome::fromCanonicalJson( const Json::Value &json, TaskOutcome &out, 
     };
     if ( !json.isObject() )
         return fail( "task outcome document must be a JSON object" );
+    // Defense in depth, mirroring the report reader: legit producers cannot
+    // seal a non-finite body, so a hand-forged one must not parse either.
+    if ( jsonCarriesNonFiniteNumber( json ) )
+        return fail( "task outcome body carries a non-finite number and cannot be sealed" );
     std::string unknown;
     if ( hasUnknownField( json, outcomeTopFields(), unknown ) )
         return fail( "unknown task outcome field: '" + unknown + "'" );
@@ -253,6 +264,8 @@ bool TaskOutcome::fromCanonicalJson( const Json::Value &json, TaskOutcome &out, 
     {
         if ( !checkJson.isObject() )
             return fail( "each task check must be an object" );
+        if ( hasUnknownField( checkJson, outcomeCheckFields(), unknown ) )
+            return fail( "unknown task check field: '" + unknown + "'" );
         VerificationCheckResult check;
         if ( !checkJson["checkId"].isString() || checkJson["checkId"].asString().empty() )
             return fail( "'checkId' must be a non-empty string" );

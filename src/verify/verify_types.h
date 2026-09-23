@@ -195,4 +195,9 @@ VerificationReport buildReport( const std::string &specId, const std::string &sc
 /// sub-digit-precision tamper lock.
 std::string canonicalJsonText( const Json::Value &value );
 
+/// @returns true when any nested number is non-finite (the same gate the
+/// canonical writer and the report reader apply). Exposed so sibling
+/// readers in this library refuse unsealable bodies identically.
+bool jsonCarriesNonFiniteNumber( const Json::Value &value );
+
 } // namespace sicnu::verify
