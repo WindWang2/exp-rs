@@ -199,6 +199,33 @@ bool SpatialToolRegistry::registerTool( SpatialToolPtr tool )
   const SpatialToolPtr metered = std::make_shared<MeteredTool>( std::move( tool ) );
   return mTools.emplace( name, metered ).second;
 }
+
+bool SpatialToolRegistry::unregisterTool( const std::string &name )
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  return mTools.erase( name ) > 0;
+}
+
+bool SpatialToolRegistry::RegistrationToken::arm( SpatialToolPtr tool )
+{
+  release();
+  if ( !tool || tool->name().empty() )
+    return false;
+  // Capture the name before the register call moves the tool away.
+  const std::string name = tool->name();
+  if ( !SpatialToolRegistry::instance().registerTool( std::move( tool ) ) )
+    return false;
+  mName = name;
+  return true;
+}
+
+void SpatialToolRegistry::RegistrationToken::release()
+{
+  if ( mName.empty() )
+    return;
+  SpatialToolRegistry::instance().unregisterTool( mName );
+  mName.clear();
+}
 std::optional<SpatialToolPtr> SpatialToolRegistry::find( const std::string &name ) const
 {
   std::lock_guard<std::mutex> lock( mMutex );

@@ -136,6 +136,55 @@ class SpatialToolRegistry {
     /// when a tool with the same name is already present.
     bool registerTool( SpatialToolPtr tool );
 
+    /// Removes the registration named @p name (if any) and returns true when
+    /// one was removed. An executor that already looked a tool up keeps it
+    /// alive through its shared_ptr — only the registry's own handle is
+    /// dropped. Lets session-scoped hosts (e.g. the main window) release
+    /// their tools at teardown instead of pinning guarded-but-dead
+    /// registrations for the process lifetime.
+    bool unregisterTool( const std::string &name );
+
+    /// Scoped registration: registers on construction and unregisters in the
+    /// destructor, so a session-owned tool never outlives its host by
+    /// accident. Moving transfers the duty; copy is disabled because two
+    /// owners would unregister twice.
+    class RegistrationToken
+    {
+      public:
+        RegistrationToken() = default;
+        RegistrationToken( const RegistrationToken & ) = delete;
+        RegistrationToken &operator=( const RegistrationToken & ) = delete;
+        RegistrationToken( RegistrationToken &&other ) noexcept
+            : mName( std::move( other.mName ) )
+        {
+            other.mName.clear();
+        }
+        RegistrationToken &operator=( RegistrationToken &&other ) noexcept
+        {
+            if ( this != &other )
+            {
+                release();
+                mName = std::move( other.mName );
+                other.mName.clear();
+            }
+            return *this;
+        }
+        ~RegistrationToken() { release(); }
+
+        /// Registers @p tool and arms the token; returns false (token stays
+        /// disarmed, nothing owned) when the name is already registered.
+        bool arm( SpatialToolPtr tool );
+
+        /// Unregisters now (idempotent) and disarms the token.
+        void release();
+
+        /// The registered tool name; empty when disarmed.
+        const std::string &name() const { return mName; }
+
+      private:
+        std::string mName;
+    };
+
     /// Registers the built-in spatial tools (raster/vector inspection,
     /// model catalog). Idempotent.
     void registerBuiltinTools();

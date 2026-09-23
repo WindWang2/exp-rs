@@ -12759,3 +12759,79 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# ── Workbench/Project lifecycle shell track (completion/workbench-project-lifecycle-shell-fixtures) ──
+# The openProject transaction (probe → clear → story boundary → store → read
+# + failure rollback), testable headless via ProjectContext::createHeadless.
+add_executable(test_project_session_boundary
+  test_project_session_boundary.cpp
+)
+target_link_libraries(test_project_session_boundary PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+  qgis_core
+)
+target_include_directories(test_project_session_boundary PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_project_session_boundary)
+set_target_properties(test_project_session_boundary PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_project_session_boundary)
+
+# B4: the layout designer must retire itself when its layout dies (project
+# clear, layout removal, direct destruction) instead of rendering a dead
+# scene.
+add_executable(test_layout_designer_lifecycle
+  test_layout_designer_lifecycle.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layout/qgslayoutdesignerdialog.cpp
+)
+target_link_libraries(test_layout_designer_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_agent
+)
+target_include_directories(test_layout_designer_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_layout_designer_lifecycle)
+set_target_properties(test_layout_designer_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_layout_designer_lifecycle)
+
+# B2: the secondary view session (widget + engine view + pixel sync) —
+# close→reopen must re-create the sync controller and land on a fresh
+# engine view without duplicated connections.
+add_executable(test_secondary_map_view_session
+  test_secondary_map_view_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/secondary_map_view_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/secondary_map_view_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_dual_viewport_sync_controller.cpp
+)
+target_link_libraries(test_secondary_map_view_session PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Sicnu::qgis_display
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_secondary_map_view_session PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_secondary_map_view_session)
+set_target_properties(test_secondary_map_view_session PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_secondary_map_view_session)
+
