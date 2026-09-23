@@ -416,6 +416,10 @@ void validateCrossOutput( const Json::Value &params, const std::string &where,
         else
             errors.push_back( at( where, "'bandCount' must be a positive integer" ) );
     }
+    // Accepted and type-checked but intentionally inert: every current
+    // cross-output constraint is an exact comparison. Tolerance stays
+    // reserved (Slice-A shape compatibility) — it is NOT a constraint and
+    // never influences a verdict.
     if ( params.isMember( "tolerance" ) &&
          ( !isReal( params["tolerance"] ) || !std::isfinite( params["tolerance"].asDouble() ) ||
            params["tolerance"].asDouble() < 0.0 ) )
