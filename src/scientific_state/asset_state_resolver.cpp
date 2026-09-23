@@ -362,7 +362,10 @@ void civilFromDays( long long days, int &year, unsigned &month, unsigned &day )
 
 std::string formatDate( int year, unsigned month, unsigned day )
 {
-    char buffer[11];
+    // Wide enough for the year rollover past 9999 (a zone shift can push a
+    // 9999-12-31 instant into year 10000); truncation would serialize a
+    // corrupt date this module itself cannot re-read.
+    char buffer[16];
     std::snprintf( buffer, sizeof( buffer ), "%04d-%02u-%02u", year, month, day );
     return buffer;
 }
@@ -412,20 +415,27 @@ bool parseTimestamp( const std::string &text, ParsedTimestamp &out )
     const int minute = digitsAsInt( p + cursor + 3, 2 );
     cursor += 5;
     int second = 0;
+    bool sawSeconds = false;
     if ( cursor < length && p[cursor] == ':' )
     {
         if ( length < cursor + 3 || !isDigitRun( p + cursor + 1, 2 ) )
             return false;
         second = digitsAsInt( p + cursor + 1, 2 );
         cursor += 3;
+        sawSeconds = true;
     }
     if ( hour > 23 || minute > 59 || second > 59 )
         return false;
 
     // Optional fractional seconds; canonical form trims trailing zeros.
+    // Decimal minutes (ISO's HH:MM.5) are outside the closed subset — a '.'
+    // after minutes is refused rather than silently re-weighted as a
+    // fraction of seconds.
     std::string fraction;
     if ( cursor < length && p[cursor] == '.' )
     {
+        if ( !sawSeconds )
+            return false;
         ++cursor;
         const std::size_t start = cursor;
         while ( cursor < length && p[cursor] >= '0' && p[cursor] <= '9' )
@@ -450,25 +460,31 @@ bool parseTimestamp( const std::string &text, ParsedTimestamp &out )
             const long long sign = ( p[cursor] == '-' ) ? -1 : 1;
             ++cursor;
             std::size_t remaining = length - cursor;
+            int offsetHours = 0;
+            int offsetMinutes = 0;
             if ( remaining == 5 && p[cursor + 2] == ':' &&
                  isDigitRun( p + cursor, 2 ) && isDigitRun( p + cursor + 3, 2 ) )
             {
-                offsetSeconds = sign * ( digitsAsInt( p + cursor, 2 ) * 3600LL +
-                                         digitsAsInt( p + cursor + 3, 2 ) * 60LL );
+                offsetHours = digitsAsInt( p + cursor, 2 );
+                offsetMinutes = digitsAsInt( p + cursor + 3, 2 );
                 cursor = length;
             }
             else if ( remaining == 4 && isDigitRun( p + cursor, 4 ) )
             {
-                offsetSeconds = sign * ( digitsAsInt( p + cursor, 2 ) * 3600LL +
-                                         digitsAsInt( p + cursor + 2, 2 ) * 60LL );
+                offsetHours = digitsAsInt( p + cursor, 2 );
+                offsetMinutes = digitsAsInt( p + cursor + 2, 2 );
                 cursor = length;
             }
             else
             {
                 return false;
             }
-            if ( offsetSeconds / 3600 > 23 || ( offsetSeconds % 3600 ) / 60 > 59 )
+            // Range-check the digit fields, not the composed value: signed
+            // truncating division silently passes negative magnitudes like
+            // -99:00 and minute overflow like +00:99.
+            if ( offsetHours > 23 || offsetMinutes > 59 )
                 return false;
+            offsetSeconds = sign * ( offsetHours * 3600LL + offsetMinutes * 60LL );
         }
         else
         {
@@ -483,7 +499,10 @@ bool parseTimestamp( const std::string &text, ParsedTimestamp &out )
         out.epochSeconds >= 0 ? out.epochSeconds / 86400
                               : ( out.epochSeconds - 86399 ) / 86400;
     const long long secondOfDay = out.epochSeconds - dayOfInstant * 86400;
-    out.midnightUtc = secondOfDay == 0;
+    // A nonzero fraction is part of the instant: 00:00:00.5Z is NOT the
+    // date, and collapsing it would merge distinct acquisitions into one
+    // date-only fact.
+    out.midnightUtc = secondOfDay == 0 && fraction.empty();
 
     if ( out.midnightUtc )
     {
@@ -904,24 +923,39 @@ void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &i
     }
 
     // Pairing the file's band i with the structure mirror's band i is only
-    // founded when both sides describe the SAME structure. A mirror written
-    // before the file gained or lost a band (re-registered asset, replaced
-    // file) would otherwise label the wrong band — roles and NoData would
-    // travel as Known facts about bands that never declared them. With a
-    // count disagreement the mirror contributes nothing and the gap is
-    // recorded; without a dataset the mirror is the only authority and
-    // pairing is unchanged.
-    const bool catalogPairable =
-        catalog && !catalog->bands.empty() &&
-        ( !useDataset || catalog->bands.size() == datasetBands.size() );
+    // founded when both sides describe the SAME structure: equal band
+    // counts AND aligned 1-based band indices (equal counts alone would
+    // still pair a {2,3} file axis against a {1,2} mirror). A mirror
+    // written before the file gained or lost a band would otherwise label
+    // the wrong band — roles and NoData would travel as Known facts about
+    // bands that never declared them. On any disagreement the mirror
+    // contributes nothing and the gap is recorded; without a dataset the
+    // mirror is the only authority and pairing is unchanged.
+    bool catalogPairable = false;
+    if ( catalog && !catalog->bands.empty() )
+    {
+        if ( !useDataset )
+            catalogPairable = true;
+        else if ( catalog->bands.size() == datasetBands.size() )
+        {
+            catalogPairable = true;
+            for ( std::size_t position = 0; position < datasetBands.size(); ++position )
+            {
+                if ( datasetBands[position].index != catalog->bands[position].index )
+                {
+                    catalogPairable = false;
+                    break;
+                }
+            }
+        }
+    }
     if ( catalog && useDataset && !catalog->bands.empty() && !catalogPairable )
     {
         addNote( state, "bands.catalog_structure_mismatch", "bands",
-                 "catalog structure mirror has " +
-                     std::to_string( catalog->bands.size() ) +
-                     " bands while the file has " +
+                 "catalog structure mirror does not match the file's band structure (" +
+                     std::to_string( catalog->bands.size() ) + " mirror bands vs " +
                      std::to_string( datasetBands.size() ) +
-                     "; catalog band facts are not merged" );
+                     " file bands, indices must align); catalog band facts are not merged" );
     }
 
     for ( std::size_t position = 0; position < projected; ++position )

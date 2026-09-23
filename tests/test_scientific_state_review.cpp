@@ -270,6 +270,28 @@ TEST_CASE( "matching structures still pair dataset bands with the mirror",
     REQUIRE( state.bands[1].role == "nir" );
 }
 
+TEST_CASE( "equal band counts with misaligned indices still refuse pairing",
+           "[scientific_state][r2][catalog_pairing]" )
+{
+    // Review R2 P2: counts alone do not prove the same structure — a {2,3}
+    // file axis and a {1,2} mirror would pair mirror band 1's role onto
+    // file band 2.
+    DatasetFacts dataset = makePlainBands( 2 );
+    for ( int i = 0; i < 2; ++i )
+        dataset.bands[i].index = i + 2;  // file bands are #2 and #3
+    CatalogFacts catalog = makeCatalogRoles( { "red", "nir" } );
+    // makeCatalogRoles indexes mirror bands 1..2 — misaligned with 2..3.
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( stateHasNote( state, "bands.catalog_structure_mismatch" ) );
+    REQUIRE( claimFor( state, "bands[2].role" ).kind == ClaimKind::Unknown );
+    REQUIRE( claimFor( state, "bands[3].role" ).kind == ClaimKind::Unknown );
+}
+
 TEST_CASE( "catalog-only passports keep the structure mirror as their authority",
            "[scientific_state][r2][catalog_pairing]" )
 {
