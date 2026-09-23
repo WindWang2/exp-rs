@@ -2,6 +2,7 @@
 #include "band_tools.h"
 
 #include "processing/algorithms/image_enhancement.h"
+#include "processing/algorithms/satellite_products.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -205,6 +206,37 @@ bool BandTools::processExtractBandsFile( const QString &sourcePath, const QStrin
             dst.abandon();
             return fail( errorMessage, QStringLiteral( "提取波段 %1 失败。" ).arg( b ) );
         }
+    }
+
+    // Provenance propagation: a pure band copy that silently drops the
+    // NoData declaration pushes declared sentinels into valid-value space
+    // (the next rs:spectral_index only NaN-izes *declared* sentinels), and
+    // dropping SICNU_BAND_ROLE / WAVELENGTH degrades every downstream
+    // consumer to positional band guessing; dropping the dataset-level
+    // radiometric/numeric-scale stamps breaks the #680 domain resolution and
+    // the ADR 0114 comparability checks of the calibration chain.
+    for ( int ob = 0; ob < bands.size(); ++ob )
+    {
+        const int srcBand = bands[ ob ];
+        bool hasNodata = false;
+        const double nd = src.bandNoDataValue( srcBand, &hasNodata );
+        if ( hasNodata )
+            dst.setBandNoDataValue( ob + 1, nd );
+        const char *bandKeys[] = { "SICNU_BAND_ROLE", "WAVELENGTH", "FWHM" };
+        for ( const char *key : bandKeys )
+        {
+            const QString v = src.bandMetadataItem( srcBand, key );
+            if ( !v.isEmpty() )
+                dst.setBandMetadataItem( ob + 1, QLatin1String( key ), v );
+        }
+    }
+    for ( const char *dsKey : { SatelliteProducts::kRadiometricStateKey,
+                                SatelliteProducts::kNumericScaleKey } )
+    {
+        const char *raw = GDALGetMetadataItem(
+            static_cast<GDALDatasetH>( src.dataset() ), dsKey, nullptr );
+        if ( raw )
+            dst.setMetadataItem( QLatin1String( dsKey ), QString::fromUtf8( raw ) );
     }
 
     QString closeError;
