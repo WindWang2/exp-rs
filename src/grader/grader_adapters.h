@@ -32,9 +32,10 @@
 //   checkpoint (WorkflowRun serialization v1/v2)
 //     envelope       → custom item, key = runId, state = envelope state
 //     stepPlans[]    → stage items, key = stepId, state = status
-//   metric record (metrics_schema_version 1)
+//   metric record (metrics_schema_version 1; run_id required)
 //     numeric leaves of `metrics` → metric items keyed by dotted path,
-//     source = "metric_record:<metrics_hash>"
+//     source = "metric_record:<run_id>:<metrics_hash>" (run-namespaced:
+//     metrics_hash is a content hash, identity comes from the run)
 //   EvidenceProjector summary (schema_version 1)
 //     status/identity/environment/steps/completeness → custom items,
 //     artifacts[] → artifact_state items, metrics.document numeric leaves →
