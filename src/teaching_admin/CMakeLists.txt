@@ -18,6 +18,8 @@ qt_add_library(sicnu_teaching_admin STATIC
   script_adapters.h
   grader_cli_adapter.cpp
   grader_cli_adapter.h
+  operator_catalog.cpp
+  operator_catalog.h
   release_preflight.cpp
   release_preflight.h
   batch_assessment.cpp

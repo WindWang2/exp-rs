@@ -9,6 +9,10 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 
+namespace sicnu::teaching_admin {
+struct OperatorCatalog;
+}
+
 namespace sicnu::app::teaching_admin {
 
 class TeachingAdminDock : public QWidget
@@ -30,6 +34,8 @@ class TeachingAdminDock : public QWidget
   private:
     void appendLog( const QString &text );
     QString repoRoot() const;
+    sicnu::teaching_admin::OperatorCatalog loadOperatorCatalog() const;
+    void refreshOperatorRegistryLabel();
 
     QTabWidget *m_tabs = nullptr;
     QPlainTextEdit *m_log = nullptr;
@@ -40,7 +46,7 @@ class TeachingAdminDock : public QWidget
 
     // Lab authoring
     QPlainTextEdit *m_labSpecEdit = nullptr;
-    QLineEdit *m_operatorsEdit = nullptr;
+    QLabel *m_operatorRegistryLabel = nullptr;
 
     // Rubric
     QPlainTextEdit *m_rubricEdit = nullptr;

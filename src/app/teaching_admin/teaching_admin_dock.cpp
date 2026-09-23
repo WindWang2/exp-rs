@@ -7,6 +7,7 @@
 #include "teaching_admin/feedback_pack.h"
 #include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/labspec_authoring.h"
+#include "teaching_admin/operator_catalog.h"
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
 #include "teaching_admin/script_adapters.h"
@@ -64,10 +65,13 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         m_labSpecEdit = new QPlainTextEdit;
         m_labSpecEdit->setPlaceholderText( tr( "Paste LabSpec JSON…" ) );
         lay->addWidget( m_labSpecEdit, 1 );
-        m_operatorsEdit = new QLineEdit( QStringLiteral( "rs:extract_bands,rs:resample,rs:ndvi" ) );
+        // Real registry truth only: operator ids/param schemas come from the
+        // repo's capability sidecars — never a hand-typed allow-list.
+        m_operatorRegistryLabel = new QLabel;
+        m_operatorRegistryLabel->setObjectName( QStringLiteral( "teachingAdminOperatorRegistry" ) );
+        m_operatorRegistryLabel->setWordWrap( true );
+        lay->addWidget( m_operatorRegistryLabel );
         auto *row = new QHBoxLayout;
-        row->addWidget( new QLabel( tr( "known operators" ) ) );
-        row->addWidget( m_operatorsEdit, 1 );
         auto *btn = new QPushButton( tr( "Validate LabSpec" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateLabSpec );
         row->addWidget( btn );
@@ -176,6 +180,8 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
     m_log->setMaximumBlockCount( 2000 );
     root->addWidget( new QLabel( tr( "Console" ) ) );
     root->addWidget( m_log, 1 );
+
+    refreshOperatorRegistryLabel();
 }
 
 QString TeachingAdminDock::repoRoot() const
@@ -197,6 +203,25 @@ QString TeachingAdminDock::repoRoot() const
 void TeachingAdminDock::appendLog( const QString &text )
 {
     m_log->appendPlainText( text );
+}
+
+sicnu::teaching_admin::OperatorCatalog TeachingAdminDock::loadOperatorCatalog() const
+{
+    return sicnu::teaching_admin::loadOperatorCatalog(
+        QDir( repoRoot() ).filePath( QStringLiteral( "data/processing/algorithm_meta/capability" ) ) );
+}
+
+void TeachingAdminDock::refreshOperatorRegistryLabel()
+{
+    if ( !m_operatorRegistryLabel )
+        return;
+    const auto catalog = loadOperatorCatalog();
+    m_operatorRegistryLabel->setText(
+        catalog.operatorIds.isEmpty()
+          ? tr( "operator registry: unavailable (%1 issues) — validation stays fail-closed" )
+              .arg( catalog.issues.size() )
+          : tr( "operator registry: %1 operators (capability sidecars)" )
+              .arg( catalog.operatorIds.size() ) );
 }
 
 void TeachingAdminDock::onValidateCurriculum()
@@ -228,10 +253,10 @@ void TeachingAdminDock::onValidateLabSpec()
         appendLog( tr( "labspec: invalid JSON" ) );
         return;
     }
-    QSet<QString> ops;
-    for ( const QString &o : m_operatorsEdit->text().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
-        ops.insert( o.trimmed() );
-    const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), ops );
+    const auto catalog = loadOperatorCatalog();
+    refreshOperatorRegistryLabel();
+    const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), catalog.operatorIds,
+                                                            catalog.paramSchemas );
     appendLog( QString::fromUtf8( QJsonDocument( vr.toJson() ).toJson( QJsonDocument::Compact ) ) );
     const auto recipe = sicnu::teaching_admin::projectRecipeCompileView( doc.object() );
     appendLog( QString::fromUtf8( QJsonDocument( recipe ).toJson( QJsonDocument::Compact ) ) );
@@ -280,10 +305,9 @@ void TeachingAdminDock::onRunPreflight()
         else
             in.labRules = rub.object();
     }
-    QSet<QString> ops;
-    for ( const QString &o : m_operatorsEdit->text().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
-        ops.insert( o.trimmed() );
-    in.knownOperators = ops;
+    const auto catalog = loadOperatorCatalog();
+    in.knownOperators = catalog.operatorIds;
+    in.operatorParamSchemas = catalog.paramSchemas;
     CurriculumPaths paths;
     paths.labsDir = m_labsDirEdit->text();
     paths.packsDir = QDir( paths.labsDir ).filePath( QStringLiteral( "packs" ) );

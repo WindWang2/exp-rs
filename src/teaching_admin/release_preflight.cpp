@@ -49,7 +49,7 @@ TeachingReleaseReport runPreflight( const PreflightInput &in )
 
     if ( !in.labSpec.isEmpty() )
     {
-        const auto lv = validateLabSpec( in.labSpec, in.knownOperators );
+        const auto lv = validateLabSpec( in.labSpec, in.knownOperators, in.operatorParamSchemas );
         report.sections.insert( QStringLiteral( "labspec" ), lv.toJson() );
         report.issues += lv.issues;
         report.labSpecDigest = sha256Hex( canonicalJsonBytes( sortKeys( in.labSpec ) ) );

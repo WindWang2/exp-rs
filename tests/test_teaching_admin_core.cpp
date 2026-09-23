@@ -10,6 +10,7 @@
 #include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/json_util.h"
 #include "teaching_admin/labspec_authoring.h"
+#include "teaching_admin/operator_catalog.h"
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
 #include "teaching_admin/script_adapters.h"
@@ -613,8 +614,7 @@ TEST_CASE( "batch over grader cli callable: graded/unavailable counters and dete
 
 TEST_CASE( "batch with missing grader: every row typed unavailable, none graded",
            "[teaching_admin][grader][batch]" )
-{
-    QTemporaryDir dir;
+{    QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     QDir root( dir.path() );
     REQUIRE( root.mkdir( QStringLiteral( "s01" ) ) );
@@ -642,4 +642,122 @@ TEST_CASE( "batch with missing grader: every row typed unavailable, none graded"
         REQUIRE( row.toJson().value( QStringLiteral( "unavailable_reason" ) ).toString()
                  == row.unavailableReason );
     }
+}
+
+TEST_CASE( "operator catalog: sidecars feed ids and param schemas, broken files fail closed",
+           "[teaching_admin][operators]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir cap( dir.path() );
+
+    auto write = [&]( const QString &name, const QByteArray &bytes ) {
+        QFile f( cap.filePath( name ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( bytes );
+    };
+    write( QStringLiteral( "rs-ndvi.json" ),
+           QByteArray( R"({"id":"rs:ndvi","schema_version":2,"capability":{"io":{"parameters":[)"
+                       R"({"name":"red","type":"integer","required":false},)"
+                       R"({"name":"nir","type":"integer","required":false},)"
+                       R"({"name":"output","type":"string","required":true}]}}})" ) );
+    write( QStringLiteral( "rs-extract_bands.json" ),
+           QByteArray( R"({"id":"rs:extract_bands","capability":{"io":{"parameters":[]}}})" ) );
+    write( QStringLiteral( "capability_relations.json" ), QByteArray( "{}" ) );
+    write( QStringLiteral( "rs-broken.json" ), QByteArray( "not json" ) );
+    write( QStringLiteral( "rs-noid.json" ), QByteArray( R"({"capability":{}})" ) );
+
+    const auto cat = loadOperatorCatalog( dir.path() );
+    REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:ndvi" ) ) );
+    REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:extract_bands" ) ) );
+    REQUIRE_FALSE( cat.operatorIds.contains( QStringLiteral( "unknown:op" ) ) );
+    REQUIRE( cat.issues.size() == 2 ); // broken + id-less, fail-closed
+
+    // The schema shape matches validateLabSpec's operatorParamSchemas contract.
+    const auto props = cat.paramSchemas.value( QStringLiteral( "rs:ndvi" ) )
+                         .toObject()
+                         .value( QStringLiteral( "properties" ) )
+                         .toObject();
+    REQUIRE( props.contains( QStringLiteral( "red" ) ) );
+    REQUIRE( props.contains( QStringLiteral( "nir" ) ) );
+    REQUIRE( props.contains( QStringLiteral( "output" ) ) );
+
+    // Unknown-operator fail-closed still holds with the real-shaped catalog.
+    QJsonObject spec{
+        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+        { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        { QStringLiteral( "operators" ), QJsonArray{ QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:nonexistent" ) } },
+        { QStringLiteral( "steps" ),
+          QJsonArray{ QJsonObject{
+              { QStringLiteral( "operator_id" ), QStringLiteral( "rs:ndvi" ) },
+              { QStringLiteral( "params" ), QJsonObject{ { QStringLiteral( "bogus_param" ), 1 } } } } } },
+    };
+    const auto vr = validateLabSpec( spec, cat.operatorIds, cat.paramSchemas );
+    REQUIRE_FALSE( vr.ok );
+    QSet<QString> codes;
+    for ( const auto &i : vr.issues )
+        codes.insert( i.code );
+    REQUIRE( codes.contains( QStringLiteral( "unknown_operator" ) ) );
+    REQUIRE( codes.contains( QStringLiteral( "invalid_param" ) ) );
+}
+
+TEST_CASE( "operator catalog: missing dir is a typed issue, empty allow-set stays fail-closed",
+           "[teaching_admin][operators]" )
+{
+    const auto cat = loadOperatorCatalog( QStringLiteral( "/no/such/capability_dir" ) );
+    REQUIRE( cat.operatorIds.isEmpty() );
+    REQUIRE( cat.issues.size() == 1 );
+    REQUIRE( cat.issues.first().code == QLatin1String( "operator_registry_missing" ) );
+
+    // With no registry, any operator reference must be flagged (empty
+    // knownOperators must not silently pass — never a demo allow-list).
+    QJsonObject spec{
+        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+        { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        { QStringLiteral( "steps" ),
+          QJsonArray{ QJsonObject{ { QStringLiteral( "operator_id" ), QStringLiteral( "rs:ndvi" ) } } } },
+    };
+    const auto vr = validateLabSpec( spec, cat.operatorIds, cat.paramSchemas );
+    REQUIRE_FALSE( vr.ok );
+    bool unknown = false;
+    for ( const auto &i : vr.issues )
+        if ( i.code == QLatin1String( "unknown_operator" ) )
+            unknown = true;
+    REQUIRE( unknown );
+}
+
+TEST_CASE( "operator catalog: repo capability sidecars are the real truth",
+           "[teaching_admin][operators][repo]" )
+{
+    QString repo = QString::fromUtf8( qgetenv( "SICNU_SOURCE_DIR" ) );
+    if ( repo.isEmpty() )
+    {
+        QDir d = QDir::current();
+        for ( int i = 0; i < 6; ++i )
+        {
+            if ( QFileInfo::exists( d.filePath(
+                   QStringLiteral( "data/processing/algorithm_meta/capability/rs-ndvi.json" ) ) ) )
+            {
+                repo = d.absolutePath();
+                break;
+            }
+            if ( !d.cdUp() )
+                break;
+        }
+    }
+    const QString capDir = QDir( repo ).filePath(
+      QStringLiteral( "data/processing/algorithm_meta/capability" ) );
+    if ( !QFileInfo::exists( QDir( capDir ).filePath( QStringLiteral( "rs-ndvi.json" ) ) ) )
+    {
+        WARN( "repo capability sidecars not found; skipping registry truth check" );
+        return;
+    }
+    const auto cat = loadOperatorCatalog( capDir );
+    REQUIRE( cat.operatorIds.size() > 50 ); // the registry is large, not a demo trio
+    REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:ndvi" ) ) );
+    REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:extract_bands" ) ) );
+    REQUIRE( cat.issues.isEmpty() );
+    // A hardcoded allow-list ("rs:extract_bands,rs:resample,rs:ndvi") would
+    // have rejected the real breadth; the sidecar set must cover e.g. rs:pca.
+    REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:pca" ) ) );
 }

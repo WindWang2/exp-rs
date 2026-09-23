@@ -68,7 +68,9 @@ ValidationResult validateLabSpec( const QJsonObject &spec, const QSet<QString> &
             r.addError( QStringLiteral( "invalid_operator" ), path, QStringLiteral( "empty operator id" ) );
             return;
         }
-        if ( !knownOperators.isEmpty() && !knownOperators.contains( opId ) )
+        // Fail-closed: an empty registry means nothing is known — every
+        // operator reference is flagged instead of silently passing.
+        if ( !knownOperators.contains( opId ) )
             r.addError( QStringLiteral( "unknown_operator" ), path,
                         QStringLiteral( "operator not in registry: " ) + opId );
     };
