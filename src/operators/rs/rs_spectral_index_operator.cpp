@@ -29,6 +29,11 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 
 #include <QString>
 
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <gdal.h>
 
 #include <algorithm>
@@ -144,9 +149,15 @@ Json::Value RsSpectralIndexOperator::executionEstimate() const {
 
 namespace spectral_index_detail {
 
+/// @param allowIndexOverride  true only for the generic rs:spectral_index
+///   operator. The facade aliases (rs:ndvi, rs:ndwi, ...) own their index
+///   identity: an undeclared `index` param naming a different formula would
+///   silently write e.g. MNDWI pixels under an rs:ndvi deliverable (provenance
+///   drift), so aliases accept only the identity value and refuse the rest.
 Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                                  const Json::Value& params,
-                                 RSOperatorContext& context) {
+                                 RSOperatorContext& context,
+                                 bool allowIndexOverride) {
     if (!params.isObject()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Operator parameters must be a JSON object");
@@ -154,9 +165,18 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     const std::string inputPath = requireString(params, "input");
     const std::string outputPath = requireString(params, "output");
-    const std::string indexName = params.isMember("index")
-                                      ? getEnum(params, "index", s_indices, defaultIndex)
-                                      : defaultIndex;
+    std::string indexName = defaultIndex;
+    if (params.isMember("index")) {
+        const std::string requested = getEnum(params, "index", s_indices, defaultIndex);
+        if (requested != defaultIndex && !allowIndexOverride) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "This alias operator always computes " + defaultIndex
+                    + "; refusing conflicting \"index\": \"" + requested
+                    + "\" (use rs:spectral_index to select a formula)");
+        }
+        indexName = requested;
+    }
 
     if (!fileExists(inputPath)) {
         throw RSOperatorError(ErrorCode::FileNotFound,
@@ -272,6 +292,62 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     swirBand = resolveWithFlag("swir1", swirExplicit, hasSwir);
     swir2Band = resolveWithFlag("swir2", swir2Explicit, hasSwir2);
     redEdgeBand = resolveWithFlag("red_edge", redEdgeExplicit, hasRedEdge);
+
+    // Degenerate-duplicate guard: a positional fallback that lands on the
+    // same band as another *participating* role produces an all-constant
+    // ratio (NBR on a 4-band stack: swir2 clamped onto band 4 == nir →
+    // constant 0 with exit success). Checked per index over its participating
+    // roles only — non-participating collisions are irrelevant. Refuse when a
+    // duplicate pair involves at least one resolver-resolved role; two
+    // explicitly-equal bands stay the caller's documented choice.
+    {
+        static const std::map<std::string, std::vector<std::string>> kParticipation = {
+            {"NDVI", {"nir", "red"}},      {"EVI", {"nir", "red", "blue"}},
+            {"SAVI", {"nir", "red"}},      {"NDWI", {"green", "nir"}},
+            {"NDBI", {"swir1", "nir"}},    {"MNDWI", {"green", "swir1"}},
+            {"NBR", {"nir", "swir2"}},     {"dNBR", {"nir", "swir2"}},
+            {"BSI", {"swir1", "red", "nir", "blue"}},
+            {"NDRE", {"nir", "red_edge"}}, {"CI", {"nir", "red_edge"}},
+            {"NDSI", {"green", "swir1"}},  {"NDTI", {"swir1", "swir2"}},
+            {"GNDVI", {"nir", "green"}},   {"NDMI", {"nir", "swir1"}},
+            {"MSAVI", {"nir", "red"}},     {"ARVI", {"nir", "red", "blue"}},
+            {"EVI2", {"nir", "red"}},      {"BAI", {"red", "nir"}},
+            {"UI", {"swir2", "nir"}},      {"BUI", {"swir1", "nir", "red"}},
+        };
+        const std::pair<const char *, std::pair<int, bool>> roles[] = {
+            {"nir", {nirBand, hasNir}},       {"red", {redBand, hasRed}},
+            {"green", {greenBand, hasGreen}}, {"blue", {blueBand, hasBlue}},
+            {"swir1", {swirBand, hasSwir}},   {"swir2", {swir2Band, hasSwir2}},
+            {"red_edge", {redEdgeBand, hasRedEdge}},
+        };
+        const auto participating = kParticipation.find(indexName);
+        if (participating != kParticipation.end()) {
+            auto bandOf = [&](const std::string &role) {
+                for (const auto &r : roles)
+                    if (role == r.first)
+                        return r.second;
+                return std::make_pair(0, true);
+            };
+            const auto &needed = participating->second;
+            for (size_t i = 0; i < needed.size(); ++i) {
+                for (size_t j = i + 1; j < needed.size(); ++j) {
+                    const auto a = bandOf(needed[i]);
+                    const auto b = bandOf(needed[j]);
+                    if (a.first != b.first || (a.second && b.second))
+                        continue; // distinct bands, or both explicit
+                    throw RSOperatorError(
+                        ErrorCode::InvalidParameter,
+                        "Band roles '" + needed[i] + "' and '" + needed[j]
+                            + "' both resolved to band " + std::to_string(a.first)
+                            + " on a " + std::to_string(bandCount)
+                            + "-band input (role/positional fallback); " + indexName
+                            + " would be a degenerate all-constant ratio. Pass "
+                              "explicit band parameters, or stack the raster with "
+                              "correct SICNU_BAND_ROLE metadata.");
+                }
+            }
+        }
+    }
 
     if (anyHardcodedFallback) {
         context.logWarning(
@@ -775,7 +851,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
 Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
                                          RSOperatorContext& context) {
-    return spectral_index_detail::runSpectralIndexCore("NDVI", params, context);
+    return spectral_index_detail::runSpectralIndexCore("NDVI", params, context,
+                                                       /*allowIndexOverride=*/true);
 }
 
 } // namespace sicnu::operators::rs
