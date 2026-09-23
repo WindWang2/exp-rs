@@ -16,7 +16,7 @@ using namespace sicnu::explain;
 namespace
 {
 
-EvidenceLink link( const std::string &kind, const std::string &target )
+EvidenceLink makeEvidenceLink( const std::string &kind, const std::string &target )
 {
   EvidenceLink l;
   l.kind = kind;
@@ -48,7 +48,7 @@ StepExplanation sampleExplanation()
   GroundedText purpose;
   purpose.text = "将 DN 转换为 TOA 反射率";
   purpose.provenance = FactProvenance::SystemFact;
-  purpose.evidence = { link( EvidenceOperatorSchema, "operator:rs:radiometric_calibration" ) };
+  purpose.evidence = { makeEvidenceLink( EvidenceOperatorSchema, "operator:rs:radiometric_calibration" ) };
   e.purpose = { purpose };
 
   GroundedText prereq;
@@ -67,7 +67,7 @@ StepExplanation sampleExplanation()
   transition.after = "TOA";
   transition.explanation = "输出端口声明 TOA";
   transition.provenance = FactProvenance::InferredExplanation;
-  transition.evidence = { link( EvidenceWorkflowDocument, "workflow:wf-ndvi-lab#node_radiometric" ) };
+  transition.evidence = { makeEvidenceLink( EvidenceWorkflowDocument, "workflow:wf-ndvi-lab#node_radiometric" ) };
   e.stateChanges = { transition };
 
   ParameterRationale rationale;
@@ -92,10 +92,10 @@ StepExplanation sampleExplanation()
   execution.artifactDigest = "sha256full:abc";
   execution.startedUtc = "2026-09-21T00:00:00Z";
   execution.endedUtc = "2026-09-21T00:00:01Z";
-  execution.evidence = { link( EvidenceProvenance, "provenance:run-1#node:node_radiometric" ) };
+  execution.evidence = { makeEvidenceLink( EvidenceProvenance, "provenance:run-1#node:node_radiometric" ) };
   e.execution = execution;
 
-  e.evidenceLinks = { link( EvidenceDerivation, "derivation:asset-7#node_radiometric" ) };
+  e.evidenceLinks = { makeEvidenceLink( EvidenceDerivation, "derivation:asset-7#node_radiometric" ) };
   e.sourceReferences = { reference( "Lillesand & Kiefer", ReferenceKindTextbook, "ch. 7" ) };
   e.trustNotes = { "assumptions 来自教学编写，非运行时验证" };
   return e;
@@ -142,29 +142,29 @@ TEST_CASE( "evidence kinds split into machine and authored classes", "[explain][
 
 TEST_CASE( "evidence link target grammar is enforced per kind", "[explain][schema]" )
 {
-  REQUIRE( link( EvidenceOperatorSchema, "operator:rs:ndvi" ).isValid() );
-  REQUIRE( link( EvidenceContract, "contract:rs:ndvi" ).isValid() );
-  REQUIRE( link( EvidenceGuidance, "guidance:rs:ndvi" ).isValid() );
-  REQUIRE( link( EvidenceOperationLog, "operation_log:rs:ndvi@2026-09-21T00:00:00Z" ).isValid() );
-  REQUIRE( link( EvidenceWorkflowDocument, "workflow:wf-1#node_a" ).isValid() );
-  REQUIRE( link( EvidenceDerivation, "derivation:asset-7#node_a" ).isValid() );
-  REQUIRE( link( EvidenceProvenance, "provenance:run-1#node:node_a" ).isValid() );
-  REQUIRE( link( EvidenceProvenance, "provenance:run-1#run" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceOperatorSchema, "operator:rs:ndvi" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceContract, "contract:rs:ndvi" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceGuidance, "guidance:rs:ndvi" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceOperationLog, "operation_log:rs:ndvi@2026-09-21T00:00:00Z" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceWorkflowDocument, "workflow:wf-1#node_a" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceDerivation, "derivation:asset-7#node_a" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceProvenance, "provenance:run-1#node:node_a" ).isValid() );
+  REQUIRE( makeEvidenceLink( EvidenceProvenance, "provenance:run-1#run" ).isValid() );
 
   // wrong-kind prefixes
-  REQUIRE( !link( EvidenceOperatorSchema, "contract:rs:ndvi" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceOperatorSchema, "contract:rs:ndvi" ).isValid() );
   // missing targets
-  REQUIRE( !link( EvidenceOperatorSchema, "operator:" ).isValid() );
-  REQUIRE( !link( EvidenceOperatorSchema, "" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceOperatorSchema, "operator:" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceOperatorSchema, "" ).isValid() );
   // whitespace anywhere in the target
-  REQUIRE( !link( EvidenceOperatorSchema, "operator:rs:ndvi now" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceOperatorSchema, "operator:rs:ndvi now" ).isValid() );
   // separator grammar for the '#' kinds
-  REQUIRE( !link( EvidenceWorkflowDocument, "workflow:wf-1" ).isValid() );
-  REQUIRE( !link( EvidenceWorkflowDocument, "workflow:wf-1#" ).isValid() );
-  REQUIRE( !link( EvidenceWorkflowDocument, "workflow:#node_a" ).isValid() );
-  REQUIRE( !link( EvidenceProvenance, "provenance:run-1#node:" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceWorkflowDocument, "workflow:wf-1" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceWorkflowDocument, "workflow:wf-1#" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceWorkflowDocument, "workflow:#node_a" ).isValid() );
+  REQUIRE( !makeEvidenceLink( EvidenceProvenance, "provenance:run-1#node:" ).isValid() );
   // unknown kind never validates
-  REQUIRE( !link( "vibes", "vibes:1" ).isValid() );
+  REQUIRE( !makeEvidenceLink( "vibes", "vibes:1" ).isValid() );
 }
 
 TEST_CASE( "closed vocabularies pin workflow/step/aspect/reference kinds", "[explain][schema]" )
