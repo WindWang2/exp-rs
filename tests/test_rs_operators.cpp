@@ -3923,7 +3923,7 @@ TEST_CASE("recode refuses non-integer label values instead of casting sentinels"
     // RED on master: the sentinel cast was UB (x86 yields INT_MIN) and the
     // garbage class was written into the deliverable with exit success.
     REQUIRE_THROWS_WITH(op->run(params, ctx),
-                        Catch::Matchers::ContainsSubstring("not an integer class"));
+                        Catch::Matchers::ContainsSubstring("not a float32-exact"));
     CHECK_FALSE(QFile::exists(tmp.path() + "/recoded.tif"));
 }
 
