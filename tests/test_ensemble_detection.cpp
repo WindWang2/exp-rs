@@ -659,6 +659,16 @@ TEST_CASE( "detection ensemble fuses member boxes into one WBF vector product",
   CHECK( provenance["ensemble"]["members"].size() == 2 );
   CHECK( provenance["ensemble"]["member_concurrency"].asInt() >= 1 );
   CHECK( provenance["ensemble"]["staging_compression"].asString() == "deflate" );
+  // Completion 13/15: the sidecar carries the input grid — all members ran
+  // the SAME input, the primary member's record is the grid authority (the
+  // raster ensemble lane already records this; the detection lane used to
+  // publish no inputs block at all).
+  REQUIRE( provenance["inputs"].isArray() );
+  REQUIRE( provenance["inputs"].size() == 1 );
+  CHECK( provenance["inputs"][0]["path"].asString() == input.toStdString() );
+  CHECK( provenance["inputs"][0]["width"].asInt() == 16 );
+  CHECK( provenance["inputs"][0]["height"].asInt() == 16 );
+  CHECK( provenance["inputs"][0]["crs"].asString() == "EPSG:4326" );
 }
 
 TEST_CASE( "detection ensemble refusals stay typed", "[models][ensemble][detection][refusal]" )

@@ -6,6 +6,7 @@
 
 #include "operators/runtime/detection_fusion.h"
 #include "operators/runtime/detection_tile_engine.h"
+#include "operators/runtime/model_publish.h"
 #include "operators/runtime/model_runtime.h"
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -83,154 +84,11 @@ class StagedFileGuard
     bool m_disarmed = false;
 };
 
-/// Publishes the provenance sidecar next to a published product — same
-/// staged-write + rename contract as the engine's own writer (the caller
-/// removes any previous sidecar BEFORE the product rename, so a crash can
-/// only ever leave a DETECTABLE absence).
-bool publishSidecar( const QString &finalPath, const Json::Value &provenance, std::string *error )
-{
-  // Test-only fault injection (Verification Platform 8.0 pattern): routes
-  // through the REAL failure branch so the publish rollback is provable.
-  if ( SICNU_FAULT_POINT( "ensemble.publish_sidecar" ) )
-  {
-    if ( error )
-      *error = "failed to publish the provenance sidecar: fault-injected failure";
-    return false;
-  }
-  const QString sidecarPath = finalPath + QStringLiteral( ".prov.json" );
-  const QString stagePath = sidecarPath + QStringLiteral( ".stage~" );
-  QFile stage( stagePath );
-  if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-  {
-    if ( error )
-      *error = "failed to stage the provenance sidecar: " + stagePath.toStdString();
-    return false;
-  }
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  const std::string text = Json::writeString( builder, provenance );
-  const qint64 written = stage.write( text.data(), static_cast<qint64>( text.size() ) );
-  stage.close();
-  if ( stage.error() != QFileDevice::NoError || written != static_cast<qint64>( text.size() ) )
-  {
-    stage.remove();
-    if ( error )
-      *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
-    return false;
-  }
-  QFile::remove( sidecarPath ); // Windows rename does not overwrite
-  if ( !QFile::rename( stagePath, sidecarPath ) )
-  {
-    stage.remove();
-    if ( error )
-      *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
-    return false;
-  }
-  return true;
-}
-
-/// Shapefile companions for a vector output (empty for GPKG/GeoJSON) — the
-/// same set the detection writer publishes and must roll back atomically.
-QStringList detectionSidecars( const QString &main )
-{
-  const QFileInfo fi( main );
-  if ( fi.suffix().toLower() != QLatin1String( "shp" ) )
-    return {};
-  const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
-  return { base + QStringLiteral( ".dbf" ), base + QStringLiteral( ".shx" ),
-           base + QStringLiteral( ".prj" ), base + QStringLiteral( ".cpg" ) };
-}
-
-void removeWithSidecars( const QString &main )
-{
-  QFile::remove( main );
-  for ( const QString &sidecar : detectionSidecars( main ) )
-    QFile::remove( sidecar );
-}
-
-/// Owns the PREVIOUS detection product across the vector publish and the
-/// sidecar write: the previous product (main + shapefile sidecars + provenance
-/// sidecar) is moved aside on construction and restored on unwind — a throw
-/// from the writer OR the sidecar publish leaves the previous product exactly
-/// as it was, never a torn one and never a hidden backup. Disarmed after a
-/// successful sidecar publish (the backup is then removed).
-///
-/// The backup suffix is deliberately NOT the vector writer's own ".prev~"
-/// (which it unconditionally cleans up at the end of a successful publish,
-/// sidecars included): a shared name would have the writer delete this
-/// guard's backup. ".ensemble-prev~" is unique to this guard.
-class DetectionPublishGuard
-{
-  public:
-    explicit DetectionPublishGuard( const QString &finalPath )
-        : m_final( finalPath ),
-          m_backup( finalPath + QStringLiteral( ".ensemble-prev~" ) )
-    {
-      m_hadExisting = QFile::exists( m_final );
-      if ( !m_hadExisting )
-        return;
-      removeWithSidecars( m_backup );
-      if ( !QFile::rename( m_final, m_backup ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "detection ensemble could not back up the previous product: "
-                                 + finalPath.toStdString() );
-      // #1186: sidecar / companion backup failures used to be ignored — a
-      // failed backup left the previous product unrestorable on rollback.
-      for ( const QString &sidecar : detectionSidecars( m_final ) )
-      {
-        if ( !QFile::exists( sidecar ) )
-          continue;
-        if ( !QFile::rename( sidecar, sidecar + QStringLiteral( ".ensemble-prev~" ) ) )
-          throw RSOperatorError( ErrorCode::FileNotWritable,
-                                 "detection ensemble could not back up sidecar: "
-                                   + sidecar.toStdString() );
-      }
-      if ( QFile::exists( m_final + QStringLiteral( ".prov.json" ) ) )
-      {
-        if ( !QFile::rename( m_final + QStringLiteral( ".prov.json" ),
-                             m_backup + QStringLiteral( ".prov.json" ) ) )
-          throw RSOperatorError( ErrorCode::FileNotWritable,
-                                 "detection ensemble could not back up provenance sidecar: "
-                                   + finalPath.toStdString() );
-      }
-    }
-    ~DetectionPublishGuard()
-    {
-      if ( m_disarmed )
-        return;
-      removeWithSidecars( m_final );
-      if ( !m_hadExisting )
-        return;
-      QFile::rename( m_backup, m_final );
-      for ( const QString &sidecar : detectionSidecars( m_final ) )
-      {
-        const QString backupSidecar = sidecar + QStringLiteral( ".ensemble-prev~" );
-        if ( QFile::exists( backupSidecar ) )
-          QFile::rename( backupSidecar, sidecar );
-      }
-      const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
-      if ( QFile::exists( backupProv ) )
-        QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
-    }
-    void disarm()
-    {
-      m_disarmed = true;
-      if ( m_hadExisting )
-      {
-        removeWithSidecars( m_backup );
-        QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
-      }
-    }
-
-    DetectionPublishGuard( const DetectionPublishGuard & ) = delete;
-    DetectionPublishGuard &operator=( const DetectionPublishGuard & ) = delete;
-
-  private:
-    QString m_final;
-    QString m_backup;
-    bool m_hadExisting = false;
-    bool m_disarmed = false;
-};
+/// Publishes the provenance sidecar next to a published product — moved to
+/// model_publish.{h,cpp} (completion 13/15) so the single-model lanes share
+/// the ONE staged-write + rename contract with the ensemble lanes.
+/// DetectionPublishGuard and its shapefile-companion helpers moved with it
+/// (the guard takes its backup suffix per lane: ".ensemble-prev~" here).
 
 /// Per-member execution record for the payload, the provenance sidecar and
 /// the parallel worker bookkeeping. Worker-owned fields (failure/aborted) are
@@ -842,7 +700,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     // AND the sidecar write: any failure (including a throw from the writer)
     // restores it exactly — main file, shapefile sidecars and provenance.
     const QString detectionFinal = QString::fromStdString( request.outputPath );
-    DetectionPublishGuard publishGuard( detectionFinal );
+    DetectionPublishGuard publishGuard( detectionFinal, QStringLiteral( ".ensemble-prev~" ) );
     writeDetectionVector( fused.boxes, vocabulary, input.geoTransform(), input.projection(),
                           request.outputPath );
 
@@ -855,6 +713,11 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       combined.tilesPlanned += run.detectionStats.tilesPlanned;
       combined.tilesProcessed += run.detectionStats.tilesProcessed;
     }
+    // Grid provenance mirrors the member engines' verified feeds: all members
+    // ran the SAME input, the primary member's record is the grid authority
+    // (completion 13/15 — the detection lane used to publish no inputs block).
+    if ( !runs.empty() )
+      combined.inputGrids = runs.front().detectionStats.inputGrids;
     Json::Value provenance =
       buildEnsembleProvenance( ensembleModel, runs, combined, combination, std::string(), budget,
                                ensembleModel.ensemble.stagingCompressed(), true );
@@ -883,7 +746,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     provenance["output"]["format"] = "vector";
     provenance["output"]["features"] = static_cast<Json::UInt64>( fused.clusters );
     std::string sidecarError;
-    if ( !publishSidecar( detectionFinal, provenance, &sidecarError ) )
+    if ( !publishProvenanceSidecar( detectionFinal, provenance, "ensemble.publish_sidecar",
+                                    &sidecarError ) )
       throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
     publishGuard.disarm();
 
@@ -1781,7 +1645,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                : std::string(),
                              budget, stagingCompressed, false );
   std::string sidecarError;
-  if ( !publishSidecar( finalPath, provenance, &sidecarError ) )
+  if ( !publishProvenanceSidecar( finalPath, provenance, "ensemble.publish_sidecar",
+                                  &sidecarError ) )
   {
     // The previous product's backup is kept until the new sidecar is in: a
     // sidecar failure restores the previous product — WITH its sidecar —

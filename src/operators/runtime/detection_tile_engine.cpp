@@ -5,6 +5,7 @@
 
 #include "operators/framework/bounded_math.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/model_publish.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <gdal.h>
@@ -353,6 +354,26 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   stats.tilesPlanned = static_cast<int>( core.size() );
   stats.rasterWidth = rasterW;
   stats.rasterHeight = rasterH;
+  // Platform 8.0 grid provenance: recorded after every input gate above
+  // passed (mirror of the raster engines) — WHAT was actually fed, compact.
+  {
+    GridProvenance grid;
+    grid.name = "input";
+    grid.path = inputPath;
+    grid.crs = crsDisplayName( ds.projection() );
+    grid.crsVerified = !grid.crs.empty();
+    grid.width = rasterW;
+    grid.height = rasterH;
+    // Effective preprocess summary (the offset is part of the detection
+    // lane's identity since hardening 15/20 applies v*scale+offset).
+    std::string note = pre.normalize.empty() ? "none" : pre.normalize;
+    if ( pre.scale != 1.0 )
+      note += "\u00d7" + std::to_string( pre.scale );
+    if ( pre.offset != 0.0 )
+      note += "+offset" + std::to_string( pre.offset );
+    grid.preprocessNote = note;
+    stats.inputGrids.push_back( std::move( grid ) );
+  }
 
   std::vector<DetectionBox> detections;
   const std::array<double, 6> geoTransform = ds.geoTransform();

@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/detection_tile_engine.h"
 #include "operators/runtime/model_ensemble.h"
+#include "operators/runtime/model_publish.h"
 #include "operators/runtime/tile_inference_engine.h"
 
 #include "processing/features/feature_cube.h"
@@ -293,8 +294,26 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
 
   if ( request.asDetection )
   {
+    // Completion 13/15: the single-model detection lane publishes under the
+    // SAME contract as the ensemble detection lane — the previous product
+    // (main + companions + provenance sidecar) is owned across the vector
+    // write AND the sidecar publish, so a failure restores the verified PAIR
+    // and a crash can only ever leave a MISSING sidecar, never a stale one.
+    const QString detectionFinal = QString::fromStdString( request.outputPath );
+    DetectionPublishGuard publishGuard( detectionFinal, QStringLiteral( ".det-prev~" ) );
     DetectionTileEngine engine( effectiveModel, session );
     result.detectionStats = engine.run( request.inputPath, bands, request.outputPath, context, options );
+
+    // The provenance sidecar the verifier (and every consumer) reads:
+    // exp-rs-prov/1 with the vector output block, model+task identity,
+    // execution identity, detection semantics and the fed input grid.
+    const Json::Value prov =
+      buildDetectionProvenance( effectiveModel, session, result.detectionStats );
+    std::string sidecarError;
+    if ( !publishProvenanceSidecar( detectionFinal, prov, "detection.publish_sidecar",
+                                    &sidecarError ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
+    publishGuard.disarm();
 
     Json::Value payload( Json::objectValue );
     payload["output"] = request.outputPath;
@@ -307,6 +326,18 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     payload["tiles"] = result.detectionStats.tilesProcessed;
     payload["detections"] = result.detectionStats.detectionsKept;
     payload["rawDetections"] = result.detectionStats.rawDetections;
+    // Platform 9.0 (M8) execution identity in the payload — parity with the
+    // raster payload (the detection lane used to omit it).
+    {
+      const ProviderRuntimeDetails details = session->providerDetails();
+      Json::Value provider( Json::objectValue );
+      if ( !details.executionProvider.empty() )
+        provider["execution_provider"] = details.executionProvider;
+      if ( !details.runtimeVersion.empty() )
+        provider["runtime_version"] = details.runtimeVersion;
+      if ( !provider.empty() )
+        payload["provider"] = provider;
+    }
     Json::Value classes( Json::arrayValue );
     for ( const auto &cls : effectiveModel.output.detection.classes )
       classes.append( cls );
