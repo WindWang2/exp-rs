@@ -14,6 +14,7 @@
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
 #include "teaching_admin/script_adapters.h"
+#include "teaching_admin/student_projection.h"
 
 #include <QDir>
 #include <QFile>
@@ -1072,4 +1073,150 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
                 warned = true;
         REQUIRE( warned );
     }
+}
+
+namespace {
+
+QJsonObject labspecWithAnswers()
+{
+    return QJsonObject{
+        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+        { QStringLiteral( "id" ), QStringLiteral( "lab99_leak_probe" ) },
+        { QStringLiteral( "version" ), QStringLiteral( "3" ) },
+        { QStringLiteral( "title" ), QStringLiteral( "Leak Probe" ) },
+        { QStringLiteral( "data" ),
+          QJsonObject{ { QStringLiteral( "spec_ref" ), QStringLiteral( "data/labs/data-specs/x.json" ) },
+                       { QStringLiteral( "offline" ), true } } },
+        { QStringLiteral( "grading_ref" ),
+          QJsonObject{ { QStringLiteral( "intent_ref" ),
+                         QStringLiteral( "data/labs/grading/lab99.intent.json" ) },
+                       { QStringLiteral( "grader_owner" ), QStringLiteral( "D4" ) } } },
+        { QStringLiteral( "expected_results" ),
+          QJsonArray{ QJsonObject{
+            { QStringLiteral( "claim" ),
+              QStringLiteral( "输出栅格的 NDVI 均值应为 0.42 ± 0.01" ) },
+            { QStringLiteral( "artifact" ), QStringLiteral( "data/labs/_tmp/out/ndvi.tif" ) } } } },
+        { QStringLiteral( "questions" ),
+          QJsonArray{ QJsonObject{ { QStringLiteral( "prompt" ), QStringLiteral( "为什么需要检查日期完整性？" ) },
+                                   { QStringLiteral( "hint" ), QStringLiteral( "rs:temporal_* 前置检查" ) } } } },
+        { QStringLiteral( "operators" ), QJsonArray{ QStringLiteral( "rs:ndvi" ) } },
+        { QStringLiteral( "steps" ),
+          QJsonArray{ QJsonObject{
+            { QStringLiteral( "id" ), QStringLiteral( "s1" ) },
+            { QStringLiteral( "title" ), QStringLiteral( "计算 NDVI" ) },
+            { QStringLiteral( "operator_id" ), QStringLiteral( "rs:ndvi" ) },
+            { QStringLiteral( "params" ),
+              QJsonObject{ { QStringLiteral( "red" ), 3 },
+                           { QStringLiteral( "nir" ), 4 },
+                           { QStringLiteral( "secret_formula" ), QStringLiteral( "band0*1.7-band1" ) } } } },
+          QJsonObject{
+            { QStringLiteral( "id" ), QStringLiteral( "s2" ) },
+            { QStringLiteral( "title" ), QStringLiteral( "记录结果" ) },
+            { QStringLiteral( "human_only" ), true } } } },
+    };
+}
+
+} // namespace
+
+TEST_CASE( "student projection masks answers and keeps the teacher view as truth",
+           "[teaching_admin][projection]" )
+{
+    const auto spec = labspecWithAnswers();
+    const auto student = projectStudentLabView( spec );
+    const auto teacher = projectRecipeCompileView( spec );
+
+    // shared truth: identical lab id and step order in both projections
+    REQUIRE( student.value( QStringLiteral( "lab_id" ) ) == teacher.value( QStringLiteral( "lab_id" ) ) );
+    const QJsonArray studentSteps = student.value( QStringLiteral( "steps" ) ).toArray();
+    const QJsonArray teacherSteps = teacher.value( QStringLiteral( "steps" ) ).toArray();
+    REQUIRE( studentSteps.size() == teacherSteps.size() );
+    for ( int i = 0; i < studentSteps.size(); ++i )
+        REQUIRE( studentSteps.at( i ).toObject().value( QStringLiteral( "id" ) )
+                 == teacherSteps.at( i ).toObject().value( QStringLiteral( "id" ) ) );
+
+    // teacher-only fields are absent
+    REQUIRE_FALSE( student.contains( QStringLiteral( "grading_ref" ) ) );
+    REQUIRE_FALSE( student.contains( QStringLiteral( "expected_results" ) ) );
+
+    // param names stay, values are masked
+    const QJsonObject params =
+      studentSteps.at( 0 ).toObject().value( QStringLiteral( "params" ) ).toObject();
+    REQUIRE( params.contains( QStringLiteral( "red" ) ) );
+    REQUIRE( params.value( QStringLiteral( "red" ) ) == QLatin1String( "***" ) );
+    REQUIRE( params.value( QStringLiteral( "secret_formula" ) ) == QLatin1String( "***" ) );
+    REQUIRE( params.value( QStringLiteral( "secret_formula" ) )
+             != spec.value( QStringLiteral( "steps" ) )
+                  .toArray()
+                  .at( 0 )
+                  .toObject()
+                  .value( QStringLiteral( "params" ) )
+                  .toObject()
+                  .value( QStringLiteral( "secret_formula" ) ) );
+
+    // student-visible pedagogy survives
+    REQUIRE( student.contains( QStringLiteral( "questions" ) ) );
+    REQUIRE( studentSteps.at( 1 ).toObject().value( QStringLiteral( "human_only" ) ) == true );
+
+    // deterministic serialization
+    REQUIRE( canonicalJsonBytes( projectStudentLabView( spec ) )
+             == canonicalJsonBytes( projectStudentLabView( spec ) ) );
+}
+
+TEST_CASE( "leak oracle passes the real projection and kills mutations",
+           "[teaching_admin][projection][adversarial]" )
+{
+    const auto spec = labspecWithAnswers();
+    const auto student = projectStudentLabView( spec );
+
+    // the real projection must pass its own oracle
+    const auto clean = assertNoAnswerLeak( student, spec );
+    REQUIRE( clean.ok );
+
+    // MUTATION ORACLE — each tampered view must be caught:
+    auto mustFail = [&]( const QJsonObject &mutant, const QString &expectedCode ) {
+        const auto r = assertNoAnswerLeak( mutant, spec );
+        REQUIRE_FALSE( r.ok );
+        bool found = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == expectedCode )
+                found = true;
+        REQUIRE( found );
+    };
+
+    // (1) grading_ref re-added
+    QJsonObject m1 = student;
+    m1.insert( QStringLiteral( "grading_ref" ), spec.value( QStringLiteral( "grading_ref" ) ) );
+    mustFail( m1, QStringLiteral( "teacher_only_field" ) );
+
+    // (2) an expected_results claim smuggled into a step title
+    QJsonObject m2 = student;
+    {
+        QJsonArray steps = m2.value( QStringLiteral( "steps" ) ).toArray();
+        QJsonObject s2 = steps.at( 1 ).toObject();
+        s2.insert( QStringLiteral( "title" ),
+                   QStringLiteral( "结果应说明 NDVI 均值应为 0.42 ± 0.01" ) );
+        steps.replace( 1, s2 );
+        m2.insert( QStringLiteral( "steps" ), steps );
+    }
+    mustFail( m2, QStringLiteral( "answer_leak" ) );
+
+    // (3) a param value left unmasked at its position
+    QJsonObject m3 = student;
+    {
+        QJsonArray steps = m3.value( QStringLiteral( "steps" ) ).toArray();
+        QJsonObject s1 = steps.at( 0 ).toObject();
+        QJsonObject params = s1.value( QStringLiteral( "params" ) ).toObject();
+        params.insert( QStringLiteral( "secret_formula" ),
+                       QStringLiteral( "band0*1.7-band1" ) );
+        s1.insert( QStringLiteral( "params" ), params );
+        steps.replace( 0, s1 );
+        m3.insert( QStringLiteral( "steps" ), steps );
+    }
+    mustFail( m3, QStringLiteral( "answer_leak" ) );
+
+    // (4) the grading intent path quoted in the note
+    QJsonObject m4 = student;
+    m4.insert( QStringLiteral( "note" ),
+               QStringLiteral( "see data/labs/grading/lab99.intent.json for answers" ) );
+    mustFail( m4, QStringLiteral( "answer_leak" ) );
 }

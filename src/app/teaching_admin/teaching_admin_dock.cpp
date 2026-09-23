@@ -11,6 +11,7 @@
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
 #include "teaching_admin/script_adapters.h"
+#include "teaching_admin/student_projection.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -258,8 +259,12 @@ void TeachingAdminDock::onValidateLabSpec()
     const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), catalog.operatorIds,
                                                             catalog.paramSchemas, repoRoot() );
     appendLog( QString::fromUtf8( QJsonDocument( vr.toJson() ).toJson( QJsonDocument::Compact ) ) );
+    // Both projections derive from the same authoring truth: the teacher sees
+    // the recipe compile view, the student-side view is answer-masked.
     const auto recipe = sicnu::teaching_admin::projectRecipeCompileView( doc.object() );
     appendLog( QString::fromUtf8( QJsonDocument( recipe ).toJson( QJsonDocument::Compact ) ) );
+    const auto student = sicnu::teaching_admin::projectStudentLabView( doc.object() );
+    appendLog( QString::fromUtf8( QJsonDocument( student ).toJson( QJsonDocument::Compact ) ) );
 }
 
 void TeachingAdminDock::onValidateRubric()
