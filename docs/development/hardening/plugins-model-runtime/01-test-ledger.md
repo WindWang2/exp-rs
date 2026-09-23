@@ -86,3 +86,10 @@ Behavior deltas vs master, for the record:
 - Oracle 9 deliberately CHANGES pinned behavior: the old test asserted the sidecar was
   "detectably absent" after rollback; hardening 15/20 restores the previous verified
   product+sidecar PAIR (crash invariant unchanged: missing, never stale).
+
+## PR record
+
+PR #1270 created from `hardening/plugins-model-runtime` (rebased onto master
+`a8c7d88ba`, zero file overlap with the 26 interleaved master commits). Final tree
+verified: all 8 targeted suites, 127 test cases, two consecutive green passes.
+Not merged; online CI not awaited.
