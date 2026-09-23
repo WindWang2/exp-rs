@@ -58,6 +58,8 @@
 | `8295b0321` | student projection (masked answers) + adversarial leak oracle |
 | `c693122b4` | portable bundle builder twins, manifest inspection + version pin, foundry drift adapter + dock button |
 | `8f3802d79` | adversarial review round 1 fixes (see below) |
+| `755a175cd` | callable lab_id backfill + opt-in real-CLI grading lane |
+| `1e726c5df` | re-review P3 lanes: crash regression, max-weight top deduction, UB-free version check |
 
 ## Verification (no full build — narrow targets only)
 
@@ -65,7 +67,7 @@
   `test_teaching_admin_dock_smoke` (+ `sicnu_teaching_admin`). **No full-app/QGIS build was made**;
   configure ran once (`dev-default` + local prefix path).
 - Final evidence, run twice consecutively:
-  - `test_teaching_admin_core`: **303 assertions / 28 cases — all passed (×2)**
+  - `test_teaching_admin_core`: **309 assertions / 28 cases — all passed (×2)**
   - `test_teaching_admin_dock_smoke` (offscreen, compiles the dock TU, no QGIS): **16 assertions /
     2 cases — all passed (×2)**
 - Mutation/adversarial oracles:
@@ -80,7 +82,7 @@ Full-diff review (`origin/master...HEAD`) by an independent reviewer: P1×1 + P2
 re-verified (declared-bytes sum regression, top-deduction max-weight parity, QProcess crash
 semantics plumbed to unavailable/unverifiable, pack validator authority parity, fake-CLI CMake
 dependency) plus P3s (CSV formula-injection twin, integral spec_version, mask-literal guard,
-sorted JSON). Re-review fix verification requested before opening this PR.
+sorted JSON). Re-review verdict: **READY / PROCEED** (fix verification incl. static check that all 19 committed packs / 111 inputs satisfy the strengthened validator).
 
 ## Known limits
 
