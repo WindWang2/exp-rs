@@ -1,0 +1,228 @@
+{
+  "capabilities" : 
+  {
+    "analysis" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 256,
+        "input_domain" : "",
+        "operator_id" : "rs:ndvi",
+        "output_domain" : "index"
+      }
+    ],
+    "data_import" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 128,
+        "input_domain" : "",
+        "operator_id" : "rs:mosaic",
+        "output_domain" : ""
+      }
+    ],
+    "publication" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 64,
+        "input_domain" : "",
+        "operator_id" : "io:translate",
+        "output_domain" : ""
+      }
+    ],
+    "verification" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 128,
+        "input_domain" : "",
+        "operator_id" : "rs:regress",
+        "output_domain" : ""
+      }
+    ]
+  },
+  "context" : 
+  {
+    "assets" : 
+    [
+      {
+        "asset_kind" : "raster",
+        "band_roles" : [ "red", "nir" ],
+        "crs" : "EPSG:32648",
+        "dates" : [ "2024-04-02" ],
+        "modality" : "optical",
+        "numeric_domain" : "reflectance",
+        "quality_mask_available" : true,
+        "ref" : "asset-wheat",
+        "resolution_m" : 10.0,
+        "state" : "ready"
+      }
+    ],
+    "constraints" : {},
+    "kind" : "planning_context",
+    "mode" : 
+    {
+      "autonomy" : "full",
+      "kind" : "agent",
+      "student_decision_default" : false
+    },
+    "quality" : {},
+    "resource_budget" : {},
+    "schema_version" : "1.0"
+  },
+  "description" : "single-date NDVI measurement: straight staged spine, no gates fired, deterministic fingerprint",
+  "expected" : 
+  {
+    "blocking_questions" : 0,
+    "candidate_count" : 1,
+    "sequence" : "import:rs:mosaic->analyze:rs:ndvi->verify:rs:regress->publish:io:translate",
+    "teaching" : 
+    {
+      "autonomy" : "guided",
+      "masking_applied" : true,
+      "mode_kind" : "teaching"
+    },
+    "verdict" : "feasible"
+  },
+  "expected_fingerprint" : "d2003b3ec6bfdeb1",
+  "expected_plan" : 
+  {
+    "cost" : 
+    {
+      "aggregate_cost_class" : "low",
+      "total_estimated_ram_mb" : 576
+    },
+    "goal_id" : "goal-ndvi-01",
+    "goal_kind" : "measurement",
+    "kind" : "scientific_plan",
+    "mode" : 
+    {
+      "autonomy" : "full",
+      "kind" : "agent"
+    },
+    "plan_id" : "plan-d2003b3ec6bfdeb1",
+    "rules_revision" : "planner-rules/1",
+    "schema_version" : "1.0",
+    "steps" : 
+    [
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 128,
+        "family" : "data_import",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "asset_ref" : "asset-wheat"
+          }
+        ],
+        "operator_id" : "rs:mosaic",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-wheat",
+            "detail" : "asset ready at plan time",
+            "kind" : "asset_state"
+          }
+        ],
+        "role" : "import",
+        "step_id" : "step-import-01"
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 256,
+        "expected_transitions" : 
+        [
+          {
+            "asset_ref" : "asset-wheat",
+            "from_domain" : "reflectance",
+            "to_domain" : "index"
+          }
+        ],
+        "family" : "analysis",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-import-01"
+          }
+        ],
+        "operator_id" : "rs:ndvi",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-wheat",
+            "detail" : "analysis consumes the bridged data scale",
+            "domain" : "reflectance",
+            "kind" : "numeric_domain"
+          }
+        ],
+        "role" : "analyze",
+        "step_id" : "step-analyze-02"
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 128,
+        "family" : "verification",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-analyze-02"
+          }
+        ],
+        "operator_id" : "rs:regress",
+        "role" : "verify",
+        "step_id" : "step-verify-03",
+        "verifier_targets" : 
+        [
+          {
+            "check" : "index within plausible range",
+            "target" : "[-1,1]"
+          }
+        ]
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 64,
+        "family" : "publication",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-verify-03"
+          }
+        ],
+        "operator_id" : "io:translate",
+        "role" : "publish",
+        "step_id" : "step-publish-04"
+      }
+    ],
+    "verdict" : "feasible"
+  },
+  "goal" : 
+  {
+    "acceptance_criteria" : 
+    [
+      {
+        "check" : "index within plausible range",
+        "criterion_id" : "acc-1",
+        "target" : "[-1,1]"
+      }
+    ],
+    "goal_id" : "goal-ndvi-01",
+    "goal_kind" : "measurement",
+    "kind" : "scientific_goal",
+    "quantity" : "ndvi",
+    "schema_version" : "1.0",
+    "subject" : "NDVI of the winter wheat parcel"
+  },
+  "kind" : "planner_golden_scenario",
+  "scenario" : "01_ndvi_measurement",
+  "schema_version" : "1.0"
+}

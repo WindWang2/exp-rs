@@ -1,0 +1,234 @@
+{
+  "capabilities" : 
+  {
+    "analysis" : 
+    [
+      {
+        "cost_class" : "medium",
+        "deterministic" : true,
+        "estimated_ram_mb" : 1024,
+        "input_domain" : "features",
+        "operator_id" : "rs:classify",
+        "output_domain" : "none"
+      }
+    ],
+    "data_import" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 128,
+        "input_domain" : "",
+        "operator_id" : "rs:mosaic",
+        "output_domain" : ""
+      }
+    ],
+    "publication" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 64,
+        "input_domain" : "",
+        "operator_id" : "io:translate",
+        "output_domain" : ""
+      }
+    ],
+    "verification" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 128,
+        "input_domain" : "",
+        "operator_id" : "rs:regress",
+        "output_domain" : ""
+      }
+    ]
+  },
+  "context" : 
+  {
+    "assets" : 
+    [
+      {
+        "asset_kind" : "raster",
+        "band_roles" : [ "feature_1", "feature_2", "feature_3" ],
+        "crs" : "EPSG:32648",
+        "dates" : [ "2024-04-20" ],
+        "modality" : "optical",
+        "numeric_domain" : "features",
+        "quality_mask_available" : true,
+        "ref" : "asset-stack",
+        "resolution_m" : 10.0,
+        "state" : "ready"
+      }
+    ],
+    "constraints" : {},
+    "kind" : "planning_context",
+    "mode" : 
+    {
+      "autonomy" : "guided",
+      "kind" : "teaching",
+      "student_decision_default" : false
+    },
+    "quality" : 
+    {
+      "require_validation_split" : true
+    },
+    "resource_budget" : {},
+    "schema_version" : "1.0"
+  },
+  "description" : "land-cover classification in a guided teaching lab: student-decision analysis parameters masked in the hidden-answer view, rationale in the explanation view",
+  "expected" : 
+  {
+    "blocking_questions" : 0,
+    "candidate_count" : 1,
+    "sequence" : "import:rs:mosaic->analyze:rs:classify->verify:rs:regress->publish:io:translate",
+    "teaching" : 
+    {
+      "autonomy" : "guided",
+      "masking_applied" : true,
+      "mode_kind" : "teaching"
+    },
+    "verdict" : "feasible"
+  },
+  "expected_fingerprint" : "e5f28fd13a74f28c",
+  "expected_plan" : 
+  {
+    "cost" : 
+    {
+      "aggregate_cost_class" : "medium",
+      "total_estimated_ram_mb" : 1344
+    },
+    "goal_id" : "goal-lulc-classify-04",
+    "goal_kind" : "classification",
+    "kind" : "scientific_plan",
+    "mode" : 
+    {
+      "autonomy" : "guided",
+      "kind" : "teaching"
+    },
+    "plan_id" : "plan-e5f28fd13a74f28c",
+    "rules_revision" : "planner-rules/1",
+    "schema_version" : "1.0",
+    "steps" : 
+    [
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 128,
+        "family" : "data_import",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "asset_ref" : "asset-stack"
+          }
+        ],
+        "operator_id" : "rs:mosaic",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-stack",
+            "detail" : "asset ready at plan time",
+            "kind" : "asset_state"
+          }
+        ],
+        "role" : "import",
+        "step_id" : "step-import-01"
+      },
+      {
+        "cost_class" : "medium",
+        "estimated_ram_mb" : 1024,
+        "expected_transitions" : 
+        [
+          {
+            "asset_ref" : "asset-stack",
+            "from_domain" : "features",
+            "to_domain" : "none"
+          }
+        ],
+        "family" : "analysis",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-import-01"
+          }
+        ],
+        "operator_id" : "rs:classify",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-stack",
+            "detail" : "analysis consumes the bridged data scale",
+            "domain" : "features",
+            "kind" : "numeric_domain"
+          }
+        ],
+        "role" : "analyze",
+        "step_id" : "step-analyze-02",
+        "student_decision" : true
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 128,
+        "family" : "verification",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-analyze-02"
+          }
+        ],
+        "operator_id" : "rs:regress",
+        "role" : "verify",
+        "step_id" : "step-verify-03",
+        "verifier_targets" : 
+        [
+          {
+            "check" : "held-out accuracy",
+            "target" : "oa >= 0.85"
+          },
+          {
+            "check" : "validation split held out from fitting"
+          }
+        ]
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 64,
+        "family" : "publication",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-verify-03"
+          }
+        ],
+        "operator_id" : "io:translate",
+        "role" : "publish",
+        "step_id" : "step-publish-04"
+      }
+    ],
+    "verdict" : "feasible"
+  },
+  "goal" : 
+  {
+    "acceptance_criteria" : 
+    [
+      {
+        "check" : "held-out accuracy",
+        "criterion_id" : "acc-1",
+        "target" : "oa >= 0.85"
+      }
+    ],
+    "goal_id" : "goal-lulc-classify-04",
+    "goal_kind" : "classification",
+    "kind" : "scientific_goal",
+    "schema_version" : "1.0",
+    "subject" : "land cover classes over the campus quad"
+  },
+  "kind" : "planner_golden_scenario",
+  "scenario" : "04_classification_teaching_guided",
+  "schema_version" : "1.0"
+}
