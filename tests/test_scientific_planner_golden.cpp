@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <vector>
 #include <fstream>
 #include <map>
 #include <string>
@@ -77,6 +78,31 @@ Json::Value loadScenario( const std::string &path )
     return doc;
 }
 
+/// Splits into '\n'-joined lines (helper for the trailing-space strip below).
+std::vector<std::string> &TextLines( std::string &text )
+{
+    static std::vector<std::string> lines;
+    lines.clear();
+    std::string current;
+    for ( const char c : text )
+    {
+        if ( c == '\n' )
+        {
+            lines.push_back( current );
+            current.clear();
+        }
+        else
+        {
+            current.push_back( c );
+        }
+    }
+    lines.push_back( current );
+    text.clear();
+    for ( const auto &line : lines )
+        text += line + "\n";
+    return lines;
+}
+
 std::string scenarioPath( const char *name )
 {
     return std::string( CMAKE_SOURCE_DIR ) + "/data/planner/golden_scenarios/" + name;
@@ -93,7 +119,14 @@ void updateGolden( const std::string &path, Json::Value scenario, const Scientif
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "  ";
     builder["commentStyle"] = "None";
-    file << Json::writeString( builder, scenario );
+    std::string text = Json::writeString( builder, scenario );
+    // jsoncpp pretty-printing leaves a trailing space after "key" : when the
+    // value moves to the next line; strip it so git diff --check stays clean
+    // and regenerated files are byte-stable against the committed form.
+    for ( auto &line : TextLines( text ) )
+        while ( !line.empty() && ( line.back() == ' ' || line.back() == '\t' ) )
+            line.pop_back();
+    file << text;
 }
 } // namespace
 

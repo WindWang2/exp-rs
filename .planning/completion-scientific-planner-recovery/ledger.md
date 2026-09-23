@@ -80,6 +80,8 @@ composition is Prompt 16's job); PR will state this honestly.
 | 12 | independent adversarial review (subagent, out-of-tree probes) | O9 | BLOCKED: 3 P0 + 3 P1 + 3 P2 (producer/reader gap, stage-wide constraints, fail-closed seams, sibling verdict stain, contract-less operators, mirror honesty) |
 | 13 | remediation commit 4a22095d1 + regression oracles for every finding | O7/O9 | suite 67/67 green; sent for re-review |
 | 14 | PR 前同步: master still e4904cd3c (no rebase needed); parallel open PRs #1277-1279 touch grader/repair_planner/preflight — zero directory overlap with src/planner; shared files are append-only unions (tests/CMakeLists.txt tail) | — | dedupe clean |
+| 15 | re-review of residue fixes (commit 0f829189e): boundedAssetRefs unifies all five per-asset loops (R1-R4 probes re-verified); drift pin mutation-proven (kModalityDem rename kills the suite) | O9 | **VERDICT: READY/PROCEED** — 0 P0/P1/P2 open |
+| 16 | O10 key oracle run TWICE consecutively | O10 | run 1: 67/67 passed; run 2: 67/67 passed |
 
 Resource discipline note: one configure; only `sicnu_planner` + 10 test
 executables built (plus their existing deps: Catch2, jsoncpp, contracts,
