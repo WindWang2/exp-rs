@@ -288,8 +288,27 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
                } );
     for ( const auto &row : sorted )
     {
+        // Twin of csv_safe() in scripts/run_classroom_batch.py and
+        // csvSafeCell() in src/cli/lab_batch_runner.cpp: a leading =+-@TABCR
+        // gets an apostrophe prefix so spreadsheets open the cell as text.
         auto esc = []( QString s ) {
             s.replace( QLatin1Char( '"' ), QStringLiteral( "\"\"" ) );
+            if ( !s.isEmpty() )
+            {
+                switch ( s.at( 0 ).unicode() )
+                {
+                    case '=':
+                    case '+':
+                    case '-':
+                    case '@':
+                    case '\t':
+                    case '\r':
+                        s.prepend( QLatin1Char( '\'' ) );
+                        break;
+                    default:
+                        break;
+                }
+            }
             return QStringLiteral( "\"" ) + s + QStringLiteral( "\"" );
         };
         csv += esc( row.studentId ) + QLatin1Char( ',' );

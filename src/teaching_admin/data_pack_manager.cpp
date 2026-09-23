@@ -113,6 +113,11 @@ ValidationResult validatePackDocument( const QJsonObject &pack, const QString &r
         const QJsonObject in = inputs.at( i ).toObject();
         const QString path = in.value( QStringLiteral( "path" ) ).toString();
         const QString at = QStringLiteral( "inputs[%1].path" ).arg( i );
+        // Parity with the pack authority loader (lab_data_pack): repo/bundle
+        // paths are forward-slash; a backslash is rejected, not normalized.
+        if ( path.contains( QLatin1Char( '\\' ) ) )
+            r.addError( QStringLiteral( "backslash_path" ), at,
+                        QStringLiteral( "pack input paths must use forward slashes" ) );
         if ( isUnsafeRelativePath( path ) )
             r.addError( QStringLiteral( "path_traversal" ), at,
                         QStringLiteral( "pack input path escapes root or is absolute" ) );
@@ -141,6 +146,17 @@ ValidationResult validatePackDocument( const QJsonObject &pack, const QString &r
             r.addError( QStringLiteral( "missing_sha256" ),
                         QStringLiteral( "inputs[%1].sha256" ).arg( i ),
                         QStringLiteral( "committed-fixture input requires sha256" ) );
+        // Same parity: a required role and a byte pin on committed fixtures.
+        if ( !in.contains( QStringLiteral( "role" ) )
+             || in.value( QStringLiteral( "role" ) ).toString().isEmpty() )
+            r.addError( QStringLiteral( "missing_role" ),
+                        QStringLiteral( "inputs[%1].role" ).arg( i ),
+                        QStringLiteral( "pack input requires a role" ) );
+        if ( isCommittedFixture( provenance )
+             && static_cast<qint64>( in.value( QStringLiteral( "bytes" ) ).toDouble( -1 ) ) <= 0 )
+            r.addError( QStringLiteral( "missing_bytes" ),
+                        QStringLiteral( "inputs[%1].bytes" ).arg( i ),
+                        QStringLiteral( "committed-fixture input requires a byte size" ) );
     }
     return r;
 }
@@ -238,8 +254,6 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
             if ( declared > 0 )
             {
                 declaredPerInputSum += declared;
-                if ( e.declaredBytes < 0 )
-                    e.declaredBytes = 0;
                 // Byte pin: hard for committed fixtures (drift means the
                 // deployment is not the audited one), informative elsewhere.
                 if ( fi.exists() && fi.isFile()

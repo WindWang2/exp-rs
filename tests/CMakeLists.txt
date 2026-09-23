@@ -12731,6 +12731,9 @@ sicnu_add_teaching_admin_test(test_teaching_admin_core)
 target_compile_definitions(test_teaching_admin_core PRIVATE
   FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
 )
+# The core suite spawns the fake grader CLI by path: make a target-scoped
+# build (no `all`) produce it too.
+add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
 
 # Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
 # into the test (no QGIS, no app binary) and drives one real batch-grade
@@ -12753,6 +12756,7 @@ target_include_directories(test_teaching_admin_dock_smoke PRIVATE
 target_compile_definitions(test_teaching_admin_dock_smoke PRIVATE
   FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
 )
+add_dependencies(test_teaching_admin_dock_smoke test_teaching_fake_grader_cli)
 set_target_properties(test_teaching_admin_dock_smoke PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   CXX_STANDARD 20

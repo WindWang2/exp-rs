@@ -166,6 +166,10 @@ ValidationResult assertNoAnswerLeak( const QJsonObject &studentView, const QJson
         {
             const QString at =
               QStringLiteral( "steps[%1].params.%2" ).arg( i ).arg( it.key() );
+            // A teacher whose literal answer IS the mask cannot be flagged —
+            // the masked view is indistinguishable by construction.
+            if ( it.value().toString() == QLatin1String( kMaskedValue ) )
+                continue;
             if ( viewParams.contains( it.key() ) && viewParams.value( it.key() ) == it.value() )
             {
                 r.addError( QStringLiteral( "answer_leak" ), at,

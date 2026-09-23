@@ -20,8 +20,9 @@ struct ScriptRunRequest
 struct ScriptRunResult
 {
     bool started = false;
-    int exitCode = -1;
     bool timedOut = false;
+    bool crashed = false; ///< child died abnormally (signal) — exitCode meaningless
+    int exitCode = -1;
     QByteArray stdoutBytes;
     QByteArray stderrBytes;
     QString error; ///< typed when process could not start

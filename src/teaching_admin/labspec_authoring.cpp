@@ -4,7 +4,6 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <cmath>
 
 namespace sicnu::teaching_admin {
 
@@ -61,11 +60,11 @@ ValidationResult validateLabSpec( const QJsonObject &spec, const QSet<QString> &
                     QStringLiteral( "unsupported LabSpec schema: " ) + schema );
     if ( hasSpecVersion )
     {
-        bool versionOk = false;
+        // The D2 loader requires an integer 1|2|3 — 2.0 or "2" tolerated by
+        // JSON round-trip must still be integral, not any nearby double.
         const double v = spec.value( QStringLiteral( "spec_version" ) ).toDouble( -1 );
-        for ( const double legal : { 1.0, 2.0, 3.0 } )
-            if ( std::fabs( v - legal ) < 1e-9 )
-                versionOk = true;
+        const bool versionOk = v == static_cast<double>( static_cast<int>( v ) )
+                               && v >= 1.0 && v <= 3.0;
         if ( !versionOk )
             r.addError( QStringLiteral( "schema_mismatch" ), QStringLiteral( "spec_version" ),
                         QStringLiteral( "unsupported spec_version (need 1, 2 or 3)" ) );

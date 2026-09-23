@@ -1,4 +1,5 @@
 #include "grader_cli_adapter.h"
+#include "json_util.h"
 #include "script_adapters.h"
 
 #include <QCoreApplication>
@@ -64,8 +65,25 @@ GraderCliGrade mapTranscript( const GraderCliConfig &cfg, int exitCode, const QJ
     g.reportDigest = digest;
 
     const QJsonArray deductions = report.value( QStringLiteral( "deductions" ) ).toArray();
-    if ( !deductions.isEmpty() )
-        g.topDeduction = deductions.at( 0 ).toObject().value( QStringLiteral( "assertion_id" ) ).toString();
+    // Highest-weight failed assertion carries the top deduction (ties: first
+    // in rules order) — the same definition as the canonical CSV emitter
+    // (src/cli/lab_batch_runner.cpp topDeduction), not merely the first entry.
+    int topIdx = -1;
+    double topWeight = -1.0;
+    for ( int i = 0; i < deductions.size(); ++i )
+    {
+        const QJsonObject d = deductions.at( i ).toObject();
+        const double w = d.value( QStringLiteral( "weight" ) ).toDouble( -1.0 );
+        if ( topIdx < 0 || w > topWeight )
+        {
+            topIdx = i;
+            topWeight = w;
+        }
+    }
+    if ( topIdx >= 0 )
+        g.topDeduction = deductions.at( topIdx ).toObject()
+                           .value( QStringLiteral( "assertion_id" ) )
+                           .toString();
     const QString errorText = report.value( QStringLiteral( "error" ) ).toString();
 
     // Exit contract: 0 pass · 1 fail · 2 usage · 3 unverifiable.
@@ -121,19 +139,19 @@ GraderCliGrade mapTranscript( const GraderCliConfig &cfg, int exitCode, const QJ
 QJsonObject GraderCliGrade::toJson() const
 {
     QJsonObject o{
-        { QStringLiteral( "started" ), started },
-        { QStringLiteral( "timed_out" ), timedOut },
         { QStringLiteral( "exit_code" ), exitCode },
-        { QStringLiteral( "status" ), status },
-        { QStringLiteral( "verdict" ), verdict },
-        { QStringLiteral( "score" ), score },
-        { QStringLiteral( "report_digest" ), reportDigest },
-        { QStringLiteral( "top_deduction" ), topDeduction },
         { QStringLiteral( "message" ), message },
+        { QStringLiteral( "report_digest" ), reportDigest },
+        { QStringLiteral( "score" ), score },
+        { QStringLiteral( "started" ), started },
+        { QStringLiteral( "status" ), status },
+        { QStringLiteral( "timed_out" ), timedOut },
+        { QStringLiteral( "top_deduction" ), topDeduction },
+        { QStringLiteral( "verdict" ), verdict },
     };
     if ( status == QLatin1String( kTeachingUnavailableVerdict ) )
         o.insert( QStringLiteral( "unavailable_reason" ), unavailableReason );
-    return o;
+    return sortKeys( o );
 }
 
 QString resolveGraderCli( const QString &explicitPath )
@@ -201,6 +219,8 @@ GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactP
     if ( sr.timedOut )
         return unavailableGrade( QStringLiteral( "grader_timeout" ),
                                  QStringLiteral( "grader exceeded %1 ms" ).arg( cfg.timeoutMs ) );
+    if ( sr.crashed )
+        return unavailableGrade( QStringLiteral( "grader_crashed" ), sr.error );
 
     // The real CLI writes the transcript to --out and mirrors it on stdout;
     // prefer the file, fall back to stdout.

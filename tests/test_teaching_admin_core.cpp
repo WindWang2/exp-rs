@@ -901,18 +901,45 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
                             { QStringLiteral( "inputs" ), inputs } };
     };
 
-    // in-root input is fine
+    // in-root input is fine (role required by the authority)
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
+                                             { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } ),
+          root );
+        REQUIRE( r.ok );
+    }
+    // missing role is now a typed error, as in the pack authority loader
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) } } } ),
           root );
-        REQUIRE( r.ok );
+        REQUIRE_FALSE( r.ok );
+        bool missingRole = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "missing_role" ) )
+                missingRole = true;
+        REQUIRE( missingRole );
+    }
+    // backslash paths are rejected, not normalized
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data\\ok.tif" ) },
+                                             { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } ),
+          root );
+        REQUIRE_FALSE( r.ok );
+        bool backslash = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "backslash_path" ) )
+                backslash = true;
+        REQUIRE( backslash );
     }
     // lexical escape
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{ QJsonObject{
-            { QStringLiteral( "path" ), QStringLiteral( "data/../../outside.tif" ) } } } ),
+            { QStringLiteral( "path" ), QStringLiteral( "data/../../outside.tif" ) },
+            { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } ),
           root );
         REQUIRE_FALSE( r.ok );
         bool traversal = false;
@@ -934,7 +961,8 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
         QFile::remove( link );
         REQUIRE( QFile::link( outside, link ) );
         const auto r = validatePackDocument(
-          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/link.tif" ) } } } ),
+          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/link.tif" ) },
+                                             { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } ),
           root );
         REQUIRE_FALSE( r.ok );
         bool escape = false;
@@ -951,8 +979,11 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
         const auto r = validatePackDocument(
           makePack( QJsonArray{
             QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
+                         { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
+                         { QStringLiteral( "bytes" ), 4096 },
                          { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) } },
             QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
+                         { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
                          { QStringLiteral( "provenance" ), QStringLiteral( "random-internet" ) } } } ),
           root );
         REQUIRE_FALSE( r.ok );
@@ -1000,6 +1031,7 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
         { QStringLiteral( "inputs" ),
           QJsonArray{ QJsonObject{
             { QStringLiteral( "path" ), QStringLiteral( "data/scene.tif" ) },
+            { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
             { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) },
             { QStringLiteral( "sha256" ), goodSha },
             { QStringLiteral( "bytes" ), static_cast<double>( goodBytes.size() ) } } } },
@@ -1013,6 +1045,11 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
         REQUIRE( inv.packs.size() == 1 );
         REQUIRE( inv.packs.first().offlineAvailable );
         REQUIRE( inv.packs.first().issues.isEmpty() );
+        // P1 regression: the declared byte sum used to be dropped to 0,
+        // silently making withinBudget trivially true.
+        REQUIRE( inv.packs.first().declaredBytes == static_cast<qint64>( goodBytes.size() ) );
+        REQUIRE( inv.packs.first().computedBytes == static_cast<qint64>( goodBytes.size() ) );
+        REQUIRE( inv.withinBudget );
     }
 
     // corrupt the fixture → digest_mismatch, offlineAvailable false
@@ -1038,6 +1075,7 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
         f.write( goodBytes );
         goodPack[QStringLiteral( "inputs" )] = QJsonArray{ QJsonObject{
           { QStringLiteral( "path" ), QStringLiteral( "data/scene.tif" ) },
+          { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
           { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) },
           { QStringLiteral( "sha256" ), goodSha },
           { QStringLiteral( "bytes" ), static_cast<double>( goodBytes.size() + 999 ) } } };
@@ -1060,6 +1098,7 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
             { QStringLiteral( "inputs" ),
               QJsonArray{ QJsonObject{
                 { QStringLiteral( "path" ), QStringLiteral( "data/labs/_tmp/absent.tif" ) },
+                { QStringLiteral( "role" ), QStringLiteral( "sample" ) },
                 { QStringLiteral( "provenance" ), QStringLiteral( "generated-samples" ) } } } },
         };
         writePack( QStringLiteral( "gen.pack.json" ), generatedPack );

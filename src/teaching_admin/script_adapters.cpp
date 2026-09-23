@@ -15,6 +15,7 @@ QJsonObject ScriptRunResult::toJson() const
 {
     return QJsonObject{
         { QStringLiteral( "started" ), started },
+        { QStringLiteral( "crashed" ), crashed },
         { QStringLiteral( "exit_code" ), exitCode },
         { QStringLiteral( "timed_out" ), timedOut },
         { QStringLiteral( "stdout_bytes" ), stdoutBytes.size() },
@@ -53,6 +54,17 @@ ScriptRunResult runScript( const ScriptRunRequest &req )
         out.stdoutBytes = proc.readAllStandardOutput();
         out.stderrBytes = proc.readAllStandardError();
         out.error = QStringLiteral( "timeout" );
+        return out;
+    }
+    // exitCode() is not meaningful for an abnormal exit (Qt docs): a grader
+    // that crashed must never be read as a normal exit-0 verdict.
+    if ( proc.exitStatus() != QProcess::NormalExit )
+    {
+        out.crashed = true;
+        out.exitCode = -1;
+        out.stdoutBytes = proc.readAllStandardOutput();
+        out.stderrBytes = proc.readAllStandardError();
+        out.error = QStringLiteral( "process crashed abnormally" );
         return out;
     }
     out.exitCode = proc.exitCode();
@@ -105,7 +117,7 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     req.timeoutMs = 120000;
     const ScriptRunResult sr = runScript( req );
     r.exitCode = sr.exitCode;
-    if ( !sr.started || sr.timedOut )
+    if ( !sr.started || sr.timedOut || sr.crashed )
     {
         r.verifiable = false;
         r.summary = sr.error;
@@ -268,16 +280,16 @@ PackDriftCheck checkLabPackDrift( const QString &repoRoot, const QString &python
     req.workingDirectory = repoRoot;
     req.timeoutMs = 120000;
     const ScriptRunResult sr = runScript( req );
-    check.ran = sr.started && !sr.timedOut;
+    check.ran = sr.started && !sr.timedOut && !sr.crashed;
     check.exitCode = sr.exitCode;
     if ( !sr.started )
     {
         check.summary = sr.error;
         return check;
     }
-    if ( sr.timedOut )
+    if ( sr.timedOut || sr.crashed )
     {
-        check.summary = QStringLiteral( "timeout" );
+        check.summary = sr.timedOut ? QStringLiteral( "timeout" ) : sr.error;
         return check;
     }
     const QString text = QString::fromUtf8( sr.stdoutBytes ) + QStringLiteral( "\n" )
