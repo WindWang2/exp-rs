@@ -12759,3 +12759,93 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# RS14-09 Scientific Task Planner recovery (PR #1193 implementation never
+# landed; this restores it on the current contracts/capability API).
+# Qt-free leaves: Catch2 + sicnu_planner (jsoncpp + sicnu_contracts only) —
+# no Qt, no QGIS — so planner suites build and run in seconds.
+add_executable(test_scientific_planner_vocab test_scientific_planner_vocab.cpp)
+target_link_libraries(test_scientific_planner_vocab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_vocab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_vocab TEST_PREFIX "test_scientific_planner_vocab::")
+
+add_executable(test_scientific_planner_schema test_scientific_planner_schema.cpp)
+target_link_libraries(test_scientific_planner_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_schema PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_schema TEST_PREFIX "test_scientific_planner_schema::")
+
+add_executable(test_scientific_planner_core test_scientific_planner_core.cpp)
+target_link_libraries(test_scientific_planner_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_core PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_core TEST_PREFIX "test_scientific_planner_core::")
+
+add_executable(test_scientific_planner_constraints test_scientific_planner_constraints.cpp)
+target_link_libraries(test_scientific_planner_constraints PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_constraints PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_constraints PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_constraints TEST_PREFIX "test_scientific_planner_constraints::")
+
+add_executable(test_scientific_planner_teaching test_scientific_planner_teaching.cpp)
+target_link_libraries(test_scientific_planner_teaching PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_teaching PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_teaching PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_teaching TEST_PREFIX "test_scientific_planner_teaching::")
+
+add_executable(test_scientific_planner_proposal test_scientific_planner_proposal.cpp)
+target_link_libraries(test_scientific_planner_proposal PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_proposal PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_proposal PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_proposal TEST_PREFIX "test_scientific_planner_proposal::")
+
+add_executable(test_scientific_planner_ir test_scientific_planner_ir.cpp)
+target_link_libraries(test_scientific_planner_ir PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_ir PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_ir PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_ir TEST_PREFIX "test_scientific_planner_ir::")
+
+add_executable(test_scientific_planner_golden test_scientific_planner_golden.cpp)
+target_link_libraries(test_scientific_planner_golden PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_golden PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_golden PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_golden TEST_PREFIX "test_scientific_planner_golden::")
+
+add_executable(test_scientific_planner_drift test_scientific_planner_drift.cpp)
+target_link_libraries(test_scientific_planner_drift PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+  sicnu_scientific_state
+)
+target_include_directories(test_scientific_planner_drift PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_drift TEST_PREFIX "test_scientific_planner_drift::")
+
+add_executable(test_scientific_planner_review test_scientific_planner_review.cpp)
+target_link_libraries(test_scientific_planner_review PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_review PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_review TEST_PREFIX "test_scientific_planner_review::")
