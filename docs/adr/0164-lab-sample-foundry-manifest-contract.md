@@ -43,6 +43,13 @@ semantic band-role vocabulary (ADR 0065).
    manifest. The only transcendentals are `atan`/`atan2` in the slope/aspect
    truth layers, which are host-stable but not guaranteed bit-identical across
    libm implementations — the one documented crack in cross-host bit-identity.
+   The emit path also pins the ambient GDAL environment (`GDAL_PAM_ENABLED=NO`,
+   `GDAL_NUM_THREADS=1`, `SHAPE_ENCODING` cleared) for the duration of
+   `generate()` and **restores the caller's values on exit** — the foundry is a
+   library (`sicnu_sample_foundry`) linked into hosts, and an unrestored pin
+   would leak process-global GDAL state into the embedding application.
+   Restoration is pinned by `tests/test_sample_fixtures.cpp`
+   ("generate pins the GDAL environment only for its own scope").
 
 4. **Ground truth is mandatory**: every product has a companion
    (`landsat_truth.tif` class mask ids 1–6, `change_truth.tif` change mask,

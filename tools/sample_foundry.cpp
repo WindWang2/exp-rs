@@ -176,6 +176,34 @@ class DetRng
     std::mt19937 engine_;
 };
 
+/// ADR 0164 env pinning with restoration: CPLSetConfigOption is process-global,
+/// and the foundry is a library (sicnu_sample_foundry) linked into hosts — a
+/// pin without restore would leak PAM/threading/encoding settings into the
+/// embedding process for its remaining lifetime.
+class ScopedConfigOption
+{
+  public:
+    ScopedConfigOption( const char *name, const char *value ) : name_( name )
+    {
+        const char *previous = CPLGetConfigOption( name, nullptr );
+        if ( previous != nullptr )
+            previous_ = previous;
+        CPLSetConfigOption( name, value );
+    }
+    ~ScopedConfigOption()
+    {
+        // An unset original must restore as unset: an empty string is a set
+        // value in GDAL's config machinery, not the absence of one.
+        CPLSetConfigOption( name_, previous_.empty() ? nullptr : previous_.c_str() );
+    }
+    ScopedConfigOption( const ScopedConfigOption & ) = delete;
+    ScopedConfigOption &operator=( const ScopedConfigOption & ) = delete;
+
+  private:
+    const char *name_;
+    std::string previous_; // empty = the option was unset; restoring clears it
+};
+
 void clamp01( double *v )
 {
   if ( *v < 0.0 )
@@ -1260,10 +1288,11 @@ Outcome generate( const Options &options, GenerateResult *result )
   // ADR 0164: the emit path must not depend on the ambient GDAL environment.
   // No .aux.xml sidecars (PAM would break byte-determinism, D-012), DEFLATE is
   // forced single-threaded, and SHAPE_ENCODING is cleared so the shapefile
-  // driver can never emit a host-dependent training_samples.cpg.
-  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
-  CPLSetConfigOption( "GDAL_NUM_THREADS", "1" );
-  CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
+  // driver can never emit a host-dependent training_samples.cpg. All three
+  // pins restore the caller's environment when generate() exits.
+  ScopedConfigOption pamPin( "GDAL_PAM_ENABLED", "NO" );
+  ScopedConfigOption threadsPin( "GDAL_NUM_THREADS", "1" );
+  ScopedConfigOption shapeEncodingPin( "SHAPE_ENCODING", nullptr );
   GDALAllRegister();
 
   const GridSpec grid = gridForProfile( options.profile );
