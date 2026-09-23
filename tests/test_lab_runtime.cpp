@@ -772,7 +772,6 @@ TEST_CASE( "session JSON envelope is strictly versioned and shaped", "[lab_runti
 #include "lab/hint_policy.h"
 
 #include "lab/checkpoint_verify.h"
-#include "lab/hint_policy.h"
 
 TEST_CASE( "session envelope refuses unknown keys at every nesting level",
            "[lab_runtime][session][negative]" )

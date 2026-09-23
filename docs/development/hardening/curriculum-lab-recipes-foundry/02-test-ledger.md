@@ -34,7 +34,7 @@ tests/test_lab_document             All tests passed (59 assertions in 5 test ca
 tests/test_lab_source               All tests passed (23 assertions in 6 test cases)
 tests/test_recipe_compiler          All tests passed (81 assertions in 8 test cases)
 tests/test_recipe_equivalence       All tests passed (79 assertions in 5 test cases)
-tests/test_recipe_lookup            All tests passed (24 assertions in 6 test cases)
+tests/test_recipe_lookup            All tests passed (28 assertions in 7 test cases)
 tests/test_recipe_registry          All tests passed (20 assertions in 4 test cases)
 tests/test_recipe_schema            All tests passed (15 assertions in 6 test cases)
 tests/test_recipe_validator         All tests passed (16 assertions in 8 test cases)
@@ -48,6 +48,11 @@ test_sample_fixtures                All tests passed (26132 assertions in 28 tes
 ===== PASS 1: ALL 16 SUITES PASSED
 ===== PASS 2: ALL 16 SUITES PASSED
 ```
+
+(Post-rebase, master-style targets output to `build/tests/`; the two
+"final" passes above were rerun after the adversarial-review fixes with
+fresh binaries — an earlier transcript had recorded a stale pre-fix
+`test_recipe_lookup` binary from before the rebase.)
 
 Gates on the same tree: `check_lab_registry.py --strict-data` ok ·
 `check_curriculum.py` OK · `gen_lab_packs.py --check` packs in sync ·
