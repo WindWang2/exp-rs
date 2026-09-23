@@ -107,6 +107,11 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onInventoryPacks );
         row->addWidget( btn );
         lay->addLayout( row );
+        auto *driftBtn = new QPushButton( tr( "Check Foundry Drift (gen_lab_packs.py --check)" ) );
+        driftBtn->setObjectName( QStringLiteral( "teachingAdminPackDriftButton" ) );
+        driftBtn->setToolTip( tr( "Reuses the pack foundry contract: exit 0 = in sync, DRIFT lines are listed." ) );
+        connect( driftBtn, &QPushButton::clicked, this, &TeachingAdminDock::onCheckPackDrift );
+        lay->addWidget( driftBtn );
         lay->addStretch( 1 );
         m_tabs->addTab( page, tr( "D 数据包" ) );
     }
@@ -288,6 +293,13 @@ void TeachingAdminDock::onInventoryPacks()
 {
     const auto inv = sicnu::teaching_admin::inventoryPacks( m_packsDirEdit->text(), repoRoot() );
     appendLog( QString::fromUtf8( QJsonDocument( inv.toJson() ).toJson( QJsonDocument::Compact ) ) );
+}
+
+void TeachingAdminDock::onCheckPackDrift()
+{
+    const auto check = sicnu::teaching_admin::checkLabPackDrift( repoRoot() );
+    appendLog( tr( "foundry drift: %1" ).arg( check.summary ) );
+    appendLog( QString::fromUtf8( QJsonDocument( check.toJson() ).toJson( QJsonDocument::Compact ) ) );
 }
 
 void TeachingAdminDock::onRunPreflight()

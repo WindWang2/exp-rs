@@ -26,6 +26,7 @@ class TeachingAdminDock : public QWidget
     void onValidateLabSpec();
     void onValidateRubric();
     void onInventoryPacks();
+    void onCheckPackDrift();
     void onRunPreflight();
     void onVerifyBundle();
     void onRunBatch();

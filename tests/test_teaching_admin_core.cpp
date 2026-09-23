@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <atomic>
@@ -1219,4 +1220,153 @@ TEST_CASE( "leak oracle passes the real projection and kills mutations",
     m4.insert( QStringLiteral( "note" ),
                QStringLiteral( "see data/labs/grading/lab99.intent.json for answers" ) );
     mustFail( m4, QStringLiteral( "answer_leak" ) );
+}
+
+TEST_CASE( "bundle manifest inspection + version pin", "[teaching_admin][offline]" )
+{
+    QTemporaryDir bundle;
+    REQUIRE( bundle.isValid() );
+    // no manifest → typed issue, not ok
+    {
+        const auto info = inspectBundleManifest( bundle.path() );
+        REQUIRE_FALSE( info.ok );
+        REQUIRE( info.issues.size() == 1 );
+        REQUIRE( info.issues.first().code == QLatin1String( "manifest_unreadable" ) );
+    }
+    // manifest with version + files
+    {
+        {
+            QFile f( QDir( bundle.path() ).filePath( QStringLiteral( "manifest.json" ) ) );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( QByteArray( R"({"schema":"sicnu.offline_bundle/2","bundle_version":"v2026.09","files":[{},{}]})" ) );
+        }
+        const auto info = inspectBundleManifest( bundle.path() );
+        REQUIRE( info.ok );
+        REQUIRE( info.schema == QLatin1String( "sicnu.offline_bundle/2" ) );
+        REQUIRE( info.bundleVersion == QLatin1String( "v2026.09" ) );
+        REQUIRE( info.fileCount == 2 );
+        REQUIRE( info.issues.isEmpty() );
+    }
+}
+
+TEST_CASE( "bundle builder argv selects the platform twin script",
+           "[teaching_admin][offline]" )
+{
+    const auto posix = bundleBuilderRequest( QStringLiteral( "/repo" ), QStringLiteral( "/build" ),
+                                             QStringLiteral( "/out" ), QStringLiteral( "v1" ), 250, false );
+    REQUIRE( posix.program == QLatin1String( "bash" ) );
+    REQUIRE( posix.arguments.first().endsWith( QLatin1String( "build_offline_bundle.sh" ) ) );
+
+    const auto win = bundleBuilderRequest( QStringLiteral( "/repo" ), QStringLiteral( "/build" ),
+                                           QStringLiteral( "/out" ), QStringLiteral( "v1" ), 250, true );
+    REQUIRE( win.program == QLatin1String( "cmd.exe" ) );
+    REQUIRE( win.arguments.contains( QLatin1String( "/c" ) ) );
+    REQUIRE( win.arguments.at( 1 ).endsWith( QLatin1String( "build_offline_bundle.cmd" ) ) );
+
+    // both carry the same option contract; version appended only when set
+    for ( const auto *req : { &posix, &win } )
+    {
+        REQUIRE( req->arguments.contains( QLatin1String( "--build-dir" ) ) );
+        REQUIRE( req->arguments.contains( QLatin1String( "--out" ) ) );
+        REQUIRE( req->arguments.contains( QLatin1String( "--max-mb" ) ) );
+        REQUIRE( req->arguments.contains( QLatin1String( "--version" ) ) );
+    }
+    const auto noVersion =
+      bundleBuilderRequest( QStringLiteral( "/repo" ), QStringLiteral( "/b" ), QStringLiteral( "/o" ),
+                            QString(), 250, false );
+    REQUIRE_FALSE( noVersion.arguments.contains( QLatin1String( "--version" ) ) );
+}
+
+TEST_CASE( "verifyOfflineBundle flags a broken version pin", "[teaching_admin][offline]" )
+{
+    // Hermetic: a fake canonical verifier (same exit contract) + a manifest.
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    REQUIRE( QDir( repo.path() ).mkpath( QStringLiteral( "scripts" ) ) );
+    {
+        QFile f( QDir( repo.path() ).filePath( QStringLiteral( "scripts/verify_bundle_manifest.py" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "#!/usr/bin/env python3\n"
+                             "import sys\n"
+                             "print('VERDICT OK')\n"
+                             "sys.exit(0)\n" ) );
+    }
+    QTemporaryDir bundle;
+    REQUIRE( bundle.isValid() );
+    {
+        QFile f( QDir( bundle.path() ).filePath( QStringLiteral( "manifest.json" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( R"({"schema":"sicnu.offline_bundle/2","bundle_version":"v2026.09","files":[]})" ) );
+    }
+
+    // expected matches declared → ok
+    const auto okRun = verifyOfflineBundle( repo.path(), bundle.path(), QStringLiteral( "python3" ),
+                                            QStringLiteral( "v2026.09" ) );
+    REQUIRE( okRun.verifiable );
+    REQUIRE( okRun.ok );
+    REQUIRE( okRun.bundleVersion == QLatin1String( "v2026.09" ) );
+    REQUIRE( okRun.manifestSchema == QLatin1String( "sicnu.offline_bundle/2" ) );
+
+    // expected differs → typed failed verification, never a silent pass
+    const auto mismatch = verifyOfflineBundle( repo.path(), bundle.path(), QStringLiteral( "python3" ),
+                                               QStringLiteral( "vOLD" ) );
+    REQUIRE( mismatch.verifiable );
+    REQUIRE_FALSE( mismatch.ok );
+    REQUIRE( mismatch.summary == QLatin1String( "version_mismatch" ) );
+    bool pinned = false;
+    for ( const auto &f : mismatch.findings )
+        if ( f.startsWith( QLatin1String( "version_mismatch:" ) ) )
+            pinned = true;
+    REQUIRE( pinned );
+}
+
+TEST_CASE( "foundry drift check reuses gen_lab_packs.py --check contract",
+           "[teaching_admin][offline]" )
+{
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    REQUIRE( QDir( repo.path() ).mkpath( QStringLiteral( "scripts" ) ) );
+    const QString python = QStandardPaths::findExecutable( QStringLiteral( "python3" ) );
+    if ( python.isEmpty() )
+    {
+        WARN( "python3 not available; skipping foundry drift adapter test" );
+        return;
+    }
+    // in sync: exit 0
+    {
+        {
+            QFile f( QDir( repo.path() ).filePath( QStringLiteral( "scripts/gen_lab_packs.py" ) ) );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( QByteArray( "import sys\nprint('packs in sync')\nsys.exit(0)\n" ) );
+        }
+        const auto check = checkLabPackDrift( repo.path(), python );
+        REQUIRE( check.ran );
+        REQUIRE( check.inSync );
+        REQUIRE( check.driftFiles.isEmpty() );
+    }
+    // drift: exit 1 + DRIFT lines parsed into typed results
+    {
+        {
+            QFile f( QDir( repo.path() ).filePath( QStringLiteral( "scripts/gen_lab_packs.py" ) ) );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( QByteArray( "import sys\n"
+                                 "print('DRIFT data/labs/packs/lab01.pack.json')\n"
+                                 "print('DRIFT data/labs/packs/lab15.pack.json')\n"
+                                 "sys.exit(1)\n" ) );
+        }
+        const auto check = checkLabPackDrift( repo.path(), python );
+        REQUIRE( check.ran );
+        REQUIRE_FALSE( check.inSync );
+        REQUIRE( check.exitCode == 1 );
+        REQUIRE( check.driftFiles.size() == 2 );
+        REQUIRE( check.driftFiles.first()
+                 == QLatin1String( "data/labs/packs/lab01.pack.json" ) );
+        REQUIRE( check.summary.contains( QLatin1String( "drift" ) ) );
+    }
+    // missing script is typed, not a crash
+    {
+        const auto missing = checkLabPackDrift( QStringLiteral( "/no/such/repo" ), python );
+        REQUIRE_FALSE( missing.ran );
+        REQUIRE( missing.summary == QLatin1String( "foundry_script_missing" ) );
+    }
 }
