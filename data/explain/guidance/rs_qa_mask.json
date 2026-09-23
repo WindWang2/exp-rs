@@ -1,0 +1,40 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:qa_mask",
+  "purpose": "从产品 QA 波段解译云、云影、雪等类别：支持 Landsat QA_PIXEL 位标志、Sentinel-2 SCL 类别码与通用位掩码三种来源，输出 UInt8 二值掩膜（1 = 掩掉）。",
+  "whenToUse": "光谱指数与变化检测之前剔除云污染像元；在预处理流程中位于大气校正之前（如 lab.preprocess.optical 流程）。",
+  "prerequisitesNote": [
+    "输入栅格须携带 QA 波段（产品堆栈烙印 SICNU_BAND_ROLE=scene_classification/qa），或用 qa_band 显式指定 1-based 波段号。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "source",
+      "rationale": "QA 位语义的解译方式：auto 按波段描述与角色自动识别 landsat_qa_pixel、sentinel2_scl 或 generic_bitmask，也可显式指定。",
+      "misconfigurationConsequence": "把 SCL 类别码当 generic_bitmask 位标志解读，掩膜结果完全错误且不报错。"
+    },
+    {
+      "parameter": "mask",
+      "rationale": "要掩掉的类别组合：cloud_and_shadow（默认）、cloud、cloud_shadow、snow、water 或 all；不同 scene 的关注类别不同。",
+      "misconfigurationConsequence": "冬季影像选 all 会把大量有效雪像元掩掉，高山地区不掩 snow 则把雪误判为亮裸地进入下游。"
+    },
+    {
+      "parameter": "bits",
+      "rationale": "generic_bitmask 来源下视为坏的位标志集合，必须给非零值，否则被类型化拒绝。",
+      "misconfigurationConsequence": "位选错时该掩的不掩、不该掩的反被掩；bits=0 直接报参数错误。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "Mask" },
+  "skipConsequence": {
+    "summary": "云与云影像元混入指数与变化统计，直方图被大气污染扭曲。",
+    "downstreamRoles": ["光谱指数", "变化检测", "时序合成"]
+  },
+  "references": [
+    {
+      "title": "USGS Landsat Collection 2 Level-2 QA Pixel 文档",
+      "kind": "doc",
+      "locator": "USGS EROS, Landsat Collection 2 Level-2 QA Pixel bit definitions",
+      "note": "QA_PIXEL 各位（云、云影、雪、水体等）的官方语义，landsat_qa_pixel 源据此解译。"
+    }
+  ],
+  "teachingNote": "qa_mask 只生成掩膜，不修改产品像元；要把掩掉像元真正置为 NoData，需接 rs:apply_mask。"
+}

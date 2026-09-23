@@ -1,0 +1,39 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:radiometric_calibration",
+  "purpose": "读取 Landsat MTL / Sentinel-2 MTD 产品定标系数，把传感器 DN 逐像元换算为物理量：辐射亮度（radiance）、TOA 反射率或亮温，是定量遥感处理链的第一步。",
+  "whenToUse": "rs:landsat_import / rs:sentinel2_import 之后、rs:atmospheric_correction 或 rs:spectral_index 之前；多时相、跨传感器比较前也必须先把各期统一到同一物理量。",
+  "prerequisitesNote": [
+    "堆栈栅格若未内嵌定标系数，须提供 metadata_path，或把 MTL/MTD 文件放在输入旁以便自动探测；歧义时算子以类型化错误拒绝而不猜测。"
+  ],
+  "assumptions": [
+    "传感器级定标是线性模型 L = gain * DN + bias（反射率再经太阳角与日地距离归一）；本步骤不做大气校正，路径散射仍留在数据中。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "unit",
+      "rationale": "输出物理量选择：radiance（默认，含单位波段辐亮度）、toa_reflectance（大气顶反射率，含太阳角归一）、brightness_temperature（亮温，要求输入含热红外波段的 K1/K2 常数）。",
+      "misconfigurationConsequence": "该用反射率的流程输出 radiance：后续比值型指数虽仍可比，但任何阈值、分类样本与反射率域产品的混合比较都会系统性出错。"
+    },
+    {
+      "parameter": "metadata_path",
+      "rationale": "Landsat *_MTL.txt / Sentinel-2 MTD_*.xml 定标系数的显式来源；缺省时自动探测输入旁的元数据文件，为堆栈数据补上内嵌元数据缺失的系数。",
+      "misconfigurationConsequence": "指向别的传感器或别的行时元数据，会把错误的 gain/bias（或 K1/K2）套用到数据上，标定系统性错误且数值上不易察觉。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "Radiance" },
+  "skipConsequence": {
+    "summary": "全部下游停留在 DN 域，跨传感器、跨日期数据不可比，定量反演无从谈起。",
+    "detail": "DN 包含传感器增益设计差异，两景看似相等的 DN 并不对应相等的入瞳辐亮度；变化检测与指数阈值都将失去物理基础。",
+    "downstreamRoles": ["大气校正", "光谱指数", "变化检测"]
+  },
+  "references": [
+    {
+      "title": "USGS Landsat 8 Data Users Handbook",
+      "kind": "doc",
+      "locator": "USGS EROS, Radiometric Calibration 章节",
+      "note": "DN 到 Radiance / TOA Reflectance 的官方定标公式与增益偏置来源。"
+    }
+  ],
+  "teachingNote": "输出状态由 unit 决定：radiance 对应 Radiance 域、toa_reflectance 对应 TOA 域、亮温需要热红外 K1/K2 常数；bands 参数可选 1-based 波段子集（缺省全部波段）。"
+}

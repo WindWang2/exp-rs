@@ -1,6 +1,8 @@
 // src/agent/spatial_tools/spatial_tool.cpp
 #include "spatial_tool.h"
 
+#include "explain_step_tool.h"
+
 #include "../layout_tools/layout_tools.h"
 
 #include "model_catalog_tool.h"
@@ -70,6 +72,8 @@ void SpatialToolRegistry::registerBuiltinTools()
     // D13 · Radiometric Spectral Workbench: agent spectral tools.
     std::make_shared<exp_agent::SpectralInspectTool>(),
     std::make_shared<exp_agent::ValidateBoaPhysicsTool>(),
+    // RS14-15 Explainable Workflow: the why-this-step teaching surface.
+    createExplainStepTool(),
     std::make_shared<VectorInspectTool>(),
     // F13: geometric registration surface (D14 tool finally cataloged).
     std::make_shared<GeometricSpatialTool>(),

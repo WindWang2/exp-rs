@@ -63,3 +63,8 @@ set_target_properties(sicnu_explain PROPERTIES
   CXX_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON
 )
+
+# Authoritative-source adapters live one layer up (they link the operator
+# registry / workflow runtime, which this directory's layer guard forbids
+# for the core).
+add_subdirectory(adapters)

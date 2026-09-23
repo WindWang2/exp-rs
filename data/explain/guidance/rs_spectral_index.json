@@ -1,0 +1,51 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:spectral_index",
+  "purpose": "面向多光谱影像的定量指数计算入口：按所选公式把 NIR、Red、SWIR 等波段逐像元合成为植被、水体、建筑、雪、火烧等归一化指数，是多数遥感分析流程的核心分析步骤。",
+  "whenToUse": "需要植被覆盖与胁迫（NDVI、EVI、SAVI）、水体（NDWI、MNDWI）、不透水面（NDBI、UI、BUI）、雪（NDSI）、火烧严重度（NBR、dNBR）等定量指数，且不想手写波段公式时使用；计算 dNBR 需同时提供 postfire 栅格。",
+  "prerequisitesNote": [
+    "输入必须是多波段栅格，且波段数覆盖所选指数需要的全部波段。",
+    "绝对型指数（EVI、SAVI、MSAVI、EVI2、BAI）锚定单位反射率 [0,1]，建议先经 rs:radiometric_calibration 与 rs:atmospheric_correction。"
+  ],
+  "assumptions": [
+    "比值型指数（NDVI、NBR、NDWI 等）在数学上对辐射尺度不变，DN 输入仍能得到正确比值；绝对型指数假设参与波段已映射到单位反射率。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "index",
+      "rationale": "选择哪个指数决定了所需的波段组合与辐射前提：ratio 型（NDVI、NBR、NDWI、NDSI 等）尺度不变，EVI、SAVI、MSAVI、EVI2、BAI 等则要求单位反射率并由 scale 机制保证。",
+      "misconfigurationConsequence": "选 EVI 却输入未标定 DN 且无 scale 元数据时，常数项按错误幅度参与运算，指数值系统性偏离可用区间。"
+    },
+    {
+      "parameter": "nir",
+      "rationale": "1-based NIR 波段号；省略时从产品波段角色（SICNU_BAND_ROLE）解析。它是大多数指数的分子主项，必须与 red、swir 等一起指向物理含义正确的波段。",
+      "misconfigurationConsequence": "波段号错位（例如把 Red 当 NIR）会使指数符号或幅度失真，植被与水体、裸土的判别颠倒。"
+    },
+    {
+      "parameter": "scale",
+      "rationale": "把存储像元乘性映射为单位反射率的 scale（如 Landsat Collection 2 DN 用 0.0001）；显式 scale 优先于输入元数据烙印的 scale，未设置时保持缺省以便省略键保持省略。",
+      "misconfigurationConsequence": "对 DN 数据计算 EVI/SAVI 等绝对型指数而不提供 scale，指数幅度错误且不可与反射率域结果比较。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "Index" },
+  "skipConsequence": {
+    "summary": "跳过后没有定量指数层，下游分类、变化检测与时序分析只能退回原始波段。",
+    "detail": "植被、水体、火烧等主题信息仍以未压缩的形式散布在多个波段中，监督分类需要更多样本、阈值需要重标定。",
+    "downstreamRoles": ["分类", "变化检测", "时序分析"]
+  },
+  "references": [
+    {
+      "title": "Rouse et al., Monitoring the Vernal Advancement and Retrogradation of Natural Vegetation",
+      "kind": "paper",
+      "locator": "NASA SP-351, NASA/GSFC, Greenbelt, MD, 1974, pp. 309-317",
+      "note": "NDVI 的原始出处；本算子指数族中 ratio 型指数的原型。"
+    },
+    {
+      "title": "Huete, A soil-adjusted vegetation index (SAVI)",
+      "kind": "paper",
+      "locator": "Remote Sensing of Environment 25(3):295-309, 1988",
+      "note": "SAVI 公式与土壤背景修正常数，说明绝对型指数对单位反射率的依赖。"
+    }
+  ],
+  "teachingNote": "比值型指数尺度不变，DN 输入亦可计算；EVI/SAVI 一类必须单位反射率——靠 scale 参数或 rs:landsat_import / rs:sentinel2_import 烙印的 scale 元数据兜底，显式 scale 优先。波段号均为 1-based，省略时按产品波段角色解析而不是按位置默认。"
+}

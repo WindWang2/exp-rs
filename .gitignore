@@ -87,6 +87,12 @@ resources/translations/*.qm
 !data/spectral/
 !data/spectral/**
 
+# Authored step-explanation guidance corpus (RS14-15) is tracked teaching
+# metadata (exp.step_guidance.v1), not local data: GuidanceStore loads it and
+# test_explain_guidance_coverage pins it to the live operator registry.
+!data/explain/
+!data/explain/**
+
 # Lab Sample Data Foundry (D1): generated rasters/vectors stay local-only.
 # The manifest schema template is tracked config; a blessed generated
 # manifest.json MAY be committed by a release manager (see docs/adr/0164).

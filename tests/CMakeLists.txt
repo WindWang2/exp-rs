@@ -12759,3 +12759,122 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# ── Explainable Workflow (RS14-15): live adapters + guidance corpus ───────
+# The explain core (sicnu_explain) stays Qt/engine/operator free; these tests
+# cover the adapter layer that attaches authoritative sources to it, the
+# authored guidance corpus on disk, and the consumers (builder/validator/
+# view model/agent tool) that were designed in
+# .planning/rs14-explainable-workflow/slices.md (Slices B–G).
+function(sicnu_add_explain_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::explain
+  )
+  sicnu_link_jsoncpp(${NAME})
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+  sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+endfunction()
+
+# Core semantics over fakes: builder composition, validator matrix, guidance
+# store loader, deterministic view model.
+sicnu_add_explain_test(test_explain_builder)
+sicnu_add_explain_test(test_explain_validator)
+sicnu_add_explain_test(test_explain_guidance_store)
+sicnu_add_explain_test(test_explain_view_model)
+
+# Live adapters: real RSOperatorRegistry, real WorkflowDocument/StepDef IR,
+# real provenance_<runId>.json envelopes.
+add_executable(test_explain_registry_adapter test_explain_registry_adapter.cpp)
+target_link_libraries(test_explain_registry_adapter PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+)
+sicnu_link_jsoncpp(test_explain_registry_adapter)
+target_include_directories(test_explain_registry_adapter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_explain_registry_adapter PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_registry_adapter TEST_PREFIX "test_explain_registry_adapter::")
+
+add_executable(test_explain_projection test_explain_projection.cpp)
+target_link_libraries(test_explain_projection PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_explain_projection)
+target_include_directories(test_explain_projection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_explain_projection PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_projection TEST_PREFIX "test_explain_projection::")
+
+# Coverage oracle: the authored guidance corpus must stay in lockstep with
+# the live registry (operator ids resolve, rationale parameters exist in the
+# live schema).
+add_executable(test_explain_guidance_coverage test_explain_guidance_coverage.cpp)
+target_link_libraries(test_explain_guidance_coverage PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+)
+sicnu_link_jsoncpp(test_explain_guidance_coverage)
+target_include_directories(test_explain_guidance_coverage PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_explain_guidance_coverage PRIVATE
+  SICNU_EXPLAIN_GUIDANCE_DIR="${CMAKE_SOURCE_DIR}/data/explain/guidance"
+)
+set_target_properties(test_explain_guidance_coverage PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_guidance_coverage TEST_PREFIX "test_explain_guidance_coverage::")
+
+# explain:step tool logic: the tool TU is compiled directly (it holds no
+# SpatialToolRegistry symbols by design); registry registration and catalog
+# visibility are exercised by the heavy agent tool lane (test_agent_tools_3).
+add_executable(test_explain_agent_tool
+  test_explain_agent_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/explain_step_tool.cpp
+)
+target_link_libraries(test_explain_agent_tool PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_explain_agent_tool)
+target_include_directories(test_explain_agent_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_explain_agent_tool PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_explain_agent_tool PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_agent_tool TEST_PREFIX "test_explain_agent_tool::")

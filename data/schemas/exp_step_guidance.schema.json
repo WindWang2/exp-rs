@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sicnu/exp/step_guidance/v1",
+  "title": "Sicnu authored step guidance (exp.step_guidance.v1)",
+  "description": "One authored-guidance entry for one operator. The loader (src/explain/guidance_store.cpp) is the normative authority; this schema documents the same contract for authoring tools. Unknown keys, unknown vocabularies and wrong-typed fields are refused at load time (fail-closed).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operatorId", "purpose"],
+  "properties": {
+    "schema": { "const": "exp.step_guidance.v1" },
+    "operatorId": {
+      "type": "string",
+      "pattern": "^[^\\s]+$",
+      "description": "Registered operator id, e.g. rs:ndvi. Must resolve in the live RSOperatorRegistry (coverage oracle)."
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[^\\s]*$",
+      "description": "Optional role-specific override; empty/absent = generic entry. Role-specific entries win over the generic entry for the same operator. The committed corpus ships generic entries only."
+    },
+    "purpose": { "type": "string", "minLength": 1 },
+    "whenToUse": { "type": "string" },
+    "prerequisitesNote": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "parameterRationale": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["parameter", "rationale"],
+        "properties": {
+          "parameter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Must exist in the operator's live schema properties."
+          },
+          "rationale": { "type": "string", "minLength": 1 },
+          "misconfigurationConsequence": { "type": "string" }
+        }
+      }
+    },
+    "stateNarrative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": { "$ref": "#/definitions/stateToken" },
+        "after": { "$ref": "#/definitions/stateToken" }
+      }
+    },
+    "skipConsequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" },
+        "downstreamRoles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "kind", "locator"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["textbook", "paper", "standard", "doc"] },
+          "locator": { "type": "string", "minLength": 1 },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "teachingNote": { "type": "string" }
+  },
+  "definitions": {
+    "stateToken": {
+      "type": "string",
+      "enum": ["DN", "Radiance", "TOA", "BOA", "Index", "Mask", "*", "None", ""],
+      "description": "Shared radiometric-state vocabulary (workflow IR 2.0 PortFact); empty = deliberately unspecified."
+    }
+  }
+}

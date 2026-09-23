@@ -1,0 +1,43 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:sar_calibrate",
+  "purpose": "用定标常数把 SAR DN 逐像元换算为校准后向散射系数 sigma0 = (DN^2 - noise) / A^2，输出线性功率或 dB 域的 Float32 产品，并把校准状态与数值域烙印到输出元数据供下游 preflight。",
+  "whenToUse": "SAR 幅度/DN 产品进入滤波、纹理、变化检测前的第一步；标准链路是 rs:sar_calibrate -> rs:sar_speckle -> 下游分析。",
+  "prerequisitesNote": [
+    "输入必须是 SAR DN/幅度栅格；声明为 dB 域的产品会被 preflight 拒绝——线性幂公式不可重施于 dB 数据，应先用 rs:sar_backscatter (inputDomain=db) 转换。"
+  ],
+  "assumptions": [
+    "采用产品级常数 A 的简化 sigma0 模型（Sentinel-1 GRD 的逐块定标常数简化为单常数），或提供逐行 LUT 侧车以恢复行相关定标。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "calibrationA",
+      "rationale": "定标常数 A，必须取自产品标注；在无 LUT 的常数路径上 sigma0 = (DN^2 - noiseLinear) / A^2，存在 calibrationLut 时常数路径不生效。",
+      "misconfigurationConsequence": "A 取自别的产品或极化时，后向散射整体错一个倍数，生物量、土壤湿度等定量反演全部失真。"
+    },
+    {
+      "parameter": "calibrationLut",
+      "rationale": "逐行定标 LUT 侧车路径：每输入行一个有限正常数，路径相对输入栅格解析并限制在其目录内；缺失或畸形是类型化拒绝，绝不回退到常数 A。",
+      "misconfigurationConsequence": "拿不匹配几何的 LUT 使用会引入行向条带误差；行数不符会被拒绝而不是静默错算。"
+    },
+    {
+      "parameter": "outputDomain",
+      "rationale": "输出数值域：linear_power（默认，物理功率域）或 db（10*log10 功率，非正功率置 NoData）；域随输出元数据烙印，供下游做一致性校验。",
+      "misconfigurationConsequence": "下游 lee/gamma_map 等滤波的统计假设建立在线性功率上，选 db 会让滤波与比值类计算的统计失效。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "" },
+  "skipConsequence": {
+    "summary": "DN 直接进入滤波与变化检测，跨传感器不可比，定标误差传导到所有衍生产品。",
+    "downstreamRoles": ["SAR 滤波", "SAR 变化检测"]
+  },
+  "references": [
+    {
+      "title": "ESA Sentinel-1 Technical Guide - Radiometric Calibration",
+      "kind": "doc",
+      "locator": "ESA Sentinel-1 SAR Technical Guide, Radiometric Calibration of SAR Data 章节",
+      "note": "sigma0 = DN^2/A^2 定标约定与定标常数 A 的产品来源。"
+    }
+  ],
+  "teachingNote": "输出是 sigma0 后向散射（线性功率或 dB），不属于光学状态词表（DN/Radiance/TOA/BOA），因此 after 留空；输出元数据烙印 SICNU_RADIOMETRIC_STATE=sigma0，polarizations、sensor、incidenceDeg 作为产品描述随行。"
+}

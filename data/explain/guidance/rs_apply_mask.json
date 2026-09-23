@@ -1,0 +1,33 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:apply_mask",
+  "purpose": "把二值掩膜应用到产品栅格：mask 第 1 波段中大于 0 的像元在各波段被置为 NoData，得到 analysis-ready 产品，同时保留波段角色与波长元数据供下游继续按产品语义解析。",
+  "whenToUse": "rs:qa_mask 之后、指数计算或变化检测之前；任何掩膜到 NoData 化的环节。",
+  "prerequisitesNote": [
+    "输入与掩膜必须同 CRS：同 CRS 下的网格差异可自动按最近邻对齐，CRS 不一致不会被自动纠正。",
+    "没有 NoData 定义的输入波段必须提供 no_data 值。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "mask",
+      "rationale": "二值掩膜栅格，取其第 1 波段、大于 0 的像元视为掩掉；这是掩膜语义的权威定义。",
+      "misconfigurationConsequence": "掩膜语义颠倒（1 表示保留时）会把有效像元全部置 NoData，输出几乎全空。"
+    },
+    {
+      "parameter": "no_data",
+      "rationale": "为缺少 NoData 定义的输入波段指定填充哨兵值；已有 NoData 定义的波段沿用原值。",
+      "misconfigurationConsequence": "选 0 这类数据中常见的值当哨兵，后续统计会把大量真实 0 值当无效剔除，引入系统性偏差。"
+    },
+    {
+      "parameter": "align_mask",
+      "rationale": "掩膜与输入网格不一致且同 CRS 时，是否按最近邻重采样自动对齐（默认开启）；最近邻适合整数掩膜。",
+      "misconfigurationConsequence": "关闭后网格不一致会直接失败；对连续量掩膜用最近邻则会引入取样误差。"
+    }
+  ],
+  "stateNarrative": { "before": "", "after": "" },
+  "skipConsequence": {
+    "summary": "云与无效像元不置 NoData，指数直方图、分类样本与变化检测统计全部被污染。",
+    "downstreamRoles": ["光谱指数", "变化检测"]
+  },
+  "teachingNote": "本步骤是辐射状态的恒等变换：DN、TOA、BOA 原样保留，只把掩掉像元替换为 NoData，因此 before/after 留空表示不做状态转换；输出保留波段角色，下游算子仍可按角色解析波段。"
+}
