@@ -880,3 +880,196 @@ TEST_CASE( "labspec dangling refs are typed when a root is provided", "[teaching
             unsafeSeen = true;
     REQUIRE( unsafeSeen );
 }
+
+TEST_CASE( "pack validation enforces containment and provenance contract",
+           "[teaching_admin][packs]" )
+{
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    REQUIRE( QDir( repo.path() ).mkpath( QStringLiteral( "data" ) ) );
+    {
+        QFile f( QDir( repo.path() ).filePath( QStringLiteral( "data/ok.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "GRID" ) );
+    }
+    const QString root = QDir( repo.path() ).canonicalPath();
+
+    auto makePack = []( const QJsonArray &inputs ) {
+        return QJsonObject{ { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+                            { QStringLiteral( "inputs" ), inputs } };
+    };
+
+    // in-root input is fine
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) } } } ),
+          root );
+        REQUIRE( r.ok );
+    }
+    // lexical escape
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{ QJsonObject{
+            { QStringLiteral( "path" ), QStringLiteral( "data/../../outside.tif" ) } } } ),
+          root );
+        REQUIRE_FALSE( r.ok );
+        bool traversal = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "path_traversal" ) )
+                traversal = true;
+        REQUIRE( traversal );
+    }
+#if !defined(Q_OS_WIN)
+    // symlink escape (canonical target outside the root)
+    {
+        const QString outside = QDir::temp().filePath( QStringLiteral( "pack_escape_probe.tif" ) );
+        {
+            QFile f( outside );
+            REQUIRE( f.open( QIODevice::WriteOnly ) );
+            f.write( QByteArray( "outside" ) );
+        }
+        const QString link = QDir( repo.path() ).filePath( QStringLiteral( "data/link.tif" ) );
+        QFile::remove( link );
+        REQUIRE( QFile::link( outside, link ) );
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/link.tif" ) } } } ),
+          root );
+        REQUIRE_FALSE( r.ok );
+        bool escape = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "path_escape" ) )
+                escape = true;
+        REQUIRE( escape );
+        QFile::remove( link );
+        QFile::remove( outside );
+    }
+#endif
+    // committed fixture requires a sha256 pin; bad provenance is rejected
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{
+            QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
+                         { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) } },
+            QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
+                         { QStringLiteral( "provenance" ), QStringLiteral( "random-internet" ) } } } ),
+          root );
+        REQUIRE_FALSE( r.ok );
+        bool missingSha = false;
+        bool badProv = false;
+        for ( const auto &i : r.issues )
+        {
+            if ( i.code == QLatin1String( "missing_sha256" ) )
+                missingSha = true;
+            if ( i.code == QLatin1String( "invalid_provenance" ) )
+                badProv = true;
+        }
+        REQUIRE( missingSha );
+        REQUIRE( badProv );
+    }
+}
+
+TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
+           "[teaching_admin][packs]" )
+{
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    QDir root( repo.path() );
+    REQUIRE( root.mkpath( QStringLiteral( "data/labs/packs" ) ) );
+
+    const QByteArray goodBytes = QByteArray( "deterministic scene bytes" );
+    const QString goodSha = sha256Hex( goodBytes );
+    {
+        QFile f( root.filePath( QStringLiteral( "data/scene.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( goodBytes );
+    }
+
+    auto writePack = [&]( const QString &name, const QJsonObject &pack ) {
+        QFile f( root.filePath( QStringLiteral( "data/labs/packs/%1" ).arg( name ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QJsonDocument( pack ).toJson( QJsonDocument::Indented ) );
+    };
+
+    QJsonObject goodPack{
+        { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+        { QStringLiteral( "lab_id" ), QStringLiteral( "demo" ) },
+        { QStringLiteral( "pack_version" ), QStringLiteral( "1" ) },
+        { QStringLiteral( "declared_offline_bytes" ), static_cast<double>( goodBytes.size() ) },
+        { QStringLiteral( "inputs" ),
+          QJsonArray{ QJsonObject{
+            { QStringLiteral( "path" ), QStringLiteral( "data/scene.tif" ) },
+            { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) },
+            { QStringLiteral( "sha256" ), goodSha },
+            { QStringLiteral( "bytes" ), static_cast<double>( goodBytes.size() ) } } } },
+    };
+    writePack( QStringLiteral( "demo.pack.json" ), goodPack );
+
+    // committed fixture with correct digest → available, no issues
+    {
+        const auto inv = inventoryPacks( root.filePath( QStringLiteral( "data/labs/packs" ) ),
+                                         root.path(), 1024 * 1024 * 1024 );
+        REQUIRE( inv.packs.size() == 1 );
+        REQUIRE( inv.packs.first().offlineAvailable );
+        REQUIRE( inv.packs.first().issues.isEmpty() );
+    }
+
+    // corrupt the fixture → digest_mismatch, offlineAvailable false
+    {
+        QFile f( root.filePath( QStringLiteral( "data/scene.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "tampered scene bytes" ) );
+        const auto inv = inventoryPacks( root.filePath( QStringLiteral( "data/labs/packs" ) ),
+                                         root.path(), 1024 * 1024 * 1024 );
+        REQUIRE( inv.packs.size() == 1 );
+        REQUIRE_FALSE( inv.packs.first().offlineAvailable );
+        bool digest = false;
+        for ( const auto &i : inv.packs.first().issues )
+            if ( i.code == QLatin1String( "digest_mismatch" ) )
+                digest = true;
+        REQUIRE( digest );
+    }
+
+    // restore bytes; make the pin lie about the size (committed → error)
+    {
+        QFile f( root.filePath( QStringLiteral( "data/scene.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( goodBytes );
+        goodPack[QStringLiteral( "inputs" )] = QJsonArray{ QJsonObject{
+          { QStringLiteral( "path" ), QStringLiteral( "data/scene.tif" ) },
+          { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) },
+          { QStringLiteral( "sha256" ), goodSha },
+          { QStringLiteral( "bytes" ), static_cast<double>( goodBytes.size() + 999 ) } } };
+        writePack( QStringLiteral( "demo.pack.json" ), goodPack );
+        const auto inv = inventoryPacks( root.filePath( QStringLiteral( "data/labs/packs" ) ),
+                                         root.path(), 1024 * 1024 * 1024 );
+        REQUIRE_FALSE( inv.packs.first().offlineAvailable );
+        bool bytePin = false;
+        for ( const auto &i : inv.packs.first().issues )
+            if ( i.code == QLatin1String( "byte_mismatch" ) && i.severity == QLatin1String( "error" ) )
+                bytePin = true;
+        REQUIRE( bytePin );
+    }
+
+    // generated input missing → typed warning, not available but not silent
+    {
+        QJsonObject generatedPack{
+            { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+            { QStringLiteral( "lab_id" ), QStringLiteral( "gen" ) },
+            { QStringLiteral( "inputs" ),
+              QJsonArray{ QJsonObject{
+                { QStringLiteral( "path" ), QStringLiteral( "data/labs/_tmp/absent.tif" ) },
+                { QStringLiteral( "provenance" ), QStringLiteral( "generated-samples" ) } } } },
+        };
+        writePack( QStringLiteral( "gen.pack.json" ), generatedPack );
+        const auto inv = inventoryPacks( root.filePath( QStringLiteral( "data/labs/packs" ) ),
+                                         root.path(), 1024 * 1024 * 1024 );
+        REQUIRE( inv.packs.size() == 2 );
+        const auto &gen = inv.packs.last();
+        REQUIRE_FALSE( gen.offlineAvailable );
+        bool warned = false;
+        for ( const auto &i : gen.issues )
+            if ( i.code == QLatin1String( "input_missing" ) && i.severity == QLatin1String( "warning" ) )
+                warned = true;
+        REQUIRE( warned );
+    }
+}

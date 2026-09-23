@@ -3,6 +3,8 @@
 
 #include <QByteArray>
 #include <QCryptographicHash>
+#include <QFile>
+#include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,6 +23,19 @@ inline QString sha256Hex( const QByteArray &bytes )
 {
     return QString::fromLatin1(
         QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
+}
+
+/// Streamed sha256 of a file in bounded chunks (mirrors the pack
+/// verifier's no-whole-file-load policy). Empty string when unreadable.
+inline QString sha256OfFile( const QString &path, qint64 chunkBytes = 1024 * 1024 )
+{
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return QString();
+    QCryptographicHash hash( QCryptographicHash::Sha256 );
+    while ( !f.atEnd() )
+        hash.addData( f.read( chunkBytes ) );
+    return QString::fromLatin1( hash.result().toHex() );
 }
 
 /// True when @p rel could escape a root (absolute, drive-qualified, or '..').

@@ -11,6 +11,61 @@
 
 namespace sicnu::teaching_admin {
 
+namespace {
+
+// Provenance tiers of the sicnu.lab-pack/1 authority
+// (src/agent/lab_data_pack.h): verification strength follows the tier.
+constexpr const char *kProvenanceCommitted = "committed-fixture";
+constexpr const char *kProvenanceGeneratedTmp = "generated-tmp";
+constexpr const char *kProvenanceGeneratedSamples = "generated-samples";
+
+bool isKnownProvenance( const QString &p )
+{
+    return p == QLatin1String( kProvenanceCommitted )
+           || p == QLatin1String( kProvenanceGeneratedTmp )
+           || p == QLatin1String( kProvenanceGeneratedSamples );
+}
+
+bool isCommittedFixture( const QString &p )
+{
+    return p == QLatin1String( kProvenanceCommitted );
+}
+
+bool isHexSha256( const QString &s )
+{
+    if ( s.size() != 64 )
+        return false;
+    for ( const QChar &c : s )
+    {
+        if ( !( ( c >= QLatin1Char( '0' ) && c <= QLatin1Char( '9' ) )
+                || ( c >= QLatin1Char( 'a' ) && c <= QLatin1Char( 'f' ) )
+                || ( c >= QLatin1Char( 'A' ) && c <= QLatin1Char( 'F' ) ) ) )
+            return false;
+    }
+    return true;
+}
+
+/// Post-resolution containment: the input's absolute path (and, when the
+/// file exists, its canonical target) must stay under the canonical repo
+/// root — lexical `..` rejection alone misses symlink escapes.
+bool staysUnderRoot( const QString &repoRoot, const QString &rel )
+{
+    const QString rootCanon =
+      QFileInfo( repoRoot ).canonicalFilePath();
+    const QString root = rootCanon.isEmpty() ? QDir( repoRoot ).absolutePath() : rootCanon;
+    QString normalized = rel;
+    normalized.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
+    const QString abs = QDir( root ).filePath( normalized );
+    if ( !abs.startsWith( root + QLatin1Char( '/' ) ) && abs != root )
+        return false;
+    const QString canonical = QFileInfo( abs ).canonicalFilePath();
+    if ( !canonical.isEmpty() && !canonical.startsWith( root + QLatin1Char( '/' ) ) )
+        return false;
+    return true;
+}
+
+} // namespace
+
 QJsonObject PackInventoryEntry::toJson() const
 {
     QJsonArray issueArr = issuesToJson( issues );
@@ -44,7 +99,6 @@ QJsonObject PackInventory::toJson() const
 
 ValidationResult validatePackDocument( const QJsonObject &pack, const QString &repoRoot )
 {
-    Q_UNUSED( repoRoot );
     ValidationResult r;
     const QString schema = pack.value( QStringLiteral( "schema_version" ) ).toString(
         pack.value( QStringLiteral( "schema" ) ).toString() );
@@ -62,10 +116,31 @@ ValidationResult validatePackDocument( const QJsonObject &pack, const QString &r
         if ( isUnsafeRelativePath( path ) )
             r.addError( QStringLiteral( "path_traversal" ), at,
                         QStringLiteral( "pack input path escapes root or is absolute" ) );
+        else if ( !repoRoot.isEmpty() && !staysUnderRoot( repoRoot, path ) )
+            r.addError( QStringLiteral( "path_escape" ), at,
+                        QStringLiteral( "pack input resolves outside the repo root" ) );
         if ( seen.contains( path ) )
             r.addError( QStringLiteral( "duplicate_pack_path" ), at,
                         QStringLiteral( "duplicate input path" ) );
         seen.insert( path );
+
+        // Provenance contract of the pack authority: value must be a known
+        // tier, and committed fixtures must pin a sha256 digest.
+        const QString provenance = in.value( QStringLiteral( "provenance" ) ).toString(
+            QString::fromLatin1( kProvenanceGeneratedSamples ) );
+        const QString provAt = QStringLiteral( "inputs[%1].provenance" ).arg( i );
+        if ( !isKnownProvenance( provenance ) )
+            r.addError( QStringLiteral( "invalid_provenance" ), provAt,
+                        QStringLiteral( "provenance must be committed-fixture | generated-samples | generated-tmp" ) );
+        const QString sha = in.value( QStringLiteral( "sha256" ) ).toString();
+        if ( !sha.isEmpty() && !isHexSha256( sha ) )
+            r.addError( QStringLiteral( "invalid_sha256" ),
+                        QStringLiteral( "inputs[%1].sha256" ).arg( i ),
+                        QStringLiteral( "sha256 must be 64 hex chars" ) );
+        else if ( isCommittedFixture( provenance ) && sha.isEmpty() )
+            r.addError( QStringLiteral( "missing_sha256" ),
+                        QStringLiteral( "inputs[%1].sha256" ).arg( i ),
+                        QStringLiteral( "committed-fixture input requires sha256" ) );
     }
     return r;
 }
@@ -108,11 +183,18 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
 
         qint64 sum = 0;
         bool allPresent = true;
+        bool digestsOk = true;
+        qint64 declaredPerInputSum = 0;
         QStringList truths;
-        for ( const auto &iv : pack.value( QStringLiteral( "inputs" ) ).toArray() )
+        for ( int idx = 0; idx < pack.value( QStringLiteral( "inputs" ) ).toArray().size(); ++idx )
         {
-            const QJsonObject in = iv.toObject();
+            const QJsonObject in =
+              pack.value( QStringLiteral( "inputs" ) ).toArray().at( idx ).toObject();
             const QString rel = in.value( QStringLiteral( "path" ) ).toString();
+            const QString at = QStringLiteral( "inputs[%1]" ).arg( idx );
+            const QString provenance = in.value( QStringLiteral( "provenance" ) ).toString(
+                QString::fromLatin1( kProvenanceGeneratedSamples ) );
+            const bool committed = isCommittedFixture( provenance );
             if ( isUnsafeRelativePath( rel ) )
             {
                 allPresent = false;
@@ -121,20 +203,69 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
             const QString abs = QDir( repoRoot ).filePath( rel );
             QFileInfo fi( abs );
             if ( fi.exists() && fi.isFile() )
+            {
                 sum += fi.size();
+                // Digest verification (strength follows the tier, as in the
+                // pack authority): declared sha256 on a committed fixture is
+                // a hard check, elsewhere an informative warning.
+                const QString declaredSha = in.value( QStringLiteral( "sha256" ) ).toString();
+                if ( !declaredSha.isEmpty() )
+                {
+                    const QString actual = sha256OfFile( abs );
+                    if ( actual.compare( declaredSha, Qt::CaseInsensitive ) != 0 )
+                    {
+                        digestsOk = false;
+                        e.issues.push_back(
+                          { QStringLiteral( "digest_mismatch" ), at,
+                            QStringLiteral( "sha256 mismatch: declared %1, computed %2" )
+                              .arg( declaredSha, actual ),
+                            committed ? QStringLiteral( "error" ) : QStringLiteral( "warning" ) } );
+                    }
+                }
+            }
             else
+            {
                 allPresent = false;
+                e.issues.push_back(
+                  { QStringLiteral( "input_missing" ), at,
+                    QStringLiteral( "input file missing: " ) + rel,
+                    committed ? QStringLiteral( "error" ) : QStringLiteral( "warning" ) } );
+            }
             const QString truth = in.value( QStringLiteral( "sensor_truth" ) ).toString();
             if ( !truth.isEmpty() )
                 truths.append( truth.left( 80 ) );
             const qint64 declared = static_cast<qint64>( in.value( QStringLiteral( "bytes" ) ).toDouble( -1 ) );
-            if ( declared > 0 && e.declaredBytes < 0 )
-                e.declaredBytes = ( e.declaredBytes < 0 ? 0 : e.declaredBytes ) + declared;
+            if ( declared > 0 )
+            {
+                declaredPerInputSum += declared;
+                if ( e.declaredBytes < 0 )
+                    e.declaredBytes = 0;
+                // Byte pin: hard for committed fixtures (drift means the
+                // deployment is not the audited one), informative elsewhere.
+                if ( fi.exists() && fi.isFile()
+                     && declared != static_cast<qint64>( fi.size() ) )
+                    e.issues.push_back(
+                      { QStringLiteral( "byte_mismatch" ), at,
+                        QStringLiteral( "declared %1 bytes, actual %2" )
+                          .arg( declared )
+                          .arg( static_cast<qint64>( fi.size() ) ),
+                        committed ? QStringLiteral( "error" ) : QStringLiteral( "warning" ) } );
+            }
         }
         e.computedBytes = sum;
         if ( e.declaredBytes < 0 )
-            e.declaredBytes = sum;
-        e.offlineAvailable = allPresent && vr.ok;
+            e.declaredBytes = declaredPerInputSum > 0 ? declaredPerInputSum : sum;
+        // Pack-level declared_offline_bytes vs the sum of the inputs.
+        const qint64 packDeclared =
+          static_cast<qint64>( pack.value( QStringLiteral( "declared_offline_bytes" ) ).toDouble( -1 ) );
+        if ( packDeclared >= 0 && packDeclared != e.computedBytes )
+            e.issues.push_back(
+              { QStringLiteral( "byte_mismatch" ), QStringLiteral( "declared_offline_bytes" ),
+                QStringLiteral( "pack declares %1 bytes, inputs compute %2" )
+                  .arg( packDeclared )
+                  .arg( e.computedBytes ),
+                QStringLiteral( "warning" ) } );
+        e.offlineAvailable = allPresent && digestsOk && vr.ok;
         e.crsGridSummary = truths.join( QStringLiteral( " | " ) );
 
         inv.totalDeclaredBytes += std::max<qint64>( 0, e.declaredBytes );
