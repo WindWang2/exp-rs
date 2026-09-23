@@ -12732,6 +12732,34 @@ target_compile_definitions(test_teaching_admin_core PRIVATE
   FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
 )
 
+# Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
+# into the test (no QGIS, no app binary) and drives one real batch-grade
+# round trip through the fake grader CLI.
+add_executable(test_teaching_admin_dock_smoke
+  test_teaching_admin_dock_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.h
+)
+target_link_libraries(test_teaching_admin_dock_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  Qt6::Widgets
+)
+target_include_directories(test_teaching_admin_dock_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin
+)
+target_compile_definitions(test_teaching_admin_dock_smoke PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+set_target_properties(test_teaching_admin_dock_smoke PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_admin_dock_smoke TEST_PREFIX "test_teaching_admin_dock_smoke::")
+
 # Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
 # → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading
 # refs, over the existing authorities only. Qt-free; GDAL arrives through

@@ -5,6 +5,7 @@
 #include "teaching_admin/curriculum_editor.h"
 #include "teaching_admin/data_pack_manager.h"
 #include "teaching_admin/feedback_pack.h"
+#include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/labspec_authoring.h"
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
@@ -140,12 +141,19 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         auto *page = new QWidget;
         auto *lay = new QFormLayout( page );
         m_submissionsDirEdit = new QLineEdit;
+        m_submissionsDirEdit->setObjectName( QStringLiteral( "teachingAdminSubmissionsDir" ) );
         m_labIdEdit = new QLineEdit( QStringLiteral( "lab15_data_inspection" ) );
+        m_labIdEdit->setObjectName( QStringLiteral( "teachingAdminLabId" ) );
         m_batchOutEdit = new QLineEdit( QDir::temp().filePath( QStringLiteral( "teaching_admin_batch" ) ) );
+        m_batchOutEdit->setObjectName( QStringLiteral( "teachingAdminBatchOut" ) );
         lay->addRow( tr( "submissions dir" ), m_submissionsDirEdit );
         lay->addRow( tr( "lab id" ), m_labIdEdit );
         lay->addRow( tr( "out prefix" ), m_batchOutEdit );
-        auto *btn = new QPushButton( tr( "Batch Grade (local mock-capable)" ) );
+        auto *btn = new QPushButton( tr( "Batch Grade (real grader CLI)" ) );
+        btn->setObjectName( QStringLiteral( "teachingAdminBatchButton" ) );
+        btn->setToolTip(
+            tr( "Grades via sicnu_geo_rs_cli lab --grade (OutputVerifier authority). "
+                "Missing CLI ⇒ typed unavailable rows, never fabricated scores." ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunBatch );
         lay->addRow( btn );
         m_tabs->addTab( page, tr( "G 批量评分" ) );
@@ -163,6 +171,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
     }
 
     m_log = new QPlainTextEdit;
+    m_log->setObjectName( QStringLiteral( "teachingAdminLog" ) );
     m_log->setReadOnly( true );
     m_log->setMaximumBlockCount( 2000 );
     root->addWidget( new QLabel( tr( "Console" ) ) );
@@ -302,53 +311,17 @@ void TeachingAdminDock::onRunBatch()
     cfg.labVersion = QStringLiteral( "ui-1" );
     cfg.softwareVersion = m_softwareVersionEdit->text();
 
+    // Real grading authority only: the lab CLI shell of
+    // OutputVerifier::gradeArtifact. When the CLI is absent every row is
+    // typed unavailable with a reason — the console never scores by itself.
+    GraderCliConfig grader;
+    grader.cliPath = resolveGraderCli();
+    grader.labIdOrRulesPath = m_labIdEdit->text();
+    if ( grader.cliPath.isEmpty() )
+        appendLog( tr( "grader CLI not found (set SICNU_GEO_RS_CLI); rows will be typed unavailable" ) );
+
     std::atomic<bool> cancel{ false };
-    const auto report = runBatchAssessment(
-        cfg,
-        [&]( const SubmissionItem &item ) {
-            BatchRowResult row;
-            row.studentId = item.studentId;
-            row.labId = cfg.labId;
-            row.artifactPath = item.path;
-            QFile f( item.path );
-            if ( !f.open( QIODevice::ReadOnly ) )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "cannot open submission" );
-                return row;
-            }
-            const QByteArray bytes = f.readAll();
-            if ( bytes.isEmpty() )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "empty submission" );
-                return row;
-            }
-            if ( bytes.startsWith( "CORRUPT" ) )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "corrupt marker" );
-                return row;
-            }
-            if ( bytes.startsWith( "MISSING_EVIDENCE" ) )
-            {
-                row.status = QStringLiteral( "unavailable" );
-                row.verdict = QStringLiteral( "unavailable" );
-                row.missingEvidence = true;
-                row.score = -1;
-                row.message = QStringLiteral( "missing evidence — not a silent zero" );
-                return row;
-            }
-            row.status = QStringLiteral( "pass" );
-            row.verdict = QStringLiteral( "pass" );
-            row.score = 80.0;
-            row.message = QStringLiteral( "local dry-run grade" );
-            return row;
-        },
-        &cancel );
+    const auto report = runBatchAssessment( cfg, cliGradeCallable( grader ), &cancel );
 
     publishBatchOutputsAtomic( report, m_batchOutEdit->text() );
     appendLog( QString::fromUtf8( QJsonDocument( report.toJson() ).toJson( QJsonDocument::Compact ) ) );
