@@ -323,8 +323,9 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
     const auto final = runDir / name;
 
     {
-        std::ofstream create( sicnu::portable::pathFromUtf8( provisional ),
-                              std::ios::binary | std::ios::trunc );
+        // provisional is already an fs::path built from the (UTF-8-safe)
+        // root — the fs::path stream overload is encoding-correct as-is.
+        std::ofstream create( provisional, std::ios::binary | std::ios::trunc );
         if ( !create )
             throw std::runtime_error( "scratch acquire: cannot create "
                                       + sicnu::portable::pathToUtf8( provisional ) );

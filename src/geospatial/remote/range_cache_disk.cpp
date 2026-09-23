@@ -17,11 +17,12 @@
 #include <mutex>
 #include <vector>
 
+#include "platform/portable.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include "platform/portable.h"
 #include <unistd.h>
 #endif
 

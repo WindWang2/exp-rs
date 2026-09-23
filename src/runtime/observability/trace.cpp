@@ -433,8 +433,8 @@ void Trace::publish( const TraceEvent &event )
 
 std::string installFileSinkFromEnv()
 {
-    const char *flag = std::getenv( "SICNU_TRACE" );
-    if ( !flag || !( flag[0] == '1' || flag[0] == 't' || flag[0] == 'T' ) )
+    const std::string flag = sicnu::portable::envUtf8( "SICNU_TRACE" );
+    if ( flag.empty() || !( flag[0] == '1' || flag[0] == 't' || flag[0] == 'T' ) )
         return std::string();
     FileTraceSink::Options options;
     // The trace directory is path-bearing: read it through the UTF-8 env
@@ -460,9 +460,10 @@ std::string installFileSinkFromEnv()
             return std::string();
         }
     }
-    if ( const char *maxMb = std::getenv( "SICNU_TRACE_MAX_MB" ) )
+    const std::string maxMb = sicnu::portable::envUtf8( "SICNU_TRACE_MAX_MB" );
+    if ( !maxMb.empty() )
     {
-        const unsigned long long mb = std::strtoull( maxMb, nullptr, 10 );
+        const unsigned long long mb = std::strtoull( maxMb.c_str(), nullptr, 10 );
         if ( mb > 0 && mb <= 512 )
             options.maxFileBytes = mb * 1024ull * 1024ull;
     }

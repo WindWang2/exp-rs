@@ -11,10 +11,10 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include "platform/portable.h"
 #ifndef _WIN32
 #include <fcntl.h>
 #include <signal.h>
-#include "platform/portable.h"
 #include <unistd.h>
 #include <sys/file.h>
 #else

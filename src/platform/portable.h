@@ -12,9 +12,15 @@
   (wideFromUtf8) and runtime/chunk/fsync_compat.h (CreateFileW + CP_UTF8).
 
   Repo-wide path convention: `std::string` path values hold UTF-8 bytes.
-  These helpers are the only sanctioned boundary between that convention
-  and std::filesystem (whose narrow conversions are ACP-encoded on
-  Windows) — see the PR notes for the migrated call sites.
+  These helpers are the sanctioned boundary between that convention and
+  std::filesystem (whose narrow conversions are ACP-encoded on Windows)
+  for NEW and migrated code. Pre-existing local variants with slightly
+  different invalid-input semantics stay put on purpose: sdk/exprs
+  path_policy's pathFromUtf8 rejects invalid UTF-8 (typed rejection, not
+  an empty path), env_doctor's u8PathString renders via
+  generic_u8string with a fallback, and mirror/external_process keep
+  private wide converters for their Win32 branches. Converge those only
+  with a dedicated semantic review — do not silently swap them.
  ***************************************************************************/
 
 #ifndef SICNU_PLATFORM_PORTABLE_H

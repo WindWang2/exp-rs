@@ -117,9 +117,16 @@ bool hashFilePrefix( const fs::path &path, std::uint64_t budget, std::string &he
     hashedOut += got;
     anyRead = true;
     if ( got < chunk )
-      break; // EOF
+      break; // EOF (or read error — istream cannot tell, checked below)
   }
-  const bool ok = anyRead && !in.bad();
+  // istream::read cannot distinguish a device error from EOF the way
+  // ferror(3) could for the FILE* build this replaces, so fail closed
+  // unless the loop provably reached the end: the budget was exhausted,
+  // or the bytes hashed equal the file size (an unprovable short read
+  // must never be pinned as asset identity).
+  std::error_code sizeEc;
+  const std::uintmax_t fileSize = std::filesystem::file_size( path, sizeEc );
+  const bool ok = anyRead && !sizeEc && ( remaining == 0 || hashedOut == fileSize );
   if ( !ok )
     return false;
   hexOut = toHex( hash.finalize() );

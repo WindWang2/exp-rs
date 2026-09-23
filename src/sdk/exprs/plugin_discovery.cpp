@@ -73,7 +73,7 @@ struct IndexEntry
 
 Json::Value loadIndex( const std::string &root )
 {
-    std::ifstream input( root + "/.exprs-manifest-index.json" );
+    std::ifstream input( sicnu::portable::pathFromUtf8( root + "/.exprs-manifest-index.json" ) );
     if ( !input )
         return Json::Value( Json::nullValue );
     std::stringstream buffer;
@@ -109,7 +109,7 @@ void storeIndex( const std::string &root, const Json::Value &index )
     const std::string path = root + "/.exprs-manifest-index.json";
     const std::string temp = path + ".tmp";
     {
-        std::ofstream output( temp, std::ios::trunc );
+        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
         if ( !output )
             return;
         Json::StyledWriter writer;

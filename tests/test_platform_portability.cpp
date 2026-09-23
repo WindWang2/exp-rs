@@ -123,7 +123,7 @@ TEST_CASE( "isWindowsReservedName classifies device names", "[platform][windows]
   REQUIRE_FALSE( isWindowsReservedName( "CONX" ) );
   REQUIRE_FALSE( isWindowsReservedName( "con txt" ) );
   REQUIRE_FALSE( isWindowsReservedName( "data" ) );
-  REQUIRE_FALSE( isWindowsReservedName( "con.txt.txt" ) == false ); // base before first dot is CON
+  REQUIRE( isWindowsReservedName( "con.txt.txt" ) ); // base before the first dot is CON
   REQUIRE_FALSE( isWindowsReservedName( "" ) );
   REQUIRE_FALSE( isWindowsReservedName( ".txt" ) );
 }

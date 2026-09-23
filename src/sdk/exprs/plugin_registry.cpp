@@ -2075,7 +2075,7 @@ std::string PluginRegistry::userIndexPath() const
 void PluginRegistry::loadUserIndex()
 {
     mDisabledIds.clear();
-    std::ifstream input( userIndexPath() );
+    std::ifstream input( sicnu::portable::pathFromUtf8( userIndexPath() ) );
     if ( !input )
         return;
     std::stringstream buffer;
@@ -2119,7 +2119,7 @@ void PluginRegistry::saveUserIndex() const
     {
         const std::string parent = path.substr( 0, slash );
         std::error_code error;
-        std::filesystem::create_directories( parent, error );
+        std::filesystem::create_directories( sicnu::portable::pathFromUtf8( parent ), error );
     }
     // Hardening 15/20: the temp file is process-unique. The shared fixed
     // "<index>.tmp" let two processes (GUI + CLI, or two CLIs) interleave
@@ -2131,7 +2131,7 @@ void PluginRegistry::saveUserIndex() const
     const std::uint32_t pid = sicnu::portable::pid();
     const std::string temp = path + ".tmp." + std::to_string( pid );
     {
-        std::ofstream output( temp, std::ios::trunc );
+        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
         if ( !output )
             return;
         Json::Value root( Json::objectValue );
