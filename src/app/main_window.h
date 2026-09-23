@@ -517,8 +517,9 @@ private:
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
     QWidget *m_mapCanvasContainer = nullptr;
     QSplitter *m_mapSplitter = nullptr;
-    class SecondaryMapViewWidget *m_secondaryMapView = nullptr;
-    sicnu::display::DisplayViewId m_secondaryViewId;
+    /// Secondary Display View lifecycle (widget + engine view id + pixel
+    /// sync) as one session object; created lazily on first open.
+    class SecondaryMapSession *m_secondaryMapSession = nullptr;
     /// Session windows registered as secondary Display Views (Wave E).
     sicnu::display::DisplayViewId m_classifyViewId;
     sicnu::display::DisplayViewId m_obiaViewId;

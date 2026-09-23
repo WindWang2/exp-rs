@@ -6,6 +6,7 @@
 #include "visualanalytics/va_layer_link_controller.h"
 #include "shell/rs_session_map_workspace.h"
 #include "shell/secondary_map_view_widget.h"
+#include "shell/secondary_map_view_session.h"
 #include "shell/rs_dual_viewport_sync_controller.h"
 
 #include <QMessageBox>
@@ -301,107 +302,49 @@ void QgisDesktopWindow::openSecondaryMapView()
     if ( !m_projectContext || !m_mapSplitter )
         return;
 
-    if ( !m_secondaryMapView )
+    // The session owns the widget/engine-view/sync state machine (and is
+    // the piece the B2 close→reopen fix lives in); the window keeps only
+    // the shell-level glue: link registration, active-view fallback and
+    // status rendering.
+    if ( !m_secondaryMapSession )
     {
-        m_secondaryMapView = new SecondaryMapViewWidget( m_mapSplitter );
-        m_mapSplitter->addWidget( m_secondaryMapView );
-        m_mapSplitter->setStretchFactor( 0, 1 );
-        m_mapSplitter->setStretchFactor( 1, 1 );
-        m_mapSplitter->setSizes( { 600, 600 } );
-
-        connect( m_secondaryMapView, &SecondaryMapViewWidget::activateRequested,
+        m_secondaryMapSession = new SecondaryMapSession(
+            m_mapCanvas, m_mapSplitter, m_projectContext.get(),
+            [this]( sicnu::display::DisplayViewId viewId ) {
+                registerLinkedVisualView( viewId );
+            },
+            this );
+        m_secondaryMapSession->setActions( m_secondaryViewAction,
+                                           m_dualViewportSyncAction );
+        connect( m_secondaryMapSession, &SecondaryMapSession::activateRequested,
                  this, &QgisDesktopWindow::activateSecondaryMapView );
-        connect( m_secondaryMapView, &SecondaryMapViewWidget::closeRequested,
+        connect( m_secondaryMapSession, &SecondaryMapSession::closeRequested,
                  this, &QgisDesktopWindow::closeSecondaryMapView );
-        connect( m_secondaryMapView, &SecondaryMapViewWidget::syncFromMainRequested,
+        connect( m_secondaryMapSession, &SecondaryMapSession::syncFromMainRequested,
                  this, &QgisDesktopWindow::syncMainLayersToSecondaryView );
-
-        // Wire pixel-level pan/zoom sync between the two canvases (Loop K4).
-        if ( !m_dualViewportSync )
-        {
-            m_dualViewportSync = new RsDualViewportSyncController(
-                m_mapCanvas, m_secondaryMapView->canvas(), this );
-            // Default the View-menu toggle to checked once sync is live.
-            if ( m_dualViewportSyncAction )
-            {
-                QSignalBlocker b( m_dualViewportSyncAction );
-                m_dualViewportSyncAction->setChecked( true );
-            }
-        }
     }
 
-    // Snap the secondary canvas to the primary's current viewport so the two
-    // views start pixel-aligned.
-    if ( m_dualViewportSync )
-        m_dualViewportSync->snapSecondaryToPrimary();
-
-    if ( m_secondaryViewId.isNull() )
+    QString error;
+    if ( !m_secondaryMapSession->open( &error ) )
     {
-        const auto created =
-            m_projectContext->createSecondaryView( m_secondaryMapView->viewSpec() );
-        if ( !created )
-        {
-            QMessageBox::warning( this, tr( "Second View" ),
-                                  tr( "Cannot create the second display view." ) );
-            if ( m_secondaryViewAction )
-            {
-                QSignalBlocker b( m_secondaryViewAction );
-                m_secondaryViewAction->setChecked( false );
-            }
-            return;
-        }
-        m_secondaryViewId = created.value();
-        m_secondaryMapView->setViewId( m_secondaryViewId );
-        // Linked Visual Analytics 11.0: join the new view to the link
-        // authorities (extent/cursor groups + layer visibility link).
-        registerLinkedVisualView( m_secondaryViewId );
-    }
-
-    m_secondaryMapView->show();
-    if ( m_secondaryViewAction )
-    {
-        QSignalBlocker b( m_secondaryViewAction );
-        m_secondaryViewAction->setChecked( true );
+        if ( !error.isEmpty() )
+            QMessageBox::warning( this, tr( "Second View" ), error );
+        return;
     }
     statusBar()->showMessage( tr( "Second view open. Use 'Active' to switch the display target." ), 4000 );
 }
 
 void QgisDesktopWindow::closeSecondaryMapView()
 {
-    if ( m_projectContext && !m_secondaryViewId.isNull() )
-    {
-        // If secondary was active, fall back to main before teardown.
-        if ( m_activeViewHost
-             && m_activeViewHost->activeViewId() == m_secondaryViewId )
-            activateMainMapView();
+    if ( !m_secondaryMapSession )
+        return;
 
-        ( void ) m_projectContext->removeView( m_secondaryViewId );
-        m_secondaryViewId = {};
-    }
+    // If secondary was active, fall back to main before teardown.
+    if ( m_activeViewHost && m_secondaryMapSession->isOpen()
+         && m_activeViewHost->activeViewId() == m_secondaryMapSession->viewId() )
+        activateMainMapView();
 
-    if ( m_secondaryMapView )
-    {
-        m_secondaryMapView->hide();
-        m_secondaryMapView->setViewId( {} );
-        m_secondaryMapView->setActiveHighlight( false );
-    }
-    // Tear down the dual-viewport sync controller — its secondary canvas is gone.
-    if ( m_dualViewportSync )
-    {
-        m_dualViewportSync->setEnabled( false );
-        delete m_dualViewportSync;
-        m_dualViewportSync = nullptr;
-        if ( m_dualViewportSyncAction )
-        {
-            QSignalBlocker b( m_dualViewportSyncAction );
-            m_dualViewportSyncAction->setChecked( false );
-        }
-    }
-    if ( m_secondaryViewAction )
-    {
-        QSignalBlocker b( m_secondaryViewAction );
-        m_secondaryViewAction->setChecked( false );
-    }
+    m_secondaryMapSession->close();
     statusBar()->showMessage( tr( "Second view closed" ), 2500 );
 }
 
@@ -410,32 +353,35 @@ void QgisDesktopWindow::activateMainMapView()
     if ( !m_activeViewHost || !m_projectContext )
         return;
     m_activeViewHost->setActiveViewId( m_projectContext->mainViewId() );
-    if ( m_secondaryMapView )
-        m_secondaryMapView->setActiveHighlight( false );
+    if ( m_secondaryMapSession && m_secondaryMapSession->widget() )
+        m_secondaryMapSession->widget()->setActiveHighlight( false );
     statusBar()->showMessage( tr( "Active view: main view" ), 2500 );
 }
 
 void QgisDesktopWindow::activateSecondaryMapView()
 {
-    if ( !m_activeViewHost || m_secondaryViewId.isNull() )
+    if ( !m_activeViewHost )
+        return;
+    if ( !m_secondaryMapSession || m_secondaryMapSession->viewId().isNull() )
     {
         openSecondaryMapView();
-        if ( m_secondaryViewId.isNull() )
+        if ( !m_secondaryMapSession || m_secondaryMapSession->viewId().isNull() )
             return;
     }
-    if ( !m_activeViewHost->setActiveViewId( m_secondaryViewId ) )
+    if ( !m_activeViewHost->setActiveViewId( m_secondaryMapSession->viewId() ) )
     {
         statusBar()->showMessage( tr( "Cannot activate the second view" ), 3000 );
         return;
     }
-    if ( m_secondaryMapView )
-        m_secondaryMapView->setActiveHighlight( true );
+    if ( m_secondaryMapSession->widget() )
+        m_secondaryMapSession->widget()->setActiveHighlight( true );
     statusBar()->showMessage( tr( "Active view: second view (open / show operations route here)" ), 3500 );
 }
 
 void QgisDesktopWindow::syncMainLayersToSecondaryView()
 {
-    if ( !m_projectContext || m_secondaryViewId.isNull() )
+    if ( !m_projectContext || !m_secondaryMapSession
+         || m_secondaryMapSession->viewId().isNull() )
     {
         statusBar()->showMessage( tr( "Open the second view first" ), 3000 );
         return;
@@ -452,7 +398,7 @@ void QgisDesktopWindow::syncMainLayersToSecondaryView()
     int cloned = 0;
     for ( const auto &layerId : mainView->layerIds() )
     {
-        const auto result = display.cloneLayer( layerId, m_secondaryViewId );
+        const auto result = display.cloneLayer( layerId, m_secondaryMapSession->viewId() );
         if ( result )
             ++cloned;
     }
@@ -462,10 +408,10 @@ void QgisDesktopWindow::syncMainLayersToSecondaryView()
 
 void QgisDesktopWindow::toggleDualViewportSync( bool on )
 {
-    if ( !m_dualViewportSync )
+    if ( !m_secondaryMapSession || !m_secondaryMapSession->syncController() )
     {
         // No controller yet — keep the action unchecked until the secondary
-        // view is opened (which lazily creates the controller).
+        // view is opened (which creates the controller).
         if ( m_dualViewportSyncAction )
         {
             QSignalBlocker b( m_dualViewportSyncAction );
@@ -474,9 +420,9 @@ void QgisDesktopWindow::toggleDualViewportSync( bool on )
         statusBar()->showMessage( tr( "Open the second view first to enable linked viewports" ), 3000 );
         return;
     }
-    m_dualViewportSync->setEnabled( on );
+    m_secondaryMapSession->syncController()->setEnabled( on );
     if ( on )
-        m_dualViewportSync->snapSecondaryToPrimary();
+        m_secondaryMapSession->syncController()->snapSecondaryToPrimary();
     statusBar()->showMessage( on ? tr( "Linked viewports enabled" ) : tr( "Linked viewports paused" ), 2500 );
 }
 

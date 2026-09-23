@@ -284,6 +284,7 @@ add_executable(sicnu_geo_rs
     # Layer and map tool managers
     active_view_host.cpp
     shell/secondary_map_view_widget.cpp
+    shell/secondary_map_view_session.cpp
     shell/rs_dual_viewport_sync_controller.cpp
     shell/gui_job_adapter.cpp
     shell/gui_job_adapter.h

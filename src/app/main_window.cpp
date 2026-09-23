@@ -3,6 +3,7 @@
 #include "active_view_host.h"
 #include "plugin_ui_invoke_delegate.h"
 #include "plugins/framework/plugin_ui_schema_host.h"
+#include "shell/secondary_map_view_session.h"
 #include "workbench/command_registry.h"
 #include "workbench/plugin_command_defs.h"
 #include <QPointer>
@@ -346,8 +347,11 @@ QgisDesktopWindow::~QgisDesktopWindow()
         dropView( m_georefI2ISrcViewId );
         dropView( m_georefI2IDstViewId );
         dropView( m_georefI2MSrcViewId );
-        dropView( m_secondaryViewId );
     }
+    // The secondary view session releases its engine view through the same
+    // project context (while it is still alive above).
+    if ( m_secondaryMapSession )
+        m_secondaryMapSession->close();
 
     // Tear down child windows that rebind QgisApp / own canvases first.
     // Use QWidget* so we don't need full type definitions here.
