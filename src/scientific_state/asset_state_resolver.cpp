@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -277,6 +278,261 @@ struct NormalizeNoData
             return std::nullopt;
         }
         return std::to_string( value );
+    }
+};
+
+// --- Acquisition timestamps -------------------------------------------------
+//
+// The rest of the fact chain parses acquisition times (workflow_facts
+// parseInstant, suitability's QDateTime criteria). The resolver compared
+// observations as raw text, so one physical acquisition declared as
+// "2026-09-23 00:00:00" by the file and "2026-09-23T00:00:00Z" by the
+// catalog was reported conflicted, while "September 2026" was accepted as
+// a Known time no consumer could parse. mergeObservations compares
+// NORMALIZED text, so the field normalizes onto one canonical spelling:
+// midnight-UTC instants collapse to the date-only form (the coarsest
+// faithful representation — a date is never widened into a fabricated
+// time-of-day, matching workflow_facts' coarser-wins convention), every
+// other instant renders as "YYYY-MM-DDTHH:MM:SS[.frac]Z" with the zone
+// offset applied; naive datetimes are UTC by the same convention
+// workflow_facts documents. Deliberately std-only: this core is Qt-free by
+// its CMake contract, so the harness/suitability parsers cannot be reused
+// here without inverting the layering.
+
+bool isDigitRun( const char *text, std::size_t count )
+{
+    for ( std::size_t i = 0; i < count; ++i )
+    {
+        if ( text[i] < '0' || text[i] > '9' )
+            return false;
+    }
+    return true;
+}
+
+int digitsAsInt( const char *text, std::size_t count )
+{
+    int value = 0;
+    for ( std::size_t i = 0; i < count; ++i )
+        value = value * 10 + ( text[i] - '0' );
+    return value;
+}
+
+bool isLeapYear( int year )
+{
+    return ( year % 4 == 0 && year % 100 != 0 ) || year % 400 == 0;
+}
+
+int daysInMonth( int year, int month )
+{
+    static const int lengths[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if ( month == 2 && isLeapYear( year ) )
+        return 29;
+    return lengths[month - 1];
+}
+
+/// Days from 1970-01-01 to the given civil date (Howard Hinnant's
+/// days_from_civil; valid for the whole proleptic range we accept).
+long long daysFromCivil( long long year, unsigned month, unsigned day )
+{
+    year -= month <= 2;
+    const long long era = ( year >= 0 ? year : year - 399 ) / 400;
+    const unsigned yearOfEra = static_cast<unsigned>( year - era * 400 );
+    const unsigned dayOfYear =
+        ( 153 * ( month + ( month > 2 ? -3 : 9 ) ) + 2 ) / 5 + day - 1;
+    const unsigned dayOfEra =
+        yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    return era * 146097 + static_cast<long long>( dayOfEra ) - 719468;
+}
+
+/// Inverse of daysFromCivil (civil_from_days).
+void civilFromDays( long long days, int &year, unsigned &month, unsigned &day )
+{
+    days += 719468;
+    const long long era = ( days >= 0 ? days : days - 146096 ) / 146097;
+    const unsigned dayOfEra = static_cast<unsigned>( days - era * 146097 );
+    const unsigned yearOfEra =
+        ( dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096 ) / 365;
+    const long long y = static_cast<long long>( yearOfEra ) + era * 400;
+    const unsigned dayOfYear = dayOfEra - ( 365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100 );
+    const unsigned mp = ( 5 * dayOfYear + 2 ) / 153;
+    day = dayOfYear - ( 153 * mp + 2 ) / 5 + 1;
+    month = mp + ( mp < 10 ? 3 : -9 );
+    year = static_cast<int>( y + ( month <= 2 ) );
+}
+
+std::string formatDate( int year, unsigned month, unsigned day )
+{
+    char buffer[11];
+    std::snprintf( buffer, sizeof( buffer ), "%04d-%02u-%02u", year, month, day );
+    return buffer;
+}
+
+struct ParsedTimestamp
+{
+    bool ok = false;
+    long long epochSeconds = 0;  // UTC
+    bool midnightUtc = false;    // instant == 00:00:00Z — date-equivalent
+    std::string canonical;       // normalized UTC spelling
+};
+
+bool parseTimestamp( const std::string &text, ParsedTimestamp &out )
+{
+    // Closed ISO-8601 subset: "YYYY-MM-DD" optionally followed by
+    // ('T'|' ')HH:MM[:SS[.frac]] and an optional zone (Z | ±HH[:MM] | ±HHMM).
+    const char * const p = text.c_str();
+    const std::size_t length = text.size();
+    if ( length < 10 || !isDigitRun( p, 4 ) || p[4] != '-' || !isDigitRun( p + 5, 2 ) ||
+         p[7] != '-' || !isDigitRun( p + 8, 2 ) )
+        return false;
+
+    const int year = digitsAsInt( p, 4 );
+    const int month = digitsAsInt( p + 5, 2 );
+    const int day = digitsAsInt( p + 8, 2 );
+    if ( month < 1 || month > 12 || day < 1 || day > daysInMonth( year, month ) )
+        return false;
+
+    const long long days = daysFromCivil( year, month, day );
+    if ( length == 10 )
+    {
+        out.epochSeconds = days * 86400;
+        out.midnightUtc = true;
+        out.canonical = formatDate( year, month, day );
+        out.ok = true;
+        return true;
+    }
+
+    if ( p[10] != 'T' && p[10] != ' ' )
+        return false;
+    std::size_t cursor = 11;
+    // HH:MM[:SS]
+    if ( length < cursor + 5 || !isDigitRun( p + cursor, 2 ) || p[cursor + 2] != ':' ||
+         !isDigitRun( p + cursor + 3, 2 ) )
+        return false;
+    const int hour = digitsAsInt( p + cursor, 2 );
+    const int minute = digitsAsInt( p + cursor + 3, 2 );
+    cursor += 5;
+    int second = 0;
+    if ( cursor < length && p[cursor] == ':' )
+    {
+        if ( length < cursor + 3 || !isDigitRun( p + cursor + 1, 2 ) )
+            return false;
+        second = digitsAsInt( p + cursor + 1, 2 );
+        cursor += 3;
+    }
+    if ( hour > 23 || minute > 59 || second > 59 )
+        return false;
+
+    // Optional fractional seconds; canonical form trims trailing zeros.
+    std::string fraction;
+    if ( cursor < length && p[cursor] == '.' )
+    {
+        ++cursor;
+        const std::size_t start = cursor;
+        while ( cursor < length && p[cursor] >= '0' && p[cursor] <= '9' )
+            ++cursor;
+        if ( cursor == start )
+            return false;
+        fraction = text.substr( start, cursor - start );
+        while ( !fraction.empty() && fraction.back() == '0' )
+            fraction.pop_back();
+    }
+
+    // Optional zone; naive means UTC (workflow_facts convention).
+    long long offsetSeconds = 0;
+    if ( cursor < length )
+    {
+        if ( p[cursor] == 'Z' || p[cursor] == 'z' )
+        {
+            ++cursor;
+        }
+        else if ( p[cursor] == '+' || p[cursor] == '-' )
+        {
+            const long long sign = ( p[cursor] == '-' ) ? -1 : 1;
+            ++cursor;
+            std::size_t remaining = length - cursor;
+            if ( remaining == 5 && p[cursor + 2] == ':' &&
+                 isDigitRun( p + cursor, 2 ) && isDigitRun( p + cursor + 3, 2 ) )
+            {
+                offsetSeconds = sign * ( digitsAsInt( p + cursor, 2 ) * 3600LL +
+                                         digitsAsInt( p + cursor + 3, 2 ) * 60LL );
+                cursor = length;
+            }
+            else if ( remaining == 4 && isDigitRun( p + cursor, 4 ) )
+            {
+                offsetSeconds = sign * ( digitsAsInt( p + cursor, 2 ) * 3600LL +
+                                         digitsAsInt( p + cursor + 2, 2 ) * 60LL );
+                cursor = length;
+            }
+            else
+            {
+                return false;
+            }
+            if ( offsetSeconds / 3600 > 23 || ( offsetSeconds % 3600 ) / 60 > 59 )
+                return false;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    if ( cursor != length )
+        return false;
+
+    out.epochSeconds = days * 86400 + hour * 3600LL + minute * 60LL + second - offsetSeconds;
+    const long long dayOfInstant =
+        out.epochSeconds >= 0 ? out.epochSeconds / 86400
+                              : ( out.epochSeconds - 86399 ) / 86400;
+    const long long secondOfDay = out.epochSeconds - dayOfInstant * 86400;
+    out.midnightUtc = secondOfDay == 0;
+
+    if ( out.midnightUtc )
+    {
+        int utcYear = 0;
+        unsigned utcMonth = 0;
+        unsigned utcDay = 0;
+        civilFromDays( dayOfInstant, utcYear, utcMonth, utcDay );
+        out.canonical = formatDate( utcYear, utcMonth, utcDay );
+        out.ok = true;
+        return true;
+    }
+
+    int utcYear = 0;
+    unsigned utcMonth = 0;
+    unsigned utcDay = 0;
+    civilFromDays( dayOfInstant, utcYear, utcMonth, utcDay );
+    char buffer[32];
+    std::snprintf( buffer, sizeof( buffer ), "T%02u:%02u:%02u",
+                   static_cast<unsigned>( secondOfDay / 3600 ),
+                   static_cast<unsigned>( ( secondOfDay % 3600 ) / 60 ),
+                   static_cast<unsigned>( secondOfDay % 60 ) );
+    out.canonical = formatDate( utcYear, utcMonth, utcDay ) + buffer + "Z";
+    if ( !fraction.empty() )
+        out.canonical.insert( out.canonical.size() - 1, "." + fraction );
+    out.ok = true;
+    return true;
+}
+
+/// Acquisition timestamps merge on the canonical UTC spelling; unparsable
+/// text fails with a typed note code instead of travelling the chain as an
+/// unparseable Known fact.
+struct NormalizeTimestamp
+{
+    std::optional<std::string> operator()( const RawObservation &observation,
+                                           std::string &failCode ) const
+    {
+        const std::string trimmed = trimAscii( observation.value );
+        if ( trimmed.empty() )
+        {
+            failCode = "observation.empty";
+            return std::nullopt;
+        }
+        ParsedTimestamp parsed;
+        if ( !parseTimestamp( trimmed, parsed ) )
+        {
+            failCode = "acquisition.time_unparseable";
+            return std::nullopt;
+        }
+        return parsed.canonical;
     }
 };
 
@@ -589,7 +845,7 @@ void resolveAcquisition( RemoteSensingAssetState &state, const StateResolutionIn
     }
 
     const MergedValue merged =
-        mergeObservations( observations, NormalizeAsIs{}, notes, "acquisition.time" );
+        mergeObservations( observations, NormalizeTimestamp{}, notes, "acquisition.time" );
     if ( !merged.present )
     {
         addUnknown( state, "acquisition.time" );
