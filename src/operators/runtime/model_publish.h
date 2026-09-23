@@ -44,11 +44,12 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
 /// product exactly as it was, never a torn one and never a hidden backup.
 /// Disarmed after a successful sidecar publish (the backup is then removed).
 ///
-/// The backup suffix is deliberately NOT the vector writer's own ".prev~"
-/// (which it unconditionally cleans up at the end of a successful publish,
-/// companions included): a shared name would have the writer delete this
-/// guard's backup. Each lane passes its own unique suffix — the ensemble
-/// lane ".ensemble-prev~", the single-model lane ".det-prev~".
+/// The backup suffix is deliberately NOT any of the vector writer's own
+/// publish-family names (the writer publishes main + companions through the
+/// atomic_fs group ladder, which manages its own ".bak" set): a shared name
+/// would have the writer delete this guard's backup. Each lane passes its
+/// own unique suffix — the ensemble lane ".ensemble-prev~", the single-
+/// model lane ".det-prev~".
 class DetectionPublishGuard
 {
   public:
@@ -60,10 +61,14 @@ class DetectionPublishGuard
     DetectionPublishGuard &operator=( const DetectionPublishGuard & ) = delete;
 
   private:
+    /// Removes the whole backup family (main + companions + prov backup).
+    void removeBackupFamily();
+
     QString m_final;
     QString m_backup;
     QString m_backupSuffix;
     bool m_hadExisting = false;
+    bool m_hadProv = false;
     bool m_disarmed = false;
 };
 

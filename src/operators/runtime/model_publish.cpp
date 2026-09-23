@@ -40,22 +40,29 @@ std::string crsDisplayName( const QString &wkt )
   return text.substr( 0, cut ) + "...";
 }
 
-/// Shapefile companions for a vector output (empty for GPKG/GeoJSON) — the
-/// same set the detection writer publishes and must roll back atomically.
-QStringList detectionSidecars( const QString &main )
+/// Shapefile companions for a vector output, optionally carrying a backup
+/// suffix. The set is the vector writer's own publish family (dbf/shx/prj/
+/// cpg plus the QGIS/shape index riders qpj/sbn/sbx/qix — a republish must
+/// never leave a stale CRS override (.qpj) or index next to the new .prj).
+/// The suffix is how the BACKUP family names them: companions of
+/// "out.shp" with suffix ".det-prev~" are "out.dbf.det-prev~", ... (never
+/// classify the backup path by suffix — "out.shp.det-prev~" is not a .shp).
+QStringList detectionSidecarsFor( const QString &main, const QString &suffix )
 {
   const QFileInfo fi( main );
   if ( fi.suffix().toLower() != QLatin1String( "shp" ) )
     return {};
   const QString base = fi.path() + QLatin1Char( '/' ) + fi.completeBaseName();
-  return { base + QStringLiteral( ".dbf" ), base + QStringLiteral( ".shx" ),
-           base + QStringLiteral( ".prj" ), base + QStringLiteral( ".cpg" ) };
+  QStringList out;
+  for ( const char *ext : { ".dbf", ".shx", ".prj", ".cpg", ".qpj", ".sbn", ".sbx", ".qix" } )
+    out << base + ext + suffix;
+  return out;
 }
 
 void removeWithSidecars( const QString &main )
 {
   QFile::remove( main );
-  for ( const QString &sidecar : detectionSidecars( main ) )
+  for ( const QString &sidecar : detectionSidecarsFor( main, QString() ) )
     QFile::remove( sidecar );
 }
 
@@ -102,38 +109,94 @@ bool publishProvenanceSidecar( const QString &finalPath, const Json::Value &prov
   return true;
 }
 
+void DetectionPublishGuard::removeBackupFamily()
+{
+  QFile::remove( m_backup );
+  for ( const QString &companion : detectionSidecarsFor( m_final, m_backupSuffix ) )
+    QFile::remove( companion );
+  QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+}
+
 DetectionPublishGuard::DetectionPublishGuard( const QString &finalPath,
                                               const QString &backupSuffix )
     : m_final( finalPath ),
       m_backup( finalPath + backupSuffix ),
       m_backupSuffix( backupSuffix )
 {
+  // Crash-orphan recovery: a previous run that died between parking the
+  // previous product and publishing the new one leaves the final path
+  // ABSENT and the backup family present. Adopt the parked product back
+  // first — the consumer must not keep staring at a missing product, and
+  // this run then parks a consistent state (which disarm() then cleans).
+  if ( !QFile::exists( m_final ) && QFile::exists( m_backup ) )
+  {
+    if ( !QFile::rename( m_backup, m_final ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "detection publish could not recover the previously parked "
+                               "product: " + finalPath.toStdString() );
+    for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
+    {
+      const QString backupCompanion = companion + m_backupSuffix;
+      if ( QFile::exists( backupCompanion ) )
+        QFile::rename( backupCompanion, companion );
+    }
+    const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+    if ( QFile::exists( backupProv ) )
+      QFile::rename( backupProv, m_final + QStringLiteral( ".prov.json" ) );
+  }
+
   m_hadExisting = QFile::exists( m_final );
   if ( !m_hadExisting )
+  {
+    // A genuine first publish: pre-clean stray backup litter from an
+    // interrupted run so it can never resurface or wedge a later park
+    // (Windows rename does not overwrite).
+    removeBackupFamily();
     return;
-  removeWithSidecars( m_backup );
+  }
+
+  // Park companions and the provenance sidecar FIRST, the main file LAST:
+  // a throwing constructor never runs the destructor, so every park failure
+  // rolls back its already-parked predecessors — the previous product stays
+  // exactly as it was (never a half-parked, invisible one).
+  removeBackupFamily();
+
+  QStringList parkedCompanions;
+  for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
+  {
+    if ( !QFile::exists( companion ) )
+      continue;
+    if ( !QFile::rename( companion, companion + m_backupSuffix ) )
+    {
+      for ( const QString &parked : parkedCompanions )
+        QFile::rename( parked + m_backupSuffix, parked );
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "detection publish could not back up sidecar: "
+                               + companion.toStdString() );
+    }
+    parkedCompanions << companion;
+  }
+  const QString provPath = m_final + QStringLiteral( ".prov.json" );
+  m_hadProv = QFile::exists( provPath );
+  if ( m_hadProv && !QFile::rename( provPath, m_backup + QStringLiteral( ".prov.json" ) ) )
+  {
+    for ( const QString &parked : parkedCompanions )
+      QFile::rename( parked + m_backupSuffix, parked );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "detection publish could not back up provenance sidecar: "
+                             + finalPath.toStdString() );
+  }
+  // Main last: the least-likely park to fail, the shortest visibility
+  // window for the product.
   if ( !QFile::rename( m_final, m_backup ) )
+  {
+    for ( const QString &parked : parkedCompanions )
+      QFile::rename( parked + m_backupSuffix, parked );
+    if ( m_hadProv )
+      QFile::rename( m_backup + QStringLiteral( ".prov.json" ), provPath );
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "detection publish could not back up the previous product: "
                              + finalPath.toStdString() );
-  // Sidecar / companion backup failures are never ignored — a failed backup
-  // would leave the previous product unrestorable on rollback.
-  for ( const QString &sidecar : detectionSidecars( m_final ) )
-  {
-    if ( !QFile::exists( sidecar ) )
-      continue;
-    if ( !QFile::rename( sidecar, sidecar + m_backupSuffix ) )
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "detection publish could not back up sidecar: "
-                               + sidecar.toStdString() );
-  }
-  if ( QFile::exists( m_final + QStringLiteral( ".prov.json" ) ) )
-  {
-    if ( !QFile::rename( m_final + QStringLiteral( ".prov.json" ),
-                         m_backup + QStringLiteral( ".prov.json" ) ) )
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "detection publish could not back up provenance sidecar: "
-                               + finalPath.toStdString() );
   }
 }
 
@@ -141,15 +204,18 @@ DetectionPublishGuard::~DetectionPublishGuard()
 {
   if ( m_disarmed )
     return;
+  // Remove the partial NEW product (main + companions + its prov).
   removeWithSidecars( m_final );
+  QFile::remove( m_final + QStringLiteral( ".prov.json" ) );
   if ( !m_hadExisting )
     return;
+  // Restore the parked previous product: main first, then companions + prov.
   QFile::rename( m_backup, m_final );
-  for ( const QString &sidecar : detectionSidecars( m_final ) )
+  for ( const QString &companion : detectionSidecarsFor( m_final, QString() ) )
   {
-    const QString backupSidecar = sidecar + m_backupSuffix;
-    if ( QFile::exists( backupSidecar ) )
-      QFile::rename( backupSidecar, sidecar );
+    const QString backupCompanion = companion + m_backupSuffix;
+    if ( QFile::exists( backupCompanion ) )
+      QFile::rename( backupCompanion, companion );
   }
   const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
   if ( QFile::exists( backupProv ) )
@@ -159,11 +225,9 @@ DetectionPublishGuard::~DetectionPublishGuard()
 void DetectionPublishGuard::disarm()
 {
   m_disarmed = true;
-  if ( m_hadExisting )
-  {
-    removeWithSidecars( m_backup );
-    QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
-  }
+  // Drop the whole backup family unconditionally (idempotent removes): an
+  // adopted crash orphan must be cleaned exactly like a live backup.
+  removeBackupFamily();
 }
 
 Json::Value buildDetectionProvenance( const ModelInfo &model, const ModelRuntimePtr &runtime,

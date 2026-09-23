@@ -764,7 +764,7 @@ std::string registerDetectModel( const QTemporaryDir &dir )
   return model->identityTag();
 }
 
-ModelExecutionRequest detectRequest( const QTemporaryDir &dir )
+ModelExecutionRequest detectRequest( const QTemporaryDir &dir, const QString &suffix = QStringLiteral( ".gpkg" ) )
 {
   const QString input = dir.filePath( QStringLiteral( "det-c-input.tif" ) );
   sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
@@ -772,7 +772,7 @@ ModelExecutionRequest detectRequest( const QTemporaryDir &dir )
   builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
   ModelExecutionRequest request;
   request.inputPath = input.toStdString();
-  request.outputPath = dir.filePath( QStringLiteral( "det-c-out.gpkg" ) ).toStdString();
+  request.outputPath = dir.filePath( QStringLiteral( "det-c-out" ) + suffix ).toStdString();
   request.modelReference = "det-sidecar-model";
   request.asDetection = true;
   return request;
@@ -894,5 +894,56 @@ TEST_CASE( "a detection sidecar failure restores the previous vector product and
   runOnce();
   CHECK( fileExists( sidecar ) );
   CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".det-prev~" ) ) );
+  ModelCatalog::instance().unregister( "det-sidecar-model" );
+}
+
+TEST_CASE( "a detection republish leaves no backup residue and recovers a crash-orphaned product",
+           "[models][detect][publish][p13c]" )
+{
+  ProviderGuard guard;
+  const DetectProviderGuard detectGuard;
+  QTemporaryDir dir;
+  ( void )registerDetectModel( dir );
+  RSOperatorContext context;
+  const auto residueCount = [ & ]( const QTemporaryDir &target ) {
+    QDir outDir( target.path() );
+    return outDir.entryList( QStringList{ QStringLiteral( "*det-prev~*" ) }, QDir::Files )
+      .size();
+  };
+
+  // A shapefile output exercises the companion family (.dbf/.shx/.prj/.cpg).
+  ModelExecutionRequest request = detectRequest( dir, QStringLiteral( ".shp" ) );
+  const QString output = QString::fromStdString( request.outputPath );
+  const QString shapeBase = QFileInfo( output ).absolutePath() + QStringLiteral( "/det-c-out" );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+
+  ModelExecutionRequest first = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( first, context ) );
+  REQUIRE( fileExists( output ) );
+  REQUIRE( fileExists( sidecar ) );
+  REQUIRE( fileExists( shapeBase + QStringLiteral( ".dbf" ) ) );
+
+  // A successful REPUBLISH must leave no backup residue: the parked
+  // companions of the first product are cleaned by the disarm, not leaked
+  // as hidden stale geodata next to the new product.
+  ModelExecutionRequest second = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( second, context ) );
+  CHECK( fileExists( output ) );
+  CHECK( fileExists( shapeBase + QStringLiteral( ".dbf" ) ) );
+  CHECK( residueCount( dir ) == 0 );
+
+  // A run killed between the park and the publish leaves the final path
+  // ABSENT with the backup family present (crash orphan). The NEXT run must
+  // adopt the parked product back and republish over it — never strand the
+  // consumer with a missing product and a hidden backup.
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".det-prev~" ) ) );
+  REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".det-prev~.prov.json" ) ) );
+  REQUIRE_FALSE( fileExists( output ) );
+
+  ModelExecutionRequest third = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( third, context ) );
+  CHECK( fileExists( output ) );
+  CHECK( fileExists( sidecar ) );
+  CHECK( residueCount( dir ) == 0 );
   ModelCatalog::instance().unregister( "det-sidecar-model" );
 }
