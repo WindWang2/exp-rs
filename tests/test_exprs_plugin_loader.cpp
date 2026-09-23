@@ -1589,6 +1589,41 @@ TEST_CASE( "snapshot sweep keeps the legacy last-good liveness rule unchanged (c
     fs::remove_all( root, ec );
 }
 
+TEST_CASE( "snapshot sweep keeps a dead-owner last-good while the plugin id is live "
+           "(completion 13/15)",
+           "[plugin][snapshot][completion13]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_deadowner" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string snapRoot = pluginSnapshotRoot( root );
+    fs::create_directories( snapRoot, ec );
+    // A pid guaranteed dead (see the sweep harness above).
+    const long deadPid = static_cast<long>( std::numeric_limits<int>::max() );
+
+    const auto seed = [&snapRoot]( const std::string &name ) {
+        std::error_code err;
+        fs::create_directories( snapRoot + "/" + name, err );
+        std::ofstream( snapRoot + "/" + name + "/x" ) << "x";
+    };
+    // Owner dead in BOTH readings, but the plugin id is live for the
+    // sweeping registry — the keep must hold through the pid-attributed
+    // reading (a regression reducing the rule to owner-liveness only would
+    // re-delete a live plugin's rollback source).
+    seed( "last-good-org.kept-" + std::to_string( deadPid ) );
+    // Same shape, id unknown to the sweeper — collectible residue.
+    seed( "last-good-org.dropped-" + std::to_string( deadPid ) );
+
+    const int removed = sweepPluginSnapshots( root, { "org.kept" } );
+    ( void ) removed;
+    REQUIRE( fs::exists( snapRoot + "/last-good-org.kept-" + std::to_string( deadPid ), ec ) );
+    REQUIRE_FALSE(
+        fs::exists( snapRoot + "/last-good-org.dropped-" + std::to_string( deadPid ), ec ) );
+    fs::remove_all( root, ec );
+}
+
 TEST_CASE( "snapshot sweep restores a dead-owner upgrade snapshot into a partial install (#1157)",
            "[plugin][snapshot][p13][issue1157]" )
 {
