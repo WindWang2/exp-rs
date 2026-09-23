@@ -12759,3 +12759,25 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# Completion 13/15: the in-process plugin model runtime bridge — first
+# direct coverage of the IModelRuntime forward-serialization contract at
+# the plugin adapter gate (model_runtime.h: implementations serialize).
+# Narrow target: links only the bridge + operators seams, never the app.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+  add_executable(test_plugin_model_bridge test_plugin_model_bridge.cpp)
+  target_link_libraries(test_plugin_model_bridge PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_plugins_framework
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  sicnu_link_jsoncpp(test_plugin_model_bridge)
+  target_include_directories(test_plugin_model_bridge PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_plugin_model_bridge)
+endif()
