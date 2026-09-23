@@ -275,13 +275,15 @@ TEST_CASE( "findings overflow is truncated deterministically and reported",
         if ( f.code == "SPF_BUDGET_EXCEEDED" )
         {
             hasMarker = true;
-            REQUIRE( f.severity == PreflightSeverity::RequireAck );
+            // Budgets are configuration, not named risk: truncation blocks.
+            REQUIRE( f.severity == PreflightSeverity::Block );
             REQUIRE( f.evidence["dropped_findings"].asInt() == 3 );
             REQUIRE( f.evidence["cap"].asInt() == 3 );
         }
     REQUIRE( hasMarker );
-    // Truncation is loud: an over-budget report can never be "ok".
-    REQUIRE( report.verdict == "requires_ack" );
+    // Truncation is loud and fail-closed: an over-budget report can never be
+    // "ok" and cannot be acknowledged into validity either.
+    REQUIRE( report.verdict == "blocked" );
 
     // Deterministic subset: same request, same surviving findings.
     const PreflightReport replay = engine.evaluate( capped, facts, capability );
@@ -313,7 +315,7 @@ TEST_CASE( "input overflow beyond max_inputs is skipped and reported",
             REQUIRE( f.evidence["dropped_inputs"].asInt() == 4 );
         }
     REQUIRE( hasMarker );
-    REQUIRE( report.verdict == "requires_ack" );
+    REQUIRE( report.verdict == "blocked" );
 }
 
 TEST_CASE( "registry full is a typed registration failure", "[preflight][engine]" )
@@ -353,6 +355,17 @@ TEST_CASE( "invalid requests fail closed with a typed finding", "[preflight][eng
     badMode.mode = "yolo";
     const PreflightReport mode = engine.evaluate( badMode, facts, capability );
     REQUIRE( mode.verdict == "blocked" );
+    // The envelope is coerced into the valid vocabulary (raw value rides in
+    // the finding evidence), so the report round-trips the fail-closed
+    // reader it is supposed to be storable as.
+    REQUIRE( mode.mode == "teaching" );
+    const auto modeParsed = PreflightReport::fromJson( mode.toJson() );
+    REQUIRE( modeParsed.has_value() );
+    bool evidenceCarriesRawMode = false;
+    for ( const auto &f : modeParsed->findings )
+        if ( f.code == "SPF_REQUEST_INVALID" && f.evidence["mode"].asString() == "yolo" )
+            evidenceCarriesRawMode = true;
+    REQUIRE( evidenceCarriesRawMode );
 }
 
 TEST_CASE( "evaluation is byte-deterministic and round-trips", "[preflight][engine]" )

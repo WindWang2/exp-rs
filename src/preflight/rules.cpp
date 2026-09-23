@@ -88,6 +88,14 @@ bool stringInArray( const Json::Value &array, const std::string &value )
     return false;
 }
 
+/// Gridded raster kinds the raster rules judge. VRT-style mosaics
+/// (virtual_raster) and remote maps carry real grids; skipping them would be
+/// a silent pass for ubiquitous input kinds.
+bool isGriddedRasterKind( const std::string &kind )
+{
+    return kind == "raster" || kind == "virtual_raster" || kind == "remote_map";
+}
+
 /// Rule-side view of one raster slot with its resolved facts.
 struct RasterSlot
 {
@@ -98,8 +106,12 @@ struct RasterSlot
 std::vector<RasterSlot> rasterSlots( const RuleFacts &facts )
 {
     std::vector<RasterSlot> out;
-    for ( const auto *slot : facts.slotsOfKind( "raster" ) )
-        out.push_back( RasterSlot{ slot, &slot->facts.facts } );
+    for ( const auto &slot : facts.slots )
+    {
+        if ( slot.facts.status == FactStatus::Available &&
+             isGriddedRasterKind( slot.facts.facts.kind ) )
+            out.push_back( RasterSlot{ &slot, &slot.facts.facts } );
+    }
     return out;
 }
 
@@ -203,7 +215,7 @@ RuleResult bandRoleEvaluate( const PreflightRequest &, const RuleFacts &facts )
             ++unknownCount;
             continue;
         }
-        if ( slot.facts.facts.kind != "raster" )
+        if ( !isGriddedRasterKind( slot.facts.facts.kind ) )
         {
             result.detail = "non-raster slot skipped: " + slot.slot;
             continue;
@@ -421,7 +433,7 @@ RuleResult radiometricStateEvaluate( const PreflightRequest &, const RuleFacts &
             continue;
         }
         const SlotFacts &f = entry.facts.facts;
-        if ( f.kind != "raster" )
+        if ( !isGriddedRasterKind( f.kind ) )
             continue;
         if ( f.radiometricUnit.empty() )
         {
@@ -488,7 +500,7 @@ RuleResult modalityEvaluate( const PreflightRequest &, const RuleFacts &facts )
             continue;
         }
         const SlotFacts &f = entry.facts.facts;
-        if ( f.kind != "raster" )
+        if ( !isGriddedRasterKind( f.kind ) )
             continue;
         if ( f.modality.empty() || f.modality == "unknown" )
         {
@@ -738,11 +750,19 @@ RuleResult leakageEvaluate( const PreflightRequest &, const RuleFacts &facts )
     const std::string trainId = identity( *training );
     const std::string evalId = identity( *evaluation );
     const bool sameAsset = !trainId.empty() && trainId == evalId;
+    // A leak in either direction counts: eval derived from training, or
+    // training manufactured from the eval source.
     bool derivedReuse = false;
     if ( !sameAsset && !trainId.empty() )
     {
         for ( const auto &origin : evaluation->facts.facts.derivedFromAssetIds )
             if ( origin == trainId )
+                derivedReuse = true;
+    }
+    if ( !sameAsset && !evalId.empty() )
+    {
+        for ( const auto &origin : training->facts.facts.derivedFromAssetIds )
+            if ( origin == evalId )
                 derivedReuse = true;
     }
     if ( !sameAsset && !derivedReuse )
@@ -827,11 +847,12 @@ RuleResult modelCompatEvaluate( const PreflightRequest &, const RuleFacts &facts
     const Json::Value &roles = model["input_band_roles"];
     if ( roles.isObject() && !roles.empty() )
     {
-        for ( const auto *slot : facts.slotsOfKind( "raster" ) )
+        for ( const auto &raster : rasterSlots( facts ) )
         {
-            if ( slot == manifest )
+            if ( raster.slot == manifest )
                 continue;
-            const SlotFacts &f = slot->facts.facts;
+            const RuleFacts::Slot *slot = raster.slot;
+            const SlotFacts &f = raster.facts ? *raster.facts : slot->facts.facts;
             for ( const auto &role : roles.getMemberNames() )
             {
                 if ( !roles[role].isInt() )

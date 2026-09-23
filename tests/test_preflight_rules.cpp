@@ -441,6 +441,22 @@ TEST_CASE( "train_eval_leakage: identical assets block; derived reuse blocks; un
             loaded.run( { { "training", "scene-a" }, { "eval", "scene-b" } } );
         REQUIRE( hasCode( report, "SPF_TRAIN_EVAL_LEAKAGE" ) );
     }
+    // Reverse derivation (training manufactured from the eval source) is the
+    // same leak.
+    {
+        Loaded loaded;
+        SlotFacts train = opticalScene();
+        train.assetId = "asset-derived";
+        train.derivedFromAssetIds = { "asset-eval-origin" };
+        loaded.facts.set( "scene-a", train );
+        SlotFacts eval = opticalScene();
+        eval.assetId = "asset-eval-origin";
+        loaded.facts.set( "scene-b", eval );
+        const PreflightReport report =
+            loaded.run( { { "training", "scene-a" }, { "eval", "scene-b" } } );
+        REQUIRE( hasCode( report, "SPF_TRAIN_EVAL_LEAKAGE" ) );
+        REQUIRE( findings( report, "SPF_TRAIN_EVAL_LEAKAGE" )[0]->basis == "derived" );
+    }
     // Unresolvable identity -> typed unknown, no silent pass.
     {
         Loaded loaded;
@@ -532,6 +548,22 @@ TEST_CASE( "model_compatibility: family mismatch blocks; missing manifest typed 
         REQUIRE( trace( report, "preflight.model_compatibility" )->outcome ==
                  "insufficient_facts" );
     }
+}
+
+TEST_CASE( "virtual_raster inputs are judged like rasters, not silently skipped",
+           "[preflight][rules]" )
+{
+    // VRT-style mosaics are ubiquitous; a missing role on a virtual raster
+    // must block, not sail through as "no raster inputs".
+    Loaded loaded;
+    SlotFacts vrt = opticalScene();
+    vrt.kind = "virtual_raster";
+    vrt.bands.erase( vrt.bands.begin() ); // drop red
+    loaded.facts.set( "scene-a", vrt );
+
+    const PreflightReport report = loaded.run();
+    REQUIRE( hasCode( report, "SPF_BAND_ROLE_MISSING" ) );
+    REQUIRE( findings( report, "SPF_BAND_ROLE_MISSING" )[0]->severity == PreflightSeverity::Block );
 }
 
 TEST_CASE( "operator_known: undeclared operator and unavailable mirror are typed, not passes",

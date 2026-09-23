@@ -181,18 +181,27 @@ TEST_CASE( "CapabilityMirrorProjection consumes the real mirror documents",
     REQUIRE( ids.size() >= 15 );
     REQUIRE( std::is_sorted( ids.begin(), ids.end() ) );
 
-    // A family default resolves with its declared constraints.
-    const auto family = mirror.entryForOperator( "family:spectral_index", {} );
-    REQUIRE( family.status == FactStatus::Available );
-    REQUIRE( family.entry["radiometric"]["acceptable"].isArray() );
+    // Family defaults are merge sources, not operators (authority parity).
+    REQUIRE( mirror.entryForOperator( "family:spectral_index", {} ).status ==
+             FactStatus::Unknown );
 
-    // The operator entry merges its extends chain (child-wins) and resolves
-    // the first matching variant against the given params.
+    // The operator entry merges its extends chain (child-wins; radiometric
+    // inherited from the terminal family default) and resolves the first
+    // matching variant against the given params.
     const auto ndvi = mirror.entryForOperator( "rs:spectral_index", makeVariantParams( "index", "NDVI" ) );
     REQUIRE( ndvi.status == FactStatus::Available );
     REQUIRE( ndvi.entry["band_roles"]["red"].asInt() == 1 );
     REQUIRE( ndvi.entry["band_roles"]["nir"].asInt() == 1 );
     REQUIRE( ndvi.entry["radiometric"]["acceptable"].isArray() ); // inherited from the family
+    REQUIRE( ndvi.entry["kind"].asString() != "family_default" ); // id/kind never inherited
+
+    // Variant matching is case-insensitive (authority parity): a lowercase
+    // selector must reach the same NDVI requirements, or a run could be
+    // cleared with the requirements silently unconsulted.
+    const auto lower = mirror.entryForOperator( "rs:spectral_index", makeVariantParams( "index", "ndvi" ) );
+    REQUIRE( lower.status == FactStatus::Available );
+    REQUIRE( lower.entry["band_roles"]["red"].asInt() == 1 );
+    REQUIRE( lower.entry["band_roles"]["nir"].asInt() == 1 );
 
     // Variant mismatch falls back to the un-varianted merge.
     const auto noVariant = mirror.entryForOperator( "rs:spectral_index", {} );

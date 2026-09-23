@@ -1,6 +1,7 @@
 #include "preflight/capability_mirror.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -9,27 +10,34 @@
 namespace sicnu::preflight {
 namespace {
 
-constexpr int kMaxMergeDepth = 16;
+constexpr int kMaxMergeDepth = 4; // authority parity (capability_knowledge bound)
 constexpr std::size_t kMaxEntries = 2048;
 
-Json::Value parseText( const std::string &text )
+Json::Value parseText( const std::string &text, std::string &errors )
 {
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
     builder["stackLimit"] = 1000;
     Json::Value parsed;
-    std::string errors;
     std::stringstream stream( text );
     Json::parseFromStream( builder, stream, &parsed, &errors );
     return parsed;
+}
+
+std::string lowered( std::string text )
+{
+    std::transform( text.begin(), text.end(), text.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    return text;
 }
 
 bool stringInArray( const Json::Value &array, const std::string &value )
 {
     if ( !array.isArray() )
         return false;
+    const std::string needle = lowered( value );
     for ( const auto &item : array )
-        if ( item.isString() && item.asString() == value )
+        if ( item.isString() && lowered( item.asString() ) == needle )
             return true;
     return false;
 }
@@ -53,6 +61,75 @@ const CapabilityMirrorProjection::Entry *CapabilityMirrorProjection::findEntry(
     return nullptr;
 }
 
+namespace {
+
+/// Fail-closed validation of the policy shapes the preflight rules consume.
+/// Anything malformed skips the entry (counted) so a half-declared policy can
+/// never silently narrow a check.
+std::string policyProblem( const Json::Value &entry )
+{
+    auto objectOfNonNegativeInts = []( const Json::Value &node ) {
+        if ( !node.isObject() )
+            return false;
+        for ( const auto &key : node.getMemberNames() )
+            if ( !node[key].isInt() || node[key].asInt() < 0 )
+                return false;
+        return true;
+    };
+    auto arrayOfStrings = []( const Json::Value &node ) {
+        if ( !node.isArray() )
+            return false;
+        for ( const auto &item : node )
+            if ( !item.isString() )
+                return false;
+        return true;
+    };
+
+    const Json::Value &roles = entry["band_roles"];
+    if ( !roles.isNull() && !objectOfNonNegativeInts( roles ) )
+        return "band_roles must map roles to non-negative ints";
+    const Json::Value &radiometric = entry["radiometric"];
+    if ( !radiometric.isNull() )
+    {
+        if ( !radiometric.isObject() )
+            return "radiometric must be an object";
+        if ( radiometric.isMember( "acceptable" ) && !arrayOfStrings( radiometric["acceptable"] ) )
+            return "radiometric.acceptable must be an array of strings";
+        if ( radiometric.isMember( "warn" ) && !arrayOfStrings( radiometric["warn"] ) )
+            return "radiometric.warn must be an array of strings";
+    }
+    const Json::Value &modality = entry["modality"];
+    if ( !modality.isNull() && !arrayOfStrings( modality ) )
+        return "modality must be an array of strings";
+    const Json::Value &temporal = entry["temporal"];
+    if ( !temporal.isNull() )
+    {
+        if ( !temporal.isObject() )
+            return "temporal must be an object";
+        if ( temporal.isMember( "min_scenes" ) && !temporal["min_scenes"].isInt() )
+            return "temporal.min_scenes must be an int";
+        if ( temporal.isMember( "max_gap_days" ) && !temporal["max_gap_days"].isInt() )
+            return "temporal.max_gap_days must be an int";
+        if ( temporal.isMember( "requires_acquisition_time" ) &&
+             !temporal["requires_acquisition_time"].isBool() )
+            return "temporal.requires_acquisition_time must be a bool";
+    }
+    const Json::Value &model = entry["model_compatibility"];
+    if ( !model.isNull() )
+    {
+        if ( !model.isObject() )
+            return "model_compatibility must be an object";
+        if ( model.isMember( "families" ) && !arrayOfStrings( model["families"] ) )
+            return "model_compatibility.families must be an array of strings";
+        if ( model.isMember( "input_band_roles" ) &&
+             !objectOfNonNegativeInts( model["input_band_roles"] ) )
+            return "model_compatibility.input_band_roles must map roles to non-negative ints";
+    }
+    return "";
+}
+
+} // namespace
+
 void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
                                               const std::string &origin )
 {
@@ -68,6 +145,13 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
         if ( !entry.isObject() || !entry["id"].isString() )
         {
             problems_.push_back( origin + ": entry without a string id" );
+            continue;
+        }
+        const std::string policyProblemText = policyProblem( entry );
+        if ( !policyProblemText.empty() )
+        {
+            problems_.push_back( origin + ": entry " + entry["id"].asString() + ": " +
+                                 policyProblemText );
             continue;
         }
         const std::string id = entry["id"].asString();
@@ -114,7 +198,14 @@ int CapabilityMirrorProjection::loadDirectory( const std::string &directory )
         }
         std::stringstream buffer;
         buffer << in.rdbuf();
-        addDocument( parseText( buffer.str() ), file.filename().string() );
+        std::string parseErrors;
+        const Json::Value parsed = parseText( buffer.str(), parseErrors );
+        if ( parsed.isNull() && !parseErrors.empty() )
+        {
+            problems_.push_back( file.filename().string() + ": " + parseErrors );
+            continue;
+        }
+        addDocument( parsed, file.filename().string() );
         ++loaded;
     }
     return loaded;
@@ -137,23 +228,14 @@ const std::vector<std::string> &CapabilityMirrorProjection::problems() const
 
 Json::Value CapabilityMirrorProjection::mergeEntry( const Entry &entry ) const
 {
-    // Merge chain, parent-first: family default, extends ancestors, the
-    // entry, then the first matching variant. Later sources overwrite
-    // top-level keys (child wins).
+    // Merge chain, parent-first, mirroring the Qt authority's walk
+    // (capability_knowledge.cpp): extends ancestors to the root, the family
+    // default of the TERMINAL ancestor (where extends is absent), then the
+    // entry itself; later sources overwrite top-level keys (child wins).
     std::vector<const Entry *> chain;
     std::set<std::string> visited;
     visited.insert( entry.value["id"].asString() );
 
-    const std::string family =
-        entry.value["family"].isString() ? entry.value["family"].asString() : std::string();
-    if ( !family.empty() )
-    {
-        const Entry *familyDefault = findEntry( "family:" + family );
-        if ( familyDefault != nullptr && familyDefault != &entry &&
-             visited.insert( familyDefault->value["id"].asString() ).second )
-            chain.push_back( familyDefault );
-    }
-    // Walk the extends chain to the root, then apply root-first.
     std::vector<const Entry *> ancestors;
     const Entry *cursor = &entry;
     int depth = 0;
@@ -166,21 +248,34 @@ Json::Value CapabilityMirrorProjection::mergeEntry( const Entry &entry ) const
         cursor = parent;
         ++depth;
     }
+    // Family fallback at the terminal level: the terminal ancestor's family
+    // default (never the requested entry's own family, which the authority
+    // ignores when extends is declared).
+    const std::string terminalFamily =
+        cursor->value["family"].isString() ? cursor->value["family"].asString() : std::string();
+    if ( !terminalFamily.empty() )
+    {
+        const Entry *familyDefault = findEntry( "family:" + terminalFamily );
+        if ( familyDefault != nullptr && familyDefault != &entry &&
+             visited.insert( familyDefault->value["id"].asString() ).second )
+            ancestors.push_back( familyDefault );
+    }
     std::reverse( ancestors.begin(), ancestors.end() );
     for ( const Entry *ancestor : ancestors )
         chain.push_back( ancestor );
     chain.push_back( &entry );
 
-    static const char *kNeverCopied[] = { "extends", "when" };
+    // Ancestors and family defaults never contribute identity or taxonomy:
+    // "id" and "kind" come from the entry itself only (authority parity).
     Json::Value merged( Json::objectValue );
     for ( const Entry *source : chain )
     {
+        const bool isSelf = source == &entry;
         for ( const auto &key : source->value.getMemberNames() )
         {
-            bool skip = false;
-            for ( const char *never : kNeverCopied )
-                if ( key == never )
-                    skip = true;
+            bool skip = key == "extends" || key == "when";  // never copied from anyone
+            if ( !isSelf && ( key == "id" || key == "kind" ) )
+                skip = true;
             if ( !skip )
                 merged[key] = source->value[key];
         }
@@ -210,6 +305,13 @@ CapabilityEntryResult CapabilityMirrorProjection::entryForOperator(
     {
         result.status = FactStatus::Unknown;
         result.detail = "operator not declared in the capability mirror";
+        return result;
+    }
+    if ( entry->value["kind"].isString() && entry->value["kind"].asString() == "family_default" )
+    {
+        // Authority parity: family defaults are merge sources, not operators.
+        result.status = FactStatus::Unknown;
+        result.detail = "family defaults are not operators";
         return result;
     }
 

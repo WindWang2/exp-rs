@@ -13,15 +13,16 @@ bool isValidRunMode( const std::string &mode )
     return mode == "teaching" || mode == "agent";
 }
 
-/// The typed truncation marker. Over-budget reports are require_ack at best:
-/// silent partial coverage is exactly the failure mode this engine exists to
-/// prevent.
+/// The typed truncation marker. Budgets are configuration, not named risk:
+/// an over-budget report cannot be accepted into validity, so the marker is
+/// a block — silent partial coverage is exactly the failure mode this engine
+/// exists to prevent.
 PreflightFinding budgetMarker( const std::string &subject,
                                const Json::Value &evidence )
 {
     PreflightFinding f;
     f.code = "SPF_BUDGET_EXCEEDED";
-    f.severity = PreflightSeverity::RequireAck;
+    f.severity = PreflightSeverity::Block;
     f.ruleId = "preflight.engine";
     f.ruleRevision = 1;
     f.domain = "budget";
@@ -187,14 +188,18 @@ PreflightReport PreflightEngine::evaluate( const PreflightRequest &request,
                                            const IAssetFactsProvider &assetFacts,
                                            const ICapabilityProvider &capability ) const
 {
-    PreflightReport report = PreflightReport::makeEmpty( request.humanOperatorId, request.mode );
+    // The report envelope must always satisfy the fail-closed report reader:
+    // an invalid mode is coerced to the teaching default and the raw value
+    // travels inside the request finding's evidence instead.
+    const bool modeValid = isValidRunMode( request.mode );
+    PreflightReport report = PreflightReport::makeEmpty(
+        request.humanOperatorId, modeValid ? request.mode : std::string( "teaching" ) );
     report.requestDigest = computeRequestDigest( request );
-    report.budgets = request.budgets;
 
     // Fail-closed request validation: an unjudgeable request is blocked with
     // a typed finding, never an empty "ok".
     std::vector<PreflightFinding> findings;
-    const bool requestValid = isValidRunMode( request.mode ) && !request.inputs.empty();
+    const bool requestValid = modeValid && !request.inputs.empty();
     if ( !requestValid )
     {
         PreflightFinding f;
@@ -209,11 +214,24 @@ PreflightReport PreflightEngine::evaluate( const PreflightRequest &request,
             "The request itself is malformed (mode or inputs) and cannot be judged.";
         f.machineExplanation["expectation"] = "mode in [teaching, agent] and at least one input";
         f.machineExplanation["remediation"] = Json::Value( Json::arrayValue );
+        f.evidence["mode"] = request.mode;
+        f.evidence["inputs"] = static_cast<int>( request.inputs.size() );
         findings.push_back( std::move( f ) );
     }
 
-    const int maxInputs = request.budgets.maxInputs > 0 ? request.budgets.maxInputs : 64;
-    const int maxFindings = request.budgets.maxFindings > 0 ? request.budgets.maxFindings : 256;
+    // Budgets: non-positive caps fall back to the schema defaults; the report
+    // records the APPLIED budgets so the artifact always round-trips.
+    PreflightBudgets applied = request.budgets;
+    if ( applied.maxInputs <= 0 )
+        applied.maxInputs = 64;
+    if ( applied.maxFindings <= 0 )
+        applied.maxFindings = 256;
+    if ( applied.maxRules <= 0 )
+        applied.maxRules = 512;
+    report.budgets = applied;
+
+    const int maxInputs = applied.maxInputs;
+    const int maxFindings = applied.maxFindings;
     int droppedInputs = 0;
 
     // Resolve authority answers once per request, read-only.
