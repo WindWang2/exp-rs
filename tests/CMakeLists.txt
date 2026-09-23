@@ -959,6 +959,7 @@ target_include_directories(test_provenance_section PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
+sicnu_link_jsoncpp(test_provenance_section)
 sicnu_discover_tests(test_provenance_section)
 
 # ── Workbench 7.0: unified processing history projection (TaskCenter + runs) ──
