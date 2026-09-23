@@ -13,6 +13,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace sicnu::faultlab
 {
