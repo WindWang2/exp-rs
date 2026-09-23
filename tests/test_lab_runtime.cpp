@@ -771,6 +771,9 @@ TEST_CASE( "session JSON envelope is strictly versioned and shaped", "[lab_runti
 
 #include "lab/hint_policy.h"
 
+#include "lab/checkpoint_verify.h"
+#include "lab/hint_policy.h"
+
 TEST_CASE( "session envelope refuses unknown keys at every nesting level",
            "[lab_runtime][session][negative]" )
 {
@@ -785,10 +788,27 @@ TEST_CASE( "session envelope refuses unknown keys at every nesting level",
   sicnu::lab::ToolChoice choice;
   choice.stageId = "s1_preprocess";
   choice.operatorId = "rs:clip";
+  choice.paramsSubset = { { "bands", "3" } }; // ckpt_clip's operator check pins this
   REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
   REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "about 30m", {} ).ok );
   REQUIRE( sicnu::lab::recordExecutionRef( session, "experiment_run", "run-7" ).ok );
   REQUIRE( sicnu::lab::revealHint( session, plan, "step:1", 1 ).ok );
+
+  // Produce a real checkpoint result: the probe serves "abc", whose sha256
+  // the valid document pins on ckpt_clip's artifact check.
+  struct AbcProbe final : public sicnu::lab::FileProbe
+  {
+    bool exists( const std::string & ) override { return true; }
+    long long fileSize( const std::string & ) override { return 3; }
+    bool readFile( const std::string &, std::string &out, long long ) override
+    {
+      out = "abc";
+      return true;
+    }
+  } probe;
+  const auto verdict = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( verdict.ok );
+  REQUIRE( verdict.value.verdict == sicnu::lab::Verdict::Pass );
 
   const std::string bytes = sicnu::lab::sessionToCanonicalBytes( session );
 
@@ -806,10 +826,24 @@ TEST_CASE( "session envelope refuses unknown keys at every nesting level",
   };
 
   SECTION( "stage entry" ) { injectAndExpectRefusal( "stages", "evil" ); }
+  SECTION( "checkpoint result entry" ) { injectAndExpectRefusal( "checkpoint_results", "evil" ); }
   SECTION( "question answer entry" ) { injectAndExpectRefusal( "question_answers", "evil" ); }
   SECTION( "hint event entry" ) { injectAndExpectRefusal( "hint_events", "evil" ); }
   SECTION( "tool choice entry" ) { injectAndExpectRefusal( "tool_choices", "evil" ); }
   SECTION( "execution ref entry" ) { injectAndExpectRefusal( "execution_refs", "evil" ); }
+  SECTION( "checkpoint evidence entry" )
+  {
+    // Two levels deep — the only vocabulary that needs its own traversal.
+    Json::Value doc = parseJson( bytes );
+    REQUIRE( doc[ "checkpoint_results" ].size() >= 1 );
+    REQUIRE( doc[ "checkpoint_results" ][ 0 ][ "evidence" ].size() >= 1 );
+    doc[ "checkpoint_results" ][ 0 ][ "evidence" ][ 0 ][ "evil" ] = 1;
+    const auto result = sicnu::lab::sessionFromJson( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.session.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "evil" ) );
+  }
   SECTION( "round-trip stays clean" )
   {
     // Sanity: the populated session itself must parse (the injections above

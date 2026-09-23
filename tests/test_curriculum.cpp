@@ -564,10 +564,11 @@ TEST_CASE( "curriculum: lab reference resolution chain", "[curriculum][resolve]"
     CHECK( resolveLabReference( "lab96_impostor", world.paths ) == "unknown" );
   }
 
-  SECTION( "v3 lab with a runtime block resolves as a labspec" )
+  SECTION( "v3 lab document resolves as a labspec" )
   {
     // spec_version 3 is the shipped, loader-supported generation (ADR 0174):
-    // the router must not strand a legal v3 document as `unknown`.
+    // the router must not strand a legal v3 document as `unknown`. The
+    // router only routes — it does not inspect the runtime block itself.
     FixtureWorld world;
     writeFile( world.dir.path() / "data" / "labs" / "lab93_runtime.lab.json",
                labSpecJson( "lab93_runtime", 3 ) );

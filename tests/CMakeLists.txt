@@ -9823,6 +9823,11 @@ sicnu_discover_tests(test_build_wiring_drift)
 # over the agent harness (sicnu_agent already in the sicnu_add_test stack).
 sicnu_add_test(test_curriculum)
 sicnu_link_jsoncpp(test_curriculum)
+# The shipped-manifest case anchors the real repo data; without this define
+# it falls back to "." and only passes when run from the source root.
+target_compile_definitions(test_curriculum PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 # RS14-15 Explainable Scientific Workflow: provenance + step explanation schema
 # (sicnu_explain links jsoncpp PUBLIC).

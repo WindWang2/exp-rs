@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 
 SCHEMA = "sicnu.lab-pack/1"
 PACKS_DIR = os.path.join("data", "labs", "packs")
@@ -58,9 +59,13 @@ def sha256_file(path):
 
 
 def committed(rel):
-    """committed-fixture entry with live checksum, or None when absent."""
+    """committed-fixture entry with live checksum. Committed fixtures are
+    git-tracked: a missing one is a broken checkout, and silently dropping
+    the entry would make the pack a function of the local tree again —
+    fail loudly instead."""
     if not os.path.isfile(rel):
-        return None
+        print(f"gen_lab_packs: committed fixture missing: {rel}")
+        sys.exit(1)
     return {
         "path": rel.replace(os.sep, "/"),
         "role": "fixture",
