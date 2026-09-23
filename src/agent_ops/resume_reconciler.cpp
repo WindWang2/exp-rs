@@ -60,6 +60,7 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
         r.reasonCode = "ALREADY_TERMINAL";
         // Delivered sessions must not re-submit.
         r.duplicateSubmitRisk = (replay.terminalState == "delivered");
+        r.details["submitted_run_ids"] = static_cast<Json::UInt64>(r.submittedRunIds.size());
         return r;
     }
 

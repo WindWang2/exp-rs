@@ -5,6 +5,27 @@
 
 namespace sicnu::agent_ops {
 
+namespace {
+
+/// The goal the journal was started with: the loop rebuilds it from the
+/// goal_normalization decision's inputs["goal"] (last write wins); empty
+/// when the journal has no recorded goal yet.
+std::string journalledGoal(const sicnu::agent_loop::SessionJournal &journal)
+{
+    std::string goal;
+    for (const auto &entry : journal.entries())
+    {
+        if (!entry.decision || entry.decision->stage != "goal_normalization")
+            continue;
+        const Json::Value &recorded = entry.decision->inputs["goal"];
+        if (recorded.isString())
+            goal = recorded.asString();
+    }
+    return goal;
+}
+
+} // namespace
+
 OperationsCoordinator::OperationsCoordinator(Dependencies deps,
                                              LiveSessionRecorder::Options recorderOptions)
     : mDeps(std::move(deps)), mRecorder(std::move(recorderOptions)),
@@ -292,6 +313,19 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     {
         out.ok = false;
         out.error = "CORRUPTED_OR_MISSING_JOURNAL";
+        return out;
+    }
+
+    // Goal-equality guard BEFORE adopting the journal. The loop checks the
+    // restated goal only inside run(), after the journal has been adopted —
+    // a mismatch there appends a refusal, and finish() would persist the
+    // refused terminal journal over this parked (resumable) one. Refuse
+    // here instead; the parked journal stays untouched.
+    const std::string recorded = journalledGoal(*journal);
+    if (!recorded.empty() && request.session.goal != recorded)
+    {
+        out.ok = false;
+        out.error = "SESSION_GOAL_MISMATCH";
         return out;
     }
 

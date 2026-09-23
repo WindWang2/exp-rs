@@ -74,8 +74,11 @@ class OperationsCoordinator {
     bool isCancelRequested() const { return mCancelRequested.load(); }
 
     /// Pending repair approval recorded through the session surface
-    /// (approve_repair); consumed by the next run()/resume() unless the
-    /// request states its own approval explicitly.
+    /// (approve_repair); consumed by the next launched run() (resume() never
+    /// consults it — its recovery bridge is not evaluated). Note: run()'s
+    /// post-hoc recovery decision is advisory and always asks, so today the
+    /// approval arms driver-side evaluateRecovery() flows rather than
+    /// changing run() outcomes; the wire records that consumption.
     void setPendingRepairApproval(bool approved) { mPendingRepairApproval = approved; }
     bool isPendingRepairApproval() const { return mPendingRepairApproval; }
 

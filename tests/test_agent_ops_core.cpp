@@ -864,6 +864,58 @@ TEST_CASE("agent_ops resume succeeds from a parked pre-plan journal", "[agent_op
     REQUIRE(out.delivery.outcome == "delivered");
 }
 
+TEST_CASE("agent_ops wrong-goal resume refuses before touching the parked journal",
+          "[agent_ops][resume]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    const std::string dir = uniqueTemp("resume-mismatch");
+    const std::string goal = "compute NDVI for the scene";
+
+    sicnu::agent_loop::DecisionRecord goalDecision;
+    goalDecision.decisionId = "dec-goal-1";
+    goalDecision.sessionId = "sess-preplan-mismatch";
+    goalDecision.stage = "goal_normalization";
+    goalDecision.reason = "goal accepted as stated: " + goal;
+    goalDecision.selected["action"] = "accept_goal";
+    goalDecision.inputs["goal"] = goal;
+
+    sicnu::agent_loop::SessionJournal parked("sess-preplan-mismatch");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("decision", "goal_normalization", {}, 2, goalDecision));
+    REQUIRE(parked.append("stage_enter", "data_state_snapshot", {}, 3));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(parked, dir, &err));
+
+    // A well-formed resume request with the WRONG goal: refused before the
+    // journal is adopted, so nothing overwrites the parked resumable state.
+    OpsRunRequest wrong;
+    wrong.session.goal = "classify land cover instead";
+    wrong.session.intent = "ndvi";
+    auto mismatch = coord.resume(dir, "sess-preplan-mismatch", wrong);
+    REQUIRE_FALSE(mismatch.ok);
+    REQUIRE(mismatch.error == "SESSION_GOAL_MISMATCH");
+
+    ResumeReconciler recon;
+    auto after = recon.reconcileFile(dir, "sess-preplan-mismatch", &err);
+    REQUIRE(after.ok);
+    REQUIRE(after.resumable);
+    REQUIRE(after.terminalState.empty());
+
+    // The correct goal still resumes the same parked journal.
+    OpsRunRequest right;
+    right.session.goal = goal;
+    right.session.intent = "ndvi";
+    auto resumed = coord.resume(dir, "sess-preplan-mismatch", right);
+    REQUIRE(resumed.ok);
+    REQUIRE(resumed.delivery.outcome == "delivered");
+}
+
 TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
           "[agent_ops][delivery]")
 {
