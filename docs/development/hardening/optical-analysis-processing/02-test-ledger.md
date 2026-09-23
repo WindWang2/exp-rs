@@ -22,6 +22,8 @@ Build: Debug, `-DENABLE_TESTS=ON` + `CMAKE_PREFIX_PATH=/home/kevin/pwb-sdks/root
 
 ## 运行记录
 
+**PR: #1273**(创建于 rebase 至 master `abc07b715` 之后;按 campaign 规则不 merge、不等待线上 CI)
+
 构建:Debug, ninja -j2, `-DENABLE_TESTS=ON -DCMAKE_PREFIX_PATH=/home/kevin/pwb-sdks/root/usr`,
 测试以 `LD_LIBRARY_PATH=/home/kevin/pwb-sdks/root/usr/lib` 直接运行(ctest 注册名单集大,
 direct binary 运行等价)。
