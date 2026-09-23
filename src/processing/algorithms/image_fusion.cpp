@@ -388,10 +388,17 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Step 1: Histogram-match pan to intensity (mean of R, G, B)
+    // NaN participates in every gate below: since the #699/#675 convention
+    // the calibrated/QUAC inputs carry NaN NoData, and NaN == nodata is
+    // always false, so the sentinel compare alone lets NaN reach the IHS
+    // math — whose NaN results the non-negative clamp then folds to 0.0f
+    // (silent black pixels). Every sibling kernel checks isnan explicitly;
+    // parity here (kernels used directly by panels/tests).
     QVector<float> intensity( n );
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata )
+        if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
+             std::isnan( msR[i] ) || std::isnan( msG[i] ) || std::isnan( msB[i] ) )
             intensity[i] = nodata;
         else
             intensity[i] = ( msR[i] + msG[i] + msB[i] ) / 3.0f;
@@ -405,7 +412,8 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     QVector<float> H( n ), S( n );
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata )
+        if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
+             std::isnan( msR[i] ) || std::isnan( msG[i] ) || std::isnan( msB[i] ) )
         {
             H[i] = nodata;
             S[i] = nodata;
@@ -426,7 +434,8 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
 
     for ( size_t i = 0; i < n; ++i )
     {
-        if ( H[i] == nodata || S[i] == nodata ||
+        if ( H[i] == nodata || S[i] == nodata || std::isnan( H[i] ) ||
+             std::isnan( S[i] ) ||
              panMatched[i] == nodata || std::isnan( panMatched[i] ) )
         {
             result[0][i] = nodata;
