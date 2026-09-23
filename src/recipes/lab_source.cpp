@@ -78,7 +78,7 @@ std::string repoRelativePath( const fs::path &path, const fs::path &labsDir )
   if ( ec || abs.empty() || root.empty() )
     return path.filename().string();
   const fs::path rel = fs::relative( abs, root, ec );
-  if ( ec || rel.empty() || rel.native().rfind( "..", 0 ) == 0 )
+  if ( ec || rel.empty() || rel.generic_string().rfind( "..", 0 ) == 0 )
     return path.filename().string();
   return rel.generic_string();
 }
