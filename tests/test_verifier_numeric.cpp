@@ -91,8 +91,12 @@ TEST_CASE( "metric.range judges bounds inclusively", "[verify][numeric][C]" )
     REQUIRE( range( params ).status == VerificationStatus::Pass );
     params["max"] = 0.5;
     REQUIRE( range( params ).status == VerificationStatus::Pass );
-    params["max"] = 0.4;
-    const VerificationCheckResult above = range( params );
+
+    // A fresh, non-contradictory pin for the violation case (min > max is a
+    // validation error the engine now refuses before evaluation).
+    Json::Value aboveParams = rangeParams( "ndvi_mean" );
+    aboveParams["max"] = 0.4;
+    const VerificationCheckResult above = range( aboveParams );
     REQUIRE( above.status == VerificationStatus::Fail );
     REQUIRE( above.code == kCodeMetricOutOfRange );
 }

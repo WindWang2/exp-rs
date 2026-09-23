@@ -56,6 +56,14 @@ struct TaskOutcome
 
     Json::Value toCanonicalJson() const;
     std::string digest() const;
+
+    /// Strict inverse of toCanonicalJson + digest re-verification: a
+    /// persisted outcome whose embedded fields disagree (check code classes,
+    /// the overall lattice) — or whose body does not hash to
+    /// @p expectedDigest — is rejected (tamper evidence for batch flows).
+    /// @returns false + @p error; out is left unmodified on refusal.
+    static bool fromCanonicalJson( const Json::Value &json, TaskOutcome &out, std::string &error,
+                                   const std::string &expectedDigest = std::string() );
 };
 
 /// Level 2: evaluate a TASK-scope spec and fold @p nodeReports into the

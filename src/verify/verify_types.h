@@ -85,6 +85,12 @@ struct VerificationSpec
 /// oracle-potency discipline, applied at the schema level).
 std::vector<std::string> validateSpec( const VerificationSpec &spec );
 
+/// Kind-specific params validation for ONE check (same rules validateSpec
+/// applies, including the vacuous-check refusal). Engine backstop for
+/// checks that reach evaluation without a full-spec validation. @returns an
+/// empty vector when the params are well-formed for @p check.kind.
+std::vector<std::string> validateCheckParams( const VerificationCheckSpec &check );
+
 /// Canonical spec document (schema marker + sorted keys + 12-significant-
 /// digit doubles). The spec digest is sha256 over this canonical text.
 Json::Value specToJson( const VerificationSpec &spec );

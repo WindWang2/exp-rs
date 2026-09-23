@@ -296,6 +296,92 @@ TEST_CASE( "evaluateCheck answers hostile params with typed refusals, never thro
     }
 }
 
+TEST_CASE( "mutation oracle: hostile params cannot pass even with providers attached",
+           "[verify][adversarial][G]" )
+{
+    // The empty-context battery above is masked by provider-missing
+    // short-circuits. With probes attached, an evaluator that silently
+    // skipped its hostile param would forge a Pass — killed here.
+    FakeViews views;
+    views.artifacts["w.tif"].exists = true;
+    views.artifacts["w.tif"].kind = "raster";
+    views.grids["w.tif"].width = 512;
+    views.grids["w.tif"].height = 512;
+    views.metrics["m"] = 0.5;
+    const VerificationContext context = views.context();
+
+    const auto pass = [ & ]( const VerificationCheckResult &result ) {
+        return result.status == VerificationStatus::Pass;
+    };
+
+    SECTION( "reproducibility with a numeric path" )
+    {
+        Json::Value p( Json::objectValue );
+        p["path"] = 9;
+        p["expectedDigest"] = std::string( 64, 'a' );
+        const VerificationCheckResult result = evaluateCheck( check( "r", "reproducibility.digest", p ), context );
+        REQUIRE_FALSE( pass( result ) );
+        REQUIRE( result.code == kCodeInvalidSpec );
+    }
+    SECTION( "reproducibility pair with numeric paths" )
+    {
+        Json::Value p( Json::objectValue );
+        p["leftPath"] = 9;
+        p["rightPath"] = 8;
+        REQUIRE_FALSE( pass( evaluateCheck( check( "r", "reproducibility.digest", p ), context ) ) );
+    }
+    SECTION( "vacuous metric.range has no engine backdoor" )
+    {
+        Json::Value p( Json::objectValue );
+        p["metric"] = "m";
+        const VerificationCheckResult result = evaluateCheck( check( "m", "metric.range", p ), context );
+        REQUIRE_FALSE( pass( result ) );
+        REQUIRE( result.code == kCodeInvalidSpec );
+    }
+    SECTION( "fractional width pin is refused, never truncated into a match" )
+    {
+        Json::Value p( Json::objectValue );
+        p["path"] = "w.tif";
+        p["width"] = 512.9;
+        const VerificationCheckResult result = evaluateCheck( check( "g", "artifact.grid", p ), context );
+        REQUIRE_FALSE( pass( result ) );
+        REQUIRE( result.code == kCodeInvalidSpec );
+    }
+}
+
+TEST_CASE( "an honest PASS stays sealable when an unpinned observed fact is non-finite",
+           "[verify][adversarial][G]" )
+{
+    // Kills the "evidence mirrors raw NaN" mutant: the verdict is a legit
+    // Pass (nothing pinned the NaN fraction) and the report must still seal.
+    FakeViews views;
+    views.artifacts["w.tif"].exists = true;
+    views.grids["w.tif"].width = 512;
+    views.grids["w.tif"].height = 512;
+    views.grids["w.tif"].nodataFraction = std::nan( "" );
+
+    VerificationSpec spec;
+    spec.specId = "spec.partial";
+    spec.scope = "node";
+    spec.checks.push_back( check( "g", "artifact.grid", [ & ] {
+        Json::Value p( Json::objectValue );
+        p["path"] = "w.tif";
+        p["width"] = 512;
+        return p;
+    }() ) );
+
+    const VerificationReport report = evaluate( spec, views.context() );
+    REQUIRE( report.overall == VerificationStatus::Pass );
+    REQUIRE( report.checks[0].evidence.has_value() );
+    REQUIRE( report.checks[0].evidence->observed["nodataFraction"].asString() == "non-finite" );
+    // The seal exists: the report can be persisted and strictly re-read.
+    const std::string digest = report.digest();
+    REQUIRE_FALSE( digest.empty() );
+    VerificationReport resealed;
+    std::string error;
+    REQUIRE( VerificationReport::fromCanonicalJson( report.toCanonicalJson(), resealed, error, digest ) );
+}
+
 TEST_CASE( "the non-finite discipline holds across the engine", "[verify][adversarial][G]" )
 {
     // Every kind that touches a non-finite observation answers Indeterminate

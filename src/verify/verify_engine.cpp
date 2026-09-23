@@ -55,8 +55,35 @@ std::string safeText( const std::string &text )
     return clean;
 }
 
+/// Non-finite doubles would make an otherwise honest report unsealable
+/// (the canonical writer refuses non-finite bodies). Evidence mirrors facts,
+/// so an unjudgeable number is recorded AS unjudgeable: a typed marker, not
+/// a sealed NaN and not a silent omission.
+void sanitizeEvidenceNumbers( Json::Value &value )
+{
+    switch ( value.type() )
+    {
+    case Json::realValue:
+        if ( !std::isfinite( value.asDouble() ) )
+            value = "non-finite";
+        break;
+    case Json::arrayValue:
+        for ( Json::ArrayIndex index = 0; index < value.size(); ++index )
+            sanitizeEvidenceNumbers( value[index] );
+        break;
+    case Json::objectValue:
+        for ( const std::string &member : value.getMemberNames() )
+            sanitizeEvidenceNumbers( value[member] );
+        break;
+    default:
+        break;
+    }
+}
+
 VerificationEvidence makeEvidence( const std::string &source, Json::Value observed, Json::Value expected )
 {
+    sanitizeEvidenceNumbers( observed );
+    sanitizeEvidenceNumbers( expected );
     VerificationEvidence evidence;
     evidence.source = source;
     evidence.observed = std::move( observed );
@@ -220,7 +247,7 @@ VerificationCheckResult evalStateInvariant( const VerificationCheckSpec &check,
         }
         else if ( op == "eq" || op == "ne" )
         {
-            if ( isFiniteNumber( value ) && !std::isfinite( value.asDouble() ) )
+            if ( isNumeric( value ) && !std::isfinite( value.asDouble() ) )
             {
                 status = VerificationStatus::Indeterminate;
                 blocking = "pinned expectation value for '" + safeText( key ) + "' is not finite";
@@ -1039,6 +1066,17 @@ VerificationCheckResult evaluateCheck( const VerificationCheckSpec &check, const
             // engine does not implement is a capability gap, never a pass.
             return makeResult( check, VerificationStatus::Indeterminate, kCodeProviderMissing,
                                "no evaluator registered for kind '" + safeText( check.kind ) + "'" );
+        }
+        // Backstop for checks that reach a single-check evaluation without a
+        // full-spec validation: an evaluator whose params leave it with
+        // nothing to judge (or a truncated/mistyped pin) would otherwise
+        // answer an honest-looking Pass. Reuse validateSpec's per-kind rules
+        // — one authority, no second validation truth.
+        const std::vector<std::string> paramErrors = validateCheckParams( check );
+        if ( !paramErrors.empty() )
+        {
+            return makeResult( check, VerificationStatus::Fail, kCodeInvalidSpec,
+                               safeText( paramErrors.front() ) );
         }
         return found->second( check, context );
     }

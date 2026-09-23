@@ -305,6 +305,20 @@ TEST_CASE( "cross-output consistency judges grid equality across outputs",
         addOutput( "water.tif", 512, 256, "EPSG:32650", 3 );
         REQUIRE( cross( params ).code == kCodeCrossOutputInconsistent );
     }
+    SECTION( "divergence in ANY pair is caught, not only adjacent ones" )
+    {
+        addOutput( "third.tif", 512, 256, "EPSG:32650", 1 );
+        Json::Value o3( Json::objectValue );
+        o3["path"] = "third.tif";
+        outputs.append( o3 );
+        params["outputs"] = outputs;
+        params.removeMember( "bandCount" );
+        REQUIRE( cross( params ).status == VerificationStatus::Pass );
+        addOutput( "third.tif", 999, 256, "EPSG:32650", 1 );
+        const VerificationCheckResult result = cross( params );
+        REQUIRE( result.status == VerificationStatus::Fail );
+        REQUIRE( result.code == kCodeCrossOutputInconsistent );
+    }
     SECTION( "a missing output is a detected violation" )
     {
         outputs[1] = [ & ] {

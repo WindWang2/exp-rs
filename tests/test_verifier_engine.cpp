@@ -541,6 +541,29 @@ TEST_CASE( "evaluate refuses an unsealable spec (non-finite in-memory params)",
     REQUIRE( report.checks[0].code == kCodeInvalidSpec );
 }
 
+TEST_CASE( "a spec over the check budget is refused before any probe runs",
+           "[verify][engine][B]" )
+{
+    VerificationSpec spec;
+    spec.specId = "spec.bloated";
+    spec.scope = "node";
+    for ( std::size_t index = 0; index <= kMaxChecksPerSpec; ++index )
+        spec.checks.push_back( makeCheck( "c" + std::to_string( index ), "artifact.exists", [ ] {
+            Json::Value p( Json::objectValue );
+            p["path"] = "out.tif";
+            return p;
+        }() ) );
+
+    FakeArtifactProbe artifacts;
+    const VerificationContext context{ &artifacts, nullptr, nullptr, nullptr, nullptr };
+    const VerificationReport report = evaluate( spec, context );
+    REQUIRE( report.checks.size() == 1 );
+    REQUIRE( report.checks[0].checkId == "spec.valid" );
+    REQUIRE( report.checks[0].code == kCodeInvalidSpec );
+    // The refusal happens before evaluation touches a single provider.
+    REQUIRE( artifacts.probeCalls == 0 );
+}
+
 TEST_CASE( "the engine probes only what the spec names — no implicit scan",
            "[verify][engine][B]" )
 {

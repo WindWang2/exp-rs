@@ -156,6 +156,92 @@ TEST_CASE( "level 2 refuses a node-scope spec as the whole-task judge",
     REQUIRE( outcome.taskChecks[0].code == kCodeInvalidSpec );
 }
 
+TEST_CASE( "level 2 outcome strict reader: round-trip, tamper and forged nodes refused",
+           "[verify][levels][L]" )
+{
+    FakeMetricView metrics;
+    metrics.metrics["ndvi_mean"] = 0.4;
+    metrics.metrics["task_metric"] = 0.1;
+    const VerificationContext context = contextForMetrics( metrics );
+
+    const VerificationSpec taskSpec = metricSpec( "spec.task", "task", "task_metric", 1.0 );
+    const VerificationSpec nodeOk = metricSpec( "spec.node.ok", "node", "ndvi_mean", 1.0 );
+    const VerificationReport nodeReport = verifyPlanNodePostcondition( nodeOk, context );
+    const TaskOutcome outcome = verifyWholeTask( taskSpec, context, { nodeReport } );
+
+    const Json::Value body = outcome.toCanonicalJson();
+    const std::string digest = outcome.digest();
+    TaskOutcome parsed;
+    std::string error;
+
+    SECTION( "clean body round-trips under its own digest" )
+    {
+        REQUIRE( TaskOutcome::fromCanonicalJson( body, parsed, error, digest ) );
+        REQUIRE( parsed.taskSpecId == outcome.taskSpecId );
+        REQUIRE( parsed.overall == VerificationStatus::Pass );
+        REQUIRE( parsed.nodes.size() == 1 );
+        REQUIRE( parsed.digest() == digest );
+    }
+    SECTION( "unknown field refused" )
+    {
+        Json::Value hostile = body;
+        hostile["extra"] = true;
+        REQUIRE_FALSE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+        REQUIRE( error.find( "unknown task outcome field" ) != std::string::npos );
+    }
+    SECTION( "digest mismatch refused" )
+    {
+        Json::Value hostile = body;
+        hostile["taskSpecId"] = "spec.other";
+        REQUIRE_FALSE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, digest ) );
+        REQUIRE( error.find( "digest mismatch" ) != std::string::npos );
+    }
+    SECTION( "an edited node overall that breaks the lattice is refused" )
+    {
+        Json::Value hostile = body;
+        REQUIRE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+        // The node genuinely passed; claiming it indeterminate now disagrees
+        // with the sealed overall — the reader recomputes the lattice.
+        hostile["nodes"][0]["overall"] = "indeterminate";
+        REQUIRE_FALSE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+        REQUIRE( error.find( "overall" ) != std::string::npos );
+    }
+    SECTION( "a task check whose code class contradicts its status is refused" )
+    {
+        Json::Value hostile = body;
+        REQUIRE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+        hostile["taskChecks"][0]["status"] = "indeterminate";
+        hostile["taskChecks"][0]["code"] = kCodeMetricOutOfRange;
+        REQUIRE_FALSE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+        REQUIRE( error.find( "code class contradicts" ) != std::string::npos );
+    }
+    SECTION( "wrong schema marker refused" )
+    {
+        Json::Value hostile = body;
+        hostile["schema"] = "sicnu.verification.task_outcome/2";
+        REQUIRE_FALSE( TaskOutcome::fromCanonicalJson( hostile, parsed, error, "" ) );
+    }
+}
+
+TEST_CASE( "level 2 derives node outcomes from checks, not from a forged report overall",
+           "[verify][levels][L]" )
+{
+    // In-memory forgery: a report CLAIMING pass while its own checks failed.
+    // The rollup reads the checks (atomic facts), never the claim.
+    VerificationReport forged = buildReport( "spec.forged", "node", std::string( 64, 'f' ), {} );
+    forged.overall = VerificationStatus::Pass;
+
+    FakeMetricView metrics;
+    metrics.metrics["task_metric"] = 0.1;
+    const VerificationSpec taskSpec = metricSpec( "spec.task", "task", "task_metric", 1.0 );
+    const TaskOutcome outcome = verifyWholeTask( taskSpec, contextForMetrics( metrics ), { forged } );
+
+    // An empty check list aggregates to Indeterminate — the forged Pass claim
+    // must not upgrade the task outcome.
+    REQUIRE( outcome.overall == VerificationStatus::Indeterminate );
+    REQUIRE( outcome.nodes[0].overall == VerificationStatus::Indeterminate );
+}
+
 TEST_CASE( "level 2 outcome digest is deterministic and tamper-evident",
            "[verify][levels][L]" )
 {
