@@ -145,3 +145,78 @@ test_detection_nms_10 5 ✅, test_device_planner 9 ✅, test_eo_platform_10 21 �
 RED first (stash/revert binding file → incremental ninja → record failing assertions → pop).
 One attributable change per round. No second truth source. Narrow targets only. Key oracles
 twice consecutively before PR. Ledger updated every round.
+
+
+## Independent adversarial review — round 1 (fresh-eyes reviewer)
+
+Verdict: PROCEED-WITH-FIXES. P0=0, P1=3, P2=2, P3=6. All P1/P2 closed in commits
+84b150b31 (guard hardening + regression test), 48e95281c (sweep keep-condition pin),
+24e1b69fb (real generation oracle); re-review round 2 dispatched on the exact delta.
+
+- P1-1 ctor could throw AFTER parking the main file (previous product invisible):
+  companions+prov park first with per-failure rollback, main parks last. CLOSED.
+- P1-2 detectionSidecars classified the BACKUP path by suffix (never .shp) so the
+  companion backup family was never pre-cleaned/disarmed — leaked on every
+  successful shapefile republish: detectionSidecarsFor(final, suffix) derives
+  backup names from the final base. CLOSED (+P3-7: companion set extended to the
+  writer's group family .qpj/.sbn/.sbx/.qix so a republish cannot leave a stale
+  CRS override).
+- P1-3 crash mid-run orphaned the backup family and left the product missing with
+  no recovery: ctor adopts the crash orphan back before parking; disarm cleans
+  unconditionally. The one-run park window itself is kept deliberately (closing it
+  means moving the guard inside engine.run()); documented in the PR body. CLOSED
+  as a self-healing exposure.
+- P2-4 sweep dead-owner keep conditions unpinned: new TEST_CASE (dead owner kept
+  while id live / collected when unknown). CLOSED.
+- P2-5 bridge "generation" test never unloaded: now closes+reopens the barrier and
+  asserts the typed refusal. CLOSED.
+- P3-6 stale .prev~ comment corrected. CLOSED. P3-7 folded into P1-2 fix. CLOSED.
+- P3-8 (legacy last-good invisible to reload until first re-load; dev-only,
+  self-healing), P3-9 (same-model ensemble members serialize per contract —
+  throughput-visible), P3-10 (ensemble sidecar lacks model.task / ensemble-level
+  digest; primary-member preprocess note), P3-11 (dtor best-effort silence,
+  consistent with the raster lane): documented, deliberately not changed.
+
+## Review-fix regression evidence
+
+test_model_tasks 15/15 (12710 assertions; new residue+orphan-recovery test),
+test_ensemble_detection 17/17, test_plugin_model_bridge 2/2 (real generation
+oracle), test_exprs_plugin_loader 30/30 (new dead-owner pin), test_model_ensemble
+12/12, test_ensemble_parallel 6/6, test_model_failure_matrix 16/16,
+test_provider_fallback 3/3, test_model_runtime_8 17/17, test_model_runtime_9 16/16,
+test_detection_nms_10 5/5, test_device_planner 9/9, test_eo_platform_10 21/21,
+test_exprs_plugin_system 16/16.
+
+
+## Re-review round 2 + round-2 fixes
+
+Round 2 verdict: PROCEED-WITH-FIXES. P0=0, P1=0, P2=1 (N-1: the adoption oracle was
+vacuous — a succeeding post-crash run cannot distinguish adoption from
+delete-and-republish), P3=1 (N-2: restore order was main-first, leaving a torn-restore
+window). All round-1 closures verified with mutation checks by the reviewer.
+
+Round-2 fixes (commit 0daf08ce2):
+- N-1: the post-crash run now FAILS at the sidecar publish; the test asserts the
+  adopted pair is back byte-identical. Counterfactual: adoption deleted → output
+  stays ABSENT after the failed run → test fails. CLOSED.
+- N-2: destructor + adoption restore companions/prov FIRST, main LAST (crash
+  mid-recovery leaves the main parked = the state the adoption branch re-enters
+  through). CLOSED.
+
+## Final verification (final tree, after all review fixes)
+
+Key suites, two consecutive passes, both green:
+- test_model_tasks 15/15 (12719 assertions)
+- test_ensemble_detection 17/17 (149)
+- test_plugin_model_bridge 2/2 (23)
+- test_exprs_plugin_loader 30/30 (249)
+Plus green re-runs after the last change: test_model_ensemble 12, test_ensemble_parallel 6,
+test_model_failure_matrix 16, test_eo_platform_10 21.
+
+
+## Re-review round 3 — FINAL VERDICT: READY
+
+Reviewer verified 0daf08ce2 with counterfactual traces: N-1 caught under all three
+breakage hypotheses (adoption deleted / prov forgotten / main move forgotten), N-2
+converges for every crash suffix of park/restore/adopt. Final tally: P0=0, P1=0, P2=0
+open (5 raised, all closed), P3=0 open (2 closed in code, 5 documented/accepted).
