@@ -3,6 +3,18 @@
 #include "agentbench/trace.h"
 
 namespace sicnu::agent_ops {
+namespace {
+
+/// Portable basename ref: strips the longest leading directory component for
+/// both POSIX and Windows separators, so an export document never leaks
+/// absolute machine paths.
+std::string basenameRef(const std::string &path)
+{
+    const std::size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+} // namespace
 
 FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult &result,
                                           const DeliveryExtras &extras) const
@@ -27,8 +39,9 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     {
         Json::Value o(Json::objectValue);
         o["path"] = art;
-        // Portability: flag absolute paths but keep basename-ish ref.
-        o["portable_ref"] = art;
+        // Portability: the capsule carries a basename ref only; the raw
+        // (absolute) path stays in the local delivery document.
+        o["portable_ref"] = basenameRef(art);
         d.outputs.append(o);
         d.provenance["artifacts"].append(art);
     }
@@ -58,19 +71,33 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
         d.traceRef["outcome_claim_success"] = extras.trace->outcomeClaimSuccess;
     }
 
-    // Claims with confidence: delivered => high; refused/aborted => low; unknown ≠ success.
+    // Claims with confidence, gated on the evidence that actually exists:
+    // a delivered claim is high-confidence only when a verifier verdict is
+    // present (dry-run/plan-only deliveries never verify); refused/aborted
+    // claims carry the loop's typed stop reason; unknown ≠ success.
     if (d.claims.empty())
     {
         Json::Value claim(Json::objectValue);
         claim["claim"] = "session_outcome";
         claim["value"] = d.outcome;
+        const std::string verdict = d.verifier["verdict"].asString();
         if (d.outcome == "delivered")
-            claim["confidence"] = 0.9;
+        {
+            if (verdict == "PASS" || verdict == "PASS_WITH_WARNINGS")
+                claim["confidence"] = 0.9;
+            else
+            {
+                claim["confidence"] = 0.0; // delivered without verification: indeterminate
+                claim["evidence_missing"].append("verifier_verdict");
+            }
+        }
         else if (d.outcome == "refused" || d.outcome == "aborted")
             claim["confidence"] = 0.85;
         else
             claim["confidence"] = 0.0; // indeterminate
         claim["evidence_ref"] = "journal:" + d.sessionId;
+        if (!d.stopReason.empty())
+            claim["stop_reason"] = d.stopReason;
         d.claims.append(claim);
     }
     return d;
@@ -95,7 +122,8 @@ Json::Value DeliveryAssembler::capsuleExportDocument(const FinalDelivery &delive
     for (const auto &o : delivery.outputs)
     {
         Json::Value p(Json::objectValue);
-        p["portable_ref"] = o.get("portable_ref", o.get("path", ""));
+        p["portable_ref"] =
+            basenameRef(o.get("portable_ref", o.get("path", "")).asString());
         outs.append(p);
     }
     doc["outputs"] = outs;
