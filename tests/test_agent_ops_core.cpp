@@ -414,3 +414,339 @@ TEST_CASE("agent_ops control surface pause/cancel without bypassing loop", "[age
     REQUIRE(applied["ok"].asBool());
     REQUIRE(coord.isCancelRequested());
 }
+
+// ---------------------------------------------------------------------------
+// Production-session consistency round (see
+// .planning/completion-agent-ops-production-session/recon-matrix.md G1..G7).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+sicnu::agent_loop::DecisionRecord journalDecision(const std::string &sessionId,
+                                                  const std::string &stage,
+                                                  const std::string &decisionId,
+                                                  const std::string &action,
+                                                  const std::string &runId = {})
+{
+    sicnu::agent_loop::DecisionRecord d;
+    d.decisionId = decisionId;
+    d.sessionId = sessionId;
+    d.stage = stage;
+    d.reason = "hand-built journal entry for reconciler tests";
+    d.selected["action"] = action;
+    if (!runId.empty())
+        d.inputs["run_id"] = runId;
+    return d;
+}
+
+} // namespace
+
+TEST_CASE("agent_ops resume reconciler projects loop resume authority (pre-plan only)",
+          "[agent_ops][resume]")
+{
+    ResumeReconciler recon;
+
+    // (a) Journal parked mid-pipeline (crash before terminal): the loop
+    // refuses to resume anything past the plan seam, so the reconciler
+    // must not advertise resumability the coordinator cannot honor.
+    sicnu::agent_loop::SessionJournal parked("sess-past-plan");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("stage_enter", "plan_request", {}, 2));
+    REQUIRE(parked.append("stage_enter", "verify", {}, 3));
+    auto pastPlan = recon.reconcile(parked);
+    REQUIRE(pastPlan.ok);
+    REQUIRE_FALSE(pastPlan.resumable);
+    REQUIRE(pastPlan.reasonCode == "RESUME_PAST_PLAN_SEAM");
+
+    // (b) Pre-plan journal: resumable per the loop contract.
+    sicnu::agent_loop::SessionJournal prePlan("sess-preplan");
+    REQUIRE(prePlan.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(prePlan.append("stage_enter", "data_state_snapshot", {}, 2));
+    auto pre = recon.reconcile(prePlan);
+    REQUIRE(pre.ok);
+    REQUIRE(pre.resumable);
+    REQUIRE(pre.reasonCode == "RESUMABLE");
+
+    // (c) Execute-stage journal with a real loop run decision: run ids are
+    // collected from the loop's wire shape (inputs.run_id + action "run"),
+    // but the journal is not resumable past the plan seam.
+    sicnu::agent_loop::SessionJournal exec("sess-exec");
+    REQUIRE(exec.append("stage_enter", "execute", {}, 1));
+    REQUIRE(exec.append("decision", "execute", {}, 2,
+                        journalDecision("sess-exec", "execute", "dec-1", "run", "run-abc")));
+    auto afterExecute = recon.reconcile(exec);
+    REQUIRE(afterExecute.ok);
+    REQUIRE_FALSE(afterExecute.resumable);
+    REQUIRE(afterExecute.reasonCode == "RESUME_PAST_PLAN_SEAM");
+    REQUIRE(afterExecute.successfulRunIds.count("run-abc") == 1);
+}
+
+TEST_CASE("agent_ops coordinator resume surfaces the reconciler reason (no silent mismatch)",
+          "[agent_ops][resume]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    const std::string dir = uniqueTemp("resume-authority");
+
+    // Execute-stage journal persisted under the recorder's file convention.
+    sicnu::agent_loop::SessionJournal exec("sess-exec-persist");
+    REQUIRE(exec.append("stage_enter", "execute", {}, 1));
+    REQUIRE(exec.append("decision", "execute", {}, 2,
+                        journalDecision("sess-exec-persist", "execute", "dec-1", "run",
+                                        "run-xyz")));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(exec, dir, &err));
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.resume(dir, "sess-exec-persist", req);
+    REQUIRE_FALSE(out.ok);
+    REQUIRE(out.error == "RESUME_PAST_PLAN_SEAM");
+
+    // Delivered journals stay duplicate-submit-refused with the typed reason.
+    OpsRunRequest persistReq = req;
+    persistReq.journalDirectory = dir;
+    auto done = coord.run(persistReq);
+    REQUIRE(done.ok);
+    auto dup = coord.resume(dir, done.session.sessionId, req);
+    REQUIRE_FALSE(dup.ok);
+    REQUIRE(dup.reconcile.reasonCode == "ALREADY_TERMINAL");
+    REQUIRE(dup.error == "DUPLICATE_SUBMIT_REFUSED");
+}
+
+TEST_CASE("agent_ops pause gates session launch instead of being a no-op flag",
+          "[agent_ops][pause]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+
+    coord.requestPause();
+    auto paused = coord.run(req);
+    REQUIRE_FALSE(paused.ok);
+    REQUIRE(paused.error == "PAUSED");
+    REQUIRE(paused.session.journal.size() == 0); // no loop work started
+
+    // resume() is gated the same way.
+    const std::string dir = uniqueTemp("pause-resume");
+    auto pausedResume = coord.resume(dir, "missing-session", req);
+    REQUIRE(pausedResume.error == "PAUSED");
+
+    coord.clearPause();
+    auto out = coord.run(req);
+    REQUIRE(out.ok);
+}
+
+TEST_CASE("agent_ops delivery claims are gated on verifier evidence", "[agent_ops][delivery]")
+{
+    OperationsCoordinator::Dependencies deps;
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    // Verified delivery: high-confidence claim with a journal evidence ref.
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto good = coord.run(req);
+    REQUIRE(good.ok);
+    REQUIRE(good.delivery.claims.size() == 1);
+    REQUIRE(good.delivery.claims[0]["confidence"].asDouble() == 0.9);
+    REQUIRE(good.delivery.claims[0]["evidence_ref"].asString() ==
+            "journal:" + good.session.sessionId);
+
+    // Unverified delivery (dry run never verifies): unknown ≠ success, so
+    // the outcome claim must not claim 0.9 confidence.
+    OpsRunRequest dry = req;
+    dry.policy.mode = sicnu::agent_loop::RunMode::DryRun;
+    auto dryRun = coord.run(dry);
+    REQUIRE(dryRun.ok);
+    REQUIRE(dryRun.delivery.outcome == "delivered");
+    REQUIRE(dryRun.session.summary.verificationVerdict.empty());
+    REQUIRE(dryRun.delivery.claims.size() == 1);
+    REQUIRE(dryRun.delivery.claims[0]["confidence"].asDouble() == 0.0);
+    REQUIRE(dryRun.delivery.claims[0]["evidence_missing"].size() == 1);
+    REQUIRE(dryRun.delivery.claims[0]["evidence_missing"][0].asString() == "verifier_verdict");
+}
+
+TEST_CASE("agent_ops coordinator persists live trajectory refs through the benchmark sink",
+          "[agent_ops][benchmark]")
+{
+    FakeScenario scenario;
+    scenario.execution = {ExecutionScript{true, "", {"/tmp/run42/out.tif"}}};
+    FakeSeams seams(scenario);
+    InMemoryBenchmarkSink sink;
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    deps.benchmarkSink = &sink;
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE(out.ok);
+    REQUIRE(out.benchmarkError.empty());
+
+    REQUIRE(sink.saved().size() == 1);
+    const auto &doc = sink.saved().front();
+    REQUIRE(doc.status == "completed");
+    REQUIRE(doc.resultId == "bpr-live-" + out.session.sessionId);
+    REQUIRE(doc.summary["session_id"].asString() == out.session.sessionId);
+    REQUIRE(doc.summary["trace_id"].asString() == out.trace->traceId);
+    // Trajectory refs, not recomputed metrics: decision ids and evidence
+    // refs recorded as the loop wrote them.
+    REQUIRE(doc.rawReport["kind"].asString() == "live_trajectory");
+    REQUIRE(doc.rawReport["decision_refs"].isArray());
+    REQUIRE(doc.rawReport["decision_refs"].size() > 0);
+    REQUIRE_FALSE(doc.summary.isMember("pass"));
+    REQUIRE_FALSE(doc.summary.isMember("fail"));
+
+    REQUIRE(out.delivery.benchmarkRefs.size() == 1);
+    REQUIRE(out.delivery.benchmarkRefs[0]["result_id"].asString() == doc.resultId);
+
+    // A failed session persists with a failed status (still real refs).
+    FakeScenario bad;
+    bad.verification = {VerifyScript{"FAIL", ""}};
+    bad.diagnosis = {DiagnoseScript{"CRS_MISMATCH", {}}}; // no proposals → refuse
+    FakeSeams badSeams(bad);
+    InMemoryBenchmarkSink badSink;
+    OperationsCoordinator::Dependencies badDeps;
+    badDeps.seams = makeDeps(badSeams);
+    badDeps.benchmarkSink = &badSink;
+    OperationsCoordinator badCoord(badDeps);
+    auto badOut = badCoord.run(req);
+    REQUIRE_FALSE(badOut.ok);
+    REQUIRE(badSink.saved().size() == 1);
+    REQUIRE(badSink.saved().front().status == "failed");
+    REQUIRE(badSink.saved().front().summary["stop_reason"].asString() ==
+            badOut.session.stopReason);
+}
+
+TEST_CASE("agent_ops session surface implements every advertised action",
+          "[agent_ops][surface]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    // Parity: no advertised action may fall through to UNKNOWN_ACTION.
+    auto actions = sessionSurfaceActions()["actions"];
+    REQUIRE(actions.isArray());
+    for (const auto &a : actions)
+    {
+        const std::string action = a.asString();
+        auto doc = sessionSurfaceApply(coord, action, {});
+        INFO("action: " << action);
+        REQUIRE(doc["error"].asString() != "UNKNOWN_ACTION");
+    }
+
+    // status before any run: typed no-session, not success.
+    auto empty = sessionSurfaceApply(coord, "status", {});
+    REQUIRE_FALSE(empty["ok"].asBool());
+    REQUIRE(empty["error"].asString() == "NO_SESSION");
+
+    // The discovery loop above set pause/cancel control state; a driver
+    // relaunching after discovery (or after a cancel) clears it first.
+    coord.clearPause();
+    coord.clearCancel();
+
+    // run through the surface, then status/timeline/export see the result.
+    Json::Value runArgs(Json::objectValue);
+    runArgs["goal"] = "compute NDVI for the scene";
+    runArgs["intent"] = "ndvi";
+    auto ran = sessionSurfaceApply(coord, "run", runArgs);
+    REQUIRE(ran["ok"].asBool());
+    const std::string sessionId = ran["session_id"].asString();
+    REQUIRE_FALSE(sessionId.empty());
+
+    auto status = sessionSurfaceApply(coord, "status", {});
+    REQUIRE(status["ok"].asBool());
+    REQUIRE(status["session_id"].asString() == sessionId);
+
+    auto timeline = sessionSurfaceApply(coord, "timeline", {});
+    REQUIRE(timeline["projection"].isObject());
+
+    auto exportDoc = sessionSurfaceApply(coord, "export", {});
+    REQUIRE(exportDoc["schema"].asString() == "sicnu.agent_ops.capsule_export/v1");
+
+    // resume without a journal directory is a typed argument error.
+    auto noArgs = sessionSurfaceApply(coord, "resume", {});
+    REQUIRE_FALSE(noArgs["ok"].asBool());
+    REQUIRE(noArgs["error"].asString() == "MISSING_ARGS");
+
+    // approve_repair records real pending state consumed by the next run.
+    Json::Value approveArgs(Json::objectValue);
+    approveArgs["approve"] = true;
+    auto approved = sessionSurfaceApply(coord, "approve_repair", approveArgs);
+    REQUIRE(approved["ok"].asBool());
+    REQUIRE(coord.isPendingRepairApproval());
+}
+
+TEST_CASE("agent_ops failed-session diagnostic stays inside the evidence", "[agent_ops][diagnostic]")
+{
+    // Preflight-blocked refusal: no verification FAIL and no diagnose
+    // decisions exist, so the only typed evidence is the loop's own stop
+    // reason. The diagnostic must carry it without inventing repairability.
+    FakeScenario scenario;
+    scenario.preflight = {PreflightScript{"blocked", {}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE_FALSE(out.ok);
+    REQUIRE(out.session.stopReason == "PREFLIGHT_BLOCKED");
+    REQUIRE(out.lastDiagnostic);
+    REQUIRE(out.lastDiagnostic->rootCauseCode == "PREFLIGHT_BLOCKED");
+    REQUIRE(out.lastDiagnostic->code == "ops.session.FAILED");
+    REQUIRE_FALSE(out.lastDiagnostic->repairable);
+    REQUIRE_FALSE(out.lastDiagnostic->retryable);
+    REQUIRE(out.lastDiagnostic->confidence <= 0.5);
+    REQUIRE(out.lastDiagnostic->advisoryNext == recovery_action::kAsk);
+    REQUIRE(out.lastDiagnostic->sources["session"]["stop_reason"].asString() ==
+            "PREFLIGHT_BLOCKED");
+    REQUIRE(out.lastDiagnostic->evidence["evidence_unavailable"].asBool());
+
+    // The recovery decision inherits the honesty: ask, never an automatic
+    // mutating replan on unknown evidence.
+    REQUIRE(out.lastRecovery);
+    REQUIRE(out.lastRecovery->action == recovery_action::kAsk);
+    REQUIRE(out.lastRecovery->reasonCode == "NEEDS_HUMAN");
+}
+
+TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
+          "[agent_ops][delivery]")
+{
+    DeliveryAssembler assembler;
+    sicnu::agent_loop::SessionResult result;
+    result.sessionId = "sess-portable";
+    result.summary.outcome = "delivered";
+    result.summary.verificationVerdict = "PASS";
+    result.summary.artifacts = {"/tmp/run42/out.tif", "relative.tif", "C:\\data\\win.tif"};
+
+    auto delivery = assembler.assemble(result, {});
+    REQUIRE(delivery.outputs.size() == 3);
+    REQUIRE(delivery.outputs[0]["path"].asString() == "/tmp/run42/out.tif"); // local truth kept
+    REQUIRE(delivery.outputs[0]["portable_ref"].asString() == "out.tif");
+    REQUIRE(delivery.outputs[1]["portable_ref"].asString() == "relative.tif");
+    REQUIRE(delivery.outputs[2]["portable_ref"].asString() == "win.tif");
+
+    auto capsule = assembler.capsuleExportDocument(delivery);
+    REQUIRE(capsule["outputs"][0]["portable_ref"].asString() == "out.tif");
+    REQUIRE(capsule["outputs"][0]["path"].isNull());
+}
