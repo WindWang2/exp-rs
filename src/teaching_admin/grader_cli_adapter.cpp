@@ -226,7 +226,9 @@ GradeCallable cliGradeCallable( const GraderCliConfig &cfg )
     return [cfg]( const SubmissionItem &item ) {
         BatchRowResult row;
         row.studentId = item.studentId;
-        row.labId = cfg.labIdOrRulesPath;
+        // labId left empty: runBatchAssessment backfills it from the batch
+        // config, so a rules *path* in the grader config never leaks into
+        // the report rows as a lab id.
         row.artifactPath = item.path;
 
         const GraderCliGrade g = gradeViaCli( cfg, item.path );

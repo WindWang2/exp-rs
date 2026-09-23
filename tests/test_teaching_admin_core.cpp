@@ -1370,3 +1370,56 @@ TEST_CASE( "foundry drift check reuses gen_lab_packs.py --check contract",
         REQUIRE( missing.summary == QLatin1String( "foundry_script_missing" ) );
     }
 }
+
+TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",
+           "[teaching_admin][grader][real-cli]" )
+{
+    // Opt-in lane: set SICNU_GEO_RS_CLI to a real sicnu_geo_rs_cli binary
+    // (the fake helper is not a real grader and is rejected here). Skipped
+    // elsewhere — hermetic coverage lives in the [grader] cases.
+    const QString cli = QString::fromUtf8( qgetenv( "SICNU_GEO_RS_CLI" ) );
+    const QString repo = QString::fromUtf8( qgetenv( "SICNU_SOURCE_DIR" ) );
+    if ( cli.isEmpty() || !QFileInfo::exists( cli ) || repo.isEmpty()
+         || !QFileInfo::exists( QDir( repo ).filePath( QStringLiteral( "data/labs/grading" ) ) ) )
+    {
+        WARN( "real grader CLI / repo not provided; skipping real-CLI integration" );
+        return;
+    }
+    // pick any committed rules file
+    const QDir grading( QDir( repo ).filePath( QStringLiteral( "data/labs/grading" ) ) );
+    const auto rules = grading.entryList( { QStringLiteral( "*.rules.json" ) }, QDir::Files, QDir::Name );
+    if ( rules.isEmpty() )
+    {
+        WARN( "no committed rules files found; skipping real-CLI integration" );
+        return;
+    }
+    // pick any committed fixture raster as a real artifact
+    QString artifact;
+    const QDir fixtures( QDir( repo ).filePath( QStringLiteral( "tests/fixtures/lab" ) ) );
+    for ( const QFileInfo &fi :
+          fixtures.entryInfoList( { QStringLiteral( "*.tif" ), QStringLiteral( "*.png" ) },
+                                  QDir::Files, QDir::Name ) )
+    {
+        artifact = fi.absoluteFilePath();
+        break;
+    }
+    if ( artifact.isEmpty() )
+    {
+        WARN( "no committed fixture raster found; skipping real-CLI integration" );
+        return;
+    }
+
+    GraderCliConfig cfg;
+    cfg.cliPath = cli;
+    cfg.labIdOrRulesPath = grading.filePath( rules.first() );
+    const auto g = gradeViaCli( cfg, artifact );
+    // Structure contract only: the verdict belongs to the grader.
+    REQUIRE( g.started );
+    REQUIRE( ( g.exitCode == 0 || g.exitCode == 1 || g.exitCode == 3 ) );
+    REQUIRE( ( g.status == QLatin1String( "pass" ) || g.status == QLatin1String( "fail" )
+               || g.status == QLatin1String( "unavailable" ) ) );
+    if ( g.status != QLatin1String( "unavailable" ) )
+        REQUIRE( g.reportDigest.size() == 64 );
+    else
+        REQUIRE_FALSE( g.unavailableReason.isEmpty() );
+}
