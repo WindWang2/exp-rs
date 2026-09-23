@@ -396,3 +396,33 @@ TEST_CASE( "rule traces expose insufficient_facts instead of silent passes",
     // was found, so the report is ok — but the trace says so per rule.
     REQUIRE( report.verdict == "ok" );
 }
+
+TEST_CASE( "findings colliding on severity/code/subject order by canonical content",
+           "[preflight][engine]" )
+{
+    // Two rules emit findings that collide on all presentation keys but
+    // differ in human_explanation. Presentation order must come from the
+    // canonical-JSON tie-break, not from rule emission order: the zeta rule
+    // (evaluated later, finding "a") must present BEFORE the alpha rule
+    // (finding "z").
+    SimpleProvider facts;
+    MemoryCapabilityProvider capability;
+
+    PreflightFinding fromZeta = makeFinding( "SPF_DEMO_TIE", PreflightSeverity::Warn );
+    fromZeta.ruleId = "preflight.zeta";
+    fromZeta.humanExplanation = "a";
+    PreflightFinding fromAlpha = makeFinding( "SPF_DEMO_TIE", PreflightSeverity::Warn );
+    fromAlpha.ruleId = "preflight.alpha";
+    fromAlpha.humanExplanation = "z";
+
+    PreflightEngine engine;
+    engine.registerRule(
+        std::make_unique<StubRule>( "preflight.alpha", 1, std::vector<PreflightFinding>{ fromAlpha } ) );
+    engine.registerRule(
+        std::make_unique<StubRule>( "preflight.zeta", 1, std::vector<PreflightFinding>{ fromZeta } ) );
+
+    const PreflightReport report = engine.evaluate( baseRequest(), facts, capability );
+    REQUIRE( report.findings.size() == 2 );
+    REQUIRE( report.findings[0].humanExplanation == "a" );
+    REQUIRE( report.findings[1].humanExplanation == "z" );
+}
