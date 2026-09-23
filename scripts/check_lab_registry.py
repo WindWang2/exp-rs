@@ -8,9 +8,11 @@
 #
 # Checks:
 #   1. loader contract  — every *.lab.json has id == file stem and
-#      id ~= ^lab[0-9]{2}_[a-z][a-z0-9_]*$, spec_version in {1,2}, a title,
-#      only allowed top-level keys, and no v2-only key in a v1 document
-#      (mirrors src/app/widgets/lab_spec_loader.cpp);
+#      id ~= ^lab[0-9]{2}_[a-z][a-z0-9_]*$, spec_version in {1,2,3}, a title,
+#      only allowed top-level keys, no v2-only key in a v1 document and no
+#      runtime block outside v3 (mirrors src/app/widgets/lab_spec_loader.cpp;
+#      the runtime block itself is only shallow-checked here — deep typed
+#      validation is sicnu_lab_runtime's authority, see src/lab/spec_runtime.cpp);
 #   2. slot uniqueness  — no two canonical labs claim the same labNN number;
 #   3. prerequisites    — entries are {path[,note]} objects, never bare strings
 #      (a string prerequisite is a knowledge reference and must live in
@@ -22,7 +24,11 @@
 #   6. declared files   — grading_rules / pipeline / data_spec paths of every
 #      canonical entry exist and parse as JSON;
 #   7. --strict-data    — additionally require every *.labspec.json to have a
-#      merged canonical counterpart (see scripts/upgrade_labspec.py).
+#      merged canonical counterpart (see scripts/upgrade_labspec.py);
+#   8. pointer parity   — a canonical wrapper document that carries its own
+#      grading_rules / grading_ref.pipeline must agree with the registry
+#      entry (the registry is the authority; drift here silently forks the
+#      grading chain between the GUI path and the registry path).
 #
 # Exit 0 iff consistent. Exit 1 with a reason per violation otherwise.
 
@@ -45,11 +51,13 @@ ALLOWED_ROOT_KEYS = {
     "steps", "grading_ref", "thinking_questions",
     "objective_zh", "glossary", "expected_artifacts", "param_ranges",
     "grading_rules", "principles", "prerequisite_knowledge",
+    "runtime",
 }
 V2_ONLY_KEYS = {
     "objective_zh", "glossary", "expected_artifacts", "param_ranges",
     "grading_rules", "principles", "prerequisite_knowledge",
 }
+V3_ONLY_KEYS = {"runtime"}
 
 
 class Violations:
@@ -91,12 +99,15 @@ def check_loader_contract(v):
             continue
 
         version = doc.get("spec_version")
-        if version not in (1, 2):
-            v.add(where, "spec_version must be 1 or 2 (got %r)" % (version,))
+        if version not in (1, 2, 3):
+            v.add(where, "spec_version must be 1, 2 or 3 (got %r)" % (version,))
             version = None
         if version == 1:
             for key in sorted(V2_ONLY_KEYS & set(doc)):
                 v.add(where, "top-level key '%s' requires spec_version 2" % key)
+        if version != 3:
+            for key in sorted(V3_ONLY_KEYS & set(doc)):
+                v.add(where, "top-level key '%s' requires spec_version 3" % key)
 
         for key in sorted(set(doc) - ALLOWED_ROOT_KEYS):
             v.add(where, "unknown top-level key '%s'" % key)
@@ -112,6 +123,10 @@ def check_loader_contract(v):
             v.add(where, "id '%s' does not equal its file stem '%s'" % (lab_id, stem))
         if not doc.get("title"):
             v.add(where, "title must be a non-empty string")
+
+        if "runtime" in doc and not isinstance(doc["runtime"], dict):
+            v.add(where, "runtime must be an object (deep typed validation "
+                         "lives in sicnu_lab_runtime)")
 
         prereqs = doc.get("prerequisites")
         if isinstance(prereqs, list):
@@ -145,7 +160,7 @@ def check_slot_uniqueness(v, doc_ids):
             v.add("lab%s" % number, "lab number %s is claimed by %s" % (number, ", ".join(ids)))
 
 
-def check_aliases(v, registry, doc_ids):
+def check_aliases(v, registry, doc_ids, wrapper_docs):
     canonical = registry.get("canonical", {})
     for lab_id in sorted(canonical):
         if lab_id not in doc_ids:
@@ -166,6 +181,23 @@ def check_aliases(v, registry, doc_ids):
                 load_json(full)
             except ValueError as exc:
                 v.add(lab_id, "%s is not valid JSON (%s)" % (path, exc))
+
+        # Pointer parity (check 8): when the merged wrapper carries its own
+        # grading pointers they must equal the registry's. The registry is
+        # the authority; a mismatch would silently fork the grading chain
+        # between consumers that read the wrapper and consumers that read
+        # the registry.
+        wrapper = wrapper_docs.get(lab_id)
+        if isinstance(wrapper, dict):
+            wrapper_rules = wrapper.get("grading_rules")
+            if wrapper_rules is not None and wrapper_rules != entry.get("grading_rules"):
+                v.add(lab_id, "wrapper grading_rules %r disagrees with registry %r"
+                      % (wrapper_rules, entry.get("grading_rules")))
+            wrapper_pipeline = (wrapper.get("grading_ref") or {}).get("pipeline") \
+                if isinstance(wrapper.get("grading_ref"), dict) else None
+            if wrapper_pipeline is not None and wrapper_pipeline != entry.get("pipeline"):
+                v.add(lab_id, "wrapper grading_ref.pipeline %r disagrees with registry %r"
+                      % (wrapper_pipeline, entry.get("pipeline")))
 
     seen = {}
     for lab_id in sorted(canonical):
@@ -273,11 +305,13 @@ def main():
     doc_ids = {doc.get("id") for _, doc in documents if isinstance(doc, dict)}
     canonical_ids = {doc.get("id") for name, doc in documents
                      if isinstance(doc, dict) and name.endswith(".lab.json")}
+    wrapper_docs = {doc.get("id"): doc for name, doc in documents
+                    if isinstance(doc, dict) and name.endswith(".lab.json")}
 
     check_loader_contract(v)
     check_slot_uniqueness(v, canonical_ids)
     check_legacy_vocabulary(v, registry, documents)
-    check_aliases(v, registry, doc_ids)
+    check_aliases(v, registry, doc_ids, wrapper_docs)
     check_pack_parity(v, registry, doc_ids)
     if args.strict_data:
         check_labspec_counterparts(v, registry)

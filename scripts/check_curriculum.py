@@ -74,7 +74,10 @@ def check_manifest(path: Path) -> list[str]:
         if doc.is_file():
             try:
                 parsed = json.loads(doc.read_text(encoding="utf-8"))
-                if parsed.get("id") == lab_id and parsed.get("spec_version") in (1, 2):
+                # 1|2|3 mirrors lab_spec_loader.cpp / curriculum_catalog.cpp:
+                # spec_version 3 (runtime generation, ADR 0174) is a legal
+                # labspec, not an unknown reference.
+                if parsed.get("id") == lab_id and parsed.get("spec_version") in (1, 2, 3):
                     return "labspec"
             except json.JSONDecodeError:
                 pass

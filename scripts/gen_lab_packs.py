@@ -8,9 +8,14 @@
 #
 # Input provenance tiers (see src/agent/lab_data_pack.h):
 #   committed-fixture  sha256+bytes pinned from the working tree (hard checks)
-#   generated-samples  data/samples/* from sicnu_generate_samples — byte sizes
-#                      recorded when the files exist locally (soft checks)
-#   generated-tmp      data/labs/_tmp/* from gen_lab_fixtures.py (soft checks)
+#   generated-samples  data/samples/* from sicnu_generate_samples — sizes are
+#                      toolchain-dependent, so no bytes field is ever emitted
+#                      (soft checks)
+#   generated-tmp      data/labs/_tmp/* from gen_lab_fixtures.py (soft checks,
+#                      no bytes field either)
+#
+# Regeneration is machine-independent: whether or not the generated inputs
+# happen to exist locally never changes the output bytes.
 #
 # Usage: python3 scripts/gen_lab_packs.py [--samples-dir data/samples]
 #   Writes/refreshes data/labs/packs/*.pack.json. Run from the repo root.
@@ -66,6 +71,10 @@ def committed(rel):
 
 
 def generated(rel, role, sensor_truth, generator, notes=""):
+    # No `bytes` pin: generated sizes drift with the local GDAL/toolchain, and
+    # emitting one only when the file happens to exist would make the pack a
+    # function of the machine instead of the repo (the header promises the
+    # opposite). The verifier treats absent bytes as "no size check".
     entry = {
         "path": rel.replace(os.sep, "/"),
         "role": role,
@@ -73,8 +82,6 @@ def generated(rel, role, sensor_truth, generator, notes=""):
         "generator": generator,
         "sensor_truth": sensor_truth,
     }
-    if os.path.isfile(rel):
-        entry["bytes"] = os.path.getsize(rel)
     if notes:
         entry["notes"] = notes
     return entry
@@ -88,8 +95,6 @@ def generated_tmp(rel, role, sensor_truth, generator, notes=""):
         "generator": generator,
         "sensor_truth": sensor_truth,
     }
-    if os.path.isfile(rel):
-        entry["bytes"] = os.path.getsize(rel)
     if notes:
         entry["notes"] = notes
     return entry
