@@ -228,6 +228,34 @@ TEST_CASE( "CapabilityMirrorProjection fails closed on corrupt input and missing
         REQUIRE( mirror.problems().size() == 1 );
         REQUIRE( mirror.problems()[0].find( "corrupt.json" ) != std::string::npos );
     }
+    // Malformed variant payloads fail closed too: band_roles with a bool
+    // count (or a 0 count) would silently narrow the check downstream.
+    {
+        CapabilityMirrorProjection mirror;
+        Json::Value doc( Json::arrayValue );
+        Json::Value entry( Json::objectValue );
+        entry["id"] = "rs:bad_variant";
+        Json::Value variants( Json::arrayValue );
+        Json::Value variant( Json::objectValue );
+        Json::Value when( Json::objectValue );
+        when["param"] = "index";
+        Json::Value values( Json::arrayValue );
+        values.append( "NDVI" );
+        when["values"] = values;
+        variant["when"] = when;
+        Json::Value roles( Json::objectValue );
+        roles["red"] = true; // bool, not an int count
+        variant["band_roles"] = roles;
+        variants.append( variant );
+        entry["variants"] = variants;
+        doc.append( entry );
+        mirror.addDocument( doc, "bad_variant.json" );
+        REQUIRE_FALSE( mirror.healthy() );
+        REQUIRE( mirror.problems().size() == 1 );
+        REQUIRE( mirror.problems()[0].find( "band_roles" ) != std::string::npos );
+        REQUIRE( mirror.entryForOperator( "rs:bad_variant", makeVariantParams( "index", "NDVI" ) )
+                     .status == FactStatus::Unavailable );
+    }
     // Non-array top-level document: fail-closed, counted.
     {
         CapabilityMirrorProjection mirror;

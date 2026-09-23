@@ -35,6 +35,10 @@ Json::Value makeVariantParams( const std::string &key, const std::string &value 
 class CapabilityMirrorProjection : public ICapabilityProvider
 {
   public:
+    // Load-then-query discipline: populate via addDocument/loadDirectory
+    // first, query afterwards. Pointers and merged results are views over
+    // the entry vector; loading after a query invalidates them. Not
+    // thread-safe (the engine's evaluate is const and safe to share).
     /// Adds one parsed document (must be a top-level array of entries).
     /// @p origin names the document in problems(); a non-array or duplicate
     /// entry id fails closed.

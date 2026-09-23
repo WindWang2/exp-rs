@@ -533,9 +533,10 @@ RuleResult modalityEvaluate( const PreflightRequest &, const RuleFacts &facts )
 RuleResult qualityMaskEvaluate( const PreflightRequest &, const RuleFacts &facts )
 {
     RuleResult result;
-    for ( const auto *slot : facts.slotsOfKind( "raster" ) )
+    for ( const auto &raster : rasterSlots( facts ) )
     {
-        const SlotFacts &f = slot->facts.facts;
+        const RuleFacts::Slot *slot = raster.slot;
+        const SlotFacts &f = *raster.facts;
         if ( !f.hasCloudCover )
             continue;
         if ( f.cloudCoverPercent <= kCloudAckPercent )
@@ -592,9 +593,10 @@ RuleResult temporalEvaluate( const PreflightRequest &, const RuleFacts &facts )
                              : 0;
 
     std::size_t unknownCount = 0;
-    for ( const auto *slot : facts.slotsOfKind( "raster" ) )
+    for ( const auto &raster : rasterSlots( facts ) )
     {
-        const SlotFacts &f = slot->facts.facts;
+        const RuleFacts::Slot *slot = raster.slot;
+        const SlotFacts &f = *raster.facts;
         const bool hasDates = !f.temporalDates.empty();
         const int sceneCount = f.temporalSceneCount > 0
                                  ? f.temporalSceneCount
@@ -751,20 +753,23 @@ RuleResult leakageEvaluate( const PreflightRequest &, const RuleFacts &facts )
     const std::string evalId = identity( *evaluation );
     const bool sameAsset = !trainId.empty() && trainId == evalId;
     // A leak in either direction counts: eval derived from training, or
-    // training manufactured from the eval source.
-    bool derivedReuse = false;
+    // training manufactured from the eval source. The finding must say which
+    // direction actually holds — teaching surfaces quote it verbatim.
+    bool evalFromTrain = false;
+    bool trainFromEval = false;
     if ( !sameAsset && !trainId.empty() )
     {
         for ( const auto &origin : evaluation->facts.facts.derivedFromAssetIds )
             if ( origin == trainId )
-                derivedReuse = true;
+                evalFromTrain = true;
     }
     if ( !sameAsset && !evalId.empty() )
     {
         for ( const auto &origin : training->facts.facts.derivedFromAssetIds )
             if ( origin == evalId )
-                derivedReuse = true;
+                trainFromEval = true;
     }
+    const bool derivedReuse = evalFromTrain || trainFromEval;
     if ( !sameAsset && !derivedReuse )
     {
         result.detail = "training and eval are disjoint";
@@ -772,19 +777,27 @@ RuleResult leakageEvaluate( const PreflightRequest &, const RuleFacts &facts )
         return result;
     }
 
+    const std::string human = sameAsset
+                                ? "Training and eval resolve to the same asset; accuracy "
+                                  "metrics would be silently optimistic."
+                                : trainFromEval
+                                    ? "The training input was derived from the eval source; "
+                                      "accuracy metrics would be silently optimistic."
+                                    : "The eval input was derived from the training asset; "
+                                      "accuracy metrics would be silently optimistic.";
     auto finding = makeFinding(
         "SPF_TRAIN_EVAL_LEAKAGE", PreflightSeverity::Block, "ml",
-        training->slot + " + " + evaluation->slot, derivedReuse ? "derived" : "observed",
-        derivedReuse ? "The eval input was derived from the training asset; accuracy metrics "
-                       "would be silently optimistic."
-                     : "Training and eval resolve to the same asset; accuracy metrics would "
-                       "be silently optimistic.",
+        training->slot + " + " + evaluation->slot, derivedReuse ? "derived" : "observed", human,
         "disjoint training and eval sources",
-        derivedReuse ? "eval derived from " + trainId : "identity " + trainId );
+        derivedReuse ? ( trainFromEval ? std::string( "training derived from " ) + evalId
+                                       : std::string( "eval derived from " ) + trainId )
+                     : "identity " + trainId );
     finding.affectedInputs = { training->assetRef, evaluation->assetRef };
     finding.evidence["training"] = trainId;
     finding.evidence["eval"] = evalId;
-    finding.evidence["relation"] = derivedReuse ? "derived" : "identical";
+    finding.evidence["relation"] =
+        sameAsset ? "identical" : ( trainFromEval ? "training_derived_from_eval"
+                                                  : "eval_derived_from_training" );
     result.findings.push_back( std::move( finding ) );
     result.outcome = "finding";
     return result;

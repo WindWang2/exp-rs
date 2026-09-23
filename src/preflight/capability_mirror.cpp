@@ -68,11 +68,13 @@ namespace {
 /// never silently narrow a check.
 std::string policyProblem( const Json::Value &entry )
 {
-    auto objectOfNonNegativeInts = []( const Json::Value &node ) {
+    auto roleCounts = []( const Json::Value &node ) {
+        // Authority parity: band-role minimums are ints >= 1; a 0 or
+        // non-int count would silently narrow the check downstream.
         if ( !node.isObject() )
             return false;
         for ( const auto &key : node.getMemberNames() )
-            if ( !node[key].isInt() || node[key].asInt() < 0 )
+            if ( !node[key].isInt() || node[key].asInt() < 1 )
                 return false;
         return true;
     };
@@ -86,8 +88,8 @@ std::string policyProblem( const Json::Value &entry )
     };
 
     const Json::Value &roles = entry["band_roles"];
-    if ( !roles.isNull() && !objectOfNonNegativeInts( roles ) )
-        return "band_roles must map roles to non-negative ints";
+    if ( !roles.isNull() && !roleCounts( roles ) )
+        return "band_roles must map roles to int counts >= 1";
     const Json::Value &radiometric = entry["radiometric"];
     if ( !radiometric.isNull() )
     {
@@ -121,11 +123,35 @@ std::string policyProblem( const Json::Value &entry )
             return "model_compatibility must be an object";
         if ( model.isMember( "families" ) && !arrayOfStrings( model["families"] ) )
             return "model_compatibility.families must be an array of strings";
-        if ( model.isMember( "input_band_roles" ) &&
-             !objectOfNonNegativeInts( model["input_band_roles"] ) )
-            return "model_compatibility.input_band_roles must map roles to non-negative ints";
+        if ( model.isMember( "input_band_roles" ) && !roleCounts( model["input_band_roles"] ) )
+            return "model_compatibility.input_band_roles must map roles to int counts >= 1";
+    }
+    const Json::Value &when = entry["when"];
+    if ( !when.isNull() )
+    {
+        if ( !when.isObject() || !when["param"].isString() || !arrayOfStrings( when["values"] ) )
+            return "when must be { param: string, values: [string...] }";
     }
     return "";
+}
+
+/// Variant payloads carry the real requirements on many real entries; they
+/// pass through the same validation as top-level keys (minus their own
+/// overrides being objects).
+std::string variantProblem( const Json::Value &variant )
+{
+    if ( !variant.isObject() )
+        return "variant must be an object";
+    for ( const auto &key : variant.getMemberNames() )
+    {
+        if ( key == "when" )
+            continue;
+        if ( !variant[key].isObject() && !variant[key].isArray() && !variant[key].isString() &&
+             !variant[key].isInt() && !variant[key].isBool() )
+            return "variant override " + key + " has an unsupported type";
+    }
+    std::string problem = policyProblem( variant );
+    return problem;
 }
 
 } // namespace
@@ -147,7 +173,20 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
             problems_.push_back( origin + ": entry without a string id" );
             continue;
         }
-        const std::string policyProblemText = policyProblem( entry );
+        std::string policyProblemText = policyProblem( entry );
+        const Json::Value &variants = entry["variants"];
+        if ( policyProblemText.empty() && variants.isArray() )
+        {
+            for ( const auto &variant : variants )
+            {
+                policyProblemText = variantProblem( variant );
+                if ( !policyProblemText.empty() )
+                {
+                    policyProblemText = "variant: " + policyProblemText;
+                    break;
+                }
+            }
+        }
         if ( !policyProblemText.empty() )
         {
             problems_.push_back( origin + ": entry " + entry["id"].asString() + ": " +

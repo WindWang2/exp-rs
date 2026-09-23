@@ -8,8 +8,8 @@
 //   * rules_revision = shortDigest of the sorted "id@revision" line set;
 //   * request_digest = shortDigest of the canonical request document;
 //   * budgets are deterministic and their truncation is LOUD: a typed
-//     SPF_BUDGET_EXCEEDED require_ack marker means an over-budget report can
-//     never be verdict "ok";
+//     SPF_BUDGET_EXCEEDED block marker means an over-budget report is
+//     fail-closed blocked (budgets are configuration, not named risk);
 //   * acknowledgement is decided at exactly one point (the engine): an ack
 //     clears a require_ack finding with the matching code; a block is never
 //     acknowledgable, whatever any rule claims.

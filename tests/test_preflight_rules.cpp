@@ -456,6 +456,12 @@ TEST_CASE( "train_eval_leakage: identical assets block; derived reuse blocks; un
             loaded.run( { { "training", "scene-a" }, { "eval", "scene-b" } } );
         REQUIRE( hasCode( report, "SPF_TRAIN_EVAL_LEAKAGE" ) );
         REQUIRE( findings( report, "SPF_TRAIN_EVAL_LEAKAGE" )[0]->basis == "derived" );
+        // The verbatim teaching text must state the direction that holds.
+        REQUIRE(
+            findings( report, "SPF_TRAIN_EVAL_LEAKAGE" )[0]->humanExplanation.find(
+                "training input was derived from the eval source" ) != std::string::npos );
+        REQUIRE( findings( report, "SPF_TRAIN_EVAL_LEAKAGE" )[0]->evidence["relation"].asString() ==
+                 "training_derived_from_eval" );
     }
     // Unresolvable identity -> typed unknown, no silent pass.
     {
@@ -564,6 +570,32 @@ TEST_CASE( "virtual_raster inputs are judged like rasters, not silently skipped"
     const PreflightReport report = loaded.run();
     REQUIRE( hasCode( report, "SPF_BAND_ROLE_MISSING" ) );
     REQUIRE( findings( report, "SPF_BAND_ROLE_MISSING" )[0]->severity == PreflightSeverity::Block );
+}
+
+TEST_CASE( "quality mask and temporal policy judge gridded kinds uniformly",
+           "[preflight][rules]" )
+{
+    // The round-1 counterexample: a cloudy VRT under a temporal operator
+    // must not clear with an empty findings list.
+    Json::Value entry = ndviCapability();
+    Json::Value temporal( Json::objectValue );
+    temporal["min_scenes"] = 6;
+    entry["temporal"] = temporal;
+
+    Loaded loaded( entry );
+    SlotFacts vrt = opticalScene();
+    vrt.kind = "virtual_raster";
+    vrt.hasCloudCover = true;
+    vrt.cloudCoverPercent = 90.0;
+    loaded.facts.set( "scene-a", vrt );
+
+    const PreflightReport report = loaded.run();
+    REQUIRE( hasCode( report, "SPF_CLOUD_COVER_HIGH" ) );
+    REQUIRE( findings( report, "SPF_CLOUD_COVER_HIGH" )[0]->severity == PreflightSeverity::Block );
+    // The temporal policy consults the VRT too: with no temporal facts the
+    // check degrades to a typed unknown, never a silent pass.
+    REQUIRE( hasCode( report, "SPF_TEMPORAL_UNKNOWN" ) );
+    REQUIRE( report.verdict == "blocked" );
 }
 
 TEST_CASE( "operator_known: undeclared operator and unavailable mirror are typed, not passes",
