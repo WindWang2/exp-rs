@@ -10,11 +10,12 @@
 #include "geospatial/remote/remote_identity_token.h"
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/sha256.h"
+#include "platform/portable.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <filesystem>
+#include <fstream>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -40,7 +41,7 @@ std::string canonicalLocalPath( const std::string &path )
   {
     canonical = fs::u8path( path ).lexically_normal();
     if ( canonical.is_relative() )
-      return canonical.string();
+      return sicnu::portable::pathToUtf8( canonical );
   }
 #if defined( _WIN32 )
   const std::wstring wide = canonical.wstring();
@@ -49,11 +50,11 @@ std::string canonicalLocalPath( const std::string &path )
     // Stable lowercase drive letter.
     std::wstring lowered = wide;
     lowered[0] = static_cast<wchar_t>( std::tolower( wide[0] ) );
-    return std::string( lowered.begin(), lowered.end() );
+    return sicnu::portable::utf8FromWide( lowered );
   }
-  return std::string( wide.begin(), wide.end() );
+  return sicnu::portable::utf8FromWide( wide );
 #else
-  return canonical.string();
+  return sicnu::portable::pathToUtf8( canonical );
 #endif
 }
 
@@ -95,9 +96,10 @@ LocalFacts localFacts( const fs::path &path )
 bool hashFilePrefix( const fs::path &path, std::uint64_t budget, std::string &hexOut,
                      std::uintmax_t &hashedOut )
 {
-  // .string() first: fs::path::c_str() is wchar_t* on Windows.
-  std::FILE *file = std::fopen( path.string().c_str(), "rb" );
-  if ( !file )
+  // fs::path overload: `path` arrives UTF-8-built from the caller (fs::u8path);
+  // the narrow fopen it replaces was ACP-encoded on Windows.
+  std::ifstream in( path, std::ios::binary );
+  if ( !in )
     return false;
   Sha256 hash;
   unsigned char buffer[64 * 1024];
@@ -106,7 +108,8 @@ bool hashFilePrefix( const fs::path &path, std::uint64_t budget, std::string &he
   while ( remaining > 0 )
   {
     const std::size_t chunk = static_cast<std::size_t>( std::min<std::uint64_t>( remaining, sizeof( buffer ) ) );
-    const std::size_t got = std::fread( buffer, 1, chunk, file );
+    in.read( reinterpret_cast<char *>( buffer ), static_cast<std::streamsize>( chunk ) );
+    const std::size_t got = static_cast<std::size_t>( in.gcount() );
     if ( got == 0 )
       break;
     hash.update( buffer, got );
@@ -116,8 +119,7 @@ bool hashFilePrefix( const fs::path &path, std::uint64_t budget, std::string &he
     if ( got < chunk )
       break; // EOF
   }
-  const bool ok = anyRead && std::ferror( file ) == 0;
-  std::fclose( file );
+  const bool ok = anyRead && !in.bad();
   if ( !ok )
     return false;
   hexOut = toHex( hash.finalize() );

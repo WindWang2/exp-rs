@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "exprs/plugin_validator.h"
+#include "platform/portable.h"
 
 namespace exprs {
 
@@ -114,7 +115,11 @@ void storeIndex( const std::string &root, const Json::Value &index )
         Json::StyledWriter writer;
         output << writer.write( index );
     }
-    std::rename( temp.c_str(), path.c_str() );
+    // Best-effort, as the unchecked std::rename it replaces: a failed swap
+    // keeps the stale index, which only costs a cache miss on the next scan.
+    std::error_code renameEc;
+    std::filesystem::rename( sicnu::portable::pathFromUtf8( temp ),
+                             sicnu::portable::pathFromUtf8( path ), renameEc );
 }
 
 // Parses a manifest from an embedded index value without touching the file.

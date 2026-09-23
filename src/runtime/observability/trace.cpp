@@ -1,14 +1,11 @@
 // trace.cpp — see trace.h for the contract.
 #include "trace.h"
 
+#include "platform/portable.h"
+
 #include <atomic>
 #include <chrono>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -166,11 +163,7 @@ uint64_t processOrigin()
     // counter. Constant within a process, so sort order is untouched.
     // Not cryptographic; ids only need process distinction and sortability.
     static const uint64_t tag = [] {
-#if defined( _WIN32 )
-        const uint64_t pid = static_cast<uint64_t>( GetCurrentProcessId() );
-#else
-        const uint64_t pid = static_cast<uint64_t>( ::getpid() );
-#endif
+        const uint64_t pid = static_cast<uint64_t>( sicnu::portable::pid() );
         const uint64_t time =
             static_cast<uint64_t>( std::chrono::steady_clock::now().time_since_epoch().count() );
         const uint64_t addr = reinterpret_cast<uint64_t>( &tag );
@@ -343,7 +336,8 @@ void FileTraceSink::writerLoop()
             openFile_locked();
             if ( !m_activePath.empty() )
             {
-                std::ofstream file( m_activePath, std::ios::app | std::ios::binary );
+                std::ofstream file( sicnu::portable::pathFromUtf8( m_activePath ),
+                                    std::ios::app | std::ios::binary );
                 if ( file.good() )
                 {
                     file << line << "\n";
@@ -365,14 +359,19 @@ void FileTraceSink::rotateIfNeeded_locked()
         const std::string from = m_options.directory + "/" + m_options.baseName + "." +
                                  std::to_string( i - 1 );
         const std::string to = m_options.directory + "/" + m_options.baseName + "." + std::to_string( i );
-        if ( std::filesystem::exists( from, ec ) )
-            std::filesystem::rename( from, to, ec );
+        // Directory strings hold UTF-8 bytes; the narrow fs::path conversion
+        // is ACP on Windows, so every fs call goes through pathFromUtf8.
+        if ( std::filesystem::exists( sicnu::portable::pathFromUtf8( from ), ec ) )
+            std::filesystem::rename( sicnu::portable::pathFromUtf8( from ),
+                                     sicnu::portable::pathFromUtf8( to ), ec );
     }
     const std::string current = m_options.directory + "/" + m_options.baseName + ".ndjson";
-    if ( std::filesystem::exists( current, ec ) )
+    if ( std::filesystem::exists( sicnu::portable::pathFromUtf8( current ), ec ) )
     {
         std::filesystem::rename(
-            current, m_options.directory + "/" + m_options.baseName + ".1", ec );
+            sicnu::portable::pathFromUtf8( current ),
+            sicnu::portable::pathFromUtf8( m_options.directory + "/" + m_options.baseName + ".1" ),
+            ec );
     }
     m_activeBytes = 0;
 }
@@ -384,7 +383,8 @@ void FileTraceSink::openFile_locked()
     m_activePath = m_options.directory + "/" + m_options.baseName + ".ndjson";
     m_activeBytes = 0;
     std::error_code ec;
-    const auto existing = std::filesystem::file_size( m_activePath, ec );
+    const auto existing =
+      std::filesystem::file_size( sicnu::portable::pathFromUtf8( m_activePath ), ec );
     m_activeBytes = ec ? 0 : static_cast<uint64_t>( existing );
 }
 
@@ -437,7 +437,9 @@ std::string installFileSinkFromEnv()
     if ( !flag || !( flag[0] == '1' || flag[0] == 't' || flag[0] == 'T' ) )
         return std::string();
     FileTraceSink::Options options;
-    if ( const char *dir = std::getenv( "SICNU_TRACE_DIR" ) )
+    // The trace directory is path-bearing: read it through the UTF-8 env
+    // seam so a non-ASCII directory survives the Windows ACP getenv.
+    if ( const std::string dir = sicnu::portable::envUtf8( "SICNU_TRACE_DIR" ); !dir.empty() )
         options.directory = dir;
     if ( options.directory.empty() )
     {

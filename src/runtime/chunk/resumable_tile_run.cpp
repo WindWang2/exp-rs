@@ -2,6 +2,8 @@
 #include "resumable_tile_run.h"
 #include "fsync_compat.h"
 
+#include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
+
 #include "runtime/observability/execution_telemetry.h"
 #include "runtime/observability/fault_point.h"
 
@@ -53,7 +55,8 @@ ResumableTileRun::ResumableTileRun( TileRunSpec spec, Config config )
 
     m_identityKey = tileRunIdentityKey( m_spec.identity );
     m_runKey = "rt-" + m_identityKey;
-    m_runDir = ( std::filesystem::path( m_config.scratchRoot ) / m_runKey ).generic_string();
+    m_runDir = sicnu::portable::pathToUtf8( sicnu::portable::pathFromUtf8( m_config.scratchRoot )
+                                            / m_runKey );
     m_journalPath = m_config.statePath + ".journal";
     m_checkpointPath = m_config.statePath + ".ckpt";
     m_markerPath = m_config.statePath + ".published";
@@ -61,7 +64,8 @@ ResumableTileRun::ResumableTileRun( TileRunSpec spec, Config config )
 
 std::filesystem::path ResumableTileRun::tilePath( std::uint64_t index ) const
 {
-    return std::filesystem::path( m_runDir ) / ( "tile-" + std::to_string( index ) + ".tl" );
+    return sicnu::portable::pathFromUtf8( m_runDir )
+           / ( "tile-" + std::to_string( index ) + ".tl" );
 }
 
 ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
@@ -70,10 +74,10 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
     state.committed.assign( static_cast<size_t>( m_totalTiles ), false );
 
     std::error_code ec;
-    if ( !std::filesystem::exists( m_journalPath, ec ) || ec )
+    if ( !std::filesystem::exists( sicnu::portable::pathFromUtf8( m_journalPath ), ec ) || ec )
         return state; // fresh
 
-    std::ifstream in( m_journalPath, std::ios::binary );
+    std::ifstream in( sicnu::portable::pathFromUtf8( m_journalPath ), std::ios::binary );
     if ( !in )
         throw ChunkCorruptTile( m_journalPath );
 
@@ -108,7 +112,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
             if ( !hasMore )
             {
                 std::error_code truncEc;
-                std::filesystem::resize_file( m_journalPath, 0, truncEc );
+                std::filesystem::resize_file(
+                    sicnu::portable::pathFromUtf8( m_journalPath ), 0, truncEc );
                 if ( truncEc ) // failed truncation must not be appended after
                     throw std::runtime_error( "resumable tile run: journal torn-header "
                                               "truncation failed ("
@@ -137,7 +142,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
         if ( !std::getline( in, probe ) )
         {
             std::error_code truncEc;
-            std::filesystem::resize_file( m_journalPath, lineStart, truncEc );
+            std::filesystem::resize_file( sicnu::portable::pathFromUtf8( m_journalPath ),
+                                          lineStart, truncEc );
             if ( truncEc )
                 throw std::runtime_error( "resumable tile run: journal torn-tail truncation "
                                           "failed (" + truncEc.message() + ")" );
@@ -162,12 +168,13 @@ void ResumableTileRun::appendCommit( std::uint64_t index )
     // (review P1 fix).
     std::error_code ec;
     bool needsHeader = true;
-    if ( std::filesystem::exists( m_journalPath, ec ) && !ec )
+    if ( std::filesystem::exists( sicnu::portable::pathFromUtf8( m_journalPath ), ec ) && !ec )
     {
-        const std::uintmax_t size = std::filesystem::file_size( m_journalPath, ec );
+        const std::uintmax_t size = std::filesystem::file_size(
+            sicnu::portable::pathFromUtf8( m_journalPath ), ec );
         needsHeader = ec || size == 0;
     }
-    std::ofstream out( m_journalPath,
+    std::ofstream out( sicnu::portable::pathFromUtf8( m_journalPath ),
                        std::ios::binary | std::ios::app | std::ios::ate );
     if ( !out )
         throw std::runtime_error( "resumable tile run: cannot open journal " + m_journalPath );
@@ -200,9 +207,9 @@ void ResumableTileRun::saveCheckpoint( std::uint64_t committedCount ) const
 bool ResumableTileRun::markerMatches() const
 {
     std::error_code ec;
-    if ( !std::filesystem::exists( m_markerPath, ec ) || ec )
+    if ( !std::filesystem::exists( sicnu::portable::pathFromUtf8( m_markerPath ), ec ) || ec )
         return false;
-    std::ifstream in( m_markerPath, std::ios::binary );
+    std::ifstream in( sicnu::portable::pathFromUtf8( m_markerPath ), std::ios::binary );
     if ( !in )
         return false;
     std::string version, key;
@@ -216,7 +223,8 @@ void ResumableTileRun::writeMarker() const
         throw std::runtime_error( "resumable tile run: injected marker failure" );
     const std::string tmp = m_markerPath + ".tmp";
     {
-        std::ofstream out( tmp, std::ios::binary | std::ios::trunc );
+        std::ofstream out( sicnu::portable::pathFromUtf8( tmp ),
+                           std::ios::binary | std::ios::trunc );
         if ( !out )
             throw std::runtime_error( "resumable tile run: cannot open marker tmp " + tmp );
         out << kJournalHeaderVersion << ' ' << m_identityKey << '\n';
@@ -225,16 +233,17 @@ void ResumableTileRun::writeMarker() const
         {
             out.close();
             std::error_code removeEc;
-            std::filesystem::remove( tmp, removeEc );
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( tmp ), removeEc );
             throw std::runtime_error( "resumable tile run: marker tmp short write" );
         }
     }
     std::error_code renameEc;
-    std::filesystem::rename( tmp, m_markerPath, renameEc );
+    std::filesystem::rename( sicnu::portable::pathFromUtf8( tmp ),
+                             sicnu::portable::pathFromUtf8( m_markerPath ), renameEc );
     if ( renameEc )
     {
         std::error_code removeEc;
-        std::filesystem::remove( tmp, removeEc );
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( tmp ), removeEc );
         throw std::runtime_error( "resumable tile run: marker rename failed ("
                                   + renameEc.message() + ")" );
     }
@@ -243,11 +252,11 @@ void ResumableTileRun::writeMarker() const
 void ResumableTileRun::wipeState( bool includeMarker ) const
 {
     std::error_code ec;
-    std::filesystem::remove_all( m_runDir, ec );
-    std::filesystem::remove( m_journalPath, ec );
-    std::filesystem::remove( m_checkpointPath, ec );
+    std::filesystem::remove_all( sicnu::portable::pathFromUtf8( m_runDir ), ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( m_journalPath ), ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( m_checkpointPath ), ec );
     if ( includeMarker )
-        std::filesystem::remove( m_markerPath, ec );
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( m_markerPath ), ec );
 }
 
 ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &cancel,
@@ -269,7 +278,7 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
     // stale run: wipe and start clean (never mix identities).
     {
         std::error_code ec;
-        if ( std::filesystem::exists( m_markerPath, ec ) && !ec )
+        if ( std::filesystem::exists( sicnu::portable::pathFromUtf8( m_markerPath ), ec ) && !ec )
             wipeState( true );
     }
 
@@ -292,7 +301,7 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
     // workflow/tooling); the journal is the sole resume source of truth.
 
     std::error_code dirEc;
-    std::filesystem::create_directories( m_runDir, dirEc );
+    std::filesystem::create_directories( sicnu::portable::pathFromUtf8( m_runDir ), dirEc );
     if ( dirEc )
         throw std::runtime_error( "resumable tile run: cannot create run dir " + m_runDir
                                   + " (" + dirEc.message() + ")" );
@@ -300,12 +309,13 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
     // parent directory too (a journal that cannot be opened would fail at
     // the first commit — after tiles were already computed).
     std::error_code stateEc;
-    const auto stateParent = std::filesystem::path( m_config.statePath ).parent_path();
+    const auto stateParent = sicnu::portable::pathFromUtf8( m_config.statePath ).parent_path();
     if ( !stateParent.empty() )
         std::filesystem::create_directories( stateParent, stateEc );
     if ( stateEc )
         throw std::runtime_error( "resumable tile run: cannot create state dir "
-                                  + stateParent.generic_string() + " (" + stateEc.message() + ")" );
+                                  + sicnu::portable::pathToUtf8( stateParent ) + " ("
+                                  + stateEc.message() + ")" );
 
     // Resume visibility (WP-F): one RunResumed event when a restart attached
     // prior committed state; per-tile attach/compute hits the cache-hit /
@@ -325,7 +335,7 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
         bool reused = false;
         if ( journal.committed[static_cast<size_t>( index )] )
         {
-            const std::string path = tilePath( index ).generic_string();
+            const std::string path = sicnu::portable::pathToUtf8( tilePath( index ) );
             TilePayload verified;
             bool verifiedOk = false;
             try
@@ -374,7 +384,8 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
                                           + " floats, spec needs "
                                           + std::to_string( expected.bufferElementCount() ) );
             payload.spec = expected;
-            DiskTileStore::writeFile( tilePath( index ).generic_string(), payload );
+            DiskTileStore::writeFile( sicnu::portable::pathToUtf8( tilePath( index ) ),
+                                      payload );
             appendCommit( index );
             cb.consume( payload );
             ++result.tilesComputed;
@@ -414,9 +425,9 @@ void ResumableTileRun::abandon()
 void ResumableTileRun::cleanupAfterPublish()
 {
     std::error_code ec;
-    std::filesystem::remove_all( m_runDir, ec );
-    std::filesystem::remove( m_journalPath, ec );
-    std::filesystem::remove( m_checkpointPath, ec );
+    std::filesystem::remove_all( sicnu::portable::pathFromUtf8( m_runDir ), ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( m_journalPath ), ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( m_checkpointPath ), ec );
 }
 
 } // namespace sicnu::runtime::chunk

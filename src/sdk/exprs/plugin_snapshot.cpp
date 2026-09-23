@@ -16,6 +16,8 @@
 
 #include <json/json.h>
 
+#include "platform/portable.h"
+
 #ifndef _WIN32
 #include <signal.h>
 #include <sys/stat.h>
@@ -29,11 +31,7 @@ namespace exprs {
 
 long snapshotOwnerPid()
 {
-#ifdef _WIN32
-    return static_cast<long>( ::GetCurrentProcessId() );
-#else
-    return static_cast<long>( ::getpid() );
-#endif
+    return static_cast<long>( sicnu::portable::pid() );
 }
 
 namespace {

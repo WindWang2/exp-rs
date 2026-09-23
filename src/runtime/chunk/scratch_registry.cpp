@@ -3,6 +3,7 @@
 #include "fsync_compat.h"
 
 #include "memory_planner.h" // saturatingAdd (F-A-14)
+#include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
 
 #include <algorithm>
 #include <cctype>
@@ -54,7 +55,8 @@ void fsyncPath( const std::string &path, bool directory )
 /// Best-effort parse of the `.digest` sidecar; false on any malformed input.
 bool readDigestSidecar( const std::string &path, std::uint64_t &hash, std::uint64_t &size )
 {
-    std::ifstream in( sidecarPath( path ), std::ios::binary );
+    std::ifstream in( sicnu::portable::pathFromUtf8( sidecarPath( path ) ),
+                      std::ios::binary );
     std::string hashHex;
     if ( !( in >> hashHex ) )
         return false;
@@ -113,15 +115,17 @@ void ScratchLease::sealDigest() const
     if ( !m_impl )
         return;
     std::error_code ec;
-    const auto size = std::filesystem::file_size( m_impl->path, ec );
+    const auto size =
+        std::filesystem::file_size( sicnu::portable::pathFromUtf8( m_impl->path ), ec );
     if ( ec )
         return;
     std::vector<char> buffer( static_cast<std::size_t>( size ) );
-    std::ifstream in( m_impl->path, std::ios::binary );
+    std::ifstream in( sicnu::portable::pathFromUtf8( m_impl->path ), std::ios::binary );
     in.read( buffer.data(), buffer.size() );
     if ( static_cast<std::size_t>( in.gcount() ) != buffer.size() )
         return;
-    std::ofstream out( sidecarPath( m_impl->path ), std::ios::binary | std::ios::trunc );
+    std::ofstream out( sicnu::portable::pathFromUtf8( sidecarPath( m_impl->path ) ),
+                       std::ios::binary | std::ios::trunc );
     out << std::hex << fnv1a( buffer.data(), buffer.size() ) << "\n"
         << std::dec << size << "\n";
 }
@@ -136,18 +140,20 @@ const std::string &ScratchLease::finalize() const
         // fsync the file and its directory, then rename — the checkpoint
         // atomicity family (tmp + durable + atomic replace).
         fsyncPath( m_impl->path, /*directory=*/false );
-        if ( auto dir = std::filesystem::path( m_impl->path ).parent_path(); !dir.empty() )
-            fsyncPath( dir.string(), /*directory=*/true );
+        if ( auto dir = sicnu::portable::pathFromUtf8( m_impl->path ).parent_path(); !dir.empty() )
+            fsyncPath( sicnu::portable::pathToUtf8( dir ), /*directory=*/true );
         std::error_code ec;
-        std::filesystem::rename( m_impl->path, m_impl->finalPath, ec );
+        std::filesystem::rename( sicnu::portable::pathFromUtf8( m_impl->path ),
+                                 sicnu::portable::pathFromUtf8( m_impl->finalPath ), ec );
         if ( !ec )
         {
             // Rename is atomic; the sidecar follows with a non-atomic move —
             // a crash between the two leaves the final file without a
             // digest, which verifyDigest() answers fail-closed (recompute).
             std::error_code ec2;
-            std::filesystem::rename( sidecarPath( m_impl->path ),
-                                     sidecarPath( m_impl->finalPath ), ec2 );
+            std::filesystem::rename(
+                sicnu::portable::pathFromUtf8( sidecarPath( m_impl->path ) ),
+                sicnu::portable::pathFromUtf8( sidecarPath( m_impl->finalPath ) ), ec2 );
         }
         else
         {
@@ -167,17 +173,19 @@ bool ScratchLease::verifyDigest() const
     if ( !m_impl )
         return false;
     std::error_code ec;
-    if ( !std::filesystem::exists( m_impl->finalPath, ec ) )
+    if ( !std::filesystem::exists( sicnu::portable::pathFromUtf8( m_impl->finalPath ), ec ) )
         return false;
     std::uint64_t expectedHash = 0;
     std::uint64_t expectedSize = 0;
     if ( !readDigestSidecar( m_impl->finalPath, expectedHash, expectedSize ) )
         return false;
-    const auto size = std::filesystem::file_size( m_impl->finalPath, ec );
+    const auto size =
+        std::filesystem::file_size( sicnu::portable::pathFromUtf8( m_impl->finalPath ), ec );
     if ( ec || size != expectedSize )
         return false;
     std::vector<char> buffer( static_cast<std::size_t>( size ) );
-    std::ifstream content( m_impl->finalPath, std::ios::binary );
+    std::ifstream content( sicnu::portable::pathFromUtf8( m_impl->finalPath ),
+                           std::ios::binary );
     content.read( buffer.data(), buffer.size() );
     if ( static_cast<std::size_t>( content.gcount() ) != buffer.size() )
         return false;
@@ -271,7 +279,7 @@ ScratchRegistry::ScratchRegistry( Config config ) : m_config( std::move( config 
     }
     else
     {
-        m_rootPath = m_config.root;
+        m_rootPath = sicnu::portable::pathFromUtf8( m_config.root );
     }
     std::error_code ec;
     std::filesystem::create_directories( m_rootPath, ec );
@@ -292,7 +300,7 @@ ScratchRegistry::~ScratchRegistry()
 
 std::string ScratchRegistry::root() const
 {
-    return m_rootPath.string();
+    return sicnu::portable::pathToUtf8( m_rootPath );
 }
 
 ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::string &stem,
@@ -315,9 +323,11 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
     const auto final = runDir / name;
 
     {
-        std::ofstream create( provisional, std::ios::binary | std::ios::trunc );
+        std::ofstream create( sicnu::portable::pathFromUtf8( provisional ),
+                              std::ios::binary | std::ios::trunc );
         if ( !create )
-            throw std::runtime_error( "scratch acquire: cannot create " + provisional.string() );
+            throw std::runtime_error( "scratch acquire: cannot create "
+                                      + sicnu::portable::pathToUtf8( provisional ) );
     }
 
     // Raw new + custom deleter: the shared_ptr refcount IS the lease
@@ -325,8 +335,8 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
     // delete would leak the accounting and the provisional file).
     ScratchLease::Entry *rawEntry = new ScratchLease::Entry();
     rawEntry->registry.store( this, std::memory_order_release );
-    rawEntry->path = provisional.string();
-    rawEntry->finalPath = final.string();
+    rawEntry->path = sicnu::portable::pathToUtf8( provisional );
+    rawEntry->finalPath = sicnu::portable::pathToUtf8( final );
     rawEntry->runId = runId;
     rawEntry->bytes = bytes;
     std::shared_ptr<ScratchLease::Entry> entry( rawEntry, ScratchLease::Deleter{} );
@@ -370,8 +380,9 @@ void ScratchRegistry::releaseEntry( ScratchLease::Entry *entry )
         if ( !entry->finalized.load() )
         {
             std::error_code ec;
-            std::filesystem::remove( entry->path, ec );
-            std::filesystem::remove( sidecarPath( entry->path ), ec );
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( entry->path ), ec );
+            std::filesystem::remove(
+                sicnu::portable::pathFromUtf8( sidecarPath( entry->path ) ), ec );
         }
     }
     delete entry;
@@ -395,7 +406,7 @@ std::size_t ScratchRegistry::sweepStale( const std::string &root,
 {
     std::size_t removed = 0;
     std::error_code ec;
-    const auto rootDir = std::filesystem::path( root );
+    const auto rootDir = sicnu::portable::pathFromUtf8( root );
     if ( !std::filesystem::exists( rootDir, ec ) )
         return 0;
     const auto now = std::filesystem::file_time_type::clock::now();

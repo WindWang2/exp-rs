@@ -14,6 +14,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <signal.h>
+#include "platform/portable.h"
 #include <unistd.h>
 #include <sys/file.h>
 #else
@@ -268,11 +269,7 @@ std::string fileSha256Hex( const std::string &path )
 
 long currentProcessId()
 {
-#ifdef _WIN32
-    return static_cast<long>( ::GetCurrentProcessId() );
-#else
-    return static_cast<long>( ::getpid() );
-#endif
+    return static_cast<long>( sicnu::portable::pid() );
 }
 
 /// #1186: cross-process install lock for one plugin id. Per-pid parks prevent

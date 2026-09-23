@@ -8,11 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
+#include "platform/portable.h"
 
 #include <algorithm>
 #include <vector>
@@ -121,11 +117,7 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         // bytes, and only then rename into the content address. A partial
         // copy or a concurrent source rewrite can never become an object.
         const QString tmp = objectPath + QStringLiteral( ".%1.puttmp" )
-#ifdef _WIN32
-                              .arg( static_cast<int>( ::_getpid() ) );
-#else
-                              .arg( ::getpid() );
-#endif
+                              .arg( static_cast<int>( sicnu::portable::pid() ) );
         QFile::remove( tmp );
         // Injected staging failures (Verification 7.0 fault matrix): route
         // through the real failure paths — copy failure cleans the tmp file,

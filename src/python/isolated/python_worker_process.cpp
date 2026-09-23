@@ -34,13 +34,13 @@ bool PythonWorkerProcess::startWorker( const QString &socketName, const QString 
   QString pythonExec = pythonPath;
   if ( pythonExec.isEmpty() )
   {
-    const QString envExec = QString::fromUtf8( qgetenv( "SICNU_PYTHON_EXECUTABLE" ) );
+    const QString envExec = qEnvironmentVariable( "SICNU_PYTHON_EXECUTABLE" );
     if ( !envExec.isEmpty() && QFileInfo::exists( envExec ) )
       pythonExec = envExec;
   }
   if ( pythonExec.isEmpty() )
   {
-    const QString envExec = QString::fromUtf8( qgetenv( "PYTHONEXECUTABLE" ) );
+    const QString envExec = qEnvironmentVariable( "PYTHONEXECUTABLE" );
     if ( !envExec.isEmpty() && QFileInfo::exists( envExec ) )
       pythonExec = envExec;
   }
