@@ -12718,7 +12718,19 @@ function(sicnu_add_teaching_admin_test NAME)
   )
   sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
 endfunction()
+# Fake grading CLI (plain C++, no Qt): same exit/transcript contract as
+# `sicnu_geo_rs_cli lab --grade` — lets test_teaching_admin_core drive the
+# real-shaped grader path hermetically (see helper file header).
+add_executable(test_teaching_fake_grader_cli helper_teaching_fake_grader_cli.cpp)
+set_target_properties(test_teaching_fake_grader_cli PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
 sicnu_add_teaching_admin_test(test_teaching_admin_core)
+target_compile_definitions(test_teaching_admin_core PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
 
 # Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
 # → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading

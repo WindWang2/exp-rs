@@ -7,6 +7,7 @@
 #include "teaching_admin/curriculum_editor.h"
 #include "teaching_admin/data_pack_manager.h"
 #include "teaching_admin/feedback_pack.h"
+#include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/json_util.h"
 #include "teaching_admin/labspec_authoring.h"
 #include "teaching_admin/release_preflight.h"
@@ -424,4 +425,221 @@ TEST_CASE( "unsafe relative path helper", "[teaching_admin][packs]" )
     REQUIRE( isUnsafeRelativePath( QStringLiteral( "/abs" ) ) );
     REQUIRE( isUnsafeRelativePath( QStringLiteral( "C:/windows" ) ) );
     REQUIRE_FALSE( isUnsafeRelativePath( QStringLiteral( "data/samples/a.tif" ) ) );
+}
+
+namespace {
+
+/// Directory of the fake grader CLI helper (same runtime dir as this test),
+/// injected by CMake as FAKE_GRADER_CLI_DIR.
+QString fakeGraderCliPath()
+{
+    static QString cached;
+    if ( !cached.isEmpty() )
+        return cached;
+    QString dir = QStringLiteral( FAKE_GRADER_CLI_DIR );
+#ifdef Q_OS_WIN
+    cached = QDir( dir ).filePath( QStringLiteral( "test_teaching_fake_grader_cli.exe" ) );
+#else
+    cached = QDir( dir ).filePath( QStringLiteral( "test_teaching_fake_grader_cli" ) );
+#endif
+    return cached;
+}
+
+} // namespace
+
+TEST_CASE( "grader cli resolution: explicit path wins, env honored", "[teaching_admin][grader]" )
+{
+    REQUIRE( resolveGraderCli( QStringLiteral( "/explicit/grader" ) )
+             == QLatin1String( "/explicit/grader" ) );
+
+    qputenv( "SICNU_GEO_RS_CLI", fakeGraderCliPath().toLocal8Bit() );
+    const QString resolved = resolveGraderCli();
+    REQUIRE( resolved == fakeGraderCliPath() );
+    qunsetenv( "SICNU_GEO_RS_CLI" );
+}
+
+TEST_CASE( "gradeViaCli: pass/fail/unverifiable/usage over the real CLI contract",
+           "[teaching_admin][grader]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    auto write = [&]( const QString &name, const QByteArray &bytes ) {
+        QFile f( root.filePath( name ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( bytes );
+        return f.fileName();
+    };
+    const QString good = write( QStringLiteral( "good.tif" ), QByteArray( "GOOD-scene" ) );
+    const QString bad = write( QStringLiteral( "bad.tif" ), QByteArray( "BAD-scene" ) );
+    const QString unverifiable = write( QStringLiteral( "weird.bin" ), QByteArray( "UNVERIFIABLE" ) );
+
+    GraderCliConfig cfg;
+    cfg.cliPath = fakeGraderCliPath();
+    cfg.labIdOrRulesPath = QStringLiteral( "lab15_data_inspection" );
+    cfg.timeoutMs = 20000;
+
+    // pass
+    {
+        const auto g = gradeViaCli( cfg, good );
+        REQUIRE( g.started );
+        REQUIRE( g.exitCode == 0 );
+        REQUIRE( g.status == QLatin1String( "pass" ) );
+        REQUIRE( g.verdict == QLatin1String( "pass" ) );
+        REQUIRE( g.score == Catch::Approx( 88.5 ) );
+        REQUIRE( g.reportDigest.size() == 64 );
+        REQUIRE( g.unavailableReason.isEmpty() );
+    }
+    // fail carries the top deduction, never a fabricated pass
+    {
+        const auto g = gradeViaCli( cfg, bad );
+        REQUIRE( g.exitCode == 1 );
+        REQUIRE( g.status == QLatin1String( "fail" ) );
+        REQUIRE( g.score == Catch::Approx( 40.0 ) );
+        REQUIRE( g.topDeduction == QLatin1String( "a1" ) );
+    }
+    // unverifiable artifact: typed unavailable with reason, score stays < 0
+    {
+        const auto g = gradeViaCli( cfg, unverifiable );
+        REQUIRE( g.exitCode == 3 );
+        REQUIRE( g.status == QLatin1String( "unavailable" ) );
+        REQUIRE( g.verdict == QLatin1String( "unavailable" ) );
+        REQUIRE( g.score < 0.0 );
+        REQUIRE( g.unavailableReason == QLatin1String( "artifact_unverifiable" ) );
+    }
+    // usage: unknown lab → typed error row
+    {
+        GraderCliConfig usageCfg = cfg;
+        usageCfg.labIdOrRulesPath = QStringLiteral( "usage_lab" );
+        const auto g = gradeViaCli( usageCfg, good );
+        REQUIRE( g.exitCode == 2 );
+        REQUIRE( g.status == QLatin1String( "error" ) );
+        REQUIRE_FALSE( g.message.isEmpty() );
+    }
+    // usage: missing artifact
+    {
+        const auto g = gradeViaCli( cfg, root.filePath( QStringLiteral( "nope.tif" ) ) );
+        REQUIRE( g.exitCode == 2 );
+        REQUIRE( g.status == QLatin1String( "error" ) );
+    }
+    // grader binary cannot start → unavailable, never an implicit pass
+    {
+        GraderCliConfig missing = cfg;
+        missing.cliPath = QStringLiteral( "/no/such/grader_binary_xyz" );
+        const auto g = gradeViaCli( missing, good );
+        REQUIRE_FALSE( g.started );
+        REQUIRE( g.status == QLatin1String( "unavailable" ) );
+        REQUIRE_FALSE( g.unavailableReason.isEmpty() );
+        REQUIRE( g.score < 0.0 );
+    }
+    // adversarial oracle: a broken authority that exits 0 while the
+    // transcript says fail must be refused, not trusted.
+    {
+        GraderCliConfig mismatch = cfg;
+        mismatch.labIdOrRulesPath = QStringLiteral( "mismatch_lab" );
+        const auto g = gradeViaCli( mismatch, good );
+        REQUIRE( g.status == QLatin1String( "unavailable" ) );
+        REQUIRE( g.unavailableReason == QLatin1String( "grader_exit_verdict_mismatch" ) );
+        REQUIRE( g.score < 0.0 );
+    }
+}
+
+TEST_CASE( "batch over grader cli callable: graded/unavailable counters and deterministic regrade",
+           "[teaching_admin][grader][batch]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    REQUIRE( root.mkdir( QStringLiteral( "s01" ) ) );
+    REQUIRE( root.mkdir( QStringLiteral( "s02" ) ) );
+    REQUIRE( root.mkdir( QStringLiteral( "s03" ) ) );
+    auto write = [&]( const QString &rel, const QByteArray &bytes ) {
+        QFile f( root.filePath( rel ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( bytes );
+    };
+    write( QStringLiteral( "s01/a.tif" ), QByteArray( "GOOD" ) );
+    write( QStringLiteral( "s02/b.tif" ), QByteArray( "BAD" ) );
+    write( QStringLiteral( "s03/c.bin" ), QByteArray( "UNVERIFIABLE" ) );
+
+    GraderCliConfig cfg;
+    cfg.cliPath = fakeGraderCliPath();
+    cfg.labIdOrRulesPath = QStringLiteral( "lab15_data_inspection" );
+    cfg.timeoutMs = 20000;
+
+    BatchAssessmentConfig batch;
+    batch.labId = cfg.labIdOrRulesPath;
+    batch.submissionsDir = dir.path();
+    batch.rubricVersion = QStringLiteral( "r1" );
+    batch.labVersion = QStringLiteral( "l1" );
+    batch.softwareVersion = QStringLiteral( "sw1" );
+
+    const auto run = [&]( BatchAssessmentReport *out ) {
+        *out = runBatchAssessment( batch, cliGradeCallable( cfg ) );
+    };
+    BatchAssessmentReport report;
+    run( &report );
+
+    REQUIRE( report.total == 3 );
+    REQUIRE( report.graded == 2 ); // pass + fail
+    REQUIRE( report.unavailable == 1 ); // unverifiable artifact
+    REQUIRE( report.failed == 0 );
+    bool sawUnavailableRow = false;
+    for ( const auto &row : report.rows )
+    {
+        if ( row.studentId == QLatin1String( "s03" ) )
+        {
+            sawUnavailableRow = true;
+            REQUIRE( row.status == QLatin1String( "unavailable" ) );
+            REQUIRE( row.verdict == QLatin1String( "unavailable" ) );
+            REQUIRE( row.score < 0.0 );
+            REQUIRE( row.unavailableReason == QLatin1String( "artifact_unverifiable" ) );
+        }
+        else
+        {
+            REQUIRE( row.unavailableReason.isEmpty() );
+            REQUIRE( row.graderDigest.size() == 64 );
+        }
+    }
+    REQUIRE( sawUnavailableRow );
+    REQUIRE( report.toJson().value( QStringLiteral( "unavailable" ) ).toInt() == 1 );
+
+    // deterministic regrade: identical inputs → identical report digest
+    BatchAssessmentReport again;
+    run( &again );
+    REQUIRE( regradeTraceability( report ).value( QStringLiteral( "report_digest" ) ).toString()
+             == regradeTraceability( again ).value( QStringLiteral( "report_digest" ) ).toString() );
+}
+
+TEST_CASE( "batch with missing grader: every row typed unavailable, none graded",
+           "[teaching_admin][grader][batch]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    REQUIRE( root.mkdir( QStringLiteral( "s01" ) ) );
+    QFile f( root.filePath( QStringLiteral( "s01/a.tif" ) ) );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "GOOD" ) );
+
+    GraderCliConfig cfg;
+    cfg.cliPath = QStringLiteral( "/no/such/grader_binary_xyz" );
+    cfg.labIdOrRulesPath = QStringLiteral( "lab15_data_inspection" );
+
+    BatchAssessmentConfig batch;
+    batch.labId = cfg.labIdOrRulesPath;
+    batch.submissionsDir = dir.path();
+
+    const auto report = runBatchAssessment( batch, cliGradeCallable( cfg ) );
+    REQUIRE( report.total == 1 );
+    REQUIRE( report.graded == 0 );
+    REQUIRE( report.unavailable == 1 );
+    for ( const auto &row : report.rows )
+    {
+        REQUIRE( row.status == QLatin1String( "unavailable" ) );
+        REQUIRE( row.score < 0.0 );
+        REQUIRE_FALSE( row.unavailableReason.isEmpty() );
+        REQUIRE( row.toJson().value( QStringLiteral( "unavailable_reason" ) ).toString()
+                 == row.unavailableReason );
+    }
 }
