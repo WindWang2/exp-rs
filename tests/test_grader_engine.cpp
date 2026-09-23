@@ -25,7 +25,9 @@
 //   * Missing/ambiguous evidence → indeterminate outcomes with reasons,
 //     never silent zeros; contradicted evidence → not_earned.
 //   * Double grading is byte-identical; evidence permutation (shuffled
-//     item order) produces the identical report body and digest.
+//     item order) leaves every judgment member identical — while the
+//     evidenceDigest deliberately binds the input BYTE order, so permuted
+//     inputs carry different digests (tamper evidence) and both verify.
 #include "grader/grader_engine.h"
 #include "grader/grader_error.h"
 #include "grader/grader_json.h"
@@ -245,6 +247,28 @@ TEST_CASE( "stage criteria: alternatives, minDistinct and orderedAfter sequencin
         CHECK( c.status == OutcomeStatus::NotEarned );
         CHECK( c.reasonCodes[0] == "grader:stage-order-violated" );
         REQUIRE_FALSE( c.evidenceIds.empty() );
+    }
+
+    SECTION( "never-satisfied prerequisite is not earned with the prerequisite reason" )
+    {
+        Criterion pre;
+        pre.criterionId = "proc-pre";
+        pre.maxPoints = 0.0001;
+        rubric.dimensions[0].criteria[0].maxPoints = 99.9999;
+        pre.kind = CriterionKind::Stage;
+        pre.evidenceKey = "preprocess";
+        pre.stage.expectedState = "Completed";
+        rubric.dimensions[0].criteria.push_back( pre );
+        rubric.dimensions[0].criteria[0].stage.orderedAfter = { "preprocess" };
+
+        GradeEvidence evidence;
+        addStage( evidence, "ev-train", "train", "Completed", "2026-09-23T09:00:00Z" );
+        addStage( evidence, "ev-pre", "preprocess", "Failed", "2026-09-23T08:00:00Z" );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &c = outcome.report.dimensions[0].criteria[0];
+        CHECK( c.status == OutcomeStatus::NotEarned );
+        CHECK( c.reasonCodes[0] == "grader:prerequisite-stage-missing" );
     }
 
     SECTION( "orderedAfter with timestamp-less evidence cannot prove order → indeterminate" )
@@ -718,6 +742,59 @@ TEST_CASE( "answer criteria: deterministic keyword boundaries and misconception 
         CHECK( o.reasonCodes[0] == "grader:answer-missing" );
     }
 
+    SECTION( "declared concept points short of the maximum still carry a reason (reason-chain invariant)" )
+    {
+        // Teacher-legal under-sum: one 60-point concept on a 100-point criterion.
+        rubric.dimensions[0].criteria[0].answer.concepts.resize( 1 );
+        const GradeOutcome outcome =
+            grade( rubric, answerEvidence( "The NDVI (normalized difference) tracks vegetation health." ) );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &o = outcome.report.dimensions[0].criteria[0];
+        CHECK( o.status == OutcomeStatus::Partial );
+        CHECK( o.rawEarned == 60.0 );
+        CHECK( o.reasonCodes[0] == "grader:answer-points-short" );
+    }
+
+    SECTION( "misconception-only criterion with no hit is not a silent zero" )
+    {
+        Criterion misconceptionOnly;
+        misconceptionOnly.criterionId = "interp-q2";
+        misconceptionOnly.maxPoints = 40.0;
+        misconceptionOnly.kind = CriterionKind::Answer;
+        misconceptionOnly.answer.questionId = "q2";
+        AnswerMisconception mis;
+        mis.misconceptionId = "m1";
+        mis.patterns = { "flat earth" };
+        mis.deductPoints = 10.0;
+        misconceptionOnly.answer.misconceptions = { mis };
+        Dimension dim2;
+        dim2.dimensionId = "interp2";
+        dim2.title = "interp2";
+        dim2.weight = 40.0;
+        dim2.criteria.push_back( misconceptionOnly );
+        rubric.dimensions.push_back( dim2 );
+        rubric.dimensions[0].weight = 60.0;
+        rubric.dimensions[0].criteria[0].maxPoints = 60.0;
+        rubric.dimensions[0].criteria[0].answer.concepts[0].points = 30.0;
+        rubric.dimensions[0].criteria[0].answer.concepts[1].points = 30.0;
+
+        GradeEvidence evidence;
+        evidence.subject.experimentId = "exp-1";
+        GradeEvidenceItem answer;
+        answer.evidenceId = "ev-a2";
+        answer.kind = EvidenceKind::Answer;
+        answer.key = "q2";
+        answer.facts["answerText"] = "The satellite orbits the sphere.";
+        evidence.items.push_back( answer );
+        const GradeOutcome outcome = grade( rubric, evidence );
+        REQUIRE( outcome.ok );
+        const CriterionOutcome &o = outcome.report.dimensions[1].criteria[0];
+        CHECK( o.status == OutcomeStatus::NotEarned );
+        CHECK( o.rawEarned == 0.0 );
+        REQUIRE_FALSE( o.reasonCodes.empty() );
+        CHECK( o.reasonCodes[0] == "grader:answer-points-short" );
+    }
+
     SECTION( "case and whitespace normalization is deterministic" )
     {
         const GradeOutcome outcome = grade( rubric,
@@ -870,6 +947,78 @@ TEST_CASE( "hard constraints: forbidden evidence zeroes, required evidence gates
         CHECK( outcome.report.score == 0.0 );
         CHECK( outcome.report.verdict == ReportVerdict::Blocked );
     }
+}
+
+TEST_CASE( "required-evidence constraints accept any taxonomy kind on the key (documented semantics)",
+           "[grader][engine][constraints]" )
+{
+    // A required-evidence constraint means "a record with this key exists and
+    // satisfies the gate" — ANY taxonomy kind can carry it (a checkpoint
+    // stage item is as good as a fact item). Pin this deliberately, so a
+    // future kind filter is a reviewed contract change, not an accident.
+    GradingRubric rubric;
+    rubric.rubricId = "req-kind";
+    rubric.revision = 1;
+    rubric.totalPoints = 100.0;
+    rubric.passingScore = 60.0;
+    Dimension dim;
+    dim.dimensionId = "d";
+    dim.weight = 100.0;
+    Criterion c;
+    c.criterionId = "c1";
+    c.maxPoints = 100.0;
+    c.kind = CriterionKind::Stage;
+    c.evidenceKey = "train";
+    c.stage.expectedState = "Completed";
+    dim.criteria.push_back( c );
+    rubric.dimensions.push_back( dim );
+    HardConstraint hc;
+    hc.constraintId = "hc-manifest";
+    hc.mode = HardConstraint::Mode::RequiredEvidence;
+    hc.evidenceKey = "dataset_manifest";
+    hc.effect = HardConstraint::Effect::Cap;
+    hc.capPoints = 50.0;
+    hc.fact.expectedState = "verified";
+    rubric.hardConstraints.push_back( hc );
+
+    GradeEvidence evidence;
+    GradeEvidenceItem stage;
+    stage.evidenceId = "ev-1";
+    stage.kind = EvidenceKind::Stage;
+    stage.key = "train";
+    stage.state = "Completed";
+    evidence.items.push_back( stage );
+    GradeEvidenceItem manifestStage;
+    manifestStage.evidenceId = "ev-2";
+    manifestStage.kind = EvidenceKind::Stage; // NOT a fact-capable kind
+    manifestStage.key = "dataset_manifest";
+    manifestStage.state = "verified";
+    evidence.items.push_back( manifestStage );
+
+    const GradeOutcome outcome = grade( rubric, evidence );
+    REQUIRE( outcome.ok );
+    CHECK_FALSE( outcome.report.hardConstraintOutcomes[0].violated );
+    CHECK( outcome.report.score == 100.0 );
+
+    // The same record does NOT satisfy a FACT criterion of identical gate —
+    // fact criteria join the fact-capable taxonomy only.
+    Criterion fact;
+    fact.criterionId = "fact-manifest";
+    fact.maxPoints = 100.0;
+    fact.kind = CriterionKind::Fact;
+    fact.evidenceKey = "dataset_manifest";
+    fact.fact.expectedState = "verified";
+    Dimension factDim;
+    factDim.dimensionId = "d2";
+    factDim.title = "d2";
+    factDim.weight = 100.0;
+    factDim.criteria.push_back( fact );
+    rubric.dimensions.clear();
+    rubric.dimensions.push_back( factDim );
+    rubric.hardConstraints.clear();
+    const GradeOutcome factOutcome = grade( rubric, evidence );
+    REQUIRE( factOutcome.ok );
+    CHECK( factOutcome.report.dimensions[0].criteria[0].status == OutcomeStatus::Indeterminate );
 }
 
 TEST_CASE( "required stages and alternate pathways resolve deterministically",

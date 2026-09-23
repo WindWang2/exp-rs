@@ -415,7 +415,7 @@ TEST_CASE( "metric-record adapter projects numeric metric observations",
     for ( const auto &item : items ) {
         CHECK( item.kind == EvidenceKind::Metric );
         CHECK( item.hasValue );
-        CHECK( item.source == "metric_record:mh-77" );
+        CHECK( item.source == "metric_record:exp-1:mh-77" );
         values[item.key] = item.value;
     }
     REQUIRE( values.count( "confusion_matrix.overall_accuracy" ) == 1 );
@@ -514,6 +514,70 @@ TEST_CASE( "metric-record adapter honors the metrics schema version and refuses 
         doc["metrics"]["deep_metric"] = deep;
         const auto items = metricRecordToEvidence( doc, err );
         CHECK_FALSE( err.ok() ); // past the depth cap → typed refusal, no silent truncation
+    }
+
+    SECTION( "distinct recorded members collapsing onto one dotted key are a typed refusal" )
+    {
+        Json::Value doc = metricRecordDoc();
+        doc["metrics"] = Json::Value{ Json::objectValue };
+        doc["metrics"]["a"] = Json::Value{ Json::objectValue };
+        doc["metrics"]["a"]["b"] = 1.0;
+        doc["metrics"]["a.b"] = 2.0;
+        const auto items = metricRecordToEvidence( doc, err );
+        CHECK_FALSE( err.ok() );
+        CHECK( err.message.find( "duplicate key" ) != std::string::npos );
+    }
+
+    SECTION( "two runs sharing one metrics hash merge without id collisions" )
+    {
+        // metrics_hash is a content hash — a deterministic workflow produces
+        // the same hash on every run; identity comes from run_id.
+        Json::Value docB = metricRecordDoc();
+        docB["run_id"] = "exp-2";
+        const auto itemsA = metricRecordToEvidence( metricRecordDoc(), err );
+        REQUIRE( err.ok() );
+        const auto itemsB = metricRecordToEvidence( docB, err );
+        REQUIRE( err.ok() );
+
+        GradeEvidence merged;
+        merged.subject.experimentId = "exp-1";
+        merged.items = itemsA;
+        merged.items.insert( merged.items.end(), itemsB.begin(), itemsB.end() );
+        REQUIRE( merged.validate( err ) );
+
+        // A metric criterion sees two agreeing observations on each key and
+        // grades deterministically (stable tie-break, both cited).
+        GradingRubric rubric;
+        rubric.rubricId = "merge-metric";
+        rubric.revision = 1;
+        rubric.totalPoints = 100.0;
+        rubric.passingScore = 60.0;
+        Dimension dim;
+        dim.dimensionId = "d";
+        dim.weight = 100.0;
+        Criterion c;
+        c.criterionId = "res-acc";
+        c.maxPoints = 100.0;
+        c.kind = CriterionKind::Metric;
+        c.evidenceKey = "confusion_matrix.overall_accuracy";
+        c.metric.mode = MetricExpectation::Mode::AtLeast;
+        c.metric.value = 0.85;
+        dim.criteria.push_back( c );
+        rubric.dimensions.push_back( dim );
+        const GradeOutcome outcome = grade( rubric, merged );
+        CAPTURE( outcome.error.message );
+        REQUIRE( outcome.ok );
+        CHECK( outcome.report.dimensions[0].criteria[0].evidenceIds.size() == 2 );
+        CHECK( outcome.report.score == 100.0 );
+    }
+
+    SECTION( "metric records without run_id are typed refusals" )
+    {
+        Json::Value doc = metricRecordDoc();
+        doc.removeMember( "run_id" );
+        const auto items = metricRecordToEvidence( doc, err );
+        CHECK_FALSE( err.ok() );
+        CHECK( err.path == "run_id" );
     }
 
     SECTION( "non-finite numbers inside the record are typed refusals" )
@@ -628,6 +692,15 @@ TEST_CASE( "EvidenceProjector adapter refuses foreign schema versions and hostil
         doc["artifacts"][0].removeMember( "path" );
         const auto items = projectorSummaryToEvidence( doc, err );
         CHECK_FALSE( err.ok() );
+    }
+
+    SECTION( "two artifacts sharing one path are a typed refusal" )
+    {
+        Json::Value doc = projectorDoc();
+        doc["artifacts"].append( doc["artifacts"][0] );
+        const auto items = projectorSummaryToEvidence( doc, err );
+        CHECK_FALSE( err.ok() );
+        CHECK( err.message.find( "duplicate artifact path" ) != std::string::npos );
     }
 
     SECTION( "a missing metrics dimension (empty object, the projector's absence spelling) projects NO fabricated item" )

@@ -88,9 +88,14 @@ std::string stripIdPrefix( const std::string &id, const char *prefix )
 // Shared numeric-leaf walk for metric documents: numbers become metric
 // observations keyed by dotted path; objects/arrays recurse (capped);
 // strings/bools/nulls are NOT numeric observations and stay unprojected.
+// @p seenIds accumulates every emitted evidenceId so two distinct recorded
+// members that collapse onto one dotted key ({"a":{"b":1}, "a.b":2}) are a
+// typed refusal naming the offending path — never a silent downstream
+// duplicate-id failure on the merged bundle.
 bool projectMetricLeaves( const Json::Value &node, const std::string &prefix, int depth,
                           const std::string &source, const std::string &idPrefix,
-                          std::vector<GradeEvidenceItem> &out, GraderError &error )
+                          std::vector<GradeEvidenceItem> &out, GraderError &error,
+                          std::set<std::string> &seenIds )
 {
     if ( depth > kMaxMetricDocumentDepth )
         return fail( error, GraderErrorCode::SchemaShapeInvalid,
@@ -105,7 +110,7 @@ bool projectMetricLeaves( const Json::Value &node, const std::string &prefix, in
                              "metric document carries an empty metric name under '" + prefix + "'",
                              prefix );
             const std::string key = prefix.empty() ? name : prefix + "." + name;
-            if ( !projectMetricLeaves( node[name], key, depth + 1, source, idPrefix, out, error ) )
+            if ( !projectMetricLeaves( node[name], key, depth + 1, source, idPrefix, out, error, seenIds ) )
                 return false;
         }
         return true;
@@ -113,7 +118,7 @@ bool projectMetricLeaves( const Json::Value &node, const std::string &prefix, in
     if ( node.isArray() ) {
         for ( Json::ArrayIndex i = 0; i < node.size(); ++i ) {
             const std::string key = prefix + "." + std::to_string( i );
-            if ( !projectMetricLeaves( node[i], key, depth + 1, source, idPrefix, out, error ) )
+            if ( !projectMetricLeaves( node[i], key, depth + 1, source, idPrefix, out, error, seenIds ) )
                 return false;
         }
         return true;
@@ -125,6 +130,9 @@ bool projectMetricLeaves( const Json::Value &node, const std::string &prefix, in
                          "metric '" + prefix + "' carries a non-finite value", prefix );
         GradeEvidenceItem item;
         item.evidenceId = idPrefix + ":" + prefix;
+        if ( !seenIds.insert( item.evidenceId ).second )
+            return fail( error, GraderErrorCode::SchemaShapeInvalid,
+                         "metric document projects duplicate key '" + prefix + "'", prefix );
         item.kind = EvidenceKind::Metric;
         item.key = prefix;
         item.hasValue = true;
@@ -397,6 +405,11 @@ std::vector<GradeEvidenceItem> metricRecordToEvidence( const Json::Value &doc, G
                    items;
     }
 
+    std::string runId;
+    if ( !stringMember( doc, "run_id", runId ) || runId.empty() )
+        return fail( error, GraderErrorCode::SchemaShapeInvalid,
+                     "metric record run_id must be a non-empty string", "run_id" ),
+               items;
     std::string metricsHash;
     if ( !stringMember( doc, "metrics_hash", metricsHash ) || metricsHash.empty() )
         return fail( error, GraderErrorCode::SchemaShapeInvalid,
@@ -407,8 +420,12 @@ std::vector<GradeEvidenceItem> metricRecordToEvidence( const Json::Value &doc, G
                      "metrics" ),
                items;
 
-    const std::string source = "metric_record:" + metricsHash;
-    if ( !projectMetricLeaves( doc["metrics"], {}, 0, source, "metric_record:" + metricsHash, items, error ) )
+    // metrics_hash is a CONTENT hash: two runs of a deterministic workflow
+    // can legitimately share one. Identity comes from the recorded run —
+    // run-namespaced ids keep cross-run merges collision-free.
+    const std::string idPrefix = "metric_record:" + runId + ":" + metricsHash;
+    std::set<std::string> seenIds;
+    if ( !projectMetricLeaves( doc["metrics"], {}, 0, idPrefix, idPrefix, items, error, seenIds ) )
         return {};
     return items;
 }
@@ -477,6 +494,7 @@ std::vector<GradeEvidenceItem> projectorSummaryToEvidence( const Json::Value &do
         if ( !doc["artifacts"].isArray() )
             return fail( error, GraderErrorCode::SchemaShapeInvalid, "artifacts must be an array", "artifacts" ),
                    items;
+        std::set<std::string> artifactPaths;
         for ( const auto &artifact : doc["artifacts"] ) {
             if ( !artifact.isObject() )
                 return fail( error, GraderErrorCode::SchemaShapeInvalid, "artifact entry must be an object",
@@ -486,6 +504,10 @@ std::vector<GradeEvidenceItem> projectorSummaryToEvidence( const Json::Value &do
             if ( !stringMember( artifact, "path", path ) || path.empty() )
                 return fail( error, GraderErrorCode::SchemaShapeInvalid,
                              "artifact entry path must be a non-empty string", "artifacts" ),
+                       items;
+            if ( !artifactPaths.insert( path ).second )
+                return fail( error, GraderErrorCode::SchemaShapeInvalid,
+                             "summary carries duplicate artifact path: " + path, "artifacts" ),
                        items;
             GradeEvidenceItem item;
             item.evidenceId = idNamespace + "artifact:" + path;
@@ -512,8 +534,9 @@ std::vector<GradeEvidenceItem> projectorSummaryToEvidence( const Json::Value &do
                 return fail( error, GraderErrorCode::SchemaShapeInvalid, "metrics.document must be an object",
                              "metrics.document" ),
                        items;
+            std::set<std::string> seenMetricIds;
             if ( !projectMetricLeaves( metrics["document"], {}, 0, "projector_summary",
-                                       idNamespace + "metric", items, error ) )
+                                       idNamespace + "metric", items, error, seenMetricIds ) )
                 return {};
         }
     }

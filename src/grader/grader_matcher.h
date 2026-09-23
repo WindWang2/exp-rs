@@ -22,7 +22,7 @@
 //              grader:fact-insufficient-count
 //   answer     grader:answer-missing | grader:answer-ambiguous |
 //              grader:concept-missing | grader:misconception-deduction |
-//              grader:answer-points-clamped
+//              grader:answer-points-clamped | grader:answer-points-short
 //   constraints grader:constraint-cap | grader:constraint-zero
 //
 // Judgment semantics pinned here (and by tests/test_grader_engine.cpp):

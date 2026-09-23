@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -218,6 +217,16 @@ CriterionJudgment match::judgeStage( const Criterion &criterion, const EvidenceI
             checkSequencing( criterion.evidenceKey, matching, criterion.stage.orderedAfter, rubric, index, cited );
         for ( const GradeEvidenceItem *item : matching )
             judgment.evidenceIds.push_back( item->evidenceId );
+        if ( verdict != SequenceVerdict::Satisfied ) {
+            // Cite the deciding prerequisite evidence too: the violation is
+            // only meaningful against the records it contradicts.
+            for ( const std::string &after : criterion.stage.orderedAfter )
+                for ( const GradeEvidenceItem *item : satisfyingStageEvidence( after, rubric, index ) )
+                    judgment.evidenceIds.push_back( item->evidenceId );
+            std::sort( judgment.evidenceIds.begin(), judgment.evidenceIds.end() );
+            judgment.evidenceIds.erase( std::unique( judgment.evidenceIds.begin(), judgment.evidenceIds.end() ),
+                                        judgment.evidenceIds.end() );
+        }
         if ( verdict == SequenceVerdict::Unprovable ) {
             judgment.status = OutcomeStatus::Indeterminate;
             judgment.reasonCodes.push_back( "grader:stage-order-unprovable" );
@@ -498,14 +507,37 @@ CriterionJudgment match::judgeFact( const Criterion &criterion, const EvidenceIn
 // Answer
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// Locale-free ASCII classification: std::isspace/std::tolower follow
+/// LC_CTYPE, and a locale where tolower('I') != 'i' would silently change
+/// judgments (and therefore digests) — the same locale determinism rule the
+/// number canonicalizer already enforces.
+bool isAsciiSpace( char ch )
+{
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
+}
+
+char asciiLower( char ch )
+{
+    return ( ch >= 'A' && ch <= 'Z' ) ? static_cast<char>( ch - 'A' + 'a' ) : ch;
+}
+
+bool isAsciiWordChar( char ch )
+{
+    const char lowered = asciiLower( ch );
+    return ( lowered >= 'a' && lowered <= 'z' ) || ( lowered >= '0' && lowered <= '9' ) || lowered == '_';
+}
+
+} // namespace
+
 std::string match::normalizeAnswerText( const std::string &text )
 {
     std::string out;
     out.reserve( text.size() );
     bool pendingSpace = false;
     for ( const char raw : text ) {
-        const unsigned char ch = static_cast<unsigned char>( raw );
-        if ( std::isspace( ch ) ) {
+        if ( isAsciiSpace( raw ) ) {
             pendingSpace = !out.empty();
             continue;
         }
@@ -513,7 +545,7 @@ std::string match::normalizeAnswerText( const std::string &text )
             out.push_back( ' ' );
             pendingSpace = false;
         }
-        out.push_back( static_cast<char>( std::tolower( ch ) ) );
+        out.push_back( asciiLower( raw ) );
     }
     return out;
 }
@@ -522,10 +554,7 @@ bool match::containsKeyword( const std::string &haystack, const std::string &nee
 {
     if ( needle.empty() || haystack.empty() )
         return false;
-    const auto isWordChar = []( char ch ) {
-        const unsigned char c = static_cast<unsigned char>( ch );
-        return std::isalnum( c ) || c == '_';
-    };
+    const auto isWordChar = []( char ch ) { return isAsciiWordChar( ch ); };
     std::size_t position = 0;
     while ( ( position = haystack.find( needle, position ) ) != std::string::npos ) {
         const bool leftOk = position == 0 || !isWordChar( haystack[position - 1] );
@@ -650,6 +679,18 @@ CriterionJudgment match::judgeAnswer( const Criterion &criterion, const Evidence
         judgment.status = OutcomeStatus::Earned;
     else
         judgment.status = OutcomeStatus::Partial;
+
+    // Reason-chain invariant (ADR 0174 §4): a non-full outcome always
+    // carries at least one slug. Two teacher-legal rubric shapes would
+    // otherwise fall through silently: declared concept points that do not
+    // sum to the criterion maximum (all concepts hit, points still short),
+    // and misconception-only criteria whose patterns never matched.
+    if ( judgment.status != OutcomeStatus::Earned && judgment.reasonCodes.empty() ) {
+        judgment.reasonCodes.push_back( "grader:answer-points-short" );
+        judgment.explanation +=
+            ( judgment.explanation.empty() ? std::string {} : std::string { " " } ) +
+            "the criterion's declared concept points do not reach its maximum; the shortfall is not earned";
+    }
     if ( judgment.explanation.empty() )
         judgment.explanation = "answer for question '" + criterion.answer.questionId +
                                "' addressed all declared concepts";

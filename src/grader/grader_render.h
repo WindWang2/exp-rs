@@ -33,6 +33,9 @@ namespace sicnu::grader {
 /// Student-facing feedback. @p rubric is OPTIONAL: when given, criterion
 /// titles and student hints are joined in (student members only — the
 /// renderer structurally cannot emit teacher members).
+/// Note: views trust the report they are given. Reports parsed from external
+/// JSON should pass verifyDigest() before rendering (the tamper gate is the
+/// caller's contract, as for every GradeReport consumer).
 Json::Value renderStudentFeedback( const GradeReport &report, const GradingRubric *rubric );
 
 /// Teacher-facing diagnostics. The rubric is required (hints are joined).
