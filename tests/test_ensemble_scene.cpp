@@ -835,3 +835,81 @@ TEST_CASE( "ensemble manifest vocabulary covers the 13.0 contract",
     CHECK( issues.front().find( "contradicts" ) != std::string::npos );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Hardening 15/20: non-finite member scores must fail CLOSED. std::clamp
+// passes NaN through, a single NaN logit poisons the whole softmax, and the
+// published artifact used to carry NaN probabilities verbatim (or elect
+// class 0 under weighted voting, since NaN never wins a `>` comparison).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "non-finite member scores fail the scene ensemble typed (hardening 15/20)",
+           "[models][ensemble][scene][p15]" )
+{
+  RegistryReset reset;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const SceneProviderGuard guardBad( "scfw-nan", { nan, 1.0 } );
+  const SceneProviderGuard guardGood( "scfw-ok", { 0.5, 2.5 } );
+  QTemporaryDir dir;
+  registerManifest( sceneMemberManifest( "scene-nan", "scfw-nan", { "water", "land" }, "logit" ),
+                    dir.filePath( QStringLiteral( "scene-nan/model.json" ) ).toStdString() );
+  registerManifest( sceneMemberManifest( "scene-ok", "scfw-ok", { "water", "land" }, "logit" ),
+                    dir.filePath( QStringLiteral( "scene-ok/model.json" ) ).toStdString() );
+
+  Json::Value ensemble( Json::objectValue );
+  ensemble["name"] = "scene-nan-ens";
+  ensemble["task"] = "classification";
+  ensemble["framework"] = "onnx";
+  Json::Value members( Json::arrayValue );
+  Json::Value a( Json::objectValue );
+  a["model"] = "scene-nan";
+  a["weight"] = 1.0;
+  members.append( a );
+  Json::Value b( Json::objectValue );
+  b["model"] = "scene-ok";
+  b["weight"] = 1.0;
+  members.append( b );
+  ensemble["ensemble"]["members"] = members;
+  registerManifest( ensemble,
+                    dir.filePath( QStringLiteral( "scene-nan-ens/model.json" ) ).toStdString() );
+
+  const QString input = writeConstantRaster( dir, "scene_nan_input.tif", 16, 2, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "scene-nan.json" ) );
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.outputPath = output.toStdString();
+  request.modelReference = "scene-nan-ens";
+  request.asSceneClassification = true;
+  RSOperatorContext context;
+  // The NaN member is a typed member failure (surfaced with the lowest-index
+  // failure semantics), never a published NaN artifact.
+  REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference( request, context ),
+                     RSOperatorError );
+  CHECK_FALSE( QFile::exists( output ) );
+}
+
+TEST_CASE( "single-model scene classification refuses non-finite scores (hardening 15/20)",
+           "[models][ensemble][scene][p15]" )
+{
+  RegistryReset reset;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  // "probability" semantics would previously clamp NaN straight into the
+  // published probabilities (std::clamp(NaN) == NaN).
+  const SceneProviderGuard guard( "scfw-nan-single", { 2.0, nan } );
+  QTemporaryDir dir;
+  registerManifest(
+    sceneMemberManifest( "scene-nan-single", "scfw-nan-single", { "water", "land" }, "probability" ),
+    dir.filePath( QStringLiteral( "scene-nan-single/model.json" ) ).toStdString() );
+
+  const QString input = writeConstantRaster( dir, "scene_single_input.tif", 16, 2, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "scene-nan-single.json" ) );
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.outputPath = output.toStdString();
+  request.modelReference = "scene-nan-single";
+  request.asSceneClassification = true;
+  RSOperatorContext context;
+  REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference( request, context ),
+                     RSOperatorError );
+  CHECK_FALSE( QFile::exists( output ) );
+}

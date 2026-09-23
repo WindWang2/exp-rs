@@ -257,6 +257,13 @@ std::string DetectionTileEngine::checkContract( const ModelInfo &model )
   if ( model.preprocess.resize != "to_input" || model.input.width <= 0 || model.input.height <= 0 )
     return "detection models must declare preprocess.resize=to_input with input.width/height "
            "(the head decodes boxes in the fixed input frame)";
+  // #646 discipline (hardening 15/20): the multimodal-only preprocess knobs
+  // are refused exactly like the single-input and scene engines — never
+  // silently ignored.
+  if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
+       || !std::isnan( model.preprocess.clampMax ) )
+    return "preprocess.pad / clamp_min / clamp_max are executed by the multi-input engine; "
+           "this detection model must drop them from the manifest";
   return {};
 }
 
@@ -511,7 +518,12 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
         if ( !std::isfinite( v ) )
           v = 0.0f;
       }
-      if ( meanStd || ( pre.normalize == "linear" && pre.scale != 1.0 ) )
+      // Hardening 15/20: the detection lane now matches the raster/scene
+      // lanes exactly (#646 + Platform 10.0). The old gate tested only
+      // scale != 1.0, so a manifest declaring normalize "linear" with
+      // scale 1.0 and a non-zero offset silently ran the model on RAW
+      // pixels, and any declared offset was dropped from the fed blob.
+      if ( meanStd || ( pre.normalize == "linear" && ( pre.scale != 1.0 || pre.offset != 0.0 ) ) )
       {
         for ( std::size_t i = 0; i < windowBuffer.size(); ++i )
         {
@@ -524,7 +536,7 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
             if ( !pre.stdv.empty() && pre.stdv[c] > 0.0 )
               v /= pre.stdv[c];
           }
-          v *= pre.scale;
+          v = v * pre.scale + pre.offset; // Platform 10.0: additive, after scale
           windowBuffer[i] = static_cast<float>( v );
         }
       }

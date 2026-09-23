@@ -23,6 +23,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <thread>
 
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_validator.h"
@@ -277,6 +278,13 @@ long currentProcessId()
 /// #1186: cross-process install lock for one plugin id. Per-pid parks prevent
 /// byte corruption; without this lock two processes can still race the final
 /// swap and the loser's rollback reverts a committed upgrade.
+/// Hardening 15/20: POSIX acquires with LOCK_NB + a bounded retry instead of a
+/// blocking flock — a stuck holder (SIGSTOP'd CLI, hung filesystem) must not
+/// hang installs/uninstalls forever. Windows CreateFileW with an exclusive
+/// share already fails fast, so both platforms now surface the same typed
+/// "lock busy" diagnostic instead of one hanging and one failing.
+constexpr int kInstallLockTimeoutMs = 5000;
+
 class CrossProcessInstallLock
 {
   public:
@@ -318,14 +326,31 @@ class CrossProcessInstallLock
             error = "cannot open install lock file at " + m_path;
             return false;
         }
-        if ( ::flock( m_fd, LOCK_EX ) != 0 )
+        const auto deadline = std::chrono::steady_clock::now()
+                              + std::chrono::milliseconds( kInstallLockTimeoutMs );
+        bool lockBusy = false;
+        for ( ;; )
         {
-            error = "cannot acquire install lock at " + m_path;
-            ::close( m_fd );
-            m_fd = -1;
-            return false;
+            if ( ::flock( m_fd, LOCK_EX | LOCK_NB ) == 0 )
+                return true;
+            if ( errno == EINTR )
+                continue;
+            if ( errno != EWOULDBLOCK )
+                break;
+            lockBusy = true;
+            if ( std::chrono::steady_clock::now() >= deadline )
+                break;
+            std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         }
-        return true;
+        // Distinguish "another process holds it" from a real acquire error —
+        // the "(waited ...)" claim is only true when the deadline was hit.
+        error = lockBusy
+                  ? "another process holds the install lock at " + m_path + " (waited "
+                        + std::to_string( kInstallLockTimeoutMs ) + " ms)"
+                  : "cannot acquire install lock at " + m_path;
+        ::close( m_fd );
+        m_fd = -1;
+        return false;
 #endif
     }
 
@@ -849,6 +874,25 @@ bool PluginPackage::uninstall( const std::string &pluginId, PluginDiagnosticLog 
         conflict.message = "refusing to remove: directory hosts plugin '" + existing.id + "'";
         log.add( conflict );
         return false;
+    }
+    // Hardening 15/20: hold the SAME cross-process lock install() takes (#1186).
+    // Without it, a concurrent install/upgrade can commit its final swap while
+    // this uninstall's removeTree is already past its existence check — both
+    // processes report success and the freshly committed version is gone (or
+    // the uninstall reports success while a subsequent install re-creates the
+    // plugin it just removed).
+    CrossProcessInstallLock installLock( userRoot + "/.locks/" + pluginId + ".install.lock" );
+    {
+        std::string lockError;
+        if ( !installLock.acquire( lockError ) )
+        {
+            PluginDiagnostic failure;
+            failure.code = PluginDiagnosticCode::ResourceMissing;
+            failure.pluginId = pluginId;
+            failure.message = lockError;
+            log.add( failure );
+            return false;
+        }
     }
     if ( !removeTree( target ) )
     {

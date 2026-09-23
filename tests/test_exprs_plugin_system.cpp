@@ -35,6 +35,8 @@ static void portableSetenv(const char *key, const char *value)
 #ifdef _WIN32
 #include <cstdlib> // _exit
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -813,4 +815,176 @@ TEST_CASE( "registry load drops the lock so a peer record() is not stalled (issu
     loader.join();
     registry.setHostProcessRuntime( nullptr );
     ::system( ( "rm -rf " + root ).c_str() );
+}
+
+// ---------------------------------------------------------------------------
+// Hardening 15/20: cross-process install-lock coverage + index temp hygiene
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Holds the plugin-id install lock exactly the way a second process would:
+/// through a separate open file description. flock(2) conflicts across
+/// descriptions even within one process, so this deterministically emulates
+/// the concurrent CLI/GUI process. Windows mirrors the lock's own
+/// CreateFileW(exclusive-share) acquisition.
+struct ExternalInstallLockHolder
+{
+    bool held = false;
+#ifdef _WIN32
+    void *handle = nullptr;
+#else
+    int fd = -1;
+#endif
+    explicit ExternalInstallLockHolder( const std::string &lockPath )
+    {
+        // Ensure the lock directory exists: this holder emulates another
+        // process that already acquired the lock, so the file must be
+        // creatable even before the first real install ran.
+        std::error_code ec;
+        std::filesystem::create_directories(
+            std::filesystem::path( lockPath ).parent_path(), ec );
+#ifdef _WIN32
+        const int wideLen = MultiByteToWideChar( CP_UTF8, 0, lockPath.c_str(), -1, nullptr, 0 );
+        if ( wideLen <= 0 )
+            return;
+        std::wstring wide( static_cast<std::size_t>( wideLen ), L'\0' );
+        MultiByteToWideChar( CP_UTF8, 0, lockPath.c_str(), -1, wide.data(), wideLen );
+        handle = ::CreateFileW( wide.c_str(), GENERIC_READ | GENERIC_WRITE, 0 /* exclusive */,
+                                nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr );
+        held = handle != INVALID_HANDLE_VALUE;
+#else
+        fd = ::open( lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0666 );
+        if ( fd >= 0 )
+            held = ::flock( fd, LOCK_EX | LOCK_NB ) == 0;
+#endif
+    }
+    ~ExternalInstallLockHolder()
+    {
+#ifdef _WIN32
+        if ( handle && handle != INVALID_HANDLE_VALUE )
+            ::CloseHandle( handle );
+#else
+        if ( fd >= 0 )
+        {
+            ::flock( fd, LOCK_UN );
+            ::close( fd );
+        }
+#endif
+    }
+};
+
+bool logMentionsInstallLock( const PluginDiagnosticLog &log )
+{
+    for ( const PluginDiagnostic &item : log.items() )
+        if ( item.message.find( "install lock" ) != std::string::npos )
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE( "uninstall holds the cross-process install lock (hardening 15/20)",
+           "[plugin][package][p15]" )
+{
+    const std::string sourceRoot = "/tmp/exprs_test_pkgsrc_p15u";
+    ::system( ( "rm -rf " + sourceRoot ).c_str() );
+    const std::string source =
+        makePluginDir( sourceRoot, "org.test.locky-uninstall", "locky-uninstall:echo" );
+    PluginDiagnosticLog log;
+    std::string installedDir;
+    REQUIRE( PluginPackage::install( source, installedDir, log ) );
+    REQUIRE( std::filesystem::is_directory( installedDir ) );
+
+    const std::string lockPath = PluginDiscovery::userPluginRoot()
+                                 + "/.locks/org.test.locky-uninstall.install.lock";
+    {
+        ExternalInstallLockHolder holder( lockPath );
+        REQUIRE( holder.held );
+        // A concurrent install/upgrade in another process holds the same
+        // lock; the uninstall must refuse TYPED instead of deleting the
+        // freshly committed install behind the installer's back (both used
+        // to report success with nothing left on disk).
+        PluginDiagnosticLog uninstallLog;
+        CHECK_FALSE( PluginPackage::uninstall( "org.test.locky-uninstall", uninstallLog ) );
+        CHECK( std::filesystem::is_directory( installedDir ) );
+        CHECK( logMentionsInstallLock( uninstallLog ) );
+    }
+    // Once the holder is gone the uninstall proceeds normally.
+    PluginDiagnosticLog finalLog;
+    CHECK( PluginPackage::uninstall( "org.test.locky-uninstall", finalLog ) );
+    CHECK_FALSE( std::filesystem::is_directory( installedDir ) );
+    ::system( ( "rm -rf " + sourceRoot ).c_str() );
+}
+
+TEST_CASE( "install fails typed and bounded while the lock is held elsewhere (hardening 15/20)",
+           "[plugin][package][p15]" )
+{
+    const std::string sourceRoot = "/tmp/exprs_test_pkgsrc_p15i";
+    ::system( ( "rm -rf " + sourceRoot ).c_str() );
+    const std::string source =
+        makePluginDir( sourceRoot, "org.test.locky-install", "locky-install:echo" );
+
+    const std::string lockPath = PluginDiscovery::userPluginRoot()
+                                 + "/.locks/org.test.locky-install.install.lock";
+    {
+        ExternalInstallLockHolder holder( lockPath );
+        REQUIRE( holder.held );
+        // POSIX used to flock(LOCK_EX) forever here — one stuck holder hung
+        // every other process's install. The acquire is now bounded and the
+        // failure is the same typed diagnostic Windows already produced.
+        const auto started = std::chrono::steady_clock::now();
+        PluginDiagnosticLog log;
+        std::string notInstalledDir;
+        CHECK_FALSE( PluginPackage::install( source, notInstalledDir, log ) );
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - started )
+                                   .count();
+        CHECK( elapsedMs < 30000 );
+        CHECK( logMentionsInstallLock( log ) );
+    }
+    PluginDiagnosticLog log2;
+    std::string reinstalledDir;
+    CHECK( PluginPackage::install( source, reinstalledDir, log2 ) );
+    PluginDiagnosticLog cleanup;
+    (void)PluginPackage::uninstall( "org.test.locky-install", cleanup );
+    ::system( ( "rm -rf " + sourceRoot ).c_str() );
+}
+
+TEST_CASE( "user index save survives a stale fixed-name temp (hardening 15/20)",
+           "[plugin][registry][p15]" )
+{
+    RegistryGuard guard;
+    const std::string root = "/tmp/exprs_test_p15_index_root";
+    ::system( ( "rm -rf " + root ).c_str() );
+    makePluginDir( root, "org.test.p15.index", "p15-index:echo" );
+
+    PluginRegistryOptions options;
+    options.roots = { root };
+    auto &registry = PluginRegistry::instance();
+    registry.setContributionSink( nullptr );
+    registry.configure( options );
+    REQUIRE( registry.record( "org.test.p15.index" ) != nullptr );
+
+    // The old implementation wrote the index through the FIXED path
+    // "<index>.tmp": two processes shared it and could rename a torn
+    // document over the real index (silently resetting the disable set).
+    // A process-unique temp ignores whatever occupies the legacy name —
+    // here: a directory, which made ofstream fail and the save silently
+    // vanish.
+    const std::string indexPath = PluginDiscovery::userPluginRoot() + "/../plugins.index.json";
+    ::system( ( "rm -f " + indexPath + " " + indexPath + ".tmp*" ).c_str() );
+    REQUIRE( ::mkdir( ( indexPath + ".tmp" ).c_str(), 0755 ) == 0 );
+
+    REQUIRE( registry.setEnabled( "org.test.p15.index", false ) );
+    CHECK_FALSE( registry.isEnabled( "org.test.p15.index" ) );
+
+    // The index must be ON DISK with the disable set persisted.
+    std::ifstream input( indexPath );
+    REQUIRE( input.is_open() );
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    CHECK( buffer.str().find( "org.test.p15.index" ) != std::string::npos );
+
+    ::system( ( "rm -rf " + indexPath + " " + indexPath + ".tmp* " + root ).c_str() );
 }

@@ -15,6 +15,7 @@
 #include "operators/runtime/model_ensemble.h"
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
+#include "operators/runtime/provenance_verify.h"
 #include "synthetic_raster_builder.h"
 
 #include "runtime/observability/fault_registry.h"
@@ -733,8 +734,14 @@ TEST_CASE( "a sidecar failure restores the previous product instead of destroyin
     // The previous product is intact …
     CHECK( QFile::exists( output ) );
     CHECK( readPixel( output, 1, 4, 4 ) == firstValue );
-    // … its sidecar is detectably absent (never stale) …
-    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+    // … and (hardening 15/20) the rolled-back product keeps ITS OWN sidecar:
+    // the previous verified product+sidecar pair is restored intact instead
+    // of downgrading a verified product to MissingSidecar. The parked sidecar
+    // is the FIRST run's (ens-roll-a), so consumer-side verification passes.
+    CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+    const auto restoredVerdict =
+      sicnu::operators::runtime::verifyProductAgainstModel( output.toStdString(), "ens-roll-a" );
+    CHECK( restoredVerdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
     // … and nothing else leaked.
     CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
     CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );

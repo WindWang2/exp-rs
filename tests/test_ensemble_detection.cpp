@@ -6,6 +6,9 @@
 // is covered by the historical suites and must stay unchanged.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <atomic>
+#include <memory>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <json/json.h>
@@ -106,7 +109,7 @@ struct DetectionHead
   std::vector<Candidate> candidates;
 };
 
-class DetectionHeadRuntime final : public IModelRuntime
+class DetectionHeadRuntime : public IModelRuntime
 {
   public:
     DetectionHeadRuntime( std::string artifact, std::string framework,
@@ -169,6 +172,119 @@ struct DetectionProviderGuard
                                                        head );
       } );
   }
+};
+
+
+/// Counting detection fake (hardening 15/20): the detection head emission of
+/// DetectionHeadRuntime, plus a shared forward counter so a test can prove
+/// members never ran.
+class CountingDetectionRuntime final : public DetectionHeadRuntime
+{
+  public:
+    CountingDetectionRuntime( std::string artifact, std::string framework,
+                              const DetectionHead &head,
+                              std::shared_ptr<std::atomic<int>> forwards )
+        : DetectionHeadRuntime( std::move( artifact ), std::move( framework ), head ),
+          m_forwards( std::move( forwards ) )
+    {
+    }
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      m_forwards->fetch_add( 1 );
+      return DetectionHeadRuntime::infer( blob );
+    }
+
+  private:
+    std::shared_ptr<std::atomic<int>> m_forwards;
+};
+
+struct CountingDetectionProviderGuard
+{
+    std::shared_ptr<std::atomic<int>> forwards;
+    CountingDetectionProviderGuard( const std::string &framework, const DetectionHead &head )
+        : forwards( std::make_shared<std::atomic<int>>( 0 ) )
+    {
+      ModelRuntimeRegistry::instance().registerProvider(
+        framework,
+        [ framework, head, forwards = forwards ]( const ModelInfo &model,
+                                                  const ModelHardwareCapabilities &,
+                                                  std::string *error ) -> ModelRuntimePtr {
+          if ( model.resolvedArtifactPath.empty() )
+          {
+            if ( error )
+              *error = "no resolved artifact";
+            return nullptr;
+          }
+          return std::make_shared<CountingDetectionRuntime>( model.resolvedArtifactPath,
+                                                             framework, head, forwards );
+        } );
+    }
+};
+
+/// Blob-capturing detection fake (hardening 15/20): accumulates the running
+/// mean of every fed forward-pass blob so a test can assert EXACTLY what
+/// preprocessing reached the model. Constant inputs keep the per-call mean
+/// identical, so accumulated mean == per-tile mean.
+class CapturingDetectionRuntime final : public DetectionHeadRuntime
+{
+  public:
+    CapturingDetectionRuntime( std::string artifact, std::string framework,
+                               const DetectionHead &head,
+                               std::shared_ptr<std::atomic<double>> sum,
+                               std::shared_ptr<std::atomic<int>> count )
+        : DetectionHeadRuntime( std::move( artifact ), std::move( framework ), head ),
+          m_sum( std::move( sum ) ), m_count( std::move( count ) )
+    {
+    }
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      // The detection engine feeds a batched N-D blob (>2 dims, where
+      // rows/cols are meaningless) — walk the contiguous element buffer.
+      const cv::Mat contiguous = blob.isContinuous() ? blob : blob.clone();
+      const std::size_t total = contiguous.total();
+      const float *data = contiguous.ptr<float>( 0 );
+      double local = 0.0;
+      for ( std::size_t i = 0; i < total; ++i )
+        local += data[ i ];
+      if ( total > 0 )
+      {
+        m_sum->fetch_add( local );
+        m_count->fetch_add( static_cast<int>( total ) );
+      }
+      return DetectionHeadRuntime::infer( blob );
+    }
+
+  private:
+    std::shared_ptr<std::atomic<double>> m_sum;
+    std::shared_ptr<std::atomic<int>> m_count;
+};
+
+struct CapturingDetectionProviderGuard
+{
+    std::shared_ptr<std::atomic<double>> sum = std::make_shared<std::atomic<double>>( 0.0 );
+    std::shared_ptr<std::atomic<int>> count = std::make_shared<std::atomic<int>>( 0 );
+    CapturingDetectionProviderGuard( const std::string &framework, const DetectionHead &head )
+    {
+      ModelRuntimeRegistry::instance().registerProvider(
+        framework,
+        [ framework, head, sum = sum, count = count ]( const ModelInfo &model,
+                                                       const ModelHardwareCapabilities &,
+                                                       std::string *error ) -> ModelRuntimePtr {
+          if ( model.resolvedArtifactPath.empty() )
+          {
+            if ( error )
+              *error = "no resolved artifact";
+            return nullptr;
+          }
+          return std::make_shared<CapturingDetectionRuntime>( model.resolvedArtifactPath,
+                                                              framework, head, sum, count );
+        } );
+    }
+    double capturedMean() const
+    {
+      const int seen = count->load();
+      return seen > 0 ? sum->load() / static_cast<double>( seen ) : 0.0;
+    }
 };
 
 /// Detection member manifest (fixed 16x16 input frame, two classes).
@@ -914,4 +1030,138 @@ TEST_CASE( "single-model detection runs stay behavior-compatible",
   // cx8,cy8,w4,h4 at scale 1 → raster (6,6,4,4); map x == raster x.
   CHECK( features[0].minX == Catch::Approx( 6.0 ).margin( 1e-3 ) );
   CHECK( features[0].maxX == Catch::Approx( 10.0 ).margin( 1e-3 ) );
+}
+
+// ---------------------------------------------------------------------------
+// Hardening 15/20 oracles
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "all-zero-weight detection ensembles refuse before any member forward (hardening 15/20)",
+           "[models][ensemble][detection][weights][p15]" )
+{
+  RegistryReset reset;
+  DetectionHead headA;
+  headA.candidates = { { 8, 8, 4, 4, 1.0f, 0.9f, 0.1f } };
+  DetectionHead headB;
+  headB.candidates = { { 9, 8, 4, 4, 1.0f, 0.8f, 0.2f } };
+  const CountingDetectionProviderGuard guardA( "cntdfw-a", headA );
+  const CountingDetectionProviderGuard guardB( "cntdfw-b", headB );
+  QTemporaryDir dir;
+  registerManifest( detectionMemberManifest( "cntd-a", "cntdfw-a", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "cntd-a/model.json" ) ).toStdString() );
+  registerManifest( detectionMemberManifest( "cntd-b", "cntdfw-b", { "tree", "shrub" } ),
+                    dir.filePath( QStringLiteral( "cntd-b/model.json" ) ).toStdString() );
+
+  Json::Value ensemble( Json::objectValue );
+  ensemble["name"] = "cntd-ens";
+  ensemble["task"] = "detection";
+  ensemble["framework"] = "onnx";
+  Json::Value members( Json::arrayValue );
+  Json::Value a( Json::objectValue );
+  a["model"] = "cntd-a";
+  a["weight"] = 0.0;
+  members.append( a );
+  Json::Value b( Json::objectValue );
+  b["model"] = "cntd-b";
+  b["weight"] = 0.0;
+  members.append( b );
+  ensemble["ensemble"]["members"] = members;
+  ensemble["ensemble"]["combination"] = "wbf";
+  registerManifest( ensemble,
+                    dir.filePath( QStringLiteral( "cntd-ens/model.json" ) ).toStdString() );
+
+  const QString input = dir.filePath( QStringLiteral( "cntd_input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+  builder.withConstantValue( 1, 10.0f );
+  builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+
+  const QString output = dir.filePath( QStringLiteral( "cntd-fused.gpkg" ) );
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.outputPath = output.toStdString();
+  request.modelReference = "cntd-ens";
+  request.asDetection = true;
+  RSOperatorContext context;
+  // Statically undefined weights: the typed refusal moved BEFORE member
+  // acquisition/execution (it used to fire in the combine pass, after every
+  // member had already run).
+  // Pin the ACTUAL refusal (see the raster-lane oracle): the message must be
+  // the weight-sum verdict so the forwards==0 assertion cannot pass for an
+  // unrelated pre-member failure.
+  bool refusedForWeights = false;
+  try
+  {
+    ( void )sicnu::operators::runtime::runModelInference( request, context );
+    FAIL( "zero-weight detection ensemble did not refuse" );
+  }
+  catch ( const RSOperatorError &e )
+  {
+    refusedForWeights = e.message().find( "weights sum to zero" ) != std::string::npos;
+  }
+  CHECK( refusedForWeights );
+  CHECK( guardA.forwards->load() == 0 );
+  CHECK( guardB.forwards->load() == 0 );
+  CHECK_FALSE( QFile::exists( output ) );
+}
+
+TEST_CASE( "detection lane applies linear scale and offset exactly like the raster lane "
+           "(hardening 15/20)",
+           "[models][ensemble][detection][preprocess][p15]" )
+{
+  RegistryReset reset;
+  DetectionHead head;
+  head.candidates = { { 8, 8, 4, 4, 1.0f, 0.9f, 0.1f } };
+  QTemporaryDir dir;
+
+  // Manifest: normalize linear, scale 1.0, offset -100 over a constant-200
+  // raster → the fed blob mean must be 100. The old gate tested only
+  // scale != 1.0, so NO normalization ran at all and the model saw 200.
+  {
+    const CapturingDetectionProviderGuard guard( "detoff-a", head );
+    Json::Value manifest = detectionMemberManifest( "det-off-a", "detoff-a", { "tree", "shrub" } );
+    manifest["preprocess"]["offset"] = -100.0;
+    registerManifest( manifest,
+                      dir.filePath( QStringLiteral( "det-off-a/model.json" ) ).toStdString() );
+
+    const QString input = dir.filePath( QStringLiteral( "detoff_a_input.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+    builder.withConstantValue( 1, 200.0f ).withConstantValue( 2, 200.0f ).withConstantValue( 3, 200.0f );
+    builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+
+    const QString output = dir.filePath( QStringLiteral( "detoff-a.gpkg" ) );
+    ModelExecutionRequest request;
+    request.inputPath = input.toStdString();
+    request.outputPath = output.toStdString();
+    request.modelReference = "det-off-a";
+    request.asDetection = true;
+    RSOperatorContext context;
+    REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+    CHECK( guard.capturedMean() == Catch::Approx( 100.0 ).margin( 0.5 ) );
+  }
+
+  // scale 2.0, offset -50 → mean 2·200 − 50 = 350 (the old code dropped the
+  // offset entirely and fed 400).
+  {
+    const CapturingDetectionProviderGuard guard( "detoff-b", head );
+    Json::Value manifest = detectionMemberManifest( "det-off-b", "detoff-b", { "tree", "shrub" } );
+    manifest["preprocess"]["scale"] = 2.0;
+    manifest["preprocess"]["offset"] = -50.0;
+    registerManifest( manifest,
+                      dir.filePath( QStringLiteral( "det-off-b/model.json" ) ).toStdString() );
+
+    const QString input = dir.filePath( QStringLiteral( "detoff_b_input.tif" ) );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+    builder.withConstantValue( 1, 200.0f ).withConstantValue( 2, 200.0f ).withConstantValue( 3, 200.0f );
+    builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+
+    const QString output = dir.filePath( QStringLiteral( "detoff-b.gpkg" ) );
+    ModelExecutionRequest request;
+    request.inputPath = input.toStdString();
+    request.outputPath = output.toStdString();
+    request.modelReference = "det-off-b";
+    request.asDetection = true;
+    RSOperatorContext context;
+    REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( request, context ) );
+    CHECK( guard.capturedMean() == Catch::Approx( 350.0 ).margin( 1.0 ) );
+  }
 }
