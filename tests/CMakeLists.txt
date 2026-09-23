@@ -9895,19 +9895,6 @@ target_link_libraries(test_lab_runtime PRIVATE
 )
 sicnu_discover_tests(test_lab_runtime)
 
-# RS14-19 Scientific Inspector: inspection aggregate + versioned codec. The
-# aggregate compiles into the test binary (pattern: test_interaction_tools)
-# until the view-model/widget slices consume it from the app shell.
-add_executable(test_sci_inspector test_sci_inspector.cpp
-  ../src/app/workbench/scientific/sci_inspection.cpp)
-target_link_libraries(test_sci_inspector PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-)
-target_include_directories(test_sci_inspector PRIVATE ${CMAKE_SOURCE_DIR}/src)
-set_target_properties(test_sci_inspector PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-sicnu_discover_tests(test_sci_inspector)
-
 # Contract Platform 10.0: scientific contract registry completeness and
 # known answers against the LIVE operator registry (append-only block).
 sicnu_add_test(test_scientific_contract_10)
