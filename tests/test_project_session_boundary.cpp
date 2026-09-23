@@ -186,7 +186,10 @@ TEST_CASE( "Session boundary: read failure rolls back to the consistent empty se
     int hookCalls = 0;
     const auto outcome = sicnu::app::openProjectSession(
         *context, project, target, [&hookCalls] { ++hookCalls; },
-        []( QgsProject &, const QString & ) { return false; } );
+        []( QgsProject &p, const QString &path ) {
+            p.setFileName( path ); // real read semantics: identity first…
+            return false;          // …then the failure
+        } );
 
     REQUIRE( outcome.stage == sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed );
     REQUIRE( outcome.failedPath == target );
@@ -218,7 +221,14 @@ TEST_CASE( "Session boundary: failed open does not advance a later Save-As ident
 
     ( void ) sicnu::app::openProjectSession(
         *context, project, target, [] {},
-        []( QgsProject &, const QString & ) { return false; } );
+        // Mirror QgsProject::read's real failure signature: the file name is
+        // assigned BEFORE parsing and left behind on failure. Without this,
+        // the rollback's setFileName reset would be untestable (the phantom
+        // name would never exist to be rolled back).
+        []( QgsProject &p, const QString &path ) {
+            p.setFileName( path );
+            return false;
+        } );
     REQUIRE( project.fileName().isEmpty() );
 
     // After the failed open, saving under a NEW name must behave like a

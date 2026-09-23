@@ -36,3 +36,13 @@
    `TESTS FAILED: 42/44 assertions, 4/6 test cases`（恰击中 reopen 后 `syncController() != nullptr` 与 project-clear 后跟随两处）。还原后 56/56 全绿。
 
 Sabotage 全部还原（tree 内 `SABOTAGE` 计 0）；`git diff --check` 通过。
+
+## 独立 Review round 1（adversarial reviewer）与修复
+
+Reviewer 结论：PROCEED-WITH-FIXES，无 P0（其自建 6 个对抗二进制 + 4 个 sabotage 复现，6 场景全过：双 reopen、pending-throttle 销毁、真读语义失败+重试、designer 跨 pending 输入/级联退役、in-flight token）。
+
+- **P1（oracle 盲区，已修）**：注入 readFn 原先不设 fileName，与 `QgsProject::read` 真实失败签名（先赋值后失败）不符 → 仅删 `setFileName` 回滚行时套件仍 41/41 全过。修复：两个 ReadFailed 用例的 readFn 改为 `p.setFileName(path); return false;`。**强化后单独 sabotage 该行 → 35/37、3/5 cases 红**（:204/:232 两个幻影 identity 断言齐杀），还原 41/41 绿。
+- **P2（已修）**：ReadFailed 分支补 `updateEditingUI(nullptr)`，与"mirror newProject"注释一致（否则编辑动作在空会话上残留启用）。
+- **P3-3（已修）**：失败分支 `m_mapCanvas` 访问加守卫，与前置 settle 守卫一致。
+- P3 其余（settle 时序前移、governance 提示在 ReadFailed 抑制、ProbeFailed diagnostics 未渲染、session 持裸 ProjectContext* 的隐式不变式、FastExitListener 权衡）：逐条记录于 01-status-matrix/PR 正文，不改（与 master 同 UX 或属先例权衡）。
+- Review 后终门：两遍 ctest `100% passed, 0 failed out of 20`。

@@ -306,10 +306,14 @@ void QgisDesktopWindow::openProject()
                     // mirror newProject's empty-session rendering so the
                     // canvas, empty-state overlays and the title cannot
                     // keep presenting the failed target.
-                    m_mapCanvas->setLayers( {} );
-                    m_mapCanvas->refresh();
+                    if ( m_mapCanvas )
+                    {
+                        m_mapCanvas->setLayers( {} );
+                        m_mapCanvas->refresh();
+                    }
                     updateCanvasEmptyState();
                     updateLayersEmptyState();
+                    updateEditingUI(nullptr);
                     updateWindowTitle();
                     refreshWorkspaceBrowser();
                     statusBar()->showMessage(
