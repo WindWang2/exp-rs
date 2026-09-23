@@ -86,7 +86,17 @@ ProposalOutcome validateProposal( const Json::Value &proposalDoc, const Scientif
     }
 
     // --- operator-level facts (provider + constraints + contracts) -------------
-    if ( providers.capability != nullptr )
+    if ( providers.capability == nullptr )
+    {
+        // Fail-closed parity with the baseline planner: a missing seam means
+        // nothing can be verified, so nothing is accepted.
+        rejection.code = kUnknownOperatorCode;
+        rejection.reasons.push_back(
+            "fail-closed: capability provider seam is not wired; proposal operators cannot be "
+            "verified" );
+        outcome.rejection = std::move( rejection );
+        return outcome;
+    }
     {
         for ( const auto &step : plan.steps )
         {
@@ -133,10 +143,22 @@ ProposalOutcome validateProposal( const Json::Value &proposalDoc, const Scientif
                                              + step.family + " outside the allowed families" );
                 break;
             }
+            const auto *operatorContract = contractForOperator( step.operatorId );
+            if ( !operatorContract )
+            {
+                // Parity with the baseline planner: a provider-known operator
+                // without a scientific contract has no verifiable semantics.
+                rejection.code = kTransitionCode;
+                rejection.reasons.push_back( "step " + step.stepId + " names operator "
+                                             + step.operatorId
+                                             + " which has no scientific contract; its state "
+                                               "transitions are unverifiable" );
+                break;
+            }
             // state transitions must agree with the linked contracts registry
             for ( const auto &transition : step.expectedTransitions )
             {
-                const auto *contract = contractForOperator( step.operatorId );
+                const auto *contract = operatorContract;
                 if ( contract && !transition.toDomain.empty()
                      && !contract->outputDomain.empty()
                      && transition.toDomain != contract->outputDomain )

@@ -44,6 +44,24 @@ TEST_CASE( "asset lifecycle mirror matches the scientific_state authority",
            == std::string( "unavailable_source" ) );
 }
 
+TEST_CASE( "asset kinds and modalities intersect their workflow_ir authorities",
+           "[scientific_planner][drift]" )
+{
+    // workflow_ir.h axes are the declared authorities (header-only data).
+    // Planning subjects are spatial surfaces: raster/vector/model of the
+    // artifact-kind axis plus the planner-added `collection` for multi-scene
+    // bundles (historical plan.md §4.1). `table` (a RESULT surface, not a
+    // planning subject) and `structured` have no planning semantics and are
+    // deliberately absent — this pin makes the absences explicit.
+    for ( const char *kind : { "raster", "vector", "model", "collection" } )
+        CHECK( isKnownAssetKind( kind ) );
+    CHECK_FALSE( isKnownAssetKind( "table" ) );
+    CHECK_FALSE( isKnownAssetKind( "structured" ) );
+
+    for ( const char *modality : { "optical", "sar", "dem", "unknown" } )
+        CHECK( isKnownVocabValue( kAssetModalities, modality ) );
+}
+
 TEST_CASE( "projection domain map equals the contracts numeric-domain authority",
            "[scientific_planner][drift]" )
 {

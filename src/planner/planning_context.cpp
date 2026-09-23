@@ -287,7 +287,7 @@ bool planningContextFromJson( const Json::Value &doc, PlanningContext &out, std:
             if ( !constraints["max_steps"].isInt() || constraints["max_steps"].asInt() < 0
                  || constraints["max_steps"].asInt() > PlanLimits::kMaxSteps )
             {
-                error = json_util::error( "out_of_bounds", "constraints.max_steps must be within [0,64]" );
+                error = json_util::error( "out_of_bounds", "constraints.max_steps must be within [0," + std::to_string( PlanLimits::kMaxSteps ) + "]" );
                 return false;
             }
             out.constraints.maxSteps = constraints["max_steps"].asInt();
@@ -361,14 +361,19 @@ bool planningContextFromJson( const Json::Value &doc, PlanningContext &out, std:
     }
 
     const Json::Value &budget = doc.get( "resource_budget", empty );
-    if ( !budget.isNull() && budget.isObject() )
+    if ( !budget.isNull() )
     {
+        if ( !budget.isObject() )
+        {
+            error = json_util::error( "invalid_field", "resource_budget must be an object" );
+            return false;
+        }
         if ( budget.isMember( "max_steps" ) )
         {
             if ( !budget["max_steps"].isInt() || budget["max_steps"].asInt() < 0
                  || budget["max_steps"].asInt() > PlanLimits::kMaxSteps )
             {
-                error = json_util::error( "out_of_bounds", "resource_budget.max_steps must be within [0,64]" );
+                error = json_util::error( "out_of_bounds", "resource_budget.max_steps must be within [0," + std::to_string( PlanLimits::kMaxSteps ) + "]" );
                 return false;
             }
             out.resourceBudget.maxSteps = budget["max_steps"].asInt();
@@ -398,8 +403,13 @@ bool planningContextFromJson( const Json::Value &doc, PlanningContext &out, std:
     }
 
     const Json::Value &mode = doc.get( "mode", empty );
-    if ( !mode.isNull() && mode.isObject() )
+    if ( !mode.isNull() )
     {
+        if ( !mode.isObject() )
+        {
+            error = json_util::error( "invalid_field", "mode must be an object" );
+            return false;
+        }
         if ( mode.isMember( "kind" ) )
         {
             if ( !json_util::readBoundedString( mode, "kind", kIdMax, out.mode.kind, error ) )

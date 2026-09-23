@@ -8,6 +8,7 @@
 #include "planner/sha256_util.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <cstdio>
 #include <map>
@@ -57,8 +58,8 @@ std::optional<PlannerCapability> firstVerifiableCapability(
     {
         if ( entry.family != family || entry.operatorId.empty() )
             continue;
-        if ( !satisfiesFamilyAllowlist( context, family ) )
-            continue;
+        if ( !isLawfulCandidate( context, entry ) )
+            continue; // forbidden operator / determinism / family allowlist
         if ( !isKnownCostClass( entry.costClass ) )
             continue;
         if ( !capabilityAgreesWithContracts( entry ) )
@@ -162,11 +163,15 @@ std::optional<PlannerCapability> findBridge( const CapabilityProvider &provider,
     bool sawAuthorityConflict = false;
     for ( const auto &entry : entries )
     {
-        if ( entry.family != "calibration" || entry.inputDomain != fromDomain
-             || entry.outputDomain != toDomain )
+        // An empty declared input domain is the seam's "unconstrained" form.
+        const bool domainMatch = ( entry.inputDomain.empty() || entry.inputDomain == fromDomain )
+                                 && entry.outputDomain == toDomain;
+        if ( entry.family != "calibration" || !domainMatch )
             continue;
-        if ( !satisfiesFamilyAllowlist( context, "calibration" ) )
-            continue;
+        if ( !isLawfulCandidate( context, entry ) )
+            continue; // forbidden operator / determinism / family allowlist
+        if ( !isKnownCostClass( entry.costClass ) )
+            continue; // malformed provider fact: excluded, never planned over
         if ( !capabilityAgreesWithContracts( entry ) )
         {
             sawAuthorityConflict = true;
@@ -246,13 +251,39 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
             importStep.estimatedRamMb = importCapability->estimatedRamMb;
             importStep.deterministic = importCapability->deterministic;
             importStep.stepId = stepIdFor( "import", ++occurrence );
+            std::vector<const AssetView *> consumableSorted;
             for ( const auto &view : assets )
             {
-                if ( !view.consumable )
-                    continue;
-                importStep.inputs.push_back( StepInput{ "", view.facts->ref, "input" } );
+                if ( view.consumable )
+                    consumableSorted.push_back( &view );
+            }
+            std::stable_sort( consumableSorted.begin(), consumableSorted.end(),
+                              []( const AssetView *a, const AssetView *b ) {
+                                  return a->facts->ref < b->facts->ref;
+                              } );
+            for ( const auto *view : consumableSorted )
+            {
+                if ( static_cast<int>( importStep.inputs.size() )
+                     >= PlanLimits::kMaxInputsPerStep )
+                {
+                    // Aggregated-overflow discipline: the plan keeps the
+                    // first N assets and raises a typed question for the
+                    // remainder — never a silent truncation.
+                    questions.push_back( PlanOpenQuestion{
+                        "", "decision_required", true,
+                        std::to_string( consumableSorted.size() )
+                            + " ready assets exceed the " +
+                            std::to_string( PlanLimits::kMaxInputsPerStep )
+                            + "-input step bound; the plan stages the first "
+                            + std::to_string( PlanLimits::kMaxInputsPerStep )
+                            + " (sorted by ref)",
+                        "split the goal or mosaic the assets first" } );
+                    plan.verdict = "feasible_with_gaps";
+                    break;
+                }
+                importStep.inputs.push_back( StepInput{ "", view->facts->ref, "input" } );
                 importStep.preconditions.push_back(
-                    StepPrecondition{ "asset_state", view.facts->ref, "", 0,
+                    StepPrecondition{ "asset_state", view->facts->ref, "", 0,
                                       "asset ready at plan time" } );
             }
             plan.steps.push_back( importStep );
@@ -443,9 +474,16 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
                 verifyStep.verifierTargets.push_back(
                     VerifierTarget{ criterion.check, criterion.target } );
             if ( context.quality.minAccuracy >= 0 )
-                verifyStep.verifierTargets.push_back( VerifierTarget{
-                    "product accuracy",
-                    "accuracy >= " + std::to_string( context.quality.minAccuracy ) } );
+            {
+                char accuracyBuffer[40];
+                if ( const auto result = std::to_chars( accuracyBuffer,
+                                                        accuracyBuffer + sizeof( accuracyBuffer ),
+                                                        context.quality.minAccuracy );
+                     result.ec == std::errc() )
+                    verifyStep.verifierTargets.push_back( VerifierTarget{
+                        "product accuracy",
+                        "accuracy >= " + std::string( accuracyBuffer, result.ptr ) } );
+            }
             if ( context.quality.requireValidationSplit )
                 verifyStep.verifierTargets.push_back(
                     VerifierTarget{ "validation split held out from fitting", "" } );
@@ -627,6 +665,18 @@ PlanningResult planScientificWork( const ScientificGoal &goal, const PlanningCon
             continue;
         analysisCandidates.push_back( entry );
     }
+    // A provider listing the same operator twice in one family must not
+    // mint two identical candidate plans.
+    {
+        std::set<std::string> seenOperators;
+        std::vector<PlannerCapability> unique;
+        for ( auto &candidate : analysisCandidates )
+        {
+            if ( seenOperators.insert( candidate.operatorId ).second )
+                unique.push_back( candidate );
+        }
+        analysisCandidates = std::move( unique );
+    }
     rankCandidates( analysisCandidates );
 
     if ( analysisCandidates.empty() )
@@ -652,6 +702,18 @@ PlanningResult planScientificWork( const ScientificGoal &goal, const PlanningCon
     // Narrowing while a lawful sibling exists is silent by design (the
     // sibling IS the answer); exclusions surface as blocking decisions only
     // in the no-lawful-candidate path below.
+    if ( static_cast<int>( analysisCandidates.size() ) > PlanLimits::kMaxCandidates )
+    {
+        globalQuestions.push_back( PlanOpenQuestion{
+            "", "decision_required", false,
+            std::to_string( analysisCandidates.size() )
+                + " lawful analysis candidates exceed the "
+                + std::to_string( PlanLimits::kMaxCandidates )
+                + "-candidate bound; the plan ranks the best "
+                + std::to_string( PlanLimits::kMaxCandidates ),
+            "narrow the provider facts or constraints" } );
+        analysisCandidates.resize( PlanLimits::kMaxCandidates );
+    }
     for ( const auto &candidate : analysisCandidates )
     {
         result.candidates.push_back( buildCandidatePlan( goal, context, *providers.capability,
@@ -660,24 +722,32 @@ PlanningResult planScientificWork( const ScientificGoal &goal, const PlanningCon
     }
 
     // The primary carries the merged DATA-question view so a consumer reading
-    // one document still sees every typed gap (deduped, deterministic ids).
-    // Budget questions are candidate-specific and are applied AFTER the merge
-    // so a sibling's overrun never stains the primary.
+    // one document still sees every typed gap. Sibling gaps are tagged and
+    // DEMOTED to non-blocking: they describe another candidate, not the
+    // primary, so they must not flip the primary's verdict. Budget questions
+    // are applied AFTER the merge (candidate-local), and ids are finalized
+    // after that so even budget questions carry deterministic identity.
     {
         auto &primary = result.candidates.front();
         std::vector<PlanOpenQuestion> merged = primary.openQuestions;
         for ( size_t i = 1; i < result.candidates.size(); ++i )
         {
-            for ( const auto &question : result.candidates[i].openQuestions )
+            for ( auto question : result.candidates[i].openQuestions )
+            {
+                question.blocking = false;
+                question.detail = "sibling candidate alt-" + std::to_string( i ) + ": "
+                                  + question.detail;
                 merged.push_back( question );
+            }
         }
         finalizeQuestions( merged );
         primary.openQuestions = std::move( merged );
-        if ( !primary.openQuestions.empty() && primary.verdict == "feasible" )
-            primary.verdict = "feasible_with_gaps";
     }
     for ( auto &plan : result.candidates )
+    {
         applyResourceBudget( context, plan );
+        finalizeQuestions( plan.openQuestions ); // re-id: includes budget questions
+    }
 
     // Alternatives on the primary (slice D): why the primary won, why each
     // sibling lost, candidateIndex into PlanningResult::candidates.

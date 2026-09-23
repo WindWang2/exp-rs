@@ -298,12 +298,154 @@ TEST_CASE( "adversarial: hostile JSON shapes are rejected fail-closed",
     ctxDoc["resource_budget"]["max_estimated_ram_mb"] = -5;
     CHECK_FALSE( planningContextFromJson( ctxDoc, context, error ) );
 
+    // whole-block wrong typing is a typed error, never a silent skip
+    ctxDoc = planningContextToJson( sample );
+    ctxDoc["resource_budget"] = "high";
+    CHECK_FALSE( planningContextFromJson( ctxDoc, context, error ) );
+    ctxDoc = planningContextToJson( sample );
+    ctxDoc["mode"] = Json::Value( Json::arrayValue );
+    CHECK_FALSE( planningContextFromJson( ctxDoc, context, error ) );
+
     // absent assets array is a typed error; an EMPTY array is a legal
     // boundary (the core answers it with a typed question, see the
     // zero-ready-assets adversarial test below)
     ctxDoc = planningContextToJson( sample );
     ctxDoc.removeMember( "assets" );
     CHECK_FALSE( planningContextFromJson( ctxDoc, context, error ) );
+}
+
+TEST_CASE( "review regression: producer bounds hold (assets, candidates, cost classes)",
+           "[scientific_planner][review][p0]" )
+{
+    // (a) >8 ready assets: aggregated-overflow question, plan still readable.
+    ScientificGoal goal = waterGoal();
+    goal.kind = "measurement";
+    PlanningContext context;
+    for ( int i = 0; i < 11; ++i )
+    {
+        PlannerAssetFacts asset;
+        asset.ref = "asset-" + std::to_string( 100 + i );
+        asset.kind = "raster";
+        asset.numericDomain = "reflectance";
+        asset.state = "ready";
+        context.assets.push_back( asset );
+    }
+    FakeProvider provider;
+    provider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+    provider.add( "analysis", capability( "rs:ndvi", "low", "", "index" ) );
+    provider.add( "publication", capability( "io:translate", "low", "", "" ) );
+
+    const PlanningResult result = planScientificWork( goal, context, PlannerProviders{ &provider } );
+    const ScientificPlan &plan = *result.primary();
+    bool overflowQuestion = false;
+    for ( const auto &question : plan.openQuestions )
+    {
+        if ( question.blocking && question.detail.find( "exceed the 8-input step bound" )
+                 != std::string::npos )
+            overflowQuestion = true;
+    }
+    CHECK( overflowQuestion );
+    for ( const auto &step : plan.steps )
+        CHECK( static_cast<int>( step.inputs.size() ) <= PlanLimits::kMaxInputsPerStep );
+    ScientificPlan reparsed;
+    std::string error;
+    REQUIRE( scientificPlanFromJson( scientificPlanToJson( plan ), reparsed, error ) );
+    CHECK( validateScientificPlan( reparsed ).empty() );
+
+    // (b) >8 lawful analysis candidates: capped at 8 with a typed overflow note.
+    PlanningContext pairContext = twoDnAssets();
+    // Nine CONTRACT-REGISTERED analysis operators (8 spectral-index family +
+    // rs:change) so every fact survives the contracts gate; the cap, not the
+    // authority check, is what under test here.
+    FakeProvider manyProvider;
+    for ( const char *op : { "rs:mndwi", "rs:ndwi", "rs:ndbi", "rs:evi", "rs:savi",
+                             "rs:ndvi", "rs:spectral_index", "rs:band_ratio" } )
+        manyProvider.add( "analysis", capability( op, "low", "", "index" ) );
+    manyProvider.add( "analysis", capability( "rs:change", "high", "features", "none" ) );
+    manyProvider.add( "publication", capability( "io:translate", "low", "", "" ) );
+    ScientificGoal pairGoal = waterGoal();
+    pairGoal.acceptanceCriteria.clear();
+    const PlanningResult capped =
+        planScientificWork( pairGoal, pairContext, PlannerProviders{ &manyProvider } );
+    REQUIRE( static_cast<int>( capped.candidates.size() ) == PlanLimits::kMaxCandidates );
+    bool candidateOverflow = false;
+    for ( const auto &question : capped.primary()->openQuestions )
+    {
+        if ( question.detail.find( "9 lawful analysis candidates" ) != std::string::npos )
+            candidateOverflow = true;
+    }
+    CHECK( candidateOverflow );
+    for ( const auto &candidate : capped.candidates )
+    {
+        ScientificPlan candidateReparse;
+        std::string candidateError;
+        REQUIRE( scientificPlanFromJson( scientificPlanToJson( candidate ), candidateReparse,
+                                         candidateError ) );
+        CHECK( validateScientificPlan( candidateReparse ).empty() );
+    }
+
+    // (c) calibration fact with unknown cost class: excluded, never planned.
+    PlanningContext dnContext = twoDnAssets();
+    FakeProvider lyingBridge;
+    lyingBridge.add( "calibration", capability( "rs:brdf_normalization", "bogus_cost", "dn", "reflectance" ) );
+    lyingBridge.add( "analysis", capability( "rs:ace", "low", "reflectance", "probability" ) );
+    lyingBridge.add( "publication", capability( "io:translate", "low", "", "" ) );
+    ScientificGoal detection = waterGoal();
+    detection.kind = "measurement";
+    detection.acceptanceCriteria.clear();
+    const PlanningResult bridgeless =
+        planScientificWork( detection, dnContext, PlannerProviders{ &lyingBridge } );
+    for ( const auto &step : bridgeless.primary()->steps )
+        CHECK( step.operatorId != "rs:brdf_normalization" );
+    bool unbridgeableTyped = false;
+    for ( const auto &question : bridgeless.primary()->openQuestions )
+    {
+        if ( question.blocking && question.detail.find( "no contracts-verified calibration" )
+                 != std::string::npos )
+            unbridgeableTyped = true;
+    }
+    CHECK( unbridgeableTyped );
+}
+
+TEST_CASE( "review regression: forbidden operators and determinism bind every stage",
+           "[scientific_planner][review][p0]" )
+{
+    ScientificGoal goal = waterGoal();
+    goal.acceptanceCriteria.clear();
+    PlanningContext context = twoDnAssets();
+    context.assets[0].crs = "EPSG:32648";
+    context.assets[0].resolutionM = 10.0;
+    context.assets[1].crs = "EPSG:32647"; // grid mismatch → alignment stage wanted
+    context.assets[1].resolutionM = 10.0;
+    context.constraints.forbiddenOperators = { "rs:align" };
+    FakeProvider provider;
+    provider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+    provider.add( "alignment", capability( "rs:align", "low", "", "" ) );
+    provider.add( "analysis", capability( "rs:mndwi", "low", "", "index" ) );
+    provider.add( "publication", capability( "io:translate", "low", "", "" ) );
+
+    const PlanningResult result = planScientificWork( goal, context, PlannerProviders{ &provider } );
+    const ScientificPlan &plan = *result.primary();
+    for ( const auto &step : plan.steps )
+        CHECK( step.operatorId != "rs:align" ); // never planned despite the gate
+    bool alignmentQuestion = false;
+    for ( const auto &question : plan.openQuestions )
+    {
+        if ( question.blocking && question.detail.find( "alignment capability" )
+                 != std::string::npos )
+            alignmentQuestion = true;
+    }
+    CHECK( alignmentQuestion );
+    CHECK( plan.verdict == "feasible_with_gaps" );
+    // and the emitted plan must survive the proposal validator (no self-reject)
+    PlanningContext validatorContext = context;
+    validatorContext.constraints.forbiddenOperators.clear();
+    FakeProvider validatorProvider = provider;
+    const auto outcome =
+        validateProposal( scientificPlanToJson( plan ), goal, validatorContext,
+                          PlannerProviders{ &validatorProvider } );
+    INFO( "rejection: " << outcome.rejection.code );
+    CHECK( outcome.accepted );
 }
 
 TEST_CASE( "adversarial: zero ready assets yields an honest plan, not a crash or a fake",

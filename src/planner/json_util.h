@@ -31,7 +31,8 @@ inline std::string error( const std::string &code, const std::string &detail )
     return code + ": " + detail;
 }
 
-/// True when `text` is within [1, max] characters (id/text bounds).
+/// True when `text` is within [1, max] bytes (id/text bounds; multibyte
+/// UTF-8 text counts its bytes).
 inline bool boundedNonEmpty( const std::string &text, size_t max )
 {
     return !text.empty() && text.size() <= max;

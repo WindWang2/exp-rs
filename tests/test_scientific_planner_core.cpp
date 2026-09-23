@@ -337,6 +337,59 @@ TEST_CASE( "provider facts contradicting contracts are excluded with a typed amb
     CHECK( ambiguity );
 }
 
+TEST_CASE( "emitted oracle: every candidate re-reads through the fail-closed reader",
+           "[scientific_planner][core][round-trip]" )
+{
+    // The producer and the reader share one schema truth: anything the
+    // planner emits must survive scientificPlanFromJson with an empty
+    // validateScientificPlan, ids and bounds included.
+    ScientificGoal goal = changeGoal();
+    goal.acceptanceCriteria.clear();
+    PlanningContext context = twoAssetContext();
+    FakeProvider provider;
+    provider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+    provider.add( "calibration", capability( "rs:brdf_normalization", "medium", "dn", "reflectance" ) );
+    provider.add( "analysis", capability( "rs:mndwi", "low", "", "index" ) );
+    provider.add( "analysis", capability( "rs:ndwi", "low", "", "index" ) );
+    provider.add( "analysis", capability( "rs:change", "high", "features", "none" ) );
+    provider.add( "publication", capability( "io:translate", "low", "", "" ) );
+
+    const PlanningResult result = planScientificWork( goal, context, PlannerProviders{ &provider } );
+    REQUIRE_FALSE( result.candidates.empty() );
+    for ( const auto &plan : result.candidates )
+    {
+        ScientificPlan reparsed;
+        std::string error;
+        INFO( "plan " << plan.planId );
+        REQUIRE( scientificPlanFromJson( scientificPlanToJson( plan ), reparsed, error ) );
+        CHECK( validateScientificPlan( reparsed ).empty() );
+        CHECK( scientificPlanFingerprint( reparsed ) == scientificPlanFingerprint( plan ) );
+    }
+}
+
+TEST_CASE( "sibling gaps stay visible on the primary but never flip its verdict",
+           "[scientific_planner][core]" )
+{
+    ScientificGoal goal = changeGoal();
+    goal.acceptanceCriteria.clear();
+    PlanningContext context = twoAssetContext();
+    FakeProvider provider;
+    provider.add( "data_import", capability( "rs:mosaic", "low", "", "" ) );
+    provider.add( "analysis", capability( "rs:mndwi", "low", "", "index" ) );
+    provider.add( "analysis", capability( "rs:change", "high", "features", "none" ) );
+    provider.add( "publication", capability( "io:translate", "low", "", "" ) );
+
+    const PlanningResult result = planScientificWork( goal, context, PlannerProviders{ &provider } );
+    REQUIRE( result.candidates.size() == 2 );
+    const ScientificPlan &primary = *result.primary();
+    CHECK( primary.verdict == "feasible" );
+    REQUIRE( primary.openQuestions.size() == 1 );
+    CHECK_FALSE( primary.openQuestions[0].blocking );
+    CHECK( primary.openQuestions[0].detail.find( "sibling candidate alt-1" )
+           != std::string::npos );
+    CHECK( result.candidates[1].verdict == "feasible_with_gaps" );
+}
+
 TEST_CASE( "multiple lawful analysis variants become ranked candidates with alternatives",
            "[scientific_planner][core]" )
 {

@@ -159,6 +159,38 @@ TEST_CASE( "RAM budget overrun annotated", "[scientific_planner][constraints]" )
     CHECK( seen );
 }
 
+TEST_CASE( "budget questions carry deterministic ids and re-read cleanly",
+           "[scientific_planner][constraints]" )
+{
+    ScientificGoal goal = changeGoal();
+    PlanningContext ctx = context();
+    ctx.resourceBudget.maxSteps = 2;
+    FakeProvider provider = twoCandidateProvider();
+
+    const PlanningResult result = planScientificWork( goal, ctx, PlannerProviders{ &provider } );
+    const ScientificPlan &plan = result.candidates[1];
+    CHECK_FALSE( plan.openQuestions.empty() );
+    for ( const auto &question : plan.openQuestions )
+    {
+        INFO( "question " << question.questionId );
+        CHECK_FALSE( question.questionId.empty() );
+    }
+    ScientificPlan reparsed;
+    std::string error;
+    REQUIRE( scientificPlanFromJson( scientificPlanToJson( plan ), reparsed, error ) );
+    CHECK( validateScientificPlan( reparsed ).empty() );
+    const PlanningResult replay = planScientificWork( goal, ctx, PlannerProviders{ &provider } );
+    REQUIRE( replay.candidates.size() == result.candidates.size() );
+    for ( size_t i = 0; i < result.candidates.size(); ++i )
+    {
+        REQUIRE( replay.candidates[i].openQuestions.size()
+                 == result.candidates[i].openQuestions.size() );
+        for ( size_t q = 0; q < result.candidates[i].openQuestions.size(); ++q )
+            CHECK( replay.candidates[i].openQuestions[q].questionId
+                   == result.candidates[i].openQuestions[q].questionId );
+    }
+}
+
 TEST_CASE( "forbidden operator: lawful sibling wins; forbidden-only plan is infeasible",
            "[scientific_planner][constraints]" )
 {

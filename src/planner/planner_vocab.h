@@ -52,16 +52,22 @@ extern const std::vector<std::string> kRiskKinds;
 /// operator's capability facts to ONE class; the planner owns only the order.
 extern const std::vector<std::string> kCostClasses;
 
-/// Asset kinds accepted in a PlanningContext (mirror of the artifact-kind
-/// axis plus `collection` for multi-scene bundles; drift-pinned).
+/// Asset kinds accepted in a PlanningContext: the harness artifact-kind axis
+/// (raster/vector/table/model/structured) is the declared authority, with
+/// `structured` dropped (no planning semantics) and `collection` added for
+/// multi-scene bundles. The intersection is drift-pinned by
+/// tests/test_scientific_planner_drift.cpp.
 extern const std::vector<std::string> kAssetKinds;
 
 /// Asset lifecycle states — declared mirror of
 /// sicnu::scientific_state::assetLifecycleToString (the authority).
-/// Drift-pinned by tests/test_scientific_planner_drift.cpp.
+/// Drift-pinned byte-for-byte by tests/test_scientific_planner_drift.cpp.
 extern const std::vector<std::string> kAssetStates;
 
-/// Asset modalities — declared mirror of the scientific_state modality axis.
+/// Asset modalities — declared mirror of the harness workflow_ir modality
+/// axis (kModalityOptical/Sar/Dem/Unknown), drift-pinned by
+/// tests/test_scientific_planner_drift.cpp. (The scientific_state Modality
+/// axis is finer: thermal/hyperspectral project onto `optical` there.)
 extern const std::vector<std::string> kAssetModalities;
 
 /// Mode kinds for the plan consumer.

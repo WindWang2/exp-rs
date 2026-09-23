@@ -601,6 +601,14 @@ bool scientificPlanFromJson( const Json::Value &doc, ScientificPlan &out, std::s
                 return false;
             }
             alternative.candidateIndex = entry["candidate_index"].asInt();
+            if ( alternative.candidateIndex < 0
+                 || alternative.candidateIndex >= PlanLimits::kMaxCandidates )
+            {
+                error = json_util::error(
+                    "out_of_bounds", "alternatives[].candidate_index must be within [0,"
+                                         + std::to_string( PlanLimits::kMaxCandidates ) + ")" );
+                return false;
+            }
             out.alternatives.push_back( alternative );
         }
     }
@@ -643,6 +651,17 @@ bool scientificPlanFromJson( const Json::Value &doc, ScientificPlan &out, std::s
                                                         question.suggestion, error ) )
                 return false;
             out.openQuestions.push_back( question );
+        }
+        std::set<std::string> questionIds;
+        for ( const auto &question : out.openQuestions )
+        {
+            if ( !questionIds.insert( question.questionId ).second )
+            {
+                error = json_util::error( "invalid_field",
+                                          "duplicate question id \"" + question.questionId
+                                              + "\"" );
+                return false;
+            }
         }
     }
 
@@ -758,6 +777,14 @@ std::vector<std::string> validateScientificPlan( const ScientificPlan &plan )
     {
         if ( !isKnownQuestionKind( question.kind ) )
             problems.push_back( "invalid_field: unknown question kind " + question.kind );
+        if ( question.questionId.empty() )
+            problems.push_back( "out_of_bounds: open question without identity" );
+    }
+    for ( const auto &alternative : plan.alternatives )
+    {
+        if ( alternative.candidateIndex < 0
+             || alternative.candidateIndex >= PlanLimits::kMaxCandidates )
+            problems.push_back( "out_of_bounds: alternative candidate_index out of range" );
     }
     for ( const auto &risk : plan.risks )
     {

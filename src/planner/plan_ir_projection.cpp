@@ -157,7 +157,7 @@ Json::Value projectPlanToIr( const ScientificPlan &plan, std::vector<std::string
                          + "\" has no state basis (no operator and no expected transitions)" );
         Json::Value node( Json::objectValue );
         node["id"] = step.stepId;
-        node["operator"] = step.operatorId.empty() ? std::string( "" ) : step.operatorId;
+        node["operator"] = step.operatorId;
         node["params"] = step.params;
 
         Json::Value nodeInputs( Json::arrayValue );
@@ -186,24 +186,17 @@ Json::Value projectPlanToIr( const ScientificPlan &plan, std::vector<std::string
         for ( const auto &transition : step.expectedTransitions )
         {
             const std::string token = artifactFactsTokenForDomain( transition.toDomain );
-            if ( token.empty() && artifactFactsTokenForDomain( transition.fromDomain ).empty() )
-                continue;
             if ( token.empty() )
                 continue;
             artifact["numeric_domain"] = token;
-            if ( domainProjectsToUnknown( transition.toDomain ) && transition.toDomain != "none"
-                 && transition.toDomain != "any" )
+            if ( domainProjectsToUnknown( transition.toDomain ) )
             {
-                for ( const auto &entry : domainMap() )
-                {
-                    if ( entry.first == transition.toDomain && entry.second.warning )
-                    {
-                        localWarnings.push_back( std::string( entry.second.warning )
-                                                 + " — projected as unknown; downstream checks "
-                                                   "degrade" );
-                        break;
-                    }
-                }
+                const std::string warning = std::string(
+                                                domainMap().at( transition.toDomain ).warning )
+                                            + " — projected as unknown; downstream checks degrade";
+                if ( std::find( localWarnings.begin(), localWarnings.end(), warning )
+                     == localWarnings.end() )
+                    localWarnings.push_back( warning ); // dedupe repeated degradations
             }
         }
         if ( !artifact.empty() )

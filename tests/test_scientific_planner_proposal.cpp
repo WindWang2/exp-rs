@@ -309,6 +309,45 @@ TEST_CASE( "budget overruns and inconsistent verdicts reject", "[scientific_plan
     CHECK( outcome.rejection.code == "planner:proposal_inconsistent_verdict" );
 }
 
+TEST_CASE( "a missing provider seam fails closed, never open", "[scientific_planner][proposal]" )
+{
+    const ScientificGoal goal = changeGoal();
+    const PlanningContext ctx = context();
+    Json::Value doc = proposalDoc();
+    // the operator is ALSO forbidden — with no seam nothing can verify it
+    const PlanningContext forbidding = [&ctx]()
+    {
+        auto copied = ctx;
+        copied.constraints.forbiddenOperators = { "rs:mndwi" };
+        return copied;
+    }();
+    const auto outcome =
+        validateProposal( doc, goal, forbidding, PlannerProviders{ nullptr } );
+    CHECK_FALSE( outcome.accepted );
+    CHECK( outcome.rejection.code == "planner:proposal_unknown_operator" );
+    CHECK( outcome.rejection.reasons.front().find( "provider seam is not wired" )
+           != std::string::npos );
+}
+
+TEST_CASE( "a provider-known operator without a scientific contract is rejected",
+           "[scientific_planner][proposal]" )
+{
+    const ScientificGoal goal = changeGoal();
+    const PlanningContext ctx = context();
+    // rs:mndwi IS contracted; simulate an uncontracted operator by using a
+    // family the provider knows but contracts has no record for. The fake
+    // provider knows "rs:uncontracted_op"; findScientificContract does not.
+    FakeProvider provider;
+    provider.add( "analysis", capability( "rs:uncontracted_op", "low", "", "index" ) );
+    Json::Value doc = proposalDoc();
+    doc["steps"][0]["operator_id"] = "rs:uncontracted_op";
+    const auto outcome = validateProposal( doc, goal, ctx, PlannerProviders{ &provider } );
+    CHECK_FALSE( outcome.accepted );
+    CHECK( outcome.rejection.code == "planner:proposal_unverified_transition" );
+    CHECK( outcome.rejection.reasons.front().find( "no scientific contract" )
+           != std::string::npos );
+}
+
 TEST_CASE( "rejection codes are the closed sorted vocabulary", "[scientific_planner][proposal]" )
 {
     // every emitted code in this suite was a kProposalRejectionCodes member
