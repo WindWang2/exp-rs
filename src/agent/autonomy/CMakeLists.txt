@@ -39,9 +39,16 @@ target_include_directories(sicnu_autonomy
     ${CMAKE_SOURCE_DIR}/src
 )
 
-find_package(jsoncpp QUIET)
+# Root CMakeLists already resolves jsoncpp → jsoncpp_lib alias. Re-running
+# find_package(jsoncpp) on Homebrew recreates imported target jsoncpp_lib and
+# fails configure ("another target with the same name already exists").
+if(NOT TARGET jsoncpp AND NOT TARGET jsoncpp_lib)
+  find_package(jsoncpp QUIET)
+endif()
 if(TARGET jsoncpp)
   target_link_libraries(sicnu_autonomy PUBLIC jsoncpp)
+elseif(TARGET jsoncpp_lib)
+  target_link_libraries(sicnu_autonomy PUBLIC jsoncpp_lib)
 elseif(JSONCPP_LIBRARIES)
   target_include_directories(sicnu_autonomy PUBLIC ${JSONCPP_INCLUDE_DIRS})
   target_link_libraries(sicnu_autonomy PUBLIC ${JSONCPP_LIBRARIES})
