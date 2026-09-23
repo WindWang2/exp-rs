@@ -903,13 +903,34 @@ void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &i
                      std::to_string( kMaxPassportBands ) );
     }
 
+    // Pairing the file's band i with the structure mirror's band i is only
+    // founded when both sides describe the SAME structure. A mirror written
+    // before the file gained or lost a band (re-registered asset, replaced
+    // file) would otherwise label the wrong band — roles and NoData would
+    // travel as Known facts about bands that never declared them. With a
+    // count disagreement the mirror contributes nothing and the gap is
+    // recorded; without a dataset the mirror is the only authority and
+    // pairing is unchanged.
+    const bool catalogPairable =
+        catalog && !catalog->bands.empty() &&
+        ( !useDataset || catalog->bands.size() == datasetBands.size() );
+    if ( catalog && useDataset && !catalog->bands.empty() && !catalogPairable )
+    {
+        addNote( state, "bands.catalog_structure_mismatch", "bands",
+                 "catalog structure mirror has " +
+                     std::to_string( catalog->bands.size() ) +
+                     " bands while the file has " +
+                     std::to_string( datasetBands.size() ) +
+                     "; catalog band facts are not merged" );
+    }
+
     for ( std::size_t position = 0; position < projected; ++position )
     {
         BandState band;
         const BandFacts *datasetBand = useDataset ? &datasetBands[position] : nullptr;
-        const CatalogBandFacts *catalogBand = catalog && position < catalog->bands.size()
-                                                  ? &catalog->bands[position]
-                                                  : nullptr;
+        const CatalogBandFacts *catalogBand =
+            catalogPairable && position < catalog->bands.size() ? &catalog->bands[position]
+                                                                : nullptr;
         band.index = datasetBand ? datasetBand->index
                                  : ( catalogBand ? catalogBand->index : static_cast<int>( position + 1 ) );
         if ( datasetBand )
