@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #else
+#include <process.h>
 #include <windows.h>
 #endif
 
@@ -297,7 +298,12 @@ LabResult<> LabSessionStore::save( const LabSession &session )
   const std::string bytes = sessionToCanonicalBytes( session );
   // Unique per-save tmp name: concurrent saves of the same session can never
   // interleave on a shared tmp file (WorkflowCheckpointManager discipline).
-  const std::string tmpPath = finalPath + ".tmp." + std::to_string( ::getpid() ) + "." +
+#ifdef _WIN32
+  const int pid = ::_getpid();
+#else
+  const int pid = ::getpid();
+#endif
+  const std::string tmpPath = finalPath + ".tmp." + std::to_string( pid ) + "." +
                               std::to_string( s_tmpCounter.fetch_add( 1 ) );
   std::string error;
   if ( !writeFileSync( tmpPath, bytes, error ) )

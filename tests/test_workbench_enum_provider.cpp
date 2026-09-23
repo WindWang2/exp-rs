@@ -90,9 +90,12 @@ TEST_CASE( "Provider caps oversized sources with a truthful truncation label",
   REQUIRE( choices.size() == WorkbenchEnumProvider::kMaxChoices );
   // The UI never materializes an unbounded list — the last entry says so AND
   // carries no selectable value (review B6: the notice is a sentinel, not a
-  // disguised choice).
+  // disguised choice). Asserted i18n-neutrally (source id + truncated-to
+  // count in the label): the tr() source text was mechanically rewritten to
+  // English and must be free to move again.
   CHECK( choices.last().id.isEmpty() );
-  CHECK( choices.last().label.contains( QStringLiteral( "截断" ) ) );
+  CHECK( choices.last().label.contains( QStringLiteral( "layers:raster" ) ) );
+  CHECK( choices.last().label.contains( QString::number( WorkbenchEnumProvider::kMaxChoices - 1 ) ) );
 }
 
 TEST_CASE( "Provider resolves assets from the authoritative DataManager",

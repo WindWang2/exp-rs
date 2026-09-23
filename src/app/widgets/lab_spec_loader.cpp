@@ -413,8 +413,24 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     return fail( QStringLiteral( "runtime must be an object" ), 0, labId );
 
   // --- steps ---------------------------------------------------------------
-  if ( !root.isMember( "steps" ) || !root[ "steps" ].isArray() || root[ "steps" ].empty() )
+  // Version-scoped requirement. LabSpec 1 (ADR 0146) is the guided-walk
+  // contract: steps are the product and must be present. LabSpec 2/3 hand the
+  // operator sequence to the pipeline (ADR 0166: "D3 steps[] is not
+  // migrated... the operator sequence remains authoritative in
+  // data/labs/pipelines/*.pipeline.json"), so the generated canonical
+  // documents (lab12–lab14) legitimately carry no steps array. When a v2/v3
+  // document DOES carry steps, they validate exactly like v1 steps; a
+  // present-but-empty array is a document bug at every version.
+  const bool stepsRequired = contractVersion == 1;
+  if ( !root.isMember( "steps" ) )
+  {
+    if ( stepsRequired )
+      return fail( QStringLiteral( "steps must be a non-empty array" ), 0, labId );
+  }
+  else if ( !root[ "steps" ].isArray() || root[ "steps" ].empty() )
+  {
     return fail( QStringLiteral( "steps must be a non-empty array" ), 0, labId );
+  }
 
   static const QStringList allowedStepKeys = {
     QStringLiteral( "title" ), QStringLiteral( "title_zh" ), QStringLiteral( "description_zh" ),

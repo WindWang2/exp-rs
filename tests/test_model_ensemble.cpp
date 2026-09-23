@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -219,6 +220,58 @@ float readPixel( const QString &path, int band, int x, int y, bool *ok )
     *ok = read;
   return value;
 }
+
+
+/// Forward-counting identity provider (hardening 15/20): counts infer() calls
+/// into a shared atomic (members may run concurrently) and returns the blob
+/// unchanged, so the run would succeed if it were allowed to reach members.
+class CountingRuntime final : public IModelRuntime
+{
+  public:
+    CountingRuntime( std::string artifact, std::string framework,
+                     std::shared_ptr<std::atomic<int>> forwards )
+        : m_artifact( std::move( artifact ) ), m_framework( std::move( framework ) ),
+          m_forwards( std::move( forwards ) )
+    {
+    }
+    std::string framework() const override { return m_framework; }
+    std::string backendName() const override { return "counting_backend"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return m_artifact; }
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      m_forwards->fetch_add( 1 );
+      return blob.clone();
+    }
+
+  private:
+    std::string m_artifact;
+    std::string m_framework;
+    std::shared_ptr<std::atomic<int>> m_forwards;
+};
+
+struct CountingProviderGuard
+{
+    std::shared_ptr<std::atomic<int>> forwards;
+    explicit CountingProviderGuard( const std::string &framework )
+        : forwards( std::make_shared<std::atomic<int>>( 0 ) )
+    {
+      ModelRuntimeRegistry::instance().registerProvider(
+        framework,
+        [ framework, forwards = forwards ]( const ModelInfo &model,
+                                            const ModelHardwareCapabilities &,
+                                            std::string *error ) -> ModelRuntimePtr {
+          if ( model.resolvedArtifactPath.empty() )
+          {
+            if ( error )
+              *error = "no resolved artifact";
+            return nullptr;
+          }
+          return std::make_shared<CountingRuntime>( model.resolvedArtifactPath, framework,
+                                                    forwards );
+        } );
+    }
+};
 
 ModelExecutionRequest rasterRequest( const std::string &input, const std::string &output,
                                      const std::string &modelRef )
@@ -809,4 +862,68 @@ TEST_CASE( "a successful ensemble run leaves no member residue behind",
   CHECK_FALSE( QFile::exists(
     dir.filePath( QStringLiteral( ".clean.tif.ensemble-member1.tmp~.prov.json" ) ) ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
+}
+
+TEST_CASE( "all-zero-weight ensembles refuse before any member forward (hardening 15/20)",
+           "[models][ensemble][weights][p15]" )
+{
+  RegistryReset reset;
+  const CountingProviderGuard guardA( "cntfw-a" );
+  const CountingProviderGuard guardB( "cntfw-b" );
+  QTemporaryDir dir;
+  registerMember( "cnt-a", "cntfw-a", dir );
+  registerMember( "cnt-b", "cntfw-b", dir );
+  // Hand-built manifest: the shared registerEnsemble() helper references the
+  // hardcoded members "member-a"/"member-b", which would make the ensemble
+  // unresolvable and refuse BEFORE the weight gate for an unrelated reason.
+  {
+    Json::Value json( Json::objectValue );
+    json["name"] = "cnt-ens-zero";
+    json["task"] = "segmentation";
+    json["framework"] = "onnx";
+    Json::Value &ensemble = json["ensemble"] = Json::Value( Json::objectValue );
+    Json::Value members( Json::arrayValue );
+    Json::Value a( Json::objectValue );
+    a["model"] = "cnt-a";
+    a["weight"] = 0.0;
+    members.append( a );
+    Json::Value b( Json::objectValue );
+    b["model"] = "cnt-b";
+    b["weight"] = 0.0;
+    members.append( b );
+    ensemble["members"] = members;
+    std::string error;
+    const bool ok = ModelCatalog::instance().registerManifestJson(
+      Json::writeString( Json::StreamWriterBuilder(), json ),
+      dir.filePath( QStringLiteral( "cnt-ens-zero/model.json" ) ).toStdString(), &error );
+    if ( !ok )
+      FAIL( "ensemble rejected: " + error );
+  }
+
+  const QString input = writeConstantRaster( dir, "input.tif", 16, 2, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "zero.tif" ) );
+  RSOperatorContext context;
+  // Statically undefined manifest: the typed refusal must fire BEFORE any
+  // member session is acquired or run — the members used to be fully
+  // executed (VRAM reserved, full raster passes) before the combine pass
+  // noticed the zero weight sum.
+  // Pin the ACTUAL refusal (not any earlier static failure): the message
+  // must be the weight-sum verdict, so the oracle cannot pass vacuously if
+  // some other pre-member gate starts refusing first.
+  bool refusedForWeights = false;
+  try
+  {
+    ( void )sicnu::operators::runtime::runModelInference(
+      rasterRequest( input.toStdString(), output.toStdString(), "cnt-ens-zero" ), context );
+    FAIL( "zero-weight ensemble did not refuse" );
+  }
+  catch ( const RSOperatorError &e )
+  {
+    refusedForWeights = e.message().find( "weights sum to zero" ) != std::string::npos;
+  }
+  CHECK( refusedForWeights );
+  CHECK( guardA.forwards->load() == 0 );
+  CHECK( guardB.forwards->load() == 0 );
+  CHECK_FALSE( QFile::exists( output ) );
+  CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
 }

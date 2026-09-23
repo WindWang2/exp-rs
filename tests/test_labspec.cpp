@@ -50,69 +50,18 @@ QList<lab::LabSpec> loadShippedLabs( lab::LabLoadResult *resultOut = nullptr )
 
 namespace {
 
-/// Master reality guard: the D3 merged teaching documents (lab12/13/14) are
-/// LabSpec 2 docs WITHOUT a steps key — their step chain lives in the
-/// lab-registry's source labspec. The strict loader correctly rejects them
-/// (steps are required), and the guided panel presents them as typed errors
-/// by design. This helper recognizes exactly that known-merged shape so the
-/// inventory gate can tolerate it WITHOUT loosening the loader contract:
-/// the doc must be spec_version 2, carry no steps key, and be a canonical
-/// registry entry whose declared source exists.
-bool isKnownMergedDoc( const lab::LabSpecError &error )
-{
-    if ( !error.reason.contains( QStringLiteral( "steps must be a non-empty array" ) ) )
-        return false;
-    QFile docFile( error.path );
-    if ( !docFile.open( QIODevice::ReadOnly ) )
-        return false;
-    const QJsonDocument doc = QJsonDocument::fromJson( docFile.readAll() );
-    if ( !doc.isObject() || doc.object().contains( QStringLiteral( "steps" ) ) )
-        return false;
-    if ( doc.object().value( QStringLiteral( "spec_version" ) ).toInt() != 2 )
-        return false;
-    QFile registryFile( labsRoot() + QStringLiteral( "/data/labs/lab-registry.json" ) );
-    if ( !registryFile.open( QIODevice::ReadOnly ) )
-        return false;
-    const QJsonDocument registry = QJsonDocument::fromJson( registryFile.readAll() );
-    const QJsonObject canonical = registry.object().value( QStringLiteral( "canonical" ) ).toObject();
-    const QJsonObject entry = canonical.value( error.labId ).toObject();
-    if ( entry.isEmpty() )
-        return false;
-    const QString source = entry.value( QStringLiteral( "source" ) ).toString();
-    return !source.isEmpty() && QFile::exists( labsRoot() + QStringLiteral( "/" ) + source );
-}
-
 } // namespace
 
 TEST_CASE( "Shipped lab inventory loads cleanly", "[labspec][drift]" )
 {
     lab::LabLoadResult result;
     const auto labs = loadShippedLabs( &result );
-
-    // The canonical set reconciles the 7 documented labs with the 10 former
-    // hardcoded workflows — the union is 11; the gate is ">= 10".
-    REQUIRE( labs.size() >= 10 );
-
-    // Known merged docs are tolerated explicitly (see isKnownMergedDoc);
-    // every OTHER load problem still fails the gate.
-    QStringList mergedIds;
-    lab::LabLoadResult tolerable;
-    for ( const auto &error : result.errors )
-    {
-        INFO( error.toString().toStdString() );
-        if ( isKnownMergedDoc( error ) )
-            mergedIds << error.labId;
-        else
-            tolerable.errors.append( error );
-    }
-    INFO( lab::errorStrings( tolerable ).join( QStringLiteral( "; " ) ).toStdString() );
-    REQUIRE( tolerable.ok() );
-    // The merged set is closed: new steps-less docs must register themselves
-    // canonically and update this guard deliberately.
-    REQUIRE( mergedIds.size() == 3 );
-    REQUIRE( mergedIds.contains( QStringLiteral( "lab12_sar_processing" ) ) );
-    REQUIRE( mergedIds.contains( QStringLiteral( "lab13_hyperspectral_analysis" ) ) );
-    REQUIRE( mergedIds.contains( QStringLiteral( "lab14_cartographic_mapping" ) ) );
+    INFO( lab::errorStrings( result ).join( QStringLiteral( "; " ) ).toStdString() );
+    // The steps requirement is version-scoped (ADR 0146 v1 walk vs ADR 0166
+    // v2/v3 pipeline-owned operator sequence), so the canonical LabSpec 2
+    // documents load too: the inventory is clean with no toleration list.
+    REQUIRE( result.ok() );
+    REQUIRE( labs.size() >= 14 );
 
     // Lab ids are unique and match their file names (loader enforces both,
     // but pin the invariant explicitly).
@@ -121,12 +70,25 @@ TEST_CASE( "Shipped lab inventory loads cleanly", "[labspec][drift]" )
         ids << lab.id;
     REQUIRE( ids.size() == QSet<QString>( ids.cbegin(), ids.cend() ).size() );
 
+    // A stepless lab is exactly the ADR 0166 canonical trio (closed set);
+    // every other lab walks, so it must carry steps.
     for ( const auto &lab : labs )
     {
         INFO( lab.id.toStdString() );
         REQUIRE( !lab.titleZh.isEmpty() );
         REQUIRE( !lab.objective.isEmpty() );
-        REQUIRE( !lab.steps.isEmpty() );
+        if ( lab.steps.isEmpty() )
+        {
+            const bool isCanonicalStepless =
+                lab.id == QStringLiteral( "lab12_sar_processing" )
+                || lab.id == QStringLiteral( "lab13_hyperspectral_analysis" )
+                || lab.id == QStringLiteral( "lab14_cartographic_mapping" );
+            REQUIRE( isCanonicalStepless );
+        }
+        else
+        {
+            REQUIRE( !lab.steps.isEmpty() );
+        }
     }
 }
 
@@ -293,6 +255,19 @@ TEST_CASE( "Unsupported spec_version is refused with a typed message",
     const lab::LabSpecError error = loadOne( path );
     REQUIRE( error.reason.contains( QStringLiteral( "unsupported spec_version 4" ) ) );
     REQUIRE( error.reason.contains( QStringLiteral( "expected 1, 2 or 3" ) ) );
+}
+
+TEST_CASE( "A v3 document without a runtime block is refused shallowly",
+           "[labspec][v3]" )
+{
+    // v3 is accepted since LabSpec 3 (ADR 0174); the loader only shallow-checks
+    // it — the deep typed runtime validation is owned by sicnu_lab_runtime. A
+    // v3 doc without the runtime object is refused here, at the door.
+    QTemporaryDir dir;
+    const QString path = writeTempSpec( QDir( dir.path() ),
+                                        { { "spec_version", 3 } } );
+    const lab::LabSpecError error = loadOne( path );
+    REQUIRE( error.reason.contains( QStringLiteral( "runtime must be an object" ) ) );
 }
 
 TEST_CASE( "LabSpec 2 structured fields validate", "[labspec][v2]" )

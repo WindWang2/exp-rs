@@ -745,6 +745,22 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   // Resolve + gate every member BEFORE acquiring anything.
   const std::vector<ModelInfo> members = resolveEnsembleMembers( ensembleModel, request );
 
+  // Hardening 15/20: the all-zero-weight refusal is a STATIC manifest
+  // property — evaluate it before any member session is acquired or run.
+  // It used to fire only in each lane's combine pass, after every member
+  // had been acquired (VRAM reserved) and fully executed: a statically
+  // undefined ensemble paid full inference for a guaranteed typed refusal.
+  // The per-lane copies were removed; this is the single authority now.
+  {
+    double manifestWeightSum = 0.0;
+    for ( const ModelEnsembleMemberContract &entry : ensembleModel.ensemble.members )
+      manifestWeightSum += entry.weight;
+    if ( !( manifestWeightSum > 0.0 ) )
+      throw RSOperatorError( ErrorCode::InvalidInputData,
+                             "ensemble weights sum to zero - the combination is undefined "
+                               "(declare at least one positive weight)" );
+  }
+
   // Device override: the request's token applies to EVERY member (what a
   // caller forcing `cpu` means); without it each member resolves its own
   // manifest contract.
@@ -809,17 +825,8 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     contributions.reserve( runs.size() );
     for ( MemberRun &run : runs )
       contributions.push_back( DetectionMemberBoxes{ run.weight, std::move( run.boxes ) } );
-    // #1186: all-zero-weight detection ensembles used to publish an empty
-    // product; raster/scene paths typed-refuse — match that here.
-    {
-      double detectionWeightSum = 0.0;
-      for ( const DetectionMemberBoxes &c : contributions )
-        detectionWeightSum += c.weight;
-      if ( !( detectionWeightSum > 0.0 ) )
-        throw RSOperatorError( ErrorCode::InvalidInputData,
-                               "ensemble weights sum to zero - the combination is undefined "
-                                 "(declare at least one positive weight)" );
-    }
+    // (The all-zero-weight refusal moved above session acquisition — single
+    // authority in runEnsembleInference.)
     DetectionFusionContract fusion;
     fusion.iouThreshold = ensembleModel.ensemble.detection.iouThreshold;
     fusion.skipBoxThreshold = ensembleModel.ensemble.detection.skipBoxThreshold;
@@ -978,13 +985,11 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     // silently). weighted_vote: each member votes its argmax (ties lowest
     // index) with its weight; the winner is the highest accumulated vote,
     // ties to the lowest class index; agreement = winner vote share.
+    // (All-zero weights are refused before session acquisition — single
+    // authority in runEnsembleInference; the sum feeds the mean/vote.)
     double weightSum = 0.0;
     for ( const MemberRun &run : runs )
       weightSum += run.weight;
-    if ( !( weightSum > 0.0 ) )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "ensemble weights sum to zero - the combination is undefined "
-                               "(declare at least one positive weight)" );
 
     std::vector<double> combined( static_cast<std::size_t>( classCount ), 0.0 );
     std::vector<double> votes( static_cast<std::size_t>( classCount ), 0.0 );
@@ -1098,7 +1103,6 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     inputJson["path"] = request.inputPath;
     inputJson["fingerprint"] = runs.front().scene.inputFingerprint;
     doc["input"] = inputJson;
-    TileInferenceEngine::publishClassificationArtifact( doc, request.outputPath );
 
     ModelExecutionResult result;
     result.identityTag = ensembleModel.identityTag();
@@ -1111,6 +1115,10 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       devices += QString::fromStdString( run.session->deviceName() );
     }
     result.device = devices.toStdString();
+    // Hardening 15/20: the durable artifact carries the SAME top-level
+    // identity fields as the returned payload. They used to be added only
+    // AFTER the publish, so the on-disk document silently lacked
+    // backend/device/model_ref/ensemble_members.
     doc["backend"] = result.backend;
     doc["device"] = result.device;
     doc["model_ref"] = ensembleModel.stableId();
@@ -1130,6 +1138,7 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       membersPayload.append( member );
     }
     doc["ensemble_members"] = membersPayload;
+    TileInferenceEngine::publishClassificationArtifact( doc, request.outputPath );
     result.payload = std::move( doc );
     return result;
   }
@@ -1298,15 +1307,11 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
     uncertaintyNote = uncertaintyToken;
   }
 
-  // Weights, normalized once. An all-zero weight set makes both combinations
-  // undefined (mean divides by zero; vote degenerates to the lowest class).
+  // Weights, normalized once. (All-zero weight sets are refused before
+  // session acquisition — single authority in runEnsembleInference.)
   double weightSum = 0.0;
   for ( const MemberRun &run : runs )
     weightSum += run.weight;
-  if ( !( weightSum > 0.0 ) )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "ensemble weights sum to zero - the combination is undefined "
-                             "(declare at least one positive weight)" );
 
   // RAII for the combine pass: every escape (typed failure, cancellation,
   // normal end) closes the member handles and the staged writer exactly once
@@ -1724,7 +1729,10 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   combined.headChannels = { totalBands };
 
   // Atomic publish + provenance sidecar (the sidecar can only ever be
-  // ABSENT after a crash, never stale).
+  // ABSENT after a crash, never stale). Hardening 15/20: the old sidecar is
+  // PARKED before the product swap and restored on any failure — a
+  // sidecar-publish failure used to leave the restored previous product
+  // without its sidecar (verified product downgraded to MissingSidecar).
   const bool hadExisting = QFile::exists( finalPath );
   const QString backupPath = finalPath + QStringLiteral( ".prev~" );
   if ( hadExisting )
@@ -1738,15 +1746,32 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
                                + finalPath.toStdString() );
     }
   }
+  const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
+  const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
+  // Pre-clean the parked-sidecar slot (Windows rename does not overwrite —
+  // a crash-stranded slot would wedge every later publish of this path).
+  QFile::remove( sidecarBackupPath );
+  const bool hadSidecar = QFile::exists( oldSidecarPath );
+  if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
+  {
+    QFile::remove( stagePath );
+    if ( hadExisting )
+      QFile::rename( backupPath, finalPath );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "ensemble combine pass could not back up the previous provenance "
+                             "sidecar: " + finalPath.toStdString() );
+  }
   if ( !QFile::rename( stagePath, finalPath ) )
   {
+    QFile::remove( stagePath );
+    if ( hadSidecar )
+      QFile::rename( sidecarBackupPath, oldSidecarPath );
     if ( hadExisting )
       QFile::rename( backupPath, finalPath );
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "ensemble combine pass could not publish the product: "
                              + finalPath.toStdString() );
   }
-  QFile::remove( finalPath + QStringLiteral( ".prov.json" ) );
   const Json::Value provenance =
     buildEnsembleProvenance( ensembleModel, runs, combined, combination,
                              withUncertainty
@@ -1759,13 +1784,17 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   if ( !publishSidecar( finalPath, provenance, &sidecarError ) )
   {
     // The previous product's backup is kept until the new sidecar is in: a
-    // sidecar failure restores the previous product instead of destroying it
-    // (same invariant as the single-model engine's writer).
+    // sidecar failure restores the previous product — WITH its sidecar —
+    // instead of destroying or downgrading it (same invariant as the
+    // single-model engine's writer, hardening 15/20).
     QFile::remove( finalPath );
     if ( hadExisting )
       QFile::rename( backupPath, finalPath );
+    if ( hadSidecar )
+      QFile::rename( sidecarBackupPath, oldSidecarPath );
     throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
   }
+  QFile::remove( sidecarBackupPath ); // unconditional: also clears crash litter
   if ( hadExisting )
     QFile::remove( backupPath );
 
