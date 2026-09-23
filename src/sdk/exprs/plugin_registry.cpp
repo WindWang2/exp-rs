@@ -433,7 +433,13 @@ std::string PluginRegistry::lastGoodSnapshotPath( const std::string &pluginId ) 
     // Path computation is unconditional: reload() consults it, the sweep
     // reconciles it, and uninstallPlugin() removes it. The devMode policy
     // gate lives in refreshLastGoodSnapshot (production captures nothing).
-    return snapshotRoot() + "/last-good-" + pluginId;
+    // pid-attributed (completion 13/15): the snapshot belongs to THIS
+    // process's dev session — the sweep's owner-liveness rule can then
+    // protect a live sibling's rollback source without needing this
+    // process's registry view, and a dead process's tree becomes ordinary
+    // collectible residue.
+    return snapshotRoot() + "/last-good-" + pluginId + "-"
+           + std::to_string( snapshotOwnerPid() );
 }
 
 std::string PluginRegistry::upgradeSnapshotPath( const std::string &pluginId ) const
@@ -1845,10 +1851,14 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     PluginDiagnosticLog log;
     const bool ok = PluginPackage::uninstall( pluginId, log );
     std::string snapshotDir;
+    std::string legacySnapshotDir;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         mDiagnostics.merge( log );
         snapshotDir = lastGoodSnapshotPath( pluginId );
+        // Pre-attribution layout (completion 13/15): cleaned alongside —
+        // an uninstalled plugin must not leave a rollback source either way.
+        legacySnapshotDir = snapshotRoot() + "/last-good-" + pluginId;
     }
     if ( !ok )
         return false;
@@ -1856,6 +1866,8 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     // the package must not leave it orphaned in the snapshot root.
     std::error_code ec;
     std::filesystem::remove_all( std::filesystem::path( snapshotDir ), ec );
+    std::error_code legacyEc;
+    std::filesystem::remove_all( std::filesystem::path( legacySnapshotDir ), legacyEc );
     refresh();
     return true;
 }

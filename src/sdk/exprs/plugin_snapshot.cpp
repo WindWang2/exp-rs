@@ -790,7 +790,35 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
         else if ( name.rfind( "last-good-", 0 ) == 0 )
         {
             const std::string id = name.substr( std::string( "last-good-" ).size() );
-            remove = std::find( liveIds.begin(), liveIds.end(), id ) == liveIds.end();
+            // Completion 13/15 — cross-process liveness attribution. The dev
+            // last-good snapshot is now written pid-attributed
+            // (last-good-<id>-<pid>): a same-pid dir is this process's live
+            // dev rollback source, a LIVE foreign pid is a concurrent
+            // instance's — collecting either would strip a running process
+            // of its only hot-reload rollback (master keyed the whole
+            // grammar on the sweeping process's live ids). A DEAD owner's
+            // dir is residue once no sweeper knows the plugin either. The
+            // suffix is ambiguous with legacy ids that end in "-<digits>",
+            // so a suffixed name is only removed when BOTH readings are
+            // dead: pid-attributed (dead owner AND base id unknown) AND
+            // legacy (whole-suffix id unknown) — conservative, never
+            // destroys a live sibling's or a live legacy plugin's snapshot.
+            const long owner = trailingPid( name );
+            if ( owner > 0 )
+            {
+                const std::string baseId = id.substr( 0, id.rfind( '-' ) );
+                const bool ownerAlive =
+                    owner == ownPid || pidAlive( owner );
+                const bool liveAsAttributed =
+                    std::find( liveIds.begin(), liveIds.end(), baseId ) != liveIds.end();
+                const bool liveAsLegacy =
+                    std::find( liveIds.begin(), liveIds.end(), id ) != liveIds.end();
+                remove = !ownerAlive && !liveAsAttributed && !liveAsLegacy;
+            }
+            else
+            {
+                remove = std::find( liveIds.begin(), liveIds.end(), id ) == liveIds.end();
+            }
         }
         if ( remove )
         {

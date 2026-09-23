@@ -3,7 +3,11 @@
  * directory snapshots (track 13.0: replaces the 12.0 ad-hoc recursive copy)
  *
  * Layout under the snapshot root (registry temp dir, deterministic subdir):
- *   <temp>/sicnu-plugin-snapshots/last-good-<id>      dev-mode hot reload
+ *   <temp>/sicnu-plugin-snapshots/last-good-<id>-<pid>  dev-mode hot reload
+ *             (completion 13/15: pid-attributed so the sweep can tell a
+ *              live sibling's rollback source from a dead process's
+ *              residue; the pre-attribution last-good-<id> layout is still
+ *              swept under the legacy liveIds rule)
  *   <temp>/sicnu-plugin-snapshots/upgrade-<id>-<pid>  in-flight upgrade backup
  *   <temp>/sicnu-plugin-snapshots/<name>~staging-*    in-flight capture
  *   <temp>/sicnu-plugin-snapshots/<name>~old-*        dest parked during swap
@@ -106,9 +110,12 @@ long snapshotOwnerPid();
 /// (*~staging-*, *~old-*) whose OWNING pid is dead — artifacts
 /// of a live process (this one or a concurrent instance) are never
 /// touched — restores a ~old-* backup when its dest went missing mid-swap,
-/// drops last-good-<id> directories whose id is not in @p liveIds
-/// (abandoned dev trees, externally uninstalled plugins), and cleans the
-/// legacy <temp>/plugin-last-good-<id> layout left by 12.0 builds.
+/// drops last-good dev trees that are dead under BOTH name readings
+/// (completion 13/15: a pid-attributed last-good-<id>-<pid> dir is kept
+/// while its owner is alive — same pid or a live sibling — or while the
+/// plugin id is known to this registry; a suffix-less legacy last-good-<id>
+/// keeps the historical liveIds rule), and cleans the legacy
+/// <temp>/plugin-last-good-<id> layout left by 12.0 builds.
 /// #1157: a dead-owner upgrade-<id>-<pid> snapshot of a still-live plugin
 /// is the LAST COMPLETE copy — the owner may have died mid-rollback, when
 /// restorePluginSnapshot has already cleared the live directory
