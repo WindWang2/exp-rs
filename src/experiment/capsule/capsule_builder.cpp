@@ -14,6 +14,7 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 
 namespace sicnu::experiment::capsule
 {
