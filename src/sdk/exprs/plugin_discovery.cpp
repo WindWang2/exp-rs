@@ -186,18 +186,23 @@ std::string PluginDiscovery::userPluginRoot()
 {
     // Overridable so tests, sandboxes and multi-instance setups can redirect
     // the user plugin root (and the enable/disable index next to it).
-    const char *overrideRoot = std::getenv( "SICNU_PLUGIN_USER_ROOT" );
-    if ( overrideRoot && *overrideRoot )
+    // Root strings must honor the UTF-8 convention the index opens below
+    // assume: a localized Windows profile read through ACP getenv would
+    // decode to an empty path inside pathFromUtf8.
+    const std::string overrideRoot = sicnu::portable::envUtf8( "SICNU_PLUGIN_USER_ROOT" );
+    if ( !overrideRoot.empty() )
         return overrideRoot;
     // Per-platform home directory; falls back to the temp directory when no
     // home is available (headless/service contexts).
 #if defined( _WIN32 )
-    const char *home = std::getenv( "USERPROFILE" );
-    std::string homeDir = home ? home : ".";
+    std::string homeDir = sicnu::portable::envUtf8( "USERPROFILE" );
+    if ( homeDir.empty() )
+        homeDir = ".";
     return homeDir + "/sicnu_geo_rs/plugins";
 #else
-    const char *home = std::getenv( "HOME" );
-    const std::string homeDir = home ? home : "/tmp";
+    std::string homeDir = sicnu::portable::envUtf8( "HOME" );
+    if ( homeDir.empty() )
+        homeDir = "/tmp";
     return homeDir + "/.local/share/sicnu_geo_rs/plugins";
 #endif
 }
@@ -211,8 +216,8 @@ std::vector<std::string> PluginDiscovery::defaultRoots( const std::string &appDi
     if ( !installDataDir.empty() )
         roots.push_back( installDataDir + "/plugins" );
     roots.push_back( userPluginRoot() );
-    const char *extra = std::getenv( "SICNU_PLUGIN_PATH" );
-    if ( extra )
+    const std::string extra = sicnu::portable::envUtf8( "SICNU_PLUGIN_PATH" );
+    if ( !extra.empty() )
     {
 #if defined( _WIN32 )
         const char separator = ';';

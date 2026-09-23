@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 
 #ifndef _WIN32
 #include <sys/stat.h>
