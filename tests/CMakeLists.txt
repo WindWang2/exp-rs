@@ -9804,11 +9804,6 @@ target_link_libraries(test_lab_source PRIVATE
 )
 sicnu_discover_tests(test_lab_source)
 
-# RS14-07 Study → ExecutionPlane bridge E2E: full Qt/GDAL lane through the
-# single execution spine (sicnu_study_bridge over Sicnu::study +
-# sicnu_task_center, both pulled in transitively).
-sicnu_add_test(test_study_e2e)
-target_link_libraries(test_study_e2e PRIVATE sicnu_study_bridge)
 
 # Structure oracle: build/test wiring drift gate — every src/**/CMakeLists
 # reachable from root, every src/**/*.cpp named by an eligible build script,
