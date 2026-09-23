@@ -10,6 +10,7 @@
 // real contract changes, update BOTH — test_teaching_admin_core fails on
 // schema/digest drift via grader_transcript_invalid / exit-verdict
 // cross-checks, which is the signal to re-sync.
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -157,10 +158,31 @@ int main( int argc, char **argv )
         return 3;
     }
 
+    if ( bytes.find( "CRASH" ) != std::string::npos )
+    {
+        // Regression lane for the crash contract: emit a *complete valid*
+        // transcript, then die abnormally. A runScript that ignores
+        // exitStatus would read this as a normal exit — the adapter must
+        // answer unavailable/grader_crashed instead.
+        const std::string document =
+          std::string( "{\"schema\":\"sicnu.lab.grade/1\",\"digest\":\"" ) + kFakeDigest
+          + "\",\"generated_utc\":\"2026-01-01T00:00:00Z\",\"report\":"
+          + transcriptBody( lab, artifact, "pass", 99.0, "", "" ) + "}";
+        emit( outPath, document );
+        std:: fflush( stdout );
+        std:: raise( SIGSEGV );
+        return 99; // unreachable
+    }
+
     if ( bytes.find( "BAD" ) != std::string::npos )
     {
+        // Two deductions: the top one must be chosen by MAX WEIGHT (a2, 60),
+        // not by array order (a1 first) — locks the lab_batch_runner parity.
         const std::string deduction =
           std::string( "[{\"assertion_id\":\"a1\",\"kind\":\"range\",\"severity\":\"normal\","
+                       "\"weight\":10.0,\"observed\":\"40\",\"expected\":\">= 60\",\"delta\":null,"
+                       "\"message\":\"low weight fail\"},"
+                       "{\"assertion_id\":\"a2\",\"kind\":\"mean_sigma\",\"severity\":\"normal\","
                        "\"weight\":60.0,\"observed\":\"40\",\"expected\":\">= 60\",\"delta\":null,"
                        "\"message\":\"below pass line\"}]" );
         const std::string document =

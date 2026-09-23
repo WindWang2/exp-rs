@@ -7,7 +7,7 @@ Oracle definitions: see `oracle.md` in this directory.
 ## Execution timeline (one attributable change per round)
 
 Baseline R0 (2026-09-24): worktree from origin/master `e4904cd3c`; configure
-`dev-default` + `-DCMAKE_PREFIX_PATH=/home/kevin/pwb-sdks/root/usr`; narrow target
+`dev-default` + `-DCMAKE_PREFIX_PATH=$HOME/pwb-sdks/root/usr`; narrow target
 `test_teaching_admin_core` builds and is GREEN on clean master
 (85 assertions / 10 cases). RED/structural evidence for G1–G7 recorded in oracle.md.
 
@@ -83,3 +83,24 @@ commit "fix(teaching-admin): adversarial review round 1"):
   sortKeys on GraderCliGrade::toJson.
 
 Re-review: requested from the same reviewer (fix verification + final verdict).
+
+## Re-review (same reviewer) — READY / PROCEED, no blockers
+
+All P1/P2 fixes verified (incl. static check: all 19 committed packs / 111
+inputs conformant, zero violations). Adopted P3 recommendations in the final
+commit:
+- fake CLI "CRASH" lane: valid transcript then SIGSEGV → unavailable/
+  grader_crashed, score<0 (found+fixed a real bug while landing it:
+  unavailableGrade left started=false for the crash path).
+- BAD case now carries two deductions (a1 w10, a2 w60) → locks max-weight
+  top_deduction (a2).
+- spec_version integral check via std::floor (no UB for huge magnitudes).
+- missing_bytes aligned to authority (<0 fails; a 0-byte committed fixture
+  stays legal at validation and is caught by the byte pin at inventory).
+- scrubbed the username-bearing local path from the ledger.
+
+## Final key-oracle evidence (two consecutive full passes)
+
+- test_teaching_admin_core: 309 assertions / 28 cases — GREEN ×2
+- test_teaching_admin_dock_smoke: 16 assertions / 2 cases — GREEN ×2
+- git diff --check origin/master...HEAD: clean

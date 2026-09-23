@@ -220,7 +220,11 @@ GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactP
         return unavailableGrade( QStringLiteral( "grader_timeout" ),
                                  QStringLiteral( "grader exceeded %1 ms" ).arg( cfg.timeoutMs ) );
     if ( sr.crashed )
-        return unavailableGrade( QStringLiteral( "grader_crashed" ), sr.error );
+    {
+        GraderCliGrade crashed = unavailableGrade( QStringLiteral( "grader_crashed" ), sr.error );
+        crashed.started = true; // the process ran; it just died abnormally
+        return crashed;
+    }
 
     // The real CLI writes the transcript to --out and mirrors it on stdout;
     // prefer the file, fall back to stdout.

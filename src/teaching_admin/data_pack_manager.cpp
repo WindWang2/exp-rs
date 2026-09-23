@@ -153,7 +153,7 @@ ValidationResult validatePackDocument( const QJsonObject &pack, const QString &r
                         QStringLiteral( "inputs[%1].role" ).arg( i ),
                         QStringLiteral( "pack input requires a role" ) );
         if ( isCommittedFixture( provenance )
-             && static_cast<qint64>( in.value( QStringLiteral( "bytes" ) ).toDouble( -1 ) ) <= 0 )
+             && static_cast<qint64>( in.value( QStringLiteral( "bytes" ) ).toDouble( -1 ) ) < 0 )
             r.addError( QStringLiteral( "missing_bytes" ),
                         QStringLiteral( "inputs[%1].bytes" ).arg( i ),
                         QStringLiteral( "committed-fixture input requires a byte size" ) );

@@ -493,13 +493,25 @@ TEST_CASE( "gradeViaCli: pass/fail/unverifiable/usage over the real CLI contract
         REQUIRE( g.reportDigest.size() == 64 );
         REQUIRE( g.unavailableReason.isEmpty() );
     }
-    // fail carries the top deduction, never a fabricated pass
+    // fail carries the top deduction by MAX WEIGHT (a2 w60 beats a1 w10),
+    // never a fabricated pass
     {
         const auto g = gradeViaCli( cfg, bad );
         REQUIRE( g.exitCode == 1 );
         REQUIRE( g.status == QLatin1String( "fail" ) );
         REQUIRE( g.score == Catch::Approx( 40.0 ) );
-        REQUIRE( g.topDeduction == QLatin1String( "a1" ) );
+        REQUIRE( g.topDeduction == QLatin1String( "a2" ) );
+    }
+    // a grader that crashes after emitting a valid transcript must yield
+    // unavailable/grader_crashed — the transcript is never trusted
+    {
+        const QString crasher = write( QStringLiteral( "boom.tif" ), QByteArray( "CRASH" ) );
+        const auto g = gradeViaCli( cfg, crasher );
+        REQUIRE( g.started );
+        REQUIRE_FALSE( g.timedOut );
+        REQUIRE( g.status == QLatin1String( "unavailable" ) );
+        REQUIRE( g.unavailableReason == QLatin1String( "grader_crashed" ) );
+        REQUIRE( g.score < 0.0 );
     }
     // unverifiable artifact: typed unavailable with reason, score stays < 0
     {
