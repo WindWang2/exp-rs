@@ -90,7 +90,10 @@ Json::Value RsBandMathOperator::run(const Json::Value& params,
     if (!BandMath::processFile(QString::fromStdString(inputPath),
                                QString::fromStdString(outputPath),
                                QString::fromStdString(expression),
-                               &errorMessage)) {
+                               &errorMessage,
+                               [&context] { return context.isCancelled(); })) {
+        if (context.isCancelled())
+            throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Band math evaluation failed: " + errorMessage.toStdString());
     }

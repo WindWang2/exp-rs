@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <gdal.h>
 #include <sstream>
 #include <vector>
@@ -176,6 +177,51 @@ TEST_CASE( "IHS: null input returns empty", "[fusion]" )
     auto result = ImageFusion::ihsFusion( nullptr, nullptr, nullptr,
                                            nullptr, 0, 0, NODATA );
     REQUIRE( result.isEmpty() );
+}
+
+TEST_CASE( "IHS: NaN NoData pixels stay NoData instead of collapsing to black", "[fusion][hardening16]" )
+{
+    // RED on master: NaN passed every `== nodata` gate (NaN compares false),
+    // flowed through rgbToIhs/ihsToRgb, and the non-negative clamp
+    // (std::max(0.0f, NaN) == 0.0f) wrote legit-looking black pixels.
+    const int W = 4, H = 4, N = W * H;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    SECTION( "declared float sentinel + NaN holes" )
+    {
+        std::vector<float> r( N, 100.0f ), g( N, 60.0f ), b( N, 30.0f );
+        std::vector<float> pan( N, 63.3f );
+        r[0] = nan; g[0] = nan; b[0] = nan;
+
+        auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                               pan.data(), W, H, NODATA );
+        REQUIRE( result.size() == 3 );
+        for ( int band = 0; band < 3; ++band )
+        {
+            REQUIRE( result[band][0] == NODATA );
+            // Valid pixels keep their fused values.
+            REQUIRE( result[band][1] != NODATA );
+            REQUIRE( std::isfinite( result[band][1] ) );
+        }
+    }
+
+    SECTION( "NaN sentinel (the calibrated/QUAC output convention)" )
+    {
+        std::vector<float> r( N, 100.0f ), g( N, 60.0f ), b( N, 30.0f );
+        std::vector<float> pan( N, 63.3f );
+        r[0] = nan; g[0] = nan; b[0] = nan;
+        pan[5] = nan;
+
+        auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                               pan.data(), W, H, nan );
+        REQUIRE( result.size() == 3 );
+        for ( int band = 0; band < 3; ++band )
+        {
+            REQUIRE( std::isnan( result[band][0] ) ); // NaN MS hole -> NaN
+            REQUIRE( std::isnan( result[band][5] ) ); // NaN pan -> NaN
+            REQUIRE( std::isfinite( result[band][1] ) ); // valid pixel survives
+        }
+    }
 }
 
 // ===========================================================================

@@ -142,6 +142,11 @@ class GdalStreamingOutput
     /// Set the NoData value for a specific band (1-based).
     bool setBandNoDataValue( int band, double nodata );
 
+    /// Set a band-level metadata item (UTF-8 key/value, e.g.
+    /// SICNU_BAND_ROLE / WAVELENGTH / FWHM), mirroring GDALSetMetadataItem on
+    /// the band. No-op when closed.
+    bool setBandMetadataItem( int band, const QString &key, const QString &value );
+
     /// Set a dataset-level metadata item (UTF-8 key/value), mirroring
     /// GDALSetMetadataItem on the output dataset. No-op when closed (#665).
     bool setMetadataItem( const QString &key, const QString &value );

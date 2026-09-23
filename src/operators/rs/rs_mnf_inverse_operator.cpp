@@ -176,6 +176,12 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
                                   "Failed to create reconstruction-error raster: " + errorOut);
         errorDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
     }
+    // Close the GDAL handles before the guard removes paths: a removal while
+    // a dataset is open is a sharing violation on Windows (fail-open there).
+    partialGuard.setCloseFirst([&outDataset, &errorDataset] {
+        outDataset.closeWithError(nullptr);
+        errorDataset.closeWithError(nullptr);
+    });
 
     const std::vector<int> bandList = [&inputBands] {
         std::vector<int> bands(static_cast<size_t>(inputBands));

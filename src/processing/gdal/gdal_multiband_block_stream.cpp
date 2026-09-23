@@ -212,6 +212,18 @@ bool GdalStreamingOutput::setBandNoDataValue( int band, double nodata )
     return GDALSetRasterNoDataValue( b, nodata ) == CE_None;
 }
 
+bool GdalStreamingOutput::setBandMetadataItem( int band, const QString &key,
+                                               const QString &value )
+{
+    if ( !m_ds )
+        return false;
+    GDALRasterBandH b = GDALGetRasterBand( m_ds, band );
+    if ( !b )
+        return false;
+    return GDALSetMetadataItem( b, key.toUtf8().constData(),
+                                value.toUtf8().constData(), nullptr ) == CE_None;
+}
+
 bool GdalStreamingOutput::setNoDataValue( double nodata )
 {
     if ( !m_ds )

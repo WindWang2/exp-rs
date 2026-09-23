@@ -6,6 +6,7 @@
 
 #include <QString>
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -56,10 +57,13 @@ namespace BandMath
     /**
      * Read a multi-band GeoTIFF, evaluate an expression via bounded tile streaming (<64MB RAM),
      * and write a single-band output GeoTIFF.
+     * @param isCancelled polled once per streamed tile; returning true aborts
+     *   with errorMessage "Cancelled" and removes the partial output.
      * @return true on success; optional errorMessage receives failure reason.
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
-                     const QString &expression, QString *errorMessage = nullptr);
+                     const QString &expression, QString *errorMessage = nullptr,
+                     const std::function<bool()> &isCancelled = {});
 
     /// Return sorted unique band numbers referenced by @a expression (e.g. "b1+b3" -> {1,3}).
     /// Returns empty vector on parse error.

@@ -17,6 +17,8 @@
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
+#include <ogr_spatialref.h>
+#include <cpl_conv.h>
 
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_context.h"
@@ -3733,3 +3735,447 @@ TEST_CASE("rs:sar_speckle respects distinct per-band NoData sentinels in multi-b
 }
 
 
+
+// ===========================================================================
+// Hardening 16/20 (optical-analysis-processing) — regression oracles
+// Each case first failed on master (RED) and pins the fixed behavior.
+// ===========================================================================
+
+#include "processing/algorithms/band_math.h"
+#include "processing/algorithms/band_tools.h"
+#include "operators/rs/rs_partial_output_guard.h"
+
+TEST_CASE("Spectral index refuses degenerate positional duplicate bands (NBR on 4-band stack)", "[operators][rs][spectral][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // 4-band stack: blue=1, green=2, red=3, nir=4. No SICNU_BAND_ROLE and no
+    // explicit band params, so NBR's swir2 positional fallback used to clamp
+    // to min(6, bandCount) = 4 == nir and produce an all-constant 0 raster
+    // with exit success.
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(4);
+    for (int b = 0; b < 4; ++b)
+        bands[b].assign(W * H, 10.0f * (b + 1));
+    const QString inputPath = tmp.path() + "/stack4.tif";
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto nbr = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(nbr != nullptr);
+    Json::Value nbrParams(Json::objectValue);
+    nbrParams["input"] = inputPath.toStdString();
+    nbrParams["output"] = (tmp.path() + "/nbr.tif").toStdString();
+    nbrParams["index"] = "NBR";
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_WITH(nbr->run(nbrParams, ctx),
+                        Catch::Matchers::ContainsSubstring("degenerate all-constant ratio"));
+
+    // Positive control: NDVI's participating roles (nir=4, red=3) do not
+    // collide on the same 4-band stack and must keep working.
+    auto ndvi = RSOperatorRegistry::instance().create("rs:ndvi");
+    REQUIRE(ndvi != nullptr);
+    Json::Value ndviParams(Json::objectValue);
+    ndviParams["input"] = inputPath.toStdString();
+    ndviParams["output"] = (tmp.path() + "/ndvi.tif").toStdString();
+    Json::Value ndviResult = ndvi->run(ndviParams, ctx);
+    CHECK(ndviResult["output"].asString() == ndviParams["output"].asString());
+
+    // Explicit equal bands stay the caller's documented choice (kernel-level
+    // degeneracy, but the operator must not second-guess explicit params).
+    Json::Value nbrExplicit(Json::objectValue);
+    nbrExplicit["input"] = inputPath.toStdString();
+    nbrExplicit["output"] = (tmp.path() + "/nbr2.tif").toStdString();
+    nbrExplicit["index"] = "NBR";
+    nbrExplicit["nir"] = 4;
+    nbrExplicit["swir2"] = 4;
+    REQUIRE_NOTHROW(nbr->run(nbrExplicit, ctx));
+}
+
+TEST_CASE("Spectral index alias operators refuse a conflicting index override", "[operators][rs][spectral][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(6);
+    for (auto &b : bands) b.assign(W * H, 10.0f);
+    const QString inputPath = tmp.path() + "/stack6.tif";
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto ndvi = RSOperatorRegistry::instance().create("rs:ndvi");
+    REQUIRE(ndvi != nullptr);
+    RSOperatorContext ctx;
+
+    // A shared param blob carrying index=MNDWI must not turn rs:ndvi into an
+    // MNDWI run under an NDVI deliverable name.
+    Json::Value drift(Json::objectValue);
+    drift["input"] = inputPath.toStdString();
+    drift["output"] = (tmp.path() + "/drift.tif").toStdString();
+    drift["index"] = "MNDWI";
+    REQUIRE_THROWS_WITH(ndvi->run(drift, ctx),
+                        Catch::Matchers::ContainsSubstring("always computes NDVI"));
+    CHECK_FALSE(QFile::exists(tmp.path() + "/drift.tif"));
+
+    // Identity override stays harmless; the generic operator still selects.
+    Json::Value identity(Json::objectValue);
+    identity["input"] = inputPath.toStdString();
+    identity["output"] = (tmp.path() + "/identity.tif").toStdString();
+    identity["index"] = "NDVI";
+    REQUIRE_NOTHROW(ndvi->run(identity, ctx));
+
+    auto generic = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(generic != nullptr);
+    Json::Value select(Json::objectValue);
+    select["input"] = inputPath.toStdString();
+    select["output"] = (tmp.path() + "/savi.tif").toStdString();
+    select["index"] = "SAVI";
+    Json::Value selected = generic->run(select, ctx);
+    CHECK(selected["index"].asString() == "SAVI");
+}
+
+TEST_CASE("apply_mask requires the dimension contract when georeferencing is missing on one side", "[operators][rs][mask][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 100.0f));
+    const QString inputPath = tmp.path() + "/in.tif";
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // Mask WITHOUT a geotransform (per-scene QA convention): projection set,
+    // geotransform deliberately never written.
+    const auto writeMaskNoGt = [&](const QString &path, int mw, int mh) {
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        REQUIRE(drv != nullptr);
+        GDALDatasetH ds = GDALCreate(drv, path.toUtf8().constData(), mw, mh, 1, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        // Same CRS as the input so compareGrids passes the CRS stage.
+        GDALDatasetH ref = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ref != nullptr);
+        GDALSetProjection(ds, GDALGetProjectionRef(ref));
+        GDALClose(ref);
+        std::vector<float> zeros(static_cast<size_t>(mw) * mh, 0.0f);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, mw, mh,
+                             zeros.data(), mw, mh, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    };
+
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    // RED on master: an 8x8 ungeoreferenced mask against a 4x4 input was
+    // applied positionally from its top-left window with success.
+    writeMaskNoGt(tmp.path() + "/mask_big.tif", 8, 8);
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["mask"] = (tmp.path() + "/mask_big.tif").toStdString();
+        params["output"] = (tmp.path() + "/out_big.tif").toStdString();
+        params["no_data"] = -9999.0;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("co-registration cannot be verified"));
+        CHECK_FALSE(QFile::exists(tmp.path() + "/out_big.tif"));
+    }
+
+    // Dimension-matched ungeoreferenced masks keep working (positional
+    // application is the only meaningful reading of such a mask).
+    writeMaskNoGt(tmp.path() + "/mask_eq.tif", W, H);
+    {
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["mask"] = (tmp.path() + "/mask_eq.tif").toStdString();
+        params["output"] = (tmp.path() + "/out_eq.tif").toStdString();
+        params["no_data"] = -9999.0;
+        REQUIRE_NOTHROW(op->run(params, ctx));
+        REQUIRE(QFile::exists(tmp.path() + "/out_eq.tif"));
+    }
+}
+
+TEST_CASE("recode refuses non-integer label values instead of casting sentinels", "[operators][rs][recode][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    const QString inputPath = tmp.path() + "/labels.tif";
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    GDALDatasetH ds = createOutputTiff(inputPath, W, H, 1, GDT_Float32, gt, QString());
+    REQUIRE(ds != nullptr);
+    std::vector<float> labels(W * H, 1.0f);
+    labels[0] = -3.4e38f; // float NoData sentinel, undeclared
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                         labels.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:recode");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = (tmp.path() + "/recoded.tif").toStdString();
+    Json::Value map(Json::objectValue);
+    map["1"] = 2;
+    params["recode_map"] = map;
+
+    RSOperatorContext ctx;
+    // RED on master: the sentinel cast was UB (x86 yields INT_MIN) and the
+    // garbage class was written into the deliverable with exit success.
+    REQUIRE_THROWS_WITH(op->run(params, ctx),
+                        Catch::Matchers::ContainsSubstring("not a float32-exact"));
+    CHECK_FALSE(QFile::exists(tmp.path() + "/recoded.tif"));
+}
+
+TEST_CASE("majority filter treats the 2^31 float boundary as non-voting", "[operators][rs][majority][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 5;
+    constexpr int H = 5;
+    const QString inputPath = tmp.path() + "/labels.tif";
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    GDALDatasetH ds = createOutputTiff(inputPath, W, H, 1, GDT_Float32, gt, QString());
+    REQUIRE(ds != nullptr);
+    std::vector<float> labels(W * H, 3.0f);
+    labels[2 * W + 2] = 2147483647.0f; // rounds to exactly 2^31 in float32
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                         labels.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:majority_filter");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = (tmp.path() + "/filtered.tif").toStdString();
+    params["kernel"] = 3;
+    RSOperatorContext ctx;
+    REQUIRE_NOTHROW(op->run(params, ctx));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(QString::fromStdString(params["output"].asString())));
+    std::vector<float> outLabels(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandData(1, outLabels.data(), W, H));
+    // RED on master: static_cast<float>(INT_MAX) rounds up to 2^31, so the
+    // boundary value passed the old guard and the UB cast produced INT_MIN
+    // as a voting class. Fixed: the boundary is excluded (non-voting 0), so
+    // the NoData center convention keeps the pixel at 0.
+    CHECK(outLabels[2 * static_cast<size_t>(W) + 2] == 0.0f);
+    // Neighbours keep the majority label.
+    CHECK(outLabels[2 * static_cast<size_t>(W) + 1] == 3.0f);
+}
+
+TEST_CASE("feature_stack validates scale/offset instead of fabricating dead bands", "[operators][rs][feature_stack][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    const QString aPath = tmp.path() + "/a.tif";
+    const QString bPath = tmp.path() + "/b.tif";
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 5.0f));
+    REQUIRE(writeTestRaster(aPath, W, H, bands).empty());
+    REQUIRE(writeTestRaster(bPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:feature_stack");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    const auto buildParams = [&](double scale) {
+        Json::Value params(Json::objectValue);
+        params["output"] = (tmp.path() + "/cube.tif").toStdString();
+        Json::Value features(Json::arrayValue);
+        Json::Value fa(Json::objectValue);
+        fa["input"] = aPath.toStdString();
+        fa["band"] = 1;
+        fa["id"] = "a1";
+        features.append(fa);
+        Json::Value fb(Json::objectValue);
+        fb["input"] = bPath.toStdString();
+        fb["band"] = 1;
+        fb["id"] = "b1";
+        fb["scale"] = scale;
+        features.append(fb);
+        params["features"] = features;
+        return params;
+    };
+
+    // RED on master: scale=0 zeroed the band while the contract claimed
+    // physical values at scale 1.
+    REQUIRE_THROWS_WITH(op->run(buildParams(0.0), ctx),
+                        Catch::Matchers::ContainsSubstring("finite and non-zero"));
+    CHECK_FALSE(QFile::exists(tmp.path() + "/cube.tif"));
+    REQUIRE_THROWS_WITH(op->run(buildParams(-0.0), ctx),
+                        Catch::Matchers::ContainsSubstring("finite and non-zero"));
+}
+
+TEST_CASE("feature_stack compares CRS semantically, not by WKT encoding", "[operators][rs][feature_stack][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    // Same CRS (EPSG:4326) in two encodings: the default WKT1 export vs an
+    // explicit WKT2_2019 export. Raw string equality refuses this pair; the
+    // shared isSameCrs seam (OSRIsSame) must accept it.
+    OGRSpatialReference srs;
+    REQUIRE(srs.SetFromUserInput("EPSG:4326") == OGRERR_NONE);
+    char *wkt2 = nullptr;
+    const char *wkt2Opts[] = {"FORMAT=WKT2_2019", nullptr};
+    REQUIRE(srs.exportToWkt(&wkt2, wkt2Opts) == OGRERR_NONE);
+    const QString wkt2Str(wkt2);
+    CPLFree(wkt2);
+
+    const auto writeRaster = [&](const QString &path, const QString &projection) {
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        REQUIRE(drv != nullptr);
+        GDALDatasetH ds = GDALCreate(drv, path.toUtf8().constData(), W, H, 1,
+                                     GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        REQUIRE(GDALSetGeoTransform(ds, gt.data()) == CE_None);
+        REQUIRE(GDALSetProjection(ds, projection.toUtf8().constData()) == CE_None);
+        std::vector<float> px(W * H, 7.0f);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             px.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    };
+
+    const QString aPath = tmp.path() + "/a_wkt1.tif";
+    const QString bPath = tmp.path() + "/b_wkt2.tif";
+    writeRaster(aPath, QStringLiteral("GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST],AUTHORITY[\"EPSG\",\"4326\"]]"));
+    writeRaster(bPath, wkt2Str);
+
+    auto op = RSOperatorRegistry::instance().create("rs:feature_stack");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["output"] = (tmp.path() + "/cube.tif").toStdString();
+    Json::Value features(Json::arrayValue);
+    Json::Value fa(Json::objectValue);
+    fa["input"] = aPath.toStdString();
+    fa["band"] = 1;
+    fa["id"] = "a1";
+    features.append(fa);
+    Json::Value fb(Json::objectValue);
+    fb["input"] = bPath.toStdString();
+    fb["band"] = 1;
+    fb["id"] = "b1";
+    features.append(fb);
+    params["features"] = features;
+
+    RSOperatorContext ctx;
+    // Positive control for the semantic-compare fix. Note: on GDAL builds
+    // whose GDALGetProjectionRef re-exports both encodings as the same WKT1
+    // string, master's raw string compare also accepts this pair — the
+    // defect this pins (identical CRS refused for encoding drift) is proven
+    // by the OSRIsSame seam semantics, not by a RED run here (review P2-1).
+    REQUIRE_NOTHROW(op->run(params, ctx));
+    REQUIRE(QFile::exists(tmp.path() + "/cube.tif"));
+}
+
+TEST_CASE("BandMath::processFile honours the cancellation probe", "[operators][rs][bandmath][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 64;
+    constexpr int H = 64;
+    std::vector<std::vector<float>> bands(2, std::vector<float>(W * H, 1.0f));
+    const QString inputPath = tmp.path() + "/in.tif";
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    const QString outputPath = tmp.path() + "/out.tif";
+    QString error;
+    const bool ok = BandMath::processFile(inputPath, outputPath,
+                                          QStringLiteral("b1 + b2"), &error,
+                                          [] { return true; });
+    REQUIRE_FALSE(ok);
+    CHECK(error == QStringLiteral("Cancelled"));
+    // No partial output may survive a cancelled run.
+    CHECK_FALSE(QFile::exists(outputPath));
+}
+
+TEST_CASE("PartialOutputGuard closes registered datasets before removing paths", "[operators][rs][guard][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Armed guard: closeFirst runs, then the artifact is removed.
+    const QString armedPath = tmp.path() + "/armed.tif";
+    {
+        QFile f(armedPath);
+        REQUIRE(f.open(QIODevice::WriteOnly));
+        f.write("x", 1);
+    }
+    bool closed = false;
+    {
+        sicnu::operators::rs::PartialOutputGuard guard(armedPath);
+        guard.setCloseFirst([&closed] { closed = true; });
+    }
+    CHECK(closed);
+    CHECK_FALSE(QFile::exists(armedPath));
+
+    // Disarmed guard: success path must not close or remove anything.
+    const QString disarmedPath = tmp.path() + "/disarmed.tif";
+    {
+        QFile f(disarmedPath);
+        REQUIRE(f.open(QIODevice::WriteOnly));
+        f.write("x", 1);
+    }
+    bool closedDisarmed = false;
+    {
+        sicnu::operators::rs::PartialOutputGuard guard(disarmedPath);
+        guard.setCloseFirst([&closedDisarmed] { closedDisarmed = true; });
+        guard.disarm();
+    }
+    CHECK_FALSE(closedDisarmed);
+    CHECK(QFile::exists(disarmedPath));
+}
+
+TEST_CASE("extract_bands carries NoData, band roles and provenance stamps", "[operators][rs][bandtools][hardening16]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    const QString inputPath = tmp.path() + "/src.tif";
+    {
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        GDALDatasetH ds = createOutputTiff(inputPath, W, H, 2, GDT_Float32, gt, QString());
+        REQUIRE(ds != nullptr);
+        std::vector<float> b1(W * H, 1.0f), b2(W * H, 2.0f);
+        b1[0] = -9999.0f;
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             b1.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Write, 0, 0, W, H,
+                             b2.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 1), -9999.0);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 1), "SICNU_BAND_ROLE", "nir", nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 1), "WAVELENGTH", "865", nullptr);
+        GDALSetMetadataItem(ds, "SICNU_RADIOMETRIC_STATE", "radiance", nullptr);
+        GDALSetMetadataItem(ds, "SICNU_NUMERIC_SCALE", "10000", nullptr);
+        GDALClose(ds);
+    }
+
+    const QString outputPath = tmp.path() + "/extracted.tif";
+    QString error;
+    REQUIRE(BandTools::processExtractBandsFile(inputPath, outputPath, {1, 2},
+                                               &error, nullptr));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    // RED on master: the output dropped the NoData declaration, so the next
+    // spectral-index call would read the sentinel as data (NDVI ≈ -1 patch).
+    bool hasNd = false;
+    const double nd = out.bandNoDataValue(1, &hasNd);
+    REQUIRE(hasNd);
+    CHECK(nd == -9999.0);
+    CHECK(out.bandMetadataItem(1, "SICNU_BAND_ROLE") == QLatin1String("nir"));
+    CHECK(out.bandMetadataItem(1, "WAVELENGTH") == QLatin1String("865"));
+    CHECK(GDALGetMetadataItem(static_cast<GDALDatasetH>(out.dataset()),
+                              "SICNU_RADIOMETRIC_STATE", nullptr) != nullptr);
+    CHECK(QLatin1String(GDALGetMetadataItem(static_cast<GDALDatasetH>(out.dataset()),
+                                            "SICNU_RADIOMETRIC_STATE", nullptr))
+          == QLatin1String("radiance"));
+    CHECK(QLatin1String(GDALGetMetadataItem(static_cast<GDALDatasetH>(out.dataset()),
+                                            "SICNU_NUMERIC_SCALE", nullptr))
+          == QLatin1String("10000"));
+}

@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "data/raster_grid_compat.h"
 #include "processing/features/feature_cube.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_window_read.h"
@@ -197,6 +198,21 @@ Json::Value RsFeatureStackOperator::run(const Json::Value& params,
         }
         fs.scale = getDouble(entry, "scale", 1.0);
         fs.offset = getDouble(entry, "offset", 0.0);
+        // scale/offset rewrite every stored pixel of the band, and the cube
+        // contract then records scale=1/offset=0 ("values are physical"). A
+        // zero or non-finite scale therefore silently replaces the band with
+        // fabricated zeros/NaNs that downstream normalize/inference consumes
+        // as data — validate instead of letting the contract lie.
+        if (!std::isfinite(fs.scale) || fs.scale == 0.0) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                where + " 'scale' must be finite and non-zero");
+        }
+        if (!std::isfinite(fs.offset)) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                where + " 'offset' must be finite");
+        }
         sources.push_back(std::move(fs));
     }
 
@@ -266,7 +282,12 @@ Json::Value RsFeatureStackOperator::run(const Json::Value& params,
                                       std::to_string(height) + " — align inputs first "
                                       "(gdal:reproject); rs:feature_stack does not resample");
         }
-        if (src.projection() != refProjection) {
+        // Semantic CRS equality (OSRIsSame via the shared seam), not a raw
+        // WKT string compare: identical CRS in different encodings (WKT1 vs
+        // WKT2 export, axis-order formatting) must not refuse co-registered
+        // inputs. Empty projections compare equal to each other and fall
+        // through to the "no CRS" warning below.
+        if (!sicnu::data::isSameCrs(src.projection(), refProjection)) {
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "features[" + std::to_string(i) + "] '" + sources[i].input +
                                       "' has a CRS that does not match the " + gridName +

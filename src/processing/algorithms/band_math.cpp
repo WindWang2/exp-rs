@@ -96,7 +96,8 @@ std::vector<int> referencedBands(const QString &expression)
 }
 
 bool processFile(const QString &sourcePath, const QString &outputPath,
-                 const QString &expression, QString *errorMessage)
+                 const QString &expression, QString *errorMessage,
+                 const std::function<bool()> &isCancelled)
 {
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
@@ -169,6 +170,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     std::vector<float> tileOutput;
 
     bool streamOk = stream.forEach([&](const GdalMultibandBlockStream::Tile &tile, const float *pixelsBip) -> bool {
+        if (isCancelled && isCancelled())
+            return false;
         const size_t tilePixels = static_cast<size_t>(tile.width) * static_cast<size_t>(tile.height);
         for (size_t b = 0; b < numStreamBands; b++) {
             planarBuffers[b].resize(tilePixels);
@@ -201,7 +204,9 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
     if (!streamOk) {
         if (errorMessage && errorMessage->isEmpty())
-            *errorMessage = QStringLiteral("Failed while streaming tiles during band-math evaluation");
+            *errorMessage = (isCancelled && isCancelled())
+                                ? QStringLiteral("Cancelled")
+                                : QStringLiteral("Failed while streaming tiles during band-math evaluation");
         return false;
     }
 

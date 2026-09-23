@@ -75,10 +75,14 @@ public:
 };
 
 namespace spectral_index_detail {
+/// @param allowIndexOverride  true only for the generic rs:spectral_index
+///   operator; facade aliases own their index identity and refuse a
+///   conflicting undeclared `index` parameter (provenance drift guard).
 Json::Value runSpectralIndexCore(
     const std::string &defaultIndex,
     const Json::Value &params,
-    RSOperatorContext &context );
+    RSOperatorContext &context,
+    bool allowIndexOverride = false );
 }
 
 } // namespace sicnu::operators::rs

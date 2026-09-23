@@ -243,9 +243,12 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
                 // int (UB); both act as the non-voting 0 sentinel (#700) —
                 // class labels from Byte/UInt16/Int32 maps are always
                 // representable, so this only catches float NoData sentinels.
+                // The upper bound is EXCLUSIVE (2^31): static_cast<float>(INT_MAX)
+                // rounds up to 2^31, so `fv <= that` admitted exactly the value
+                // whose cast is UB.
                 labels[i] = (std::isfinite(fv)
-                             && fv >= static_cast<float>(std::numeric_limits<int>::min())
-                             && fv <= static_cast<float>(std::numeric_limits<int>::max()))
+                             && fv >= -2147483648.0f
+                             && fv < 2147483648.0f)
                             ? static_cast<int>(fv) : 0;
             }
         }
