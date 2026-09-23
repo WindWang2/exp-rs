@@ -100,9 +100,14 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
     if ( srs )
     {
         facts.geometry.hasCrs = true;
-        const std::string wkt = srs->exportToWkt();
-        if ( !wkt.empty() )
+        // GDAL exportToWkt takes char** (OGRERR_NONE on success); there is no
+        // std::string-returning overload on OGRSpatialReference.
+        char *wkt = nullptr;
+        if ( srs->exportToWkt( &wkt ) == OGRERR_NONE && wkt != nullptr )
+        {
             facts.geometry.crsWkt = wkt;
+            CPLFree( wkt );
+        }
         const char *authorityName = srs->GetAuthorityName( nullptr );
         const char *authorityCode = srs->GetAuthorityCode( nullptr );
         if ( authorityName != nullptr && authorityCode != nullptr )
