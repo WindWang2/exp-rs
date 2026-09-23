@@ -1,25 +1,33 @@
 #include "experiment_studio/experiment_studio_dock.h"
 #include "experiment_studio/sensitivity_chart_widget.h"
 
+#include "dataset/dataset_store.h"
+#include "experiment/experiment_matrix.h"
+#include "experiment/experiment_store.h"
 #include "experiment_studio/fault_teaching_projection.h"
 #include "experiment_studio/first_divergence_projection.h"
+#include "experiment_studio/live/studio_live.h"
 #include "experiment_studio/run_matrix_projection.h"
 #include "experiment_studio/sensitivity_projection.h"
 #include "experiment_studio/spatial_compare_projection.h"
 #include "experiment_studio/studio_export.h"
 #include "experiment_studio/study_designer.h"
+#include "study/bridge/study_execution_plane.h"
 #include "study/study_export.h"
 #include "study/study_spatial.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonParseError>
+#include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -30,9 +38,12 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include <atomic>
+
 using sicnu::app::experiment_studio::ChartSeriesPoint;
 using sicnu::app::experiment_studio::SensitivityChartWidget;
 using namespace sicnu::experiment_studio;
+using namespace sicnu::experiment_studio::live;
 using namespace sicnu::study;
 
 namespace sicnu::app
@@ -66,7 +77,7 @@ class BufferSummarizer final : public ISpatialDifferenceSummarizer
         return Result<SpatialDifferenceSummary>::failure(
             studyError( QStringLiteral( "experiment_studio.spatial_demo_only" ),
                         QStringLiteral( "dock demo summarizer handles synthetic:// paths only; "
-                                         "production uses GdalRasterDifferenceSummarizer" ) ) );
+                                        "the live path uses GdalRasterDifferenceSummarizer" ) ) );
     }
 };
 
@@ -78,6 +89,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
     setObjectName( QStringLiteral( "rsExperimentExplorationStudioDock" ) );
     m_session.policy = defaultResourcePolicy();
     m_session.activeTab = QStringLiteral( "designer" );
+    m_liveDatasets = std::make_unique<sicnu::dataset::DatasetStore>();
 
     auto *root = new QWidget( this );
     auto *rootLayout = new QVBoxLayout( root );
@@ -114,10 +126,15 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_replicatesSpin->setRange( 1, 32 );
         m_replicatesSpin->setValue( 1 );
         m_metricEdit = new QLineEdit( QStringLiteral( "maskedPercent" ) );
+        m_inputRasterEdit = new QLineEdit;
+        m_inputRasterEdit->setPlaceholderText( tr( "/path/to/input.tif (live study input)" ) );
         m_designerLog = new QPlainTextEdit;
         m_designerLog->setReadOnly( true );
         auto *validateBtn = new QPushButton( tr( "Validate StudySpec" ) );
         auto *demoBtn = new QPushButton( tr( "Load NDVI/threshold demo" ) );
+        m_openStoreBtn = new QPushButton( tr( "Open experiment store…" ) );
+        m_runLiveBtn = new QPushButton( tr( "Run study (live spine)" ) );
+        m_runLiveBtn->setEnabled( false );
         form->addRow( tr( "Algorithm" ), m_algorithmEdit );
         form->addRow( tr( "Strategy" ), m_strategyCombo );
         form->addRow( tr( "Parameter" ), m_paramPathEdit );
@@ -127,11 +144,17 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         form->addRow( tr( "Max runs" ), m_maxRunsSpin );
         form->addRow( tr( "Seed replicates" ), m_replicatesSpin );
         form->addRow( tr( "Metric" ), m_metricEdit );
+        form->addRow( tr( "Input raster" ), m_inputRasterEdit );
         form->addRow( validateBtn );
         form->addRow( demoBtn );
+        form->addRow( m_openStoreBtn );
+        form->addRow( m_runLiveBtn );
         form->addRow( m_designerLog );
         connect( validateBtn, &QPushButton::clicked, this, &ExperimentStudioDock::validateDesigner );
         connect( demoBtn, &QPushButton::clicked, this, &ExperimentStudioDock::loadDemoThresholdStudy );
+        connect( m_openStoreBtn, &QPushButton::clicked, this,
+                 &ExperimentStudioDock::openLiveStore );
+        connect( m_runLiveBtn, &QPushButton::clicked, this, &ExperimentStudioDock::runLiveStudy );
         m_tabs->addTab( page, tr( "A Study Designer" ) );
     }
 
@@ -162,8 +185,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( m_matrixTable );
         connect( applyFilter, &QPushButton::clicked, this, &ExperimentStudioDock::rebuildMatrixTable );
         connect( synth, &QPushButton::clicked, this, &ExperimentStudioDock::applySyntheticRunMatrix );
-        connect( cancelBtn, &QPushButton::clicked, this,
-                 &ExperimentStudioDock::cancelStudyPlaceholder );
+        connect( cancelBtn, &QPushButton::clicked, this, &ExperimentStudioDock::cancelLiveStudy );
         m_tabs->addTab( page, tr( "B Run Matrix" ) );
     }
 
@@ -410,21 +432,263 @@ void ExperimentStudioDock::rebuildMatrixTable()
     }
 }
 
-void ExperimentStudioDock::cancelStudyPlaceholder()
+ExperimentStudioDock::~ExperimentStudioDock()
 {
-    // UI signals cancel intent; execution cancel propagates via StudyRunner /
-    // TaskCenter — Studio owns no private thread pool.
+    if ( m_liveCancel )
+        m_liveCancel->store( true );
+    if ( m_liveRunThread && m_liveRunThread->joinable() )
+        m_liveRunThread->join(); // drains quickly: StudyRunner honours the flag
+}
+
+void ExperimentStudioDock::openLiveStore()
+{
+    if ( liveBusy() )
+    {
+        m_designerLog->setPlainText( tr( "study run in progress — wait or cancel first" ) );
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr( "Open experiment store" ), QString(),
+        tr( "SQLite store (*.db *.sqlite *.sqlite3);;All files (*)" ) );
+    if ( path.isEmpty() )
+        return;
+    auto store = std::make_shared<sicnu::experiment::ExperimentStore>();
+    QString error;
+    if ( !store->open( path, &error ) )
+    {
+        logTypedFailure( m_designerLog, QStringLiteral( "open store" ),
+                         QStringLiteral( "experiment_studio.store_open_failed" ), error );
+        return;
+    }
+    m_liveStore = store;
+    m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
+    m_liveStudyOutputDir =
+        QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
+    m_designerLog->setPlainText(
+        tr( "Live store open: %1\nStudy outputs will be committed under %2\n"
+            "Set the input raster, then Run study (live spine)." )
+            .arg( path, m_liveStudyOutputDir ) );
+    m_runLiveBtn->setEnabled( true );
+}
+
+void ExperimentStudioDock::runLiveStudy()
+{
+    if ( !m_liveStore )
+    {
+        m_designerLog->setPlainText( tr( "Open an experiment store first" ) );
+        return;
+    }
+    if ( liveBusy() )
+    {
+        m_designerLog->setPlainText( tr( "study run already in progress" ) );
+        return;
+    }
+    const QString inputRaster = m_inputRasterEdit->text().trimmed();
+    if ( inputRaster.isEmpty() || !QFile::exists( inputRaster ) )
+    {
+        m_designerLog->setPlainText(
+            tr( "Input raster missing: the study needs a real input file" ) );
+        return;
+    }
+
+    // The designer fields ARE the live spec (validated by the production
+    // reader inside StudyRunner — typed study.* refusals surface verbatim).
+    ParameterDimension dim;
+    dim.parameterPath = m_paramPathEdit->text().trimmed();
+    dim.minValue = m_minSpin->value();
+    dim.maxValue = m_maxSpin->value();
+    dim.stepCount = m_stepsSpin->value();
+    StudyBudget budget;
+    budget.maxRuns = m_maxRunsSpin->value();
+    budget.maxInFlight = 2;
+    budget.perRunTimeoutMs = 600000;
+    budget.seedReplicates = m_replicatesSpin->value();
+    budget.seed = 42;
+    ParameterStudySpec spec;
+    spec.studyId = m_session.studyId.isEmpty() ? QStringLiteral( "studio-live" )
+                                               : m_session.studyId;
+    spec.experimentId = m_session.experimentId.isEmpty() ? QStringLiteral( "exp-studio-live" )
+                                                         : m_session.experimentId;
+    spec.algorithmId = m_algorithmEdit->text().trimmed();
+    spec.baseParameters = QJsonObject{ { QStringLiteral( "input" ), inputRaster } };
+    spec.strategy = static_cast<SamplingStrategy>( m_strategyCombo->currentData().toInt() );
+    spec.dimensions.append( dim );
+    spec.budget = budget;
+    spec.metricNames.append( m_metricEdit->text().trimmed() );
+    m_liveSpatialEpsilon = 0.0;
+
+    // Sampling happens on the UI thread (pure, bounded); a typed refusal
+    // never reaches the worker.
+    const auto points = sampleStudyPoints( spec );
+    if ( !points )
+    {
+        logTypedFailure( m_designerLog, QStringLiteral( "sample study" ),
+                         points.diagnostics().first().code,
+                         points.diagnostics().first().message );
+        return;
+    }
+
+    m_runLiveBtn->setEnabled( false );
+    m_openStoreBtn->setEnabled( false );
+    m_liveCancel = std::make_shared<std::atomic<bool>>( false );
+    auto cancel = m_liveCancel;
+    auto store = m_liveStore;
+    auto ledger = m_liveLedger;
+    const QString outputDir = m_liveStudyOutputDir;
+    QPointer<ExperimentStudioDock> guard( this );
+
+    m_liveRunThread = std::make_unique<std::thread>(
+        [guard, store, ledger, spec, pts = points.value(), outputDir, cancel]() {
+            // Waiter thread only: StudyRunner owns the in-flight window and
+            // TaskCenter owns admission. No study point executes here.
+            ExecutionPlaneStudyBackend backend; // production spine adapter
+            const auto ran =
+                runStudy( *store, *ledger, spec, backend, outputDir, *cancel );
+            QJsonObject reportJson;
+            QString error;
+            int recorded = 0;
+            int failed = 0;
+            int cancelledCount = 0;
+            if ( ran )
+            {
+                recorded = ran->recordedCount;
+                failed = ran->failedCount;
+                cancelledCount = ran->cancelledCount;
+                if ( spec.spatialComparison && ran->recordedCount > 0 )
+                {
+                    // Real GDAL run-vs-baseline summaries for the report.
+                    const GdalRasterDifferenceSummarizer summarizer( spec.spatialEpsilon );
+                    const auto spatial =
+                        summarizeStudyOutputs( *store, *ledger, spec, pts, outputDir,
+                                               summarizer );
+                    const StudyReport report =
+                        reportFromStore( *store, *ledger, spec, pts,
+                                         spatial ? spatial.value()
+                                                 : QVector<SpatialDifferenceSummary>{},
+                                         &ran.value() );
+                    reportJson = report.toJson();
+                }
+                else
+                {
+                    const StudyReport report =
+                        reportFromStore( *store, *ledger, spec, pts, {}, &ran.value() );
+                    reportJson = report.toJson();
+                }
+            }
+            else
+            {
+                error = QStringLiteral( "%1: %2" )
+                            .arg( ran.diagnostics().first().code,
+                                  ran.diagnostics().first().message );
+            }
+            if ( !guard )
+                return; // dock closed mid-run; refs keep the stores alive
+            QMetaObject::invokeMethod(
+                guard,
+                [guard, reportJson, recorded, failed, cancelledCount, error]() {
+                    if ( guard )
+                        guard->applyLiveStudyResult( reportJson, recorded, failed, cancelledCount,
+                                                     error );
+                },
+                Qt::QueuedConnection );
+        } );
+}
+
+void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount,
+                                                 int failedCount, int cancelledCount,
+                                                 const QString &error )
+{
+    if ( m_liveRunThread && m_liveRunThread->joinable() )
+        m_liveRunThread->join();
+    m_liveRunThread.reset();
+    m_liveCancel.reset();
+    m_runLiveBtn->setEnabled( true );
+    m_openStoreBtn->setEnabled( true );
+
+    if ( !error.isEmpty() )
+    {
+        logTypedFailure( m_designerLog, QStringLiteral( "live study" ),
+                         QStringLiteral( "study.run_failed" ), error );
+        return;
+    }
+
+    m_lastStudyReport = reportJson;
+    m_session.lastStudyReport = reportJson;
+    const auto report = StudyReport::fromJson( reportJson );
+    if ( report )
+    {
+        m_session.studyId = report->studyId;
+        m_session.experimentId = report->experimentId;
+        m_session.algorithmId = report->algorithmId;
+    }
+    rebuildMatrixTable();
+    refreshSensitivity();
+    m_tabs->setCurrentIndex( 1 );
     m_matrixStatus->setText(
-        tr( "Cancel requested — propagates via StudyRunner → TaskCenter (no private pool)" ) );
+        tr( "live study: %1 recorded, %2 failed, %3 cancelled — run truth in the store" )
+            .arg( recordedCount )
+            .arg( failedCount )
+            .arg( cancelledCount ) );
+}
+
+void ExperimentStudioDock::logTypedFailure( QPlainTextEdit *log, const QString &context,
+                                            const QString &code, const QString &message )
+{
+    if ( !log )
+        return;
+    log->setPlainText(
+        QStringLiteral( "%1 refused — %2: %3" ).arg( context, code, message ) );
+}
+
+bool ExperimentStudioDock::liveBusy() const
+{
+    return m_liveRunThread != nullptr;
+}
+
+void ExperimentStudioDock::cancelLiveStudy()
+{
+    if ( !liveBusy() || !m_liveCancel )
+    {
+        m_matrixStatus->setText( tr( "No live study in progress" ) );
+        return;
+    }
+    // Cooperative cancel: StudyRunner observes the flag between submissions,
+    // drains in-flight points as cancelled and records truthful states.
+    m_liveCancel->store( true );
+    m_matrixStatus->setText(
+        tr( "Cancellation requested — propagates via StudyRunner → TaskCenter" ) );
 }
 
 void ExperimentStudioDock::compareSelectedSpatial()
 {
+    const auto selected = m_matrixTable->selectionModel()->selectedRows();
+    // LIVE path: a live study exists and two recorded points are selected →
+    // compare the COMMITTED outputs through the real GDAL summarizer.
+    if ( m_liveStore && !m_lastStudyReport.isEmpty() && selected.size() >= 2 )
+    {
+        const QString leftId = m_matrixTable->item( selected[0].row(), 0 )->text();
+        const QString rightId = m_matrixTable->item( selected[1].row(), 0 )->text();
+        const auto vm = compareRecordedPoints( m_liveStudyOutputDir, leftId, rightId,
+                                               m_liveSpatialEpsilon, SpatialCompareMode::DiffSummary,
+                                               m_session.policy );
+        if ( !vm )
+        {
+            logTypedFailure( m_spatialLog, QStringLiteral( "compare" ),
+                             vm.diagnostics().first().code,
+                             vm.diagnostics().first().message );
+            return;
+        }
+        m_lastSpatialVm = vm.value().toJson();
+        m_spatialLog->setPlainText( QString::fromUtf8(
+            QJsonDocument( m_lastSpatialVm ).toJson( QJsonDocument::Indented ) ) );
+        return;
+    }
+
+    // DEMO path (no live store): labeled demo, refuses real paths.
     QString left = QStringLiteral( "synthetic://out/p0000.tif" );
     QString right = QStringLiteral( "synthetic://out/p0001.tif" );
     QString leftId = QStringLiteral( "p0000" );
     QString rightId = QStringLiteral( "p0001" );
-    const auto selected = m_matrixTable->selectionModel()->selectedRows();
     if ( selected.size() >= 2 )
     {
         leftId = m_matrixTable->item( selected[0].row(), 0 )->text();
@@ -501,49 +765,107 @@ void ExperimentStudioDock::rebuildChart()
 
 void ExperimentStudioDock::runFaultTeachingDemo()
 {
-    QJsonObject scenario;
-    scenario.insert( QStringLiteral( "scenario_id" ), QStringLiteral( "fault.demo.all_nodata" ) );
-    scenario.insert( QStringLiteral( "title" ), QStringLiteral( "All NoData teaching fault" ) );
-    scenario.insert( QStringLiteral( "learning_objective" ),
-                     QStringLiteral( "Recognize all-nodata scientific fault" ) );
-    scenario.insert( QStringLiteral( "expected_diagnosis_signature" ),
-                     QStringLiteral( "all_nodata" ) );
-    auto prior = projectFaultScenarioPredict( scenario );
-    const QString prediction = m_faultPrediction->text().trimmed().isEmpty()
-                                   ? QStringLiteral( "all_nodata" )
-                                   : m_faultPrediction->text().trimmed();
-    const QString originalFp = QStringLiteral( "sha256:original-demo" );
-    const auto vm = projectFaultDiagnosis( prior, prediction, QStringLiteral( "all_nodata" ),
-                                           QJsonObject{ { QStringLiteral( "observable" ),
-                                                          QStringLiteral( "all_nodata" ) } },
-                                           QStringLiteral( "/tmp/fault-sandbox-demo" ), originalFp,
-                                           originalFp );
-    m_lastFaultVm = vm.toJson();
-    m_session.faultScenarioId = vm.scenarioId;
+    // LIVE fault teaching: a real sicnu.lab.faults/1 scenario runs through
+    // the REAL faultlab sandbox pipeline (copy → inject into the copy →
+    // re-digest the source). No scenario file → typed refusal, never a
+    // fabricated run.
+    const QString scenarioPath = QFileDialog::getOpenFileName(
+        this, tr( "Load fault scenario (sicnu.lab.faults/1)" ), QString(),
+        tr( "Scenario JSON (*.json)" ) );
+    if ( scenarioPath.isEmpty() )
+    {
+        m_faultLog->setPlainText(
+            tr( "No scenario loaded — pick a sicnu.lab.faults/1 JSON document "
+                "(the previous all-nodata demo ran no real sandbox)." ) );
+        return;
+    }
+    QFile scenarioFile( scenarioPath );
+    if ( !scenarioFile.open( QIODevice::ReadOnly ) )
+    {
+        logTypedFailure( m_faultLog, QStringLiteral( "load scenario" ),
+                         QStringLiteral( "experiment_studio.fault_scenario_unreadable" ),
+                         scenarioPath );
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonObject scenario =
+        QJsonDocument::fromJson( scenarioFile.readAll(), &parseError ).object();
+    if ( scenario.isEmpty() )
+    {
+        logTypedFailure( m_faultLog, QStringLiteral( "parse scenario" ),
+                         QStringLiteral( "experiment_studio.fault_scenario_invalid" ),
+                         parseError.errorString() );
+        return;
+    }
+    const QString prediction = m_faultPrediction->text().trimmed();
+    const auto vm = runFaultScenarioTeaching( scenario, prediction );
+    if ( !vm )
+    {
+        logTypedFailure( m_faultLog, QStringLiteral( "run scenario" ),
+                         vm.diagnostics().first().code, vm.diagnostics().first().message );
+        return;
+    }
+    m_lastFaultVm = vm.value().toJson();
+    m_session.faultScenarioId = vm->scenarioId;
     m_faultLog->setPlainText(
         QString::fromUtf8( QJsonDocument( m_lastFaultVm ).toJson( QJsonDocument::Indented ) ) );
 }
 
 void ExperimentStudioDock::loadFirstDivergenceDemo()
 {
-    QJsonObject first;
-    first.insert( QStringLiteral( "kind" ), QStringLiteral( "ParameterDivergence" ) );
-    first.insert( QStringLiteral( "confidence" ), QStringLiteral( "high" ) );
-    first.insert( QStringLiteral( "reference_step_id" ), QStringLiteral( "step-threshold" ) );
-    first.insert( QStringLiteral( "student_step_id" ), QStringLiteral( "step-threshold" ) );
-    first.insert( QStringLiteral( "evidence" ),
-                  QJsonArray{ QStringLiteral( "param:threshold ref=0.3 student=0.5" ) } );
-    first.insert( QStringLiteral( "missing_evidence" ),
-                  QJsonArray{ QStringLiteral( "upstream_digest" ) } );
-    QJsonObject report;
-    report.insert( QStringLiteral( "reference_run_id" ), QStringLiteral( "run-ref" ) );
-    report.insert( QStringLiteral( "student_run_id" ), QStringLiteral( "run-student" ) );
-    report.insert( QStringLiteral( "verdict" ), QStringLiteral( "incomplete" ) );
-    report.insert( QStringLiteral( "has_first_divergence" ), true );
-    report.insert( QStringLiteral( "first_divergence" ), first );
-    report.insert( QStringLiteral( "evidence_gaps" ),
-                   QJsonArray{ QStringLiteral( "upstream_digest" ) } );
-    const FirstDivergenceViewModel vm = projectFirstDivergence( report );
+    // LIVE divergence: real recorded evidence via DirectoryEvidenceSource —
+    // checkpoint/provenance/workflow-metrics when present, typed evidence
+    // gaps (and DOWNGRADED confidence) when absent. Without a live study,
+    // this stays a clearly-labeled demo, never fake evidence.
+    if ( !m_liveStore || m_lastStudyReport.isEmpty() )
+    {
+        m_divergenceLog->setPlainText(
+            tr( "No live study — open a store, run a study, then compare two "
+                "recorded runs. (The previous hand-built report was a demo.)" ) );
+        return;
+    }
+    if ( liveBusy() )
+    {
+        m_divergenceLog->setPlainText( tr( "study run in progress — wait or cancel first" ) );
+        return;
+    }
+    QString referenceRunId = m_session.referenceRunId;
+    QString studentRunId = m_session.studentRunId;
+    const auto selected = m_matrixTable->selectionModel()->selectedRows();
+    if ( selected.size() >= 2 )
+    {
+        const auto report = StudyReport::fromJson( m_lastStudyReport );
+        if ( report )
+        {
+            const QString leftPointId = m_matrixTable->item( selected[0].row(), 0 )->text();
+            const QString rightPointId = m_matrixTable->item( selected[1].row(), 0 )->text();
+            for ( const StudyRunRow &row : report->runTable )
+            {
+                if ( row.pointId == leftPointId && !row.runId.isEmpty() )
+                    referenceRunId = row.runId;
+                if ( row.pointId == rightPointId && !row.runId.isEmpty() )
+                    studentRunId = row.runId;
+            }
+        }
+    }
+    if ( referenceRunId.isEmpty() || studentRunId.isEmpty() || referenceRunId == studentRunId )
+    {
+        m_divergenceLog->setPlainText(
+            tr( "Select two recorded points in the run matrix (reference and "
+                "student run) to localize divergence." ) );
+        return;
+    }
+    const auto report =
+        firstDivergenceReport( m_liveStore.get(), m_liveStudyOutputDir, referenceRunId,
+                               studentRunId );
+    if ( !report )
+    {
+        logTypedFailure( m_divergenceLog, QStringLiteral( "first divergence" ),
+                         report.diagnostics().first().code,
+                         report.diagnostics().first().message );
+        return;
+    }
+    const FirstDivergenceViewModel vm = projectFirstDivergence( report.value() );
     m_lastDivergenceVm = vm.toJson();
     m_session.referenceRunId = vm.referenceRunId;
     m_session.studentRunId = vm.studentRunId;
@@ -570,6 +892,56 @@ void ExperimentStudioDock::exportBundle()
             bundle.runIds.append( runId );
     }
     bundle.csvRunTable = studyRunTableToCsv( m_lastStudyReport );
+
+    // LIVE capsules: build/export/reload through the real Capsule APIs for
+    // the recorded divergence runs. The bundle and session carry the REFS
+    // (paths) only — a capsule body never enters either.
+    QStringList capsuleLogLines;
+    if ( m_liveStore && !liveBusy() )
+    {
+        QStringList capsuleRunIds;
+        if ( !m_session.referenceRunId.isEmpty() )
+            capsuleRunIds.append( m_session.referenceRunId );
+        if ( !m_session.studentRunId.isEmpty()
+             && !capsuleRunIds.contains( m_session.studentRunId ) )
+            capsuleRunIds.append( m_session.studentRunId );
+        const QString capsuleDir = m_liveStudyOutputDir + QStringLiteral( "/capsules" );
+        for ( const QString &runId : capsuleRunIds )
+        {
+            const QString capsulePath =
+                capsuleDir + QStringLiteral( "/capsule-%1.json" ).arg( runId );
+            const auto exported = exportRunCapsule( *m_liveStore, *m_liveDatasets, runId,
+                                                    capsulePath, m_liveStudyOutputDir );
+            if ( !exported )
+            {
+                capsuleLogLines.append(
+                    QStringLiteral( "capsule %1 refused — %2: %3" )
+                        .arg( runId, exported.diagnostics().first().code,
+                              exported.diagnostics().first().message ) );
+                continue;
+            }
+            bundle.capsuleRefs.append( exported->path );
+            const auto readiness = capsuleReloadReadiness( exported->path, nullptr );
+            if ( readiness )
+            {
+                capsuleLogLines.append(
+                    QStringLiteral( "capsule %1 → %2 (readiness level: %3)" )
+                        .arg( runId, exported->path,
+                              readiness->value( QStringLiteral( "readiness" ) )
+                                  .toObject()
+                                  .value( QStringLiteral( "level" ) )
+                                  .toString() ) );
+            }
+            else
+            {
+                capsuleLogLines.append(
+                    QStringLiteral( "capsule reload %1 refused — %2: %3" )
+                        .arg( runId, readiness.diagnostics().first().code,
+                              readiness.diagnostics().first().message ) );
+            }
+        }
+    }
+
     const QString path = QFileDialog::getSaveFileName(
         this, tr( "Export Studio bundle" ), QStringLiteral( "studio-export.json" ),
         tr( "JSON (*.json)" ) );
@@ -583,8 +955,14 @@ void ExperimentStudioDock::exportBundle()
     }
     m_session.lastExportPath = path;
     m_exportLog->setPlainText(
-        tr( "Wrote %1\nCSV rows embedded; offline reload via StudioExportBundle::fromJson" )
-            .arg( path ) );
+        tr( "Wrote %1\nCSV rows embedded; offline reload via StudioExportBundle::fromJson\n"
+            "capsule refs: %2" )
+            .arg( path )
+            .arg( bundle.capsuleRefs.isEmpty()
+                      ? QStringLiteral( "(none — no live store)" )
+                      : bundle.capsuleRefs.join( QStringLiteral( ", " ) ) ) );
+    for ( const QString &line : capsuleLogLines )
+        m_exportLog->appendPlainText( line );
 }
 
 } // namespace sicnu::app
