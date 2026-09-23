@@ -761,3 +761,122 @@ TEST_CASE( "operator catalog: repo capability sidecars are the real truth",
     // have rejected the real breadth; the sidecar set must cover e.g. rs:pca.
     REQUIRE( cat.operatorIds.contains( QStringLiteral( "rs:pca" ) ) );
 }
+
+TEST_CASE( "labspec version contract is fail-closed", "[teaching_admin][labspec]" )
+{
+    QSet<QString> ops{ QStringLiteral( "rs:ndvi" ) };
+    // D3 schema string is pinned
+    {
+        QJsonObject spec{
+            { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v99" ) },
+            { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        };
+        const auto r = validateLabSpec( spec, ops );
+        REQUIRE_FALSE( r.ok );
+        bool mismatch = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "schema_mismatch" ) && i.path == QLatin1String( "schema" ) )
+                mismatch = true;
+        REQUIRE( mismatch );
+    }
+    // D2 spec_version must be 1|2|3
+    {
+        QJsonObject spec{
+            { QStringLiteral( "spec_version" ), 7 },
+            { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        };
+        const auto r = validateLabSpec( spec, ops );
+        REQUIRE_FALSE( r.ok );
+        bool mismatch = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "schema_mismatch" )
+                 && i.path == QLatin1String( "spec_version" ) )
+                mismatch = true;
+        REQUIRE( mismatch );
+    }
+    // legal versions still pass (no schema_mismatch among issues)
+    for ( const int v : { 1, 2, 3 } )
+    {
+        QJsonObject spec{
+            { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+            { QStringLiteral( "spec_version" ), v },
+            { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        };
+        const auto r = validateLabSpec( spec, ops );
+        for ( const auto &i : r.issues )
+            REQUIRE( i.code != QLatin1String( "schema_mismatch" ) );
+    }
+    // offline must hold when data.offline is declared false
+    {
+        QJsonObject spec{
+            { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+            { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+            { QStringLiteral( "data" ),
+              QJsonObject{ { QStringLiteral( "spec_ref" ), QStringLiteral( "data/labs/data-specs/demo.json" ) },
+                           { QStringLiteral( "offline" ), false } } },
+        };
+        const auto r = validateLabSpec( spec, ops );
+        REQUIRE_FALSE( r.ok );
+        bool offline = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "offline_required" ) )
+                offline = true;
+        REQUIRE( offline );
+    }
+}
+
+TEST_CASE( "labspec dangling refs are typed when a root is provided", "[teaching_admin][labspec]" )
+{
+    QTemporaryDir repo;
+    REQUIRE( repo.isValid() );
+    REQUIRE( QDir( repo.path() ).mkpath( QStringLiteral( "data/labs/grading" ) ) );
+    {
+        QFile intent( QDir( repo.path() ).filePath( QStringLiteral( "data/labs/grading/demo.intent.json" ) ) );
+        REQUIRE( intent.open( QIODevice::WriteOnly ) );
+        intent.write( QByteArray( "{}" ) );
+    }
+
+    QJsonObject spec{
+        { QStringLiteral( "schema" ), QStringLiteral( "sicnu.labspec.v1" ) },
+        { QStringLiteral( "id" ), QStringLiteral( "demo" ) },
+        { QStringLiteral( "data" ),
+          QJsonObject{ { QStringLiteral( "spec_ref" ), QStringLiteral( "data/labs/data-specs/demo.json" ) },
+                       { QStringLiteral( "offline" ), true } } },
+        { QStringLiteral( "grading_ref" ),
+          QJsonObject{ { QStringLiteral( "intent_ref" ),
+                         QStringLiteral( "data/labs/grading/demo.intent.json" ) },
+                       { QStringLiteral( "grader_owner" ), QStringLiteral( "D4" ) } } },
+    };
+    QSet<QString> ops{ QStringLiteral( "rs:ndvi" ) };
+
+    // intent_ref resolves, spec_ref dangles
+    const auto r = validateLabSpec( spec, ops, {}, repo.path() );
+    REQUIRE_FALSE( r.ok );
+    bool dangling = false;
+    bool wrongPath = true;
+    for ( const auto &i : r.issues )
+    {
+        if ( i.code == QLatin1String( "dangling_ref" ) && i.path == QLatin1String( "data.spec_ref" ) )
+            dangling = true;
+        if ( i.code == QLatin1String( "dangling_ref" ) && i.path == QLatin1String( "grading_ref.intent_ref" ) )
+            wrongPath = false;
+    }
+    REQUIRE( dangling );
+    REQUIRE( wrongPath );
+
+    // without a root: no existence checks at all (pure structural lint)
+    const auto structural = validateLabSpec( spec, ops );
+    for ( const auto &i : structural.issues )
+        REQUIRE( i.code != QLatin1String( "dangling_ref" ) );
+
+    // escape attempt is unsafe even without a root
+    QJsonObject escaping = spec;
+    escaping.insert( QStringLiteral( "grading_ref" ),
+                     QJsonObject{ { QStringLiteral( "intent_ref" ), QStringLiteral( "../secrets.json" ) } } );
+    const auto unsafe = validateLabSpec( escaping, ops, {}, repo.path() );
+    bool unsafeSeen = false;
+    for ( const auto &i : unsafe.issues )
+        if ( i.code == QLatin1String( "unsafe_ref" ) )
+            unsafeSeen = true;
+    REQUIRE( unsafeSeen );
+}

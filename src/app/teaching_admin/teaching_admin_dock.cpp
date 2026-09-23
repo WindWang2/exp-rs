@@ -256,7 +256,7 @@ void TeachingAdminDock::onValidateLabSpec()
     const auto catalog = loadOperatorCatalog();
     refreshOperatorRegistryLabel();
     const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), catalog.operatorIds,
-                                                            catalog.paramSchemas );
+                                                            catalog.paramSchemas, repoRoot() );
     appendLog( QString::fromUtf8( QJsonDocument( vr.toJson() ).toJson( QJsonDocument::Compact ) ) );
     const auto recipe = sicnu::teaching_admin::projectRecipeCompileView( doc.object() );
     appendLog( QString::fromUtf8( QJsonDocument( recipe ).toJson( QJsonDocument::Compact ) ) );

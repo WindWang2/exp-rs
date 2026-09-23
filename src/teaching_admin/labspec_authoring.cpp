@@ -1,6 +1,10 @@
 #include "labspec_authoring.h"
+#include "json_util.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
+#include <cmath>
 
 namespace sicnu::teaching_admin {
 
@@ -39,7 +43,7 @@ QSet<QString> legalLabspecTopKeys()
 }
 
 ValidationResult validateLabSpec( const QJsonObject &spec, const QSet<QString> &knownOperators,
-                                  const QJsonObject &operatorParamSchemas )
+                                  const QJsonObject &operatorParamSchemas, const QString &repoRoot )
 {
     ValidationResult r;
     const QString schema = spec.value( QStringLiteral( "schema" ) ).toString();
@@ -47,6 +51,32 @@ ValidationResult validateLabSpec( const QJsonObject &spec, const QSet<QString> &
     if ( schema.isEmpty() && !hasSpecVersion )
         r.addError( QStringLiteral( "schema_mismatch" ), QStringLiteral( "schema" ),
                     QStringLiteral( "LabSpec must declare schema or spec_version" ) );
+
+    // Fail-closed version contract: D3 pins schema to sicnu.labspec.v1
+    // (data/labs/labspec.schema.json); D2 pins spec_version to 1|2|3
+    // (data/schemas/labspec.schema.json, lab_spec_loader). Anything else is a
+    // typed error, never a silent accept.
+    if ( !schema.isEmpty() && schema != QLatin1String( "sicnu.labspec.v1" ) )
+        r.addError( QStringLiteral( "schema_mismatch" ), QStringLiteral( "schema" ),
+                    QStringLiteral( "unsupported LabSpec schema: " ) + schema );
+    if ( hasSpecVersion )
+    {
+        bool versionOk = false;
+        const double v = spec.value( QStringLiteral( "spec_version" ) ).toDouble( -1 );
+        for ( const double legal : { 1.0, 2.0, 3.0 } )
+            if ( std::fabs( v - legal ) < 1e-9 )
+                versionOk = true;
+        if ( !versionOk )
+            r.addError( QStringLiteral( "schema_mismatch" ), QStringLiteral( "spec_version" ),
+                        QStringLiteral( "unsupported spec_version (need 1, 2 or 3)" ) );
+    }
+
+    // D3 offline contract: labs must not require network access.
+    const QJsonObject data = spec.value( QStringLiteral( "data" ) ).toObject();
+    if ( spec.contains( QStringLiteral( "data" ) ) && data.contains( QStringLiteral( "offline" ) )
+         && !data.value( QStringLiteral( "offline" ) ).toBool( false ) )
+        r.addError( QStringLiteral( "offline_required" ), QStringLiteral( "data.offline" ),
+                    QStringLiteral( "LabSpec must be offline-capable (data.offline=true)" ) );
 
     const QSet<QString> legal = legalLabspecTopKeys();
     for ( auto it = spec.begin(); it != spec.end(); ++it )
@@ -122,6 +152,32 @@ ValidationResult validateLabSpec( const QJsonObject &spec, const QSet<QString> &
                                 QStringLiteral( "param not in operator schema" ) );
             }
         }
+    }
+
+    // Dangling repo-relative references — only checkable when a root is
+    // provided. Authoring save passes the repo root; an empty root skips
+    // existence checks (pure structural lint), but an unsafe ref is still a
+    // typed error wherever it appears.
+    if ( !repoRoot.isEmpty() )
+    {
+        auto checkRef = [&]( const QString &relPath, const QString &path ) {
+            if ( relPath.isEmpty() )
+                return;
+            if ( isUnsafeRelativePath( relPath ) )
+            {
+                r.addError( QStringLiteral( "unsafe_ref" ), path,
+                            QStringLiteral( "reference escapes the repo root: " ) + relPath );
+                return;
+            }
+            if ( !QFileInfo::exists( QDir( repoRoot ).filePath( relPath ) ) )
+                r.addError( QStringLiteral( "dangling_ref" ), path,
+                            QStringLiteral( "referenced file not found: " ) + relPath );
+        };
+        checkRef( spec.value( QStringLiteral( "grading_ref" ) ).toObject()
+                    .value( QStringLiteral( "intent_ref" ) ).toString(),
+                  QStringLiteral( "grading_ref.intent_ref" ) );
+        checkRef( data.value( QStringLiteral( "spec_ref" ) ).toString(),
+                  QStringLiteral( "data.spec_ref" ) );
     }
 
     return r;
