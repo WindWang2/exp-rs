@@ -703,6 +703,40 @@ TEST_CASE( "subset generate prunes leftover catalog files so verify still passes
     CHECK( report.files_checked == 1 );
 }
 
+TEST_CASE( "generate pins the GDAL environment only for its own scope",
+           "[foundry][env][restoration]" )
+{
+    GDALAllRegister();
+
+    // The foundry is a library: its ADR 0164 environment pins (PAM off,
+    // single-threaded DEFLATE, cleared SHAPE_ENCODING) must restore whatever
+    // the embedding host had set once generate() returns — in both the
+    // previously-set and the previously-unset direction.
+    CPLSetConfigOption( "GDAL_PAM_ENABLED", "YES" );
+    CPLSetConfigOption( "GDAL_NUM_THREADS", "4" );
+    CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
+    struct RestoreGdalEnv
+    {
+        ~RestoreGdalEnv()
+        {
+            CPLSetConfigOption( "GDAL_PAM_ENABLED", nullptr );
+            CPLSetConfigOption( "GDAL_NUM_THREADS", nullptr );
+            CPLSetConfigOption( "SHAPE_ENCODING", nullptr );
+        }
+    } restore;
+
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    options.seed = 42;
+    GenerateResult result;
+    REQUIRE( generate( options, &result ).ok );
+
+    CHECK( std::string( CPLGetConfigOption( "GDAL_PAM_ENABLED", "" ) ) == "YES" );
+    CHECK( std::string( CPLGetConfigOption( "GDAL_NUM_THREADS", "" ) ) == "4" );
+    CHECK( CPLGetConfigOption( "SHAPE_ENCODING", nullptr ) == nullptr );
+}
+
 TEST_CASE( "generate is byte-identical under a hostile GDAL environment",
            "[foundry][cli][determinism]" )
 {

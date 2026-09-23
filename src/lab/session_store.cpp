@@ -119,7 +119,29 @@ bool writeFileSync( const std::string &path, const std::string &bytes, std::stri
     error = "short write";
     return false;
   }
-  return true;
+  out.close();
+  if ( out.fail() )
+  {
+    error = "close failed";
+    return false;
+  }
+  // Windows counterpart of fsync(2) above: the tmp file must reach stable
+  // storage before rename() publishes it, or a crash can lose a save the
+  // caller was told succeeded (the documented old-or-new contract).
+  const HANDLE handle = ::CreateFileA( path.c_str(), GENERIC_WRITE,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
+  if ( handle == INVALID_HANDLE_VALUE )
+  {
+    error = "cannot reopen tmp file for flush: " +
+            std::to_string( ::GetLastError() );
+    return false;
+  }
+  const BOOL flushed = ::FlushFileBuffers( handle );
+  if ( !flushed )
+    error = "FlushFileBuffers failed: " + std::to_string( ::GetLastError() );
+  ::CloseHandle( handle );
+  return flushed != FALSE;
 #endif
 }
 
@@ -217,11 +239,19 @@ LabResult<LabSession> LabSessionStore::create( const LabRuntimePlan &plan, const
   std::error_code ec;
   if ( std::filesystem::exists( dir, ec ) )
   {
-    for ( const std::filesystem::directory_entry &entry :
-          std::filesystem::directory_iterator( dir, ec ) )
+    // An existing path that is not a readable directory (a regular file
+    // dropped where the lab directory belongs) makes the numbering scan
+    // unusable — refuse rather than silently reusing sequence 1 and letting
+    // save() clobber an existing session.
+    std::filesystem::directory_iterator it( dir, ec );
+    if ( ec )
     {
-      if ( ec )
-        break;
+      return LabResult<LabSession>::failure(
+        { LabDiag{ "lab.session.io",
+                   "cannot scan store directory '" + dir + "': " + ec.message() } } );
+    }
+    for ( const std::filesystem::directory_entry &entry : it )
+    {
       const std::string name = entry.path().filename().string();
       const std::string prefix = meta.studentId + "-";
       const std::string suffix = ".session.json";
@@ -232,6 +262,11 @@ LabResult<LabSession> LabSessionStore::create( const LabRuntimePlan &plan, const
       const std::string digits = name.substr( prefix.size(), name.size() - prefix.size() - suffix.size() );
       if ( digits.empty() ||
            digits.find_first_not_of( "0123456789" ) != std::string::npos )
+        continue;
+      // The read path (sessionPathFromId) caps seq at 18 digits; anything
+      // longer cannot be a legal session, and strtoll-saturating it would
+      // overflow the +1 below. Skip such files outright.
+      if ( digits.size() > 18 )
         continue;
       const long long value = std::strtoll( digits.c_str(), nullptr, 10 );
       if ( value > 0 && value >= next )

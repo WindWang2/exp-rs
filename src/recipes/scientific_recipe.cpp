@@ -12,8 +12,10 @@ namespace sicnu::recipes {
 
 bool isScientificRecipe( const Json::Value &doc )
 {
-  return doc.isObject() &&
-         doc.get( "schema", "" ).asString() == kRecipeSchemaId;
+  // isString guard: registry scans feed hostile files through here, and
+  // asString() on an object/array raises Json::LogicError.
+  return doc.isObject() && doc[ "schema" ].isString() &&
+         doc[ "schema" ].asString() == kRecipeSchemaId;
 }
 
 std::string serializeRecipe( const Json::Value &recipe )

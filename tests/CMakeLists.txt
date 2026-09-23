@@ -9853,6 +9853,11 @@ sicnu_discover_tests(test_build_wiring_drift)
 # over the agent harness (sicnu_agent already in the sicnu_add_test stack).
 sicnu_add_test(test_curriculum)
 sicnu_link_jsoncpp(test_curriculum)
+# The shipped-manifest case anchors the real repo data; without this define
+# it falls back to "." and only passes when run from the source root.
+target_compile_definitions(test_curriculum PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 # RS14-15 Explainable Scientific Workflow: provenance + step explanation schema
 # (sicnu_explain links jsoncpp PUBLIC).
@@ -12727,3 +12732,43 @@ function(sicnu_add_teaching_admin_test NAME)
   sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
 endfunction()
 sicnu_add_teaching_admin_test(test_teaching_admin_core)
+
+# Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
+# → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading
+# refs, over the existing authorities only. Qt-free; GDAL arrives through
+# sicnu_sample_foundry, so discovery carries the same DL_PATHS / LSAN
+# treatment as test_sample_fixtures (#730, sanitizer lanes).
+add_executable(test_teaching_foundation_e2e test_teaching_foundation_e2e.cpp)
+target_link_libraries(test_teaching_foundation_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_runtime
+  sicnu_recipes
+  sicnu_sample_foundry
+)
+target_include_directories(test_teaching_foundation_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_teaching_foundation_e2e PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_teaching_foundation_e2e PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+set(_e2e_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_e2e_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
+set(_e2e_discovery_props "")
+if(ENABLE_SANITIZERS)
+  list(APPEND _e2e_discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
+endif()
+catch_discover_tests(test_teaching_foundation_e2e
+  DISCOVERY_MODE PRE_TEST
+  TEST_PREFIX "teaching_foundation_e2e: "
+  ${_e2e_dl_paths}
+  PROPERTIES ${_e2e_discovery_props}
+)

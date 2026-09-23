@@ -108,7 +108,11 @@ std::vector<RecipeHit> searchRecipes( const ScientificRecipeRegistry &registry,
 
     if ( !intentLower.empty() )
     {
-      const std::string intent = goal.get( "intent", "" ).asString();
+      // isString guards: asString() on a non-string raises Json::LogicError,
+      // and lookup runs over everything the registry admitted — the
+      // validator pins intent's type, but stay defensive for both fields.
+      const std::string intent = goal[ "intent" ].isString() ? goal[ "intent" ].asString()
+                                                             : std::string{};
       if ( intent == intentLower )
       {
         score += 4.0;
@@ -123,7 +127,9 @@ std::vector<RecipeHit> searchRecipes( const ScientificRecipeRegistry &registry,
       }
     }
 
-    if ( !query.modality.empty() && goal.get( "modality", "" ).asString() == query.modality )
+    const std::string docModality = goal[ "modality" ].isString() ? goal[ "modality" ].asString()
+                                                                  : std::string{};
+    if ( !query.modality.empty() && docModality == query.modality )
     {
       score += 2.0;
       matched.push_back( "modality:" + query.modality );

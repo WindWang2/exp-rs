@@ -389,6 +389,113 @@ TEST_CASE( "runtime block typed validation rejects malformed documents", "[lab_r
   }
 }
 
+TEST_CASE( "runtime parsing never throws on hostile value shapes", "[lab_runtime][spec][negative]" )
+{
+  // spec_runtime.h promises "parsing never throws": every localized string
+  // field must be type-checked, not handed to jsoncpp's asString() (which
+  // raises Json::LogicError on object/array values).
+  SECTION( "prompt_zh as object" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "questions" ][ 0 ][ "prompt_zh" ] = Json::Value( Json::objectValue );
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "prompt_zh" ) );
+  }
+  SECTION( "objective_zh as array" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "stages" ][ 0 ][ "objective_zh" ] = Json::Value( Json::arrayValue );
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "objective_zh" ) );
+  }
+  SECTION( "hint text_zh as object" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "hints" ][ "entries" ][ 0 ][ "text_zh" ] = Json::Value( Json::objectValue );
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "text_zh" ) );
+  }
+  SECTION( "choice entries must be strings" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "questions" ][ 2 ][ "choices" ][ 1 ] = 3;
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.field" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "choices" ) );
+  }
+}
+
+TEST_CASE( "expected_numeric and hint level are never silently defaulted", "[lab_runtime][spec][negative]" )
+{
+  // "Nothing is silently coerced, dropped or defaulted away" (module header):
+  // a non-numeric bound must be a typed rejection, not a quiet 0.0, and a
+  // non-integer hint level must not collapse to level 1.
+  SECTION( "non-numeric min becomes a typed error, not 0.0" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "questions" ][ 1 ][ "expected_numeric" ][ "min" ] = "zero";
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.field" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "expected_numeric" ) );
+  }
+  SECTION( "empty expected_numeric is a typed error, not [0,0]" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "questions" ][ 1 ][ "expected_numeric" ] = Json::Value( Json::objectValue );
+    } ) );
+    REQUIRE( !sicnu::lab::parseRuntimeBlock( doc ).ok );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.field" );
+  }
+  SECTION( "one-sided bound is a typed error" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "questions" ][ 1 ][ "expected_numeric" ].removeMember( "max" );
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.field" );
+  }
+  SECTION( "non-integer hint level is a typed error, not level 1" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "hints" ][ "entries" ][ 0 ][ "level" ] = "2";
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.runtime.field" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "level" ) );
+  }
+  SECTION( "absent hint level still defaults to 1" )
+  {
+    const Json::Value doc = parseJson( mutated( []( Json::Value &d ) {
+      d[ "runtime" ][ "hints" ][ "entries" ][ 0 ].removeMember( "level" );
+    } ) );
+    const auto result = sicnu::lab::parseRuntimeBlock( doc );
+    REQUIRE( result.ok );
+    REQUIRE( result.value.hints.entries[0].level == 1 );
+  }
+}
+
 TEST_CASE( "spec fingerprint is sha256 hex and deterministic", "[lab_runtime][fingerprint]" )
 {
   // FIPS 180-4 known answer vector.
@@ -662,6 +769,88 @@ TEST_CASE( "session JSON envelope is strictly versioned and shaped", "[lab_runti
   }
 }
 
+#include "lab/hint_policy.h"
+
+#include "lab/checkpoint_verify.h"
+
+TEST_CASE( "session envelope refuses unknown keys at every nesting level",
+           "[lab_runtime][session][negative]" )
+{
+  // The store promises "refuses unknown keys ... never adopted" for the whole
+  // envelope, not just the top level: a hand-edited checkpoint result or hint
+  // event must not smuggle extra fields through a load/save cycle.
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession &session = started.value;
+
+  sicnu::lab::ToolChoice choice;
+  choice.stageId = "s1_preprocess";
+  choice.operatorId = "rs:clip";
+  choice.paramsSubset = { { "bands", "3" } }; // ckpt_clip's operator check pins this
+  REQUIRE( sicnu::lab::recordToolUse( session, plan, choice ).ok );
+  REQUIRE( sicnu::lab::recordAnswer( session, plan, "q_extent", "about 30m", {} ).ok );
+  REQUIRE( sicnu::lab::recordExecutionRef( session, "experiment_run", "run-7" ).ok );
+  REQUIRE( sicnu::lab::revealHint( session, plan, "step:1", 1 ).ok );
+
+  // Produce a real checkpoint result: the probe serves "abc", whose sha256
+  // the valid document pins on ckpt_clip's artifact check.
+  struct AbcProbe final : public sicnu::lab::FileProbe
+  {
+    bool exists( const std::string & ) override { return true; }
+    long long fileSize( const std::string & ) override { return 3; }
+    bool readFile( const std::string &, std::string &out, long long ) override
+    {
+      out = "abc";
+      return true;
+    }
+  } probe;
+  const auto verdict = sicnu::lab::verifyCheckpoint( session, plan, "ckpt_clip", probe );
+  REQUIRE( verdict.ok );
+  REQUIRE( verdict.value.verdict == sicnu::lab::Verdict::Pass );
+
+  const std::string bytes = sicnu::lab::sessionToCanonicalBytes( session );
+
+  auto injectAndExpectRefusal = [ &bytes ]( const char *array, const char *key )
+  {
+    Json::Value doc = parseJson( bytes );
+    REQUIRE( doc[ array ].isArray() );
+    REQUIRE( doc[ array ].size() >= 1 );
+    doc[ array ][ 0 ][ key ] = 1;
+    const auto result = sicnu::lab::sessionFromJson( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.session.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( key ) );
+  };
+
+  SECTION( "stage entry" ) { injectAndExpectRefusal( "stages", "evil" ); }
+  SECTION( "checkpoint result entry" ) { injectAndExpectRefusal( "checkpoint_results", "evil" ); }
+  SECTION( "question answer entry" ) { injectAndExpectRefusal( "question_answers", "evil" ); }
+  SECTION( "hint event entry" ) { injectAndExpectRefusal( "hint_events", "evil" ); }
+  SECTION( "tool choice entry" ) { injectAndExpectRefusal( "tool_choices", "evil" ); }
+  SECTION( "execution ref entry" ) { injectAndExpectRefusal( "execution_refs", "evil" ); }
+  SECTION( "checkpoint evidence entry" )
+  {
+    // Two levels deep — the only vocabulary that needs its own traversal.
+    Json::Value doc = parseJson( bytes );
+    REQUIRE( doc[ "checkpoint_results" ].size() >= 1 );
+    REQUIRE( doc[ "checkpoint_results" ][ 0 ][ "evidence" ].size() >= 1 );
+    doc[ "checkpoint_results" ][ 0 ][ "evidence" ][ 0 ][ "evil" ] = 1;
+    const auto result = sicnu::lab::sessionFromJson( doc );
+    REQUIRE( !result.ok );
+    REQUIRE( result.diagnostics.front().code == "lab.session.schema" );
+    using Catch::Matchers::ContainsSubstring;
+    REQUIRE_THAT( result.diagnostics.front().message, ContainsSubstring( "evil" ) );
+  }
+  SECTION( "round-trip stays clean" )
+  {
+    // Sanity: the populated session itself must parse (the injections above
+    // are the only mutations).
+    REQUIRE( sicnu::lab::sessionFromJson( parseJson( bytes ) ).ok );
+  }
+}
+
 namespace
 {
 
@@ -776,8 +965,59 @@ TEST_CASE( "session store failures are typed", "[lab_runtime][store][negative]" 
     REQUIRE( !unsafe.ok );
     REQUIRE( unsafe.diagnostics.front().code == "lab.session.field" );
   }
+  SECTION( "absurd sequence numbers never overflow the next-session scan" )
+  {
+    // A 20-digit seq cannot be a legal session (the read path caps ids at 18
+    // digits); create() must skip it, not strtoll-saturate into signed
+    // overflow and hand out a garbage sequence.
+    std::filesystem::create_directories( root + "/lab90_runtime_probe" );
+    std::ofstream out( root + "/lab90_runtime_probe/student1-99999999999999999999.session.json",
+                       std::ios::binary );
+    out << "{}";
+    out.close();
+    const auto created = store.create( plan, probeMeta(), "fp" );
+    REQUIRE( created.ok );
+    REQUIRE( created.value.sessionId == "lab90_runtime_probe/student1/1" );
+  }
+  SECTION( "lab directory blocked by a regular file fails typed" )
+  {
+    // A regular file where the lab directory belongs makes the numbering
+    // scan unreadable; create() must refuse instead of quietly reusing seq 1.
+    std::filesystem::create_directories( root );
+    std::ofstream out( root + "/lab90_runtime_probe", std::ios::binary );
+    out << "not a directory";
+    out.close();
+    const auto blocked = store.create( plan, probeMeta(), "fp" );
+    REQUIRE( !blocked.ok );
+    REQUIRE( blocked.diagnostics.front().code == "lab.session.io" );
+  }
 
   std::filesystem::remove_all( root );
+}
+
+TEST_CASE( "session ledger seq is assigned by the recorder, never the caller", "[lab_runtime][session]" )
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
+  REQUIRE( started.ok );
+  sicnu::lab::LabSession &session = started.value;
+
+  // A caller-supplied seq must not jump or fork the monotonic ledger: every
+  // recorder draws from nextSeq() so gate latest-wins stays orderable.
+  sicnu::lab::ToolChoice forged;
+  forged.stageId = "s1_preprocess";
+  forged.operatorId = "rs:clip";
+  forged.seq = 500;
+  REQUIRE( sicnu::lab::recordToolUse( session, plan, forged ).ok );
+  REQUIRE( session.toolChoices.back().seq == 1 );
+  REQUIRE( session.lastSeq == 1 );
+
+  sicnu::lab::ToolChoice normal;
+  normal.stageId = "s1_preprocess";
+  normal.operatorId = "rs:clip";
+  REQUIRE( sicnu::lab::recordToolUse( session, plan, normal ).ok );
+  REQUIRE( session.toolChoices.back().seq == 2 );
+  REQUIRE( session.lastSeq == 2 );
 }
 
 // ---------------------------------------------------------------------------
