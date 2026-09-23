@@ -4,7 +4,6 @@
 
 #include "session_state.h"
 
-#include <algorithm>
 #include <utility>
 
 namespace sicnu::lab
@@ -134,6 +133,60 @@ std::vector<LabDiag> validateEnvelope( const Json::Value &doc )
     if ( !known )
       add( std::string( "unknown key '" ) + key + "'" );
   }
+
+  // The strict-envelope promise ("refuses unknown keys ... never adopted")
+  // holds at every nesting level: a hand-edited entry must not smuggle extra
+  // fields through a load/save cycle. These vocabularies mirror what
+  // sessionToJson emits, which is the schema of record.
+  auto rejectNested = [ &add ]( const Json::Value &node, const char *array,
+                                const char *const *allowed, std::size_t count )
+  {
+    if ( !node.isArray() )
+      return;
+    for ( Json::ArrayIndex i = 0; i < node.size(); ++i )
+    {
+      const Json::Value &entry = node[ i ];
+      if ( !entry.isObject() )
+        continue; // shape errors are reported by the typed parsers below
+      for ( const auto &key : entry.getMemberNames() )
+      {
+        bool known = false;
+        for ( std::size_t k = 0; k < count; ++k )
+          known |= key == allowed[ k ];
+        if ( !known )
+        {
+          add( std::string( array ) + "[" + std::to_string( i ) + "]: unknown key '" + key + "'" );
+        }
+      }
+    }
+  };
+
+  static const char *kStageKeys[] = { "stage_id", "status" };
+  rejectNested( doc[ "stages" ], "stages", kStageKeys, 2 );
+
+  static const char *kResultKeys[] = { "checkpoint_id", "verdict", "attempt", "evidence", "seq" };
+  rejectNested( doc[ "checkpoint_results" ], "checkpoint_results", kResultKeys, 5 );
+  if ( doc[ "checkpoint_results" ].isArray() )
+  {
+    static const char *kEvidenceKeys[] = { "check_index", "ok", "observed", "expected" };
+    for ( const Json::Value &result : doc[ "checkpoint_results" ] )
+      rejectNested( result[ "evidence" ], "checkpoint_results.evidence", kEvidenceKeys, 4 );
+  }
+
+  static const char *kAnswerKeys[] = { "question_id", "answer", "numeric", "seq" };
+  rejectNested( doc[ "question_answers" ], "question_answers", kAnswerKeys, 4 );
+
+  static const char *kHintKeys[] = { "target", "level", "seq" };
+  rejectNested( doc[ "hint_events" ], "hint_events", kHintKeys, 3 );
+
+  static const char *kChoiceKeys[] = { "stage_id", "operator_id", "params_subset", "allowed", "seq" };
+  rejectNested( doc[ "tool_choices" ], "tool_choices", kChoiceKeys, 5 );
+  // params_subset itself stays open-keyed (names mirror the operator schema);
+  // its value types are enforced by the typed parser below.
+
+  static const char *kRefKeys[] = { "kind", "id", "seq" };
+  rejectNested( doc[ "execution_refs" ], "execution_refs", kRefKeys, 3 );
+
   return diags;
 }
 
@@ -260,8 +313,12 @@ LabResult<> recordToolUse( LabSession &session, const LabRuntimePlan &plan, Tool
     return LabResult<>::failure( { LabDiag{ "lab.session.unknown_stage",
                                             "unknown stage '" + choice.stageId + "'" } } );
   choice.allowed = toolAllowedByStage( *stage, choice.operatorId );
-  choice.seq = choice.seq > 0 ? choice.seq : nextSeq( session );
-  session.lastSeq = std::max( session.lastSeq, choice.seq );
+  // The ledger owns the sequence: a caller-forged seq (gaps, duplicates,
+  // order inversions) would corrupt the latest-wins gate semantics, so every
+  // recorder draws from nextSeq() — same discipline as recordAnswer and
+  // verifyCheckpoint.
+  choice.seq = nextSeq( session );
+  session.lastSeq = choice.seq;
   session.toolChoices.push_back( std::move( choice ) );
   return LabResult<>::success();
 }

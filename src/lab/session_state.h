@@ -87,7 +87,7 @@ struct ToolChoice
   std::string operatorId;
   std::map<std::string, std::string> paramsSubset;
   bool allowed = true; // recorded honestly; an out-of-whitelist use is data, not an error
-  long long seq = 0;
+  long long seq = 0;   // assigned by recordToolUse from the ledger; caller values are ignored
 };
 
 struct ExecutionRef

@@ -256,7 +256,14 @@ class Parser
         if ( !ok )
           add( "lab.runtime.schema", locator + ".prompt: required non-empty string" );
         if ( hasKey( node, "prompt_zh" ) )
+        {
+          if ( !node[ "prompt_zh" ].isString() )
+          {
+            add( "lab.runtime.schema", locator + ".prompt_zh: must be a string" );
+            continue;
+          }
           question.promptZh = node[ "prompt_zh" ].asString();
+        }
 
         const std::string kind = hasKey( node, "kind" ) && node[ "kind" ].isString()
                                    ? node[ "kind" ].asString()
@@ -281,7 +288,15 @@ class Parser
             continue;
           }
           for ( const auto &choice : node[ "choices" ] )
+          {
+            if ( !choice.isString() )
+            {
+              add( "lab.runtime.field",
+                   locator + ".choices: entries must be strings" );
+              continue;
+            }
             question.choices.push_back( choice.asString() );
+          }
         }
         if ( question.kind == QuestionKind::Numeric && hasKey( node, "expected_numeric" ) )
         {
@@ -291,9 +306,19 @@ class Parser
             add( "lab.runtime.schema", locator + ".expected_numeric must be an object" );
             continue;
           }
+          // Both bounds are required and numeric — the header contract is
+          // "never a fallback value", so a missing or non-numeric bound is a
+          // typed rejection instead of a quiet 0.0.
+          if ( !hasKey( range, "min" ) || !hasKey( range, "max" ) ||
+               !range[ "min" ].isNumeric() || !range[ "max" ].isNumeric() )
+          {
+            add( "lab.runtime.field",
+                 locator + ".expected_numeric: min and max are required and must be numbers" );
+            continue;
+          }
           question.hasExpectedNumeric = true;
-          question.expectedMin = range[ "min" ].isNumeric() ? range[ "min" ].asDouble() : 0.0;
-          question.expectedMax = range[ "max" ].isNumeric() ? range[ "max" ].asDouble() : 0.0;
+          question.expectedMin = range[ "min" ].asDouble();
+          question.expectedMax = range[ "max" ].asDouble();
           if ( question.expectedMin > question.expectedMax )
           {
             add( "lab.runtime.field", locator + ".expected_numeric: min must be <= max" );
@@ -385,7 +410,14 @@ class Parser
         if ( !ok )
           add( "lab.runtime.schema", locator + ".objective: required non-empty string" );
         if ( hasKey( node, "objective_zh" ) )
+        {
+          if ( !node[ "objective_zh" ].isString() )
+          {
+            add( "lab.runtime.schema", locator + ".objective_zh: must be a string" );
+            continue;
+          }
           stage.objectiveZh = node[ "objective_zh" ].asString();
+        }
 
         if ( !hasKey( node, "step_indices" ) || !node[ "step_indices" ].isArray() )
         {
@@ -761,9 +793,21 @@ class Parser
         if ( !ok )
           add( "lab.runtime.schema", locator + ".text: required non-empty string" );
         if ( hasKey( node, "text_zh" ) )
+        {
+          if ( !node[ "text_zh" ].isString() )
+          {
+            add( "lab.runtime.schema", locator + ".text_zh: must be a string" );
+            continue;
+          }
           entry.textZh = node[ "text_zh" ].asString();
+        }
 
-        entry.level = hasKey( node, "level" ) && node[ "level" ].isInt() ? node[ "level" ].asInt() : 1;
+        if ( hasKey( node, "level" ) && !node[ "level" ].isInt() )
+        {
+          add( "lab.runtime.field", locator + ".level: must be an integer" );
+          continue;
+        }
+        entry.level = hasKey( node, "level" ) ? node[ "level" ].asInt() : 1;
         if ( entry.level < 1 || entry.level > static_cast<int>( m_plan.hints.policy.escalation.size() ) )
         {
           add( "lab.runtime.field", locator + ".level: must be within 1.." +
