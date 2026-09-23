@@ -9750,7 +9750,60 @@ target_link_libraries(test_verifier_schema PRIVATE
   Catch2::Catch2WithMain
   sicnu_verifier
 )
-sicnu_discover_tests(test_verifier_schema)
+sicnu_discover_tests(test_verifier_schema TEST_PREFIX "test_verifier_schema::")
+
+# Unified Scientific Verifier engine completion (#1191 slices B..G): check
+# dispatch, packs, two-level rollup, renders, projections and the
+# adversarial battery. All light targets: sicnu_verifier + Catch2 + jsoncpp
+# only — no Qt, no GDAL, no QGIS link.
+add_executable(test_verifier_engine test_verifier_engine.cpp)
+target_link_libraries(test_verifier_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_engine TEST_PREFIX "test_verifier_engine::")
+
+add_executable(test_verifier_numeric test_verifier_numeric.cpp)
+target_link_libraries(test_verifier_numeric PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_numeric TEST_PREFIX "test_verifier_numeric::")
+
+add_executable(test_verifier_provenance test_verifier_provenance.cpp)
+target_link_libraries(test_verifier_provenance PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_provenance TEST_PREFIX "test_verifier_provenance::")
+
+add_executable(test_verifier_packs test_verifier_packs.cpp)
+target_link_libraries(test_verifier_packs PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_packs TEST_PREFIX "test_verifier_packs::")
+
+add_executable(test_verifier_levels test_verifier_levels.cpp)
+target_link_libraries(test_verifier_levels PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_levels TEST_PREFIX "test_verifier_levels::")
+
+add_executable(test_verifier_render test_verifier_render.cpp)
+target_link_libraries(test_verifier_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_render TEST_PREFIX "test_verifier_render::")
+
+add_executable(test_verifier_adversarial test_verifier_adversarial.cpp)
+target_link_libraries(test_verifier_adversarial PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_adversarial TEST_PREFIX "test_verifier_adversarial::")
 
 # RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
 # PreflightReport schema (pure C++; no Qt/GDAL link).
