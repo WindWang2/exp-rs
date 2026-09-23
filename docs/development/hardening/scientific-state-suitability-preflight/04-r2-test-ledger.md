@@ -35,9 +35,30 @@ untouched (oracles extend existing test files only).
 
 ## Verification
 
-(Run on the R2 branch; `-j2`, `ctest --test-dir build-dev -j2 -R` …)
+(Run on the R2 branch; `-j2`, sdk-lane binaries under `build-dev`)
 - RED (unmodified master sources): `test_scientific_state_geo [r2]` →
   2/8 passed (guards only); `test_scientific_state_review [r2]` → 2/3
   passed (controls only).
-- GREEN: full `scientific|suitability|platform5` face — see PR body for the
-  final counts and the two consecutive passes.
+- GREEN, two consecutive passes after review round 1 (below): 9/9 suites —
+  core 76/12, resolver 78/18, geo 171/37, provenance 71/15, diff 41/12,
+  teaching 31/8, fixtures 102/9, review 39/10, gdal 64/4 (assertions/cases).
+- Face-selection notes: the `suitability` family was excluded by type-level
+  argument — `sicnu::suitability::DatasetFacts` is an independent type that
+  never enters the passport resolver. The catalog adapter lane
+  (`test_scientific_state_catalog`, Qt/DataManager) was excluded from local
+  execution (its fixture `acquisitionTimeIso` inputs are already-canonical
+  strings, an identity under the normalizer) — the compiler ICEs seen on
+  Qt-heavy TUs with the rolling GCC 16 snapshot are master-preexisting and
+  out of this delta's blast radius. `test_platform5` lives in the
+  `test_mapspec` Qt mega-target and does not link `Sicnu::ScientificState`;
+  no harness TU changed in R2.
+
+## Review round 1 (independent adversarial reviewer) — all fixed with oracles
+
+| Sev | Finding (verified counterexample) | Fix | Oracle |
+|---|---|---|---|
+| P1 | Offset range check used truncating division on the composed value: `"…T00:00:00-99:00"` accepted (4-day silent shift), `"…+00:99"` accepted | Per-digit-field bounds (hours ≤ 23, minutes ≤ 59) before composing | geo `[r2]` "zone offsets beyond ±23:59…" (4 spellings → unparseable) |
+| P2 | `midnightUtc` ignored a nonzero fraction: `00:00:00.5Z` collapsed to `2026-09-23`, merging distinct instants | midnight collapse requires `fraction.empty()` | geo `[r2]` "a nonzero fraction at midnight…" (stays a distinct instant → real conflict) |
+| P2 | `formatDate` buffer[11] truncated the year-10000 rollover to `"10000-01-0…"` (self-unreadable passport fact) | buffer[16] | geo `[r2]` "…survives the year-10000 zone rollover" (`9999-12-31T23:30:00-01:00` → `10000-01-01T00:30:00Z`) |
+| P2 | Equal counts without index alignment still paired a `{2,3}` file axis against a `{1,2}` mirror | Pairing additionally requires aligned 1-based indices; note detail updated | review `[r2]` "equal band counts with misaligned indices…" |
+| P3 | Decimal minutes `05:06.5` were re-weighted as a fraction of seconds | `.` after minutes (no SS) refused — outside the closed subset | geo `[r2]` "decimal minutes are outside the closed subset…" |
