@@ -285,11 +285,14 @@ TEST_CASE( "v2-only keys in a v1 document are rejected (version-strict)",
 TEST_CASE( "Unsupported spec_version is refused with a typed message",
            "[labspec][v2]" )
 {
+    // spec_version 3 is accepted since LabSpec 3 (ADR 0174); the loader's
+    // typed refusal message names the supported generations.
     QTemporaryDir dir;
     const QString path = writeTempSpec( QDir( dir.path() ),
-                                        { { "spec_version", 3 } } );
+                                        { { "spec_version", 4 } } );
     const lab::LabSpecError error = loadOne( path );
-    REQUIRE( error.reason.contains( QStringLiteral( "unsupported spec_version 3" ) ) );
+    REQUIRE( error.reason.contains( QStringLiteral( "unsupported spec_version 4" ) ) );
+    REQUIRE( error.reason.contains( QStringLiteral( "expected 1, 2 or 3" ) ) );
 }
 
 TEST_CASE( "LabSpec 2 structured fields validate", "[labspec][v2]" )
