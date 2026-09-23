@@ -54,7 +54,10 @@ struct RepairPolicyContext
     /// Which surface the plan is being resolved for. "lab" activates the
     /// teaching gate (mirror of the harness TeachingContext intentDomain
     /// discipline); anything else — including "" — leaves it inert, exactly
-    /// as research flows resolve in the harness.
+    /// as research flows resolve in the harness. EMBEDDER OBLIGATION: this
+    /// must be the RESOLVED intentDomain (as lab_copilot derives it), never
+    /// a client-claimed value — an embedder that fails to thread the
+    /// resolved domain silently loses the student gate there.
     std::string domain;
     /// Session role. ON THE TEACHING SURFACE ("lab") only "teacher" and
     /// "admin" escape the student gate — byte-identical to the harness

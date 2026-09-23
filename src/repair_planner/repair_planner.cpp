@@ -336,7 +336,6 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
 
         // Provider-driven candidates, then deterministic ordering and caps.
         std::vector<RepairAction> candidates;
-        bool providerServed = false;
         // Closed alternative-family rule: an inconsistent radiometric state
         // can legitimately be answered by masking invalid pixels first, so
         // the provider's quality_mask family joins the candidate pool (the
@@ -348,7 +347,6 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
         {
             int candidateIndex = 1;
             const auto entries = provider.capabilitiesForRequirement( requirement.kind );
-            providerServed = providerServed || !entries.empty();
             for ( const Json::Value &entry : entries )
                 candidates.push_back(
                     buildCandidate( requirement, candidateContractTable().at( requirement.kind ),
@@ -357,7 +355,6 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
             {
                 const auto maskEntries =
                     provider.capabilitiesForRequirement( requirement_kind::kQualityMask );
-                providerServed = providerServed || !maskEntries.empty();
                 for ( const Json::Value &entry : maskEntries )
                     candidates.push_back(
                         buildCandidate( requirement,
@@ -390,7 +387,6 @@ bool planRepairsForFindings( const std::vector<Json::Value> &findings,
             else
             {
                 candidates.push_back( buildDecisionCandidate( requirement ) );
-                providerServed = true;
             }
         }
 

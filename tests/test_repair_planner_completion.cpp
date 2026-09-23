@@ -808,6 +808,12 @@ TEST_CASE( "teaching view withholds every executable value, recursively",
   CHECK( !containsKeyRecursive( teaching, "operator_id" ) );
   CHECK( !containsKeyRecursive( teaching, "action_key" ) );
 
+  // Over-stripping protection: the auditable contract stays visible.
+  for ( const char *key : { "rule_id", "kind", "cost", "risk", "before_state",
+                            "after_state", "information_loss", "assumptions",
+                            "missing_facts", "facts_sufficient", "source_finding" } )
+    CHECK( containsKeyRecursive( teaching, key ) ); // refusal_cause is conditional
+
   // Leakage oracle: a marker value that only lives in executable fields must
   // not appear anywhere in the serialized teaching view.
   RepairPlannerOutcome marked = out;

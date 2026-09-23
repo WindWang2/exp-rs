@@ -167,6 +167,9 @@ bool synthesizeRequirements( const std::vector<Json::Value> &findings,
             return a.subject < b.subject;
         // Final tie-break keeps the order total for findings equal on
         // (severity, code, subject) but differing in evidence payloads.
+        // Canonical compact serialization is deterministic (jsoncpp sorts
+        // object keys); at planner scale (<= maxRequirements entries) the
+        // per-comparison serialization cost is bounded and intentional.
         return jsonToString( a.evidence ) < jsonToString( b.evidence );
     } );
 
