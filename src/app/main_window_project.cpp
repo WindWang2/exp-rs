@@ -15,6 +15,7 @@
 #include "panels/data_manager_panel.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workbench/mission_timeline_panel.h"
+#include "workbench/project_session_boundary.h"
 
 #include <QCoreApplication>
 #include <QBuffer>
@@ -267,63 +268,72 @@ void QgisDesktopWindow::openProject()
             return;
         }
 
-        // #1083: probe-read into a throwaway project before destroying the live
-        // session. A corrupt/unreadable .qgs must not wipe layers, re-bind the
-        // governance store, or leave the lab recorder on the previous project.
+        if ( m_mapCanvas )
+            m_mapCanvas->stopRenderingAndSettle();
+
+        // One open transaction (probe → clear → story boundary → store →
+        // read, with the failure rollback) lives in
+        // workbench/project_session_boundary — the window only renders the
+        // typed outcome.
+        const auto outcome = openProjectSession(
+            *m_projectContext, *QgsProject::instance(), filePath,
+            [this] {
+                // Session is empty now: stop lab recording so runs cannot
+                // land in the previous project's experiments.db while we
+                // finish (or fail) the load.
+                stopLabRecording();
+                // Story boundary for the mission authority too: whether the
+                // read below succeeds or fails, the previous project's
+                // mission must not leak into this session.
+                resetMissionSessionState( m_mission, m_missionRuntime,
+                                          m_missionPanel,
+                                          m_missionSidecarWatcher );
+            } );
+
+        switch ( outcome.stage )
         {
-            QgsProject probe;
-            if ( !probe.read( filePath, Qgis::ProjectReadFlag::DontResolveLayers ) )
+            case sicnu::app::ProjectSessionOpenResult::Stage::ProbeFailed:
+            case sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed:
             {
                 QMessageBox::warning(
                     this, tr( "Open Project" ),
                     tr( "Failed to open project:\n%1" ).arg( filePath ) );
+                if ( outcome.stage ==
+                     sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed )
+                {
+                    // The session is now the consistent EMPTY state (the
+                    // transaction rolled the phantom fileName/store back):
+                    // mirror newProject's empty-session rendering so the
+                    // canvas, empty-state overlays and the title cannot
+                    // keep presenting the failed target.
+                    m_mapCanvas->setLayers( {} );
+                    m_mapCanvas->refresh();
+                    updateCanvasEmptyState();
+                    updateLayersEmptyState();
+                    updateWindowTitle();
+                    refreshWorkspaceBrowser();
+                    statusBar()->showMessage(
+                        tr( "Open failed — session reset to an empty project" ), 4000 );
+                }
+                // Lab already stopped (ReadFailed) or never touched
+                // (ProbeFailed); nothing about the failed target advanced.
                 return;
             }
+            case sicnu::app::ProjectSessionOpenResult::Stage::ClearFailed:
+            {
+                QMessageBox::warning(
+                    this, tr( "Open Project" ),
+                    tr( "Failed to release the current project data:\n%1" )
+                        .arg( outcome.diagnostics.join( '\n' ) ) );
+                return;
+            }
+            case sicnu::app::ProjectSessionOpenResult::Stage::Succeeded:
+                break;
         }
 
-        if ( m_mapCanvas )
-            m_mapCanvas->stopRenderingAndSettle();
-
-        const auto cleared =
-            m_projectContext->clearProject( *QgsProject::instance() );
-        if ( !cleared )
-        {
-            QStringList details;
-            for ( const auto &diagnostic : cleared.diagnostics() )
-                details.append( QStringLiteral( "[%1] %2" )
-                                    .arg( diagnostic.code,
-                                          diagnostic.message ) );
-            QMessageBox::warning(
-                this, tr( "Open Project" ),
-                tr( "Failed to release the current project data:\n%1" )
-                    .arg( details.join( '\n' ) ) );
-            return;
-        }
-
-        // Session is empty now: stop lab recording so runs cannot land in the
-        // previous project's experiments.db while we finish (or fail) the load.
-        stopLabRecording();
-        // Story boundary for the mission authority too: whether the read below
-        // succeeds or fails, the previous project's mission must not leak into
-        // this session (a failed read used to keep it live here, and the next
-        // save published it into the next project's sidecar).
-        resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
-                                  m_missionSidecarWatcher );
-
-        // Workspace Governance 3.0: the store must be open BEFORE the read so
-        // the serializer can restore governed state from a v3 document (or run
-        // the in-memory v1 migration into it).
-        if ( !m_projectContext->openWorkspaceStore( filePath ) )
+        if ( !outcome.governanceStoreOpened )
             statusBar()->showMessage( tr( "Governance store unavailable: workspace state runs in memory-only mode" ), 5000 );
 
-        if ( !QgsProject::instance()->read(filePath) )
-        {
-            QMessageBox::warning(
-                this, tr( "Open Project" ),
-                tr( "Failed to open project:\n%1" ).arg( filePath ) );
-            // Lab already stopped above; leave it disabled on the empty session.
-            return;
-        }
         refreshCanvasLayers();
         updateCanvasEmptyState();
         updateLayersEmptyState();

@@ -22,6 +22,8 @@ qt_add_library(sicnu_qgis_display STATIC
     display/qgs_display_stretch.h
     project_context.cpp
     project_context.h
+    workbench/project_session_boundary.cpp
+    workbench/project_session_boundary.h
 )
 add_library(Sicnu::qgis_display ALIAS sicnu_qgis_display)
 target_include_directories(sicnu_qgis_display
