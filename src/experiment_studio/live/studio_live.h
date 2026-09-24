@@ -119,8 +119,9 @@ Result<QJsonObject> firstDivergenceReport( experiment::ExperimentStore *store,
 /// faultlab pipeline and projects the ACTUAL run facts into the teaching VM:
 /// systemDiagnosis is the diagnosed signature, sandboxUnchangedOriginal is
 /// the runner's re-digest verdict, evidence is the canonical report. A
-/// foreign/invalid scenario is a typed refusal (faultlab.* via
-/// experiment_studio.fault_scenario_invalid), never a synthetic success.
+/// foreign/invalid scenario is a typed refusal
+/// (experiment_studio.fault_scenario_invalid; a pipeline that cannot START
+/// is experiment_studio.fault_pipeline_failed), never a synthetic success.
 /// @p sandboxRoot may be empty (the pipeline's own temp default).
 Result<FaultTeachingViewModel> runFaultScenarioTeaching( const QJsonObject &scenarioJson,
                                                          const QString &studentPrediction,

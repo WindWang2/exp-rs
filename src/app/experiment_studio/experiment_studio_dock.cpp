@@ -478,6 +478,8 @@ void ExperimentStudioDock::openLiveStore()
     m_session.referenceRunId.clear();
     m_session.studentRunId.clear();
     m_session.faultScenarioId.clear();
+    m_lastStudyReport = QJsonObject{};
+    m_session.lastStudyReport = QJsonObject{};
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
         QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
