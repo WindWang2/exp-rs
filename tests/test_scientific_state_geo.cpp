@@ -544,3 +544,310 @@ TEST_CASE( "empty catalog projects no temporal refs", "[scientific_state][slice_
     REQUIRE( state.temporalRefs.empty() );
     REQUIRE( !state.temporalRefsTruncated );
 }
+
+// ---------------------------------------------------------------------------
+// Acquisition time normalization (R2)
+//
+// The harness (workflow_facts parseInstant) and the suitability criteria
+// (QDateTime) both parse acquisition timestamps; the resolver accepted any
+// string verbatim and compared observations as raw text. The chain must
+// agree: same instant in different spellings is ONE fact, and a string the
+// rest of the chain cannot parse is a typed unknown, never a Known time.
+// Canonical form: midnight-UTC instants collapse to the date-only spelling
+// (the coarsest faithful representation — a date is never widened to a
+// fabricated time-of-day); every other instant renders as
+// "YYYY-MM-DDTHH:MM:SS[.frac]Z" with the offset applied (naive sources are
+// UTC by the same convention workflow_facts documents).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "same instant in different spellings resolves once, never conflicts",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23 00:00:00",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23T00:00:00Z";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2026-09-23" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+    REQUIRE( !hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "zone offsets normalize before instants are compared",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // 08:00+08:00 IS 00:00Z IS the date-only fact; master compared raw text
+    // and reported a conflict for one physical acquisition.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23T08:00:00+08:00",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2026-09-23" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+    REQUIRE( !hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "already-canonical timestamps round-trip unchanged",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // Existing passports pin "2024-05-01T10:12:31Z"; normalization must be
+    // the identity on the canonical form.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2024-05-01T10:12:31Z",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2024-05-01T10:12:31Z" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+}
+
+TEST_CASE( "non-midnight naive sources carry the documented UTC convention",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23 05:06:07",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23T05:06:07Z";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2026-09-23T05:06:07Z" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+    REQUIRE( !hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "genuinely different instants still conflict, alternatives kept",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-24T00:00:00Z";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !state.acquisition.valid );
+    const ClaimRecord claim = claimFor( state, "acquisition.time" );
+    REQUIRE( claim.kind == ClaimKind::Conflicted );
+    REQUIRE( claim.alternatives.size() == 2 );
+    REQUIRE( hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "unparsable acquisition text is a typed unknown, never a Known time",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // RED on master: "September 2026" became acquisition.time Known and
+    // travelled the chain as a fact no consumer could parse.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "September 2026",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !state.acquisition.valid );
+    REQUIRE( unknownsContain( state, "acquisition.time" ) );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Unknown );
+    REQUIRE( hasNote( state, "acquisition.time_unparseable" ) );
+}
+
+TEST_CASE( "one unparsable observation degrades the field, the usable one survives",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "September 2026",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23T05:06:07Z";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2026-09-23T05:06:07Z" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+    REQUIRE( hasNote( state, "acquisition.time_unparseable" ) );
+}
+
+TEST_CASE( "impossible calendar dates are unparsable, never silently normalized",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    for ( const char *text : { "2026-02-30", "2026-13-01", "2026-00-10" } )
+    {
+        DatasetFacts dataset = makeOneBandDataset();
+        dataset.metadata.add( "SICNU_ACQUISITION_DATE", text,
+                              "gdal:SICNU_ACQUISITION_DATE" );
+
+        StateResolutionInput input;
+        input.dataset = dataset;
+        const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+        INFO( "acquisition text: " << text );
+        REQUIRE( !state.acquisition.valid );
+        REQUIRE( unknownsContain( state, "acquisition.time" ) );
+        REQUIRE( hasNote( state, "acquisition.time_unparseable" ) );
+    }
+}
+
+TEST_CASE( "fractional spellings normalize to one canonical second value",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23T05:06:07.500Z",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23T05:06:07.5Z";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "2026-09-23T05:06:07.5Z" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+    REQUIRE( !hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "pre-epoch instants normalize through negative epochs correctly",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "1961-08-21T00:00:00Z",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "1961-08-21" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+}
+
+TEST_CASE( "zone offsets beyond ±23:59 or with minute overflow are refused",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // Review R2 P1: the composed-offset range check divided signed values
+    // with truncating division, so "-99:00" (a 4-day silent shift) and
+    // "+00:99" were accepted. Bounds are per digit field now.
+    for ( const char *text : { "2026-09-23T00:00:00-99:00", "2026-09-23T00:00:00+00:99",
+                               "2026-09-23T00:00:00-2400", "2026-09-23T00:00:00+24:00" } )
+    {
+        DatasetFacts dataset = makeOneBandDataset();
+        dataset.metadata.add( "SICNU_ACQUISITION_DATE", text,
+                              "gdal:SICNU_ACQUISITION_DATE" );
+
+        StateResolutionInput input;
+        input.dataset = dataset;
+        const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+        INFO( "acquisition text: " << text );
+        REQUIRE( !state.acquisition.valid );
+        REQUIRE( unknownsContain( state, "acquisition.time" ) );
+        REQUIRE( hasNote( state, "acquisition.time_unparseable" ) );
+    }
+}
+
+TEST_CASE( "a nonzero fraction at midnight is part of the instant, never collapsed",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // Review R2 P2: 00:00:00.5Z collapsed to the date-only form, merging
+    // distinct instants into one Known date fact.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23T00:00:00.5Z",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+    CatalogFacts catalog;
+    catalog.assetId = "x";
+    catalog.acquisitionTimeIso = "2026-09-23";
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    // The canonical spelling of the fraction survives; the instant is
+    // genuinely different from the catalog's date-only fact, so the pair
+    // is a real conflict, and valid stays false (a conflicted time is not
+    // a usable time).
+    const ClaimRecord claim = claimFor( state, "acquisition.time" );
+    REQUIRE( claim.kind == ClaimKind::Conflicted );
+    REQUIRE( claim.alternatives.size() == 2 );
+    REQUIRE( std::find( claim.alternatives.begin(), claim.alternatives.end(),
+                        "2026-09-23T00:00:00.5Z" ) != claim.alternatives.end() );
+    REQUIRE( !state.acquisition.valid );
+    REQUIRE( hasNote( state, "acquisition.conflict" ) );
+}
+
+TEST_CASE( "the canonical spelling survives the year-10000 zone rollover",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // Review R2 P2: an 11-char date buffer truncated "10000-01-01…" into a
+    // corrupt "10000-01-0…" the module itself could not re-read.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "9999-12-31T23:30:00-01:00",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( state.acquisition.valid );
+    REQUIRE( state.acquisition.timeIso == "10000-01-01T00:30:00Z" );
+    REQUIRE( claimFor( state, "acquisition.time" ).kind == ClaimKind::Known );
+}
+
+TEST_CASE( "decimal minutes are outside the closed subset, never re-weighted",
+           "[scientific_state][r2][acquisition_time]" )
+{
+    // Review R2 P3: "05:06.5" (ISO decimal minutes = 05:06:30) was parsed
+    // as five-tenths of a SECOND.
+    DatasetFacts dataset = makeOneBandDataset();
+    dataset.metadata.add( "SICNU_ACQUISITION_DATE", "2026-09-23T05:06.5Z",
+                          "gdal:SICNU_ACQUISITION_DATE" );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !state.acquisition.valid );
+    REQUIRE( unknownsContain( state, "acquisition.time" ) );
+    REQUIRE( hasNote( state, "acquisition.time_unparseable" ) );
+}
