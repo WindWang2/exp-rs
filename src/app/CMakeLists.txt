@@ -467,6 +467,9 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # agent-ops driver: the MCP `scientific:agent_session` tool delegates to
+    # an OpsDriver injected at startup (Qt-free core lib).
+    Sicnu::agent_ops
   # unified-trace bootstrap in main.cpp (Verification 7.0)
     sicnu_runtime
     jsoncpp

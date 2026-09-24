@@ -18,6 +18,7 @@ add_library(sicnu_agent_ops STATIC
   resume_reconciler.cpp
   operations_coordinator.cpp
   session_surface.cpp
+  ops_driver.cpp
 )
 
 add_library(Sicnu::agent_ops ALIAS sicnu_agent_ops)

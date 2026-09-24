@@ -2365,6 +2365,7 @@ target_link_libraries(test_mcp_server PRIVATE
   Sicnu::experiment
   Sicnu::experiment_bridge
   GDAL::GDAL
+  Sicnu::agent_ops
 )
 if(TARGET sicnu_operators)
   target_link_libraries(test_mcp_server PRIVATE sicnu_operators)
@@ -9768,6 +9769,45 @@ target_link_libraries(test_agent_ops_core PRIVATE
   sicnu_agent_ops
 )
 sicnu_discover_tests(test_agent_ops_core)
+
+# Agent ops driver: per-session bookkeeping + reconcile + seam gate
+# (Qt-free core, Catch2 only).
+add_executable(test_agent_ops_driver test_agent_ops_driver.cpp)
+target_link_libraries(test_agent_ops_driver PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_agent_ops_driver)
+
+# CLI `session` command: flag parsing + typed exit codes over an injected
+# driver (needs Qt6::Core for the CliIO envelope contract).
+add_executable(test_cli_agent_ops test_cli_agent_ops.cpp)
+target_link_libraries(test_cli_agent_ops PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_cli_agent_ops
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_cli_agent_ops)
+
+# Production agent_loop verifier seam over harness::verifyArtifact (needs
+# GDAL for the real-raster oracle; sicnu_agent for harness + adapter).
+add_executable(test_agent_session_adapter test_agent_session_adapter.cpp)
+target_link_libraries(test_agent_session_adapter PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_agent_loop
+  sicnu_agent
+  sicnu_processing
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_agent_session_adapter PRIVATE jsoncpp)
+else()
+  target_link_libraries(test_agent_session_adapter PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_agent_session_adapter)
 
 # Agent Ops Control Center UI offscreen smoke (optional when UI lib present).
 if(TARGET sicnu_agent_ops_ui)

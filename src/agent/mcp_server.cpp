@@ -6,6 +6,7 @@
 #include "help/help_id.h"
 #include "help/help_registry.h"
 
+#include "agent_ops/ops_driver.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "experiment/bridge/workflow_experiment_adapter.h"
 #include "core/sicnu_logging.h"
@@ -846,6 +847,10 @@ void McpServer::handleRequest(const QVariantMap &request)
                 if (runId.isEmpty())
                     throw std::runtime_error("Invalid or missing run_id");
                 resultData = handleResumeWorkflow(runId);
+            }
+            else if (toolName == QStringLiteral("scientific:agent_session"))
+            {
+                resultData = handleAgentSession(arguments);
             }
             else if (toolName == QStringLiteral("artifact_read"))
             {
@@ -2654,6 +2659,32 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
         steps.append(step);
     }
     result[QStringLiteral("steps")] = steps;
+    return result;
+}
+
+QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
+{
+    // One MCP tool over the SAME session surface the CLI `session` command
+    // and the workbench panel drive (single wire contract). The tool itself
+    // holds no session state: everything below the envelope is OpsDriver →
+    // OperationsCoordinator → agent_loop (the only state machine).
+    if (!m_agentOpsDriver)
+    {
+        throw McpToolError(QStringLiteral("scientific:agent_session: no OpsDriver injected "
+                                          "in this host (fail closed; no fake sessions)"),
+                           QStringLiteral("AGENT_OPS_UNAVAILABLE"),
+                           QStringLiteral("availability"));
+    }
+    const std::string action = arguments.value(QStringLiteral("action")).toString().toStdString();
+    if (action.empty())
+    {
+        throw McpToolError(QStringLiteral("scientific:agent_session: 'action' is required"),
+                           QStringLiteral("INVALID_PARAMETER"),
+                           QStringLiteral("validation"));
+    }
+    const Json::Value args = sicnu::processing::variantToJsonValue(arguments);
+    const Json::Value doc = m_agentOpsDriver->apply(action, args);
+    QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();
     return result;
 }
 
