@@ -24,6 +24,7 @@
 #include "workbench/layer_sections.h"
 #include "workbench/processing_history_panel.h"
 #include "workbench/provenance_section.h"
+#include "workbench/step_explanation_section.h"
 #include "workbench/shutdown_policy.h"
 #include "workbench/temporal_workbench_panel.h"
 #include "workbench/dataset_experiment_panel.h"
@@ -37,6 +38,15 @@
 #include "workbench/mission_timeline_panel.h"
 #include "workbench/mission_tool_host_install.h"
 #include "agent/spatial_tools/mission_tools.h"
+// RS14-15 R3: the why-this-step section shares the explain:step tool's
+// guidance store and reads the live operator registry through the adapter.
+#include "agent/spatial_tools/explain_step_tool.h"
+#include "explain/adapters/registry_operator_knowledge.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "operators/rs/rs_operators_init.h"
+#include "workflow/workflow_ir_v2.h"
+
+#include <optional>
 // F11 unblocking include (pre-existing master break): this TU dereferences
 // the rs::app::GeorefDualWindow returned by openGeorefDualWindow() (passes
 // it to addDockWidget and reads members) but relied on a transitive include
@@ -459,6 +469,29 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         };
     m_inspectorHost->registerSection(
         new sicnu::app::ProvenanceSection( dmProvider, wsProvider, m_inspectorHost ) );
+    // Explainable Workflow (RS14-15 R3): why-this-step over the live operator
+    // registry, the SHARED authored-guidance corpus (the same cached store
+    // the explain:step tool answers from — agent and panel can never
+    // disagree about authored text) and the D17 run's provenance record.
+    // Providers resolve lazily on populate; the D17 dock is created on
+    // demand, so a missing document renders as unsupported, not a note.
+    const sicnu::app::StepExplanationSection::DocumentProvider explainDocument =
+        [this]( ) -> std::optional<sicnu::workflow::WorkflowDocument> {
+            if ( !m_ir2PipelineDock )
+                return std::nullopt;
+            return m_ir2PipelineDock->currentDocument();
+        };
+    m_inspectorHost->registerSection( new sicnu::app::StepExplanationSection(
+        []( ) -> const sicnu::explain::IOperatorKnowledge * {
+            sicnu::operators::rs::initBuiltinRsOperators();
+            static sicnu::explain::adapters::RegistryOperatorKnowledge knowledge(
+                sicnu::operators::RSOperatorRegistry::instance() );
+            return &knowledge;
+        },
+        []( ) -> const sicnu::explain::IAuthoredGuidance * {
+            return sicnu::agent::spatial_tools::sharedExplainGuidanceStore().get();
+        },
+        explainDocument, m_inspectorHost ) );
     m_inspectorHost->attachSelectionContext( m_selectionContext );
     m_inspectorDock->setWidget( m_inspectorHost );
     addDockWidget( Qt::RightDockWidgetArea, m_inspectorDock );
