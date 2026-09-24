@@ -13,7 +13,7 @@ the CMake change.
 
 | Target | Scope | Result |
 |---|---|---|
-| `test_workbench_full_shell_lifecycle` | offscreen full `QgisDesktopWindow`; open/open-fail/save/new/SaveAs/close/secondary-view/designer/shutdown/restore-state | **ALL PASSED 116/116 assertions, 7/7 cases — run twice consecutively** |
+| `test_workbench_full_shell_lifecycle` | offscreen full `QgisDesktopWindow`; open/open-fail/save/new/SaveAs(dir-refusal + doomed-write)/close/secondary-view/designer/shutdown/restore-state | **ALL PASSED 116/116 assertions, 7/7 cases — run twice consecutively** (126/126 after review round) |
 | `test_project_context_run_mirror` | headless; run-mirror connect-once over a real tracked pipeline | **ALL PASSED 12/12 assertions — run twice consecutively** |
 | `test_project_session_boundary` | pre-existing boundary suite (adjacent surface) | ALL PASSED 41/41 assertions, 5/5 cases |
 | `test_secondary_map_view_session` | pre-existing secondary view session (adjacent) | ALL PASSED 56/56 assertions, 6/6 cases |
@@ -34,6 +34,32 @@ the CMake change.
 
 All sabotages reverted; final tree grep-verified free of `SABOTAGE` markers
 before the double GREEN run above.
+
+## Review round 1 (independent adversarial review) and fixes
+
+Verdict on `65c6e73bb`: NOT-READY, blocking P1-1 — all blocking findings fixed
+on the final tree, suites re-run green.
+
+| Finding | Disposition |
+|---|---|
+| **P1-1** failed Save As leaves `m_missionRuntime.context.projectRef` on the failed target (onProjectWrite mirrors the re-homed context during the doomed write), silently disabling mission reconciliation | **Fixed**: the rollback now restores `m_missionRuntime.context.projectRef` together with the other refs; new doomed-write scenario (read-only parent, writeProject emitted before the failure) asserts context ref restoration on the live window |
+| **P2-1** failed Save As publishes an orphan mission sidecar beside the failed target (later adoptable into an unrelated project) | **Fixed two-sided**: directory targets are refused before the transaction mutates anything; a sidecar that did not exist before the transaction is removed by the rollback (pre-existing sidecars left untouched); absence of the orphan is asserted in the doomed-write scenario |
+| **P2-2** rebasing branches could append `target_sources(sicnu_geo_rs ...)` cleanly and land TUs on the exe, silently bypassing the full-shell test | **Fixed**: configure-time split-drift guard in `src/app/CMakeLists.txt` — `get_target_property(SOURCES sicnu_geo_rs)` must be `main.cpp` + `.qrc` only, else `FATAL_ERROR` with a pointer to the shell library |
+| **P3-1** `>=` gate lets newer-shell state be destroyed by an alternating older binary | **Fixed (softened)**: `savedVersion > k` now restores nothing and rewrites nothing — newer state passes through untouched; test flipped to pin preservation |
+| P3-2 duplicated exe/shell link lists; exe-side `Sicnu::teaching` residue | **Kept deliberately** (belt-and-suspenders for parallel-branch rebases: a dep added exe-side still links the exe); recorded here |
+| P3-3 mirror now runs with no store open | Verified safe: `GovernanceStore` refuses `!m_impl`; residual unconditional `entityChanged` broadcast on failed upsert noted upstream |
+| P3-4 modal dismisser / QSettings isolation / pumpUntil | Reviewed sound (budget-bounded, per-process namespace, predicate-driven settle) |
+| P3-5 stale `v9/v12` comment | Fixed (comment now lists actual versions) |
+
+## Final GREEN (post-review tree)
+
+| Target | Result |
+|---|---|
+| `test_workbench_full_shell_lifecycle` | **ALL PASSED 126/126 assertions, 7/7 cases — twice consecutively** |
+| `test_project_context_run_mirror` | ALL PASSED 12/12 |
+| `test_build_wiring_drift` | All tests passed (34 assertions, 7 cases) |
+| `[save_as]` focused (dir-refusal + doomed-write rollback) | ALL PASSED 33/33 |
+| `[b12]` focused (corrupt drop + newer-state preservation) | ALL PASSED 5/5 |
 
 ## Notes
 

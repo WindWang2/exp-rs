@@ -258,14 +258,25 @@ void QgisDesktopWindow::restorePanelState()
     // and a crowded right dock stack that fought the new chrome.
     // v7: full-width top ribbon dock (setCorner Top*→TopDock) — drop prior states.
     // v8: toolbars hosted in chrome strip under ribbon (not TopToolBarArea).
-    // v9/v12: hide empty Task Center by default; single task projection.
+    // v9: hide empty Task Center by default; single task projection.
     // v10: remove band composition rail from top chrome; content-width toolbars.
     // v11: view-oriented shell — Data Manager raised; Layers retitled 视图图层.
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
     // Exact-version gate: state saved by a NEWER shell must not be restored
     // into this older binary (it may encode dock geometry this build cannot
-    // interpret) — the B12 twin of the drop-prior-states rule below.
+    // interpret) — the B12 twin of the drop-prior-states rule below. And
+    // this binary must not DESTROY that newer state either: rewriting the
+    // version marker here would have a v12 build's layout clobbered on the
+    // next launch of an older binary. Touch nothing.
+    if ( savedVersion > kShellLayoutVersion )
+    {
+        qWarning( "restorePanelState: saved layout state is from a newer shell "
+                  "(version %d > %d) — left untouched",
+                  savedVersion, kShellLayoutVersion );
+        return;
+    }
+
     if ( savedVersion == kShellLayoutVersion )
     {
         const QByteArray state = settings.value( QStringLiteral( "mainwindow/state" ) ).toByteArray();

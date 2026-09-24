@@ -15,6 +15,7 @@
 #include "panels/data_manager_panel.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workbench/mission_timeline_panel.h"
+#include "workbench/mission_context_store.h"
 #include "workbench/project_session_boundary.h"
 
 #include <QCoreApplication>
@@ -407,6 +408,18 @@ void QgisDesktopWindow::saveProject()
 
 bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
 {
+    // A directory target cannot become a project file: refuse before the
+    // transaction mutates anything. (QgsProject::write emits writeProject
+    // before any target I/O, so a doomed write would still publish the
+    // mission sidecar beside the target.)
+    if ( QFileInfo( filePath ).isDir() )
+    {
+        QMessageBox::warning(
+            this, tr("Save Project"),
+            tr("Cannot save to:\n%1\n(the path is a directory)").arg(filePath) );
+        return false;
+    }
+
     // #1097: QgsProject::write(filename) sets mFile BEFORE the write. Hold
     // prior identity/governance until the write succeeds so a failure does
     // not leave title/store pointing at a file that was never saved.
@@ -423,6 +436,14 @@ bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
         m_mission.projectRef = filePath;
     if ( m_missionRuntime.timeline.projectRef() != filePath )
         m_missionRuntime.timeline.setProjectRef( filePath );
+    // onProjectWrite publishes the mission sidecar beside the TARGET during
+    // the write — before the project file I/O can fail. A sidecar that did
+    // not exist before this transaction is this transaction's orphan on
+    // failure and is removed with the rollback; a pre-existing sidecar (a
+    // real authority of the target) is left untouched.
+    const QString targetSidecar =
+        sicnu::app::missionSidecarPathForProject( filePath );
+    const bool sidecarExisted = QFileInfo::exists( targetSidecar );
 
     if ( QgsProject::instance()->write(filePath) )
     {
@@ -443,6 +464,15 @@ bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
         m_mission.projectRef = previousMissionRef;
     if ( m_missionRuntime.timeline.projectRef() != previousTimelineRef )
         m_missionRuntime.timeline.setProjectRef( previousTimelineRef );
+    // onProjectWrite mirrored the re-homed m_mission into the live runtime
+    // context during the doomed write — the rollback must cover it, or the
+    // session keeps a context.projectRef naming the failed target and
+    // mission reconciliation stays silently disabled.
+    m_missionRuntime.context.projectRef = m_mission.projectRef;
+    if ( !sidecarExisted )
+    {
+        QFile::remove( targetSidecar );
+    }
     QgsProject::instance()->setFileName( previousPath );
     updateWindowTitle();
     QMessageBox::warning(

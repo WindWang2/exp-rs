@@ -402,7 +402,6 @@ add_executable(sicnu_geo_rs main.cpp)
 # The shell library is PRIVATE: the executable is its only production
 # consumer, and static-library PRIVATE deps still resolve at final link.
 target_link_libraries(sicnu_geo_rs PRIVATE sicnu_geo_rs_shell)
-
 set_target_properties(sicnu_geo_rs_shell PROPERTIES
     AUTOMOC ON
     # Same contract as the executable had: the dialog headers name ui_*.h
@@ -607,6 +606,23 @@ set_target_properties(sicnu_geo_rs PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     OUTPUT_NAME "sicnu_geo_rs"
 )
+
+# Split-drift guard: the executable is main.cpp + resources ONLY; every
+# shell TU lives in sicnu_geo_rs_shell so the full-shell offscreen lifecycle
+# test keeps linking the real shell through one library. A rebasing branch
+# that appends target_sources(sicnu_geo_rs ...) would apply cleanly and
+# silently bypass that test — fail the configure instead.
+get_target_property(_sicnu_geo_rs_sources sicnu_geo_rs SOURCES)
+foreach(_src ${_sicnu_geo_rs_sources})
+    if(NOT _src MATCHES "(^|/)main\\.cpp$" AND NOT _src MATCHES "\\.qrc$")
+        message(FATAL_ERROR
+            "sicnu_geo_rs may contain only main.cpp and resource (.qrc) "
+            "files, got '${_src}'. Shell translation units belong in "
+            "sicnu_geo_rs_shell (see the split comment at the top of this "
+            "file).")
+    endif()
+endforeach()
+unset(_sicnu_geo_rs_sources)
 
 install(TARGETS sicnu_geo_rs
     RUNTIME DESTINATION bin

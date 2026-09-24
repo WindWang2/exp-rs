@@ -350,8 +350,9 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
          == QStringList{ projects.sidecarB() } );
 
   // Failed Save As: the target is an existing DIRECTORY, so the write must
-  // refuse. Identity, store binding, mission ref and watcher stay on B —
-  // and B's bytes are exactly what they were.
+  // refuse before the transaction mutates anything. Identity, store binding,
+  // mission ref and watcher stay on B — and B's bytes are exactly what
+  // they were.
   const QString dirTarget = projects.tmp.filePath( QStringLiteral( "目标目录" ) );
   REQUIRE( QDir().mkpath( dirTarget ) );
   const QByteArray projectBBefore = readBytes( projects.pathB );
@@ -361,8 +362,36 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
   CHECK( fx.window.windowTitle().contains( QStringLiteral( "工程B" ) ) );
   CHECK( fx.window.projectContext()->workspaceService().isStoreOpen() );
   CHECK( fx.window.missionContext().projectRef == projects.pathB );
+  CHECK( fx.window.missionRuntime().context.projectRef == projects.pathB );
   CHECK( fx.window.watchedMissionSidecars()
          == QStringList{ projects.sidecarB() } );
+  CHECK( readBytes( projects.pathB ) == projectBBefore );
+
+  // A DOOMED write: QgsProject::write emits writeProject (running the
+  // mission publication into the live runtime context) BEFORE it touches
+  // the target. A read-only parent fails the write only afterwards — every
+  // re-homed ref, including m_missionRuntime.context.projectRef, must roll
+  // back, and no orphan sidecar may survive beside the refused target.
+  const QString roDir = projects.tmp.filePath( QStringLiteral( "只读目录" ) );
+  REQUIRE( QDir().mkpath( roDir ) );
+  const QFile::Permissions ro =
+      QFileDevice::ReadOwner | QFileDevice::ExeOwner
+      | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+      | QFileDevice::ReadOther | QFileDevice::ExeOther;
+  REQUIRE( QFile::setPermissions( roDir, ro ) );
+  armModalAnswer( QMessageBox::Ok, 4 );
+  CHECK( !fx.window.saveProjectAsTo(
+      QDir( roDir ).filePath( QStringLiteral( "只读工程.qgs" ) ) ) );
+  CHECK( QgsProject::instance()->fileName() == projects.pathB );
+  CHECK( fx.window.missionContext().projectRef == projects.pathB );
+  CHECK( fx.window.missionRuntime().context.projectRef == projects.pathB );
+  CHECK( fx.window.watchedMissionSidecars()
+         == QStringList{ projects.sidecarB() } );
+  CHECK( !QFile::exists(
+      QDir( roDir ).filePath( QStringLiteral( "只读工程.mission.json" ) ) ) );
+  QFile::setPermissions(
+      roDir, ro | QFileDevice::WriteOwner | QFileDevice::WriteGroup
+                 | QFileDevice::WriteOther );
   CHECK( readBytes( projects.pathB ) == projectBBefore );
 }
 
@@ -502,8 +531,10 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
   CHECK( settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ) )
              .toInt() == 11 );
 
-  // A state saved by a NEWER shell must not be restored into this older
-  // binary either: the exact-version gate drops it to the baseline.
+  // A state saved by a NEWER shell must be neither interpreted nor
+  // destroyed by this older binary: version and state stay exactly as the
+  // newer shell wrote them (an alternating-version user keeps the newer
+  // layout).
   {
     QSettings newer;
     newer.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 99 );
@@ -513,9 +544,10 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
   {
     ShellFixture fx2;
     QSettings after;
-    CHECK( !after.contains( QStringLiteral( "mainwindow/state" ) ) );
+    CHECK( after.value( QStringLiteral( "mainwindow/state" ) ).toByteArray()
+           == QByteArray( "future-layout-state" ) );
     CHECK( after.value( QStringLiteral( "mainwindow/shellLayoutVersion" ) )
-               .toInt() == 11 );
+               .toInt() == 99 );
   }
 }
 
