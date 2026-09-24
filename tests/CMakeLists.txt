@@ -12490,6 +12490,24 @@ target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificStat
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
 sicnu_add_sdk_test(test_science_context_broker)
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
+
+# Science context live-authority probes: broker + real ScientificRecipeRegistry
+# (in-repo pack via CMAKE_SOURCE_DIR) + real GDAL facts collector (io lane).
+add_executable(test_science_context_live_authorities test_science_context_live_authorities.cpp)
+target_link_libraries(test_science_context_live_authorities PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::ScienceContext
+  sicnu_recipes
+  Sicnu::ScientificStateGdal
+)
+target_include_directories(test_science_context_live_authorities PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_science_context_live_authorities PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_science_context_live_authorities PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_science_context_live_authorities)
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)
