@@ -276,8 +276,14 @@ Result<FirstDivergenceReport> analyzeImpl(
     // failed are never "identical" — with digest-less evidence both
     // documents can otherwise agree while the outcomes differ.
     if ( reference.identityDocument() == student.identityDocument()
-         && reference.pins().runStatus == student.pins().runStatus )
+         && reference.pins().runStatus == student.pins().runStatus
+         && reference.stepEvidence() != StepEvidenceMode::Absent
+         && student.stepEvidence() != StepEvidenceMode::Absent )
     {
+        // "identical" is a claim about the executions' PROCESS, not merely
+        // their pins: without step evidence on both sides the report would
+        // assert equivalence from identity alone, so evidence-less pairs
+        // fall through to the availability gate's honest "incomplete".
         report.verdict = QStringLiteral( "identical" );
         return Result<FirstDivergenceReport>::success( report );
     }

@@ -14,6 +14,8 @@
 
 #include "data/data_result.h"
 #include "experiment/debugger/debugger_types.h"
+
+#include "experiment/experiment_types.h"
 #include "experiment/debugger/evidence_source.h"
 #include "experiment/debugger/run_snapshot.h"
 #include "experiment/debugger/snapshot_builder.h"
@@ -39,6 +41,7 @@
 using namespace sicnu::experiment::debugger;
 using namespace sicnu::experiment::debugger::fixtures;
 using sicnu::experiment::ExperimentRun;
+using sicnu::experiment::RunEnvironment;
 using sicnu::experiment::ExperimentStore;
 namespace workflow = sicnu::workflow;
 
@@ -1972,4 +1975,219 @@ TEST_CASE( "Slice C: identical pipeline but a failed student run is never 'ident
         makeStoredRun( QStringLiteral( "run-ref" ) ), failedRun, refSnap, stuSnap.take() );
     REQUIRE( report.has_value() );
     CHECK( report->verdict != QStringLiteral( "identical" ) );
+}
+
+namespace
+{
+
+// One checkpoint step shaped exactly like the volatile-fields oracle uses.
+StepEvidence singleCheckpointStep( const QString &stepId, const QString &outputDigest,
+                                   qint64 sizeBytes )
+{
+    StepEvidence stepEvidence;
+    stepEvidence.mode = StepEvidenceMode::CheckpointSteps;
+    StepSnapshot step;
+    step.stepId = stepId;
+    step.operatorId = QStringLiteral( "rs:threshold_calc" );
+    step.lineageSignature = QStringLiteral( "sig-1" );
+    step.status = QStringLiteral( "Completed" );
+    step.outputDigest = outputDigest;
+    step.digestMode = QLatin1String( kDigestModeSha256Hex );
+    step.outputSizeBytes = sizeBytes;
+    stepEvidence.steps.append( step );
+    return stepEvidence;
+}
+
+} // namespace
+
+TEST_CASE( "Round-2: environment drift moves snapshot identity and blocks 'identical'",
+           "[debugger][identity][round2]" )
+{
+    const auto withPlatform = []( const char *platform ) {
+        ExperimentRun run = makeStoredRun( QStringLiteral( "run-env" ) );
+        run.setEnvironment( RunEnvironment::fromFields(
+            QJsonObject{ { QStringLiteral( "platform" ), QString::fromLatin1( platform ) } } ) );
+        return run;
+    };
+    ExperimentRun referenceRun = withPlatform( "linux" );
+    ExperimentRun studentRun = withPlatform( "windows" );
+
+    InMemoryEvidenceSource referenceSource;
+    referenceSource.insertRun( referenceRun );
+    referenceSource.insertStepEvidence( QStringLiteral( "run-env" ),
+                                        singleCheckpointStep( QStringLiteral( "threshold" ),
+                                                              QStringLiteral( "d1" ), 1024 ) );
+    InMemoryEvidenceSource studentSource;
+    studentSource.insertRun( studentRun );
+    studentSource.insertStepEvidence( QStringLiteral( "run-env" ),
+                                      singleCheckpointStep( QStringLiteral( "threshold" ),
+                                                            QStringLiteral( "d1" ), 1024 ) );
+
+    RunSnapshotBuilder referenceBuilder( referenceSource );
+    RunSnapshotBuilder studentBuilder( studentSource );
+    const auto reference = referenceBuilder.build( QStringLiteral( "run-env" ) );
+    const auto student = studentBuilder.build( QStringLiteral( "run-env" ) );
+    REQUIRE( reference.has_value() );
+    REQUIRE( student.has_value() );
+
+    // Replay deviation treats environment drift as divergence; the debugger
+    // identity must agree (round-2 P1-3: two modules contradicted each other
+    // on the same pair — first_divergence said "identical" while its own
+    // run-level comparison reported environment differs).
+    CHECK( reference->snapshotDigest() != student->snapshotDigest() );
+
+    const auto report = FirstDivergenceAnalyzer::analyze(
+        referenceRun, studentRun, reference.value(), student.value() );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict != QStringLiteral( "identical" ) );
+}
+
+TEST_CASE( "Round-2: re-recording one execution is identity-stable across trace timestamps",
+           "[debugger][identity][round2]" )
+{
+    // Same execution recorded twice: identical pins, steps, artifacts and
+    // result metrics — only the workflow TRACE timestamps differ. The pins'
+    // result_fingerprint must not carry that trace, or "same execution =>
+    // same identity" is unsatisfiable for bridge runs (round-2 P1-4).
+    const auto recordedAt = []( qint64 startedMs ) {
+        ExperimentRun run = makeStoredRun( QStringLiteral( "run-replay" ) );
+        run.artifacts().append( ExperimentRun::Artifact{
+            QStringLiteral( "out.tif" ), QStringLiteral( "primary" ),
+            QStringLiteral( "digest-a" ), 100 } );
+        QJsonArray steps{ QJsonObject{
+            { QStringLiteral( "step_id" ), QStringLiteral( "threshold" ) },
+            { QStringLiteral( "status" ), QStringLiteral( "Completed" ) },
+            { QStringLiteral( "started_ms" ), startedMs },
+            { QStringLiteral( "finished_ms" ), startedMs + 40 } } };
+        run.setMetrics( QJsonObject{
+            { QStringLiteral( "overall_accuracy" ), 0.85 },
+            { QStringLiteral( "workflow" ),
+              QJsonObject{ { QStringLiteral( "steps" ), steps },
+                           { QStringLiteral( "started_ms" ), startedMs } } } } );
+        return run;
+    };
+
+    ExperimentRun firstRecording = recordedAt( 1000 );
+    ExperimentRun secondRecording = recordedAt( 9000 );
+
+    InMemoryEvidenceSource firstSource;
+    firstSource.insertRun( firstRecording );
+    firstSource.insertStepEvidence( QStringLiteral( "run-replay" ),
+                                    singleCheckpointStep( QStringLiteral( "threshold" ),
+                                                          QStringLiteral( "d1" ), 1024 ) );
+    InMemoryEvidenceSource secondSource;
+    secondSource.insertRun( secondRecording );
+    secondSource.insertStepEvidence( QStringLiteral( "run-replay" ),
+                                     singleCheckpointStep( QStringLiteral( "threshold" ),
+                                                           QStringLiteral( "d1" ), 1024 ) );
+
+    RunSnapshotBuilder firstBuilder( firstSource );
+    RunSnapshotBuilder secondBuilder( secondSource );
+    const auto first = firstBuilder.build( QStringLiteral( "run-replay" ) );
+    const auto second = secondBuilder.build( QStringLiteral( "run-replay" ) );
+    REQUIRE( first.has_value() );
+    REQUIRE( second.has_value() );
+    CHECK( first->snapshotDigest() == second->snapshotDigest() );
+
+    const auto report = FirstDivergenceAnalyzer::analyze(
+        firstRecording, secondRecording, first.value(), second.value() );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict == QStringLiteral( "identical" ) );
+}
+
+TEST_CASE( "Round-2: evidence-less twins with matching pins are 'incomplete', never 'identical'",
+           "[debugger][identity][round2]" )
+{
+    // Identity documents CAN agree while no process evidence exists to back
+    // "identical" — the shortcut must not fire on evidence-less pairs.
+    const auto bare = []( const char *digest ) {
+        ExperimentRun run = makeStoredRun( QStringLiteral( "run-bare" ) );
+        run.artifacts().append( ExperimentRun::Artifact{
+            QStringLiteral( "out.tif" ), QStringLiteral( "primary" ),
+            QString::fromLatin1( digest ), 100 } );
+        run.setMetrics( QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.85 } } );
+        return run;
+    };
+    ExperimentRun referenceRun = bare( "digest-a" );
+    ExperimentRun studentRun = bare( "digest-a" );
+
+    InMemoryEvidenceSource referenceSource;
+    referenceSource.insertRun( referenceRun );
+    InMemoryEvidenceSource studentSource;
+    studentSource.insertRun( studentRun );
+
+    RunSnapshotBuilder referenceBuilder( referenceSource );
+    RunSnapshotBuilder studentBuilder( studentSource );
+    const auto reference = referenceBuilder.build( QStringLiteral( "run-bare" ) );
+    const auto student = studentBuilder.build( QStringLiteral( "run-bare" ) );
+    REQUIRE( reference.has_value() );
+    REQUIRE( student.has_value() );
+    REQUIRE( reference->stepEvidence() == StepEvidenceMode::Absent );
+    REQUIRE( student->stepEvidence() == StepEvidenceMode::Absent );
+
+    const auto report = FirstDivergenceAnalyzer::analyze(
+        referenceRun, studentRun, reference.value(), student.value() );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict == QStringLiteral( "incomplete" ) );
+}
+
+TEST_CASE( "Round-2: final-digest invariant evaluates the pipeline SINK, not the sort-last step",
+           "[debugger][invariants][round2]" )
+{
+    // Two-branch pipeline: both branches end in their own sink. Storage
+    // order is (topological, stepId), so the historical constLast read
+    // pointed at whichever sink sorted last — a check whose verdict moves
+    // with a RENAME protects nothing. With two sinks the invariant must
+    // refuse to guess; with exactly one sink it must still decide.
+    RunSnapshot snapshot;
+    snapshot.setRunId( QStringLiteral( "run-branchy" ) );
+    const auto step = []( const QString &stepId, const QStringList &dependencies,
+                          const QString &outputDigest ) {
+        StepSnapshot oneStep;
+        oneStep.stepId = stepId;
+        oneStep.operatorId = QStringLiteral( "rs:threshold_calc" );
+        oneStep.dependencies = dependencies;
+        oneStep.status = QStringLiteral( "Completed" );
+        oneStep.outputDigest = outputDigest;
+        oneStep.digestMode = QLatin1String( kDigestModeSha256Hex );
+        return oneStep;
+    };
+    Invariant sinkInvariant;
+    sinkInvariant.kind = Invariant::Kind::FinalDigestEquals;
+    sinkInvariant.invariantId = QStringLiteral( "sink-digest" );
+    sinkInvariant.digest = QStringLiteral( "digest-b" );
+
+    // (1) Several sinks: the ambiguity is named, never guessed.
+    snapshot.setSteps( { step( QStringLiteral( "ingest" ), {},
+                               QStringLiteral( "digest-root" ) ),
+                         step( QStringLiteral( "a_export" ), { QStringLiteral( "ingest" ) },
+                               QStringLiteral( "digest-a" ) ),
+                         step( QStringLiteral( "b_mask" ), { QStringLiteral( "ingest" ) },
+                               QStringLiteral( "digest-b" ) ) } );
+    const auto checks = evaluateInvariants( { sinkInvariant }, snapshot );
+    REQUIRE( checks.size() == 1 );
+    CHECK( !checks.first().evaluable );
+    CHECK( !checks.first().passed );
+
+    // (2) A sibling rename (a_export -> z_export, re-ordered the same way
+    // the store would sort it) must not change the outcome.
+    snapshot.setSteps( { step( QStringLiteral( "ingest" ), {},
+                               QStringLiteral( "digest-root" ) ),
+                         step( QStringLiteral( "b_mask" ), { QStringLiteral( "ingest" ) },
+                               QStringLiteral( "digest-b" ) ),
+                         step( QStringLiteral( "z_export" ), { QStringLiteral( "ingest" ) },
+                               QStringLiteral( "digest-a" ) ) } );
+    const auto renamed = evaluateInvariants( { sinkInvariant }, snapshot );
+    REQUIRE( renamed.size() == 1 );
+    CHECK( !renamed.first().evaluable );
+
+    // (3) A single-sink pipeline is still decidable, and judges the sink.
+    snapshot.setSteps( { step( QStringLiteral( "ingest" ), {},
+                               QStringLiteral( "digest-root" ) ),
+                         step( QStringLiteral( "mask" ), { QStringLiteral( "ingest" ) },
+                               QStringLiteral( "digest-b" ) ) } );
+    const auto singleSink = evaluateInvariants( { sinkInvariant }, snapshot );
+    REQUIRE( singleSink.size() == 1 );
+    CHECK( singleSink.first().evaluable );
+    CHECK( singleSink.first().passed );
 }

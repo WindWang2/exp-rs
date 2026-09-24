@@ -191,9 +191,13 @@ QJsonObject RunPinsSnapshot::toJson() const
     json.insert( QLatin1String( "run_status" ), runStatus );
     if ( seedKnown )
     {
-        json.insert( QLatin1String( "seed" ), static_cast<double>( seed ) );
+        // Seeds are 64-bit; a double token corrupts everything at 2^53 and
+        // above (the study spec already refuses such seeds for the same
+        // reason). Integers serialize losslessly, so pin the exact value.
+        json.insert( QLatin1String( "seed" ), static_cast<qint64>( seed ) );
         json.insert( QLatin1String( "seed_known" ), true );
     }
+    json.insert( QLatin1String( "environment" ), environment );
     return json;
 }
 
@@ -213,8 +217,14 @@ Result<RunPinsSnapshot> RunPinsSnapshot::fromJson( const QJsonObject &json )
     pins.resultFingerprint = json.value( QLatin1String( "result_fingerprint" ) ).toString();
     pins.runStatus = json.value( QLatin1String( "run_status" ) ).toString();
     pins.seedKnown = json.value( QLatin1String( "seed_known" ) ).toBool( false );
-    pins.seed = static_cast<quint64>( json.value( QLatin1String( "seed" ) ).toDouble( 0 ) );
-    return Result<RunPinsSnapshot>::success( pins );
+    // Seed pins carry an exact 64-bit integer from current builders; older
+    // documents carry a double token, already lossy at >= 2^53 — read what
+    // is there, the loss happened on write, not here.
+    if ( pins.seedKnown )
+        pins.seed = static_cast<quint64>(
+            json.value( QLatin1String( "seed" ) ).toInteger() );
+    pins.environment = json.value( QLatin1String( "environment" ) ).toObject();
+        return Result<RunPinsSnapshot>::success( pins );
 }
 
 const StepSnapshot *RunSnapshot::findStep( const QString &stepId ) const

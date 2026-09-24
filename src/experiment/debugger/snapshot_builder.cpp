@@ -113,13 +113,32 @@ Result<RunSnapshot> RunSnapshotBuilder::build( const QString &runId ) const
     pins.modelDigest = record->modelDigest();
     pins.softwareRevision = record->softwareRevision();
     pins.configHash = record->configHash();
-    pins.resultFingerprint = record->resultFingerprint();
+    // Result identity for the debugger must survive a RE-RECORD of the same
+    // execution: the stored result_fingerprint hashes the FULL metrics
+    // document, and its "workflow" block carries recording-time trace
+    // (started_ms/finished_ms per step) that legitimately differs between
+    // two recordings of one execution. Derive the debugger's pin without
+    // that trace — the per-step output digests below still carry everything
+    // the execution produced. Result-metric drift (non-trace) still moves
+    // this pin, so result-only divergence keeps its identity signal.
+    {
+        QJsonObject stableMetrics = record->metrics();
+        stableMetrics.remove( QLatin1String( "workflow" ) );
+        QStringList artifactDigests;
+        for ( const ExperimentRun::Artifact &artifact : record->artifacts() )
+            artifactDigests.append( artifact.digest );
+        pins.resultFingerprint = runResultFingerprint( artifactDigests, stableMetrics );
+    }
     pins.runStatus = sicnu::dataset::runStatusToString( record->status() );
     // Representation honesty: ExperimentRun carries a bare quint64 seed, so a
     // legitimately-recorded seed 0 is indistinguishable from "no seed"; it is
     // reported as unknown rather than guessed.
     pins.seed = record->seed();
     pins.seedKnown = record->seed() != 0;
+    // Environment is identity (replay_deviation treats environment drift as
+    // divergence) — snapshot it redacted so identity documents cannot claim
+    // "identical" across differing hosts, and so no secret rides along.
+    pins.environment = record->environment().redacted().toJson();
     snapshot.setPins( pins );
     snapshot.setMetrics( record->metrics() );
 

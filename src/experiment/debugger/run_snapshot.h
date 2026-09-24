@@ -123,6 +123,11 @@ struct RunPinsSnapshot
     QString runStatus;
     quint64 seed = 0;
     bool seedKnown = false;
+    /// Redacted environment snapshot of the recording host. Identity-bearing:
+    /// replay deviation treats environment drift as divergence, so two
+    /// snapshots that differ only here must not call themselves identical
+    /// (round-2 audit P1-3). Empty object = recorded without environment.
+    QJsonObject environment;
 
     QJsonObject toJson() const;
     static sicnu::data::Result<RunPinsSnapshot> fromJson( const QJsonObject &json );
