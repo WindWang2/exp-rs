@@ -28,7 +28,7 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 | `test_inspector_host` | 27 assertions / 6 cases (adjacent) |
 | `test_provenance_section` | 61 assertions / 6 cases (adjacent) |
 | `test_build_wiring_drift` | 34 assertions / 7 cases (CMake changed) |
-| `sicnu_geo_rs` | **named product target: compiled + linked clean** (shell TUs + link closure) |
+| `sicnu_geo_rs` | **named product target: compiled + linked clean — true of the final rebased tree** (the registration TU initially missed the designer-dock include; the product-target build caught it, it was fixed, and the link evidence is from after that fix + rebase) |
 
 ## Sabotage evidence (each run on the exact tree, then reverted and re-verified green)
 
