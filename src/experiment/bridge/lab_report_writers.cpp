@@ -43,9 +43,32 @@ QString compactJson( const QJsonValue &value )
 
 QString mdEscape( const QString &text )
 {
+    // The HTML writer escapes every interpolated field; the Markdown writer
+    // must hold the same line. Recorded strings (paths, ids, summaries) are
+    // unvalidated content: unescaped, they forge links, break out of code
+    // spans and tables, and raw inline HTML sails into every Markdown
+    // renderer. Escape the structural characters, keep the text readable.
     QString out = text;
+    out.replace( QLatin1Char( '\\' ), QStringLiteral( "\\\\" ) );
+    out.replace( QLatin1Char( '`' ), QStringLiteral( "\\`" ) );
     out.replace( QLatin1Char( '|' ), QStringLiteral( "\\|" ) );
+    out.replace( QLatin1Char( '[' ), QStringLiteral( "\\[" ) );
+    out.replace( QLatin1Char( ']' ), QStringLiteral( "\\]" ) );
+    out.replace( QLatin1Char( '<' ), QStringLiteral( "\\<" ) );
+    out.replace( QLatin1Char( '>' ), QStringLiteral( "\\>" ) );
     out.replace( QLatin1Char( '\n' ), QStringLiteral( " " ) );
+    return out;
+}
+
+/// The URL slot of `![alt](url)` cannot be backslash-escaped: breakouts go
+/// through parentheses and whitespace, so percent-encode those instead.
+QString mdEscapeUrl( const QString &url )
+{
+    QString out = url;
+    out.replace( QLatin1Char( '(' ), QStringLiteral( "%28" ) );
+    out.replace( QLatin1Char( ')' ), QStringLiteral( "%29" ) );
+    out.replace( QLatin1Char( ' ' ), QStringLiteral( "%20" ) );
+    out.replace( QLatin1Char( '\n' ), QStringLiteral( "%0A" ) );
     return out;
 }
 
@@ -88,38 +111,42 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
 
     const QJsonObject header = headerOf( document );
     QString md;
-    md += QStringLiteral( "# 实验报告 %1\n\n" ).arg( header.value( "reportId" ).toString() );
+    md += QStringLiteral( "# 实验报告 %1\n\n" )
+              .arg( mdEscape( header.value( "reportId" ).toString() ) );
     md += QStringLiteral( "- schema: `%1`\n" )
-              .arg( document.value( "schema" ).toString() );
+              .arg( mdEscape( document.value( "schema" ).toString() ) );
     md += QStringLiteral( "- lab: %1 (%2)\n" )
-              .arg( header.value( "labName" ).toString(), header.value( "labId" ).toString() );
+              .arg( mdEscape( header.value( "labName" ).toString() ),
+                    mdEscape( header.value( "labId" ).toString() ) );
     md += QStringLiteral( "- student: %1 · session: %2\n" )
-              .arg( header.value( "student" ).toString(), header.value( "session" ).toString() );
+              .arg( mdEscape( header.value( "student" ).toString() ),
+                    mdEscape( header.value( "session" ).toString() ) );
     md += QStringLiteral( "- generated: %1 · software: %2 · git: %3\n\n" )
-              .arg( header.value( "generatedAtUtc" ).toString(),
-                    header.value( "softwareRevision" ).toString(),
-                    header.value( "gitSha" ).toString() );
+              .arg( mdEscape( header.value( "generatedAtUtc" ).toString() ),
+                    mdEscape( header.value( "softwareRevision" ).toString() ),
+                    mdEscape( header.value( "gitSha" ).toString() ) );
     const QString objective = header.value( "objective" ).toString();
     if ( !objective.isEmpty() )
-        md += QStringLiteral( "> %1\n\n" ).arg( objective );
+        md += QStringLiteral( "> %1\n\n" ).arg( mdEscape( objective ) );
 
     md += QStringLiteral( "## 实验运行 (runs)\n\n" );
     for ( const QJsonValue &value : runsOf( document ) )
     {
         const QJsonObject run = value.toObject();
         md += QStringLiteral( "### %1 — %2\n\n" )
-                  .arg( run.value( "runId" ).toString(), run.value( "status" ).toString() );
+                  .arg( mdEscape( run.value( "runId" ).toString() ),
+                        mdEscape( run.value( "status" ).toString() ) );
         md += QStringLiteral( "- algorithm: %1 · executionRef: `%2`\n" )
-                  .arg( run.value( "algorithmId" ).toString(),
-                        run.value( "executionRef" ).toString() );
+                  .arg( mdEscape( run.value( "algorithmId" ).toString() ),
+                        mdEscape( run.value( "executionRef" ).toString() ) );
         md += QStringLiteral( "- window: %1 → %2\n" )
-                  .arg( run.value( "startedAtUtc" ).toString(),
-                        run.value( "finishedAtUtc" ).toString() );
+                  .arg( mdEscape( run.value( "startedAtUtc" ).toString() ),
+                        mdEscape( run.value( "finishedAtUtc" ).toString() ) );
         md += QStringLiteral( "- configHash: `%1`\n- executionFingerprint: `%2`\n- "
                               "resultFingerprint: `%3`\n" )
-                  .arg( run.value( "configHash" ).toString(),
-                        run.value( "executionFingerprint" ).toString(),
-                        run.value( "resultFingerprint" ).toString() );
+                  .arg( mdEscape( run.value( "configHash" ).toString() ),
+                        mdEscape( run.value( "executionFingerprint" ).toString() ),
+                        mdEscape( run.value( "resultFingerprint" ).toString() ) );
         const QJsonObject pins = QJsonObject{
             { QStringLiteral( "datasetVersionId" ),
               run.value( QStringLiteral( "datasetVersionId" ) ) },
@@ -132,15 +159,15 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
             { QStringLiteral( "modelId" ), run.value( QStringLiteral( "modelId" ) ) },
             { QStringLiteral( "seed" ), run.value( QStringLiteral( "seed" ) ) },
         };
-        md += QStringLiteral( "- pins: %1\n" ).arg( compactJson( QJsonValue( pins ) ) );
+        md += QStringLiteral( "- pins: %1\n" ).arg( mdEscape( compactJson( QJsonValue( pins ) ) ) );
         for ( const QJsonValue &artifact : run.value( "artifacts" ).toArray() )
         {
             const QJsonObject entry = artifact.toObject();
             md += QStringLiteral( "- artifact: `%1` (role %2, size %3, digest `%4`)\n" )
-                      .arg( entry.value( "path" ).toString(),
-                            entry.value( "role" ).toString( QStringLiteral( "-" ) ),
+                      .arg( mdEscape( entry.value( "path" ).toString() ),
+                            mdEscape( entry.value( "role" ).toString( QStringLiteral( "-" ) ) ),
                             QString::number( entry.value( "sizeBytes" ).toDouble( -1 ), 'f', 0 ),
-                            entry.value( "digest" ).toString( QStringLiteral( "-" ) ) );
+                            mdEscape( entry.value( "digest" ).toString( QStringLiteral( "-" ) ) ) );
         }
         md += QLatin1Char( '\n' );
     }
@@ -157,10 +184,11 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
                         mdEscape( step.value( "operator" ).toString() ),
                         step.value( "success" ).toBool() ? QStringLiteral( "✔" )
                                                           : QStringLiteral( "✘" ),
-                        step.value( "startedAtIso" ).toString(),
+                        mdEscape( step.value( "startedAtIso" ).toString() ),
                         QString::number( step.value( "durationMs" ).toDouble(), 'f', 1 ),
-                        attribution.value( "runId" ).toString( QStringLiteral( "—" ) ),
-                        attribution.value( "quality" ).toString() );
+                        mdEscape(
+                            attribution.value( "runId" ).toString( QStringLiteral( "—" ) ) ),
+                        mdEscape( attribution.value( "quality" ).toString() ) );
     }
     md += QLatin1Char( '\n' );
     for ( const QJsonValue &value : stepsOf( document ) )
@@ -189,44 +217,46 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
     if ( grade.value( "status" ).toString() == QLatin1String( "recorded" ) )
     {
         md += QStringLiteral( "recorded — ref `%1`\n\n" )
-                  .arg( grade.value( "gradingRef" ).toString() );
+                  .arg( mdEscape( grade.value( "gradingRef" ).toString() ) );
         md += QStringLiteral( "```json\n%1\n```\n\n" )
                   .arg( compactJson( grade.value( QStringLiteral( "inline" ) ) ) );
     }
     else
     {
         md += QStringLiteral( "**unavailable** — %1\n\n" )
-                  .arg( grade.value( "reason" ).toString() );
+                  .arg( mdEscape( grade.value( "reason" ).toString() ) );
     }
 
     md += QStringLiteral( "## 溯源 (lineage)\n\n" );
     const QJsonObject lineage = document.value( QStringLiteral( "lineage" ) ).toObject();
     md += QStringLiteral( "- start: %1:`%2` · existence: %3\n\n" )
-              .arg( lineage.value( "startKind" ).toString(),
-                    lineage.value( "startId" ).toString(),
-                    lineage.value( "existence" ).toString() );
+              .arg( mdEscape( lineage.value( "startKind" ).toString() ),
+                    mdEscape( lineage.value( "startId" ).toString() ),
+                    mdEscape( lineage.value( "existence" ).toString() ) );
     for ( const QJsonValue &value : lineage.value( "edges" ).toArray() )
     {
         const QJsonObject edge = value.toObject();
         md += QStringLiteral( "- `%1:%2` --(%3)--> `%4:%5`\n" )
-                  .arg( edge.value( "from_kind" ).toString(), edge.value( "from_id" ).toString(),
-                        edge.value( "edge" ).toString(), edge.value( "to_kind" ).toString(),
-                        edge.value( "to_id" ).toString() );
+                  .arg( mdEscape( edge.value( "from_kind" ).toString() ),
+                        mdEscape( edge.value( "from_id" ).toString() ),
+                        mdEscape( edge.value( "edge" ).toString() ),
+                        mdEscape( edge.value( "to_kind" ).toString() ),
+                        mdEscape( edge.value( "to_id" ).toString() ) );
     }
     md += QLatin1Char( '\n' );
 
     md += QStringLiteral( "## 环境回放 (replay)\n\n" );
     const QJsonObject replay = document.value( QStringLiteral( "replay" ) ).toObject();
-    md += QStringLiteral( "- level: **%1**\n" ).arg( replay.value( "level" ).toString() );
+    md += QStringLiteral( "- level: **%1**\n" ).arg( mdEscape( replay.value( "level" ).toString() ) );
     for ( const QJsonValue &value : replay.value( "blockers" ).toArray() )
-        md += QStringLiteral( "- blocker: %1\n" ).arg( value.toString() );
+        md += QStringLiteral( "- blocker: %1\n" ).arg( mdEscape( value.toString() ) );
     for ( const QJsonValue &value : replay.value( "checks" ).toArray() )
     {
         const QJsonObject check = value.toObject();
         md += QStringLiteral( "- %1: %2 %3\n" )
-                  .arg( check.value( "dependency" ).toString(),
-                        check.value( "status" ).toString(),
-                        check.value( "detail" ).toString() );
+                  .arg( mdEscape( check.value( "dependency" ).toString() ),
+                        mdEscape( check.value( "status" ).toString() ),
+                        mdEscape( check.value( "detail" ).toString() ) );
     }
     md += QLatin1Char( '\n' );
 
@@ -243,17 +273,17 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
         if ( thumbnail.contains( QStringLiteral( "renderError" ) ) )
         {
             md += QStringLiteral( "- %1: render failed — %2\n" )
-                      .arg( thumbnail.value( "sourcePath" ).toString(),
-                            thumbnail.value( "renderError" ).toString() );
+                      .arg( mdEscape( thumbnail.value( "sourcePath" ).toString() ),
+                            mdEscape( thumbnail.value( "renderError" ).toString() ) );
             continue;
         }
         md += QStringLiteral( "![%1](%2)\n\n" )
                   .arg( mdEscape( thumbnail.value( "sourcePath" ).toString() ),
-                        thumbnail.value( "dataUrl" ).toString() );
+                        mdEscapeUrl( thumbnail.value( "dataUrl" ).toString() ) );
     }
 
     for ( const QJsonValue &value : document.value( QStringLiteral( "warnings" ) ).toArray() )
-        md += QStringLiteral( "> warning: %1\n" ).arg( value.toString() );
+        md += QStringLiteral( "> warning: %1\n" ).arg( mdEscape( value.toString() ) );
 
     return Result<QString>::success( md );
 }

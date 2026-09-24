@@ -270,12 +270,17 @@ Result<QJsonObject> LabReportBuilder::build( const LabReportRequest &request ) c
     const QJsonArray steps = buildSteps( trail, runs );
 
     // Statistics: the run's metric record verbatim (protocol + documents),
-    // one entry per run in the (already deterministic) run order.
+    // one entry per run in the (already deterministic) run order. The record
+    // is hash-committed evidence scrubbed AT INGESTION (run_recorder) —
+    // re-running the denylist here would mask legitimate secret-SHAPED keys
+    // ("token_accuracy") into "***" and break the metrics_hash round-trip,
+    // the exact boundary violation round 2 removed from the reproduction
+    // bundle. The record goes out byte-identical to the store.
     QJsonArray statistics;
     for ( const ExperimentRun &run : runs )
     {
         if ( const auto record = m_store->metricRecordForRun( run.runId() ) )
-            statistics.append( deepRedactSecretKeys( record->toJson() ) );
+            statistics.append( record->toJson() );
     }
 
     const QJsonArray thumbnails = buildThumbnails( request, warnings );

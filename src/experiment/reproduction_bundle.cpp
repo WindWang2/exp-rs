@@ -20,11 +20,9 @@ using dataset::DatasetStore;
 namespace
 {
 
-Diagnostic bundleError( const QString &message )
-{
-    return Diagnostic{ QStringLiteral( "repro.bundle_error" ), message,
-                       DiagnosticSeverity::Error };
-}
+// (bundleError was removed: its last caller was the metrics redaction that
+// round 2 replaced with byte-identical record export — the compiler flagged
+// it unused.)
 
 /// Writes one bundle file + returns its checksum line content.
 bool writeFileWithChecksum( const QString &path, const QByteArray &content, QString *errorOut,
