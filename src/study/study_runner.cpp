@@ -184,7 +184,16 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
                           QStringLiteral( "store refused the failure transition" ), 0 );
             return false;
         }
-        m_ledger->link( point.pointId, runId.value() );
+        // Same doctrine for the ledger edge: a refusal here makes the point's
+        // failure invisible to every matrix consumer while the summary still
+        // reports it — abort like the main path instead of a silent gap.
+        if ( !m_ledger->link( point.pointId, runId.value() ).has_value() )
+        {
+            emitProgress( StudyProgress::Phase::Aborted, point.pointId,
+                          QStringLiteral( "ledger refused the point link" ),
+                          static_cast<int>( inFlight.size() ) );
+            return false;
+        }
         summary.runIds.append( runId.value() );
         ++summary.failedCount;
         emitProgress( StudyProgress::Phase::PointFinished, point.pointId,

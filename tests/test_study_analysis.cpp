@@ -418,3 +418,23 @@ TEST_CASE( "metric names resolve through the dotted-path rule, not top-level key
     for ( int i = 0; i < 5; ++i )
         REQUIRE( curve.points.at( i ).mean == Catch::Approx( 25.0 * i ) );
 }
+
+TEST_CASE( "matrix ledger surfaces every linked run, not the first 100",
+           "[study][analysis]" )
+{
+    // Study budget caps a study at kMaxMatrixCells runs; a cell's linked-run
+    // listing therefore has no business silently stopping at 100 — every
+    // statistic downstream (pooled means, envelopes, Pareto) would skew
+    // toward the earliest runs with no marker anywhere in the report.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    sicnu::experiment::MatrixLedger ledger( store );
+
+    const QString cell = QStringLiteral( "cell-many-runs" );
+    for ( int i = 0; i < 150; ++i )
+        REQUIRE( ledger.link( cell, QStringLiteral( "run-%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) )
+                     .has_value() );
+    REQUIRE( ledger.runsForCell( cell ).size() == 150 );
+}
