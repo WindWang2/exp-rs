@@ -400,11 +400,21 @@ TEST_CASE( "studio dock: only the synthetic demo builder may stamp synthetic doc
     REQUIRE( file.is_open() );
     const std::string source( ( std::istreambuf_iterator<char>( file ) ),
                               std::istreambuf_iterator<char>() );
+    // The note stamp is pinned for the same reason: "not derived from
+    // recorded runs" on real analyzer output is the dishonesty this gate
+    // exists for, with or without the boolean beside it.
     const std::string stamp = "insert( QStringLiteral( \"synthetic\" ), true )";
+    const std::string noteStamp = "QStringLiteral( \"synthetic_note\" )";
     int sites = 0;
     for ( std::size_t at = source.find( stamp ); at != std::string::npos;
           at = source.find( stamp, at + 1 ) )
         ++sites;
+    int noteSites = 0;
+    for ( std::size_t at = source.find( noteStamp ); at != std::string::npos;
+          at = source.find( noteStamp, at + 1 ) )
+        ++noteSites;
     INFO( "synthetic stamp sites in experiment_studio_dock.cpp: " << sites );
+    INFO( "synthetic_note stamp sites: " << noteSites );
     REQUIRE( sites == 1 );
+    REQUIRE( noteSites == 1 );
 }
