@@ -393,6 +393,6 @@ TEST_CASE( "explain:step is listed by the spatial tool provider (RS14-15)",
 TEST_CASE( "explain: family is an allowed MCP surface prefix (RS14-15)",
            "[d16][agent][explain]" )
 {
-    const QStringList prefixes = surfaceAllowedPrefixes();
+    const QStringList prefixes = sicnu::agent::tool_catalog::surfaceAllowedPrefixes();
     CHECK( prefixes.contains( QStringLiteral( "explain:" ) ) );
 }
