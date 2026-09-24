@@ -13079,6 +13079,59 @@ sicnu_link_jsoncpp(test_secondary_map_view_session)
 set_target_properties(test_secondary_map_view_session PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_secondary_map_view_session)
 
+# R3 full-shell recovery: the workflow run-state mirror must be connected
+# exactly once per ProjectContext (it used to stack a connection per
+# openWorkspaceStore call — open + Save As ⇒ N deliveries per transition).
+add_executable(test_project_context_run_mirror
+  test_project_context_run_mirror.cpp
+)
+target_link_libraries(test_project_context_run_mirror PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_workflow_runtime
+  qgis_core
+)
+target_include_directories(test_project_context_run_mirror PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_project_context_run_mirror)
+sicnu_discover_tests(test_project_context_run_mirror)
+
+# R3 full-shell recovery: the full QgisDesktopWindow lifecycle fixture —
+# open/open-fail/save/new/close, Save As store+watcher rebind, secondary
+# view reopen, designer retirement and the shutdown policy, driven offscreen
+# through the real window's dialog-free entry points. Links the SAME shell
+# library the product executable links (sicnu_geo_rs_shell) — no embedded
+# TU copy, so central-file drift breaks this suite loudly.
+add_executable(test_workbench_full_shell_lifecycle
+  test_workbench_full_shell_lifecycle.cpp
+)
+target_link_libraries(test_workbench_full_shell_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  # qgis usage requirements (include dirs for moc + TU) must come from a
+  # direct link: the shell library's PRIVATE deps propagate symbols only.
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+)
+target_include_directories(test_workbench_full_shell_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_workbench_full_shell_lifecycle)
+set_target_properties(test_workbench_full_shell_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_full_shell_lifecycle)
+
 # Scoped SpatialTool registrations: the process-wide registry gains
 # unregister/token semantics so session hosts release their tools.
 add_executable(test_spatial_tool_registration

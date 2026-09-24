@@ -132,6 +132,12 @@ private:
   /// keeps the asset loaded via that other lease).
   data::Result<void> removeAllDisplayLayers();
 
+  /// Connects the workflow run-state mirror (issue #754) exactly once, from
+  /// the constructor. It used to be wired inside every openWorkspaceStore()
+  /// call, so after N project opens / Save As one run transition ran N
+  /// queued recordRun writes and broadcasts.
+  void installRunStateMirror();
+
   /// Adopts a layer that entered the QGIS project outside the Data Manager
   /// seam. Local GDAL rasters and OGR vectors are registered and adopted;
   /// remote and unsupported layers are left as External Display Layers. Layers

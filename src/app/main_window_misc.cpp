@@ -241,6 +241,16 @@ void QgisDesktopWindow::showLabCockpit()
         m_labCockpitDock->raise();
     }
 }
+namespace
+{
+// Shell layout contract version. Bumped whenever a layout change makes old
+// saved state incompatible (see the restorePanelState history). Single
+// source of truth for save / restore / reset — the literal used to be
+// duplicated at three sites, so a bump silently left the write sites behind
+// and permanently re-triggered the drop-pre-shell-layout branch.
+constexpr int kShellLayoutVersion = 11;
+} // namespace
+
 void QgisDesktopWindow::restorePanelState()
 {
     QSettings settings;
@@ -251,14 +261,23 @@ void QgisDesktopWindow::restorePanelState()
     // v9/v12: hide empty Task Center by default; single task projection.
     // v10: remove band composition rail from top chrome; content-width toolbars.
     // v11: view-oriented shell — Data Manager raised; Layers retitled 视图图层.
-    constexpr int kShellLayoutVersion = 11;
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
-    if ( savedVersion >= kShellLayoutVersion )
+    // Exact-version gate: state saved by a NEWER shell must not be restored
+    // into this older binary (it may encode dock geometry this build cannot
+    // interpret) — the B12 twin of the drop-prior-states rule below.
+    if ( savedVersion == kShellLayoutVersion )
     {
         const QByteArray state = settings.value( QStringLiteral( "mainwindow/state" ) ).toByteArray();
-        if ( !state.isEmpty() )
-            restoreState( state );
+        // B12: a restore can legitimately fail (corrupt / foreign-version
+        // blob). Ignoring the return means the window silently no-ops while
+        // the bad blob comes back on every launch — drop it so the next
+        // save rewrites state from the real layout.
+        if ( !state.isEmpty() && !restoreState( state ) )
+        {
+            qWarning( "restorePanelState: saved mainwindow/state is corrupt — dropped" );
+            settings.remove( QStringLiteral( "mainwindow/state" ) );
+        }
     }
     else
     {
@@ -268,8 +287,11 @@ void QgisDesktopWindow::restorePanelState()
     }
 
     const QByteArray geometry = settings.value( QStringLiteral( "mainwindow/geometry" ) ).toByteArray();
-    if ( !geometry.isEmpty() )
-        restoreGeometry( geometry );
+    if ( !geometry.isEmpty() && !restoreGeometry( geometry ) )
+    {
+        qWarning( "restorePanelState: saved mainwindow/geometry is corrupt — dropped" );
+        settings.remove( QStringLiteral( "mainwindow/geometry" ) );
+    }
 }
 
 QMenu *QgisDesktopWindow::createPopupMenu()
@@ -385,7 +407,8 @@ void QgisDesktopWindow::resetPanelLayout()
     QSettings settings;
     settings.remove( QStringLiteral( "mainwindow/state" ) );
     settings.remove( QStringLiteral( "mainwindow/geometry" ) );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 11 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ),
+                       kShellLayoutVersion );
 
     // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
@@ -459,7 +482,8 @@ void QgisDesktopWindow::savePanelState()
     QSettings settings;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 11 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ),
+                       kShellLayoutVersion );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )
