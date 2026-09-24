@@ -443,6 +443,10 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::experiment
     Sicnu::study
     Sicnu::experiment_studio
+    # Studio live-execution bridge: dock runs real studies through the
+    # ExecutionPlane spine, real GDAL compare, debugger evidence, faultlab
+    # sandbox and capsule IO.
+    Sicnu::experiment_studio_live
     Sicnu::teaching_admin
     # D5: desktop lab auto-recording surface + lab report builder (bridge
     # converts coordinator truth into experiment records).

@@ -336,6 +336,16 @@ target_link_libraries(test_study_e2e PRIVATE
   Sicnu::study_bridge
   GDAL::GDAL
 )
+# Studio live-execution closed loop: fake + real-shaped backend over the
+# studio_live bridge, then the real spine E2E (study → spatial → divergence →
+# fault sandbox → capsule reload → refs-only export). Heavy for the same
+# reason as test_study_e2e.
+sicnu_add_test(test_studio_live_e2e)
+target_link_libraries(test_studio_live_e2e PRIVATE
+  Sicnu::experiment_studio_live
+  GDAL::GDAL
+  SQLite::SQLite3
+)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)
