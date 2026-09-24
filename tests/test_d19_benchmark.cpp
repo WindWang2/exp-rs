@@ -12,7 +12,10 @@
 
 #include <cmath>
 
+#include <QStringList>
 #include <QTemporaryDir>
+
+#include <algorithm>
 
 using namespace sicnu::experiment;
 using namespace sicnu::dataset;
@@ -236,4 +239,99 @@ TEST_CASE( "D19 BenchmarkService persists via ExperimentStore",
     const auto results = cold.resultsFor( QStringLiteral( "bench-class-v1" ) );
     REQUIRE( !results.isEmpty() );
     CHECK( results.first().resultId() == run->resultId() );
+}
+
+TEST_CASE( "BenchmarkResult::fromJson refuses a corrupt protocol like its siblings",
+           "[d19][benchmark]" )
+{
+    // MetricRecord::fromJson and BenchmarkDefinition::fromJson both propagate
+    // protocol parse failure. The result parser silently substituted a
+    // default-constructed protocol instead, so a torn protocol block slipped
+    // past the store's fail-closed read gates carrying fabricated evaluation
+    // semantics (default IoU 0.5 / subset "test" / macro) into comparisons.
+    QJsonObject protocol;
+    protocol.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+    protocol.insert( QStringLiteral( "split_manifest_id" ), QStringLiteral( "sp-1" ) );
+    protocol.insert( QStringLiteral( "subset" ), QStringLiteral( "test" ) );
+    protocol.insert( QStringLiteral( "iou_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "confidence_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "aggregation" ), QStringLiteral( "macro" ) );
+
+    QJsonObject json;
+    json.insert( QStringLiteral( "schema_version" ), 1 );
+    json.insert( QStringLiteral( "result_id" ), QStringLiteral( "res-1" ) );
+    json.insert( QStringLiteral( "benchmark_id" ), QStringLiteral( "bench-1" ) );
+    json.insert( QStringLiteral( "status" ), QStringLiteral( "completed" ) );
+    json.insert( QStringLiteral( "protocol" ), protocol );
+
+    // A threshold outside (0,1] fails EvaluationProtocol::validate — the
+    // result parser must refuse the document, not default it.
+    QJsonObject hostileProtocol = protocol;
+    hostileProtocol.insert( QStringLiteral( "iou_threshold" ), 1.7 );
+    json.insert( QStringLiteral( "protocol" ), hostileProtocol );
+    REQUIRE( !BenchmarkResult::fromJson( json ).has_value() );
+
+    // A missing protocol block is the same corruption class.
+    json.remove( QStringLiteral( "protocol" ) );
+    REQUIRE( !BenchmarkResult::fromJson( json ).has_value() );
+}
+
+TEST_CASE( "BenchmarkResult::fromJson clamps a negative benchmark_version to zero",
+           "[d19][benchmark]" )
+{
+    // benchmark_definition.cpp clamps a negative stored version with
+    // qMax<qint64>(0, …); the result parser cast straight through quint64, so
+    // -5 wrapped to ~2^64 and defeated id/version comparability in
+    // compareBenchmarkResults. Same clamp, same authority.
+    QJsonObject protocol;
+    protocol.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+    protocol.insert( QStringLiteral( "split_manifest_id" ), QStringLiteral( "sp-1" ) );
+    protocol.insert( QStringLiteral( "subset" ), QStringLiteral( "test" ) );
+    protocol.insert( QStringLiteral( "iou_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "confidence_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "aggregation" ), QStringLiteral( "macro" ) );
+
+    QJsonObject json;
+    json.insert( QStringLiteral( "schema_version" ), 1 );
+    json.insert( QStringLiteral( "result_id" ), QStringLiteral( "res-1" ) );
+    json.insert( QStringLiteral( "benchmark_id" ), QStringLiteral( "bench-1" ) );
+    json.insert( QStringLiteral( "benchmark_version" ), -5 );
+    json.insert( QStringLiteral( "status" ), QStringLiteral( "completed" ) );
+    json.insert( QStringLiteral( "protocol" ), protocol );
+    const auto parsed = BenchmarkResult::fromJson( json );
+    REQUIRE( parsed.has_value() );
+    CHECK( parsed.value().benchmarkVersion() == quint64( 0 ) );
+}
+
+TEST_CASE( "BenchmarkService::listDefinitions order is deterministic from the cache",
+           "[d19][benchmark][determinism]" )
+{
+    // The cache is a QHash; iterating it hands listDefinitions a
+    // process-random order AND a random subset when the limit cuts. Benchmark
+    // ids are inserted here in sorted order, so the listed order must be the
+    // insertion order — any other order is QHash leakage (compare
+    // comparison_ext.cpp: families are iterated sorted so summaries are
+    // deterministic across processes).
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.sqlite" ) ) ) );
+    BenchmarkService service( &store );
+
+    constexpr int kDefinitions = 12;
+    for ( int i = 0; i < kDefinitions; ++i )
+    {
+        BenchmarkDefinition definition = makeDefinition();
+        definition.setBenchmarkId( QStringLiteral( "bench-%1" ).arg( i, 2, 10, QLatin1Char( '0' ) ) );
+        REQUIRE( service.publishDefinition( definition ).has_value() );
+    }
+
+    const auto listed = service.listDefinitions( kDefinitions );
+    REQUIRE( listed.size() == kDefinitions );
+    QStringList ids;
+    for ( const BenchmarkDefinition &definition : listed )
+        ids << definition.benchmarkId();
+    QStringList sorted = ids;
+    std::sort( sorted.begin(), sorted.end() );
+    REQUIRE( ids == sorted );
 }

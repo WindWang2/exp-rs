@@ -91,8 +91,10 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
     BenchmarkResult result;
     result.setResultId( json.value( QStringLiteral( "result_id" ) ).toString() );
     result.setBenchmarkId( json.value( QStringLiteral( "benchmark_id" ) ).toString() );
-    result.setBenchmarkVersion(
-        quint64( json.value( QStringLiteral( "benchmark_version" ) ).toInteger( 0 ) ) );
+    // A negative stored version wraps through quint64 and defeats id/version
+    // comparability — clamp like benchmark_definition.cpp does.
+    result.setBenchmarkVersion( quint64( qMax<qint64>(
+        0, json.value( QStringLiteral( "benchmark_version" ) ).toInteger( 0 ) ) ) );
     result.setDefinitionDigest( json.value( QStringLiteral( "definition_digest" ) ).toString() );
     result.setStatus( statusFromString( json.value( QStringLiteral( "status" ) ).toString() ) );
     result.setFailureCode( json.value( QStringLiteral( "failure_code" ) ).toString() );
@@ -111,10 +113,16 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
     for ( const QJsonValue &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
         result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
     result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
+    // Protocol parse failure propagates like its siblings (MetricRecord,
+    // BenchmarkDefinition): a torn or hostile protocol block must not come
+    // back as a default-constructed protocol — that would slip fabricated
+    // evaluation semantics (IoU 0.5 / subset "test" / macro) past the
+    // store's fail-closed read gates into comparisons.
     const auto protocol =
         EvaluationProtocol::fromJson( json.value( QStringLiteral( "protocol" ) ).toObject() );
-    if ( protocol )
-        result.setProtocol( protocol.value() );
+    if ( !protocol )
+        return ResultT::failure( protocol.diagnostics() );
+    result.setProtocol( protocol.value() );
     if ( result.resultId().isEmpty() || result.benchmarkId().isEmpty() )
     {
         return ResultT::failure( Diagnostic{
