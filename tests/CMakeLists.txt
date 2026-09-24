@@ -12823,7 +12823,51 @@ function(sicnu_add_teaching_admin_test NAME)
   )
   sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
 endfunction()
+# Fake grading CLI (plain C++, no Qt): same exit/transcript contract as
+# `sicnu_geo_rs_cli lab --grade` — lets test_teaching_admin_core drive the
+# real-shaped grader path hermetically (see helper file header).
+add_executable(test_teaching_fake_grader_cli helper_teaching_fake_grader_cli.cpp)
+set_target_properties(test_teaching_fake_grader_cli PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
 sicnu_add_teaching_admin_test(test_teaching_admin_core)
+target_compile_definitions(test_teaching_admin_core PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+# The core suite spawns the fake grader CLI by path: make a target-scoped
+# build (no `all`) produce it too.
+add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
+
+# Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
+# into the test (no QGIS, no app binary) and drives one real batch-grade
+# round trip through the fake grader CLI.
+add_executable(test_teaching_admin_dock_smoke
+  test_teaching_admin_dock_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.h
+)
+target_link_libraries(test_teaching_admin_dock_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  Qt6::Widgets
+)
+target_include_directories(test_teaching_admin_dock_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin
+)
+target_compile_definitions(test_teaching_admin_dock_smoke PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+add_dependencies(test_teaching_admin_dock_smoke test_teaching_fake_grader_cli)
+set_target_properties(test_teaching_admin_dock_smoke PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_admin_dock_smoke TEST_PREFIX "test_teaching_admin_dock_smoke::")
 
 # Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
 # → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading
