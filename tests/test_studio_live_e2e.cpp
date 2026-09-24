@@ -400,11 +400,12 @@ TEST_CASE( "studio live: real spine closed loop — study, spatial refusal, "
     INFO( QJsonDocument( divergenceDoc ).toJson( QJsonDocument::Indented ).toStdString() );
     CHECK( divergenceDoc.value( QStringLiteral( "reference_run_id" ) ).toString()
            == baselineRun );
+    // Study runs carry no step evidence: the analyzer's honest verdict is
+    // "incomplete" (named gaps, downgraded confidence) — pin exactly that
+    // instead of accepting any closed-set member.
     const QString verdict = divergenceDoc.value( QStringLiteral( "verdict" ) ).toString();
     INFO( "divergence verdict: " + verdict.toStdString() );
-    CHECK( ( verdict == QStringLiteral( "identical" ) || verdict == QStringLiteral( "equivalent" )
-             || verdict == QStringLiteral( "divergent" ) || verdict == QStringLiteral( "incomplete" )
-             || verdict == QStringLiteral( "non_comparable" ) ) );
+    CHECK( verdict == QStringLiteral( "incomplete" ) );
     CHECK( divergenceDoc.value( QStringLiteral( "evidence_gaps" ) ).toArray().size() > 0 );
     const FirstDivergenceViewModel divergenceVm = projectFirstDivergence( divergenceDoc );
     CHECK( divergenceVm.confidenceDowngraded );

@@ -303,8 +303,13 @@ Result<FaultTeachingViewModel> runFaultScenarioTeaching( const QJsonObject &scen
     options.sandboxRoot = sandboxRoot.toStdString();
     const auto run = sicnu::faultlab::runFaultScenario( scenario.value, options );
     if ( !run.ok )
-        return Result<FaultTeachingViewModel>::failure( scenarioInvalid(
-            QStringLiteral( "fault pipeline could not start" ) ) );
+    {
+        // The scenario was VALID — the failure is the pipeline start (e.g.
+        // sandbox creation), a different family from an invalid document.
+        return Result<FaultTeachingViewModel>::failure(
+            studioError( QStringLiteral( "experiment_studio.fault_pipeline_failed" ),
+                         QStringLiteral( "fault pipeline could not start" ) ) );
+    }
     const FaultRunReport &report = run.value;
 
     const auto prior = projectFaultScenarioPredict( scenarioJson );

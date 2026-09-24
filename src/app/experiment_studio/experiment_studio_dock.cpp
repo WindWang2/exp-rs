@@ -237,7 +237,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
-        auto *btn = new QPushButton( tr( "Load first-divergence demo report" ) );
+        auto *btn = new QPushButton( tr( "Localize first divergence (live)" ) );
         m_divergenceLog = new QPlainTextEdit;
         m_divergenceLog->setReadOnly( true );
         layout->addWidget( btn );
@@ -360,7 +360,10 @@ void ExperimentStudioDock::validateDesigner()
     StudyBudget budget;
     budget.maxRuns = m_maxRunsSpin->value();
     budget.maxInFlight = 2;
-    budget.perRunTimeoutMs = 600000;
+    // Teaching studies are small: a 60s per-point deadline bounds the
+    // close-time join in ~ExperimentStudioDock (StudyRunner drains in-flight
+    // points before the wait returns).
+    budget.perRunTimeoutMs = 60000;
     budget.seedReplicates = m_replicatesSpin->value();
     budget.seed = 42;
     const auto strategy =
@@ -385,6 +388,15 @@ void ExperimentStudioDock::validateDesigner()
 
 void ExperimentStudioDock::applySyntheticRunMatrix()
 {
+    // A live store means the export bundle would mix demo rows with real
+    // capsule refs — refuse the demo instead of contaminating the bundle.
+    if ( m_liveStore )
+    {
+        m_matrixStatus->setText(
+            tr( "Demo report refused: a live experiment store is open "
+                "(synthetic rows would contaminate live exports)" ) );
+        return;
+    }
     const int n = qBound( 2, m_stepsSpin->value(), 1000 );
     m_lastStudyReport = makeSyntheticStudyReport( n );
     m_session.lastStudyReport = m_lastStudyReport;
@@ -461,6 +473,11 @@ void ExperimentStudioDock::openLiveStore()
         return;
     }
     m_liveStore = store;
+    // Run refs from a previous store must not leak into the new one's
+    // divergence/export flows (capsule.run-missing noise at best).
+    m_session.referenceRunId.clear();
+    m_session.studentRunId.clear();
+    m_session.faultScenarioId.clear();
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
         QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
@@ -501,7 +518,10 @@ void ExperimentStudioDock::runLiveStudy()
     StudyBudget budget;
     budget.maxRuns = m_maxRunsSpin->value();
     budget.maxInFlight = 2;
-    budget.perRunTimeoutMs = 600000;
+    // Teaching studies are small: a 60s per-point deadline bounds the
+    // close-time join in ~ExperimentStudioDock (StudyRunner drains in-flight
+    // points before the wait returns).
+    budget.perRunTimeoutMs = 60000;
     budget.seedReplicates = m_replicatesSpin->value();
     budget.seed = 42;
     ParameterStudySpec spec;
@@ -518,7 +538,9 @@ void ExperimentStudioDock::runLiveStudy()
     m_liveSpatialEpsilon = 0.0;
 
     // Sampling happens on the UI thread (pure, bounded); a typed refusal
-    // never reaches the worker.
+    // never reaches the worker. Safe to hand the same points to
+    // reportFromStore because sampling is deterministic (seeded); StudyRunner
+    // re-samples internally and the exemplar tests pin rows/run-ids aligned.
     const auto points = sampleStudyPoints( spec );
     if ( !points )
     {
