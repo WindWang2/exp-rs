@@ -111,6 +111,10 @@ int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 
     mTasks = incoming;
     mTimeline = timeline;
     mVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
+    // The authority is append-only through the shell contract; a timeline
+    // that somehow arrived with fewer tasks must not leave rowCount()
+    // pointing past the data.
+    mVisible = qMin( mVisible, mTasks.size() );
     ++mApplyCount;
 
     // Ascending, one entry per row even when two events hit the same task in
