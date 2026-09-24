@@ -7,6 +7,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 
 #include <QCoreApplication>
+#include <QJsonDocument>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;
