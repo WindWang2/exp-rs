@@ -39,6 +39,15 @@ const char *pathPolicyRejectionName( PathPolicyRejection rejection )
 
 namespace {
 
+/// The UTF-8 twin of pathFromUtf8: path::generic_string() re-encodes through
+/// the process ANSI code page on MSVC, so every path RENDERED back into the
+/// std::string world here goes through the wide native form instead.
+std::string pathToUtf8String( const fs::path &path )
+{
+    const std::u8string u8 = path.generic_u8string();
+    return std::string( u8.begin(), u8.end() );
+}
+
 /// True when @p candidate (already canonical) equals @p root or lies under
 /// it (root + separator + at least one character).
 bool isInside( const fs::path &root, const fs::path &candidate )
@@ -75,14 +84,6 @@ fs::path pathFromUtf8( const std::string &text )
                                     text.size() ) );
 }
 
-/// The UTF-8 twin of pathFromUtf8: path::generic_string() re-encodes through
-/// the process ANSI code page on MSVC, so every path RENDERED back into the
-/// std::string world here goes through the wide native form instead.
-std::string pathToUtf8String( const fs::path &path )
-{
-    const std::u8string u8 = path.generic_u8string();
-    return std::string( u8.begin(), u8.end() );
-}
 
 } // namespace
 

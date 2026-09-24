@@ -67,10 +67,9 @@ bool writeFileAtomic( const fs::path &target, const std::string &body, std::stri
     // collide across processes forked from the same counter state (or pid
     // reuse after a crash), so the entropy + exclusive claim is the part
     // that makes the name safe on shared session directories.
-    static thread_local std::mt19937_64 stagingRng{ std::random_device{} ^
-                                                    ( static_cast<std::uint64_t>(
-                                                        sicnu::portable::pid() )
-                                                      << 1 ) };
+    static thread_local std::mt19937_64 stagingRng{
+      std::random_device{}() ^
+      ( static_cast<std::uint64_t>( sicnu::portable::pid() ) << 1 ) };
     const std::string stagingBase = sicnu::portable::pathToUtf8( target.filename() ) + "." +
                                     std::to_string( sicnu::portable::pid() ) + "." +
                                     std::to_string( stagingCounter()++ );
