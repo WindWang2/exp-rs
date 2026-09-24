@@ -84,7 +84,7 @@ void writeStackTiff( const QString &path, int bands )
   }
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   REQUIRE( driver != nullptr );
-  const std::array<double, 6> gt = { 500000, 8.0, 0, 4400000, 0, -8.0 };
+  std::array<double, 6> gt = { 500000, 8.0, 0, 4400000, 0, -8.0 };
   GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), 4, 4, bands, GDT_Float32, nullptr );
   REQUIRE( ds != nullptr );
   GDALSetGeoTransform( ds, gt.data() );

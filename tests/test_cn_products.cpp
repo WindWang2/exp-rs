@@ -76,7 +76,7 @@ void writeStackTiff(const QString &path, const std::vector<std::vector<float>> &
     REQUIRE(driver != nullptr);
     const int width = static_cast<int>(bands.front().size() == 0 ? 0 : std::sqrt(bands.front().size()));
     const int height = width;
-    const std::array<double, 6> gt = {500000, pixelSize, 0, 4400000, 0, -pixelSize};
+    std::array<double, 6> gt = {500000, pixelSize, 0, 4400000, 0, -pixelSize};
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), width, height,
                                  static_cast<int>(bands.size()), GDT_Float32, nullptr);
     REQUIRE(ds != nullptr);
