@@ -81,11 +81,14 @@ int main( int argc, char *argv[] )
     // Mirror test_qgis_display_manager: a heap-held QgsApplication with GUI
     // enabled (QT_QPA_PLATFORM=offscreen carries it); QgsMapCanvas aborts
     // without the QGIS singletons.
-    static QgsApplication app( argc, argv, true );
+    // Intentionally leaked (never destroyed, no exitQgis): a function-static
+    // QgsApplication is torn down during static destruction after QGIS
+    // singletons are gone, which segfaulted Catch2 test discovery
+    // (`--list-tests`) and aborted the whole CTest run.
+    auto *app = new QgsApplication( argc, argv, true );
+    ( void ) app;
     QgsApplication::initQgis();
-    const int result = Catch::Session().run( argc, argv );
-    QgsApplication::exitQgis();
-    return result;
+    return Catch::Session().run( argc, argv );
 }
 
 TEST_CASE( "view link propagates extents across linked views",
