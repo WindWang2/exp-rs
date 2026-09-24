@@ -3,6 +3,7 @@
 
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "experiment/metric_path.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -164,9 +165,16 @@ StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
             const QJsonObject recorded = run.value().metrics();
             for ( const QString &metric : spec.metricNames )
             {
-                const auto value = recorded.value( metric );
-                if ( value.isDouble() )
-                    pointValues[point.pointId][metric].append( value.toDouble() );
+                // One lookup rule with the matrix aggregator and the
+                // promotion evaluator (metric_path.h): dotted paths into
+                // nested metric documents, only finite numbers count.
+                // The previous top-level-only read silently starved any
+                // spec that names a nested metric — a curve with zero
+                // evidence instead of a typed gap.
+                const auto value =
+                    sicnu::experiment::metricValueAtPath( recorded, metric );
+                if ( value.has_value() )
+                    pointValues[point.pointId][metric].append( value.value() );
             }
         }
         aggregate.status =
