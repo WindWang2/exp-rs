@@ -27,8 +27,10 @@
 #include <zlib.h>
 
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using sicnu::agent::LabKernelOutcome;
@@ -757,6 +759,110 @@ TEST_CASE( "file_check: PNG page geometry and MapSpec validation",
       outcomes, &usageError );
     REQUIRE( geometryFails );
     REQUIRE( !outcomes.at( "f.png" ).passed );
+}
+
+TEST_CASE( "file_check containment: sibling-prefix and symlink escapes are refused "
+           "without leaking the probed file",
+           "[lab_grader_kernels][file_check][containment]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // The graded artifact lives in sub/; a sibling directory and an
+    // out-of-tree directory hold "secret" files a rules file must never
+    // probe through the transcript.
+    const QString sub = dir.filePath( "sub" );
+    REQUIRE( QDir().mkpath( sub ) );
+    const QString artifact = sub + "/artifact.json";
+    {
+        QFile file( artifact );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        file.write( "{}" );
+    }
+    const QString secretBody = "top-secret-grading-oracle";
+    const QString siblingSecret = dir.filePath( "sub-evil/secret.txt" );
+    REQUIRE( QDir().mkpath( QFileInfo( siblingSecret ).absolutePath() ) );
+    const QString outsideSecret = dir.filePath( "outside/secret.txt" );
+    REQUIRE( QDir().mkpath( QFileInfo( outsideSecret ).absolutePath() ) );
+    for ( const QString &secret : { siblingSecret, outsideSecret } )
+    {
+        QFile file( secret );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        file.write( secretBody.toUtf8() );
+    }
+
+    const auto probeSecret = [&]( const QString &rulesPath, const QString &specId ) {
+        Json::Value params;
+        params["exists"] = true;
+        params["min_bytes"] = 4;
+        params["path"] = rulesPath.toStdString();
+        std::map<QString, LabKernelOutcome> outcomes;
+        QString usageError;
+        const bool ok = runLabFileChecks(
+          artifact, { LabKernelSpec{ specId, "file_check", params } }, dir.path(),
+          outcomes, &usageError );
+        REQUIRE( ok );
+        return outcomes.at( specId );
+    };
+
+    // 1. Sibling-PREFIX escape: "../sub-evil/secret.txt" cleans to
+    //    <dir>/sub-evil/secret.txt, whose directory string starts with the
+    //    artifact directory string ("sub") but is NOT inside it. The probe
+    //    must be refused and the secret's size must not surface in observed.
+    {
+        const LabKernelOutcome outcome = probeSecret( "../sub-evil/secret.txt", "sib" );
+        REQUIRE_FALSE( outcome.passed );
+        INFO( "message: " << outcome.message.toStdString() );
+        REQUIRE( outcome.message.contains( QLatin1String( "escapes" ) ) );
+        REQUIRE( outcome.observed.isMember( "bytes" ) == false );
+    }
+
+#if !defined( _WIN32 )
+    // 2. Symlink escape: a link INSIDE the artifact directory pointing
+    //    outside. absolutePath() cannot see it; only resolving the probe can.
+    const QString link = sub + "/link.txt";
+    {
+        std::error_code linkEc;
+        std::filesystem::create_symlink(
+          std::filesystem::path( outsideSecret.toStdString() ),
+          std::filesystem::path( link.toStdString() ), linkEc );
+        if ( linkEc )
+            return; // unprivileged symlink host: the case above still ran
+    }
+    {
+        const LabKernelOutcome outcome = probeSecret( "link.txt", "sym" );
+        REQUIRE_FALSE( outcome.passed );
+        INFO( "message: " << outcome.message.toStdString() );
+        REQUIRE( outcome.message.contains( QLatin1String( "escapes" ) ) );
+        REQUIRE( outcome.observed.isMember( "bytes" ) == false );
+    }
+#endif
+
+    // 3. The legitimate sibling probe still passes: containment must not
+    //    degrade into blanket rejection.
+    {
+        QFile file( sub + "/sibling.bin" );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        REQUIRE( file.write( "12345" ) == 5 );
+        file.close(); // flushed before the probe reads its size
+        Json::Value params;
+        params["exists"] = true;
+        params["min_bytes"] = 4;
+        params["path"] = "sibling.bin";
+        std::map<QString, LabKernelOutcome> outcomes;
+        QString usageError;
+        const bool ok = runLabFileChecks(
+          artifact, { LabKernelSpec{ "legit", "file_check", params } }, dir.path(),
+          outcomes, &usageError );
+        REQUIRE( ok );
+        INFO( "usage: " << usageError.toStdString() );
+        INFO( "legit message: "
+              << outcomes.at( "legit" ).message.toStdString() );
+        INFO( "legit observed: "
+              << Json::writeString( Json::StreamWriterBuilder(),
+                                    outcomes.at( "legit" ).observed ) );
+        REQUIRE( outcomes.at( "legit" ).passed );
+    }
 }
 
 // lab platform 12.0 — provenance kernel: foundry dataset metadata assertions.
