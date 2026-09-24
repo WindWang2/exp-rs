@@ -15,6 +15,7 @@
 #include "registration_test_helpers.h"
 
 #include <QFile>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 #include <algorithm>

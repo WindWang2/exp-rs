@@ -14,6 +14,7 @@
 #include <QTemporaryDir>
 
 #include <QUuid>
+#include <QJsonDocument>
 
 #include <atomic>
 #include <chrono>

@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 using namespace sicnu::data;
