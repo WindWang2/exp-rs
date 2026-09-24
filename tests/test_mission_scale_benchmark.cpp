@@ -313,3 +313,35 @@ TEST_CASE( "a 10k-task reload resets once and pages, and ids survive the reset",
              == QStringLiteral( "task-4242" ) );
     REQUIRE( model.canFetchMore( QModelIndex() ) );
 }
+
+TEST_CASE( "a cursor outside the retained event window is detected",
+           "[mission][scale][truncation]" )
+{
+    // The bounded log is what keeps a 100k-event mission cheap; the cost is
+    // that applyEvents() cannot serve a cursor older than the retained
+    // window. missionTimelineCursorRetained is the decision the shell must
+    // consult before choosing the incremental path: stale cursor -> full
+    // reload, fresh cursor -> incremental.
+    MissionTimeline timeline;
+    timeline.setMissionId( QStringLiteral( "bench" ) );
+    MissionTask task;
+    task.id = QStringLiteral( "t1" );
+    REQUIRE( timeline.addTask( task ).applied );
+
+    // Below the bound nothing is truncated: any cursor is servable.
+    REQUIRE_FALSE( timeline.eventsTruncated() );
+    REQUIRE( missionTimelineCursorRetained( timeline, 0 ) );
+
+    // Drive the log past kEventLogBound so the window truncates.
+    const quint64 freshCursorAtBound = 4000;
+    for ( int i = 0; i < 5000; ++i )
+        (void) timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Pending,
+                                    QStringLiteral( "2026-09-25T00:00:00Z" ), "replay" );
+    REQUIRE( timeline.eventsTruncated() );
+    REQUIRE( timeline.firstRetainedEventSeq() > freshCursorAtBound );
+
+    // The stale cursor predates the retained window: incremental is unsafe.
+    REQUIRE_FALSE( missionTimelineCursorRetained( timeline, freshCursorAtBound ) );
+    // The cursor that saw everything up to now is fine.
+    REQUIRE( missionTimelineCursorRetained( timeline, timeline.lastEventSeq() ) );
+}
