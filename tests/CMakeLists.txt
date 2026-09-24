@@ -11496,6 +11496,8 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
+  # classification_studio_widget → object_identity.h → <json/json.h>
+  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
