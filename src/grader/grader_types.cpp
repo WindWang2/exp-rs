@@ -1571,6 +1571,188 @@ std::optional<GradeReport> GradeReport::fromJson( const Json::Value &doc, Grader
             return std::nullopt;
         }
     }
+
+    // Full-body reconstruction: the digest is sealed over the canonical
+    // body, so a round-tripped report must carry EVERY body member back —
+    // a reader that dropped dimensions/constraints would make every real
+    // engine report fail verifyDigest(). Hostile member types stay typed
+    // refusals, mirroring the lenient-with-defaults members above.
+    const auto parseStringArray = []( const Json::Value &parent, const char *member,
+                                      std::vector<std::string> &out, GraderError &parseError,
+                                      const std::string &path ) -> bool {
+        if ( !parent.isMember( member ) )
+            return true;
+        if ( !parent[member].isArray() ) {
+            parseError = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                    std::string( member ) + " must be an array", path );
+            return false;
+        }
+        for ( const auto &entry : parent[member] ) {
+            if ( !entry.isString() || entry.asString().empty() ) {
+                parseError = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                        std::string( member ) + " entries must be non-empty strings", path );
+                return false;
+            }
+            out.push_back( entry.asString() );
+        }
+        return true;
+    };
+
+    const auto parseOutcomeStatus = []( const std::string &spelling, OutcomeStatus &out ) -> bool {
+        if ( spelling == "earned" ) { out = OutcomeStatus::Earned; return true; }
+        if ( spelling == "partial" ) { out = OutcomeStatus::Partial; return true; }
+        if ( spelling == "not_earned" ) { out = OutcomeStatus::NotEarned; return true; }
+        if ( spelling == "indeterminate" ) { out = OutcomeStatus::Indeterminate; return true; }
+        if ( spelling == "capped" ) { out = OutcomeStatus::Capped; return true; }
+        return false;
+    };
+
+    if ( doc.isMember( "hardConstraintOutcomes" ) ) {
+        if ( !doc["hardConstraintOutcomes"].isArray() ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid, "hardConstraintOutcomes must be an array",
+                               "hardConstraintOutcomes" );
+            return std::nullopt;
+        }
+        for ( const auto &hcJson : doc["hardConstraintOutcomes"] ) {
+            HardConstraintOutcome outcome;
+            const std::string path =
+                "hardConstraintOutcomes[" + std::to_string( report.hardConstraintOutcomes.size() ) + "]";
+            if ( !hcJson.isObject() || !stringMember( hcJson, "constraintId", outcome.constraintId ) ||
+                 outcome.constraintId.empty() ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "constraintId must be a non-empty string", path + ".constraintId" );
+                return std::nullopt;
+            }
+            if ( hcJson.isMember( "violated" ) ) {
+                if ( !hcJson["violated"].isBool() ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid, "violated must be a boolean",
+                                       path + ".violated" );
+                    return std::nullopt;
+                }
+                outcome.violated = hcJson["violated"].asBool();
+            }
+            if ( !parseStringArray( hcJson, "evidenceIds", outcome.evidenceIds, error, path + ".evidenceIds" ) )
+                return std::nullopt;
+            stringMember( hcJson, "effect", outcome.effect );
+            stringMember( hcJson, "explanation", outcome.explanation );
+            report.hardConstraintOutcomes.push_back( std::move( outcome ) );
+        }
+    }
+
+    if ( doc.isMember( "dimensions" ) ) {
+        if ( !doc["dimensions"].isArray() ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid, "dimensions must be an array", "dimensions" );
+            return std::nullopt;
+        }
+        for ( const auto &dimJson : doc["dimensions"] ) {
+            DimensionOutcome dimension;
+            const std::string dimPath = "dimensions[" + std::to_string( report.dimensions.size() ) + "]";
+            if ( !dimJson.isObject() || !stringMember( dimJson, "dimensionId", dimension.dimensionId ) ||
+                 dimension.dimensionId.empty() ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                   "dimensionId must be a non-empty string", dimPath + ".dimensionId" );
+                return std::nullopt;
+            }
+            if ( dimJson.isMember( "weight" ) && !finiteNumberMember( dimJson, "weight", dimension.weight ) ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid, "weight must be a finite number",
+                                   dimPath + ".weight" );
+                return std::nullopt;
+            }
+            if ( dimJson.isMember( "earned" ) && !finiteNumberMember( dimJson, "earned", dimension.earned ) ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid, "earned must be a finite number",
+                                   dimPath + ".earned" );
+                return std::nullopt;
+            }
+            if ( dimJson.isMember( "criteria" ) ) {
+                if ( !dimJson["criteria"].isArray() ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid, "criteria must be an array",
+                                       dimPath + ".criteria" );
+                    return std::nullopt;
+                }
+                for ( const auto &critJson : dimJson["criteria"] ) {
+                    CriterionOutcome outcome;
+                    const std::string critPath =
+                        dimPath + ".criteria[" + std::to_string( dimension.criteria.size() ) + "]";
+                    if ( !critJson.isObject() || !stringMember( critJson, "criterionId", outcome.criterionId ) ||
+                         outcome.criterionId.empty() ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "criterionId must be a non-empty string", critPath + ".criterionId" );
+                        return std::nullopt;
+                    }
+                    if ( critJson.isMember( "maxPoints" ) &&
+                         !finiteNumberMember( critJson, "maxPoints", outcome.maxPoints ) ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "maxPoints must be a finite number", critPath + ".maxPoints" );
+                        return std::nullopt;
+                    }
+                    if ( critJson.isMember( "rawEarned" ) &&
+                         !finiteNumberMember( critJson, "rawEarned", outcome.rawEarned ) ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "rawEarned must be a finite number", critPath + ".rawEarned" );
+                        return std::nullopt;
+                    }
+                    if ( critJson.isMember( "earned" ) &&
+                         !finiteNumberMember( critJson, "earned", outcome.earned ) ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "earned must be a finite number", critPath + ".earned" );
+                        return std::nullopt;
+                    }
+                    std::string critStatus;
+                    if ( stringMember( critJson, "status", critStatus ) &&
+                         !parseOutcomeStatus( critStatus, outcome.status ) ) {
+                        error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                                           "unknown criterion outcome status: " + critStatus,
+                                           critPath + ".status" );
+                        return std::nullopt;
+                    }
+                    if ( !parseStringArray( critJson, "reasonCodes", outcome.reasonCodes, error,
+                                            critPath + ".reasonCodes" ) )
+                        return std::nullopt;
+                    if ( !parseStringArray( critJson, "evidenceIds", outcome.evidenceIds, error,
+                                            critPath + ".evidenceIds" ) )
+                        return std::nullopt;
+                    stringMember( critJson, "explanation", outcome.explanation );
+                    dimension.criteria.push_back( std::move( outcome ) );
+                }
+            }
+            report.dimensions.push_back( std::move( dimension ) );
+        }
+    }
+
+    if ( doc.isMember( "requiredStageOutcomes" ) ) {
+        if ( !doc["requiredStageOutcomes"].isArray() ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid, "requiredStageOutcomes must be an array",
+                               "requiredStageOutcomes" );
+            return std::nullopt;
+        }
+        for ( const auto &stageJson : doc["requiredStageOutcomes"] ) {
+            StageOutcome stage;
+            const std::string path =
+                "requiredStageOutcomes[" + std::to_string( report.requiredStageOutcomes.size() ) + "]";
+            if ( !stageJson.isObject() || !stringMember( stageJson, "stageKey", stage.stageKey ) ||
+                 stage.stageKey.empty() ) {
+                error = makeError( GraderErrorCode::SchemaShapeInvalid, "stageKey must be a non-empty string",
+                                   path + ".stageKey" );
+                return std::nullopt;
+            }
+            if ( stageJson.isMember( "satisfied" ) ) {
+                if ( !stageJson["satisfied"].isBool() ) {
+                    error = makeError( GraderErrorCode::SchemaShapeInvalid, "satisfied must be a boolean",
+                                       path + ".satisfied" );
+                    return std::nullopt;
+                }
+                stage.satisfied = stageJson["satisfied"].asBool();
+            }
+            if ( !parseStringArray( stageJson, "evidenceIds", stage.evidenceIds, error, path + ".evidenceIds" ) )
+                return std::nullopt;
+            stringMember( stageJson, "explanation", stage.explanation );
+            report.requiredStageOutcomes.push_back( std::move( stage ) );
+        }
+    }
+
+    if ( !parseStringArray( doc, "matchedPathways", report.matchedPathways, error, "matchedPathways" ) )
+        return std::nullopt;
+
     stringMember( doc, "digest", report.digest );
     return report;
 }

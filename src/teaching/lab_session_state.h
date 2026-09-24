@@ -25,6 +25,7 @@ struct LabSessionState {
   std::string runId;          // navigation ref only
   int stepIndex = 0;
   std::vector<std::string> evidenceRefs;
+  std::string artifactPath;      // student artifact under validation (nav ref)
   std::string autonomyPolicyRef; // path or id pointer
   Json::Value lastValidationSummary; // projected feedback summary (no goldens)
   std::string capsuleExportRef;

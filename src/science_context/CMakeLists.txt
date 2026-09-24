@@ -10,6 +10,7 @@ add_library( sicnu_science_context STATIC
     capability_router.cpp
     context_budget.cpp
     context_cache.cpp
+    live_asset_resolver.cpp
     observability.cpp
     observed_state.cpp
     planner_projection.cpp
@@ -25,6 +26,19 @@ target_include_directories( sicnu_science_context PUBLIC
 target_link_libraries( sicnu_science_context PUBLIC
     Sicnu::ScientificState
 )
+
+# Live recipe authority: the registry stays the only store; the broker's
+# RecipeRouter is a bounded projection synced from it (Qt-free, jsoncpp only).
+if ( TARGET sicnu_recipes )
+    target_link_libraries( sicnu_science_context PUBLIC sicnu_recipes )
+endif()
+
+# Live GDAL facts collector (Qt-free; the target is added unconditionally by
+# src/scientific_state/gdal alongside this module).
+if ( TARGET Sicnu::ScientificStateGdal )
+    target_sources( sicnu_science_context PRIVATE gdal_asset_source.cpp )
+    target_link_libraries( sicnu_science_context PUBLIC Sicnu::ScientificStateGdal )
+endif()
 
 if ( TARGET jsoncpp )
     target_link_libraries( sicnu_science_context PUBLIC jsoncpp )

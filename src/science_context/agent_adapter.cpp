@@ -4,6 +4,7 @@
 #include "science_context/recipe_router.h"
 
 #include "science_context/observed_state.h"
+#include "recipes/recipe_registry.h"
 #include "scientific_state/asset_state_json.h"
 
 #include <stdexcept>
@@ -16,6 +17,7 @@ using ::sicnu::science_context::RecipeQuery;
 using ::sicnu::science_context::AssetResolveRequest;
 using ::sicnu::science_context::AssetResolveResult;
 using ::sicnu::science_context::AssetStateProvider;
+using ::sicnu::science_context::contentSourceToString;
 using ::sicnu::science_context::evidenceBucketToString;
 using ::sicnu::science_context::observedStateFromPassport;
 using ::sicnu::science_context::bundleToJson;
@@ -26,10 +28,43 @@ using ::sicnu::science_context::SynthesizeRequest;
 namespace {
 
 ScienceContextBroker *gTestBroker = nullptr;
+
+/// Process-default broker. Wired to the real recipe authority on first use:
+/// the registry (only store) reloads from the default pack directory and the
+/// router becomes a bounded projection of it. Capability facts stay
+/// builtin/degraded until the embedding layer installs a CapabilityFactsLookup.
 ScienceContextBroker &defaultBroker()
 {
-    static ScienceContextBroker broker;
+    static ScienceContextBroker broker = [] {
+        ScienceContextBroker b;
+        static sicnu::recipes::ScientificRecipeRegistry registry;
+        b.setRecipeRegistry( &registry );
+        b.refreshRecipes();
+        return b;
+    }();
     return broker;
+}
+
+Json::Value recipeSourceInfoToJson( const RecipeSourceInfo &info )
+{
+    Json::Value o( Json::objectValue );
+    switch ( info.mode )
+    {
+        case RecipeSourceMode::LiveAuthority:
+            o["source"] = "live_authority";
+            break;
+        case RecipeSourceMode::InlineInput:
+            o["source"] = "inline_input";
+            break;
+        case RecipeSourceMode::None:
+            o["source"] = "unavailable";
+            break;
+    }
+    o["authority"] = info.authority;
+    o["revision"] = Json::UInt64( info.revision );
+    o["registry_status"] = info.registryStatus;
+    o["registry_problems"] = info.registryProblems;
+    return o;
 }
 
 Json::Value requireObject( const Json::Value &args )
@@ -130,6 +165,9 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
     CapabilityQuery q;
     q.goal = args.get( "goal", "" ).asString();
     q.intent = args.get( "intent", "" ).asString();
+    // Route through the same capability authority the broker uses — without
+    // this the tool would silently run on the builtin fallback table.
+    q.facts = sharedBroker().capabilityFacts();
     if ( args.isMember( "passport" ) || args.isMember( "passport_json" ) )
     {
         auto state = passportFromArgs( args );
@@ -170,6 +208,14 @@ Json::Value scientificCapabilities( const Json::Value &argsIn )
     out["truncated"] = false;
     out["counts"] = Json::objectValue;
     out["counts"]["capabilities"] = static_cast<int>( routed.entries.size() );
+    Json::Value sources( Json::objectValue );
+    Json::Value capsSource( Json::objectValue );
+    capsSource["source"] = routed.factsFromAuthority ? "live_authority" : "builtin_fallback";
+    capsSource["authority"] = routed.factsAuthority;
+    capsSource["revision"] = Json::UInt64( routed.factsRevision );
+    capsSource["degraded"] = !routed.factsFromAuthority || routed.presenceUnknown;
+    sources["capabilities"] = capsSource;
+    out["sources"] = sources;
     return out;
 }
 
@@ -178,12 +224,14 @@ Json::Value dataAssetPassport( const Json::Value &argsIn )
     const Json::Value args = requireObject( argsIn );
     const std::string assetKey = args.get( "asset_id", args.get( "asset_key", "" ).asString() ).asString();
     AssetResolveResult resolved;
+    bool inlinePassport = false;
     if ( args.isMember( "passport" ) || args.isMember( "passport_json" ) )
     {
         auto state = passportFromArgs( args );
         resolved.ok = true;
         resolved.state = state;
         resolved.summary = AssetStateProvider::summarize( state );
+        inlinePassport = true;
     }
     else
     {
@@ -209,6 +257,13 @@ Json::Value dataAssetPassport( const Json::Value &argsIn )
     out["band_roles"] = roles;
     out["evidence"] = evidenceBucketToString( resolved.summary.evidence );
     out["path_hint"] = resolved.summary.pathHint;
+    // Provenance follows the actual resolution path, never a fixed label.
+    if ( inlinePassport )
+        out["source"] = contentSourceToString( ::sicnu::science_context::ContentSource::InlineInput );
+    else if ( sharedBroker().assets().hasResolver() )
+        out["source"] = contentSourceToString( ::sicnu::science_context::ContentSource::LiveAuthority );
+    else
+        out["source"] = contentSourceToString( ::sicnu::science_context::ContentSource::Unavailable );
     out["observed_state"] = observedStateFromPassport( resolved.state );
     if ( args.get( "include_full", false ).asBool() )
         out["passport"] = sicnu::state::assetStateToJson( resolved.state );
@@ -255,6 +310,8 @@ Json::Value recipeSearch( const Json::Value &argsIn )
     out["truncated"] = false;
     out["counts"] = Json::objectValue;
     out["counts"]["hits"] = static_cast<int>( hits.hits.size() );
+    out["sources"] = Json::objectValue;
+    out["sources"]["recipes"] = recipeSourceInfoToJson( sharedBroker().recipes().sourceInfo() );
     // Never auto-execute.
     out["auto_execute"] = false;
     return out;

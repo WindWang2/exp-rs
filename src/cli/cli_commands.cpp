@@ -67,11 +67,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/rs/rs_product_import_plan.h"
 #include <csignal>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
+#include "platform/portable.h"
 #include "processing/framework/algorithm_search.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "workflow/workflow_definition.h"
@@ -1115,13 +1111,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         options.tempDirectory =
             ( std::filesystem::temp_directory_path()
               / ( "pt9-conformance-"
-                  + std::to_string( static_cast<long>(
-#ifdef _WIN32
-                        ::GetCurrentProcessId()
-#else
-                        ::getpid()
-#endif
-                      ) ) ) )
+                  + std::to_string( static_cast<long>( sicnu::portable::pid() ) ) ) )
                 .generic_string();
         std::filesystem::create_directories( options.tempDirectory );
         sicnu::plugins::PluginRuntimeHost::instance().bootstrap( options );

@@ -336,6 +336,16 @@ target_link_libraries(test_study_e2e PRIVATE
   Sicnu::study_bridge
   GDAL::GDAL
 )
+# Studio live-execution closed loop: fake + real-shaped backend over the
+# studio_live bridge, then the real spine E2E (study → spatial → divergence →
+# fault sandbox → capsule reload → refs-only export). Heavy for the same
+# reason as test_study_e2e.
+sicnu_add_test(test_studio_live_e2e)
+target_link_libraries(test_studio_live_e2e PRIVATE
+  Sicnu::experiment_studio_live
+  GDAL::GDAL
+  SQLite::SQLite3
+)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)
@@ -358,6 +368,21 @@ sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
+
+# Cross-platform Completion: header-only portability primitives
+# (src/platform/portable.h). Lightest possible lane — Catch2 only, no sicnu
+# library, no Qt/QGIS/GDAL — so the UTF-8/path/pid contract compiles and
+# runs on every platform lane.
+add_executable(test_platform_portability test_platform_portability.cpp)
+target_link_libraries(test_platform_portability PRIVATE Catch2::Catch2WithMain)
+target_include_directories(test_platform_portability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_platform_portability PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_platform_portability)
 
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
@@ -9750,7 +9775,60 @@ target_link_libraries(test_verifier_schema PRIVATE
   Catch2::Catch2WithMain
   sicnu_verifier
 )
-sicnu_discover_tests(test_verifier_schema)
+sicnu_discover_tests(test_verifier_schema TEST_PREFIX "test_verifier_schema::")
+
+# Unified Scientific Verifier engine completion (#1191 slices B..G): check
+# dispatch, packs, two-level rollup, renders, projections and the
+# adversarial battery. All light targets: sicnu_verifier + Catch2 + jsoncpp
+# only — no Qt, no GDAL, no QGIS link.
+add_executable(test_verifier_engine test_verifier_engine.cpp)
+target_link_libraries(test_verifier_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_engine TEST_PREFIX "test_verifier_engine::")
+
+add_executable(test_verifier_numeric test_verifier_numeric.cpp)
+target_link_libraries(test_verifier_numeric PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_numeric TEST_PREFIX "test_verifier_numeric::")
+
+add_executable(test_verifier_provenance test_verifier_provenance.cpp)
+target_link_libraries(test_verifier_provenance PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_provenance TEST_PREFIX "test_verifier_provenance::")
+
+add_executable(test_verifier_packs test_verifier_packs.cpp)
+target_link_libraries(test_verifier_packs PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_packs TEST_PREFIX "test_verifier_packs::")
+
+add_executable(test_verifier_levels test_verifier_levels.cpp)
+target_link_libraries(test_verifier_levels PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_levels TEST_PREFIX "test_verifier_levels::")
+
+add_executable(test_verifier_render test_verifier_render.cpp)
+target_link_libraries(test_verifier_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_render TEST_PREFIX "test_verifier_render::")
+
+add_executable(test_verifier_adversarial test_verifier_adversarial.cpp)
+target_link_libraries(test_verifier_adversarial PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_adversarial TEST_PREFIX "test_verifier_adversarial::")
 
 # RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
 # PreflightReport schema (pure C++; no Qt/GDAL link).
@@ -9769,6 +9847,20 @@ target_link_libraries(test_repair_planner_schema PRIVATE
   sicnu_repair_planner
 )
 sicnu_discover_tests(test_repair_planner_schema)
+
+# RS14-03 completion: requirement synthesis, provider-driven candidates,
+# auto policy, deterministic plan/result/fragment, teaching/agent views and
+# the tamper-evident planning state (Qt-free leaf; the integration case reads
+# the real capability knowledge documents).
+add_executable(test_repair_planner_completion test_repair_planner_completion.cpp)
+target_link_libraries(test_repair_planner_completion PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_repair_planner
+)
+target_compile_definitions(test_repair_planner_completion PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_repair_planner_completion)
 
 # RS14-20 Scientific Recipe Compiler (#1206): schema, compiler, validator,
 # registry, lookup, equivalence and the lab document/source contract —
@@ -9885,6 +9977,29 @@ target_link_libraries(test_grader_schema PRIVATE
   sicnu_grader
 )
 sicnu_discover_tests(test_grader_schema)
+
+# RS14-05 Slices B/C: matching/scoring engine, document-shape adapters and
+# report renderers (same leaf lane, no new links).
+add_executable(test_grader_engine test_grader_engine.cpp)
+target_link_libraries(test_grader_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_engine)
+
+add_executable(test_grader_adapters test_grader_adapters.cpp)
+target_link_libraries(test_grader_adapters PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_adapters)
+
+add_executable(test_grader_render test_grader_render.cpp)
+target_link_libraries(test_grader_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_render)
 
 # LabSpec v3 runtime: checkpoint verify, hint policy, session state/store,
 # spec runtime (sicnu_lab_runtime links jsoncpp PUBLIC).
@@ -12490,6 +12605,24 @@ target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificStat
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
 sicnu_add_sdk_test(test_science_context_broker)
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
+
+# Science context live-authority probes: broker + real ScientificRecipeRegistry
+# (in-repo pack via CMAKE_SOURCE_DIR) + real GDAL facts collector (io lane).
+add_executable(test_science_context_live_authorities test_science_context_live_authorities.cpp)
+target_link_libraries(test_science_context_live_authorities PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::ScienceContext
+  sicnu_recipes
+  Sicnu::ScientificStateGdal
+)
+target_include_directories(test_science_context_live_authorities PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_science_context_live_authorities PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_science_context_live_authorities PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_science_context_live_authorities)
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)
@@ -12700,6 +12833,60 @@ function(sicnu_add_teaching_test NAME)
 endfunction()
 
 sicnu_add_teaching_test(test_teaching_lab_cockpit)
+
+# Undergraduate Lab Cockpit offscreen widget smoke (completion
+# teaching-cockpit-live-integration): drives the REAL dock widgets over the
+# REAL authorities — runtime registry probe, OutputVerifier grading engine
+# (real GTiff + shipped rules), ExperimentStore + CapsuleBuilder + CapsuleIO
+# export, and the session file across a restart. Compiles the dock TUs;
+# heavy deps (qgis/processing/operators) arrive transitively via sicnu_agent.
+add_executable(test_teaching_cockpit_smoke
+  test_teaching_cockpit_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_validate_service.cpp
+)
+target_link_libraries(test_teaching_cockpit_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::dataset
+  Sicnu::experiment_capsule
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_sample_foundry
+)
+target_include_directories(test_teaching_cockpit_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_teaching_cockpit_smoke PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_teaching_cockpit_smoke PROPERTIES
+  AUTOMOC ON
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+set(_smoke_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_smoke_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
+catch_discover_tests(test_teaching_cockpit_smoke
+  DISCOVERY_MODE PRE_TEST
+  TEST_PREFIX "teaching_cockpit_smoke: "
+  ${_smoke_dl_paths}
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 # ── Teacher Authoring & Assessment Console (Catch2 + Sicnu::teaching_admin) ──
 function(sicnu_add_teaching_admin_test NAME)
   add_executable(${NAME} ${NAME}.cpp)
@@ -12718,7 +12905,51 @@ function(sicnu_add_teaching_admin_test NAME)
   )
   sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
 endfunction()
+# Fake grading CLI (plain C++, no Qt): same exit/transcript contract as
+# `sicnu_geo_rs_cli lab --grade` — lets test_teaching_admin_core drive the
+# real-shaped grader path hermetically (see helper file header).
+add_executable(test_teaching_fake_grader_cli helper_teaching_fake_grader_cli.cpp)
+set_target_properties(test_teaching_fake_grader_cli PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
 sicnu_add_teaching_admin_test(test_teaching_admin_core)
+target_compile_definitions(test_teaching_admin_core PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+# The core suite spawns the fake grader CLI by path: make a target-scoped
+# build (no `all`) produce it too.
+add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
+
+# Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
+# into the test (no QGIS, no app binary) and drives one real batch-grade
+# round trip through the fake grader CLI.
+add_executable(test_teaching_admin_dock_smoke
+  test_teaching_admin_dock_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.h
+)
+target_link_libraries(test_teaching_admin_dock_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  Qt6::Widgets
+)
+target_include_directories(test_teaching_admin_dock_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin
+)
+target_compile_definitions(test_teaching_admin_dock_smoke PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+add_dependencies(test_teaching_admin_dock_smoke test_teaching_fake_grader_cli)
+set_target_properties(test_teaching_admin_dock_smoke PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_admin_dock_smoke TEST_PREFIX "test_teaching_admin_dock_smoke::")
 
 # Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
 # → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading
@@ -12849,3 +13080,45 @@ target_link_libraries(test_scientific_planner_review PRIVATE
 )
 target_include_directories(test_scientific_planner_review PRIVATE ${CMAKE_SOURCE_DIR}/src)
 sicnu_discover_tests(test_scientific_planner_review TEST_PREFIX "test_scientific_planner_review::")
+# RS14-02 Scientific Preflight Engine slice B: deterministic rule engine,
+# builtin rule families, provider seam and teaching/agent projections —
+# Qt/GDAL-free leaf tests over sicnu_preflight; the provider test adds the
+# sicnu_preflight_state_adapter (passport projection) over sicnu_scientific_state.
+add_executable(test_preflight_engine test_preflight_engine.cpp)
+target_link_libraries(test_preflight_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_engine TEST_PREFIX "test_preflight_engine::")
+
+add_executable(test_preflight_rules test_preflight_rules.cpp)
+target_link_libraries(test_preflight_rules PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_rules TEST_PREFIX "test_preflight_rules::")
+
+add_executable(test_preflight_render test_preflight_render.cpp)
+target_link_libraries(test_preflight_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_render TEST_PREFIX "test_preflight_render::")
+
+add_executable(test_preflight_provider test_preflight_provider.cpp)
+target_compile_definitions(test_preflight_provider PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_preflight_provider PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+)
+sicnu_discover_tests(test_preflight_provider TEST_PREFIX "test_preflight_provider::")
+
+add_executable(test_preflight_golden test_preflight_golden.cpp)
+target_link_libraries(test_preflight_golden PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_golden TEST_PREFIX "test_preflight_golden::")

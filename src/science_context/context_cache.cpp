@@ -39,12 +39,19 @@ std::string makeCacheKey( const CacheKeyMaterial &material )
     oss << material.assetDigest << '|' << material.catalogGeneration << '|'
         << material.registryRevision << '|' << material.recipePackDigest << '|'
         << material.autonomyRevision << '|' << material.goal << '|' << material.intent
-        << '|' << ( material.offline ? '1' : '0' );
+        << '|' << ( material.offline ? '1' : '0' )
+        << '|' << material.maxBytes << '|' << material.maxRecipes
+        << '|' << material.maxCapabilities << '|' << material.maxOpenQuestions
+        << '|' << material.maxAssets
+        << '|' << ( material.determinismRequired ? '1' : '0' )
+        << '|' << material.capabilityAuthority << '|' << material.capabilityRevision;
     return hex16( fnv1a64( oss.str() ) );
 }
 
 void ContextCache::put( const std::string &key, const ScientificContextBundle &bundle )
 {
+    if ( mEntries.size() >= kMaxEntries && mEntries.find( key ) == mEntries.end() )
+        mEntries.clear(); // deterministic bounded projection
     mEntries[key] = bundle;
 }
 

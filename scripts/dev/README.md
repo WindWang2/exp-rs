@@ -13,6 +13,7 @@ usable from any worktree of this repository; shared helpers live in
 | `resource_guard.py` | Build lock + parallelism clamp around any command | second concurrent writer of one build dir gets exit 75 (or queues with `--wait`); `--parallel N`/`-jN` clamped to ≤ 2; stale locks broken only for a dead holder past `--stale-after` |
 | `review_pack.py` | Reproducible PR evidence pack + PR-body draft | refuses to write an incomplete pack; deterministic modulo the `Generated:` line |
 | `stale_branches.py` | Classifies remote branches (merged-equivalent / superseded / unmerged-increment / diverged-stale) with evidence | advisory only; deletes nothing, merges nothing |
+| `narrow_targets.py` | Maps changed paths to the minimal build/test targets the CMake wiring actually names (plus the `test_build_wiring_drift` oracle for wiring changes) | mapping is mechanical from the wiring text — paths no target covers are reported `unwired`, never guessed |
 
 Exit codes across the suite: `0` success (possibly degraded), `1` genuine
 failure, `2` refused (fail-closed precondition), `75` busy (lock held).
@@ -37,6 +38,7 @@ python scripts/dev/resource_guard.py --lock-dir <build-dir> [--wait 900] \
 python scripts/dev/review_pack.py [--base origin/master] [--head HEAD] \
     [--title "..."] [--out PR_PACK.md] [--json]
 python scripts/dev/stale_branches.py [--branch <name>] [--behind-threshold 50] [--json]
+python scripts/dev/narrow_targets.py [paths...] [--base origin/master] [--json]
 ```
 
 Every tool accepts `--json` for machine-readable output and prints a human

@@ -472,3 +472,8 @@ data/labs/_tmp/
 !.planning/RS14-14-agent-benchmark/
 .planning/RS14-14-agent-benchmark/*
 !.planning/RS14-14-agent-benchmark/*.md
+
+# completion-teaching-admin-real-adapters: track planning notes (markdown only; logs stay local).
+!.planning/completion-teaching-admin-real-adapters/
+.planning/completion-teaching-admin-real-adapters/*
+!.planning/completion-teaching-admin-real-adapters/*.md

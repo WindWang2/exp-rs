@@ -29,7 +29,8 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
+
+#include "platform/portable.h"
 
 #include <chrono>
 #include <ctime>
@@ -379,7 +380,7 @@ TEST_CASE( "a leftover writer.lock from a crashed writer is broken by pid or age
   //    the typed single-writer error naming the lock file.
   {
     std::ofstream out( fix.mirrorDir + "/writer.lock", std::ios::binary );
-    out << static_cast<long>( ::getpid() ) << " " << std::time( nullptr ) << "\n";
+    out << static_cast<long>( sicnu::portable::pid() ) << " " << std::time( nullptr ) << "\n";
   }
   bool refused = false;
   try

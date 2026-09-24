@@ -26,6 +26,9 @@ QJsonObject BatchRowResult::toJson() const
         { QStringLiteral( "lab_version" ), labVersion },
         { QStringLiteral( "software_version" ), softwareVersion },
         { QStringLiteral( "missing_evidence" ), missingEvidence },
+        { QStringLiteral( "grader_digest" ), graderDigest },
+        { QStringLiteral( "top_deduction" ), topDeduction },
+        { QStringLiteral( "unavailable_reason" ), unavailableReason },
     } );
 }
 
@@ -51,6 +54,7 @@ QJsonObject BatchAssessmentReport::toJson() const
         { QStringLiteral( "corrupted" ), corrupted },
         { QStringLiteral( "cancelled" ), cancelled },
         { QStringLiteral( "missing_evidence" ), missingEvidence },
+        { QStringLiteral( "unavailable" ), unavailable },
         { QStringLiteral( "cancelled_early" ), cancelledEarly },
         { QStringLiteral( "rubric_version" ), rubricVersion },
         { QStringLiteral( "lab_version" ), labVersion },
@@ -222,6 +226,10 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
             report.graded += 1;
         else if ( row.status == QLatin1String( "cancelled" ) )
             report.cancelled += 1;
+        else if ( row.status == QLatin1String( "unavailable" ) )
+        {
+            // grader-side unavailability; counted in the unavailable pass below
+        }
         else
             report.failed += 1;
 
@@ -238,6 +246,15 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
         }
 
         report.rows.push_back( row );
+    }
+
+    // Grader-side unavailability (CLI missing/timeout, unverifiable artifact),
+    // counted from final rows: a class that could not be graded is not a
+    // silent success. Missing-evidence rewrites above keep their own counter.
+    for ( const auto &row : report.rows )
+    {
+        if ( row.status == QLatin1String( "unavailable" ) && !row.missingEvidence )
+            report.unavailable += 1;
     }
 
     return report;
@@ -261,7 +278,7 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
 
     QString csv;
     csv += QStringLiteral( "\xEF\xBB\xBF" ); // UTF-8 BOM
-    csv += QStringLiteral( "student_id,lab_id,score,verdict,status,message,missing_evidence,rubric_version,lab_version,software_version\r\n" );
+    csv += QStringLiteral( "student_id,lab_id,score,verdict,status,message,missing_evidence,grader_digest,top_deduction,unavailable_reason,rubric_version,lab_version,software_version\r\n" );
     QVector<BatchRowResult> sorted = report.rows;
     std::sort( sorted.begin(), sorted.end(),
                []( const BatchRowResult &a, const BatchRowResult &b ) {
@@ -271,8 +288,27 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
                } );
     for ( const auto &row : sorted )
     {
+        // Twin of csv_safe() in scripts/run_classroom_batch.py and
+        // csvSafeCell() in src/cli/lab_batch_runner.cpp: a leading =+-@TABCR
+        // gets an apostrophe prefix so spreadsheets open the cell as text.
         auto esc = []( QString s ) {
             s.replace( QLatin1Char( '"' ), QStringLiteral( "\"\"" ) );
+            if ( !s.isEmpty() )
+            {
+                switch ( s.at( 0 ).unicode() )
+                {
+                    case '=':
+                    case '+':
+                    case '-':
+                    case '@':
+                    case '\t':
+                    case '\r':
+                        s.prepend( QLatin1Char( '\'' ) );
+                        break;
+                    default:
+                        break;
+                }
+            }
             return QStringLiteral( "\"" ) + s + QStringLiteral( "\"" );
         };
         csv += esc( row.studentId ) + QLatin1Char( ',' );
@@ -282,6 +318,9 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
         csv += esc( row.status ) + QLatin1Char( ',' );
         csv += esc( row.message ) + QLatin1Char( ',' );
         csv += ( row.missingEvidence ? QStringLiteral( "1" ) : QStringLiteral( "0" ) ) + QLatin1Char( ',' );
+        csv += esc( row.graderDigest ) + QLatin1Char( ',' );
+        csv += esc( row.topDeduction ) + QLatin1Char( ',' );
+        csv += esc( row.unavailableReason ) + QLatin1Char( ',' );
         csv += esc( row.rubricVersion ) + QLatin1Char( ',' );
         csv += esc( row.labVersion ) + QLatin1Char( ',' );
         csv += esc( row.softwareVersion ) + QStringLiteral( "\r\n" );

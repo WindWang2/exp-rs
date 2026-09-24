@@ -11,7 +11,31 @@ add_library( sicnu_preflight STATIC
     sha256.cpp
     finding.cpp
     report.cpp
+    provider.cpp
+    rule.cpp
+    engine.cpp
+    rules.cpp
+    render.cpp
+    capability_mirror.cpp
 )
+
+# Slice B: the facts adapter consumes the scientific_state passport types and
+# reuses its vocabulary writers (single source of the modality/kind wire
+# strings). Both libraries stay Qt/QGIS/GDAL-free jsoncpp leaves; CMake
+# resolves the target name at generate time (it is add_subdirectory'ed later
+# in the root file — see src/study/bridge for the precedent).
+add_library( sicnu_preflight_state_adapter STATIC
+    asset_state_adapter.cpp
+)
+target_link_libraries( sicnu_preflight_state_adapter PUBLIC
+    sicnu_preflight
+    sicnu_scientific_state
+)
+set_target_properties( sicnu_preflight_state_adapter PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+add_library( Sicnu::PreflightStateAdapter ALIAS sicnu_preflight_state_adapter )
 
 target_include_directories( sicnu_preflight PUBLIC ${CMAKE_SOURCE_DIR}/src )
 

@@ -314,6 +314,16 @@ void QgisDesktopWindow::setupDockWidgets()
     // Undergraduate Lab Cockpit (Course Home + Guided Lab Workspace)
     {
         auto *cockpit = new sicnu::app::teaching::LabCockpitDock( this );
+        cockpit->setOperatorLauncher( [this]( const QString &algorithmId ) {
+            openProcessingAlgorithm( algorithmId ); // existing Processing seam
+        } );
+        cockpit->setCapsuleSourceProvider( [this]() -> sicnu::app::teaching::LabCapsuleSource {
+            sicnu::app::teaching::LabCapsuleSource src;
+            src.experimentDbPath = labExperimentDbPath();
+            src.experimentId = labExperimentId();
+            src.workspaceRoot = labWorkspaceRoot();
+            return src;
+        } );
         m_labCockpitDock = new QgsDockWidget( this );
         m_labCockpitDock->setObjectName( QStringLiteral( "labCockpitDock" ) );
         m_labCockpitDock->setWindowTitle( tr( "遥感实验学习工作台" ) );

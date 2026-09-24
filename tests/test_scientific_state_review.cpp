@@ -179,3 +179,129 @@ TEST_CASE( "non-finite doubles are typed InvalidField, never a self-unreadable d
     REQUIRE( !assetStateFromJson( mutatedNoData, decodedBand, bandError ) );
     REQUIRE( bandError.code == StateErrorCode::InvalidField );
 }
+
+// ---------------------------------------------------------------------------
+// R2 review gate: positional catalog band pairing
+//
+// resolveBands pairs dataset band i with catalog structure band i. The
+// pairing is only founded when both sides describe the SAME structure; a
+// stale mirror (asset re-registered after the file gained a band) must not
+// feed its roles/noData into the file's bands.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+bool stateHasNote( const RemoteSensingAssetState &state, const char *code )
+{
+    for ( const ResolutionNote &note : state.notes )
+    {
+        if ( note.code == code )
+            return true;
+    }
+    return false;
+}
+
+DatasetFacts makePlainBands( int count )
+{
+    DatasetFacts facts;
+    facts.sourcePath = "/data/pairing.tif";
+    facts.driverName = "GTiff";
+    facts.bandCount = count;
+    for ( int i = 1; i <= count; ++i )
+    {
+        BandFacts band;
+        band.index = i;
+        band.dataType = "Byte";
+        facts.bands.push_back( band );
+    }
+    return facts;
+}
+
+CatalogFacts makeCatalogRoles( const std::vector<const char *> &roles )
+{
+    CatalogFacts catalog;
+    catalog.assetId = "pairing";
+    catalog.structureBandCount = static_cast<int>( roles.size() );
+    for ( std::size_t i = 0; i < roles.size(); ++i )
+    {
+        CatalogBandFacts band;
+        band.index = static_cast<int>( i ) + 1;
+        band.role = roles[i];
+        catalog.bands.push_back( band );
+    }
+    return catalog;
+}
+
+} // namespace
+
+TEST_CASE( "a stale catalog mirror cannot feed roles into the file's bands",
+           "[scientific_state][r2][catalog_pairing]" )
+{
+    // RED on master: bands paired by position with no structure check, so
+    // the 3-band mirror silently labelled a 2-band file's band 1 "red".
+    DatasetFacts dataset = makePlainBands( 2 );
+    CatalogFacts catalog = makeCatalogRoles( { "red", "green", "nir" } );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( stateHasNote( state, "bands.catalog_structure_mismatch" ) );
+    REQUIRE( claimFor( state, "bands[1].role" ).kind == ClaimKind::Unknown );
+    REQUIRE( claimFor( state, "bands[2].role" ).kind == ClaimKind::Unknown );
+}
+
+TEST_CASE( "matching structures still pair dataset bands with the mirror",
+           "[scientific_state][r2][catalog_pairing]" )
+{
+    DatasetFacts dataset = makePlainBands( 2 );
+    CatalogFacts catalog = makeCatalogRoles( { "red", "nir" } );
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !stateHasNote( state, "bands.catalog_structure_mismatch" ) );
+    REQUIRE( claimFor( state, "bands[1].role" ).kind == ClaimKind::Known );
+    REQUIRE( state.bands[0].role == "red" );
+    REQUIRE( state.bands[1].role == "nir" );
+}
+
+TEST_CASE( "equal band counts with misaligned indices still refuse pairing",
+           "[scientific_state][r2][catalog_pairing]" )
+{
+    // Review R2 P2: counts alone do not prove the same structure — a {2,3}
+    // file axis and a {1,2} mirror would pair mirror band 1's role onto
+    // file band 2.
+    DatasetFacts dataset = makePlainBands( 2 );
+    for ( int i = 0; i < 2; ++i )
+        dataset.bands[i].index = i + 2;  // file bands are #2 and #3
+    CatalogFacts catalog = makeCatalogRoles( { "red", "nir" } );
+    // makeCatalogRoles indexes mirror bands 1..2 — misaligned with 2..3.
+
+    StateResolutionInput input;
+    input.dataset = dataset;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( stateHasNote( state, "bands.catalog_structure_mismatch" ) );
+    REQUIRE( claimFor( state, "bands[2].role" ).kind == ClaimKind::Unknown );
+    REQUIRE( claimFor( state, "bands[3].role" ).kind == ClaimKind::Unknown );
+}
+
+TEST_CASE( "catalog-only passports keep the structure mirror as their authority",
+           "[scientific_state][r2][catalog_pairing]" )
+{
+    CatalogFacts catalog = makeCatalogRoles( { "red", "green", "nir" } );
+
+    StateResolutionInput input;
+    input.catalog = catalog;
+    const RemoteSensingAssetState state = resolveAssetState( input ).state;
+
+    REQUIRE( !stateHasNote( state, "bands.catalog_structure_mismatch" ) );
+    REQUIRE( state.bands.size() == 3 );
+    REQUIRE( claimFor( state, "bands[3].role" ).kind == ClaimKind::Known );
+}

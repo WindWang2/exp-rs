@@ -14,6 +14,11 @@ add_library( sicnu_verifier STATIC
     verify_error_codes.cpp
     verify_sha256.cpp
     verify_types.cpp
+    verify_engine.cpp
+    verify_pack.cpp
+    verify_levels.cpp
+    verify_render.cpp
+    projections.cpp
 )
 
 target_include_directories( sicnu_verifier PUBLIC ${CMAKE_SOURCE_DIR}/src )

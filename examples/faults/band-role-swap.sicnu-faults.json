@@ -1,0 +1,40 @@
+{
+  "schema_version": "sicnu.lab.faults/1",
+  "scenario_id": "fs_band_role_swap_ndvi",
+  "title": "Band role swap on an index pair",
+  "title_zh": "指数波段对上的波段角色互换",
+  "fault": {
+    "family": "band_role_swap",
+    "params": {
+      "role_a": "red",
+      "role_b": "nir"
+    },
+    "seed": 42
+  },
+  "base_fixture": {
+    "fixture_id": "two_band_index_pair",
+    "params": {},
+    "seed": 42
+  },
+  "sandbox": {
+    "class": "temp_copy",
+    "max_bytes": 1048576,
+    "require_source_unchanged": true
+  },
+  "expected": {
+    "observables": [
+      { "id": "band_roles", "relation": "changed" },
+      { "id": "index_mean", "relation": "delta_ge", "value": 0.5 }
+    ],
+    "diagnosis": { "signature": "all_negative_index" }
+  },
+  "learning_objective": {
+    "id": "LO-03",
+    "statement": "Recognize that band metadata, not band position, defines an index.",
+    "statement_zh": "认识到定义指数的是波段元数据而不是波段位置。"
+  },
+  "cleanup": {
+    "required": true,
+    "verify_no_residue": true
+  }
+}

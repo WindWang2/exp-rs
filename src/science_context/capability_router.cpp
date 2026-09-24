@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 #include <set>
 
 namespace sicnu::science_context {
@@ -112,11 +113,69 @@ const IntentSpec *findSpec( const std::string &intent )
     return nullptr;
 }
 
-CapabilityEntry evaluate( const IntentSpec &spec, const Json::Value &observed )
+/// Modality-agnostic spec shape. Built from the builtin table (no authority
+/// wired) or from a live CapabilityKnowledge entry (merged, variant-resolved).
+struct ResolvedSpec
+{
+    std::string capabilityId;
+    std::string surface = "operator";
+    std::vector<std::string> requiredRoles;
+    std::vector<int> roleMinima; ///< parallel to requiredRoles (authority minima)
+    std::vector<std::string> modalities; ///< empty = any
+    std::vector<std::string> preferredRadio;
+    std::vector<std::string> warnRadio;
+    bool fromAuthority = false;
+};
+
+ResolvedSpec builtinSpec( const IntentSpec &spec )
+{
+    ResolvedSpec s;
+    s.capabilityId = spec.capabilityId;
+    s.requiredRoles = spec.requiredRoles;
+    s.roleMinima.assign( spec.requiredRoles.size(), 1 );
+    s.modalities = spec.opticalOnly;
+    s.preferredRadio = spec.preferredRadio;
+    s.warnRadio = spec.warnRadio;
+    return s;
+}
+
+/// Knowledge shorthand tokens ("dn", "toa", "sr", "bt") mapped onto the
+/// passport radiometric vocabulary; unknown tokens compare verbatim.
+std::string canonicalRadioToken( const std::string &token )
+{
+    static const std::map<std::string, std::string> kAliases = {
+        { "dn", "digital_number" },
+        { "digital_number", "digital_number" },
+        { "toa", "toa_reflectance" },
+        { "toa_reflectance", "toa_reflectance" },
+        { "sr", "surface_reflectance" },
+        { "surface_reflectance", "surface_reflectance" },
+        { "radiance", "radiance" },
+        { "bt", "brightness_temperature" },
+        { "brightness_temperature", "brightness_temperature" },
+        { "sigma0", "sigma0" },
+        { "gamma0", "gamma0" },
+        { "beta0", "beta0" },
+    };
+    const auto it = kAliases.find( lower( token ) );
+    return it == kAliases.end() ? lower( token ) : it->second;
+}
+
+std::vector<std::string> canonicalRadioList( const Json::Value &array )
+{
+    std::vector<std::string> out;
+    for ( const auto &t : array )
+    {
+        if ( t.isString() )
+            out.push_back( canonicalRadioToken( t.asString() ) );
+    }
+    return out;
+}
+
+CapabilityEntry evaluate( const ResolvedSpec &spec, const Json::Value &observed )
 {
     CapabilityEntry e;
     e.capabilityId = spec.capabilityId;
-    e.intent = spec.intent;
     e.structuralOnly = true;
     e.score = 1.0;
 
@@ -125,10 +184,10 @@ CapabilityEntry evaluate( const IntentSpec &spec, const Json::Value &observed )
     const std::string modality = modalityOf( observed );
 
     // Modality gate
-    if ( !spec.opticalOnly.empty() && !modality.empty() && modality != "unknown" )
+    if ( !spec.modalities.empty() && !modality.empty() && modality != "unknown" )
     {
         bool okMod = false;
-        for ( const auto &m : spec.opticalOnly )
+        for ( const auto &m : spec.modalities )
         {
             if ( m == modality )
             {
@@ -165,6 +224,26 @@ CapabilityEntry evaluate( const IntentSpec &spec, const Json::Value &observed )
             e.prepActions.push_back( "assign_band_roles:" + missing );
             e.score = 0.2;
             return e;
+        }
+        // Authority minima above 1 cannot be verified against the deduped
+        // observed role set — fail closed to prep instead of a fake direct.
+        if ( spec.fromAuthority )
+        {
+            for ( std::size_t i = 0; i < spec.requiredRoles.size(); ++i )
+            {
+                const int minimum = i < spec.roleMinima.size() ? spec.roleMinima[i] : 1;
+                if ( minimum > 1 )
+                {
+                    e.status = "prep";
+                    e.reasons.push_back( "BAND_ROLE_COUNT_UNVERIFIED:" +
+                                         spec.requiredRoles[i] + ":" +
+                                         std::to_string( minimum ) );
+                    e.prepActions.push_back( "verify_band_role_counts:" +
+                                             spec.requiredRoles[i] );
+                    e.score = 0.35;
+                    return e;
+                }
+            }
         }
     }
 
@@ -305,53 +384,21 @@ std::string resolveIntentFromGoal( const std::string &goalText, std::string *sta
     return hits[0].intent;
 }
 
-CapabilityRouterResult routeCapabilities( const CapabilityQuery &query )
+namespace {
+
+CapabilityEntry unknownIntentEntry( const std::string &intent )
 {
-    CapabilityRouterResult result;
-    std::string intent = query.intent;
-    std::string intentStatus = "resolved";
-    if ( intent.empty() )
-        intent = resolveIntentFromGoal( query.goal, &intentStatus );
-    else if ( !isKnownBrokerIntent( intent ) )
-    {
-        intentStatus = "unresolved";
-        result.openQuestions.push_back( "unknown_operator_or_intent:" + intent );
-        result.intent = intent;
-        result.intentStatus = intentStatus;
-        CapabilityEntry unk;
-        unk.capabilityId = "unknown";
-        unk.intent = intent;
-        unk.status = "impossible";
-        unk.reasons.push_back( "UNKNOWN_INTENT:" + intent );
-        unk.score = 0.0;
-        result.entries.push_back( unk );
-        return result;
-    }
-    result.intent = intent;
-    result.intentStatus = intentStatus;
+    CapabilityEntry unk;
+    unk.capabilityId = "unknown";
+    unk.intent = intent;
+    unk.status = "impossible";
+    unk.reasons.push_back( "UNKNOWN_INTENT:" + intent );
+    unk.score = 0.0;
+    return unk;
+}
 
-    if ( intentStatus != "resolved" || intent.empty() )
-    {
-        result.openQuestions.push_back( "intent_" + intentStatus );
-        return result;
-    }
-
-    const IntentSpec *spec = findSpec( intent );
-    if ( !spec )
-    {
-        result.openQuestions.push_back( "unknown_operator_or_intent:" + intent );
-        return result;
-    }
-
-    CapabilityEntry entry = evaluate( *spec, query.observedState );
-    result.entries.push_back( entry );
-    if ( entry.status != "direct" )
-    {
-        for ( const auto &r : entry.reasons )
-            result.openQuestions.push_back( r );
-    }
-
-    // Deterministic order if we later add more candidates.
+void finalizeEntries( CapabilityRouterResult &result, int limit )
+{
     std::sort( result.entries.begin(), result.entries.end(),
                []( const CapabilityEntry &a, const CapabilityEntry &b ) {
                    const bool af = a.status == "direct";
@@ -362,10 +409,199 @@ CapabilityRouterResult routeCapabilities( const CapabilityQuery &query )
                        return a.score > b.score;
                    return a.capabilityId < b.capabilityId;
                } );
+    if ( limit > 0 && static_cast<int>( result.entries.size() ) > limit )
+        result.entries.resize( static_cast<std::size_t>( limit ) );
+}
 
-    if ( query.limit > 0 && static_cast<int>( result.entries.size() ) > query.limit )
-        result.entries.resize( static_cast<std::size_t>( query.limit ) );
+void recordUnknownIntent( CapabilityRouterResult &result, const std::string &intent )
+{
+    result.intentStatus = "unresolved";
+    result.openQuestions.push_back( "unknown_operator_or_intent:" + intent );
+    result.entries.push_back( unknownIntentEntry( intent ) );
+}
 
+/// Strict candidate shaping: a present-but-malformed constraint is treated as
+/// malformed and the candidate is skipped (fail-closed), never as "no
+/// requirement". Returns false when the candidate must be skipped.
+bool authoritySpecFromCandidate( const Json::Value &candidate, ResolvedSpec &spec )
+{
+    if ( !candidate.isObject() )
+        return false;
+    const Json::Value &id = candidate["id"];
+    if ( !id.isString() || id.asString().empty() )
+        return false;
+    spec = ResolvedSpec{};
+    spec.fromAuthority = true;
+    spec.capabilityId = id.asString();
+    if ( candidate["surface"].isString() )
+        spec.surface = candidate["surface"].asString();
+
+    const Json::Value &roles = candidate["band_roles"];
+    if ( !roles.isNull() )
+    {
+        if ( !roles.isObject() )
+            return false;
+        for ( const auto &name : roles.getMemberNames() )
+        {
+            const Json::Value &minimum = roles[name];
+            if ( !minimum.isInt() && !minimum.isUInt() )
+                return false;
+            spec.requiredRoles.push_back( name );
+            spec.roleMinima.push_back( minimum.asInt() );
+        }
+    }
+
+    const Json::Value &modality = candidate["modality"];
+    if ( !modality.isNull() )
+    {
+        if ( !modality.isArray() )
+            return false;
+        for ( const auto &m : modality )
+        {
+            if ( !m.isString() )
+                return false;
+            spec.modalities.push_back( lower( m.asString() ) );
+        }
+    }
+
+    const Json::Value &radio = candidate["radiometric"];
+    if ( !radio.isNull() )
+    {
+        if ( !radio.isObject() )
+            return false;
+        const Json::Value &acceptable = radio["acceptable"];
+        if ( !acceptable.isNull() )
+        {
+            if ( !acceptable.isArray() )
+                return false;
+            spec.preferredRadio = canonicalRadioList( acceptable );
+        }
+        const Json::Value &warn = radio["warn"];
+        if ( !warn.isNull() )
+        {
+            if ( !warn.isArray() )
+                return false;
+            spec.warnRadio = canonicalRadioList( warn );
+        }
+    }
+    return true;
+}
+
+/// Evaluates one resolved candidate and appends its entry; returns false when
+/// the candidate's operator is absent from the registry (an impossible entry
+/// is appended instead).
+bool evaluateCandidate( const ResolvedSpec &spec, const CapabilityQuery &query,
+                        const CapabilityFactsLookup &facts, CapabilityRouterResult &result )
+{
+    bool presenceUnknownHere = false;
+    if ( facts.presence && !spec.capabilityId.empty() )
+    {
+        const OperatorPresence presence =
+            facts.presence( spec.capabilityId, spec.surface );
+        if ( presence == OperatorPresence::Absent )
+        {
+            CapabilityEntry e;
+            e.capabilityId = spec.capabilityId;
+            e.intent = query.intent;
+            e.structuralOnly = true;
+            e.status = "impossible";
+            e.reasons.push_back( "OPERATOR_NOT_REGISTERED:" + spec.capabilityId );
+            e.score = 0.0;
+            result.entries.push_back( e );
+            result.openQuestions.push_back( "operator_not_registered:" +
+                                            spec.capabilityId );
+            return false;
+        }
+        presenceUnknownHere = ( presence == OperatorPresence::Unknown );
+        result.presenceUnknown = result.presenceUnknown || presenceUnknownHere;
+    }
+
+    CapabilityEntry entry = evaluate( spec, query.observedState );
+    entry.intent = query.intent;
+    if ( presenceUnknownHere )
+    {
+        entry.reasons.push_back( "OPERATOR_PRESENCE_UNKNOWN:" + spec.capabilityId );
+        result.openQuestions.push_back( "operator_presence_unknown:" +
+                                        spec.capabilityId );
+        if ( entry.status == "direct" )
+            entry.score = std::min( entry.score, 0.9 ); // unknown ≠ clean success
+    }
+    result.entries.push_back( entry );
+    if ( entry.status != "direct" )
+    {
+        for ( const auto &r : entry.reasons )
+            result.openQuestions.push_back( r );
+    }
+    return true;
+}
+
+} // namespace
+
+CapabilityRouterResult routeCapabilities( const CapabilityQuery &query )
+{
+    CapabilityRouterResult result;
+    std::string intent = query.intent;
+    std::string intentStatus = "resolved";
+    if ( intent.empty() )
+        intent = resolveIntentFromGoal( query.goal, &intentStatus );
+    result.intent = intent;
+    result.intentStatus = intentStatus;
+
+    if ( intentStatus != "resolved" || intent.empty() )
+    {
+        result.openQuestions.push_back( "intent_" + intentStatus );
+        return result;
+    }
+
+    const CapabilityFactsLookup *facts = query.facts;
+    const bool haveProvider = facts && static_cast<bool>( facts->entriesForIntent );
+
+    if ( !haveProvider )
+    {
+        // No authority wired: the builtin table runs, and the bundle
+        // provenance reports builtin_fallback/degraded.
+        const IntentSpec *builtin = findSpec( intent );
+        if ( !builtin )
+        {
+            recordUnknownIntent( result, intent );
+            finalizeEntries( result, query.limit );
+            return result;
+        }
+        evaluateCandidate( builtinSpec( *builtin ), query, CapabilityFactsLookup{},
+                           result );
+        finalizeEntries( result, query.limit );
+        return result;
+    }
+
+    // Live authority: evaluate EVERY candidate fact-set it serves for the
+    // intent. First-match selection would silently drop variant-scoped
+    // requirements and fabricate feasibility; empty ⇒ intent not served and
+    // must not fall back to the builtin table.
+    const std::vector<Json::Value> candidates = facts->entriesForIntent( intent );
+    result.factsFromAuthority = true;
+    result.factsAuthority = facts->authority;
+    result.factsRevision = facts->revision;
+    if ( candidates.empty() )
+    {
+        recordUnknownIntent( result, intent );
+        finalizeEntries( result, query.limit );
+        return result;
+    }
+
+    for ( const auto &candidate : candidates )
+    {
+        ResolvedSpec spec;
+        if ( !authoritySpecFromCandidate( candidate, spec ) )
+            continue; // malformed candidate — fail closed, never "no constraint"
+        evaluateCandidate( spec, query, *facts, result );
+    }
+    if ( result.entries.empty() )
+    {
+        // Every candidate was malformed: the authority answered, but nothing
+        // usable — report unknown rather than a fabricated capability.
+        recordUnknownIntent( result, intent );
+    }
+    finalizeEntries( result, query.limit );
     return result;
 }
 

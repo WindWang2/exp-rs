@@ -12,7 +12,10 @@ set( SICNU_GRADER_SOURCES
   grader_sha256.cpp
   grader_json.cpp
   grader_types.cpp
+  grader_matcher.cpp
   grader_engine.cpp
+  grader_adapters.cpp
+  grader_render.cpp
 )
 
 add_library( sicnu_grader STATIC ${SICNU_GRADER_SOURCES} )
