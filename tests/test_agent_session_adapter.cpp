@@ -43,9 +43,8 @@ std::string writeRealRaster(const std::string &path)
     std::vector<std::vector<float>> bands(1, std::vector<float>(16, 1.0f));
     std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
     QString err;
-    const bool ok = sicnu::processing::writeGdalOutput(QString::fromStdString(path), 4, 4,
-                                                       bands, gt,
-                                                       QStringLiteral("EPSG:4326"), &err);
+    const bool ok = ::writeGdalOutput(QString::fromStdString(path), 4, 4, bands, gt,
+                                      QStringLiteral("EPSG:4326"), &err);
     return ok ? path : std::string();
 }
 

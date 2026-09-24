@@ -3,7 +3,6 @@
 
 #include "agent_ops/session_surface.h"
 
-#include <json/exceptions.h>
 
 #include <filesystem>
 #include <fstream>
