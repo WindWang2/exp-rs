@@ -660,7 +660,34 @@ void McpServer::handleRequest(const QVariantMap &request)
         try
         {
             QVariantMap resultData;
-            if (sicnu::agent::isDataPlatformTool(toolName))
+            // Specific-over-family: `scientific:` is a data-platform prefix,
+            // but THIS tool is the agent-ops session surface — it must be
+            // matched before the isDataPlatformTool family check below.
+            if (toolName == QStringLiteral("scientific:agent_session"))
+            {
+                // journal_directory (and refs) are caller-controlled paths:
+                // they get the same SICNU_MCP_WORKSPACE containment as every
+                // other path-consuming tool (#1033). Only real path slots
+                // are scanned — the gate must not reject prose arguments
+                // (goal/intent) that merely LOOK like paths.
+                QVariantMap pathArgs;
+                if (arguments.contains(QStringLiteral("journal_directory")))
+                    pathArgs[QStringLiteral("journal_directory")] =
+                        arguments.value(QStringLiteral("journal_directory"));
+                if (arguments.contains(QStringLiteral("refs")))
+                    pathArgs[QStringLiteral("refs")] =
+                        arguments.value(QStringLiteral("refs"));
+                QString denyReason;
+                if (!pathArgs.isEmpty() && !validateWorkspacePaths(pathArgs, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
+                resultData = handleAgentSession(arguments);
+            }
+            else if (sicnu::agent::isDataPlatformTool(toolName))
             {
                 // Data-platform tools take caller-controlled dataset_db/
                 // experiment_db/out/bundle paths and open them READWRITE|CREATE
@@ -847,30 +874,6 @@ void McpServer::handleRequest(const QVariantMap &request)
                 if (runId.isEmpty())
                     throw std::runtime_error("Invalid or missing run_id");
                 resultData = handleResumeWorkflow(runId);
-            }
-            else if (toolName == QStringLiteral("scientific:agent_session"))
-            {
-                // journal_directory (and refs) are caller-controlled paths:
-                // they get the same SICNU_MCP_WORKSPACE containment as every
-                // other path-consuming tool (#1033). Only real path slots
-                // are scanned — the gate must not reject prose arguments
-                // (goal/intent) that merely LOOK like paths.
-                QVariantMap pathArgs;
-                if (arguments.contains(QStringLiteral("journal_directory")))
-                    pathArgs[QStringLiteral("journal_directory")] =
-                        arguments.value(QStringLiteral("journal_directory"));
-                if (arguments.contains(QStringLiteral("refs")))
-                    pathArgs[QStringLiteral("refs")] =
-                        arguments.value(QStringLiteral("refs"));
-                QString denyReason;
-                if (!pathArgs.isEmpty() && !validateWorkspacePaths(pathArgs, &denyReason))
-                {
-                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
-                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
-                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
-                                       QStringLiteral("validation"));
-                }
-                resultData = handleAgentSession(arguments);
             }
             else if (toolName == QStringLiteral("artifact_read"))
             {

@@ -1861,6 +1861,18 @@ TEST_CASE( "mcp agent_session tool fails closed without an injected driver",
     TestMcpServer server;
     server.setAgentOpsDriver( nullptr );
 
+    // MCP gate: other requests are refused until the initialize handshake.
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 70;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    QVariantMap initParams;
+    initParams[QStringLiteral( "protocolVersion" )] = QStringLiteral( "2024-11-05" );
+    initReq[QStringLiteral( "params" )] = initParams;
+    server.testHandleRequest( initReq );
+    QVariantMap notifReq;
+    notifReq[QStringLiteral( "method" )] = QStringLiteral( "notifications/initialized" );
+    server.testHandleRequest( notifReq );
+
     QVariantMap req;
     req[QStringLiteral( "id" )] = 71;
     req[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
@@ -1886,6 +1898,18 @@ TEST_CASE( "mcp agent_session tool drives the shared driver envelope",
     // SAME typed code the CLI reports, and discovery/status stay live.
     static sicnu::agent_ops::OpsDriver driver{ sicnu::agent_ops::OpsDriver::Options{} };
     server.setAgentOpsDriver( &driver );
+
+    // MCP gate: other requests are refused until the initialize handshake.
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 70;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    QVariantMap initParams;
+    initParams[QStringLiteral( "protocolVersion" )] = QStringLiteral( "2024-11-05" );
+    initReq[QStringLiteral( "params" )] = initParams;
+    server.testHandleRequest( initReq );
+    QVariantMap notifReq;
+    notifReq[QStringLiteral( "method" )] = QStringLiteral( "notifications/initialized" );
+    server.testHandleRequest( notifReq );
 
     // Missing action: typed invalid parameter.
     QVariantMap noAction;

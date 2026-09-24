@@ -1381,6 +1381,7 @@ TEST_CASE("agent_ops projected repair plans are fail-closed on risk class",
     science.code = "ops.diagnose.X";
     science.rootCauseCode = "X";
     science.proposals = {"qa_mask"};
+    science.advisoryNext = recovery_action::kRepair; // route decide() to the repair gate
     Json::Value detail(Json::objectValue);
     detail["rule_id"] = "qa_mask";
     detail["risk_class"] = "science_changing";
