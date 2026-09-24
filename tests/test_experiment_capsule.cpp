@@ -1669,3 +1669,54 @@ TEST_CASE( "readiness hands output sizes beyond the 32-bit range to hooks verbat
             outputOk = check.status == sicnu::experiment::ReplayCheckStatus::Ok;
     CHECK( outputOk );
 }
+
+TEST_CASE( "a refused export leaves the previously published capsule intact",
+           "[capsule][io][rollback]" )
+{
+    // The publish path is QSaveFile + commit: a refused re-export over an
+    // existing artifact must never tear, truncate or replace it — the old
+    // capsule stays byte-identical and loadable (atomic publish, all-or-
+    // nothing rollback on the disk artifact).
+    BuiltCapsule built;
+    REQUIRE( built.build() );
+    QTemporaryDir dir;
+    const QString path = dir.filePath( QStringLiteral( "capsule.json" ) );
+    REQUIRE( CapsuleIO::exportCapsule( built.doc, path ).has_value() );
+
+    QFile published( path );
+    REQUIRE( published.open( QIODevice::ReadOnly ) );
+    const QByteArray publishedBytes = published.readAll();
+    published.close();
+
+    // A forged re-export (self digest does not verify) targeting the SAME
+    // path is refused before any byte is written.
+    QJsonObject root = built.doc.root();
+    root.insert( QStringLiteral( "capsule_id" ), QStringLiteral( "capsule-forged" ) );
+    const CapsuleDocument forged = CapsuleDocument::fromRoot( root );
+    REQUIRE( !forged.digestValid() );
+    auto refused = CapsuleIO::exportCapsule( forged, path );
+    REQUIRE( !refused.has_value() );
+
+    QFile after( path );
+    REQUIRE( after.open( QIODevice::ReadOnly ) );
+    CHECK( after.readAll() == publishedBytes );
+    after.close();
+
+    const auto reloaded = CapsuleIO::loadCapsule( path );
+    REQUIRE( reloaded.has_value() );
+    CHECK( reloaded->digestValue() == built.doc.digestValue() );
+}
+
+TEST_CASE( "a stale capsule ref is a typed load refusal, never a fake readiness",
+           "[capsule][io][stale-ref]" )
+{
+    // Studio sessions and export bundles store capsule REFS (paths). When the
+    // file behind a ref is gone, the reload gate must answer with a typed
+    // refusal — readiness is never assessed over a document that does not
+    // exist.
+    QTemporaryDir dir;
+    const QString missing = dir.filePath( QStringLiteral( "capsule-deleted.json" ) );
+    auto refused = CapsuleIO::loadCapsule( missing );
+    REQUIRE( !refused.has_value() );
+    CHECK( refused.diagnostics().first().code == QLatin1String( "capsule.unreadable" ) );
+}
