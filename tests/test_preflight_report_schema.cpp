@@ -172,7 +172,7 @@ TEST_CASE("report digest is tamper sensitive", "[preflight][report]")
 TEST_CASE("report fromJson round-trips and is fail-closed", "[preflight][report]")
 {
     PreflightReport r = PreflightReport::makeEmpty("rs:ndvi", "teaching");
-    r.verdict        = "requires_ack";
+    r.verdict        = "blocked"; // consistent with the Block finding below
     r.requestDigest  = shortDigest("req");
     r.rulesRevision  = shortDigest("rules");
     r.findings.push_back(sampleFinding());
@@ -180,14 +180,14 @@ TEST_CASE("report fromJson round-trips and is fail-closed", "[preflight][report]
     const Json::Value j = r.toJson();
     REQUIRE(j["schema_version"].asString() == "1");
     REQUIRE(j["kind"].asString() == "preflight_report");
-    REQUIRE(j["verdict"].asString() == "requires_ack");
+    REQUIRE(j["verdict"].asString() == "blocked");
     REQUIRE(j["findings"].size() == 1);
     REQUIRE(j["evaluated"].isArray());
     REQUIRE(j["budgets"].isObject());
 
     auto parsed = PreflightReport::fromJson(j);
     REQUIRE(parsed.has_value());
-    REQUIRE(parsed->verdict == "requires_ack");
+    REQUIRE(parsed->verdict == "blocked");
     REQUIRE(parsed->findings.size() == 1);
     REQUIRE(parsed->findings.front().code == "SPF_RADIOMETRIC_STATE_MISMATCH");
     REQUIRE(canonicalReportJson(*parsed) == canonicalReportJson(r));
@@ -203,4 +203,11 @@ TEST_CASE("report fromJson round-trips and is fail-closed", "[preflight][report]
     Json::Value badVerdict = j;
     badVerdict["verdict"] = "maybe";
     REQUIRE_FALSE(PreflightReport::fromJson(badVerdict).has_value());
+
+    // A verdict that contradicts its own findings is corrupt: render would
+    // project a can_proceed the findings refute. Fail closed.
+    PreflightReport lying = PreflightReport::makeEmpty("rs:ndvi", "teaching");
+    lying.verdict = "ok"; // claims a clean run...
+    lying.findings.push_back(sampleFinding()); // ...while carrying a Block
+    REQUIRE_FALSE(PreflightReport::fromJson(lying.toJson()).has_value());
 }

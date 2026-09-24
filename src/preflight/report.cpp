@@ -151,6 +151,27 @@ std::optional<PreflightReport> PreflightReport::fromJson( const Json::Value &jso
       return std::nullopt;
     r.evaluated.push_back( std::move( *e ) );
   }
+
+  // Verdict consistency, mirroring the engine's derivation rule (block
+  // dominates; unacknowledged require_ack gates; else ok). A stored report
+  // that contradicts its own findings is corrupt: render would project a
+  // can_proceed the findings refute. Fail closed.
+  {
+    bool sawBlock = false;
+    bool sawLoudAck = false;
+    for ( const auto &f : r.findings )
+    {
+      if ( f.severity == PreflightSeverity::Block )
+        sawBlock = true;
+      if ( f.severity == PreflightSeverity::RequireAck && !f.acknowledged )
+        sawLoudAck = true;
+    }
+    const bool consistent = sawBlock  ? r.verdict == "blocked"
+                            : sawLoudAck ? r.verdict == "requires_ack"
+                                         : r.verdict == "ok";
+    if ( !consistent )
+      return std::nullopt;
+  }
   return r;
 }
 

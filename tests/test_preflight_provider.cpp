@@ -326,3 +326,270 @@ TEST_CASE( "integration: real passport + real mirror drive the full engine",
             sawUnknown = true;
     REQUIRE( sawUnknown );
 }
+
+TEST_CASE( "variant-parameterized policies that match nothing are flagged, not silently dropped",
+           "[preflight][provider]" )
+{
+    // The real mirror keeps rs:spectral_index's band_roles ONLY inside its
+    // variants. A request whose params match no variant (missing, typo'd,
+    // foreign-cased) must not hand rules a bare entry that reads as "no
+    // policy declared": the policies exist but none is consultable.
+    CapabilityMirrorProjection mirror;
+    Json::Value doc( Json::arrayValue );
+    Json::Value entry( Json::objectValue );
+    entry["id"] = "rs:variant_only";
+    Json::Value variants( Json::arrayValue );
+    Json::Value variant( Json::objectValue );
+    Json::Value when( Json::objectValue );
+    when["param"] = "index";
+    Json::Value values( Json::arrayValue );
+    values.append( "NDVI" );
+    when["values"] = values;
+    variant["when"] = when;
+    Json::Value roles( Json::objectValue );
+    roles["red"] = 1;
+    roles["nir"] = 1;
+    variant["band_roles"] = roles;
+    variants.append( variant );
+    entry["variants"] = variants;
+    doc.append( entry );
+    mirror.addDocument( doc, "variant_only.json" );
+
+    // Matching params apply the policy: nothing is dropped.
+    const auto matched =
+        mirror.entryForOperator( "rs:variant_only", makeVariantParams( "index", "NDVI" ) );
+    REQUIRE( matched.status == FactStatus::Available );
+    REQUIRE_FALSE( matched.variantPoliciesDropped );
+    REQUIRE( matched.entry["band_roles"]["red"].asInt() == 1 );
+
+    // No params at all: declared but not consultable.
+    const auto unmatched = mirror.entryForOperator( "rs:variant_only", {} );
+    REQUIRE( unmatched.status == FactStatus::Available );
+    REQUIRE( unmatched.variantPoliciesDropped );
+
+    // Foreign params: same flag, still Available.
+    const auto foreign =
+        mirror.entryForOperator( "rs:variant_only", makeVariantParams( "index", "NDWI" ) );
+    REQUIRE( foreign.status == FactStatus::Available );
+    REQUIRE( foreign.variantPoliciesDropped );
+
+    // An entry without variants never sets the flag.
+    Json::Value plainDoc( Json::arrayValue );
+    Json::Value plain( Json::objectValue );
+    plain["id"] = "rs:plain";
+    plainDoc.append( plain );
+    CapabilityMirrorProjection plainMirror;
+    plainMirror.addDocument( plainDoc, "plain.json" );
+    const auto plainEntry = plainMirror.entryForOperator( "rs:plain", {} );
+    REQUIRE( plainEntry.status == FactStatus::Available );
+    REQUIRE_FALSE( plainEntry.variantPoliciesDropped );
+}
+
+TEST_CASE( "passport lifecycle gates the projection and truncation stays honest",
+           "[preflight][provider][integration]" )
+{
+    // Same science facts, but the passport says the asset is stale: the
+    // metadata may no longer describe the usable data, so the adapter must
+    // not hand rules "observed" values — every strategy check degrades to a
+    // typed unknown and the verdict cannot be a clean ok.
+    std::string json = twoBandPassportJson();
+    const std::string ready = "\"lifecycle\": \"ready\"";
+    const std::string stale = "\"lifecycle\": \"stale\"";
+    const auto pos = json.find( ready );
+    REQUIRE( pos != std::string::npos );
+    json.replace( pos, ready.size(), stale );
+    bool ok = false;
+    const auto state = passportFromJson( json, ok );
+    REQUIRE( ok );
+
+    StateAssetFactsProvider provider(
+        [&]( const std::string & ) { return std::optional{ state }; } );
+    const auto resolved = provider.slotFacts( "scene-a" );
+    REQUIRE( resolved.status == FactStatus::Unknown );
+    REQUIRE( resolved.detail.find( "stale" ) != std::string::npos );
+
+    StateAssetFactsProvider facts( [&]( const std::string &ref ) {
+        if ( ref == "scene-a" )
+            return std::optional{ state };
+        return std::optional<sicnu::state::RemoteSensingAssetState>{};
+    } );
+    CapabilityMirrorProjection mirror;
+    REQUIRE( mirror.loadDirectory( filePath( "data/agent/capabilities" ) ) > 0 );
+    PreflightEngine engine;
+    for ( auto &rule : sicnu::preflight::builtinRules() )
+        REQUIRE( engine.registerRule( std::move( rule ) ) == RegistrationResult::Ok );
+    PreflightRequest req;
+    req.operatorId = "rs:spectral_index";
+    req.mode = "teaching";
+    req.humanOperatorId = "integration";
+    req.inputs = { { "primary", "scene-a" } };
+    req.operatorParams = makeVariantParams( "index", "NDVI" );
+    const PreflightReport report = engine.evaluate( req, facts, mirror );
+    REQUIRE( report.verdict == "requires_ack" );
+
+    // The passport's temporal truncation flag projects honestly instead of
+    // being rewritten to false.
+    std::string truncatedJson = twoBandPassportJson();
+    const std::string provenance = "\"provenance\": { \"is_derived\": false }";
+    const auto provPos = truncatedJson.find( provenance );
+    REQUIRE( provPos != std::string::npos );
+    truncatedJson.replace( provPos, provenance.size(),
+                            "\"provenance\": { \"is_derived\": false }, "
+                            "\"temporal\": { \"present\": true, \"truncated\": true, "
+                            "\"refs\": [ { \"collection_id\": \"S2\" } ] }" );
+    bool truncatedOk = false;
+    const auto truncatedState = passportFromJson( truncatedJson, truncatedOk );
+    REQUIRE( truncatedOk );
+    StateAssetFactsProvider truncatedProvider(
+        [&]( const std::string & ) { return std::optional{ truncatedState }; } );
+    const auto truncatedFacts = truncatedProvider.slotFacts( "scene-a" );
+    REQUIRE( truncatedFacts.status == FactStatus::Available );
+    REQUIRE( truncatedFacts.facts.temporalTruncated );
+}
+
+TEST_CASE( "mirror fails closed on extends chains deeper than the merge bound",
+           "[preflight][provider]" )
+{
+    // Six chained ancestors carry the policy at the deepest end. The merge
+    // walks at most kMaxMergeDepth=4 hops, so the policy could never be
+    // consulted — the header promises this is never silently skipped.
+    CapabilityMirrorProjection mirror;
+    Json::Value doc( Json::arrayValue );
+    const char *ids[] = { "deep:a", "deep:b", "deep:c", "deep:d", "deep:e", "deep:f" };
+    for ( int i = 0; i < 6; ++i )
+    {
+        Json::Value entry( Json::objectValue );
+        entry["id"] = ids[i];
+        if ( i > 0 )
+        {
+            entry["extends"] = ids[i - 1];
+        }
+        else
+        {
+            Json::Value roles( Json::objectValue );
+            roles["red"] = 1;
+            entry["band_roles"] = roles;
+        }
+        doc.append( entry );
+    }
+    mirror.addDocument( doc, "deep.json" );
+    REQUIRE_FALSE( mirror.healthy() );
+    REQUIRE( mirror.problems().size() == 1 );
+    REQUIRE( mirror.problems().front().find( "extends" ) != std::string::npos );
+    // The flagged entry is the one whose merge gets cut: the query root.
+    REQUIRE( mirror.problems().front().find( "deep:f" ) != std::string::npos );
+    REQUIRE( mirror.entryForOperator( "deep:f", {} ).status == FactStatus::Unavailable );
+}
+
+TEST_CASE( "mirror accepts a chain exactly at the merge bound", "[preflight][provider]" )
+{
+    // Five entries -> four hops: exactly kMaxMergeDepth. The full chain is
+    // consultable, so the projection must stay healthy (boundary pin).
+    CapabilityMirrorProjection mirror;
+    Json::Value doc( Json::arrayValue );
+    const char *ids[] = { "bound:a", "bound:b", "bound:c", "bound:d", "bound:e" };
+    for ( int i = 0; i < 5; ++i )
+    {
+        Json::Value entry( Json::objectValue );
+        entry["id"] = ids[i];
+        if ( i > 0 )
+            entry["extends"] = ids[i - 1];
+        else
+        {
+            Json::Value roles( Json::objectValue );
+            roles["red"] = 1;
+            entry["band_roles"] = roles;
+        }
+        doc.append( entry );
+    }
+    mirror.addDocument( doc, "bound.json" );
+    REQUIRE( mirror.healthy() );
+    const auto merged = mirror.entryForOperator( "bound:e", {} );
+    REQUIRE( merged.status == FactStatus::Available );
+    REQUIRE( merged.entry["band_roles"]["red"].asInt() == 1 );
+}
+
+TEST_CASE( "integration: a variant-only capability gates the verdict instead of passing silently",
+           "[preflight][provider][integration]" )
+{
+    bool ok = false;
+    const auto state = passportFromJson( twoBandPassportJson(), ok );
+    REQUIRE( ok );
+    StateAssetFactsProvider facts( [&]( const std::string &ref ) {
+        if ( ref == "scene-a" )
+            return std::optional{ state };
+        return std::optional<sicnu::state::RemoteSensingAssetState>{};
+    } );
+    CapabilityMirrorProjection mirror;
+    REQUIRE( mirror.loadDirectory( filePath( "data/agent/capabilities" ) ) > 0 );
+
+    PreflightEngine engine;
+    for ( auto &rule : sicnu::preflight::builtinRules() )
+        REQUIRE( engine.registerRule( std::move( rule ) ) == RegistrationResult::Ok );
+
+    // rs:spectral_index keeps its band_roles only in variants; a request
+    // without the index param must surface a typed unknown per policy
+    // family, never a clean ok on an unconsultable strategy.
+    PreflightRequest req;
+    req.operatorId = "rs:spectral_index";
+    req.mode = "teaching";
+    req.humanOperatorId = "integration";
+    req.inputs = { { "primary", "scene-a" } };
+    req.operatorParams = Json::Value();
+    const PreflightReport report = engine.evaluate( req, facts, mirror );
+
+    std::size_t unknowns = 0;
+    for ( const auto &f : report.findings )
+        if ( f.code == "SPF_BAND_ROLE_UNKNOWN" )
+            ++unknowns;
+    REQUIRE( unknowns >= 1 );
+    REQUIRE( report.verdict == "requires_ack" );
+}
+
+TEST_CASE( "a passport without a resolvable asset kind is a typed unknown, not an available slot",
+           "[preflight][provider][integration]" )
+{
+    // The wire format legally omits identity.kind; the resolver then reports
+    // AssetKind::Unknown. Projecting that as an Available slot would make
+    // every raster rule silently skip it ("non-raster slot skipped") and the
+    // engine returns ok on a passport nobody can classify.
+    std::string json = twoBandPassportJson();
+    const auto pos = json.find( "\"kind\": \"raster\", " );
+    REQUIRE( pos != std::string::npos );
+    json.erase( pos, std::string( "\"kind\": \"raster\", " ).size() );
+    bool ok = false;
+    const auto state = passportFromJson( json, ok );
+    REQUIRE( ok );
+    REQUIRE( state.kind == sicnu::state::AssetKind::Unknown );
+
+    StateAssetFactsProvider provider(
+        [&]( const std::string & ) { return std::optional{ state }; } );
+    const auto resolved = provider.slotFacts( "scene-a" );
+    REQUIRE( resolved.status == FactStatus::Unknown );
+    REQUIRE_FALSE( resolved.detail.empty() );
+
+    // Engine-level: the unclassifiable passport gates the verdict.
+    StateAssetFactsProvider facts( [&]( const std::string &ref ) {
+        if ( ref == "scene-a" )
+            return std::optional{ state };
+        return std::optional<sicnu::state::RemoteSensingAssetState>{};
+    } );
+    CapabilityMirrorProjection mirror;
+    REQUIRE( mirror.loadDirectory( filePath( "data/agent/capabilities" ) ) > 0 );
+    PreflightEngine engine;
+    for ( auto &rule : sicnu::preflight::builtinRules() )
+        REQUIRE( engine.registerRule( std::move( rule ) ) == RegistrationResult::Ok );
+    PreflightRequest req;
+    req.operatorId = "rs:spectral_index";
+    req.mode = "teaching";
+    req.humanOperatorId = "integration";
+    req.inputs = { { "primary", "scene-a" } };
+    req.operatorParams = makeVariantParams( "index", "NDVI" );
+    const PreflightReport report = engine.evaluate( req, facts, mirror );
+    bool sawUnknown = false;
+    for ( const auto &f : report.findings )
+        if ( f.basis == "unknown" )
+            sawUnknown = true;
+    REQUIRE( sawUnknown );
+    REQUIRE( report.verdict == "requires_ack" );
+}

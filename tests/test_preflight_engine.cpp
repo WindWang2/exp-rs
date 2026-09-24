@@ -178,6 +178,109 @@ TEST_CASE( "request digest is stable and sensitive to the evaluated request",
     REQUIRE( different.requestDigest != one.requestDigest );
 }
 
+TEST_CASE( "subject-scoped acknowledgements clear only the named subject",
+           "[preflight][engine]" )
+{
+    // Two slots both flag high cloud (require_ack). A subject-scoped ack
+    // names one of them: the other must stay loud — a code-only ack would
+    // clear both and hide a slot the operator never looked at.
+    struct CloudyRule : IPreflightRule
+    {
+        std::string id() const override { return "preflight.cloudy"; }
+        int revision() const override { return 1; }
+        RuleResult evaluate( const PreflightRequest &, const RuleFacts &facts ) const override
+        {
+            RuleResult result;
+            for ( const auto &slot : facts.slots )
+            {
+                PreflightFinding f;
+                f.code = "SPF_DEMO_CLOUDY";
+                f.severity = PreflightSeverity::RequireAck;
+                f.domain = "quality";
+                f.subject = slot.slot;
+                f.basis = "observed";
+                f.affectedInputs = { slot.assetRef };
+                result.findings.push_back( f );
+            }
+            result.outcome = result.findings.empty() ? "pass" : "finding";
+            return result;
+        }
+    };
+
+    PreflightEngine engine;
+    REQUIRE( engine.registerRule( std::make_unique<CloudyRule>() ) == RegistrationResult::Ok );
+    MemoryFactsProvider facts;
+    SlotFacts a;
+    a.slot = "primary";
+    a.assetRef = "asset-a";
+    a.kind = "raster";
+    SlotFacts b;
+    b.slot = "secondary";
+    b.assetRef = "asset-b";
+    b.kind = "raster";
+    facts.set( "asset-a", a );
+    facts.set( "asset-b", b );
+    MemoryCapabilityProvider capability;
+
+    PreflightRequest scoped = baseRequest();
+    scoped.inputs = { { "primary", "asset-a" }, { "secondary", "asset-b" } };
+    scoped.acknowledgedSubjects = { { "SPF_DEMO_CLOUDY", "primary" } };
+    const PreflightReport scopedReport = engine.evaluate( scoped, facts, capability );
+    std::size_t loud = 0;
+    std::size_t quiet = 0;
+    for ( const auto &f : scopedReport.findings )
+    {
+        if ( f.code != "SPF_DEMO_CLOUDY" )
+            continue;
+        if ( f.acknowledged )
+            ++quiet;
+        else
+            ++loud;
+    }
+    REQUIRE( quiet == 1 );
+    REQUIRE( loud == 1 );
+    REQUIRE( scopedReport.verdict == "requires_ack" );
+
+    // The code-only form still clears every subject (backward compatibility).
+    PreflightRequest blanket = scoped;
+    blanket.acknowledgedSubjects.clear();
+    blanket.acknowledgements = { "SPF_DEMO_CLOUDY" };
+    const PreflightReport blanketReport = engine.evaluate( blanket, facts, capability );
+    for ( const auto &f : blanketReport.findings )
+        if ( f.code == "SPF_DEMO_CLOUDY" )
+            REQUIRE( f.acknowledged );
+}
+
+TEST_CASE( "request digest covers the request budgets", "[preflight][engine]" )
+{
+    SimpleProvider facts;
+    MemoryCapabilityProvider capability;
+    PreflightEngine engine;
+    engine.registerRule( std::make_unique<StubRule>( "preflight.a", 1, std::vector<PreflightFinding>{} ) );
+
+    // Budgets change what gets truncated; two runs that differ only in
+    // their budgets must not share a request digest, or provenance joins
+    // mix differently-configured evaluations of the same logical request.
+    PreflightRequest capped = baseRequest();
+    capped.budgets.maxFindings = 1;
+    const PreflightReport one = engine.evaluate( capped, facts, capability );
+
+    PreflightRequest uncapped = baseRequest();
+    uncapped.budgets.maxFindings = 4096;
+    const PreflightReport other = engine.evaluate( uncapped, facts, capability );
+
+    REQUIRE( one.requestDigest != other.requestDigest );
+    {
+        const std::string oneJson = canonicalReportJson( one );
+        const std::string otherJson = canonicalReportJson( other );
+        REQUIRE( oneJson != otherJson ); // budgets shape the canonical bytes too
+    }
+
+    // Same budgets -> same digest (determinism guard).
+    const PreflightReport repeat = engine.evaluate( capped, facts, capability );
+    REQUIRE( repeat.requestDigest == one.requestDigest );
+}
+
 TEST_CASE( "verdict matrix: ok / requires_ack / blocked", "[preflight][engine]" )
 {
     PreflightEngine engine;
