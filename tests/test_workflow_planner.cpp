@@ -336,6 +336,7 @@ TEST_CASE( "An accepted ScientificPlan enters the compiler chain through project
   // conformance against THE authority, not a fixture).
   WorkflowIr ir;
   HarnessError readError;
+  INFO( "read error: " << readError.code << " " << readError.summary );
   REQUIRE( readWorkflowIr( irDoc, ir, readError ) );
 
   // The whole chain lowers the plan into an executable workflow.
