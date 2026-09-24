@@ -96,8 +96,18 @@ std::string projectState( const Json::Value &stateValue )
 
 CheckpointStateView::CheckpointStateView( Json::Value document )
 {
-    if ( !document.isObject() || !document["nodes"].isArray() ||
-         !( ( document["kind"].isString() && document["kind"].asString() == kCheckpointKind ) ) )
+    // Same closed envelope as readCheckpoint — a direct construction must
+    // not smuggle in a version this platform never wrote (a projected state
+    // of a foreign document could otherwise read as success).
+    const Json::Value &kind = document["kind"];
+    const Json::Value &version = document["version"];
+    const bool knownVersion =
+        version.isString() && ( version.asString() == kCheckpointVersionCurrent ||
+                                version.asString() == kCheckpointVersionLegacy );
+    const bool envelopeOk =
+        document.isObject() && kind.isString() && kind.asString() == kCheckpointKind &&
+        knownVersion && document["nodes"].isArray();
+    if ( !envelopeOk )
     {
         mUsable = false;
         return;

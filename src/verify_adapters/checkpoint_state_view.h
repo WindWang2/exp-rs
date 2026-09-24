@@ -30,8 +30,12 @@
 //
 // Fail-closed reading: a checkpoint that is missing, oversized, unparseable
 // or of a foreign envelope loads as a typed status, and every state(key)
-// then answers nullopt — the engine renders that as a loud non-pass, never
-// a skip.
+// then answers nullopt — for every expectation op except "absent" the
+// engine renders that as a loud non-pass, never a skip. (An "absent" pin
+// over a dead view trivially holds — that is the engine's vocabulary
+// semantics, and "absent" cannot distinguish a correctly-absent key from an
+// unreadable record; specs that must witness liveness should pin present /
+// eq instead.)
 #pragma once
 
 #include "verify/verify_context.h"

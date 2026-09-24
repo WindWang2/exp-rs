@@ -67,10 +67,13 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     if (isUnifiedVerificationReport(extras.verificationReport))
     {
         unifiedPresent = true;
-        unifiedPassed = extras.verificationReport["overall"].asString() == "pass";
+        // The overall word is the fail-closed lattice; a non-string overall
+        // (hostile/buggy document) is a non-pass, never an exception.
+        const Json::Value &overall = extras.verificationReport["overall"];
+        unifiedPassed = overall.isString() && overall.asString() == "pass";
         Json::Value unified(Json::objectValue);
         unified["spec_id"] = extras.verificationReport["specId"];
-        unified["overall"] = extras.verificationReport["overall"];
+        unified["overall"] = overall;
         unified["verdict"] = unifiedPassed ? "PASS" : "FAIL";
         unified["counts"] = extras.verificationReport["counts"];
         d.verifier["unified"] = unified;
@@ -141,8 +144,6 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
             else if (unifiedPresent)
             {
                 claim["confidence"] = 0.0; // verification present but not passed
-                if (unifiedPassed)
-                    claim["confidence"] = 0.0; // loop passed, unified refused
                 claim["evidence_missing"].append("passing_verifier_verdict");
                 claim["unified_overall"] = d.verifier["unified"]["overall"];
             }

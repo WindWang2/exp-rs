@@ -52,11 +52,16 @@ class TempDir
     TempDir()
     {
         std::error_code ec;
+        // Per-process unique tag: ctest runs each CASE as its own process,
+        // and a deterministic name would make concurrent processes share
+        // (and delete each other's) fixtures.
+        const std::string tag = std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count() );
         for ( int attempt = 0; attempt < 64 && mPath.empty(); ++attempt )
         {
             const std::filesystem::path candidate =
                 std::filesystem::temp_directory_path() /
-                ( "verify_grid_" + std::to_string( attempt ) + "_" + std::to_string( rand() ) );
+                ( "verify_grid_" + tag + "_" + std::to_string( attempt ) );
             if ( std::filesystem::create_directories( candidate, ec ); !ec )
                 mPath = candidate;
         }
@@ -217,6 +222,21 @@ TEST_CASE( "GdalGridProbe reads real GTiff grid facts", "[verify_adapters][grid]
         CHECK( vrtInfo->width == kEdge );
         CHECK( vrtInfo->crs == "EPSG:4326" );
         CHECK( vrtInfo->nodataFraction == Catch::Approx( kQuarterNodata ) );
+    }
+    SECTION( "a VRT whose source is gone cannot be answered" )
+    {
+        const std::string deadVrt = dir.file( "dead.vrt" );
+        TempDir::writeFile( deadVrt,
+                            "<?xml version=\"1.0\"?>\n"
+                            "<VRTDataset rasterXSize=\"96\" rasterYSize=\"96\">\n"
+                            "  <VRTRasterBand dataType=\"Float32\" band=\"1\">\n"
+                            "    <SimpleSource>\n"
+                            "      <SourceFilename relativeToVRT=\"1\">gone.tif</SourceFilename>\n"
+                            "      <SourceBand>1</SourceBand>\n"
+                            "    </SimpleSource>\n"
+                            "  </VRTRasterBand>\n"
+                            "</VRTDataset>\n" );
+        CHECK_FALSE( probe.grid( deadVrt ).has_value() );
     }
     SECTION( "open failure and unreadable grids answer nullopt" )
     {

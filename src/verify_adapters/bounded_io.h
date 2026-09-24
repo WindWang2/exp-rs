@@ -21,6 +21,9 @@ namespace sicnu::verify_adapters
 
 /// Shared document cap — the workflow checkpoint discipline (a probe reads
 /// small JSON sidecars; anything past the cap is planted or corrupt).
+/// Mirrors kMaxCheckpointDocumentBytes (src/workflow/workflow_limits.h);
+/// duplicated because that header drags QtGlobal in and this layer must
+/// stay Qt-free.
 inline constexpr std::uint64_t kMaxAdapterDocumentBytes = 16ull * 1024ull * 1024ull;
 
 /// Typed read failure. Callers map these onto their own public statuses;
@@ -54,10 +57,8 @@ std::optional<Json::Value> parseJsonBounded( const std::string &text, std::strin
 /// UTF-8 text -> platform path, the sdk/exprs/path_policy decoding contract.
 std::filesystem::path pathFromUtf8( const std::string &text );
 
-/// Existence answered through the same UTF-8 decoding contract; false when
-/// the answer is "no" AND when the answer is "cannot ask" (check
-/// pathExistsAnswerable for the distinction).
+/// Existence answered through the same UTF-8 decoding contract (false also
+/// when the stat itself fails — callers needing the distinction own it).
 bool pathExists( const std::string &path );
-bool pathExistsAnswerable( const std::string &path );
 
 } // namespace sicnu::verify_adapters

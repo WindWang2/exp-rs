@@ -3,8 +3,6 @@
 
 #include "bounded_io.h"
 
-#include <filesystem>
-
 namespace sicnu::verify_adapters
 {
 
@@ -93,10 +91,14 @@ ProvenanceReadResult readRunProvenance( const std::string &runId,
         // workflow_provenance writes provenance_<runId>.json beside the run.
         if ( dir.empty() || !pathExists( dir ) )
             continue;
-        const std::string path =
-            ( pathFromUtf8( dir ) / ( "provenance_" + runId + ".json" ) ).generic_string();
+        // Joined in UTF-8 string space: round-tripping through
+        // filesystem::path::generic_string() would re-encode via the ANSI
+        // code page on MSVC and lose non-ACP run directories.
+        const std::string joined = dir.back() == '/' || dir.back() == '\\'
+                                       ? dir + "provenance_" + runId + ".json"
+                                       : dir + "/provenance_" + runId + ".json";
         ProvenanceReadResult candidate =
-            classifyEnvelope( path, nullptr, kRunProvenanceKind, kRunProvenanceVersion );
+            classifyEnvelope( joined, nullptr, kRunProvenanceKind, kRunProvenanceVersion );
         if ( candidate.status != ProvenanceReadStatus::Missing )
             return candidate;
     }

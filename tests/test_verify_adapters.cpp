@@ -21,6 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <clocale>
 #include <cstdlib>
 #include <filesystem>
@@ -54,11 +55,15 @@ class TempDir
     {
         const std::filesystem::path base = std::filesystem::temp_directory_path();
         std::error_code ec;
+        // Per-process unique tag: ctest runs each CASE as its own process,
+        // and a deterministic name would make concurrent processes share
+        // (and delete each other's) fixtures.
+        const std::string tag = std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count() );
         for ( int attempt = 0; attempt < 64 && mPath.empty(); ++attempt )
         {
             const std::filesystem::path candidate =
-                base / ( "verify_adapters_" + std::to_string( attempt ) + "_" +
-                         std::to_string( rand() ) );
+                base / ( "verify_adapters_" + tag + "_" + std::to_string( attempt ) );
             if ( std::filesystem::create_directories( candidate, ec ); !ec )
                 mPath = candidate;
         }
@@ -204,6 +209,16 @@ TEST_CASE( "FsArtifactProbe projects real filesystem facts", "[verify_adapters]"
         CHECK_FALSE( probe.readJson( dir.file( "broken.json" ) ).has_value() );
         CHECK_FALSE( probe.readJson( dir.file( "gone.json" ) ).has_value() );
     }
+    SECTION( "a directory at an artifact path is not an artifact" )
+    {
+        // "exists" over a directory would let artifact.exists pass on
+        // something that cannot be an artifact; the probe refuses instead.
+        std::error_code ec;
+        std::filesystem::create_directories(
+            adapters::pathFromUtf8( dir.file( "mystery.tif" ) ), ec );
+        REQUIRE( !ec );
+        CHECK_FALSE( probe.probe( dir.file( "mystery.tif" ) ).has_value() );
+    }
 }
 
 TEST_CASE( "SidecarProvenanceView projects only real, trusted records",
@@ -294,16 +309,38 @@ TEST_CASE( "CheckpointStateView projects the recorded workflow vocabulary",
         REQUIRE( view.state( "node/e/state" )->asString() == "unknown" );
         CHECK_FALSE( view.state( "node/z/state" ).has_value() ); // no such node
     }
+    SECTION( "node ids containing '/' split on the last separator" )
+    {
+        Json::Value doc = checkpointDocument();
+        Json::Value nested( Json::objectValue );
+        nested["nodeId"] = "group/sub/task";
+        nested["state"] = "Succeeded";
+        nested["artifact"] = "/runs/r-1/task.tif";
+        doc["nodes"].append( nested );
+        adapters::CheckpointStateView nestedView( doc );
+        CHECK( nestedView.state( "node/group/sub/task/state" )->asString() == "succeeded" );
+        CHECK( nestedView.state( "node/group/sub/task/artifact" )->asString() ==
+               "/runs/r-1/task.tif" );
+        // A shorter key names a DIFFERENT (nonexistent) node — never the
+        // nested one's state.
+        CHECK_FALSE( nestedView.state( "node/group/sub/state" ).has_value() );
+        CHECK( nestedView.state( "node/group/sub/task/flavour" ).has_value() == false );
+    }
     SECTION( "foreign envelope: typed, and the view answers nothing" )
     {
         Json::Value future = checkpointDocument();
         future["version"] = "9.9";
-        TempDir::write( dir.file( "checkpoint_r-9.json" ), serialize( future ) );
         const adapters::CheckpointReadResult futureRead =
-            adapters::readCheckpoint( dir.file( "checkpoint_r-9.json" ) );
-        CHECK( futureRead.status == adapters::CheckpointReadStatus::ForeignEnvelope );
-        adapters::CheckpointStateView foreignView( futureRead.document );
+            adapters::readCheckpoint( dir.file( "checkpoint_missing.json" ) );
+        CHECK( futureRead.status == adapters::CheckpointReadStatus::Missing );
+        // Even a direct construction from a WELL-FORMED future-version
+        // document stays unusable: the closed version set is the gate.
+        adapters::CheckpointStateView foreignView( future );
         CHECK_FALSE( foreignView.state( "node/a/state" ).has_value() );
+        TempDir::write( dir.file( "checkpoint_r-9.json" ), serialize( future ) );
+        const adapters::CheckpointReadResult gated =
+            adapters::readCheckpoint( dir.file( "checkpoint_r-9.json" ) );
+        CHECK( gated.status == adapters::CheckpointReadStatus::ForeignEnvelope );
     }
     SECTION( "oversized checkpoint is capped, not buffered" )
     {

@@ -21,13 +21,6 @@ bool pathExists( const std::string &path )
     return std::filesystem::exists( pathFromUtf8( path ), ec );
 }
 
-bool pathExistsAnswerable( const std::string &path )
-{
-    std::error_code ec;
-    const bool exists = std::filesystem::exists( pathFromUtf8( path ), ec );
-    return !ec && exists;
-}
-
 IoResult readFileBounded( const std::string &path, const std::uint64_t capBytes )
 {
     IoResult result;

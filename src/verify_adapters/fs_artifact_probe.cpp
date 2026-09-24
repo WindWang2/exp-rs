@@ -91,7 +91,14 @@ std::optional<ArtifactInfo> FsArtifactProbe::probe( const std::string &path )
     ArtifactInfo info;
     info.exists = true;
     info.kind = sniffKind( path );
-    if ( std::filesystem::is_regular_file( fsPath, ec ) && !ec )
+    if ( !std::filesystem::is_regular_file( fsPath, ec ) || ec )
+    {
+        // A directory (or special file) sitting at an artifact path cannot
+        // be probed for size/digest — "exists" would let artifact.exists
+        // pass on something that is not an artifact, so refuse loudly
+        // (nullopt -> engine Indeterminate) instead of a hollow Pass.
+        return std::nullopt;
+    }
     {
         const std::uintmax_t size = std::filesystem::file_size( fsPath, ec );
         if ( !ec )

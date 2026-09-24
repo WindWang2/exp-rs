@@ -1001,3 +1001,22 @@ TEST_CASE("agent_ops unified verifier report gates delivery claims fail-closed",
     REQUIRE(round);
     REQUIRE(round->verifier["unified"]["overall"].asString() == "indeterminate");
 }
+
+TEST_CASE("agent_ops hostile unified report never crashes assembly", "[agent_ops][delivery][verify]")
+{
+    DeliveryAssembler assembler;
+    sicnu::agent_loop::SessionResult result;
+    result.sessionId = "sess-hostile";
+    result.summary.outcome = "delivered";
+    result.summary.verificationVerdict = "PASS";
+
+    // A malformed unified report (overall is an object): assembly records a
+    // non-pass instead of throwing or upgrading.
+    DeliveryExtras extras;
+    extras.verificationReport["schema"] = "sicnu.verification.report/1";
+    extras.verificationReport["overall"]["bogus"] = true;
+
+    auto delivery = assembler.assemble(result, extras);
+    REQUIRE(delivery.verifier["unified"]["verdict"].asString() == "FAIL");
+    REQUIRE(delivery.claims[0]["confidence"].asDouble() == 0.0);
+}

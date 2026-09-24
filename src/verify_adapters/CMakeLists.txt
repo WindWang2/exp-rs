@@ -35,7 +35,9 @@ target_link_libraries( sicnu_verify_adapters PUBLIC sicnu_verifier )
 # Layer guard — LAST so it observes every link declared above: the adapter
 # layer stays Qt/GDAL-free and never reaches around the engine's provider
 # seam (grid facts are the gdal variant's business; verdicts are the
-# engine's).
+# engine's). Tripwire scope: this snapshot is configure-time; a later
+# cross-directory target_link_libraries would bypass it, so keep links in
+# this file.
 get_target_property( SICNU_VERIFY_ADAPTERS_LINK_LIBRARIES sicnu_verify_adapters LINK_LIBRARIES )
 set( SICNU_VERIFY_ADAPTERS_ALLOWED_LINKS jsoncpp jsoncpp_lib sicnu_verifier )
 foreach( SICNU_VERIFY_ADAPTERS_LINK IN LISTS SICNU_VERIFY_ADAPTERS_LINK_LIBRARIES )
