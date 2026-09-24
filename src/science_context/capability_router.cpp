@@ -580,7 +580,7 @@ CapabilityRouterResult routeCapabilities( const CapabilityQuery &query )
     const std::vector<Json::Value> candidates = facts->entriesForIntent( intent );
     result.factsFromAuthority = true;
     result.factsAuthority = facts->authority;
-    result.factsRevision = facts->revision;
+    result.factsRevision = facts->revision ? facts->revision() : 0;
     if ( candidates.empty() )
     {
         recordUnknownIntent( result, intent );

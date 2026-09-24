@@ -31,6 +31,9 @@
 #include "science_context/capability_facts.h"
 // Live capability authorities for the science tools (single store per kind):
 #include "agent/harness/capability_knowledge.h"
+#include "recipes/recipe_registry.h"
+#include "science_context/gdal_asset_source.h"
+#include "science_context/live_asset_resolver.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "operators/framework/rs_operator_registry.h"
 #include <json/json.h>
@@ -1430,10 +1433,26 @@ QVariantMap scienceContextJsonToVariant( const Json::Value &value )
     return doc.object().toVariantMap();
 }
 
-// Install the live capability authority on the shared science broker once:
-// facts come from the harness CapabilityKnowledge (the only capability store)
-// and operator/tool presence from the registries those surfaces dispatch
-// through. Without this the broker runs on its labelled builtin fallback.
+// Explicit recipe-pack invalidation: hosts (or an agent call) pass
+// refresh_recipes=true after a known pack change; the registry rescan is
+// fail-closed and clears the broker's derived projections.
+void ensureScienceContextAuthorities(); // wiring below; refresh reuses it
+
+void refreshScienceRecipesIfRequested( const QVariantMap &arguments )
+{
+    if ( arguments.value( QStringLiteral( "refresh_recipes" ) ).toBool() )
+    {
+        ensureScienceContextAuthorities();
+        sicnu::science_context::agent_adapter::sharedBroker().refreshRecipes();
+    }
+}
+
+// Install the live authorities on the shared science broker once: capability
+// facts (with the live content revision) from harness CapabilityKnowledge,
+// operator/tool presence from the registries those surfaces dispatch through,
+// recipes from the ScientificRecipeRegistry, and passports from
+// scientific_state over a read-only GDAL open. Without this the broker runs
+// on its labelled builtin fallback with no recipes and no asset resolver.
 void ensureScienceContextAuthorities()
 {
     using sicnu::science_context::CapabilityFactsLookup;
@@ -1441,67 +1460,17 @@ void ensureScienceContextAuthorities()
     static const bool wired = [] {
         CapabilityFactsLookup lookup;
         lookup.authority = "harness.capability_knowledge";
-        // Candidate semantics: every requirement-set the knowledge serves for
-        // the intent — the operator's own base entry plus every variant that
-        // declares the intent. First-match selection would drop
-        // variant-scoped band roles and fabricate feasibility, which the
-        // router must never do under a live_authority label.
+        // Candidate + revision semantics live IN the authority (one fact,
+        // one source): base entries declaring the intent plus every variant
+        // that declares it, and the content revision that invalidates cached
+        // bundles when the knowledge pack is reloaded/reinstalled.
         lookup.entriesForIntent = []( const std::string &intent )
             -> std::vector<Json::Value> {
-            const auto &knowledge = sicnu::agent::harness::CapabilityKnowledge::instance();
-            std::vector<Json::Value> candidates;
-            for ( const auto &operatorId : knowledge.operatorsForIntent( intent ) )
-            {
-                const Json::Value raw = knowledge.rawEntry( operatorId );
-                const Json::Value merged = knowledge.entryForOperator( operatorId );
-                bool baseServes = false;
-                if ( raw.isObject() && raw["intents"].isArray() )
-                {
-                    for ( const auto &candidate : raw["intents"] )
-                        baseServes =
-                            baseServes || ( candidate.isString() && candidate.asString() == intent );
-                }
-                if ( baseServes && merged.isObject() )
-                {
-                    Json::Value entry = merged;
-                    if ( !entry.isMember( "id" ) )
-                        entry["id"] = operatorId;
-                    candidates.push_back( entry );
-                }
-                if ( raw.isObject() && raw["variants"].isArray() )
-                {
-                    for ( const auto &variant : raw["variants"] )
-                    {
-                        if ( !variant.isObject() || !variant["intents"].isArray() )
-                            continue;
-                        bool variantServes = false;
-                        for ( const auto &candidate : variant["intents"] )
-                            variantServes = variantServes ||
-                                            ( candidate.isString() &&
-                                              candidate.asString() == intent );
-                        if ( !variantServes || !merged.isObject() )
-                            continue;
-                        // Variant constraints OVERRIDE the family-merged
-                        // entry; everything the variant does not declare
-                        // still applies (e.g. family modality/radiometric).
-                        Json::Value entry = merged;
-                        for ( const auto &key : variant.getMemberNames() )
-                        {
-                            if ( key == std::string( "when" ) ||
-                                 key == std::string( "intents" ) )
-                                continue;
-                            entry[key] = variant[key];
-                        }
-                        if ( entry.isMember( "when" ) )
-                            entry.removeMember( "when" );
-                        if ( entry.isMember( "intents" ) )
-                            entry.removeMember( "intents" );
-                        entry["id"] = operatorId;
-                        candidates.push_back( entry );
-                    }
-                }
-            }
-            return candidates;
+            return sicnu::agent::harness::CapabilityKnowledge::instance()
+                .factSetsForIntent( intent );
+        };
+        lookup.revision = []() -> std::uint64_t {
+            return sicnu::agent::harness::CapabilityKnowledge::instance().revision();
         };
         lookup.presence = []( const std::string &capabilityId,
                               const std::string &surface ) -> OperatorPresence {
@@ -1529,6 +1498,21 @@ void ensureScienceContextAuthorities()
         };
         sicnu::science_context::agent_adapter::sharedBroker().setCapabilityFacts(
             std::move( lookup ) );
+
+        // Recipe authority: the shared broker's default projection already
+        // owns the ScientificRecipeRegistry instance (see agent_adapter); a
+        // fresh rescan here makes a mid-session pack change visible.
+        sicnu::science_context::agent_adapter::sharedBroker().refreshRecipes();
+
+        // Live passports: scientific_state over a read-only GDAL open. Typed
+        // GDAL failure reasons (gdal_open_failed vs asset_not_found) travel
+        // with the resolver outcome into the bundle problem channel.
+        sicnu::science_context::AssetFactSources sources;
+        sources.dataset = sicnu::science_context::gdalDatasetFactsCollector();
+        auto &broker = sicnu::science_context::agent_adapter::sharedBroker();
+        broker.assets().setResolver(
+            sicnu::science_context::makeFactsBasedResolver( std::move( sources ) ) );
+        broker.assets().setResolverAuthority( "scientific_state.resolve_asset_state+gdal" );
         return true;
     }();
     (void)wired;
@@ -1694,10 +1678,11 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
           { { "goal", "string", "Goal text", false },
             { "intent", "string", "Closed intent override", false },
             { "passport_json", "string", "sicnu.asset_state.v1 JSON document", false },
-            { "asset_id", "string", "Catalog asset id (requires resolver)", false },
+            { "asset_id", "string", "Dataset path for live passport resolution", false },
             { "autonomy_level", "string", "L0..L5 (default L2)", false },
             { "offline", "boolean", "Offline constraints", false },
-            { "max_bytes", "integer", "Context budget bytes", false } } },
+            { "max_bytes", "integer", "Context budget bytes", false },
+            { "refresh_recipes", "boolean", "Re-scan the scientific recipe pack before answering", false } } },
         { "scientific:capabilities",
           "Route structural capability candidates for a goal/intent against observed passport state. Structural only — does not bypass the planner.",
           { { "goal", "string", "Goal text", false },
@@ -1715,7 +1700,8 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
             { "modality", "string", "Modality filter", false },
             { "text", "string", "Free-text keywords", false },
             { "passport_json", "string", "Optional passport for modality filter", false },
-            { "limit", "integer", "Top-K (default 5)", false } } },
+            { "limit", "integer", "Top-K (default 5)", false },
+            { "refresh_recipes", "boolean", "Re-scan the scientific recipe pack before answering", false } } },
     };
     return defs;
 }
@@ -1785,6 +1771,7 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
     if ( toolId == QLatin1String( "scientific:context" ) )
     {
         ensureScienceContextAuthorities();
+        refreshScienceRecipesIfRequested( arguments );
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::scientificContext( variantArgsToJson( arguments ) ) );
     }
@@ -1803,6 +1790,7 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
     if ( toolId == QLatin1String( "recipe:search" ) )
     {
         ensureScienceContextAuthorities();
+        refreshScienceRecipesIfRequested( arguments );
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::recipeSearch( variantArgsToJson( arguments ) ) );
     }
