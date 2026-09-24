@@ -13,6 +13,8 @@
 #include <sstream>
 #include <string>
 
+#include <limits>
+
 namespace sicnu::faultlab
 {
 
@@ -79,7 +81,11 @@ bool readSeed( const Value &parent, const char *key, std::uint32_t &out, std::st
         out = seed.asUInt();
         return true;
     }
-    if ( seed.isIntegral() && seed.isInt64() && seed.asInt64() >= 0 )
+    // The width bound is the contract: a seed above UINT32_MAX is a field
+    // error, never a silent truncation — a truncated seed would replay the
+    // lab with a different noise stream while claiming the scenario.
+    if ( seed.isIntegral() && seed.isInt64() && seed.asInt64() >= 0
+         && seed.asInt64() <= static_cast<std::int64_t>( std::numeric_limits<std::uint32_t>::max() ) )
     {
         out = static_cast<std::uint32_t>( seed.asInt64() );
         return true;
