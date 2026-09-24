@@ -66,7 +66,7 @@ void writeStackTiff(const QString &path, int bands, int width = 4)
     }
     GDALDriverH driver = GDALGetDriverByName("GTiff");
     REQUIRE(driver != nullptr);
-    const std::array<double, 6> gt = {500000, 8.0, 0, 4400000, 0, -8.0};
+    std::array<double, 6> gt = {500000, 8.0, 0, 4400000, 0, -8.0};
     const int height = 4;
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), width, height, bands,
                                  GDT_Float32, nullptr);
