@@ -949,3 +949,435 @@ TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
     REQUIRE(capsule["outputs"][1]["portable_ref"].asString() ==
             capsule["outputs"][1]["portable_ref"].asString());
 }
+
+// ---------------------------------------------------------------------------
+// R3 agent-ops live driver: cancel disarm, resume parity, crash
+// checkpointing, fail-closed repair plans and the approval ask carrier.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("agent_ops surface can disarm cancel and pause (relaunch path)",
+          "[agent_ops][surface]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    // cancel latches: the next run aborts as CANCELLED without any seam
+    // work (the loop is the authority for the abort).
+    auto cancelled = sessionSurfaceApply(coord, "cancel");
+    REQUIRE(cancelled["ok"].asBool());
+    Json::Value runArgs(Json::objectValue);
+    runArgs["goal"] = "compute NDVI for the scene";
+    runArgs["intent"] = "ndvi";
+    auto aborted = sessionSurfaceApply(coord, "run", runArgs);
+    REQUIRE_FALSE(aborted["ok"].asBool());
+    REQUIRE(aborted["stop_reason"].asString() == "CANCELLED");
+    REQUIRE(seams.executorFake().beginCount() == 0);
+
+    // The wire disarm: after observing the aborted run, clear_cancel arms
+    // the coordinator for new work — before this action existed, a driver
+    // that cancelled once could never launch again over the wire.
+    auto disarm = sessionSurfaceApply(coord, "clear_cancel");
+    REQUIRE(disarm["ok"].asBool());
+    REQUIRE_FALSE(coord.isCancelRequested());
+    auto relaunched = sessionSurfaceApply(coord, "run", runArgs);
+    REQUIRE(relaunched["ok"].asBool());
+    REQUIRE(relaunched["outcome"].asString() == "delivered");
+
+    // clear_pause on the wire (the legacy resume_clear_pause stays valid).
+    REQUIRE(sessionSurfaceApply(coord, "pause")["ok"].asBool());
+    REQUIRE(coord.isPauseRequested());
+    auto pausedRun = sessionSurfaceApply(coord, "run", runArgs);
+    REQUIRE_FALSE(pausedRun["ok"].asBool());
+    REQUIRE(pausedRun["error"].asString() == "PAUSED");
+    REQUIRE(sessionSurfaceApply(coord, "clear_pause")["ok"].asBool());
+    REQUIRE_FALSE(coord.isPauseRequested());
+    REQUIRE(sessionSurfaceApply(coord, "resume_clear_pause")["ok"].asBool());
+
+    // The parity loop over advertised actions never falls through.
+    for (const auto &a : sessionSurfaceActions()["actions"])
+    {
+        auto doc = sessionSurfaceApply(coord, a.asString(), {});
+        INFO("action: " << a.asString());
+        REQUIRE(doc["error"].asString() != "UNKNOWN_ACTION");
+    }
+}
+
+TEST_CASE("agent_ops resume applies the same autonomy gate and budgets as run",
+          "[agent_ops][resume]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    deps.autonomyPolicy = restrictiveL0();
+    OperationsCoordinator coord(deps);
+
+    const std::string dir = uniqueTemp("resume-gate");
+    const std::string goal = "compute NDVI for the scene";
+
+    sicnu::agent_loop::DecisionRecord goalDecision;
+    goalDecision.decisionId = "dec-goal-1";
+    goalDecision.sessionId = "sess-gate-parity";
+    goalDecision.stage = "goal_normalization";
+    goalDecision.reason = "goal accepted as stated: " + goal;
+    goalDecision.selected["action"] = "accept_goal";
+    goalDecision.inputs["goal"] = goal;
+
+    sicnu::agent_loop::SessionJournal parked("sess-gate-parity");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("decision", "goal_normalization", {}, 2, goalDecision));
+    REQUIRE(parked.append("stage_enter", "data_state_snapshot", {}, 3));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(parked, dir, &err));
+
+    // An execute-capable resume must pass the SAME gate as a launch: L0
+    // exam policy denies it before the journal is even loaded.
+    OpsRunRequest executeReq;
+    executeReq.session.goal = goal;
+    executeReq.session.intent = "ndvi";
+    executeReq.policy.mode = sicnu::agent_loop::RunMode::ExecuteWithVerify;
+    executeReq.domain = "lab";
+    executeReq.role = "student";
+    auto denied = coord.resume(dir, "sess-gate-parity", executeReq);
+    REQUIRE_FALSE(denied.ok);
+    REQUIRE(denied.error.find("AUTONOMY") != std::string::npos);
+    REQUIRE(denied.lastRecovery);
+    REQUIRE(denied.lastRecovery->action == recovery_action::kAbort);
+
+    // Budget parity: the resumed session's summary must show the caller's
+    // bounds, not the policy defaults the old resume silently used.
+    OpsRunRequest bounded;
+    bounded.session.goal = goal;
+    bounded.session.intent = "ndvi";
+    bounded.policy.mode = sicnu::agent_loop::RunMode::PlanOnly;
+    bounded.budgets.noProgressThreshold = 7;
+    bounded.budgets.maxReplans = 5;
+    bounded.budgets.resourceBudgetMb = 8192;
+    auto resumed = coord.resume(dir, "sess-gate-parity", bounded);
+    REQUIRE(resumed.ok);
+    REQUIRE(resumed.session.summary.policy["no_progress_threshold"].asInt() == 7);
+    REQUIRE(resumed.session.summary.policy["max_replans"].asInt() == 5);
+    REQUIRE(resumed.session.summary.policy["resource_budget_mb"].asInt() == 8192);
+}
+
+namespace {
+
+/// Executor decorator that observes the journal directory at the SUBMIT
+/// boundary (poll runs right after the loop journaled the run decision):
+/// the crash-evidence checkpoint must already be on disk there.
+class ProbeExecutor : public sicnu::agent_loop::IExecutor
+{
+  public:
+    ProbeExecutor(sicnu::agent_loop::IExecutor &inner, std::string journalDir,
+                  std::vector<std::size_t> &observedSizes)
+        : mInner(inner), mDir(std::move(journalDir)), mObserved(observedSizes)
+    {
+    }
+
+    sicnu::agent_loop::ExecutionStart begin(
+        const sicnu::agent_loop::PlanDraft &plan) override
+    {
+        return mInner.begin(plan);
+    }
+
+    sicnu::agent_loop::ExecutionOutcome poll(const sicnu::agent_loop::ExecutionStart &start,
+                                             long long timeoutMs) override
+    {
+        // The checkpoint that exists when control returns to the engine is
+        // what a hard kill at this moment would leave behind.
+        for (const auto &entry : std::filesystem::directory_iterator(mDir))
+        {
+            if (!entry.is_regular_file() || entry.path().extension() != ".json")
+                continue;
+            std::string err;
+            auto journal = sicnu::agent_loop::SessionJournal::load(
+                mDir, entry.path().stem().string(), &err);
+            if (!journal)
+                continue;
+            mObserved.push_back(journal->size());
+            mObservedRunIds = sicnu::agent_ops::ResumeReconciler{}.reconcile(*journal);
+        }
+        return mInner.poll(start, timeoutMs);
+    }
+
+    void cancel(const sicnu::agent_loop::ExecutionStart &start) override
+    {
+        mInner.cancel(start);
+    }
+
+    sicnu::agent_ops::ReconcileResult mObservedRunIds;
+
+  private:
+    sicnu::agent_loop::IExecutor &mInner;
+    std::string mDir;
+    std::vector<std::size_t> &mObserved;
+};
+
+} // namespace
+
+TEST_CASE("agent_ops journal is flushed at the submit boundary (crash evidence)",
+          "[agent_ops][crash]")
+{
+    FakeScenario scenario;
+    scenario.execution = {ExecutionScript{true, "", {"/tmp/run42/out.tif"}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+
+    const std::string dir = uniqueTemp("checkpoint-submit");
+    std::filesystem::remove_all(dir); // no leftovers from earlier runs
+    std::vector<std::size_t> observed;
+    ProbeExecutor probe(seams.executor(), dir, observed);
+    deps.seams.executor = &probe;
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    req.journalDirectory = dir;
+    auto out = coord.run(req);
+    REQUIRE(out.ok);
+    REQUIRE(out.checkpointError.empty());
+
+    // At the submit boundary the on-disk journal already carried the run
+    // decision — a kill exactly there leaves typed submitted-run evidence,
+    // not an empty trail.
+    REQUIRE_FALSE(observed.empty());
+    REQUIRE(probe.mObservedRunIds.ok);
+    REQUIRE(probe.mObservedRunIds.reasonCode == "RESUME_PAST_PLAN_SEAM");
+    REQUIRE(probe.mObservedRunIds.duplicateSubmitRisk);
+    REQUIRE_FALSE(probe.mObservedRunIds.submittedRunIds.empty());
+    REQUIRE(probe.mObservedRunIds.submittedRunIds ==
+            out.reconcile.submittedRunIds);
+
+    // The delivered journal refuses re-submission as always.
+    REQUIRE(out.reconcile.reasonCode == "ALREADY_TERMINAL");
+    REQUIRE(out.reconcile.duplicateSubmitRisk);
+}
+
+TEST_CASE("agent_ops resume refuses a crashed past-plan journal with submitted runs",
+          "[agent_ops][crash][resume]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    const std::string dir = uniqueTemp("crash-past-plan");
+
+    // The journal a hard kill during execute would have checkpointed.
+    sicnu::agent_loop::SessionJournal crashed("sess-crash-submit");
+    REQUIRE(crashed.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(crashed.append("decision", "goal_normalization", {}, 2,
+                           journalDecision("sess-crash-submit", "goal_normalization",
+                                           "dec-1", "accept_goal")));
+    REQUIRE(crashed.append("stage_enter", "plan_request", {}, 3));
+    REQUIRE(crashed.append("stage_enter", "preflight", {}, 4));
+    REQUIRE(crashed.append("stage_enter", "execute", {}, 5));
+    REQUIRE(crashed.append("decision", "execute", {}, 6,
+                           journalDecision("sess-crash-submit", "execute", "dec-2", "run",
+                                           "run-crash-1")));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(crashed, dir, &err));
+
+    // Resume: refused (loop contract), and the duplicate-submit hazard is
+    // on the wire WITHOUT hijacking the resume-contract reason code.
+    OpsRunRequest req;
+    req.session.goal = "compute NDVI for the scene";
+    req.session.intent = "ndvi";
+    auto out = coord.resume(dir, "sess-crash-submit", req);
+    REQUIRE_FALSE(out.ok);
+    REQUIRE(out.error == "RESUME_PAST_PLAN_SEAM");
+    REQUIRE(out.reconcile.duplicateSubmitRisk);
+    REQUIRE(out.reconcile.submittedRunIds.count("run-crash-1") == 1);
+    REQUIRE(out.reconcile.submittedRunIds.size() == 1);
+
+    // The surface status doc carries the reconcile verdict (driver wire).
+    OpsRunResult holder;
+    holder.reconcile = out.reconcile;
+    auto doc = sessionSurfaceStatus(out);
+    REQUIRE(doc["reconcile"]["duplicate_submit_risk"].asBool());
+    REQUIRE(doc["reconcile"]["submitted_run_ids"][0].asString() == "run-crash-1");
+
+    // A pre-plan checkpointed journal WITHOUT submitted runs stays
+    // duplicate-free: the flag keys on evidence, not on stage.
+    sicnu::agent_loop::SessionJournal parked("sess-crash-preplan");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("stage_enter", "data_state_snapshot", {}, 2));
+    REQUIRE(rec.persistJournal(parked, dir, &err));
+    ResumeReconciler recon;
+    auto before = recon.reconcileFile(dir, "sess-crash-preplan", &err);
+    REQUIRE(before.resumable);
+    REQUIRE_FALSE(before.duplicateSubmitRisk);
+    auto pre = coord.resume(dir, "sess-crash-preplan", req);
+    REQUIRE(pre.ok); // resumes cleanly to delivery
+    REQUIRE(pre.delivery.outcome == "delivered");
+}
+
+TEST_CASE("agent_ops checkpoint persistence failure is surfaced, never silent",
+          "[agent_ops][crash]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    // A FILE used as the journal directory: every persist (checkpoint and
+    // terminal) fails; the session outcome stays authoritative but the
+    // failure is on the wire.
+    const std::string notADir = (std::filesystem::path(uniqueTemp("notadir")) / "plain-file").string();
+    {
+        std::ofstream f(notADir);
+        f << "x";
+    }
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    req.journalDirectory = notADir;
+    auto out = coord.run(req);
+    REQUIRE(out.session.ok); // the loop's outcome is untouched
+    REQUIRE_FALSE(out.error.empty());       // terminal persist failure
+    REQUIRE_FALSE(out.checkpointError.empty()); // mid-run checkpoint failure
+
+    auto doc = sessionSurfaceStatus(out);
+    REQUIRE_FALSE(doc["checkpoint_error"].asString().empty());
+    REQUIRE(doc["error"].asString() == out.error);
+}
+
+TEST_CASE("agent_ops withheld science-changing repair becomes a typed question",
+          "[agent_ops][approval]")
+{
+    FakeScenario scenario;
+    // Preflight finds a science-changing fix and the policy refuses to
+    // proceed unfixed: the session refuses, and the ask must survive on the
+    // delivery wire instead of dying inside the decision log.
+    scenario.preflight = {PreflightScript{"fixable", {proposal("qa_mask", "science_changing")}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE_FALSE(out.ok); // never executed past the withheld repair
+    REQUIRE(seams.executorFake().beginCount() == 0);
+
+    REQUIRE(out.delivery.questions.size() >= 1);
+    bool sawAsk = false;
+    for (const auto &q : out.delivery.questions)
+    {
+        if (q["kind"].asString() != "repair_approval")
+            continue;
+        sawAsk = true;
+        REQUIRE(q["rule_id"].asString() == "qa_mask");
+        REQUIRE(q["risk_class"].asString() == "science_changing");
+        // The question anchors the loop's own evidence: the decision id of
+        // the withhold record it was derived from.
+        bool anchored = false;
+        for (const auto &dec : out.session.summary.decisions)
+            if (dec.decisionId == q["decision_id"].asString() &&
+                dec.selected["action"].asString() == "withhold_repair")
+                anchored = true;
+        REQUIRE(anchored);
+        REQUIRE(q["stage"].asString() == "repair_approval");
+        REQUIRE(q["ask"].asString().find("qa_mask") != std::string::npos);
+    }
+    REQUIRE(sawAsk);
+
+    // The capsule carries the ask too: an exported outcome must not drop
+    // the pending science gate.
+    DeliveryAssembler asmblr;
+    auto cap = asmblr.capsuleExportDocument(out.delivery);
+    REQUIRE(cap["questions"].size() == out.delivery.questions.size());
+}
+
+TEST_CASE("agent_ops recovery ask rides the delivery questions as well",
+          "[agent_ops][approval]")
+{
+    FakeScenario scenario;
+    // Verify FAIL, diagnose proposes nothing → session refuses; the
+    // post-hoc recovery decision is ask (needs approval).
+    scenario.verification = {VerifyScript{"FAIL", ""}};
+    scenario.diagnosis = {DiagnoseScript{"CRS_MISMATCH", {}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+    OperationsCoordinator coord(deps);
+
+    OpsRunRequest req;
+    req.session = ndviRequest();
+    auto out = coord.run(req);
+    REQUIRE_FALSE(out.ok);
+    REQUIRE(out.lastRecovery);
+    REQUIRE(out.lastRecovery->action == recovery_action::kAsk);
+    bool sawRecoveryAsk = false;
+    for (const auto &q : out.delivery.questions)
+        if (q["kind"].asString() == "recovery_ask")
+        {
+            sawRecoveryAsk = true;
+            REQUIRE(q["reason_code"].asString() == "NEEDS_HUMAN");
+        }
+    REQUIRE(sawRecoveryAsk);
+}
+
+TEST_CASE("agent_ops projected repair plans are fail-closed on risk class",
+          "[agent_ops][approval]")
+{
+    RecoveryBridge bridge;
+
+    // (a) The diagnostic carries real risk evidence: the plan reflects it.
+    OpDiagnostic science;
+    science.code = "ops.diagnose.X";
+    science.rootCauseCode = "X";
+    science.proposals = {"qa_mask"};
+    Json::Value detail(Json::objectValue);
+    detail["rule_id"] = "qa_mask";
+    detail["risk_class"] = "science_changing";
+    science.proposalDetails.append(detail);
+
+    RecoveryBridge::PlanHints hints;
+    hints.leadingRiskClass = "shape_preserving"; // must NOT win over evidence
+    auto plan = bridge.projectRepairPlan(science, "ops", hints);
+    REQUIRE(plan["selected"][0]["risk_class"].asString() == "science_changing");
+    REQUIRE(plan["selected"][0]["risk"]["severity"].asString() == "high");
+    REQUIRE(plan["policy"]["auto_executable"].asBool() == false);
+    REQUIRE(plan["policy"]["actions"][0]["decision"].asString() == "needs_confirmation");
+
+    // (b) Unknown risk class: STRICTEST class, never shape_preserving.
+    OpDiagnostic unknown;
+    unknown.code = "ops.diagnose.Y";
+    unknown.rootCauseCode = "Y";
+    unknown.proposals = {"mystery_rule"};
+    Json::Value bogus(Json::objectValue);
+    bogus["rule_id"] = "mystery_rule";
+    bogus["risk_class"] = "harmless_looking";
+    unknown.proposalDetails.append(bogus);
+    auto plan2 = bridge.projectRepairPlan(unknown, "ops");
+    REQUIRE(plan2["selected"][0]["risk_class"].asString() == "science_changing");
+
+    // (c) No per-proposal evidence: the leading hint applies (validated).
+    OpDiagnostic bare;
+    bare.code = "ops.diagnose.Z";
+    bare.rootCauseCode = "Z";
+    bare.proposals = {"reproject"};
+    RecoveryBridge::PlanHints shape;
+    shape.leadingRiskClass = "shape_preserving";
+    auto plan3 = bridge.projectRepairPlan(bare, "ops", shape);
+    REQUIRE(plan3["selected"][0]["risk_class"].asString() == "shape_preserving");
+    // Even the shape-preserving projection stays needs_confirmation: an
+    // ops projection carries no executable action key.
+    REQUIRE(plan3["policy"]["actions"][0]["decision"].asString() == "needs_confirmation");
+
+    // (d) Round-trip: proposal_details survive OpDiagnostic serde.
+    auto round = OpDiagnostic::fromJson(science.toJson());
+    REQUIRE(round);
+    REQUIRE(round->proposalDetails.size() == 1);
+    REQUIRE(round->proposalDetails[0]["risk_class"].asString() == "science_changing");
+}
