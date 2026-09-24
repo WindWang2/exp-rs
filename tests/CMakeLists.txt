@@ -11285,7 +11285,7 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test jsoncpp sicnu_operators
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp sicnu_operators
 )
 
 # --- Package E: run coordinator + checkpoints
@@ -11298,7 +11298,7 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network
 )
 
 # --- Package F: canvas
@@ -11339,7 +11339,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
-  LIBS Qt6::Widgets Qt6::Test jsoncpp
+  LIBS Qt6::Widgets Qt6::Test Qt6::Network jsoncpp
 )
 
 # Targets that compile pipeline_run_coordinator.cpp directly (instead of
