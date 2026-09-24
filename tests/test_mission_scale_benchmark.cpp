@@ -333,15 +333,20 @@ TEST_CASE( "a cursor outside the retained event window is detected",
     REQUIRE( missionTimelineCursorRetained( timeline, 0 ) );
 
     // Drive the log past kEventLogBound so the window truncates.
-    const quint64 freshCursorAtBound = 4000;
     for ( int i = 0; i < 5000; ++i )
         (void) timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Pending,
                                     QStringLiteral( "2026-09-25T00:00:00Z" ), "replay" );
     REQUIRE( timeline.eventsTruncated() );
-    REQUIRE( timeline.firstRetainedEventSeq() > freshCursorAtBound );
+    REQUIRE( timeline.firstRetainedEventSeq() > 1 );
 
-    // The stale cursor predates the retained window: incremental is unsafe.
-    REQUIRE_FALSE( missionTimelineCursorRetained( timeline, freshCursorAtBound ) );
-    // The cursor that saw everything up to now is fine.
+    // The event at seq F-1 (F = first retained) is gone, so a cursor of F-2
+    // cannot be served: its post-cursor set [F-1..last] needs a lost event.
+    // Derived from the actual window so the oracle survives a change of
+    // kEventLogBound.
+    const quint64 staleCursor = timeline.firstRetainedEventSeq() - 2;
+    REQUIRE_FALSE( missionTimelineCursorRetained( timeline, staleCursor ) );
+    // F-1 itself is servable again: [F..last] is exactly the retained set.
+    REQUIRE( missionTimelineCursorRetained( timeline, timeline.firstRetainedEventSeq() - 1 ) );
+    // And the fresh cursor saw everything.
     REQUIRE( missionTimelineCursorRetained( timeline, timeline.lastEventSeq() ) );
 }
