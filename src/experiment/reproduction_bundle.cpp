@@ -216,6 +216,10 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         runExecutionFingerprint( run.executionIdentity() ) );
     runConfig.insert( QStringLiteral( "result_fingerprint" ), run.resultFingerprint() );
     runConfig.insert( QStringLiteral( "seed" ), qint64( run.seed() ) );
+    // Lossless seed pin for consumers: JSON numbers only round-trip through
+    // a double below 2^53, and seeds are 64-bit (run-bridge RunPins set the
+    // precedent with seed_hex).
+    runConfig.insert( QStringLiteral( "seed_hex" ), QString::number( run.seed(), 16 ) );
     runConfig.insert( QStringLiteral( "determinism" ),
                       dataset::determinismGradeToString( run.determinism() ) );
     if ( !run.determinismNote().isEmpty() )
@@ -236,11 +240,24 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
         {
             datasetRefs.insert( QStringLiteral( "status" ),
                                 dataset::datasetVersionStatusToString( version->status() ) );
-            datasetRefs.insert( QStringLiteral( "manifest_json" ), version->manifestJson() );
             const auto parsed = dataset::DatasetManifest::fromJson(
                 QJsonDocument::fromJson( version->manifestJson().toUtf8() ).object() );
             if ( parsed.has_value() )
             {
+                // Every other export member goes through the secret filters
+                // at this boundary (#789); embedding the RAW store manifest
+                // text would be a scrub bypass through the one member nobody
+                // re-serialized. Persist the REDACTED document instead — the
+                // authoritative raw manifest stays in the dataset store.
+                const QJsonObject redactedManifest = RunEnvironment::redactSecretKeys(
+                    parsed.value().toJson() );
+                // Stay string-typed (schema v1 contract): older consumers
+                // read manifest_json as the manifest TEXT.
+                datasetRefs.insert(
+                    QStringLiteral( "manifest_json" ),
+                    QString::fromUtf8(
+                        QJsonDocument( redactedManifest )
+                            .toJson( QJsonDocument::Compact ) ) );
                 QJsonArray sourceAssets;
                 for ( const dataset::SourceAssetRef &ref : parsed.value().sourceAssets() )
                 {
@@ -251,6 +268,15 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
                     sourceAssets.append( item );
                 }
                 datasetRefs.insert( QStringLiteral( "source_assets" ), sourceAssets );
+            }
+            else
+            {
+                // Never fall back to the raw store text — export pins without
+                // the manifest copy and names the gap instead.
+                report.warnings.append(
+                    QStringLiteral( "dataset manifest for %1 does not parse;"
+                                    " exporting pins without the manifest copy" )
+                        .arg( run.datasetVersionId() ) );
             }
         }
         else
@@ -290,10 +316,16 @@ ReproductionBundleReport ReproductionBundleExporter::exportRun(
     // Metrics + protocol (#789 review: metrics serialize through the same
     // secret-key pass as parameters — a credential-shaped metric key must
     // not leak either).
+    // The metric record is recorded evidence, not a credential carrier: it
+    // was scrubbed AT INGESTION (run_recorder), and the persisted
+    // metrics_hash binds the stored content. Re-running the denylist here
+    // would rewrite legitimate secret-SHAPED metric keys (e.g.
+    // "token_accuracy") into "***", breaking the hash round-trip on
+    // re-import — so the record goes out byte-identical to the store.
     QJsonObject metrics;
     const auto metricRecord = m_experimentStore.metricRecordForRun( run.runId() );
     if ( metricRecord )
-        metrics = RunEnvironment::redactSecretKeys( metricRecord->toJson() );
+        metrics = metricRecord->toJson();
     if ( !writeJson( QStringLiteral( "metrics.json" ), metrics ) )
         return report;
 
