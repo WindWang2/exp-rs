@@ -850,6 +850,17 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("scientific:agent_session"))
             {
+                // journal_directory is a caller-controlled path: it gets the
+                // same SICNU_MCP_WORKSPACE containment as every other
+                // path-consuming tool (#1033).
+                QString denyReason;
+                if (!validateWorkspacePaths(arguments, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
                 resultData = handleAgentSession(arguments);
             }
             else if (toolName == QStringLiteral("artifact_read"))
