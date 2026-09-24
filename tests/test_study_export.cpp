@@ -13,10 +13,13 @@
 #include "experiment/run_recorder.h"
 
 #include <QFile>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+
+#include <limits>
 
 using namespace sicnu::study;
 
@@ -285,4 +288,187 @@ TEST_CASE( "unwritable report paths are typed failures", "[study][export]" )
     REQUIRE( !result.has_value() );
     REQUIRE( result.diagnostics().first().code
              == QStringLiteral( "study.report_write_failed" ) );
+}
+
+namespace
+{
+
+StudyRunRow recordedRowWithSeed( quint64 seed )
+{
+    StudyRunRow row;
+    row.pointId = QStringLiteral( "p0000" );
+    row.replicateIndex = 0;
+    row.runId = QStringLiteral( "run-0" );
+    row.status = QStringLiteral( "recorded" );
+    row.seed = seed;
+    return row;
+}
+
+void recordScaledRun( sicnu::experiment::ExperimentRunRecorder &recorder,
+                      sicnu::experiment::MatrixLedger &ledger, const ParameterStudySpec &spec,
+                      const StudyPoint &point, const QTemporaryDir &dir )
+{
+    sicnu::experiment::RunStartRequest request;
+    request.experimentId = spec.experimentId;
+    request.algorithmId = spec.algorithmId;
+    request.parameters = point.parameters;
+    request.parameters.insert(
+        QStringLiteral( "output" ),
+        dir.filePath( point.pointId + QStringLiteral( "/output.tif" ) ) );
+    request.seed = point.seed;
+    request.executionRef = QStringLiteral( "scaling-%1" ).arg( point.pointId );
+    const auto runId = recorder.startRun( request );
+    REQUIRE( runId.has_value() );
+    REQUIRE( recorder.markSucceeded( runId.value(), {}, QJsonObject{} ).has_value() );
+    REQUIRE( ledger.link( point.pointId, runId.value() ).has_value() );
+}
+
+} // namespace
+
+TEST_CASE( "64-bit seeds round-trip the report JSON without double rounding",
+           "[study][export][seed]" )
+{
+    // budget.seed is a quint64 and the report is the record other tools
+    // reload. Serializing it through a JSON double silently corrupts every
+    // seed above 2^53 (~91% of the 64-bit space): the reloaded study would
+    // replay with a DIFFERENT seed while claiming the original. The same
+    // applies to 2^63+ seeds, whose double form also flips sign on read.
+    for ( const quint64 seed :
+          { quint64{ 9007199254740993ULL },   // 2^53 + 1 — first broken value
+            quint64{ 0x8000000000000001ULL }, // 2^63 + 1 — sign-reinterpreted
+            quint64{ 0xFFFFFFFFFFFFFFFFULL } } )
+    {
+        const auto row = recordedRowWithSeed( seed );
+        const auto parsed = StudyRunRow::fromJson( row.toJson() );
+        REQUIRE( parsed.has_value() );
+        INFO( "seed = " << seed );
+        CHECK( parsed.value().seed == seed );
+    }
+
+    // Small seeds keep their legacy lossless form (no behavior change).
+    const auto small = recordedRowWithSeed( 42 );
+    const auto parsedSmall = StudyRunRow::fromJson( small.toJson() );
+    REQUIRE( parsedSmall.has_value() );
+    CHECK( parsedSmall.value().seed == 42 );
+}
+
+TEST_CASE( "run table seeds survive a full report round-trip at 64-bit width",
+           "[study][export][seed]" )
+{
+    Fixture fix;
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-export" ) );
+    experiment.setName( QStringLiteral( "export" ) );
+    experiment.setCreatedAtUtc( frozenTime() );
+    REQUIRE( fix.store.upsertExperiment( experiment ).has_value() );
+
+    // The spec validation caps budget.seed at 2^53-1 for JSON fidelity — but
+    // replicate seeds are budget.seed + replicateIndex, so a legal maximum
+    // budget with a full replicate count lands ABOVE 2^53: exactly the range
+    // a JSON double corrupts on the report round-trip.
+    auto spec = specWithObjective();
+    spec.budget.seed = ( quint64{ 1 } << 53 ) - 1; // legal maximum
+    spec.budget.seedReplicates = 32; // budget.seedReplicates bound
+    spec.budget.maxRuns = 160; // 5 OAT parameter sets x 32 replicates
+    const auto points = sampleStudyPoints( spec ).value();
+    REQUIRE( points.size() == 160 );
+    const quint64 widest = points.last().seed;
+    REQUIRE( widest > quint64{ 1 } << 53 ); // the fixture really breaks doubles
+
+    for ( const StudyPoint &point : points )
+        fix.recordRun( spec, point, QJsonObject{ { QStringLiteral( "maskedPercent" ), 1.0 } } );
+
+    const StudyReport report =
+        buildStudyReport( fix.store, fix.ledger, spec, points, {}, nullptr, frozenTime() );
+    REQUIRE( report.runTable.size() == 160 );
+    for ( int i = 0; i < report.runTable.size(); ++i )
+        REQUIRE( report.runTable.at( i ).seed == points.at( i ).seed );
+
+    const auto parsed = StudyReport::fromJson( report.toJson() );
+    REQUIRE( parsed.has_value() );
+    for ( int i = 0; i < parsed.value().runTable.size(); ++i )
+        CHECK( parsed.value().runTable.at( i ).seed == points.at( i ).seed );
+}
+
+namespace
+{
+
+// Assembles a fresh store with @p n recorded LHS points and times ONLY the
+// report assembly (setup cost is not part of the complexity claim).
+// @p budgetSeed must satisfy the spec's JSON-fidelity cap (<= 2^53-1).
+qint64 timedReportAssemblyMs( int n, quint64 budgetSeed )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiment.sqlite" ) ) ) );
+    sicnu::experiment::MatrixLedger ledger{ store };
+    sicnu::experiment::ExperimentRunRecorder recorder{ store };
+
+    ParameterStudySpec spec;
+    spec.studyId = QStringLiteral( "report-scaling" );
+    spec.experimentId = QStringLiteral( "exp-report-scaling" );
+    spec.algorithmId = QStringLiteral( "rs:threshold_raster" );
+    spec.strategy = SamplingStrategy::LatinHypercube;
+    ParameterDimension dim;
+    dim.parameterPath = QStringLiteral( "threshold" );
+    dim.minValue = 0.0;
+    dim.maxValue = 1.0;
+    dim.stepCount = 2;
+    spec.dimensions.append( dim );
+    spec.budget.maxRuns = n;
+    spec.budget.maxInFlight = 2;
+    spec.budget.perRunTimeoutMs = 1000;
+    spec.budget.seedReplicates = 1;
+    spec.budget.seed = budgetSeed;
+    spec.metricNames.append( QStringLiteral( "maskedPercent" ) );
+
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( spec.experimentId );
+    experiment.setName( QStringLiteral( "scaling" ) );
+    experiment.setCreatedAtUtc( frozenTime() );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    const auto sampled = sampleStudyPoints( spec );
+    REQUIRE( sampled.has_value() );
+    const QVector<StudyPoint> points = sampled.has_value() ? sampled.value()
+                                                           : QVector<StudyPoint>{};
+    REQUIRE( points.size() == n );
+    for ( const StudyPoint &point : points )
+        recordScaledRun( recorder, ledger, spec, point, dir );
+
+    QElapsedTimer timer;
+    timer.start();
+    const StudyReport report =
+        buildStudyReport( store, ledger, spec, points, {}, nullptr, frozenTime() );
+    const qint64 ms = timer.elapsed();
+    REQUIRE( report.runTable.size() == n );
+    return ms;
+}
+
+} // namespace
+
+TEST_CASE( "study sweep cap refuses oversized specs instead of truncating",
+           "[study][export][perf]" )
+{
+    // The bound that keeps the Studio's model updates affordable is the
+    // matrix authority's sweep cap: a 10k-point study never exists — the
+    // spec is refused up front, before any sampling or store write.
+    auto oversize = specWithObjective();
+    oversize.budget.maxRuns = 10000;
+    const auto sampled = sampleStudyPoints( oversize );
+    REQUIRE( !sampled.has_value() );
+    REQUIRE( sampled.diagnostics().first().code
+             == QStringLiteral( "study.spec_budget_over_cap" ) );
+}
+
+TEST_CASE( "report assembly at the sweep cap stays within the UI budget",
+           "[study][export][perf]" )
+{
+    // The report builder indexes the sampled points once (O(n)); the earlier
+    // form rescanned the full list per run-table row (O(n²) in the cap-bound
+    // worst case). Profile reference (this machine, Debug): see PR notes.
+    const qint64 capMs = timedReportAssemblyMs( 1000, 7 );
+    WARN( "report assembly profile: 1000 points = " << capMs << " ms" );
+    CHECK( capMs < 5000 ); // absolute teaching-study budget at the cap
 }
