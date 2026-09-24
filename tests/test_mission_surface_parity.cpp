@@ -15,11 +15,16 @@
 #include "app/workbench/mission_projection.h"
 #include "app/workbench/mission_timeline_model.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
+
+#include <functional>
 
 using namespace sicnu::app;
 
@@ -174,4 +179,191 @@ TEST_CASE( "the mission family is wired into the MCP allow-list and the Pi bridg
     const QString categories = piCategoryBlock();
     REQUIRE_FALSE( categories.isEmpty() );
     REQUIRE( categories.contains( QStringLiteral( "mission" ) ) );
+}
+
+// ---------------------------------------------------------------------------
+// #1300 shifted left: the task-space test targets embed the mission sources
+// directly (Qt Core only, no leaf library), so the embed list is a
+// hand-maintained copy of the modules' TU graph. #1300 was a link failure
+// days after the code was fine — a companion source missing from the embed
+// list. This gate parses the REAL embed list and the REAL include closure of
+// the task-space TUs and fails on either direction of the drift, while the
+// cause is still one commit deep.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+QString stripCmakeComments( const QString &text )
+{
+    QString out;
+    out.reserve( text.size() );
+    for ( const QStringView line : QStringView( text ).split( QLatin1Char( '\n' ) ) )
+    {
+        const int hash = line.indexOf( QLatin1Char( '#' ) );
+        out += hash >= 0 ? line.left( hash ) : line;
+        out += QLatin1Char( '\n' );
+    }
+    return out;
+}
+
+/// Basenames of the *.cpp entries of `set(NAME ...)` in CMake text.
+QStringList cmakeSetCppEntries( const QString &cmakeText, const QString &setName )
+{
+    const QString clean = stripCmakeComments( cmakeText );
+    QStringList basenames;
+    const int at = clean.indexOf( QStringLiteral( "set(%1" ).arg( setName ) );
+    if ( at < 0 )
+        return basenames;
+    int depth = 0;
+    int i = at;
+    for ( ; i < clean.size(); ++i )
+    {
+        if ( clean.at( i ) == QLatin1Char( '(' ) )
+            ++depth;
+        else if ( clean.at( i ) == QLatin1Char( ')' ) )
+        {
+            --depth;
+            if ( depth == 0 )
+                break;
+        }
+    }
+    const QString body = clean.mid( at, i - at + 1 );
+    const QRegularExpression tokenRe( QStringLiteral( "\\S+" ) );
+    auto it = tokenRe.globalMatch( body );
+    while ( it.hasNext() )
+    {
+        const QString token = it.next().captured( 0 );
+        if ( token.endsWith( QStringLiteral( ".cpp" ) ) )
+            basenames.push_back( QFileInfo( token ).fileName() );
+    }
+    basenames.sort();
+    return basenames;
+}
+
+/// Transitive quoted-include closure of @p roots over the source tree; every
+/// reachable app/workbench header with a sibling .cpp contributes that TU.
+QStringList requiredWorkbenchTus( const QString &sourceDir, const QStringList &roots )
+{
+    QSet<QString> visited;
+    QStringList required;
+    const QRegularExpression includeRe( QStringLiteral( "#include\\s+\"([^\"]+)\"" ) );
+
+    std::function<void( const QString & )> visit = [&]( const QString &rel ) {
+        if ( visited.contains( rel ) )
+            return;
+        visited.insert( rel );
+        const QString text = readSourceFile( rel );
+        if ( text.isEmpty() )
+            return;
+        const QString dir = QFileInfo( rel ).path();
+        auto it = includeRe.globalMatch( text );
+        while ( it.hasNext() )
+        {
+            QString inc = it.next().captured( 1 );
+            // Try includer-relative first, then src/-rooted.
+            QStringList candidates;
+            if ( !dir.isEmpty() && dir != QLatin1String( "." ) )
+                candidates << dir + QLatin1Char( '/' ) + inc;
+            candidates << QStringLiteral( "src/" ) + inc;
+            for ( const QString &candidate : candidates )
+            {
+                const QString clean = QDir::cleanPath( candidate );
+                if ( !QFileInfo::exists( sourceDir + QLatin1Char( '/' ) + clean ) )
+                    continue;
+                if ( clean.startsWith( QStringLiteral( "src/app/workbench/" ) )
+                     && clean.endsWith( QStringLiteral( ".h" ) ) )
+                {
+                    const int prefixLen =
+                        int( QStringLiteral( "src/app/workbench/" ).size() );
+                    const QString tu =
+                        clean.mid( prefixLen ).chopped( 2 ) + QStringLiteral( ".cpp" );
+                    if ( QFileInfo::exists( sourceDir + QLatin1String( "/src/app/workbench/" )
+                                            + tu ) && !required.contains( tu ) )
+                        required.push_back( tu );
+                }
+                visit( clean );
+                break;
+            }
+        }
+    };
+    for ( const QString &root : roots )
+        visit( root );
+
+    required.sort();
+    return required;
+}
+
+} // namespace
+
+TEST_CASE( "the task-space embed list covers the transitive mission include closure",
+           "[mission][parity][build-wiring]" )
+{
+    const QStringList taskSpaceTestTus{
+        QStringLiteral( "tests/test_mission_stage.cpp" ),
+        QStringLiteral( "tests/test_mission_surface_parity.cpp" ),
+        QStringLiteral( "tests/test_mission_scale_benchmark.cpp" ),
+    };
+
+    const QString testsCmake =
+        readSourceFile( QStringLiteral( "tests/CMakeLists.txt" ) );
+    REQUIRE_FALSE( testsCmake.isEmpty() );
+    const QStringList embedded =
+        cmakeSetCppEntries( testsCmake, QStringLiteral( "SICNU_MISSION_TASK_SPACE_SOURCES" ) );
+    // The #1300 regression, verbatim: the paged timeline model missing from
+    // the embed list.
+    REQUIRE( embedded.contains( QStringLiteral( "mission_stage.cpp" ) ) );
+    REQUIRE( embedded.contains( QStringLiteral( "mission_projection.cpp" ) ) );
+    REQUIRE( embedded.contains( QStringLiteral( "mission_timeline_model.cpp" ) ) );
+
+    // Closure roots: the three test TUs plus the embedded task-space sources
+    // (as src/-rooted paths for the include walk).
+    const QStringList required = requiredWorkbenchTus(
+        SICNU_MISSION_SOURCE_DIR,
+        taskSpaceTestTus + QStringList{ QStringLiteral( "src/app/workbench/mission_stage.cpp" ),
+                                        QStringLiteral( "src/app/workbench/mission_projection.cpp" ),
+                                        QStringLiteral(
+                                            "src/app/workbench/mission_timeline_model.cpp" ) } );
+
+    // Every companion TU of the closure is embedded...
+    for ( const QString &tu : required )
+        REQUIRE( embedded.contains( tu ) );
+    REQUIRE_FALSE( required.isEmpty() );
+    // ...and the list carries no dead entries (a stale .cpp is silent
+    // duplicate compile cost and hides the drift the gate exists for).
+    for ( const QString &tu : embedded )
+        REQUIRE( required.contains( tu ) );
+
+    // Lethality self-check: the gate must kill the #1300 mutation, not merely
+    // report today's green state. Remove the timeline model from the parsed
+    // list and the same comparison must flag exactly that file.
+    QStringList mutated = embedded;
+    mutated.removeAll( QStringLiteral( "mission_timeline_model.cpp" ) );
+    for ( const QString &tu : required )
+    {
+        if ( tu == QLatin1String( "mission_timeline_model.cpp" ) )
+            REQUIRE_FALSE( mutated.contains( tu ) );
+        else
+            REQUIRE( mutated.contains( tu ) );
+    }
+}
+
+TEST_CASE( "the shared mission-runtime source lists carry the task space",
+           "[mission][parity][build-wiring]" )
+{
+    // cmake/SicnuMissionRuntimeSources.cmake drives the mission-runtime gate
+    // build; a task-space source dropped there would quietly stop being
+    // gate-checked while every other list still compiled it.
+    const QString shared = readSourceFile(
+        QStringLiteral( "cmake/SicnuMissionRuntimeSources.cmake" ) );
+    REQUIRE_FALSE( shared.isEmpty() );
+
+    for ( const QString &setName : { QStringLiteral( "SICNU_MISSION_RUNTIME_SOURCES_FULL" ),
+                                     QStringLiteral( "SICNU_MISSION_RUNTIME_SOURCES_GATE" ) } )
+    {
+        const QStringList entries = cmakeSetCppEntries( shared, setName );
+        REQUIRE( entries.contains( QStringLiteral( "mission_stage.cpp" ) ) );
+        REQUIRE( entries.contains( QStringLiteral( "mission_projection.cpp" ) ) );
+        REQUIRE( entries.contains( QStringLiteral( "mission_timeline_model.cpp" ) ) );
+    }
 }
