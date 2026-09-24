@@ -399,6 +399,8 @@ target_sources(sicnu_geo_rs PRIVATE
     teaching/guided_lab_workspace.h
     teaching/lab_cockpit_dock.cpp
     teaching/lab_cockpit_dock.h
+    teaching/lab_validate_service.cpp
+    teaching/lab_validate_service.h
     teaching/status_badge.h
 )
 if(TARGET Sicnu::teaching)
@@ -447,6 +449,8 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     # D5: desktop lab auto-recording surface + lab report builder (bridge
     # converts coordinator truth into experiment records).
     Sicnu::experiment_bridge
+    # lab cockpit submit/export consumes the existing capsule contract
+    Sicnu::experiment_capsule
     Sicnu::Geospatial
     sicnu_core
     sicnu_processing

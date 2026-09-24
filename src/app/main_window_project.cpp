@@ -40,6 +40,15 @@
 
 // ── Project Actions ────────────────────────────────────────────────────────
 
+void QgisDesktopWindow::setLabRecordingContext( const QString &dbPath,
+                                                const QString &experimentId,
+                                                const QString &workspaceRoot )
+{
+    m_labExperimentDbPath = dbPath;
+    m_labExperimentId = experimentId;
+    m_labWorkspaceRoot = workspaceRoot;
+}
+
 namespace
 {
 // D5 lab-report wiring. The recorder is recreated per opened project: the
@@ -57,15 +66,23 @@ constexpr int kMaxReportThumbnails = 8;
 /// project registers an experiment run. Opt-out (never opt-in) via
 /// QSettings `lab/autoRecordExperimentRuns`; a bound recorder keeps its
 /// already-started stories truthful when disabled mid-flight.
-void ensureLabRecordingForProject( const QString &projectPath )
+void ensureLabRecordingForProject( QgisDesktopWindow *win, const QString &projectPath )
 {
     QSettings settings;
-    if ( !settings.value( QLatin1String( kLabAutoRecordKey ), true ).toBool() )
+    if ( !settings.value( QLatin1String( kLabAutoRecordKey ), true ).toBool() ) {
+        // Recording opted out: the cockpit must see "no recording context",
+        // not a stale one from a previously opened project.
+        if ( win )
+            win->setLabRecordingContext( QString(), QString(), QString() );
         return;
+    }
 
     const QFileInfo projectInfo( projectPath );
-    if ( projectInfo.fileName().isEmpty() )
+    if ( projectInfo.fileName().isEmpty() ) {
+        if ( win )
+            win->setLabRecordingContext( QString(), QString(), QString() );
         return;
+    }
 
     const QString dbPath =
         projectInfo.dir().filePath( QStringLiteral( ".sicnu/lab/experiments.db" ) );
@@ -98,7 +115,13 @@ void ensureLabRecordingForProject( const QString &projectPath )
         s_labRecorder->deleteLater();
         s_labRecorder = nullptr;
         qWarning( "lab recording not enabled: %s", qUtf8Printable( error ) );
+        if ( win )
+            win->setLabRecordingContext( QString(), QString(), QString() );
+        return;
     }
+    if ( win )
+        win->setLabRecordingContext( dbPath, experimentId,
+                                     projectInfo.dir().absolutePath() );
 }
 
 void stopLabRecording()
@@ -220,6 +243,7 @@ void QgisDesktopWindow::newProject()
     // The cleared project has no lab: stop recording so later runs cannot
     // land in the previous project's experiment store.
     stopLabRecording();
+    setLabRecordingContext( QString(), QString(), QString() );
     // Story boundary: the empty session owns no mission either.
     resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
                               m_missionSidecarWatcher );
@@ -303,6 +327,7 @@ void QgisDesktopWindow::openProject()
         // Session is empty now: stop lab recording so runs cannot land in the
         // previous project's experiments.db while we finish (or fail) the load.
         stopLabRecording();
+        setLabRecordingContext( QString(), QString(), QString() );
         // Story boundary for the mission authority too: whether the read below
         // succeeds or fails, the previous project's mission must not leak into
         // this session (a failed read used to keep it live here, and the next
@@ -333,7 +358,7 @@ void QgisDesktopWindow::openProject()
         refreshWorkspaceBrowser();
         // D5: this project's lab executions now register as experiment runs
         // (opt-out via QSettings lab/autoRecordExperimentRuns).
-        ensureLabRecordingForProject( filePath );
+        ensureLabRecordingForProject( this, filePath );
         statusBar()->showMessage(tr("Opened project: %1").arg(filePath), 3000);
     }
 }
