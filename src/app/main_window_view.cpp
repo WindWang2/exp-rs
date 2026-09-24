@@ -628,6 +628,16 @@ void QgisDesktopWindow::showIr2PipelineDesigner()
         connect( m_ir2PipelineDock, &sicnu::app::pipeline::Ir2PipelineDesignerDock::workflowIdentityChanged,
                  this, [this]( const sicnu::app::ActiveWorkflowRef &ref ) {
                      sicnu::app::setMissionActiveWorkflow( m_mission, ref );
+                     // RS14-15 R3: a replaced document (New / LabSpec lift)
+                     // invalidates the previous run's evidence AND the node
+                     // selection — the old run never explains the new
+                     // document's nodes.
+                     if ( auto *stepSection =
+                              m_inspectorHost ? m_inspectorHost->findChild<sicnu::app::StepExplanationSection *>()
+                                              : nullptr )
+                         stepSection->clearRunEvidence();
+                     if ( m_selectionContext )
+                         m_selectionContext->notifyPipelineNodeSelection( QString() );
                      statusBar()->showMessage(
                          tr( "Mission workflow identity: %1 (fp %2…)" )
                              .arg( ref.workflowId )

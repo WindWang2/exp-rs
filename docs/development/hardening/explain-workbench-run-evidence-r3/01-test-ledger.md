@@ -21,9 +21,10 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 
 | Suite | Result |
 |---|---|
-| `test_explain_step_panel` | **ALL PASSED 147/147, 15/15 — ×2** |
-| `test_explain_agent_tool` | **ALL PASSED 73/73, 12/12 — ×2** (includes 6 new run-scoped cases) |
-| `test_selection_context` | 60 assertions / 13 cases (adjacent — snapshot field added) |
+| `test_explain_step_panel` | **ALL PASSED 148/148, 15/15 — ×2** |
+| `test_explain_agent_tool` | **ALL PASSED 78/78, 12/12 — ×2** (includes 6 new run-scoped cases) |
+| `test_explain_projection` | **110/110, 8/8 — ×2** (record-name grammar + single-record load pinned) |
+| `test_selection_context` | **72/72, 15/15 — ×2** (node-selection push/coalescing/clear covered) |
 | `test_inspector_host` | 27 assertions / 6 cases (adjacent) |
 | `test_provenance_section` | 61 assertions / 6 cases (adjacent) |
 | `test_build_wiring_drift` | 34 assertions / 7 cases (CMake changed) |
@@ -36,6 +37,27 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 | S1: tool reverted to master shape (no `runId`/`provenanceDirectory` handling) | `test_explain_agent_tool` 4 cases / 8 assertions FAIL |
 | S2: panel honest-unknown branch removed (`if (false && !executionShown)`) | `test_explain_step_panel` 6 cases / 7 assertions FAIL |
 | S3: section keeps the previous run's adapter when a re-attach fails to parse | tampered-re-attach case FAIL (stale 状态: Succeeded served after the record corrupted) |
+
+## Review round (independent adversarial review, all blocking findings fixed)
+
+- **P1-1 (stale scope across boundaries)** — the shell cleared run evidence only on
+  `pipelineRunStarted`; a project switch or a replaced D17 document (New / LabSpec lift)
+  left the previous run's evidence attached and the stale node id selected. Fixed: the
+  dock's `workflowIdentityChanged` now clears evidence + node selection, and the project
+  story boundary (empty-session render + open transaction hook, next to the mission/lab
+  resets) calls `resetStepExplanationSession()` (clear evidence + clear node selection).
+- **P1-2 (notify path untested)** — `notifyPipelineNodeSelection` (trim, idempotence,
+  clear-on-empty, debounce coalescing) now has direct `test_selection_context` coverage.
+- **P2-1 (duplicated record-name grammar)** — the section's local name parser is gone;
+  the grammar lives once as `ProvenanceFileEvidence::runIdFromFileName` (whitespace/'#'
+  refusals included), pinned in `test_explain_projection`.
+- **P2-2 (empty/typed runId accepted)** — empty-string and non-string `runId` are now
+  refused `INVALID_PARAMETER` by tests (the empty-runId acceptance regression is killed).
+- **P2-3 (plan-only shape asserted loosely)** — the plan-only response now pins the
+  EXACT top-level key set, so any added member is a red contract change.
+- **P2-4 (GUI-thread directory scan on run finish)** — the section loads exactly ONE
+  record via the new `ProvenanceFileEvidence::loadFromFile` (no directory scan; the
+  load cost is the record itself).
 
 ## Honesty contract pinned by the oracles
 
@@ -51,8 +73,11 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
   adds the honest no-guidance trust note; an authored state contradiction renders only
   as typed problem + trust note — port facts (`DN → Radiance`) cannot be overwritten.
 - Run A → run B (separate provenance directories) leaves no artifact identity of A;
-  re-attaching a corrupted record for the SAME run drops the stale status immediately;
-  `clearRunEvidence()` (run start / session boundary) drops evidence at once.
+  re-attaching a corrupted record for the SAME run drops the stale status immediately
+  and serves NO run scope (refusal-phrased unknown); `clearRunEvidence()` drops
+  evidence at once on run start, on document replacement (`workflowIdentityChanged`)
+  and on the project story boundary; a record whose name can never form a valid
+  evidence link (whitespace/`#`) is refused by the shared grammar, never half-accepted.
 - Inspector host lifecycle: unsupported selection → placeholder, zero generations;
   identical snapshots re-populate exactly once with byte-identical render (no
   accumulation); hide/show of the section triggers no population; selection leaving and

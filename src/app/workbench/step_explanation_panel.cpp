@@ -49,7 +49,11 @@ QString elide( const QString &text )
 {
     if ( text.size() <= kMaxLineChars )
         return text;
-    return text.left( kMaxLineChars ) + QStringLiteral( "…（内容过长，已截断显示）" );
+    int cut = kMaxLineChars;
+    // Never split a UTF-16 surrogate pair at the cut.
+    if ( cut > 0 && QChar::isHighSurrogate( text.at( cut - 1 ).unicode() ) )
+        --cut;
+    return text.left( cut ) + QStringLiteral( "…（内容过长，已截断显示）" );
 }
 
 } // namespace
@@ -181,14 +185,18 @@ void StepExplanationPanel::renderExplanation( const sicnu::explain::StepExplanat
 
     // Honest absence right where the execution section would have been: the
     // record carries no facts for this step, so no status is shown — only
-    // the reason nothing is shown.
+    // the reason nothing is shown (refused record > plan-only > run without
+    // evidence).
     if ( !executionShown )
     {
-        const QString unknown =
-            request.runId.empty()
-                ? tr( "执行情况未知（计划模式：尚无此步骤的运行证据）。" )
-                : tr( "执行情况未知（运行 %1 中没有此步骤的执行证据）。" )
-                      .arg( QString::fromStdString( request.runId ) );
+        QString unknown;
+        if ( !evidenceProblemCodes.isEmpty() )
+            unknown = tr( "执行情况未知（证据记录被拒绝；见下方“证据记录问题”）。" );
+        else if ( request.runId.empty() )
+            unknown = tr( "执行情况未知（计划模式：尚无此步骤的运行证据）。" );
+        else
+            unknown = tr( "执行情况未知（运行 %1 中没有此步骤的执行证据）。" )
+                          .arg( QString::fromStdString( request.runId ) );
         html += QStringLiteral( "<h3>%1</h3><p style='color:#616161'>%2</p>" )
                     .arg( tr( "执行情况（Execution）" ), escape( unknown ) );
         plain += QStringLiteral( "\n" ) + tr( "执行情况（Execution）" ) + QStringLiteral( ":\n- " ) + unknown

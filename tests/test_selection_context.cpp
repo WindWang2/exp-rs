@@ -409,3 +409,58 @@ TEST_CASE( "SelectionContext: computeSnapshot avoids UAF on deleted layer while 
   project->clear();
 }
 
+
+// ── RS14-15 R3: IR 2.0 canvas node selection push ─────────────────────────
+TEST_CASE( "SelectionContext: pipeline node selection flows into the snapshot and clears",
+           "[selection_context][behavior]" )
+{
+  ensureApp();
+  sicnu::app::SelectionContext ctx;
+  QSignalSpy spy( &ctx, &sicnu::app::SelectionContext::changed );
+
+  ctx.notifyPipelineNodeSelection( QStringLiteral( " n1 " ) );
+  ctx.notifyAssetSelection( QStringList{ "a" } ); // coalesces into one emission
+  REQUIRE( spy.isEmpty() );                       // debounced
+  REQUIRE( ctx.snapshot().selectedPipelineNodeId == QStringLiteral( "n1" ) );
+
+  QTest::qWait( 400 );
+  REQUIRE( spy.count() == 1 );
+  const SelectionContextSnapshot snap = spy.first().first().value<SelectionContextSnapshot>();
+  REQUIRE( snap.selectedPipelineNodeId == QStringLiteral( "n1" ) );
+  REQUIRE( snap.hasPipelineNodeSelection() );
+
+  // Empty id clears the selection.
+  ctx.notifyPipelineNodeSelection( QString() );
+  QTest::qWait( 400 );
+  REQUIRE( spy.count() == 2 );
+  const SelectionContextSnapshot cleared = spy.last().first().value<SelectionContextSnapshot>();
+  REQUIRE( cleared.selectedPipelineNodeId.isEmpty() );
+  REQUIRE_FALSE( cleared.hasPipelineNodeSelection() );
+}
+
+TEST_CASE( "SelectionContext: identical pipeline node announcements do not reschedule",
+           "[selection_context][behavior]" )
+{
+  ensureApp();
+  sicnu::app::SelectionContext ctx;
+  QSignalSpy spy( &ctx, &sicnu::app::SelectionContext::changed );
+
+  // Coalesced burst: only the FINAL state is broadcast once.
+  ctx.notifyPipelineNodeSelection( QStringLiteral( "n1" ) );
+  ctx.notifyPipelineNodeSelection( QStringLiteral( " n1 " ) ); // trims to a duplicate → no-op
+  ctx.notifyPipelineNodeSelection( QString() );                // final state: cleared
+  QTest::qWait( 400 );
+  REQUIRE( spy.count() == 1 );
+  REQUIRE( spy.last().first().value<SelectionContextSnapshot>().selectedPipelineNodeId.isEmpty() );
+
+  // The debounced duplicate never re-emitted "n1", so announcing it now is
+  // a real change.
+  ctx.notifyPipelineNodeSelection( QStringLiteral( "n1" ) );
+  QTest::qWait( 400 );
+  REQUIRE( spy.count() == 2 );
+
+  // Identical re-announce: no reschedule, no second emission.
+  ctx.notifyPipelineNodeSelection( QStringLiteral( "n1" ) );
+  QTest::qWait( 400 );
+  REQUIRE( spy.count() == 2 );
+}

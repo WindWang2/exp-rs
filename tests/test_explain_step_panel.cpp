@@ -627,16 +627,19 @@ TEST_CASE( "tampered provenance records surface as typed problems and stay unkno
     CHECK( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
 
     // The same record becomes unreadable on disk; re-attaching the SAME run
-    // must drop the stale success — unknown + typed problem, never the old
-    // status.
+    // must drop the stale success — the refused record serves NO run scope
+    // at all, so the render is refusal-phrased unknown + typed problem,
+    // never the old status.
     goodDir.write( "provenance_run-42.json", std::string( "{ corrupted " ) );
     section.attachRunProvenance(
         QString::fromStdString( ( goodDir.path / "provenance_run-42.json" ).string() ) );
-    CHECK( section.currentRunId() == "run-42" );
+    CHECK( section.currentRunId().isEmpty() );
     REQUIRE_FALSE( section.evidenceProblemCodes().isEmpty() );
     CHECK( section.evidenceProblemCodes().first().contains( "parse_failed" ) );
     section.populate( snapshot42 );
     CHECK_FALSE( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
+    CHECK( section.panel()->renderedText().contains(
+        QStringLiteral( "执行情况未知（证据记录被拒绝" ) ) );
     CHECK( section.panel()->renderedText().contains( QStringLiteral( "证据记录问题" ) ) );
 
     // A fresh section against a tampered-only directory behaves the same.
@@ -645,7 +648,7 @@ TEST_CASE( "tampered provenance records surface as typed problems and stay unkno
         [&]() -> std::optional<WorkflowDocument> { return document; } );
     freshSection.attachRunProvenance(
         QString::fromStdString( ( evidenceDir.path / "provenance_run-9.json" ).string() ) );
-    CHECK( freshSection.currentRunId() == "run-9" );
+    CHECK( freshSection.currentRunId().isEmpty() );
     REQUIRE_FALSE( freshSection.evidenceProblemCodes().isEmpty() );
     CHECK( freshSection.evidenceProblemCodes().first().contains( "parse_failed" ) );
 
@@ -653,15 +656,20 @@ TEST_CASE( "tampered provenance records surface as typed problems and stay unkno
     snapshot.selectedPipelineNodeId = QStringLiteral( "n1" );
     freshSection.populate( snapshot );
     CHECK( freshSection.panel()->renderedText().contains(
-        QStringLiteral( "执行情况未知（运行 run-9 中没有此步骤的执行证据）" ) ) );
-    CHECK( freshSection.panel()->renderedText().contains( QStringLiteral( "证据记录问题" ) ) );
-    CHECK( freshSection.panel()->renderedText().contains( "parse_failed" ) );
+        QStringLiteral( "执行情况未知（证据记录被拒绝" ) ) );
     CHECK_FALSE( freshSection.panel()->renderedText().contains( "状态: " ) );
 
     // A file not matching the pinned record-name grammar serves no evidence
-    // either — and says so.
+    // either — and says so (single grammar truth: the adapter's).
     section.attachRunProvenance(
         QString::fromStdString( ( evidenceDir.path / "checkpoint_run-1.json" ).string() ) );
+    CHECK( section.currentRunId().isEmpty() );
+    CHECK( section.evidenceProblemCodes().first().contains( "malformed_name" ) );
+
+    // A well-formed name whose run id can never produce a valid evidence
+    // link (whitespace) is refused by the SAME grammar, not half-accepted.
+    section.attachRunProvenance(
+        QString::fromStdString( ( evidenceDir.path / "provenance_a b.json" ).string() ) );
     CHECK( section.currentRunId().isEmpty() );
     CHECK( section.evidenceProblemCodes().first().contains( "malformed_name" ) );
 }

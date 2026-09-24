@@ -8,28 +8,11 @@
 #include "workflow/workflow_ir_v2.h"
 
 #include <QFileInfo>
+
 #include <QVBoxLayout>
 
 namespace sicnu::app
 {
-namespace
-{
-// The pinned record name grammar (same pattern ProvenanceFileEvidence
-// loads by): provenance_<runId>.json — the runId is everything between.
-bool runIdFromFileName( const QString &fileName, QString *runId )
-{
-    if ( !fileName.startsWith( QLatin1String( "provenance_" ) )
-         || !fileName.endsWith( QLatin1String( ".json" ) ) )
-        return false;
-    const int begin = int( QString( "provenance_" ).size() );
-    const int end = fileName.size() - int( QString( ".json" ).size() );
-    if ( end <= begin )
-        return false;
-    *runId = fileName.mid( begin, end - begin );
-    return true;
-}
-} // namespace
-
 StepExplanationSection::StepExplanationSection( StepExplanationPanel::KnowledgeProvider knowledge,
                                                 StepExplanationPanel::GuidanceProvider guidance,
                                                 DocumentProvider document, QWidget *parent )
@@ -96,28 +79,26 @@ void StepExplanationSection::attachRunProvenance( const QString &provenanceFileP
     if ( provenanceFilePath.isEmpty() )
         return;
 
-    QString runId;
-    if ( !runIdFromFileName( QFileInfo( provenanceFilePath ).fileName(), &runId ) )
-    {
-        // Not the pinned record name grammar: serve no evidence and say so.
-        m_evidenceProblemCodes.append( QStringLiteral( "malformed_name: %1" )
-                                           .arg( QFileInfo( provenanceFilePath ).fileName() ) );
-        return;
-    }
-
+    // The adapter owns the record-name grammar (single truth) and the strict
+    // parse; loading ONE named record keeps the run-finish path off any
+    // directory scan.
     std::vector<sicnu::explain::adapters::EvidenceLoadProblem> problems;
-    m_evidence = sicnu::explain::adapters::ProvenanceFileEvidence::loadFromDirectory(
-        QFileInfo( provenanceFilePath ).absolutePath().toStdString(), problems );
+    m_evidence = sicnu::explain::adapters::ProvenanceFileEvidence::loadFromFile(
+        provenanceFilePath.toStdString(), problems );
     for ( const auto &problem : problems )
         m_evidenceProblemCodes.append(
             QStringLiteral( "%1 [%2]: %3" )
                 .arg( QString::fromStdString( problem.code ),
                       QString::fromStdString( problem.file ),
                       QString::fromStdString( problem.message ) ) );
-    // The adapter itself is always non-null (possibly empty): an empty
-    // adapter answers nullopt for every lookup, which the panel renders as
-    // honest unknown — no status is ever invented from a broken record.
-    m_runId = runId;
+    if ( !problems.empty() )
+        return; // refused record: serve no run scope at all
+
+    // The adapter is non-null; when the record loaded, the run id comes from
+    // the same grammar the loader validated.
+    m_runId = QString::fromStdString(
+        *sicnu::explain::adapters::ProvenanceFileEvidence::runIdFromFileName(
+            QFileInfo( provenanceFilePath ).fileName().toStdString() ) );
 }
 
 void StepExplanationSection::clearRunEvidence()

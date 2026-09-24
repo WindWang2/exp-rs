@@ -28,6 +28,7 @@
 #include <json/json.h>
 
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -557,6 +558,23 @@ TEST_CASE( "a lone runId or provenanceDirectory is refused instead of partially 
   const SpatialToolResult noRun = tool->execute( loneDirectory );
   CHECK( !noRun.success );
   CHECK( noRun.errorCode == "INVALID_PARAMETER" );
+
+  // An EMPTY runId is not "run-scope with an empty id" — it is refused like
+  // a missing parameter, so a plan-only answer can never wear run scope.
+  Json::Value emptyRunId = base;
+  emptyRunId["runId"] = "";
+  emptyRunId["provenanceDirectory"] = evidenceDir.path.string();
+  const SpatialToolResult emptyRun = tool->execute( emptyRunId );
+  CHECK( !emptyRun.success );
+  CHECK( emptyRun.errorCode == "INVALID_PARAMETER" );
+
+  // Wrong-typed runId (a number) is refused, not coerced.
+  Json::Value numericRunId = base;
+  numericRunId["runId"] = 42;
+  numericRunId["provenanceDirectory"] = evidenceDir.path.string();
+  const SpatialToolResult numericRun = tool->execute( numericRunId );
+  CHECK( !numericRun.success );
+  CHECK( numericRun.errorCode == "INVALID_PARAMETER" );
 }
 
 TEST_CASE( "plan-only responses keep their exact shape (no evidenceProblems member)",
@@ -579,4 +597,13 @@ TEST_CASE( "plan-only responses keep their exact shape (no evidenceProblems memb
   CHECK( result.output["budget"]["truncated"].asBool() == false );
   // The markdown contract holds on the plan-only path.
   CHECK( result.output.isMember( "markdown" ) );
+  // The plan-only response shape is pinned EXACTLY: any added/renamed top
+  // level member is a silent contract change and must fail here.
+  std::vector<std::string> keys;
+  for ( const auto &key : result.output.getMemberNames() )
+    keys.push_back( key );
+  std::sort( keys.begin(), keys.end() );
+  const std::vector<std::string> expected = { "budget", "explanation", "guidanceSource",
+                                              "markdown", "problems", "valid", "validation" };
+  CHECK( keys == expected );
 }
