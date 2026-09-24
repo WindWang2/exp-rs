@@ -10732,6 +10732,9 @@ add_executable(test_mission_context
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost (same pairing as
+  # test_object_identity / test_mission_runtime_store).
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_context PRIVATE
   Catch2::Catch2WithMain
@@ -10797,6 +10800,9 @@ add_executable(test_mission_e2e_scaffolding
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost (same pairing as
+  # test_object_identity / test_mission_runtime_store).
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   Catch2::Catch2WithMain
