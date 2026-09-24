@@ -116,12 +116,24 @@ void MissionTimelinePanel::repushSelection()
     const QString taskId = selectedTaskId();
     if ( taskId.isEmpty() )
     {
-        emit taskSelected( {}, MissionTaskStatus::Pending );
+        pushSelection( {}, MissionTaskStatus::Pending );
         updateActionStates();
         return;
     }
-    emit taskSelected( taskId, selectedTaskStatus( taskId ) );
+    pushSelection( taskId, selectedTaskStatus( taskId ) );
     updateActionStates();
+}
+
+void MissionTimelinePanel::pushSelection( const QString &taskId, MissionTaskStatus status )
+{
+    // A batch applyEvents emits one dataChanged per touched row; the derived
+    // selection is the same for all of them. Skip the identical re-announce
+    // (SelectionContext dedupes anyway) but keep the bookkeeping honest.
+    if ( taskId == m_pushedTaskId && status == m_pushedStatus )
+        return;
+    m_pushedTaskId = taskId;
+    m_pushedStatus = status;
+    emit taskSelected( taskId, status );
 }
 
 void MissionTimelinePanel::onRefreshClicked()
