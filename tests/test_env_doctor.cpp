@@ -171,7 +171,7 @@ TEST_CASE( "env doctor full required-driver set passes on a complete host",
   // Host-tolerant oracle: recompute the expected absence set independently
   // through the GDAL C API — the check must agree with reality, whichever
   // drivers this host's build carries.
-  ensureGdalRegistered();
+  sicnu::geo::ensureGdalRegistered();
   std::set< std::string > independentlyMissing;
   for ( const char *name : { "GTiff", "GPKG", "GeoJSON", "ESRI Shapefile", "MEM", "VRT" } )
     if ( !GDALGetDriverByName( name ) )
