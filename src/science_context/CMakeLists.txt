@@ -14,6 +14,7 @@ add_library( sicnu_science_context STATIC
     observability.cpp
     observed_state.cpp
     planner_projection.cpp
+    planner_goal_projection.cpp
     recipe_router.cpp
 )
 
@@ -25,6 +26,10 @@ target_include_directories( sicnu_science_context PUBLIC
 
 target_link_libraries( sicnu_science_context PUBLIC
     Sicnu::ScientificState
+    # R3 track 14: bundle → ScientificGoal/PlanningContext projection. The
+    # planner is a Qt-free leaf (contracts + jsoncpp), so this stays inside
+    # the module's no-GUI discipline.
+    sicnu_planner
 )
 
 # Live recipe authority: the registry stays the only store; the broker's
