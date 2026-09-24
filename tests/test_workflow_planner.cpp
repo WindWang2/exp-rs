@@ -224,3 +224,174 @@ TEST_CASE( "Compile refuses requests without an IR or recipe (typed)", "[workflo
   CHECK( compiled.workflowJson.empty() );
   CHECK( error.code == "INVALID_PARAMETER" );
 }
+
+// ---------------------------------------------------------------------------
+// R3 track 14 (planner live capability / WorkflowIR lowering / handoff):
+// the ScientificPlan decision layer enters THIS chain through
+// projectPlanToIr — the harness reader and compiler stay the only lowering
+// authority. The Qt-free half of these oracles (bundle→plan→IR document,
+// preflight, repair, proposals) lives in test_planner_handoff_e2e.cpp.
+// ---------------------------------------------------------------------------
+
+#include "contracts/scientific_contract.h"
+#include "planner/planner_core.h"
+#include "planner/plan_ir_projection.h"
+#include "planner/planning_context.h"
+#include "planner/scientific_goal.h"
+#include "planner/scientific_plan.h"
+#include "planner/provider_interfaces.h"
+
+namespace planner_handoff
+{
+
+using namespace sicnu::planner;
+
+/// Map-backed provider over contract-aligned facts for the operators the
+/// scenario plans over (the planner re-checks them against the registry).
+class MapProvider : public CapabilityProvider
+{
+public:
+  void add( PlannerCapability fact ) { byFamily_[fact.family].push_back( fact ); }
+
+  std::vector<PlannerCapability> capabilitiesForFamily(
+    const std::string &family ) const override
+  {
+    auto it = byFamily_.find( family );
+    return it == byFamily_.end() ? std::vector<PlannerCapability>{} : it->second;
+  }
+
+private:
+  std::map<std::string, std::vector<PlannerCapability>> byFamily_;
+};
+
+/// A lawful NDVI measurement plan over one ready reflectance scene.
+sicnu::planner::PlanningResult ndviPlan()
+{
+  MapProvider provider;
+  auto fact = []( const char *id, const char *family, const char *cost ) {
+    PlannerCapability fact;
+    fact.operatorId = id;
+    fact.family = family;
+    fact.costClass = cost;
+    const auto *contract = sicnu::contracts::findScientificContract( id );
+    fact.inputDomain = contract ? contract->inputDomain : std::string();
+    fact.outputDomain = contract ? contract->outputDomain : std::string();
+    fact.deterministic = true;
+    return fact;
+  };
+  provider.add( fact( "rs:landsat_import", "data_import", "low" ) );
+  provider.add( fact( "rs:ndvi", "analysis", "low" ) );
+
+  ScientificGoal goal;
+  goal.goalId = "goal-handoff-ndvi";
+  goal.kind = "measurement";
+  goal.subject = "handoff ndvi";
+
+  PlanningContext context;
+  PlannerAssetFacts asset;
+  asset.ref = "scene-a";
+  asset.kind = "raster";
+  asset.modality = "optical";
+  asset.numericDomain = "reflectance";
+  asset.crs = "EPSG:32650";
+  asset.resolutionM = 10.0;
+  asset.state = "ready";
+  context.assets.push_back( asset );
+
+  PlannerProviders providers;
+  providers.capability = &provider;
+  return planScientificWork( goal, context, providers );
+}
+
+CompileWorkflowRequest requestForPlanIr( const Json::Value &irDoc )
+{
+  CompileWorkflowRequest request;
+  request.irDoc = irDoc;
+  Json::Value understanding = opticalUnderstanding();
+  understanding["entity"]["asset_entity_id"] = "scene-a";
+  request.inputFacts["in-scene-a"] = understanding;
+  return request;
+}
+
+} // namespace planner_handoff
+
+TEST_CASE( "An accepted ScientificPlan enters the compiler chain through projectPlanToIr",
+           "[workflow_planner][planner_handoff]" )
+{
+  loadHarnessKnowledge();
+  using namespace planner_handoff;
+
+  const sicnu::planner::PlanningResult planned = ndviPlan();
+  REQUIRE( planned.primary() != nullptr );
+  const sicnu::planner::ScientificPlan &primary = *planned.primary();
+  REQUIRE( primary.verdict != "infeasible" );
+
+  std::vector<std::string> warnings;
+  std::string projectionError;
+  const Json::Value irDoc =
+    sicnu::planner::projectPlanToIr( primary, &warnings, &projectionError );
+  REQUIRE( projectionError.empty() );
+
+  // The harness reader accepts the projected document (data-level
+  // conformance against THE authority, not a fixture).
+  WorkflowIr ir;
+  HarnessError readError;
+  REQUIRE( readWorkflowIr( irDoc, ir, readError ) );
+
+  // The whole chain lowers the plan into an executable workflow.
+  HarnessError error;
+  const CompiledWorkflow compiled = compileWorkflow( requestForPlanIr( irDoc ), error );
+  CHECK( compiled.verdict() == "ok" );
+  CHECK( compiled.workflowJson.size() > 0 );
+  CHECK( compiled.planError.code.empty() );
+
+  // Plan provenance survives: the ir id derives from the plan fingerprint and
+  // rides the lowered plan document.
+  CHECK( ir.irId == irDoc["ir_id"].asString() );
+  CHECK( compiled.plan.raw["workflow_ir"]["ir_id"].asString() == ir.irId );
+  bool sawPlannerSource = false;
+  for ( const auto &node : compiled.ir.nodes )
+    sawPlannerSource =
+      sawPlannerSource || node.source.rfind( "planner:" + primary.planId, 0 ) == 0;
+  CHECK( sawPlannerSource );
+}
+
+TEST_CASE( "A hostile IR cannot borrow the lowering chain past the authority gates",
+           "[workflow_planner][planner_handoff]" )
+{
+  loadHarnessKnowledge();
+  using namespace planner_handoff;
+
+  const sicnu::planner::PlanningResult planned = ndviPlan();
+  REQUIRE( planned.primary() != nullptr );
+  std::string projectionError;
+  Json::Value irDoc =
+    sicnu::planner::projectPlanToIr( *planned.primary(), nullptr, &projectionError );
+  REQUIRE( projectionError.empty() );
+
+  SECTION( "an operator no authority declares is refused (never lowered)" )
+  {
+    REQUIRE( irDoc["nodes"].isArray() );
+    irDoc["nodes"][0]["operator"] = "rs:total_wipe";
+    HarnessError error;
+    const CompiledWorkflow compiled = compileWorkflow( requestForPlanIr( irDoc ), error );
+    CHECK( compiled.verdict() != "ok" );
+    CHECK( compiled.executionBlocked );
+    CHECK( compiled.workflowJson.empty() );
+    bool sawUnknownOperator = false;
+    for ( const auto &check : compiled.analysis.toJson()["checks"] )
+      sawUnknownOperator = sawUnknownOperator
+                           || check["check"].asString() == "known_operator";
+    CHECK( sawUnknownOperator );
+  }
+
+  SECTION( "an ungrounded hostile slot refuses instead of guessing a path" )
+  {
+    irDoc["inputs"][0]["name"] = "hostile-slot";
+    HarnessError error;
+    CompileWorkflowRequest request = requestForPlanIr( irDoc );
+    request.inputFacts.clear();
+    const CompiledWorkflow compiled = compileWorkflow( request, error );
+    CHECK( compiled.workflowJson.empty() );
+  }
+}
