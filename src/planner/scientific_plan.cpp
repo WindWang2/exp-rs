@@ -4,6 +4,7 @@
 #include "planner/json_util.h"
 #include "planner/sha256_util.h"
 
+#include <algorithm>
 #include <set>
 
 namespace sicnu::planner {

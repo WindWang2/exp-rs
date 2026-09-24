@@ -24,6 +24,7 @@ target_include_directories( sicnu_recipes PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_recipes PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: the canonical target when the
