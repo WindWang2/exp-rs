@@ -9886,6 +9886,29 @@ target_link_libraries(test_grader_schema PRIVATE
 )
 sicnu_discover_tests(test_grader_schema)
 
+# RS14-05 Slices B/C: matching/scoring engine, document-shape adapters and
+# report renderers (same leaf lane, no new links).
+add_executable(test_grader_engine test_grader_engine.cpp)
+target_link_libraries(test_grader_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_engine)
+
+add_executable(test_grader_adapters test_grader_adapters.cpp)
+target_link_libraries(test_grader_adapters PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_adapters)
+
+add_executable(test_grader_render test_grader_render.cpp)
+target_link_libraries(test_grader_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_render)
+
 # LabSpec v3 runtime: checkpoint verify, hint policy, session state/store,
 # spec runtime (sicnu_lab_runtime links jsoncpp PUBLIC).
 add_executable(test_lab_runtime test_lab_runtime.cpp)
