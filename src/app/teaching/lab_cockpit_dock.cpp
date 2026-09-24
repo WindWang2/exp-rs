@@ -3,10 +3,16 @@
 #include <memory>
 #include "course_home_page.h"
 #include "guided_lab_workspace.h"
+#include "lab_validate_service.h"
 
 #include "agent/harness/curriculum_availability.h"
 #include "agent/harness/curriculum_catalog.h"
 #include "agent/harness/curriculum_progress.h"
+#include "agent/harness/curriculum_registry_probe.h"
+#include "dataset/dataset_store.h"
+#include "experiment/capsule/capsule_builder.h"
+#include "experiment/capsule/capsule_io.h"
+#include "experiment/experiment_store.h"
 #include "agent/autonomy/autonomy_policy.h"
 #include "agent/autonomy/autonomy_projection.h"
 #include "teaching/autonomy_effective_display.h"
@@ -71,6 +77,16 @@ LabCockpitDock::LabCockpitDock( QgisDesktopWindow *mainWindow, QWidget *parent )
   restoreSession();
 }
 
+void LabCockpitDock::setOperatorLauncher( OperatorLauncher launcher )
+{
+  m_launchOperator = std::move( launcher );
+}
+
+void LabCockpitDock::setCapsuleSourceProvider( CapsuleSourceProvider provider )
+{
+  m_capsuleSource = std::move( provider );
+}
+
 void LabCockpitDock::wireSignals()
 {
   connect( m_home, &CourseHomePage::labSelected, this, &LabCockpitDock::openLab );
@@ -98,37 +114,157 @@ void LabCockpitDock::wireSignals()
              saveSession();
            } );
   connect( m_workspace, &GuidedLabWorkspace::validateRequested, this, [this]() {
-    // Honest stub: project indeterminate when no live reports are injected.
-    auto fb = sicnu::teaching::LabFeedbackProjection::fromReports(
-      m_session.labId, Json::Value(), Json::Value(), m_session.capsuleExportRef );
+    // Real wiring: the same OutputVerifier engines `lab --grade` wraps,
+    // projected through the teaching leaf. Empty artifact → honest
+    // indeterminate; the UI never recomputes a verdict.
+    m_session.artifactPath = m_workspace->artifactPath().toStdString();
+    sicnu::app::teaching::LabValidateInput in;
+    in.labId = m_session.labId;
+    in.artifactPath = m_session.artifactPath;
+    in.rulesPath = sicnu::app::teaching::resolveLabRulesPath(
+      m_labDoc, repoDataRoot().toStdString() );
+    auto fb = sicnu::app::teaching::projectValidation( in );
     m_workspace->setFeedback( fb );
     m_session.lastValidationSummary = fb.toJson();
-    m_session.labStatus = sicnu::teaching::LabUiStatus::PendingVerify;
+    m_session.labStatus = fb.overallStatus == "pass" ? sicnu::teaching::LabUiStatus::Completed
+                          : fb.overallStatus == "fail"
+                            ? sicnu::teaching::LabUiStatus::NeedsCorrection
+                            : sicnu::teaching::LabUiStatus::PendingVerify;
     saveSession();
   } );
-  connect( m_workspace, &GuidedLabWorkspace::exportCapsuleRequested, this, [this]() {
-    m_session.capsuleExportRef = "capsule:pending/" + m_session.labId;
-    auto fb = m_session.lastValidationSummary.isObject()
-                ? sicnu::teaching::LabFeedbackProjection::fromReports(
-                    m_session.labId,
-                    Json::Value(),
-                    Json::Value(),
-                    m_session.capsuleExportRef )
-                : sicnu::teaching::LabFeedbackProjection::fromReports(
-                    m_session.labId, Json::Value(), Json::Value(), m_session.capsuleExportRef );
-    m_workspace->setFeedback( fb );
-    saveSession();
-  } );
-  connect( m_workspace, &GuidedLabWorkspace::jumpWorkbenchRequested, this,
-           [this]( const QString &operatorId ) {
-             // Honest stub jump: surface message; real Processing jump is owned
-             // by existing GuidedWorkflow / toolbox — we do not clone UI.
-             Q_UNUSED( operatorId );
-             QMessageBox::information(
-               this, tr( "跳转到处理工具箱" ),
-               tr( "请在现有 Processing Toolbox / Guided Workflow 中执行该算子。"
-                   "实验工作台只投影，不复制算子 UI。" ) );
+  connect( m_workspace, &GuidedLabWorkspace::runOperatorRequested, this,
+           [this]( const QString &operatorId, const QString &paramsJson ) {
+             Q_UNUSED( paramsJson ); // the Processing dialog owns parameter widgets
+             launchOperator( operatorId );
            } );
+  connect( m_workspace, &GuidedLabWorkspace::jumpWorkbenchRequested, this,
+           [this]( const QString &operatorId ) { launchOperator( operatorId ); } );
+  connect( m_workspace, &GuidedLabWorkspace::exportCapsuleRequested, this,
+           [this]() { exportCapsule(); } );
+}
+
+void LabCockpitDock::launchOperator( const QString &operatorId )
+{
+  // Hand off to the EXISTING Processing surface (openProcessingAlgorithm);
+  // we never clone the operator UI and never report a fake launch.
+  if ( m_launchOperator ) {
+    m_launchOperator( operatorId );
+    return;
+  }
+  QMessageBox::information(
+    this, tr( "跳转到处理工具箱" ),
+    tr( "请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。"
+        "实验工作台只投影，不复制算子 UI。" )
+      .arg( operatorId ) );
+}
+
+void LabCockpitDock::appendExportNote( const QString &noteZh )
+{
+  m_workspace->appendFeedbackNote( noteZh );
+}
+
+void LabCockpitDock::exportCapsule()
+{
+  namespace caps = sicnu::experiment::capsule;
+  const LabCapsuleSource src = m_capsuleSource ? m_capsuleSource() : LabCapsuleSource{};
+  auto fail = [this]( const QString &reasonZh ) {
+    // Never leave or fabricate a capsule ref after a failed export.
+    m_session.capsuleExportRef.clear();
+    appendExportNote( tr( "导出失败: %1" ).arg( reasonZh ) );
+    saveSession();
+  };
+  auto diagText = []( const auto &result ) -> QString {
+    return result.diagnostics().isEmpty() ? QString()
+                                          : result.diagnostics().first().message;
+  };
+
+  if ( src.experimentDbPath.isEmpty() ) {
+    fail( tr( "未打开实验记录库：没有可提交的运行记录（不做假引用）" ) );
+    return;
+  }
+  sicnu::experiment::ExperimentStore store;
+  QString err;
+  if ( !store.open( src.experimentDbPath, &err ) ) {
+    fail( tr( "实验记录库打开失败: %1" ).arg( err ) );
+    return;
+  }
+
+  if ( m_session.runId.empty() ) {
+    // Bind deterministically to recorded truth (same policy as the classroom
+    // CLI): the newest run recorded for THIS experiment — never a guess.
+    const QString expId = !src.experimentId.isEmpty()
+                            ? src.experimentId
+                            : QString::fromStdString( m_session.experimentId );
+    if ( expId.isEmpty() ) {
+      fail( tr( "无法确定所属实验：未打开 lab 项目（不做跨实验猜测绑定）" ) );
+      return;
+    }
+    auto totalRes = store.listRuns( expId, QString(), QString(), 0, 1 );
+    if ( !totalRes ) {
+      fail( tr( "无法读取运行记录: %1" ).arg( diagText( totalRes ) ) );
+      return;
+    }
+    const qint64 total = totalRes.value().first;
+    if ( total <= 0 ) {
+      fail( tr( "实验还没有已记录的运行（先在处理工具箱完成运行并保存）" ) );
+      return;
+    }
+    auto lastRes = store.listRuns( expId, QString(), QString(), total - 1, 1 );
+    if ( !lastRes || lastRes.value().second.isEmpty() ) {
+      fail( tr( "无法读取最新运行记录" ) );
+      return;
+    }
+    m_session.runId = lastRes.value().second.first().runId().toStdString();
+    appendExportNote( tr( "已绑定最新记录的运行: %1" )
+                        .arg( QString::fromStdString( m_session.runId ) ) );
+  }
+
+  sicnu::dataset::DatasetStore datasets;
+  if ( !src.datasetDbPath.isEmpty() ) {
+    QString dsErr;
+    if ( !datasets.open( src.datasetDbPath, &dsErr ) )
+      appendExportNote( tr( "数据集库不可用（%1）：数据集版本将按未解析记录" ).arg( dsErr ) );
+  }
+
+  caps::CapsuleBuilder builder( store, datasets );
+  caps::CapsuleOptions opts;
+  opts.workspaceRoot = src.workspaceRoot;
+  caps::CapsuleHooks hooks; // unwired ⇒ recorded facts only, never fabricated
+
+  const QString runId = QString::fromStdString( m_session.runId );
+  auto built = builder.build( runId, opts, hooks );
+  if ( !built ) {
+    // A pruned/deleted run must not wedge the session forever: drop the
+    // stale binding so the next export re-derives the newest recorded run
+    // by the same deterministic policy (still no guessing).
+    const bool runMissing = !built.diagnostics().isEmpty()
+                            && built.diagnostics().first().code
+                                 == QStringLiteral( "capsule.run-missing" );
+    if ( runMissing ) {
+      m_session.runId.clear();
+      appendExportNote( tr( "已记录的运行 %1 已不存在，下次导出将重新绑定最新运行" ).arg( runId ) );
+    }
+    fail( tr( "胶囊构建失败（%1）: %2" )
+            .arg( runId, diagText( built ) ) );
+    return;
+  }
+
+  const QString exportDir =
+    QStandardPaths::writableLocation( QStandardPaths::AppDataLocation )
+    + QStringLiteral( "/teaching/exports" );
+  QDir().mkpath( exportDir );
+  const QString path = exportDir + QStringLiteral( "/%1.capsule.json" ).arg( runId );
+  auto exported = caps::CapsuleIO::exportCapsule( built.value(), path );
+  if ( !exported ) {
+    fail( tr( "胶囊写入失败: %1" ).arg( diagText( exported ) ) );
+    return;
+  }
+  m_session.capsuleExportRef =
+    ( QStringLiteral( "file:" ) + exported.value().path ).toStdString();
+  appendExportNote( tr( "胶囊已导出: %1（%2 字节）" )
+                      .arg( exported.value().path )
+                      .arg( exported.value().bytes ) );
+  saveSession();
 }
 
 Json::Value LabCockpitDock::loadJsonFile( const QString &path ) const
@@ -175,19 +311,12 @@ void LabCockpitDock::loadCourseFromRepo()
   paths.labsDir = QDir( data ).filePath( QStringLiteral( "labs" ) ).toStdString();
   paths.packsDir = QDir( data ).filePath( QStringLiteral( "labs/packs" ) ).toStdString();
 
-  // Probe: treat operators unknown unless registered probe says otherwise —
-  // offline classroom defaults to honest UNKNOWN rather than fake available.
-  CurriculumOperatorProbes probes;
-  probes.registered = []( const std::string & ) { return false; };
-  probes.capabilityNote = []( const std::string & ) { return false; };
-  // Soften for resolvable labspecs: if we can read the lab file, mark operators
-  // as registered_no_capability_note via a slightly richer probe when the
-  // shipped lab JSON lists them — still fail-closed for unknown ids.
-  // For demo readiness of lab15, mark its known operators available.
-  probes.registered = []( const std::string &id ) {
-    return id == "rs:extract_bands" || id == "rs:resample" || id == "io:inspect";
-  };
-  probes.capabilityNote = probes.registered;
+  // Probe: operators are unknown unless the authoritative registry probe
+  // (RSOperatorRegistry::hasOperator + CapabilityKnowledge, sicnu_agent)
+  // says otherwise — the offline classroom stays honest UNKNOWN, fail-closed.
+  // No hard-coded operator id list lives here; the runtime registry is the
+  // single truth source.
+  const CurriculumOperatorProbes probes = defaultCurriculumProbes();
 
   if ( m_manifest.isObject() ) {
     m_availability = buildAvailabilityReport( m_manifest, paths.labsDir, paths.packsDir, probes );
@@ -224,22 +353,36 @@ void LabCockpitDock::showCourseHome()
 
 void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
 {
+  // Session boundary FIRST: switching lab (or arriving fresh) resets step
+  // navigation so the previous lab's step index never leaks into this
+  // timeline.
+  if ( !m_session.ok || m_session.labId != labId.toStdString() ) {
+    m_session = sicnu::teaching::LabSessionState::makeNew(
+      "local/" + labId.toStdString(),
+      m_manifest.isObject() && m_manifest.isMember( "id" ) ? m_manifest["id"].asString()
+                                                           : "undergraduate_rs",
+      labId.toStdString(),
+      m_home->viewModel().mode );
+    m_session.artifactPath.clear();
+    m_workspace->setArtifactPath( QString() );
+    m_workspace->clearFeedback();
+  }
+  m_session.moduleId = moduleId.toStdString();
+
   const QString data = repoDataRoot();
   const QString labPath =
     QDir( data ).filePath( QStringLiteral( "labs/%1.lab.json" ).arg( labId ) );
   Json::Value labDoc = loadJsonFile( labPath );
+  m_labDoc = labDoc;
   auto timeline = sicnu::teaching::LabStepTimeline::fromLabDocument( labDoc, m_session.stepIndex );
   m_workspace->setTimeline( timeline );
 
+  // Honest readiness: passport / inspector / scientific facts are NOT
+  // fabricated here. Without an injected preflight the aggregate records
+  // UNKNOWN items (fail-closed) instead of a fake OK.
   Json::Value slice = findAvailabilityLabSlice( m_availability, labId.toStdString() );
-  Json::Value passport( Json::objectValue );
-  passport["ok"] = true;
-  Json::Value inspector( Json::objectValue );
-  inspector["blocking"] = false;
-  Json::Value sci( Json::objectValue );
-  sci["conflict"] = false;
   auto readiness = sicnu::teaching::LabReadiness::aggregate(
-    labId.toStdString(), slice, passport, inspector, sci, m_offline );
+    labId.toStdString(), slice, Json::Value(), Json::Value(), Json::Value(), m_offline );
   m_workspace->setReadiness( readiness );
 
   Json::Value policy( Json::objectValue );
@@ -257,15 +400,20 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   }
   m_workspace->setWhyMarkdown( why );
 
-  if ( !m_session.ok || m_session.labId != labId.toStdString() ) {
-    m_session = sicnu::teaching::LabSessionState::makeNew(
-      "local/" + labId.toStdString(),
-      m_manifest.isObject() && m_manifest.isMember( "id" ) ? m_manifest["id"].asString()
-                                                           : "undergraduate_rs",
-      labId.toStdString(),
-      m_home->viewModel().mode );
+  // Restore the persisted feedback summary for THIS lab only; a summary from
+  // another lab is never shown. The summary is re-materialized from the
+  // recorded projection — no verdict is recomputed here.
+  const auto &summary = m_session.lastValidationSummary;
+  if ( summary.isObject() && summary.isMember( "schema" ) ) {
+    auto fb = sicnu::teaching::LabFeedbackProjection::fromJson( summary );
+    if ( fb.ok && fb.labId == m_session.labId ) {
+      // A successful export after the last validation is recorded in the
+      // session, not in the summary — overlay it so the ref survives restart.
+      if ( !m_session.capsuleExportRef.empty() )
+        fb.capsuleExportRef = m_session.capsuleExportRef;
+      m_workspace->setFeedback( fb );
+    }
   }
-  m_session.moduleId = moduleId.toStdString();
   m_session.autonomyPolicyRef = "inline:practice/L2";
   saveSession();
 
@@ -290,7 +438,19 @@ void LabCockpitDock::restoreSession()
 {
   auto loaded = sicnu::teaching::LabSessionState::loadFromFile( sessionPath().toStdString() );
   if ( !loaded.ok ) return; // fail-closed: stay on course home
+  // Course-switch fail-closed: a session recorded under another course must
+  // not silently adopt this manifest's labs. Drop to a fresh state on the
+  // Course Home instead.
+  const std::string manifestId =
+    m_manifest.isObject() && m_manifest.isMember( "id" ) && m_manifest["id"].isString()
+      ? m_manifest["id"].asString()
+      : "undergraduate_rs";
+  if ( loaded.courseId != manifestId ) {
+    m_session = sicnu::teaching::LabSessionState{};
+    return;
+  }
   m_session = loaded;
+  m_workspace->setArtifactPath( QString::fromStdString( m_session.artifactPath ) );
   if ( !m_session.labId.empty() )
     openLab( QString::fromStdString( m_session.moduleId ),
              QString::fromStdString( m_session.labId ) );

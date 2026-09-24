@@ -12815,6 +12815,60 @@ function(sicnu_add_teaching_test NAME)
 endfunction()
 
 sicnu_add_teaching_test(test_teaching_lab_cockpit)
+
+# Undergraduate Lab Cockpit offscreen widget smoke (completion
+# teaching-cockpit-live-integration): drives the REAL dock widgets over the
+# REAL authorities — runtime registry probe, OutputVerifier grading engine
+# (real GTiff + shipped rules), ExperimentStore + CapsuleBuilder + CapsuleIO
+# export, and the session file across a restart. Compiles the dock TUs;
+# heavy deps (qgis/processing/operators) arrive transitively via sicnu_agent.
+add_executable(test_teaching_cockpit_smoke
+  test_teaching_cockpit_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_validate_service.cpp
+)
+target_link_libraries(test_teaching_cockpit_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::dataset
+  Sicnu::experiment_capsule
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_sample_foundry
+)
+target_include_directories(test_teaching_cockpit_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_teaching_cockpit_smoke PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_teaching_cockpit_smoke PROPERTIES
+  AUTOMOC ON
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+set(_smoke_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_smoke_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
+catch_discover_tests(test_teaching_cockpit_smoke
+  DISCOVERY_MODE PRE_TEST
+  TEST_PREFIX "teaching_cockpit_smoke: "
+  ${_smoke_dl_paths}
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 # ── Teacher Authoring & Assessment Console (Catch2 + Sicnu::teaching_admin) ──
 function(sicnu_add_teaching_admin_test NAME)
   add_executable(${NAME} ${NAME}.cpp)
