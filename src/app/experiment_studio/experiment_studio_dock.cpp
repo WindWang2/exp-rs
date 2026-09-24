@@ -899,14 +899,10 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
         return;
     }
     const FirstDivergenceViewModel vm = projectFirstDivergence( report.value() );
+    // No synthetic marker here: this IS analyzer output over recorded runs.
+    // (The #1293 merge stranded the old demo marker on this live path, which
+    // exported real evidence labeled "not derived from recorded runs".)
     m_lastDivergenceVm = vm.toJson();
-    // Same honesty as the synthetic study report: this divergence view is a
-    // hand-built demonstration, not analyzer output over recorded runs.
-    m_lastDivergenceVm.insert( QStringLiteral( "synthetic" ), true );
-    m_lastDivergenceVm.insert(
-        QStringLiteral( "synthetic_note" ),
-        QStringLiteral( "studio demonstration document, not derived from"
-                        " recorded runs" ) );
     m_session.referenceRunId = vm.referenceRunId;
     m_session.studentRunId = vm.studentRunId;
     m_divergenceLog->setPlainText(
