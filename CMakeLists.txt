@@ -799,6 +799,11 @@ add_subdirectory(src/explain)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
+# ADR 0172 real provider adapters (filesystem/exp-rs-prov/d17 checkpoint,
+# GDAL grid probe): they adapt the authorities above onto the verifier's
+# provider seam and judge nothing. Placed after geospatial (the gdal variant
+# links Sicnu::Geospatial); the verifier leaf itself stays dependency-free.
+add_subdirectory(src/verify_adapters)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
