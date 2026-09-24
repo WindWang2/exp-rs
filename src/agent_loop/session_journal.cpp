@@ -1,13 +1,17 @@
 // src/agent_loop/session_journal.cpp
 #include "session_journal.h"
 
+#include "platform/portable.h"
+
 #include <json/reader.h>
 #include <json/writer.h>
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <system_error>
 
@@ -43,38 +47,92 @@ bool sessionIdCharsetSafe( const std::string &id )
     return id != "." && id != "..";
 }
 
+std::atomic<unsigned long long> &stagingCounter()
+{
+    static std::atomic<unsigned long long> counter{ 0 };
+    return counter;
+}
+
 bool writeFileAtomic( const fs::path &target, const std::string &body, std::string &error )
 {
-    std::error_code ec;
-    const fs::path temp = target.parent_path() / ( target.filename().string() + ".tmp" );
+    const fs::path directory = target.parent_path();
+
+    // Unique staging claim (the atomic_fs #1097 pattern): pid + per-process
+    // counter + random_device entropy, and the name is CLAIMED with
+    // O_EXCL/CREATE_NEW before any bytes are written. The previous
+    // "<name>.tmp" was shared by every publisher of the same target — two
+    // concurrent saves truncated and interleaved each other's bytes, renamed
+    // the file out from under a peer (publish failed with ENOENT), or
+    // published a torn document. The pid+counter prefix alone would still
+    // collide across processes forked from the same counter state (or pid
+    // reuse after a crash), so the entropy + exclusive claim is the part
+    // that makes the name safe on shared session directories.
+    static thread_local std::mt19937_64 stagingRng{ std::random_device{} ^
+                                                    ( static_cast<std::uint64_t>(
+                                                        sicnu::portable::pid() )
+                                                      << 1 ) };
+    const std::string stagingBase = sicnu::portable::pathToUtf8( target.filename() ) + "." +
+                                    std::to_string( sicnu::portable::pid() ) + "." +
+                                    std::to_string( stagingCounter()++ );
+    fs::path temp;
+    bool claimed = false;
+    constexpr int kMaxStagingAttempts = 64;
+    for ( int attempt = 0; attempt < kMaxStagingAttempts && !claimed; ++attempt )
+    {
+        temp = directory / sicnu::portable::pathFromUtf8(
+          stagingBase + "." + std::to_string( stagingRng() ) + ".tmp" );
+        claimed = sicnu::portable::claimExclusiveUtf8( sicnu::portable::pathToUtf8( temp ) );
+    }
+    if ( !claimed )
+    {
+        error = "cannot allocate a staging file next to " +
+                sicnu::portable::pathToUtf8( target );
+        return false;
+    }
     {
         std::ofstream out( temp, std::ios::binary | std::ios::trunc );
         if ( !out )
         {
-            error = "cannot open temp file " + temp.string();
+            error = "cannot open temp file " + sicnu::portable::pathToUtf8( temp );
             return false;
         }
         out.write( body.data(), static_cast< std::streamsize >( body.size() ) );
         out.flush();
         if ( !out )
         {
-            error = "cannot write temp file " + temp.string();
+            error = "cannot write temp file " + sicnu::portable::pathToUtf8( temp );
             return false;
         }
     }
-    // rename() fails when the target exists on some platforms (Windows):
-    // remove first, then rename. The window between the two is the same
-    // best-effort contract the harness session store documents (a crash
-    // mid-publish leaves either the old or no file — never a torn one).
-    fs::remove( target, ec );
+    // Durability gate: the bytes must reach the device before the rename
+    // commits the directory entry, or a crash can publish empty/garbage
+    // content that survives the crash.
+    if ( !sicnu::portable::syncFileUtf8( sicnu::portable::pathToUtf8( temp ) ) )
+    {
+        error = "cannot flush temp file " + sicnu::portable::pathToUtf8( temp );
+        std::error_code cleanup;
+        fs::remove( temp, cleanup );
+        return false;
+    }
+    // Publish with a single atomic replace. POSIX rename(2) and MSVC's
+    // std::filesystem::rename (MoveFileExW with MOVEFILE_REPLACE_EXISTING)
+    // both replace an existing target. The previous remove-then-rename turned
+    // the publish into a window where the journal did not exist at all — a
+    // crash between the two calls destroyed the audit trail it exists to
+    // protect.
+    std::error_code ec;
     fs::rename( temp, target, ec );
     if ( ec )
     {
         std::error_code cleanup;
         fs::remove( temp, cleanup );
-        error = "cannot publish " + target.string() + ": " + ec.message();
+        error = "cannot publish " + sicnu::portable::pathToUtf8( target ) + ": " + ec.message();
         return false;
     }
+    // Narrow the crash window for the directory entry itself (best-effort —
+    // some filesystems refuse directory fsync; the file fsync above is the
+    // correctness gate).
+    sicnu::portable::syncDirectoryBestEffortUtf8( sicnu::portable::pathToUtf8( target ) );
     return true;
 }
 
@@ -217,13 +275,25 @@ bool SessionJournal::save( const std::string &directory, std::string *error ) co
     }
 
     std::error_code ec;
-    const fs::path dir( directory );
+    const fs::path dir = sicnu::portable::pathFromUtf8( directory );
     fs::create_directories( dir, ec );
-    if ( ec && !fs::is_directory( dir ) )
+    if ( ec )
     {
-        if ( error )
-            *error = "cannot create directory " + directory + ": " + ec.message();
-        return false;
+        // The re-check must stay on the error_code overload: the throwing
+        // fs::is_directory(status) turned an unrepresentable path (over-long,
+        // ENAMETOOLONG) into an uncaught filesystem_error instead of the
+        // documented graceful failure. The create error is snapshotted first
+        // because a successful probe CLEARS ec — reporting ec.message()
+        // after the probe would read "Success" when the directory exists as
+        // a non-directory (EEXIST).
+        const std::string createMessage = ec.message();
+        std::error_code probe;
+        if ( !fs::is_directory( dir, probe ) )
+        {
+            if ( error )
+                *error = "cannot create directory " + directory + ": " + createMessage;
+            return false;
+        }
     }
 
     // Oversized documents persist through the deterministic compaction
@@ -252,12 +322,13 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
             *error = "session journal: unsafe session_id '" + sessionId + "'";
         return std::nullopt;
     }
-    const fs::path path = fs::path( directory ) / ( sessionId + ".json" );
+    const fs::path path =
+      sicnu::portable::pathFromUtf8( directory ) / ( sessionId + ".json" );
     std::error_code ec;
     if ( !fs::exists( path, ec ) )
     {
         if ( error )
-            *error = "session journal: not found " + path.string();
+            *error = "session journal: not found " + sicnu::portable::pathToUtf8( path );
         return std::nullopt;
     }
 
@@ -265,7 +336,7 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
     if ( !in )
     {
         if ( error )
-            *error = "session journal: cannot open " + path.string();
+            *error = "session journal: cannot open " + sicnu::portable::pathToUtf8( path );
         return std::nullopt;
     }
     std::ostringstream buffer;
@@ -279,7 +350,8 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
     if ( !reader->parse( body.data(), body.data() + body.size(), &doc, &parseError ) )
     {
         if ( error )
-            *error = "session journal: corrupt document " + path.string() + ": " + parseError;
+            *error = "session journal: corrupt document " +
+                     sicnu::portable::pathToUtf8( path ) + ": " + parseError;
         return std::nullopt;
     }
     return fromJson( doc, error );

@@ -27,11 +27,14 @@
 #define SICNU_PLATFORM_PORTABLE_H
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
 #if !defined( _WIN32 )
+#include <fcntl.h>
 #include <unistd.h>
 #else
 #ifndef WIN32_LEAN_AND_MEAN
@@ -167,6 +170,95 @@ inline bool isWindowsReservedName( const std::string &name )
     if ( base == reserved )
       return true;
   return false;
+}
+
+/// Claims @p path exclusively as a fresh staging file: POSIX open(2) with
+/// O_EXCL, Windows CreateFileW with CREATE_NEW. True when this caller now
+/// owns the name (the file exists empty; the caller writes and publishes it
+/// or removes it). This is the check-then-use antidote for staging names on
+/// directories other writers may touch: two publishers can never hold the
+/// same temp, whatever their pids/counters happen to be.
+inline bool claimExclusiveUtf8( const std::string &path )
+{
+#if !defined( _WIN32 )
+  const int fd = ::open( path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600 );
+  if ( fd < 0 )
+    return false;
+  ::close( fd );
+  return true;
+#else
+  const HANDLE handle = ::CreateFileW( wideFromUtf8( path ).c_str(), GENERIC_WRITE,
+                                       FILE_SHARE_READ, nullptr, CREATE_NEW,
+                                       FILE_ATTRIBUTE_NORMAL, nullptr );
+  if ( handle == INVALID_HANDLE_VALUE )
+    return false;
+  ::CloseHandle( handle );
+  return true;
+#endif
+}
+
+/// fopen() over a UTF-8 @p path (POSIX byte-transparent; Windows widens to
+/// UTF-16 so a non-ASCII cache/data directory survives the C file API — the
+/// narrow fopen decodes with the process ANSI code page and misses). @p mode
+/// is the usual ASCII fopen mode text. Returns nullptr like fopen on failure.
+inline std::FILE *fileOpenUtf8( const std::string &utf8, const char *mode )
+{
+#if !defined( _WIN32 )
+  return std::fopen( utf8.c_str(), mode );
+#else
+  const std::wstring wideMode( mode, mode + std::strlen( mode ) );
+  return ::_wfopen( wideFromUtf8( utf8 ).c_str(), wideMode.c_str() );
+#endif
+}
+
+/// Durability gate for a publish sequence: flush @p path's written bytes to
+/// the storage device (fsync(2), resp. FlushFileBuffers). @p path is UTF-8.
+/// Returns false when the file cannot be opened or the flush fails — a
+/// publisher must then refuse to rename the file into place, or a crash can
+/// commit the directory entry for bytes that never reached the disk.
+inline bool syncFileUtf8( const std::string &path )
+{
+#if !defined( _WIN32 )
+  // O_WRONLY so fsync(2) is legal on every POSIX flavor (XSI is strictest
+  // about O_RDONLY fds). Windows opens GENERIC_WRITE, which fails on a
+  // read-only file — publishers call this on files they just wrote.
+  const int fd = ::open( path.c_str(), O_WRONLY );
+  if ( fd < 0 )
+    return false;
+  const bool flushed = ::fsync( fd ) == 0;
+  ::close( fd );
+  return flushed;
+#else
+  const HANDLE handle = ::CreateFileW( wideFromUtf8( path ).c_str(), GENERIC_WRITE,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
+  if ( handle == INVALID_HANDLE_VALUE )
+    return false;
+  const bool flushed = ::FlushFileBuffers( handle ) != 0;
+  ::CloseHandle( handle );
+  return flushed;
+#endif
+}
+
+/// Best-effort durability for a RENAME's directory entry: flushes the
+/// directory containing @p path (UTF-8) so a crash after publish cannot
+/// revert the directory entry. Silent by design — several legitimate
+/// filesystems (network/FUSE mounts) refuse directory fsync with EINVAL, and
+/// failing the publish there would trade a real capability for a durability
+/// nicety. Windows has no directory-flush API; MOVEFILE_WRITE_THROUGH-style
+/// semantics are the publisher's responsibility there, so this is a no-op.
+inline void syncDirectoryBestEffortUtf8( const std::string &path )
+{
+#if !defined( _WIN32 )
+  const std::filesystem::path target = pathFromUtf8( path );
+  const std::filesystem::path directory =
+    target.parent_path().empty() ? std::filesystem::path( "." ) : target.parent_path();
+  const int fd = ::open( directory.c_str(), O_RDONLY );
+  if ( fd < 0 )
+    return;
+  ::fsync( fd ); // ignored: EINVAL on filesystems without directory fsync
+  ::close( fd );
+#endif
 }
 
 } // namespace sicnu::portable
