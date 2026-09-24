@@ -70,6 +70,13 @@ public:
     /// The benchmark uses size() as the per-call work bound.
     const QVector<int> &lastTouchedRows() const { return mSessionRows; }
 
+    /// Rows this model ITERATED over inside applyEvents(). This is the
+    /// anti-regression twin of lookupOps(): the touched-row set is derived
+    /// from the event batch directly (O(events)), so a change that quietly
+    /// reintroduces a scan of all task rows shows up as scannedRows growing
+    /// with the mission size instead of with the event count.
+    long long scannedRows() const { return mScannedRows; }
+
     /// Projection of a single row — the exact bytes the MCP `mission:timeline`
     /// tool returns for the same task (surface parity by construction).
     QJsonObject projectionAt( int row ) const;
@@ -104,18 +111,14 @@ private:
     void emitRowChanged( int row );
     void appendNewTasks( const QVector<MissionTask> &tasks );
 
-    /// Task -> the applyEvents() serial in which it was last reported. An
-    /// event may repeat a row (two transitions in one batch); those are still
-    /// two rows worth of work, so the model reports both.
-    QHash<QString, int> mLastTouchedSerial;
-    /// Rows touched by the current applyEvents() call. Reconciliation can drop
-    /// a reference from a task WITHOUT any event and `retry()` can bring a
-    /// stale task back, so the model cannot assume "changed tasks have events":
-    /// it reports the rows whose task actually changed, which is the honest
-    /// bound. Rows are never removed (positions are stable and the history is
-    /// provenance), so no index has to move.
+    /// Rows touched by the current applyEvents() call, ascending. Derived
+    /// directly from the event batch: every mutation that changes a task
+    /// appends an event (reconciliation, retry and rename all go through the
+    /// state machine), so the events are the complete work list — the model
+    /// never scans rows whose task did not move. Rows are never removed
+    /// (positions are stable and the history is provenance), so no index has
+    /// to move.
     QVector<int> mSessionRows;
-    int mSerial = 0;
 
     MissionTimeline mTimeline;
     QVector<MissionTask> mTasks;   ///< in insertion order; index == row
@@ -126,6 +129,7 @@ private:
     int mFullRangeChanges = 0;
     long long mTouchedRows = 0;
     long long mLookupOps = 0;
+    long long mScannedRows = 0;
     int mApplyCount = 0;
 };
 

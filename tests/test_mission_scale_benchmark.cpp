@@ -23,6 +23,7 @@ struct RunResult
 {
     long long touchedRows = 0;
     long long lookupOps = 0;
+    long long scannedRows = 0;
     int resets = 0;
     int fullRangeChanges = 0;
     qint64 elapsedMs = 0;
@@ -87,6 +88,7 @@ RunResult runEvents( const MissionTimeline &base, int taskCount, int eventCount,
     RunResult result;
     result.touchedRows = model.touchedRows();
     result.lookupOps = model.lookupOps();
+    result.scannedRows = model.scannedRows();
     result.resets = model.resetCount();
     result.fullRangeChanges = model.fullRangeDataChangedCount();
     result.elapsedMs = timer.elapsed();
@@ -122,6 +124,13 @@ TEST_CASE( "incremental updates cost O(events), not O(tasks)", "[mission][scale]
     REQUIRE( largeRun.lookupOps == kEventCount );
     REQUIRE( smallRun.lookupOps == largeRun.lookupOps );
 
+    // …and each event scanned exactly one row. This is the bound the
+    // lookupOps counter cannot express on its own: an applyEvents that
+    // diffs the whole task table keeps lookupOps at O(events) while making
+    // the real work O(tasks x events).
+    REQUIRE( smallRun.scannedRows == kEventCount );
+    REQUIRE( largeRun.scannedRows == kEventCount );
+
     // And every event repainted exactly one row.
     REQUIRE( smallRun.touchedRows == kEventCount );
     REQUIRE( largeRun.touchedRows == kEventCount );
@@ -153,4 +162,154 @@ TEST_CASE( "history is paged instead of materialised", "[mission][scale][benchma
     // Paging never touches rows: it inserts, it does not repaint.
     REQUIRE( model.fullRangeDataChangedCount() == 0 );
     REQUIRE( model.touchedRows() == 0 );
+}
+
+namespace {
+
+/// The O(events)-not-O(tasks x events) contract, parameterized so the
+/// always-on suite proves it at 10^4 events while the 10^5-event campaign
+/// profile stays opt-in (SICNU_MISSION_SCALE_100K=1 — same pattern as
+/// SICNU_LAB_SCALE_1000): at ~5.5 ms/event in a Debug build the full 10^5
+/// run costs ~9 minutes, dominated by Qt COW snapshot detaches that scale
+/// with the task count, not by any per-event table scan.
+void runScaleContract( int taskCount, int eventCount, qint64 ceilingMs )
+{
+    constexpr int kLayerCount = 300;
+
+    const MissionTimeline base = makeMission( kLayerCount, taskCount );
+    // Page size above the task count so every row is paged in and the
+    // touched-row count is directly comparable with the event count.
+    const RunResult run = runEvents( base, taskCount, eventCount, taskCount + 1 );
+
+    // One reset (the initial load), never again — model reset stays a
+    // per-project-load event, not a per-update fallback.
+    REQUIRE( run.resets == 1 );
+    REQUIRE( run.fullRangeChanges == 0 );
+
+    // O(1) per event on both counters, independent of the task count.
+    REQUIRE( run.lookupOps == eventCount );
+    REQUIRE( run.scannedRows == eventCount );
+    REQUIRE( run.touchedRows == eventCount );
+
+    // Pathological-regression ceiling, NOT a performance claim: the counter
+    // assertions above are the algorithmic oracle (O(1) work per event).
+    // The wall-clock constant is dominated by Qt COW detaches of the shared
+    // task vector on every authority mutation — value-type semantics that
+    // scale with the task count even though the WORK per event does not. A
+    // reintroduced per-event task scan multiplies that constant by the task
+    // count again and lands far beyond any ceiling chosen here.
+    REQUIRE( run.elapsedMs < ceilingMs );
+    WARN( "mission timeline scale: " << taskCount << " tasks x " << eventCount << " events = "
+          << run.elapsedMs << " ms (" << ( double( run.elapsedMs ) / eventCount )
+          << " ms/event)" );
+}
+
+} // namespace
+
+TEST_CASE( "10k progress events over a 10k-task mission cost O(events), not O(tasks x events)",
+           "[mission][scale][benchmark]" )
+{
+    // Always-on contract: one event per apply (the shape of a live TaskCenter
+    // progress stream) costs one lookup and one scanned row — the pre-index
+    // implementations did a full task-vector pass per event here.
+    runScaleContract( 10000, 10000, 300000 );
+}
+
+TEST_CASE( "100k-event campaign profile (opt-in: SICNU_MISSION_SCALE_100K=1)",
+           "[mission][scale][benchmark][.integration]" )
+{
+    // The 10^5-event leg of the contract: same assertions, ten times the
+    // events. Opt-in because a Debug build pays ~5.5 ms/event in COW
+    // snapshot costs (~9 minutes); the number itself is the deliverable of
+    // the profile run and is printed below.
+    if ( qEnvironmentVariableIsEmpty( "SICNU_MISSION_SCALE_100K" ) )
+    {
+        WARN( "skipping the 100k-event profile; set SICNU_MISSION_SCALE_100K=1 to run it" );
+        SKIP();
+    }
+    runScaleContract( 10000, 100000, 900000 );
+}
+
+TEST_CASE( "append-heavy missions keep row identity and paging", "[mission][scale][selection]" )
+{
+    // Rows are provenance: appending tasks must never move, rename or lose
+    // an existing row's identity — a view selection bound to a row keeps
+    // addressing the same task, and every id stays resolvable through the
+    // incremental path (no reset).
+    MissionTimeline timeline;
+    timeline.setMissionId( QStringLiteral( "bench" ) );
+    timeline.setProjectRef( QStringLiteral( "/tmp/bench.qgz" ) );
+
+    constexpr int kInitial = 2000;
+    for ( int i = 0; i < kInitial; ++i )
+    {
+        MissionTask task;
+        task.id = QStringLiteral( "task-%1" ).arg( i );
+        task.title = QStringLiteral( "task %1" ).arg( i );
+        REQUIRE( timeline.addTask( task ).applied );
+    }
+
+    MissionTimelineModel model;
+    model.setPageSize( 200 );
+    model.setTimeline( timeline );
+    REQUIRE( model.resetCount() == 1 );
+    REQUIRE( model.rowCount() == 200 ); // paged-in prefix only
+    REQUIRE( model.canFetchMore( QModelIndex() ) );
+
+    // Selection identity before growth: row 5 is task-5 by id.
+    REQUIRE( model.projectionAt( 5 ).value( QStringLiteral( "id" ) ).toString()
+             == QStringLiteral( "task-5" ) );
+
+    quint64 cursor = timeline.lastEventSeq();
+    constexpr int kAppended = 3000;
+    for ( int i = 0; i < kAppended; ++i )
+    {
+        MissionTask task;
+        task.id = QStringLiteral( "task-%1" ).arg( kInitial + i );
+        task.title = QStringLiteral( "task %1" ).arg( kInitial + i );
+        REQUIRE( timeline.addTask( task ).applied );
+        model.applyEvents( timeline, cursor );
+        cursor = timeline.lastEventSeq();
+    }
+
+    // No reset happened; the pre-existing rows kept their positions and ids.
+    REQUIRE( model.resetCount() == 1 );
+    REQUIRE( model.rowOfTask( QStringLiteral( "task-5" ) ) == 5 );
+    REQUIRE( model.rowOfTask( QStringLiteral( "task-1999" ) ) == 1999 );
+    REQUIRE( model.projectionAt( 5 ).value( QStringLiteral( "id" ) ).toString()
+             == QStringLiteral( "task-5" ) );
+    // New tasks are addressable by id. By design (documented in the model
+    // header) appended in-flight tasks become visible immediately — paging
+    // governs the bulk load, not live appends — so the row count grew to the
+    // full task count without a second reset.
+    REQUIRE( model.rowOfTask( QStringLiteral( "task-4999" ) ) == kInitial + kAppended - 1 );
+    REQUIRE( model.rowCount() == kInitial + kAppended );
+    REQUIRE_FALSE( model.canFetchMore( QModelIndex() ) );
+    // Each append counts twice in the work ledger — one inserted row plus
+    // the row emission of its task_added event — and no repaint existed
+    // anywhere (dataChanged stays row-scoped, inserts are not repaints).
+    REQUIRE( model.touchedRows() == 2 * kAppended );
+    REQUIRE( model.fullRangeDataChangedCount() == 0 );
+}
+
+TEST_CASE( "a 10k-task reload resets once and pages, and ids survive the reset",
+           "[mission][scale][reset]" )
+{
+    const MissionTimeline timeline = makeMission( 300, 10000 );
+
+    MissionTimelineModel model;
+    model.setPageSize( 200 );
+    model.setTimeline( timeline );
+    REQUIRE( model.resetCount() == 1 );
+    REQUIRE( model.rowCount() == 200 );
+    REQUIRE( model.canFetchMore( QModelIndex() ) );
+
+    // Identity is bound to the stable task id, not to a stale row cache:
+    // after a full reload the same id resolves to the same task.
+    model.setTimeline( timeline );
+    REQUIRE( model.resetCount() == 2 );
+    REQUIRE( model.rowOfTask( QStringLiteral( "task-4242" ) ) == 4242 );
+    REQUIRE( model.projectionAt( 4242 ).value( QStringLiteral( "id" ) ).toString()
+             == QStringLiteral( "task-4242" ) );
+    REQUIRE( model.canFetchMore( QModelIndex() ) );
 }
