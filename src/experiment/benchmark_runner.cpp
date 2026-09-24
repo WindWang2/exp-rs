@@ -202,6 +202,12 @@ BenchmarkResult failResult( const BenchmarkDefinition &def, const QString &code,
     result.setFailureMessage( message );
     result.setDatasetVersionId( def.datasetVersionId() );
     result.setSplitManifestId( def.splitManifestId() );
+    // The read gate refuses results whose protocol fails validation — a
+    // Failed row carrying a default-constructed (pin-less) protocol would
+    // poison its benchmark's entire stored history. A refusal run already
+    // carries the completed, validated definition protocol it declined to
+    // evaluate under; record it truthfully.
+    result.setProtocol( def.protocol() );
     return result;
 }
 

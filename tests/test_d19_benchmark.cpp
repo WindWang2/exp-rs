@@ -2,6 +2,7 @@
 // Service + ExperimentRun benchmark pins + pseudo-label safety.
 #include <catch2/catch_test_macros.hpp>
 
+#include "dataset/dataset_store.h"
 #include "dataset/dataset_types.h"
 #include "experiment/benchmark_compare.h"
 #include "experiment/benchmark_definition.h"
@@ -334,4 +335,59 @@ TEST_CASE( "BenchmarkService::listDefinitions order is deterministic from the ca
     QStringList sorted = ids;
     std::sort( sorted.begin(), sorted.end() );
     REQUIRE( ids == sorted );
+}
+
+TEST_CASE( "a recorded benchmark refusal round-trips without poisoning its history",
+           "[d19][benchmark][fail-closed]" )
+{
+    // failResult used to persist a default-constructed (pin-less) protocol;
+    // the read gate correctly refuses protocols that fail validation, so one
+    // recorded refusal made benchmarkResultsFor refuse the WHOLE listing and
+    // hydrateFromStore fail store-wide. A refusal run carries the completed,
+    // validated definition protocol it declined to evaluate under.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.sqlite" ) ) ) );
+
+    BenchmarkService service( &store );
+    REQUIRE( service.publishDefinition( makeDefinition() ).has_value() );
+
+    // A definition whose dataset pin points nowhere: the store is open, so
+    // run() takes the truthful refusal path (version_missing) and records it.
+    BenchmarkDefinition unreachable = makeDefinition();
+    unreachable.setDatasetVersionId( QStringLiteral( "00000000-0000-4000-8000-000000000000" ) );
+    // keep the protocol pins aligned, or definition validation refuses the
+    // whole request instead of recording the truthful refusal
+    unreachable.protocol().setDatasetVersionId( unreachable.datasetVersionId() );
+    sicnu::dataset::DatasetStore datasets;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    BenchmarkRunRequest request;
+    request.definition = unreachable;
+    request.store = &datasets; // the pin checks run only against a wired store
+    request.modelId = QStringLiteral( "model-a" );
+    request.modelDigest = QStringLiteral( "digest" );
+    request.softwareRevision = QStringLiteral( "rev" );
+    BenchmarkTruth truth;
+    truth.sampleId = QStringLiteral( "s1" );
+    truth.truthClass = QStringLiteral( "water" );
+    request.truths.append( truth );
+    BenchmarkPrediction pred;
+    pred.sampleId = QStringLiteral( "s1" );
+    pred.predictedClass = QStringLiteral( "water" );
+    request.predictions.append( pred );
+    const auto run = service.run( request );
+    REQUIRE( run.has_value() );
+    CHECK( run->status() == BenchmarkRunStatus::Failed );
+
+    // Hydrating the store must NOT refuse: the Failed row is valid evidence.
+    BenchmarkService cold( &store );
+    REQUIRE( cold.hydrateFromStore().has_value() );
+    const auto results = cold.resultsFor( makeDefinition().benchmarkId() );
+    REQUIRE( results.size() == 1 );
+    CHECK( results.first().status() == BenchmarkRunStatus::Failed );
+    CHECK( !results.first().failureCode().isEmpty() );
+    // And its protocol is the definition's, not a default fabrication.
+    CHECK( results.first().protocol().datasetVersionId()
+           == unreachable.datasetVersionId() );
 }
