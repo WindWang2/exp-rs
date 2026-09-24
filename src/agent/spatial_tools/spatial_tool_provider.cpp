@@ -49,9 +49,11 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     const bool isSolution = ( spatial->name().rfind( "solution:", 0 ) == 0 );
     const bool isStyle = ( spatial->name().rfind( "style:", 0 ) == 0 );
     const bool isTemplate = ( spatial->name().rfind( "template:", 0 ) == 0 );
+    // RS14-15 Explainable Workflow: the why-this-step teaching surface.
+    const bool isExplain = ( spatial->name().rfind( "explain:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
          !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo &&
-         !isMission && !isSolution && !isStyle && !isTemplate )
+         !isMission && !isSolution && !isStyle && !isTemplate && !isExplain )
       continue;
 
     AgentTool tool;
@@ -71,6 +73,7 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isSolution        ? "solution"
                  : isStyle           ? "style"
                  : isTemplate        ? "template"
+                 : isExplain         ? "explain"
                                      : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();

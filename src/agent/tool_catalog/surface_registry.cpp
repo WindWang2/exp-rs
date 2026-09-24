@@ -77,6 +77,7 @@ QStringList allowedPrefixTable()
         QStringLiteral( "run:" ),         // workflow run comparison (Platform 3.0)
         QStringLiteral( "harness:" ),     // Harness 4.0: taxonomy/manifest/preflight/plan/verify/recipe
         QStringLiteral( "mission:" ),     // mission context/timeline/advance (Workbench 12.0)
+        QStringLiteral( "explain:" ),     // why-this-step explanations (RS14-15, exp.step_explanation.v1)
     };
 }
 

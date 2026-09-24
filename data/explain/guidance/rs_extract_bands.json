@@ -1,0 +1,21 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:extract_bands",
+  "purpose": "从多波段栅格中按 1-based 波段号抽取子集，并按给定顺序重组为新的多波段栅格，用于裁剪无关波段、降低内存与下游 I/O。",
+  "whenToUse": "预处理收尾阶段（如只保留 NIR/Red），或为对波段数敏感的下游算子（如 ihs 融合恰需 3 个波段）准备输入时。",
+  "prerequisitesNote": [
+    "输入必须是多波段栅格，bands 中引用的波段号必须真实存在。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "bands",
+      "rationale": "1-based 波段号数组，数组顺序就是输出波段的顺序；它同时决定输出波段数与各位置的物理含义。",
+      "misconfigurationConsequence": "顺序写反会让按位置引用波段的下游算子（band_math 的 b1/b2、IHS 的 R/G/B 映射）拿错波段，结果整体错位且难以察觉。"
+    }
+  ],
+  "skipConsequence": {
+    "summary": "不裁剪波段时，下游算子读入并处理多余波段，内存与 I/O 开销增大。",
+    "downstreamRoles": ["预处理", "融合", "分类"]
+  },
+  "teachingNote": "纯波段选择：像元值逐位不变（bit-exact），不改变辐射状态——DN、TOA、BOA、Index 任何状态的数据都可安全通过，本步骤不做任何状态转换。"
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:ndvi",
+  "purpose": "rs:spectral_index 的 NDVI 专用原子入口：按 (NIR - Red) / (NIR + Red) 逐像元计算归一化植被指数，度量活体绿色植被的覆盖度与活力。",
+  "whenToUse": "流程只需要 NDVI 一种指数、希望节点语义自文档化时使用；需要多种指数时改用 rs:spectral_index 一次完成。",
+  "prerequisitesNote": [
+    "输入多波段栅格须同时包含 NIR 与 Red 波段；建议先经 rs:atmospheric_correction 以获得最佳精度。"
+  ],
+  "assumptions": [
+    "NDVI 是比值型指数，对辐射尺度不变：DN、TOA 或 BOA 输入在数学上都成立，但大气校正能压低气溶胶对 Red 波段的系统性抬升。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "nir",
+      "rationale": "1-based NIR 波段号，省略时由产品波段角色自动解析；NIR 反映植被冠层的近红外高反射平台，是公式的分子主项。",
+      "misconfigurationConsequence": "波段号错位（把 Red 当 NIR）使 NDVI 失去物理意义甚至反号，植被被误判为水体或裸土。"
+    },
+    {
+      "parameter": "red",
+      "rationale": "1-based Red 波段号，省略时自动解析；Red 承担叶绿素吸收信息，与 nir 一起构成归一化差值的两侧。",
+      "misconfigurationConsequence": "Red 波段指错与 nir 错位同样致命：指数不再对比吸收与反射平台，数值失去可解释区间。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "Index" },
+  "skipConsequence": {
+    "summary": "没有植被指数层，下游植被监测、旱情评估与物候分析失去核心输入。",
+    "downstreamRoles": ["植被监测", "时序分析", "旱情评估"]
+  },
+  "references": [
+    {
+      "title": "Rouse et al., Monitoring the Vernal Advancement and Retrogradation of Natural Vegetation",
+      "kind": "paper",
+      "locator": "NASA SP-351, NASA/GSFC, Greenbelt, MD, 1974, pp. 309-317",
+      "note": "NDVI 公式的标准出处。"
+    }
+  ],
+  "teachingNote": "输出值域约 [-1, 1]，健康植被通常在 0.2-0.9，负值常见于水体与冰雪；比值结构使其对 DN/反射率尺度不敏感，这也是本算子不设 scale 参数的原因。产品未烙印波段角色时务必显式给出 nir/red。"
+}

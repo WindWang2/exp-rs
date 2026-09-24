@@ -1,0 +1,45 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:change_detection",
+  "purpose": "对两期同网格影像逐像元计算变化强度（difference / normalized_difference / ratio / cva / mad），并可继续经 manual、otsu、percentile、statistical 阈值生成二值变化掩膜，附带形态学清理、最小图斑过滤与面积统计。",
+  "whenToUse": "洪水、火烧、城市扩张等双时相变化监测；要求两期数据已完成配准且辐射状态一致。",
+  "prerequisitesNote": [
+    "before / after 必须同网格（preflight 校验 same-grid）且辐射状态一致——端口契约同时接受 DN、Radiance、TOA 与地表反射率，但两期必须取同一状态。",
+    "建议两期都先经 rs:atmospheric_correction 再进入本算子。"
+  ],
+  "assumptions": [
+    "两期之间除目标变化外，物候与观测条件差异已被辐射归一化压低。",
+    "ratio 输出 after/before，before <= 0 的像元为 NaN；cva 与 mad 按波段向量定义变化幅度。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "method",
+      "rationale": "变化度量的数学定义：difference 适合阈值明确的单波段对比，normalized_difference 抑制整体亮度差异，ratio 突出相对变化，cva 面向多波段向量变化，mad 做多波段统计变换。",
+      "misconfigurationConsequence": "两期辐射状态不一致时使用 difference，观测条件差异会以伪变化淹没真实变化。"
+    },
+    {
+      "parameter": "thresholdMethod",
+      "rationale": "掩膜阈值策略：manual 用固定 threshold，otsu 自动取类内方差最小的双峰谷底，percentile 直接控制检出比例，statistical 用 mean + k*stddev（statisticalK）。",
+      "misconfigurationConsequence": "场景变化占比远离 otsu 的双峰假设时仍用 otsu，阈值偏向占比大的一类，小面积真实变化被漏检。"
+    },
+    {
+      "parameter": "minAreaPixels",
+      "rationale": "最小制图单元（MMU）：丢弃小于该像元数的连通变化斑块，0 表示关闭；与 cleanup 的形态学操作配合控制掩膜噪声。",
+      "misconfigurationConsequence": "不设 MMU 时孤立像元噪声会虚增 changedPixels 与 changedArea 面积统计。"
+    }
+  ],
+  "stateNarrative": { "before": "", "after": "Index" },
+  "skipConsequence": {
+    "summary": "两期影像的差异停留在目视对比层面，没有定量变化强度层、变化掩膜与面积统计。",
+    "downstreamRoles": ["灾害评估", "土地利用监测"]
+  },
+  "references": [
+    {
+      "title": "Otsu, A threshold selection method from gray-level histograms",
+      "kind": "paper",
+      "locator": "IEEE Transactions on Systems, Man, and Cybernetics 9(1):62-66, 1979",
+      "note": "thresholdMethod=otsu 的自动阈值出处。"
+    }
+  ],
+  "teachingNote": "默认输出是变化强度层（Index 域），makeMask=true 时才额外写 UInt8 0/1 掩膜（Mask 域）；before 侧留空是因为两期可选状态各有多种，但教学上必须强调两期一致。"
+}
