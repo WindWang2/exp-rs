@@ -12796,3 +12796,46 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# RS14-02 Scientific Preflight Engine slice B: deterministic rule engine,
+# builtin rule families, provider seam and teaching/agent projections —
+# Qt/GDAL-free leaf tests over sicnu_preflight; the provider test adds the
+# sicnu_preflight_state_adapter (passport projection) over sicnu_scientific_state.
+add_executable(test_preflight_engine test_preflight_engine.cpp)
+target_link_libraries(test_preflight_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_engine TEST_PREFIX "test_preflight_engine::")
+
+add_executable(test_preflight_rules test_preflight_rules.cpp)
+target_link_libraries(test_preflight_rules PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_rules TEST_PREFIX "test_preflight_rules::")
+
+add_executable(test_preflight_render test_preflight_render.cpp)
+target_link_libraries(test_preflight_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_render TEST_PREFIX "test_preflight_render::")
+
+add_executable(test_preflight_provider test_preflight_provider.cpp)
+target_compile_definitions(test_preflight_provider PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_preflight_provider PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+)
+sicnu_discover_tests(test_preflight_provider TEST_PREFIX "test_preflight_provider::")
+
+add_executable(test_preflight_golden test_preflight_golden.cpp)
+target_link_libraries(test_preflight_golden PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_golden TEST_PREFIX "test_preflight_golden::")
