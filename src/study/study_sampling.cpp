@@ -264,8 +264,12 @@ Result<QVector<StudyPoint>> sampleStudyPoints( const ParameterStudySpec &spec )
         // Point count is knowable up front — refuse over-budget studies
         // instead of sampling and truncating. The accumulation SATURATES at
         // the cap: a hostile spec with enormous step counts must produce a
-        // typed refusal, not signed overflow.
-        qint64 parameterSets = spec.strategy == SamplingStrategy::Grid ? 1 : 0;
+        // typed refusal, not signed overflow. Grid multiplies the ladder
+        // product; OneAtATime adds one swept set per dimension ON TOP of the
+        // baseline set every OAT sweep starts from (missing it here made the
+        // pre-check pass one set over budget and the sampler's post-count
+        // refuse late with the wrong guidance).
+        qint64 parameterSets = 1;
         for ( const ParameterDimension &dim : spec.dimensions )
         {
             if ( spec.strategy == SamplingStrategy::Grid )
