@@ -97,7 +97,14 @@ std::optional<OpDiagnostic> DiagnosticBridge::diagnose(const DiagnosticInputs &i
             d.confidence = 0.9;
             d.advisoryNext = recovery_action::kRepair;
             for (const auto &p : inputs.preflight->proposals)
+            {
                 d.proposals.push_back(p.ruleId);
+                Json::Value detail(Json::objectValue);
+                detail["rule_id"] = p.ruleId;
+                detail["risk_class"] = p.riskClass;
+                detail["operator_id"] = p.operatorId;
+                d.proposalDetails.append(detail);
+            }
         }
     }
 
@@ -113,7 +120,14 @@ std::optional<OpDiagnostic> DiagnosticBridge::diagnose(const DiagnosticInputs &i
             d.summary = inputs.diagnoseRun->summary; // advisory only
         }
         for (const auto &p : inputs.diagnoseRun->proposals)
+        {
             d.proposals.push_back(p.ruleId);
+            Json::Value detail(Json::objectValue);
+            detail["rule_id"] = p.ruleId;
+            detail["risk_class"] = p.riskClass;
+            detail["operator_id"] = p.operatorId;
+            d.proposalDetails.append(detail);
+        }
         if (inputs.diagnoseRun->evidence.isObject())
             d.evidence["diagnose_run"] = inputs.diagnoseRun->evidence;
     }
