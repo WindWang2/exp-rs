@@ -11,10 +11,17 @@ namespace {
 
 /// The closed finding-code -> requirement-kind table. Codes are the ones the
 /// codebase already emits (scientific_preflight.cpp rule packs over
-/// harness_error.h error_codes::*); nothing here is invented.
+/// harness_error.h error_codes::*, AND the Scientific Preflight Engine's
+/// SPF_* vocabulary from src/preflight/rules.cpp — R3 track 14: before this
+/// table knew the engine codes, every engine finding routed to
+/// `unsupported` and the preflight→repair seam could never offer a
+/// candidate). Codes describing an UNKNOWN fact (the authority could not
+/// answer) stay deliberately unmapped: an unknown is not an actionable
+/// data-prep need, and a repair offer over it would fabricate feasibility.
 const std::map<std::string, std::string> &findingCodeTable()
 {
     static const std::map<std::string, std::string> kTable = {
+        // --- harness rule packs (pre-engine) --------------------------------
         { "CRS_MISMATCH", requirement_kind::kCrsAlign },
         { "GRID_MISMATCH", requirement_kind::kGridAlign },
         { "INVALID_RADIOMETRY", requirement_kind::kRadiometricState },
@@ -34,6 +41,18 @@ const std::map<std::string, std::string> &findingCodeTable()
         { "TRAINING_INVALID", requirement_kind::kTrainingData },
         { "DATASET_NOT_FOUND", requirement_kind::kDatasetSubstitution },
         { "CATEGORICAL_MISMATCH", requirement_kind::kCategoricalCheck },
+        // --- Scientific Preflight Engine (src/preflight/rules.cpp) -----------
+        { "SPF_BAND_ROLE_MISSING", requirement_kind::kBandRole },
+        { "SPF_CRS_MISMATCH", requirement_kind::kCrsAlign },
+        { "SPF_GRID_RESOLUTION_MISMATCH", requirement_kind::kGridAlign },
+        { "SPF_RADIOMETRIC_STATE_MISMATCH", requirement_kind::kRadiometricState },
+        { "SPF_MODALITY_MISMATCH", requirement_kind::kModalityCheck },
+        { "SPF_MODEL_INCOMPATIBLE", requirement_kind::kModelContract },
+        { "SPF_TRAIN_EVAL_LEAKAGE", requirement_kind::kTrainingData },
+        { "SPF_TEMPORAL_ORDER_INVALID", requirement_kind::kTemporalAlign },
+        { "SPF_TEMPORAL_GAP_EXCEEDED", requirement_kind::kTemporalAlign },
+        { "SPF_TEMPORAL_SCENES_INSUFFICIENT", requirement_kind::kTemporalAlign },
+        { "SPF_CLOUD_COVER_HIGH", requirement_kind::kQualityMask },
     };
     return kTable;
 }
