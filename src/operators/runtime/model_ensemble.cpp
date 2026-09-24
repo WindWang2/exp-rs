@@ -134,6 +134,13 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
     modelJson["version"] = ensembleModel.modelVersion;
   modelJson["identity_tag"] = ensembleModel.identityTag();
   modelJson["framework"] = "ensemble";
+  // Provenance parity with the single-model lanes (buildProvenanceDocument /
+  // buildDetectionProvenance): task intent and whole-package identity travel
+  // with the ensemble model too — truthful absence when undeclared.
+  if ( !ensembleModel.task.empty() )
+    modelJson["task"] = ensembleModel.task;
+  if ( !ensembleModel.packageDigest.empty() )
+    modelJson["package_digest"] = ensembleModel.packageDigest;
   if ( !ensembleModel.sourceManifest.empty() )
     modelJson["source_manifest"] = ensembleModel.sourceManifest;
   if ( !ensembleModel.license.empty() )
@@ -157,6 +164,13 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
     member["identity_tag"] = run.model.identityTag();
     if ( !run.model.contentDigest.empty() )
       member["content_digest"] = run.model.contentDigest;
+    // Member identity parity with the single-model sidecars: the task the
+    // member declares and the whole-package digest it shipped with are part
+    // of what makes the ensemble product reproducible (truthful absence).
+    if ( !run.model.task.empty() )
+      member["task"] = run.model.task;
+    if ( !run.model.packageDigest.empty() )
+      member["package_digest"] = run.model.packageDigest;
     member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
                                                                   : run.selection.resolvedFramework;
     member["weight"] = run.weight;
@@ -219,6 +233,15 @@ Json::Value buildEnsembleProvenance( const ModelInfo &ensembleModel,
       Json::Value input( Json::objectValue );
       input["name"] = grid.name;
       input["path"] = grid.path;
+      // Lineage parity with the single-model raster sidecar: when the feed
+      // was prepared from origins, the reproduction record names them.
+      if ( !grid.preparedFrom.empty() )
+      {
+        Json::Value prepared( Json::arrayValue );
+        for ( const std::string &origin : grid.preparedFrom )
+          prepared.append( origin );
+        input["prepared_from"] = prepared;
+      }
       if ( !grid.crs.empty() )
         input["crs"] = grid.crs;
       input["crs_verified"] = grid.crsVerified;
@@ -943,6 +966,12 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
       member["identity_tag"] = run.model.identityTag();
       if ( !run.model.contentDigest.empty() )
         member["content_digest"] = run.model.contentDigest;
+      // Member identity parity with the other ensemble lanes (truthful
+      // absence when the member declares neither).
+      if ( !run.model.task.empty() )
+        member["task"] = run.model.task;
+      if ( !run.model.packageDigest.empty() )
+        member["package_digest"] = run.model.packageDigest;
       member["framework"] = run.selection.resolvedFramework.empty() ? run.model.framework
                                                                     : run.selection.resolvedFramework;
       member["weight"] = run.weight;
@@ -1592,50 +1621,16 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   combined.outHeight = height;
   combined.headChannels = { totalBands };
 
-  // Atomic publish + provenance sidecar (the sidecar can only ever be
-  // ABSENT after a crash, never stale). Hardening 15/20: the old sidecar is
-  // PARKED before the product swap and restored on any failure — a
-  // sidecar-publish failure used to leave the restored previous product
-  // without its sidecar (verified product downgraded to MissingSidecar).
-  const bool hadExisting = QFile::exists( finalPath );
-  const QString backupPath = finalPath + QStringLiteral( ".prev~" );
-  if ( hadExisting )
-  {
-    QFile::remove( backupPath );
-    if ( !QFile::rename( finalPath, backupPath ) )
-    {
-      QFile::remove( stagePath );
-      throw RSOperatorError( ErrorCode::FileNotWritable,
-                             "ensemble combine pass could not back up the previous product: "
-                               + finalPath.toStdString() );
-    }
-  }
-  const QString oldSidecarPath = finalPath + QStringLiteral( ".prov.json" );
-  const QString sidecarBackupPath = backupPath + QStringLiteral( ".prov.json" );
-  // Pre-clean the parked-sidecar slot (Windows rename does not overwrite —
-  // a crash-stranded slot would wedge every later publish of this path).
-  QFile::remove( sidecarBackupPath );
-  const bool hadSidecar = QFile::exists( oldSidecarPath );
-  if ( hadSidecar && !QFile::rename( oldSidecarPath, sidecarBackupPath ) )
-  {
-    QFile::remove( stagePath );
-    if ( hadExisting )
-      QFile::rename( backupPath, finalPath );
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "ensemble combine pass could not back up the previous provenance "
-                             "sidecar: " + finalPath.toStdString() );
-  }
-  if ( !QFile::rename( stagePath, finalPath ) )
-  {
-    QFile::remove( stagePath );
-    if ( hadSidecar )
-      QFile::rename( sidecarBackupPath, oldSidecarPath );
-    if ( hadExisting )
-      QFile::rename( backupPath, finalPath );
-    throw RSOperatorError( ErrorCode::FileNotWritable,
-                           "ensemble combine pass could not publish the product: "
-                             + finalPath.toStdString() );
-  }
+  // Atomic publish + provenance sidecar — the same ProductPublishGuard
+  // contract as the single-model raster lanes: the previous pair is parked
+  // (sidecar first, main last) and restored on ANY failure; the crash-orphan
+  // states a killed run leaves are adopted back on the next publish instead
+  // of being destroyed.
+  ProductPublishGuard publishGuard( finalPath, QStringLiteral( ".prev~" ),
+                                    "ensemble.publish_park", stagePath );
+  publishGuard.publishStaged( stagePath, "ensemble.publish_swap",
+                              "ensemble combine pass could not publish the product: "
+                                + finalPath.toStdString() );
   const Json::Value provenance =
     buildEnsembleProvenance( ensembleModel, runs, combined, combination,
                              withUncertainty
@@ -1648,20 +1643,12 @@ ModelExecutionResult runEnsembleInference( const ModelInfo &ensembleModel,
   if ( !publishProvenanceSidecar( finalPath, provenance, "ensemble.publish_sidecar",
                                   &sidecarError ) )
   {
-    // The previous product's backup is kept until the new sidecar is in: a
-    // sidecar failure restores the previous product — WITH its sidecar —
-    // instead of destroying or downgrading it (same invariant as the
-    // single-model engine's writer, hardening 15/20).
-    QFile::remove( finalPath );
-    if ( hadExisting )
-      QFile::rename( backupPath, finalPath );
-    if ( hadSidecar )
-      QFile::rename( sidecarBackupPath, oldSidecarPath );
+    // The guard's destructor restores the previous product — WITH its
+    // sidecar — instead of destroying or downgrading it (same invariant as
+    // the single-model engines' writers).
     throw RSOperatorError( ErrorCode::FileNotWritable, sidecarError );
   }
-  QFile::remove( sidecarBackupPath ); // unconditional: also clears crash litter
-  if ( hadExisting )
-    QFile::remove( backupPath );
+  publishGuard.disarm();
 
   // Success: release the member stacks and their sidecars explicitly (the
   // staged guard stays as a safety net until the very end — its paths no
