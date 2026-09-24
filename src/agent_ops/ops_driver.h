@@ -56,7 +56,9 @@ class OpsDriver {
 
     /// Apply a named action. Typed failure documents (ok=false + machine
     /// reason) on missing args / unknown sessions / unavailable seams —
-    /// never silent success. Run/resume results are remembered per session.
+    /// never silent success. Wrong-typed arguments come back as INVALID_ARGS
+    /// (never a Json::LogicError escaping the wire contract). Run/resume
+    /// results are remembered per session.
     Json::Value apply(const std::string &action,
                       const Json::Value &args = Json::Value(Json::objectValue));
 
@@ -67,6 +69,8 @@ class OpsDriver {
     OperationsCoordinator &coordinator() { return mCoordinator; }
 
   private:
+    Json::Value applyChecked(const std::string &action, const Json::Value &args);
+
     const OpsRunResult *findResult(const std::string &sessionId) const;
     void remember(const OpsRunResult &result);
     /// Typed SEAMS_UNAVAILABLE doc when the injected seams cannot serve the

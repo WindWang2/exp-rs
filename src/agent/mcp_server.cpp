@@ -850,11 +850,20 @@ void McpServer::handleRequest(const QVariantMap &request)
             }
             else if (toolName == QStringLiteral("scientific:agent_session"))
             {
-                // journal_directory is a caller-controlled path: it gets the
-                // same SICNU_MCP_WORKSPACE containment as every other
-                // path-consuming tool (#1033).
+                // journal_directory (and refs) are caller-controlled paths:
+                // they get the same SICNU_MCP_WORKSPACE containment as every
+                // other path-consuming tool (#1033). Only real path slots
+                // are scanned — the gate must not reject prose arguments
+                // (goal/intent) that merely LOOK like paths.
+                QVariantMap pathArgs;
+                if (arguments.contains(QStringLiteral("journal_directory")))
+                    pathArgs[QStringLiteral("journal_directory")] =
+                        arguments.value(QStringLiteral("journal_directory"));
+                if (arguments.contains(QStringLiteral("refs")))
+                    pathArgs[QStringLiteral("refs")] =
+                        arguments.value(QStringLiteral("refs"));
                 QString denyReason;
-                if (!validateWorkspacePaths(arguments, &denyReason))
+                if (!pathArgs.isEmpty() && !validateWorkspacePaths(pathArgs, &denyReason))
                 {
                     SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
                     throw McpToolError(toolName + QStringLiteral(": ") + denyReason,

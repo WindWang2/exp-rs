@@ -4,6 +4,7 @@
 #include "repair_planner/repair_policy.h"
 #include "repair_planner/repair_schema.h"
 
+#include <algorithm>
 #include <map>
 
 namespace sicnu::agent_ops {
@@ -30,6 +31,40 @@ std::string severityForRiskClass(const std::string &riskClass)
     if (riskClass == sicnu::repair::repair_risk::kRadiometric)
         return "medium";
     return "high";
+}
+
+/// Strictness rank for the ask gate: unknown counts as the strictest.
+int riskRank(const std::string &riskClass)
+{
+    if (riskClass == sicnu::repair::repair_risk::kShapePreserving)
+        return 0;
+    if (riskClass == sicnu::repair::repair_risk::kRadiometric)
+        return 1;
+    return 2; // science_changing AND anything unknown
+}
+
+/// The diagnostic's per-proposal evidence decides; the context's leading
+/// class is only consulted when no evidence exists. Unknown/empty evidence
+/// yields science_changing (fail-closed), never shape_preserving.
+std::string resolveLeadingRiskClass(const OpDiagnostic &diagnostic,
+                                    const std::string &fallback)
+{
+    int rank = -1;
+    for (const auto &detail : diagnostic.proposalDetails)
+    {
+        if (!detail.isObject() || !detail.isMember("rule_id"))
+            continue;
+        const std::string candidate =
+            detail.isMember("risk_class") && detail["risk_class"].isString()
+                ? detail["risk_class"].asString()
+                : std::string();
+        rank = std::max(rank, riskRank(failClosedRiskClass(candidate)));
+    }
+    if (rank >= 0)
+        return rank == 0 ? sicnu::repair::repair_risk::kShapePreserving
+                         : (rank == 1 ? sicnu::repair::repair_risk::kRadiometric
+                                      : sicnu::repair::repair_risk::kScienceChanging);
+    return failClosedRiskClass(fallback);
 }
 
 } // namespace
@@ -193,14 +228,18 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
     {
         if (ctx.repairCount >= ctx.budgets.maxRepairs)
             return abortWith("MAX_REPAIRS");
+        // The diagnostic's per-proposal risk evidence is authoritative; the
+        // context's leading class is only a fallback. Anything unknown or
+        // empty counts as science-changing here — the ask gate must never
+        // rely on a caller having labeled the risk correctly.
+        const auto leading = resolveLeadingRiskClass(diagnostic, ctx.leadingRiskClass);
         RecoveryBridge::PlanHints hints;
-        hints.leadingRiskClass = ctx.leadingRiskClass;
+        hints.leadingRiskClass = leading;
         hints.scienceChangeApproved = ctx.humanApprovedRepair;
         hints.domain = ctx.domain;
         hints.role = ctx.role;
         out.repairPlan = projectRepairPlan(diagnostic, ctx.intent, hints);
-        const bool scienceChanging =
-            ctx.leadingRiskClass == "radiometric" || ctx.leadingRiskClass == "science_changing";
+        const bool scienceChanging = leading != sicnu::repair::repair_risk::kShapePreserving;
         if (scienceChanging && !ctx.humanApprovedRepair)
         {
             out.action = recovery_action::kAsk;
@@ -216,7 +255,7 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         req.role = ctx.role;
         req.intent = ctx.intent;
         req.actionKey = "ops:repair";
-        req.riskClass = ctx.leadingRiskClass;
+        req.riskClass = leading;
         const auto gate = gateMutatingOp(ctx.autonomyPolicy, req);
         out.autonomyAllowed = gate.allowed;
         out.autonomyReasonCode = gate.reasonCode;

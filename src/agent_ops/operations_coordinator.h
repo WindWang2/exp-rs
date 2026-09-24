@@ -35,7 +35,10 @@ struct OpsRunRequest {
     std::string role;
     std::string journalDirectory; ///< empty = in-memory only
     bool approvePendingRepair = false;
-    std::string leadingRepairRiskClass = "shape_preserving";
+/// Fallback when a diagnostic carries no per-proposal risk evidence. Empty
+    /// (the default) means UNKNOWN, and unknown resolves to the STRICTEST
+    /// class downstream — never shape_preserving.
+    std::string leadingRepairRiskClass;
 };
 
 struct OpsRunResult {

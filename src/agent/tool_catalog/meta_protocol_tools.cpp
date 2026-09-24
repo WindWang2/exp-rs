@@ -199,6 +199,7 @@ const std::vector<MetaToolDef> &table()
             { "mode", "string", "'dry_run' | 'plan_only' | 'execute_with_verify'.", false },
             { "journal_directory", "string", "Directory holding session journals.", false },
             { "session_id", "string", "Session id for resume/reconcile/status/export.", false },
+            { "refs", "object", "Slot -> reference map (paths / asset ids) for run.", false },
             { "domain", "string", "Autonomy domain (default 'research').", false },
             { "role", "string", "Autonomy role.", false },
             { "approve", "boolean", "approve_repair: record one-shot pending approval.", false } } },

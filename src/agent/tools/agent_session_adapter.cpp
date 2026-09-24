@@ -19,18 +19,26 @@ expectationsFor( const sicnu::agent_loop::PlanDraft &plan, const std::string &pa
     expectations.requireProvenance = false; // loop deliveries carry no sidecar contract yet
     expectations.requireNonEmpty = true;
 
+    // Minimal shape (documented): the plan's output documents carry no
+    // per-artifact path mapping yet, so the FIRST output naming a known
+    // kind provides the expectations and every other artifact is verified
+    // under structural defaults. A wrong-typed kind is skipped, never
+    // dereferenced (no Json::LogicError may escape verify()).
     for ( const Json::Value &output : plan.outputs )
     {
         if ( !output.isObject() )
             continue;
-        const std::string kind = output.get( "kind", "" ).asString();
-        if ( kind == "raster" || kind == "vector" || kind == "map" )
-            expectations.kind = kind;
-        // A plan output may pin a CR authority string.
-        const Json::Value crs = output.get( "crs", Json::Value( Json::nullValue ) );
-        if ( crs.isString() && !crs.asString().empty() )
-            expectations.crs = crs.asString();
-        break; // minimal shape: the first declared output describes the artifact
+        const Json::Value &kind = output[ "kind" ];
+        if ( kind.isString() &&
+             ( kind.asString() == "raster" || kind.asString() == "vector" ||
+               kind.asString() == "map" ) )
+        {
+            expectations.kind = kind.asString();
+            const Json::Value &crs = output[ "crs" ];
+            if ( crs.isString() && !crs.asString().empty() )
+                expectations.crs = crs.asString();
+            break;
+        }
     }
     ( void )path;
     return expectations;

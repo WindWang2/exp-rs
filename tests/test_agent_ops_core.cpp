@@ -1158,6 +1158,50 @@ TEST_CASE("agent_ops journal is flushed at the submit boundary (crash evidence)"
     REQUIRE(out.reconcile.duplicateSubmitRisk);
 }
 
+TEST_CASE("agent_ops resumed sessions checkpoint the adopted journal too",
+          "[agent_ops][crash][resume]")
+{
+    FakeScenario scenario;
+    scenario.execution = {ExecutionScript{true, "", {"/tmp/run42/out.tif"}}};
+    FakeSeams seams(scenario);
+    OperationsCoordinator::Dependencies deps;
+    deps.seams = makeDeps(seams);
+
+    const std::string dir = uniqueTemp("checkpoint-resume");
+    std::filesystem::remove_all(dir);
+    std::vector<std::size_t> observed;
+    ProbeExecutor probe(seams.executor(), dir, observed);
+    deps.seams.executor = &probe;
+    OperationsCoordinator coord(deps);
+
+    // Park a pre-plan journal (3 entries), then resume under checkpointing.
+    sicnu::agent_loop::SessionJournal parked("sess-resume-ckpt");
+    REQUIRE(parked.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(parked.append("decision", "goal_normalization", {}, 2,
+                           journalDecision("sess-resume-ckpt", "goal_normalization",
+                                           "dec-1", "accept_goal")));
+    REQUIRE(parked.append("stage_enter", "data_state_snapshot", {}, 3));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(parked, dir, &err));
+
+    OpsRunRequest req;
+    req.session.goal = "compute NDVI for the scene";
+    req.session.intent = "ndvi";
+    req.journalDirectory = dir;
+    auto out = coord.resume(dir, "sess-resume-ckpt", req);
+    REQUIRE(out.ok);
+    REQUIRE(out.checkpointError.empty());
+
+    // Every boundary the resumed leg passed left a STRICTLY GROWING prefix
+    // on disk (the adopted journal plus the new appends) — a kill during
+    // the resumed leg loses nothing either.
+    REQUIRE_FALSE(observed.empty());
+    for (const std::size_t size : observed)
+        REQUIRE(size > parked.size());
+    REQUIRE(out.reconcile.duplicateSubmitRisk); // delivered WITH submitted runs
+}
+
 TEST_CASE("agent_ops resume refuses a crashed past-plan journal with submitted runs",
           "[agent_ops][crash][resume]")
 {

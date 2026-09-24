@@ -140,18 +140,36 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
     // Typed error → exit code (the envelope still carries the full doc).
     const bool ok = doc.get( "ok", false ).asBool();
     const std::string error = doc.get( "error", "" ).asString();
+    const std::string stopReason =
+        doc.get( "delivery", Json::Value( Json::objectValue ) )
+            .get( "stop_reason", "" )
+            .asString();
     if ( ok )
         return io.finish( true, "session", doc,
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok ) );
+
+    // Cancellation and pause are user-initiated holds, not failures.
+    if ( stopReason == "CANCELLED" || error == "PAUSED" )
+        return io.finish( false, "session", doc,
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::Cancelled ), {},
+                          error );
+
+    // Reconciliation / journal-verdict refusals and argument errors: the
+    // "unknown is never resumable" family (INDETERMINATE_STATE) belongs to
+    // the SAME typed family as the corrupted journal — scripts can rely on
+    // exit 2 meaning "the session/journal state refuses this operation".
     int exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
     if ( error == "MISSING_ARGS" || error == "UNKNOWN_MODE" || error == "UNKNOWN_SESSION" ||
-         error == "UNKNOWN_ACTION" || error == "NO_SESSION" )
+         error == "UNKNOWN_ACTION" || error == "NO_SESSION" || error == "INVALID_ARGS" ||
+         error.find( "AUTONOMY" ) != std::string::npos )
         exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
     else if ( error == "SEAMS_UNAVAILABLE" )
         exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency );
     else if ( error == "SUBMITTED_RUN_EXISTS" || error == "DUPLICATE_SUBMIT_REFUSED" ||
-              error == "RESUME_PAST_PLAN_SEAM" || error == "SESSION_GOAL_MISMATCH" ||
-              error == "CORRUPTED_OR_MISSING_JOURNAL" )
+              error == "RESUME_PAST_PLAN_SEAM" || error == "SESSION_RESUMABLE_USE_RESUME" ||
+              error == "SESSION_GOAL_MISMATCH" || error == "CORRUPTED_OR_MISSING_JOURNAL" ||
+              error == "INDETERMINATE_STATE" || error == "EMPTY_SESSION" ||
+              error == "RESUME_REJECTED" )
         exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
     return io.finish( false, "session", doc, exitCode, {}, error );
 }

@@ -95,3 +95,11 @@ checkpoint suites; coordinator-level: `test_agent_ops_core` crash suites).
   OpsDriver later without core changes (PR #1312's PR #1286 panel remains test-only).
 * `OperationsCoordinator::run()` is synchronous; status mid-run is out of scope (the loop's
   single-threaded state machine is the authority; a live-status API would be a new seam).
+* Crash checkpointing is best-effort process-kill safety: bounded (4096 entries / 1 MB, whole
+  document rewritten per append) with no fsync — power loss can lose the latest prefix, and
+  the remove-then-rename window (documented in session_journal.cpp) can drop the file
+  entirely; that degrades to `CORRUPTED_OR_MISSING_JOURNAL` (refused, never fake-resumable).
+* `approve_repair` is advisory by design: the consumption arms `humanApprovedRepair` for
+  driver-side `evaluateRecovery` flows; `run()`'s post-hoc recovery always asks, and
+  `resume()` never builds a recovery decision — so on the run/resume paths themselves the
+  flag changes no loop outcome (documented in operations_coordinator.h).

@@ -29,7 +29,9 @@ struct RecoveryContext {
     std::string domain;
     std::string role;
     std::string intent;
-    std::string leadingRiskClass = "shape_preserving";
+    /// Fallback when the diagnostic carries no per-proposal risk evidence;
+    /// empty/unknown is treated as science-changing (fail-closed).
+    std::string leadingRiskClass;
     bool humanApprovedRepair = false;
     sicnu::agent::autonomy::AutonomyPolicy autonomyPolicy{
         sicnu::agent::autonomy::AutonomyPolicyHolder::researchDefaultPolicy()};
