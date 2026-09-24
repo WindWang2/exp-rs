@@ -270,11 +270,37 @@ Project `CapabilityKnowledge` onto `sicnu::planner::CapabilityProvider`
 rejects any fact that contradicts `findScientificContract` (typed ambiguity
 question, candidate excluded) — the contracts registry stays the authority.
 
+LIVE ADAPTER (R3 track 14): `src/planner/live` (`sicnu_planner_live`,
+Qt-free) is the production implementation. It reads the capability knowledge
+mirror documents through the shared Qt-free read path
+(`sicnu::preflight::CapabilityMirrorProjection` — one merge semantics for
+every consumer) and projects them onto
+`sicnu::planner::LiveCapabilityProvider`. Projection policy: only operators
+with an explicit planner family slot AND a contracts record are emitted
+(domains come from the contracts registry, determinism from the seed
+policy, cost class mapped light/medium/heavy → low/medium/high); the
+mirror's verification/publication entries do not exist, so those slots stay
+honestly unprojected; everything skipped is listed in `stats()`. The
+provider carries `revision()` (a digest over the projected merged entries):
+a replan after an authority change is attributable to facts, not drift.
+Unprojected slots are inert by declaration; the planner asks instead of
+default-filling.
+
 ## 2. Passport / asset state → PlanningContext
 `resolveAssetState` + `claimFor` map onto `PlannerAssetFacts` (`state` uses the
 scientific_state lifecycle vocabulary, mirror drift-pinned). Only `ready`
 assets back hard preconditions (integration §3 above); every other state
 becomes a typed blocking question.
+
+BUNDLE PROJECTION (R3 track 14): `src/science_context/planner_goal_projection.{h,cpp}`
+projects an `exp.science_context.v1` bundle (plus caller-selected passport
+facts the bundle does not carry) onto `ScientificGoal` / `PlanningContext`.
+Known intents map onto planner goal kinds; an unknown intent leaves the goal
+kind EMPTY (the planner answers infeasible — never a default-filled runnable
+goal), a foreign radiometric unit degrades the domain to undeclared WITH a
+typed issue, and enrichment is vocabulary-validated (rejected fields become
+issues, never silent copies). Section provenance (authority/revision/degraded)
+travels in the projection result.
 
 ## 3. ScientificPlan → WorkflowIR → existing lowering chain
 `projectPlanToIr(plan, &warnings, &error)` emits a workflow_ir 1.0-shaped
@@ -282,6 +308,10 @@ document (data-level conformance; the harness reader stays the final
 authority). Wire it as `readWorkflowIr(input)` to enter AgentPlan v2 lowering
 unchanged. Domains without an honest artifact_facts token degrade to
 "unknown" WITH a warning — never a fake verdict.
+`tests/test_planner_handoff_e2e.cpp` pins the document boundary end-to-end;
+`tests/test_workflow_planner.cpp` (R3 cases) drives the projected plan
+through `readWorkflowIr → compileWorkflow` and proves a hostile operator id
+is refused by the analysis stage instead of being lowered.
 
 ## 4. LLM proposal surfaces → validateProposal
 Untrusted plan documents go through `validateProposal` (closed sorted
