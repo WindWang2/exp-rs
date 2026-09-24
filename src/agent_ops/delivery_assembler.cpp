@@ -8,6 +8,15 @@
 namespace sicnu::agent_ops {
 namespace {
 
+/// Wire marker of the unified Scientific Verifier report document. Consumed
+/// as a JSON contract here: the delivery layer projects it, it never
+/// re-runs verification and never links the verifier.
+bool isUnifiedVerificationReport(const Json::Value &doc)
+{
+    return doc.isObject() && doc.isMember("schema") && doc["schema"].isString()
+           && doc["schema"].asString() == "sicnu.verification.report/1";
+}
+
 /// Stable 8-hex FNV-1a fingerprint over the full path (same scheme the
 /// loop uses for plan identity).
 std::string pathFingerprint(const std::string &canonical)
@@ -48,6 +57,24 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     d.stopReason = result.stopReason.empty() ? result.summary.stopReason : result.stopReason;
     d.budgets = result.summary.budgets;
     d.verifier["verdict"] = result.summary.verificationVerdict;
+
+    // Project the unified verifier report when the caller supplies one: its
+    // overall is the engine's fail-closed lattice, so anything that is not
+    // "pass" — including "indeterminate" — records as a non-passing
+    // verdict here. It never upgrades the loop's own verdict.
+    bool unifiedPresent = false;
+    bool unifiedPassed = false;
+    if (isUnifiedVerificationReport(extras.verificationReport))
+    {
+        unifiedPresent = true;
+        unifiedPassed = extras.verificationReport["overall"].asString() == "pass";
+        Json::Value unified(Json::objectValue);
+        unified["spec_id"] = extras.verificationReport["specId"];
+        unified["overall"] = extras.verificationReport["overall"];
+        unified["verdict"] = unifiedPassed ? "PASS" : "FAIL";
+        unified["counts"] = extras.verificationReport["counts"];
+        d.verifier["unified"] = unified;
+    }
     d.capsule = extras.capsule;
     d.benchmarkRefs = extras.benchmarkRefs;
     d.questions = extras.questions;
@@ -95,9 +122,11 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     }
 
     // Claims with confidence, gated on the evidence that actually exists:
-    // a delivered claim is high-confidence only when a verifier verdict is
-    // present (dry-run/plan-only deliveries never verify); refused/aborted
-    // claims carry the loop's typed stop reason; unknown ≠ success.
+    // a delivered claim is high-confidence only when the loop's verdict
+    // passed AND the unified report — when one was supplied — did not
+    // record a non-pass overall (dry-run/plan-only deliveries never verify;
+    // refused/aborted claims carry the loop's typed stop reason; unknown ≠
+    // success).
     if (d.claims.empty())
     {
         Json::Value claim(Json::objectValue);
@@ -106,8 +135,17 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
         const std::string verdict = d.verifier["verdict"].asString();
         if (d.outcome == "delivered")
         {
-            if (verdict == "PASS" || verdict == "PASS_WITH_WARNINGS")
+            const bool loopPassed = verdict == "PASS" || verdict == "PASS_WITH_WARNINGS";
+            if (loopPassed && (!unifiedPresent || unifiedPassed))
                 claim["confidence"] = 0.9;
+            else if (unifiedPresent)
+            {
+                claim["confidence"] = 0.0; // verification present but not passed
+                if (unifiedPassed)
+                    claim["confidence"] = 0.0; // loop passed, unified refused
+                claim["evidence_missing"].append("passing_verifier_verdict");
+                claim["unified_overall"] = d.verifier["unified"]["overall"];
+            }
             else
             {
                 claim["confidence"] = 0.0; // delivered without verification: indeterminate
