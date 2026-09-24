@@ -136,9 +136,17 @@ struct ReportFixture
         assignment.sampleId = QStringLiteral( "sample-1" );
         assignment.role = SplitRole::Train;
         split.assignments().append( assignment );
-        split.setFingerprint( splitFingerprint );
+        // Pin the STORE-DERIVED fingerprint (the fingerprint column is the
+        // content digest computed at save; a hand-set value like "sf1"
+        // disagrees with it, and replay readiness correctly calls that a
+        // mismatch). Round-2: splitManifestById now restores the stored
+        // fingerprint, so the fixture must pin what the store actually
+        // derives — exactly like production runs do.
         REQUIRE( datasets.saveSplitManifest( split ).has_value() );
-        REQUIRE( datasets.splitManifestById( splitManifestId ).has_value() );
+        const auto storedSplit = datasets.splitManifestById( splitManifestId );
+        REQUIRE( storedSplit.has_value() );
+        REQUIRE( !storedSplit->fingerprint().isEmpty() );
+        splitFingerprint = storedSplit->fingerprint();
 
         Experiment experiment;
         experiment.setExperimentId( experimentId );

@@ -110,16 +110,23 @@ std::optional<SplitManifest> DatasetStore::splitManifestById( const QString &man
         return std::nullopt;
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
-        "SELECT json FROM split_manifests WHERE manifest_id=?" ) );
+        "SELECT json, fingerprint FROM split_manifests WHERE manifest_id=?" ) );
     if ( !stmt )
         return std::nullopt;
     stmt.bind( 1, manifestId );
     if ( !stmt.stepRow() )
         return std::nullopt;
-    const auto manifest = SplitManifest::fromJson( textToJson( stmt.text( 0 ) ) );
-    if ( !manifest )
+    auto parsed = SplitManifest::fromJson( textToJson( stmt.text( 0 ) ) );
+    if ( !parsed )
         return std::nullopt; // corrupt row reads as absent — fail-conservative
-    return manifest.value();
+    // The fingerprint lives in a dedicated column (toJson deliberately omits
+    // it: the digest covers the manifest content, never itself), so the read
+    // must restore it — without this, every manifest read back from the
+    // store reports an empty fingerprint and downstream split pins (capsule
+    // readiness, bundle split.json) degrade to "pins no fingerprint".
+    SplitManifest manifest = parsed.take();
+    manifest.setFingerprint( stmt.text( 1 ) );
+    return manifest;
 }
 
 QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
@@ -130,7 +137,7 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
         return manifests;
     QMutexLocker lock( &m_impl->mutex );
     StoreStmt stmt( m_impl->db, QStringLiteral(
-        "SELECT json FROM split_manifests WHERE dataset_version_id=?"
+        "SELECT json, fingerprint FROM split_manifests WHERE dataset_version_id=?"
         " ORDER BY created_ms, manifest_id LIMIT ?" ) );
     if ( !stmt )
         return manifests;
@@ -138,9 +145,14 @@ QVector<SplitManifest> DatasetStore::splitManifestsForVersion(
     stmt.bind( 2, qint64( 10000 ) );
     while ( stmt.stepRow() )
     {
-        const auto manifest = SplitManifest::fromJson( textToJson( stmt.text( 0 ) ) );
-        if ( manifest )
-            manifests.append( manifest.value() );
+        auto parsed = SplitManifest::fromJson( textToJson( stmt.text( 0 ) ) );
+        if ( parsed )
+        {
+            // Same column-restore contract as splitManifestById.
+            SplitManifest manifest = parsed.take();
+            manifest.setFingerprint( stmt.text( 1 ) );
+            manifests.append( manifest );
+        }
     }
     return manifests;
 }

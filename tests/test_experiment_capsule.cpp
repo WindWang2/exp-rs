@@ -1631,3 +1631,41 @@ TEST_CASE( "diff treats sections outside the reader's vocabulary as identity-bea
     CHECK( report.level == CapsuleDiffReport::Level::IdentityBreak );
     CHECK( !report.sections.isEmpty() );
 }
+
+TEST_CASE( "readiness hands output sizes beyond the 32-bit range to hooks verbatim",
+           "[capsule][readiness]" )
+{
+    ReadyFixture ready;
+    REQUIRE( ready.build() );
+
+    // 3 GiB + 1: representable in qint64, destroyed by toInt() (Qt returns
+    // the default 0 for out-of-range reads — the round-1 evaluation.cpp
+    // defect class, still live on the readiness path).
+    const qint64 hugeSize = qint64( 3 ) * 1024 * 1024 * 1024 + 1;
+    QJsonObject root = ready.doc.root();
+    QJsonArray outputs = root.value( QStringLiteral( "outputs" ) ).toArray();
+    outputs.append( QJsonObject{
+        { QStringLiteral( "portable_ref" ), QStringLiteral( "workspace:out/huge.tif" ) },
+        { QStringLiteral( "digest" ), QStringLiteral( "digest-huge" ) },
+        { QStringLiteral( "size_bytes" ), hugeSize } } );
+    root.insert( QStringLiteral( "outputs" ), outputs );
+    root.remove( QStringLiteral( "digest" ) ); // finalize re-canonicalizes
+    const auto mutated = CapsuleDocument::finalize( root );
+    REQUIRE( mutated.has_value() );
+
+    qint64 hookSize = -1;
+    CapsuleReadinessHooks hooks = matchingReadinessHooks();
+    hooks.outputAvailable = [&]( const QString &, const QString &, qint64 sizeBytes ) {
+        hookSize = sizeBytes;
+        return true;
+    };
+    const auto report = CapsuleReadiness::assess( mutated.value(), &ready.fixture.datasets,
+                                                  matchingHooks( ready.descriptor ),
+                                                  hooks );
+    REQUIRE( hookSize == hugeSize );
+    bool outputOk = false;
+    for ( const auto &check : report.checks )
+        if ( check.dependency == QStringLiteral( "output:workspace:out/huge.tif" ) )
+            outputOk = check.status == sicnu::experiment::ReplayCheckStatus::Ok;
+    CHECK( outputOk );
+}
