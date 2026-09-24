@@ -856,6 +856,9 @@ add_subdirectory(src/contracts)
 # ScientificPlan decision layer. Pure C++20, links sicnu_contracts only.
 # Planning-only: never executes operators (kill-switch = no target links it).
 add_subdirectory(src/planner)
+# R3 planner live capability seam: the capability-mirror → CapabilityProvider
+# adapter (production implementation of the injected seam; core unchanged).
+add_subdirectory(src/planner/live)
 # RS14-11: evidence-first agent session orchestration — pure C++20 core
 # (state machine, decision records, journal, seams). The Qt-capable
 # production adapter and tool live in src/agent/tools.
