@@ -11868,6 +11868,7 @@ add_executable(test_edit_roi_semantics
   ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
   ${CMAKE_SOURCE_DIR}/src/app/editing/rs_roi_semantics.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
 )
 target_link_libraries(test_edit_roi_semantics PRIVATE
   Catch2::Catch2WithMain
@@ -11941,6 +11942,7 @@ set_tests_properties(test_edit_agent_state PROPERTIES
 add_executable(test_edit_persistence
   test_edit_persistence.cpp
   ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_persistence.cpp
+  ${CMAKE_SOURCE_DIR}/src/geospatial/util/atomic_fs.cpp
 )
 target_link_libraries(test_edit_persistence PRIVATE
   Catch2::Catch2WithMain
@@ -11971,6 +11973,8 @@ add_executable(test_editing_e2e
   ${CMAKE_SOURCE_DIR}/src/app/editing/rs_sample_brush_tool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_persistence.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+  ${CMAKE_SOURCE_DIR}/src/geospatial/util/atomic_fs.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
 )
 target_link_libraries(test_editing_e2e PRIVATE
   Catch2::Catch2WithMain
