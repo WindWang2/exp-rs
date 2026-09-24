@@ -2,6 +2,7 @@
 #pragma once
 
 #include "science_context/bundle.h"
+#include "science_context/capability_facts.h"
 #include <json/json.h>
 #include <string>
 #include <vector>
@@ -15,6 +16,9 @@ struct CapabilityQuery
     Json::Value observedState{Json::objectValue};
     ContextConstraints constraints;
     int limit = 8;
+    /// Live capability authority; nullptr ⇒ the router's builtin table runs
+    /// and the bundle provenance reports builtin_fallback/degraded.
+    const CapabilityFactsLookup *facts = nullptr;
 };
 
 struct CapabilityRouterResult
@@ -23,6 +27,11 @@ struct CapabilityRouterResult
     std::string intentStatus;
     std::vector<CapabilityEntry> entries;
     std::vector<std::string> openQuestions;
+    // Provenance of the capability facts that produced the entries.
+    bool factsFromAuthority = false;
+    std::string factsAuthority;
+    std::uint64_t factsRevision = 0;
+    bool presenceUnknown = false; ///< operator registry presence unverifiable
 };
 
 CapabilityRouterResult routeCapabilities( const CapabilityQuery &query );

@@ -21,6 +21,7 @@ static void portableSetenv(const char *key, const char *value)
 #include "exprs/plugin_registry.h"
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
+#include "platform/portable.h"
 
 #include <atomic>
 #include <chrono>
@@ -428,7 +429,7 @@ TEST_CASE( "interrupted-install staging leftovers are swept before a new install
     // 24 h sweep — the behavior under test).
     const std::string stagingDir =
         exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.stale."
-        + std::to_string( static_cast<long>( ::getpid() ) + 1 );
+        + std::to_string( static_cast<long>( sicnu::portable::pid() ) + 1 );
     std::error_code ec;
     fs::create_directories( fs::path( stagingDir ) / "junk", ec );
     {
@@ -461,13 +462,7 @@ TEST_CASE( "crashed swap parks restore the missing install and live parks are ke
     // A dead pid that cannot collide with a live process on any platform
     // (exceeds every legal pid_max): the park is unambiguously crash residue.
     const std::string deadPid = std::to_string( std::numeric_limits<int>::max() );
-    const std::string livePid = std::to_string( static_cast<long>(
-#ifdef _WIN32
-        ::GetCurrentProcessId()
-#else
-        ::getpid()
-#endif
-        ) );
+    const std::string livePid = std::to_string( static_cast<long>( sicnu::portable::pid() ) );
 
     // A parked backup holds the REAL manifest (the plugin's own id), only
     // the directory name carries the ~old.<pid> suffix.

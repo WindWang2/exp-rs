@@ -1,6 +1,8 @@
 // src/science_context/recipe_router.cpp
 #include "science_context/recipe_router.h"
 
+#include "recipes/recipe_registry.h"
+
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -48,16 +50,55 @@ void RecipeRouter::setRecipes( std::vector<RecipeDocument> recipes )
                []( const RecipeDocument &a, const RecipeDocument &b ) {
                    return a.recipeId < b.recipeId;
                } );
+    mSource.mode = RecipeSourceMode::InlineInput;
+    mSource.authority = "manual_seed";
 }
 
 void RecipeRouter::clear()
 {
     mRecipes.clear();
+    mSource.mode = RecipeSourceMode::None;
+    mSource.authority.clear();
 }
 
 void RecipeRouter::setRegistryRevision( std::uint64_t revision )
 {
     mRevision = revision;
+}
+
+RecipeSourceInfo RecipeRouter::sourceInfo() const
+{
+    return mSource;
+}
+
+bool RecipeRouter::loadFromRegistry( sicnu::recipes::ScientificRecipeRegistry &registry )
+{
+    registry.reload();
+    mSource.registryStatus = registry.status();
+    mSource.registryProblems = static_cast<int>( registry.loadProblems().size() );
+
+    if ( !registry.loaded() || registry.recipeIds().empty() )
+    {
+        // Fail closed: unavailable authority must not leave stale docs or a
+        // stale live_authority label behind.
+        mRecipes.clear();
+        mSource.mode = RecipeSourceMode::None;
+        mSource.authority.clear();
+        mSource.revision = 0;
+        mRevision = 0;
+        return false;
+    }
+
+    std::vector<RecipeDocument> docs;
+    for ( const auto &id : registry.recipeIds() )
+        docs.push_back( fromRecipeJson( registry.recipe( id ) ) );
+    setRecipes( std::move( docs ) );
+    mSource.mode = RecipeSourceMode::LiveAuthority; // setRecipes re-tagged it
+    mSource.authority = "recipes.scientific_recipe_registry";
+    // Digest-derived: covers ids, intents and modalities of the synced set.
+    mSource.revision = fnv1a64( packDigest() );
+    mRevision = mSource.revision;
+    return true;
 }
 
 std::string RecipeRouter::packDigest() const

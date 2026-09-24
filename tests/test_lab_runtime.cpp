@@ -15,6 +15,7 @@
 #include <json/json.h>
 
 #include "lab/spec_runtime.h"
+#include "platform/portable.h"
 
 #include <functional>
 #include <sstream>
@@ -525,10 +526,6 @@ TEST_CASE( "spec fingerprint is sha256 hex and deterministic", "[lab_runtime][fi
 #include <fstream>
 #include <set>
 
-#if !defined(_WIN32)
-#include <unistd.h>
-#endif
-
 namespace
 {
 
@@ -859,7 +856,7 @@ std::string makeSessionDir()
   static unsigned counter = 0;
   const std::string dir = ( std::filesystem::temp_directory_path() /
                             ( "sicnu_lab_session_test_" + std::to_string( ++counter ) +
-                              "_" + std::to_string( ::getpid() ) ) )
+                              "_" + std::to_string( sicnu::portable::pid() ) ) )
                              .string();
   std::filesystem::create_directories( dir );
   return dir;

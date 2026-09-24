@@ -161,7 +161,10 @@ struct SensorStateSection
 
 struct AcquisitionStateSection
 {
-    std::string timeIso;      ///< empty when unknown (never guessed)
+    /// Canonical UTC ISO-8601 spelling (resolver-normalized): midnight-UTC
+    /// instants carry the date-only form, all other instants
+    /// "YYYY-MM-DDTHH:MM:SS[.frac]Z". Empty when unknown (never guessed).
+    std::string timeIso;
     std::string timeSource;   ///< e.g. "metadata"|"explicit"|"filename"|"descriptor"|"catalog"
     std::string precision;    ///< e.g. "second"|"day"|"" (unknown)
     bool valid = false;

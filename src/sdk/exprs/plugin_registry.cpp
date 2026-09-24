@@ -14,14 +14,10 @@
 #include <sstream>
 #include <thread>
 #include <utility>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
 
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_validator.h"
+#include "platform/portable.h"
 
 namespace {
 exprs::PluginState incompatibleStateFor( const std::string &pluginId,
@@ -2091,7 +2087,7 @@ std::string PluginRegistry::userIndexPath() const
 void PluginRegistry::loadUserIndex()
 {
     mDisabledIds.clear();
-    std::ifstream input( userIndexPath() );
+    std::ifstream input( sicnu::portable::pathFromUtf8( userIndexPath() ) );
     if ( !input )
         return;
     std::stringstream buffer;
@@ -2135,7 +2131,7 @@ void PluginRegistry::saveUserIndex() const
     {
         const std::string parent = path.substr( 0, slash );
         std::error_code error;
-        std::filesystem::create_directories( parent, error );
+        std::filesystem::create_directories( sicnu::portable::pathFromUtf8( parent ), error );
     }
     // Hardening 15/20: the temp file is process-unique. The shared fixed
     // "<index>.tmp" let two processes (GUI + CLI, or two CLIs) interleave
@@ -2144,14 +2140,10 @@ void PluginRegistry::saveUserIndex() const
     // In-process writers are serialized by gRegistryMutex; the pid suffix only
     // separates processes, mirroring the per-pid staging idiom the package and
     // snapshot code already use.
-#ifdef _WIN32
-    const long pid = static_cast<long>( ::GetCurrentProcessId() );
-#else
-    const long pid = static_cast<long>( ::getpid() );
-#endif
+    const std::uint32_t pid = sicnu::portable::pid();
     const std::string temp = path + ".tmp." + std::to_string( pid );
     {
-        std::ofstream output( temp, std::ios::trunc );
+        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
         if ( !output )
             return;
         Json::Value root( Json::objectValue );
@@ -2167,14 +2159,19 @@ void PluginRegistry::saveUserIndex() const
             // A failed write (ENOSPC ...) must NOT be renamed over the real
             // index — that would install a torn document and silently reset
             // the user's disable set on next load.
-            std::remove( temp.c_str() );
+            std::error_code removeError;
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
             return;
         }
     }
     std::error_code renameError;
-    std::filesystem::rename( temp, path, renameError );
+    std::filesystem::rename( sicnu::portable::pathFromUtf8( temp ),
+                             sicnu::portable::pathFromUtf8( path ), renameError );
     if ( renameError )
-        std::remove( temp.c_str() );
+    {
+        std::error_code removeError;
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
+    }
 }
 
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )

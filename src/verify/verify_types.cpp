@@ -400,9 +400,12 @@ void validateCrossOutput( const Json::Value &params, const std::string &where,
     {
         if ( params.isMember( field ) )
         {
-            if ( params[field].isBool() )
+            // Only a TRUE pin binds anything: `sameGrid: false` claims to
+            // constrain while judging nothing — the vacuous check the
+            // oracle-potency doctrine forbids.
+            if ( params[field].isBool() && params[field].asBool() )
                 ++constraints;
-            else
+            else if ( !params[field].isBool() )
                 errors.push_back( at( where, std::string( "'" ) + field + "' must be a boolean" ) );
         }
     }
@@ -413,6 +416,10 @@ void validateCrossOutput( const Json::Value &params, const std::string &where,
         else
             errors.push_back( at( where, "'bandCount' must be a positive integer" ) );
     }
+    // Accepted and type-checked but intentionally inert: every current
+    // cross-output constraint is an exact comparison. Tolerance stays
+    // reserved (Slice-A shape compatibility) — it is NOT a constraint and
+    // never influences a verdict.
     if ( params.isMember( "tolerance" ) &&
          ( !isReal( params["tolerance"] ) || !std::isfinite( params["tolerance"].asDouble() ) ||
            params["tolerance"].asDouble() < 0.0 ) )
@@ -536,6 +543,30 @@ bool containsNonFiniteNumber( const Json::Value &value )
     }
 }
 
+/// -0.0 and 0.0 compare equal but serialize differently ("-0" vs "0"): a
+/// digest over the raw writer output would depend on the sign of zero. The
+/// canonical text normalizes negative zero away before sealing.
+void normalizeNegativeZero( Json::Value &value )
+{
+    switch ( value.type() )
+    {
+    case Json::realValue:
+        if ( value.asDouble() == 0.0 )
+            value = 0.0;
+        break;
+    case Json::arrayValue:
+        for ( Json::ArrayIndex index = 0; index < value.size(); ++index )
+            normalizeNegativeZero( value[index] );
+        break;
+    case Json::objectValue:
+        for ( const std::string &member : value.getMemberNames() )
+            normalizeNegativeZero( value[member] );
+        break;
+    default:
+        break;
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -584,6 +615,24 @@ std::vector<std::string> validateSpec( const VerificationSpec &spec )
     return errors;
 }
 
+std::vector<std::string> validateCheckParams( const VerificationCheckSpec &check )
+{
+    std::vector<std::string> errors;
+    if ( !contains( kCheckKinds, check.kind ) )
+    {
+        errors.push_back( "kind '" + check.kind + "' is outside the closed vocabulary" );
+        return errors;
+    }
+    if ( !check.params.isObject() )
+    {
+        errors.push_back( "params must be an object" );
+        return errors;
+    }
+    const std::string where = "check '" + check.checkId + "'";
+    validateCheckParams( check, where, errors );
+    return errors;
+}
+
 // ---------------------------------------------------------------------------
 // Canonical JSON
 // ---------------------------------------------------------------------------
@@ -595,6 +644,8 @@ std::string canonicalJsonText( const Json::Value &value )
     // sealing NaN/null ambiguity or a parser-divergent `1e+9999`.
     if ( containsNonFiniteNumber( value ) )
         return {};
+    Json::Value normalized = value;
+    normalizeNegativeZero( normalized );
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "";
     builder["commentStyle"] = "None";
@@ -605,7 +656,7 @@ std::string canonicalJsonText( const Json::Value &value )
     // discipline as the lab grade body and DAG provenance).
     builder["precision"] = 12;
     builder["precisionType"] = "significant";
-    return Json::writeString( builder, value );
+    return Json::writeString( builder, normalized );
 }
 
 // ---------------------------------------------------------------------------
@@ -735,6 +786,11 @@ bool parseSpec( const std::string &text, VerificationSpec &out, std::string &err
     }
     error.clear();
     return true;
+}
+
+bool jsonCarriesNonFiniteNumber( const Json::Value &value )
+{
+    return containsNonFiniteNumber( value );
 }
 
 std::string specDigest( const VerificationSpec &spec )

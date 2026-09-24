@@ -58,15 +58,21 @@ PlanningContext projectPlanningContext( const ScientificContextBundle &bundle )
             break;
         }
     }
+    // Impossibility is not monotone across capability candidates: one operator
+    // being impossible does not block the goal while another candidate is
+    // direct or prep. Blocking requires every candidate to be unusable.
+    bool anyImpossible = false;
+    std::string impossibleReason;
+    bool anyFeasible = false;
     for ( const auto &c : bundle.capabilities )
     {
         if ( c.status == "impossible" )
         {
-            blocked = true;
-            if ( reason.empty() )
-                reason = "capability_impossible:" + c.capabilityId;
+            anyImpossible = true;
+            if ( impossibleReason.empty() )
+                impossibleReason = "capability_impossible:" + c.capabilityId;
         }
-        else if ( c.status == "unavailable" && reason.empty() )
+        else if ( c.status == "unavailable" )
         {
             // unavailable = needs prep; draft ok but note limitation
             ctx.missingFacts.append( c.reasons.empty() ? c.capabilityId : c.reasons.front() );
@@ -76,6 +82,14 @@ PlanningContext projectPlanningContext( const ScientificContextBundle &bundle )
             for ( const auto &p : c.prepActions )
                 ctx.missingFacts.append( p );
         }
+        if ( c.status == "direct" || c.status == "prep" )
+            anyFeasible = true;
+    }
+    if ( anyImpossible && !anyFeasible )
+    {
+        blocked = true;
+        if ( reason.empty() )
+            reason = impossibleReason;
     }
     if ( bundle.constraints.offline )
         ctx.limitations.append( "offline_mode" );

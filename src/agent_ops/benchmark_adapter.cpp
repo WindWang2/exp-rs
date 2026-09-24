@@ -39,6 +39,18 @@ std::optional<BenchmarkPersistDocument> BenchmarkPersistDocument::fromJson(
     return d;
 }
 
+namespace {
+
+/// First digest with at least `width` hex-ish characters, else whatever is
+/// available; never an empty result id component.
+std::string digestComponent(const std::string &primary, const std::string &fallback)
+{
+    const std::string &pick = primary.size() >= 8 ? primary : fallback;
+    return pick.empty() ? "nodigest" : pick.substr(0, 8);
+}
+
+} // namespace
+
 bool InMemoryBenchmarkSink::save(const BenchmarkPersistDocument &doc, std::string *error)
 {
     (void)error;
@@ -54,7 +66,7 @@ BenchmarkPersistDocument BenchmarkAdapter::projectSuiteReport(
     d.suiteVersion = report.version;
     d.packDigest = report.packDigest;
     d.resultId = "bpr-" + report.suiteId + "@" + report.version + "-" +
-                 (report.packDigest.size() >= 8 ? report.packDigest.substr(0, 8) : report.digest.substr(0, 8));
+                 digestComponent(report.packDigest, report.digest);
     d.status = (report.summary.failCount == 0) ? "completed" : "failed";
     d.summary["pass"] = report.summary.passCount;
     d.summary["warnings"] = report.summary.warningsCount;
