@@ -157,6 +157,9 @@ add_executable(sicnu_geo_rs
     workbench/inspector_host.cpp
     workbench/layer_sections.cpp
     workbench/provenance_section.cpp
+    # RS14-15 R3: why-this-step panel + inspector section
+    workbench/step_explanation_panel.cpp
+    workbench/step_explanation_section.cpp
     workbench/processing_history_model.cpp
     workbench/processing_history_panel.cpp
     workbench/shutdown_policy.cpp
@@ -467,6 +470,10 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+  # RS14-15 R3: the why-this-step section composes through the explain
+  # adapters directly (registry knowledge / workflow projection / provenance
+  # evidence) — not via sicnu_agent's private link.
+    Sicnu::explain_adapters
   # unified-trace bootstrap in main.cpp (Verification 7.0)
     sicnu_runtime
     jsoncpp

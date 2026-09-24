@@ -987,6 +987,41 @@ target_include_directories(test_provenance_section PRIVATE
 sicnu_link_jsoncpp(test_provenance_section)
 sicnu_discover_tests(test_provenance_section)
 
+# ── Explainable Workflow (RS14-15 R3): why-this-step panel + inspector section ──
+# Offscreen render surface over the deterministic explain pipeline. The panel
+# and section TUs are Qt-only; the host-lifecycle lane reuses the
+# test_provenance_section TU set (inspector host + selection context) so
+# InspectorHost::attachSelectionContext links against the real context.
+add_executable(test_explain_step_panel
+  test_explain_step_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/step_explanation_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/step_explanation_section.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_explain_step_panel PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+target_include_directories(test_explain_step_panel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_explain_step_panel)
+set_target_properties(test_explain_step_panel PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_step_panel TEST_PREFIX "test_explain_step_panel::")
+
 # ── Workbench 7.0: unified processing history projection (TaskCenter + runs) ──
 add_executable(test_processing_history_model
   test_processing_history_model.cpp
