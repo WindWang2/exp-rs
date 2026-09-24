@@ -226,6 +226,8 @@ Result<StepEvidence> stepEvidenceFromProvenanceDoc( const QJsonObject &doc )
     QHash<QString, int> artifactIndexById;
     QHash<QString, QString> producerOfArtifact; // artifact node id → producing node id
     QHash<QString, QString> producedByExec;     // exec node id → produced/reused artifact node id
+    QSet<QString> seenStepIds;     // resolved step identity — duplicates are corrupt
+    QSet<QString> seenArtifactIds; // resolved artifact identity — duplicates are corrupt
 
     for ( const workflow::ProvenanceNode &node : graph.nodes() )
     {
@@ -239,6 +241,18 @@ Result<StepEvidence> stepEvidenceFromProvenanceDoc( const QJsonObject &doc )
             step.stepId = node.attributes.value( QLatin1String( "nodeId" ) ).toString();
             if ( step.stepId.isEmpty() )
                 step.stepId = stripNodePrefix( node.id );
+            // Two nodeExec NODES may carry distinct node ids yet resolve to
+            // the same step id through the nodeId attribute — the shape
+            // RunSnapshot::fromJson refuses ("duplicate step id"). The
+            // in-memory path is the primary build path and applies the same
+            // gate instead of letting alignment and identity digests key the
+            // collision away.
+            if ( seenStepIds.contains( step.stepId ) )
+                return Result<StepEvidence>::failure( typedFailure(
+                    kCodeMalformedEvidence,
+                    QStringLiteral( "duplicate step id '%1' in provenance document" )
+                        .arg( step.stepId ) ) );
+            seenStepIds.insert( step.stepId );
             step.operatorId = node.attributes.value( QLatin1String( "operatorId" ) ).toString();
             step.status = node.attributes.value( QLatin1String( "state" ) ).toString();
             step.lineageSignature =
@@ -257,6 +271,12 @@ Result<StepEvidence> stepEvidenceFromProvenanceDoc( const QJsonObject &doc )
             artifact.artifactId = node.attributes.value( QLatin1String( "path" ) ).toString();
             if ( artifact.artifactId.isEmpty() )
                 artifact.artifactId = stripNodePrefix( node.id );
+            if ( seenArtifactIds.contains( artifact.artifactId ) )
+                return Result<StepEvidence>::failure( typedFailure(
+                    kCodeMalformedEvidence,
+                    QStringLiteral( "duplicate artifact id '%1' in provenance document" )
+                        .arg( artifact.artifactId ) ) );
+            seenArtifactIds.insert( artifact.artifactId );
             const DigestRecord digest = classifyRecordedDigest(
                 node.attributes.value( QLatin1String( "fingerprint" ) ).toString() );
             artifact.digest = digest.digest;
@@ -358,6 +378,7 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
             QStringLiteral( "bridge step evidence was truncated by the recorder — the snapshot covers only the reported prefix" ),
             DiagnosticSeverity::Warning );
     const QJsonArray steps = workflow.value( QLatin1String( "steps" ) ).toArray();
+    QSet<QString> seenStepIds; // the runtime keys steps by id; a repeat is corrupt
     for ( const QJsonValue &value : steps )
     {
         const QJsonObject entry = value.toObject();
@@ -367,6 +388,12 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
             return Result<StepEvidence>::failure( typedFailure(
                 kCodeMalformedEvidence,
                 QStringLiteral( "bridge step summary carries no id" ) ) );
+        if ( seenStepIds.contains( step.stepId ) )
+            return Result<StepEvidence>::failure( typedFailure(
+                kCodeMalformedEvidence,
+                QStringLiteral( "duplicate step id '%1' in bridge step evidence" )
+                    .arg( step.stepId ) ) );
+        seenStepIds.insert( step.stepId );
         step.operatorId = entry.value( QLatin1String( "operator" ) ).toString();
         step.status = entry.value( QLatin1String( "status" ) ).toString();
         step.errorMessage = entry.value( QLatin1String( "error" ) ).toString();

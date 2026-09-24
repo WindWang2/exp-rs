@@ -472,6 +472,11 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
         }
         if ( check.passed )
             continue;
+        // Seeing the failure is a verdict input, not a truncation decision:
+        // set anyFailed BEFORE the cap check, or maxFindings == 0 takes the
+        // truncation branch on the first failure and the report claims
+        // "equivalent" while its own checks record passed:false.
+        anyFailed = true;
         if ( report.additionalFindings.size() >= options.maxFindings )
         {
             report.evidenceGaps
@@ -479,7 +484,6 @@ Result<FirstDivergenceReport> analyzeAgainstInvariants( const RunSnapshot &stude
                        .arg( options.maxFindings );
             break;
         }
-        anyFailed = true;
         DivergenceFinding finding;
         // A failed invariant is a DECLARED-CONTRACT divergence: there is no
         // process reference to compare against, so the taxonomy's
