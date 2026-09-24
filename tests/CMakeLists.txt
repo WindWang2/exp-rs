@@ -11872,6 +11872,7 @@ target_link_libraries(test_edit_roi_semantics PRIVATE
   qgis_analysis
   GDAL::GDAL
 )
+sicnu_link_jsoncpp(test_edit_roi_semantics)
 target_include_directories(test_edit_roi_semantics PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -11942,6 +11943,7 @@ target_link_libraries(test_edit_persistence PRIVATE
   Qt6::Gui
   qgis_core
 )
+sicnu_link_jsoncpp(test_edit_persistence)
 target_include_directories(test_edit_persistence PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
