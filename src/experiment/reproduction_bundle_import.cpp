@@ -6,6 +6,8 @@
 // never observed the execution never fabricates a terminal lifecycle.
 #include "reproduction_bundle_import.h"
 
+#include "experiment_types.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -42,6 +44,48 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
         return std::nullopt;
     }
     return document.object();
+}
+
+/// Self-consistent tamper gate: the metrics-hash gate only proves the record
+/// matches its own embedded hash, so an attacker who re-derives the hash can
+/// smuggle secret material that the exporter's ingestion redaction would
+/// have masked. A record exported by the real pipeline never carries a
+/// secret-named key with a value other than the "***" ingestion mask, nor a
+/// credential-shaped string value — refuse those instead of installing them
+/// into a store whose lab reports ship records byte-identical. Returns the
+/// offending key, or empty when clean.
+QString unmaskedSecretKeyInMetrics( const QJsonValue &value, const QString &key )
+{
+    if ( value.isObject() )
+    {
+        const QJsonObject object = value.toObject();
+        for ( auto it = object.begin(); it != object.end(); ++it )
+        {
+            const QString found = unmaskedSecretKeyInMetrics( it.value(), it.key() );
+            if ( !found.isEmpty() )
+                return found;
+        }
+        return QString();
+    }
+    if ( value.isArray() )
+    {
+        const QJsonArray array = value.toArray();
+        for ( const QJsonValue &item : array )
+        {
+            const QString found = unmaskedSecretKeyInMetrics( item, key );
+            if ( !found.isEmpty() )
+                return found;
+        }
+        return QString();
+    }
+    if ( !value.isString() )
+        return QString();
+    const QString text = value.toString();
+    if ( text == QStringLiteral( "***" ) )
+        return QString(); // already masked at ingestion — legal
+    if ( RunEnvironment::nameLooksSecret( key ) || RunEnvironment::valueLooksSecret( text ) )
+        return key;
+    return QString();
 }
 
 } // namespace
@@ -301,6 +345,20 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                 // success. Refuse the import instead.
                 report.warnings.append( QStringLiteral( "metrics.json does not parse as a"
                                                         " metric record" ) );
+                return report;
+            }
+            const QString secretKey =
+                unmaskedSecretKeyInMetrics( record->metrics, QStringLiteral( "metrics" ) );
+            if ( !secretKey.isEmpty() )
+            {
+                // Self-consistent tamper: a re-signed metrics_hash makes the
+                // record provably "its own", not trustworthy. A real export
+                // never carries unmasked secret material — the ingestion
+                // redaction masked it before the record was hash-committed.
+                report.warnings.append(
+                    QStringLiteral( "metrics.json carries unmasked secret-shaped"
+                                    " material under '%1' — refused" )
+                        .arg( secretKey ) );
                 return report;
             }
             else

@@ -1820,6 +1820,31 @@ TEST_CASE( "bundle import refuses corrupted member documents instead of half-ins
         CHECK( !ok );
         CHECK( runs == 0 );
     }
+
+    // Leg 4: a SELF-CONSISTENT metrics record carrying unmasked secret
+    // material. The hash gate alone cannot catch an attacker who re-derives
+    // the hash over their own hostile content — a real export never carries
+    // unmasked secret-shaped keys (ingestion masked them before the record
+    // was hash-committed), so the import refuses instead of installing
+    // material its lab reports would later ship byte-identically.
+    {
+        MetricRecord hostile;
+        hostile.runId = QStringLiteral( "run-src" );
+        hostile.protocol.setDatasetVersionId( committed->versionId() );
+        hostile.protocol.setSplitManifestId( run.splitManifestId() );
+        hostile.metrics = QJsonObject{
+            { QStringLiteral( "overall_accuracy" ), 0.9 },
+            { QStringLiteral( "api_key" ), QStringLiteral( "sk-abcdefghij1234567890" ) } };
+        hostile.metricsHash = hostile.contentHash(); // the hash gate passes…
+        writeMemberAndResign( QStringLiteral( "metrics.json" ),
+                              QJsonDocument( hostile.toJson() ).toJson(
+                                  QJsonDocument::Indented ) );
+        const auto [ok, runs] = importIntoFreshStore( QStringLiteral( "t4.db" ),
+                                                      QStringLiteral( "exp-t4" ) );
+        // …but the import refuses anyway.
+        CHECK( !ok );
+        CHECK( runs == 0 );
+    }
 }
 
 TEST_CASE( "metric records survive the bundle round trip byte-identically, "
