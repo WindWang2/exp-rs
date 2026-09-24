@@ -27,6 +27,12 @@ Json::Value sessionSurfaceStatus(const OpsRunResult &result)
     }
     if (!result.benchmarkError.empty())
         doc["benchmark_error"] = result.benchmarkError;
+    if (!result.checkpointError.empty())
+        doc["checkpoint_error"] = result.checkpointError;
+    // Resume/restart evidence on the wire: the reconciler's typed verdict
+    // (incl. duplicate-submit hazard + submitted run ids) rides with every
+    // status so a driver never has to guess whether a restart is safe.
+    doc["reconcile"] = result.reconcile.toJson();
     doc["error"] = result.error;
     return doc;
 }
@@ -34,8 +40,8 @@ Json::Value sessionSurfaceStatus(const OpsRunResult &result)
 Json::Value sessionSurfaceActions()
 {
     Json::Value actions(Json::arrayValue);
-    for (const char *a : {"run", "pause", "cancel", "resume", "approve_repair", "export",
-                          "timeline", "status"})
+    for (const char *a : {"run", "pause", "cancel", "clear_pause", "clear_cancel", "resume",
+                          "approve_repair", "export", "timeline", "status"})
         actions.append(a);
     Json::Value doc(Json::objectValue);
     doc["schema"] = kSessionSurfaceSchema;
@@ -102,6 +108,23 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         doc["effective_scope"] = "session_launch_and_next_run";
         return doc;
     }
+    if (action == "clear_pause")
+    {
+        coordinator.clearPause();
+        doc["ok"] = true;
+        return doc;
+    }
+    if (action == "clear_cancel")
+    {
+        // Relaunch path: cancel latches (it must survive until the in-flight
+        // or next run actually consumed it), so the driver needs an explicit
+        // typed way to arm the coordinator for new work after the aborted
+        // run was observed. Without this the wire had no disarm at all and
+        // every later run on a cancelled coordinator aborted as CANCELLED.
+        coordinator.clearCancel();
+        doc["ok"] = true;
+        return doc;
+    }
     if (action == "resume")
     {
         // The loop refuses a resume whose run() does not restate the
@@ -128,6 +151,8 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     }
     if (action == "resume_clear_pause")
     {
+        // Legacy name kept for wire compatibility; clear_pause is the
+        // advertised spelling.
         coordinator.clearPause();
         doc["ok"] = true;
         return doc;
