@@ -11281,6 +11281,7 @@ sicnu_add_d17_test(test_ir2_port_param_mapping
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/ir2_registry_node_executor.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
@@ -11295,6 +11296,7 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
   LIBS Qt6::Widgets Qt6::Test
 )
@@ -11333,6 +11335,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_composer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_provenance.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
     ${SICNU_FAULT_REGISTRY_SOURCE}
