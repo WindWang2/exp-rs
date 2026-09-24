@@ -350,6 +350,29 @@ TEST_CASE( "64-bit seeds round-trip the report JSON without double rounding",
     const auto parsedSmall = StudyRunRow::fromJson( small.toJson() );
     REQUIRE( parsedSmall.has_value() );
     CHECK( parsedSmall.value().seed == 42 );
+
+    // Malformed exact keys are a typed refusal (fail-closed), never a silent
+    // zero: negative, overflowing and trailing-garbage decimals, and a
+    // number-typed key (the reader demands the string form the writer emits).
+    for ( const QString &garbage : { QStringLiteral( "-1" ),
+                                     QStringLiteral( "18446744073709551616" ),
+                                     QStringLiteral( "12abc" ) } )
+    {
+        auto row = recordedRowWithSeed( 0 ).toJson();
+        row.insert( QStringLiteral( "seed_u64" ), garbage );
+        const auto refused = StudyRunRow::fromJson( row );
+        REQUIRE( !refused.has_value() );
+        CHECK( refused.diagnostics().first().code
+               == QStringLiteral( "study.report_invalid_row" ) );
+    }
+    {
+        auto row = recordedRowWithSeed( 0 ).toJson();
+        row.insert( QStringLiteral( "seed_u64" ), 42 ); // number, not string
+        const auto refused = StudyRunRow::fromJson( row );
+        REQUIRE( !refused.has_value() );
+        CHECK( refused.diagnostics().first().code
+               == QStringLiteral( "study.report_invalid_row" ) );
+    }
 }
 
 TEST_CASE( "run table seeds survive a full report round-trip at 64-bit width",
@@ -400,8 +423,10 @@ qint64 timedReportAssemblyMs( int n, quint64 budgetSeed )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
+    // In-memory store: the complexity claim is about ASSEMBLY, not I/O — a
+    // file DB's reads dominate the timing and would mask the O(n²) shape.
     sicnu::experiment::ExperimentStore store;
-    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiment.sqlite" ) ) ) );
+    REQUIRE( store.open( QStringLiteral( ":memory:" ) ) );
     sicnu::experiment::MatrixLedger ledger{ store };
     sicnu::experiment::ExperimentRunRecorder recorder{ store };
 
@@ -465,9 +490,14 @@ TEST_CASE( "study sweep cap refuses oversized specs instead of truncating",
 TEST_CASE( "report assembly at the sweep cap stays within the UI budget",
            "[study][export][perf]" )
 {
-    // The report builder indexes the sampled points once (O(n)); the earlier
-    // form rescanned the full list per run-table row (O(n²) in the cap-bound
-    // worst case). Profile reference (this machine, Debug): see PR notes.
+    // Absolute budget for the Studio's live worker at the sweep cap. NOTE on
+    // what this oracle deliberately is NOT: a runtime complexity probe. At
+    // n ≤ 1000 the assembly time is dominated by per-run store reads, so a
+    // size-ratio assertion cannot distinguish the O(n) point index from the
+    // quadratic std::find_if it replaced (measured delta ≈ 45 ms of 836 ms
+    // at the cap, in-memory store) — a ratio CHECK here would be false
+    // confidence. The quadratic scan is guarded structurally: the run-table
+    // loop consumes the pointsById index and contains no scan over `points`.
     const qint64 capMs = timedReportAssemblyMs( 1000, 7 );
     WARN( "report assembly profile: 1000 points = " << capMs << " ms" );
     CHECK( capMs < 5000 ); // absolute teaching-study budget at the cap

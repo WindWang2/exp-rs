@@ -78,7 +78,17 @@ bool readSeed( const Value &parent, const char *key, std::uint32_t &out, std::st
     const Value &seed = parent[key];
     if ( seed.isUInt() )
     {
-        out = seed.asUInt();
+        // asUInt64() is exact regardless of jsoncpp version; the bound is
+        // re-checked here so the width contract never leans on isUInt()'s
+        // bound-checking behavior of a particular vendored jsoncpp.
+        const Json::Value::UInt64 wide = seed.asUInt64();
+        if ( wide > static_cast<Json::Value::UInt64>( std::numeric_limits<std::uint32_t>::max() ) )
+        {
+            error = std::string( "seed field '" ) + key
+                    + "' must be an unsigned 32-bit integer";
+            return false;
+        }
+        out = static_cast<std::uint32_t>( wide );
         return true;
     }
     // The width bound is the contract: a seed above UINT32_MAX is a field

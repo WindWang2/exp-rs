@@ -33,6 +33,10 @@ namespace
 
 void ensureQgisApplication()
 {
+    // The platform env must be set BEFORE the first QApplication of this
+    // binary exists — keep this file's ensure call ahead of any TU that
+    // constructs widgets, or the fixture silently runs on the desktop
+    // platform.
     if ( QApplication::instance() )
         return;
     // Offscreen: the dock must construct, lay out and destroy without a
@@ -62,6 +66,9 @@ qlonglong countRows( const QString &storePath, const char *sql )
     if ( sqlite3_open_v2( storePath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY,
                           nullptr ) != SQLITE_OK )
         return -1;
+    // The live study's worker thread may hold the write lock mid-commit; a
+    // bare reader would trip SQLITE_BUSY and report -1 for a healthy store.
+    sqlite3_busy_timeout( db, 250 );
     sqlite3_stmt *stmt = nullptr;
     qlonglong count = -1;
     if ( sqlite3_prepare_v2( db, sql, -1, &stmt, nullptr ) == SQLITE_OK
@@ -116,7 +123,7 @@ void writeInputRaster( const QString &path )
         pixels[i] = static_cast<float>( i ) / 64.0f;
     GDALRasterBandH band = GDALGetRasterBand( dataset, 1 );
     REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 8, 8, pixels, 8, 8, GDT_Float32, 0,
-                           0, nullptr ) == CE_None );
+                           0 ) == CE_None );
     GDALClose( dataset );
 }
 
@@ -204,24 +211,33 @@ TEST_CASE( "studio dock busy gate keeps store A runs from publishing over store 
     CHECK( !dock->openLiveStoreAtPath( storeB ) );
 
     dock->cancelLiveStudy();
-    // The cooperative cancel flag is set immediately; whether it lands
-    // mid-run or after the (fast-refusing) drain is timing — the TRUTHFUL
-    // outcome is recorded either way. Wait for the queued result, then judge
-    // by store truth, never by a UI substring.
+    // The cooperative cancel flag is set immediately; where it lands decides
+    // how many of the five points ever get submitted — the store records
+    // EXACTLY that truth (1..5 terminal rows), never a fabricated completion.
     REQUIRE( waitFor( [ & ] { return runLiveButton( *dock )->isEnabled(); }, 30000 ) );
-    CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "live study" ) ) );
-
-    // Run truth lives in store A: the study recorded every sampled point, and
-    // store B (refused during flight) holds nothing at all.
-    CHECK( waitFor(
-        [ & ] {
-            return countRows( storeA, "SELECT COUNT(*) FROM experiment_runs" ) >= 1;
-        },
-        5000 ) );
+    CHECK( matrixStatus( *dock )->text().contains( QStringLiteral( "live study" ) ) );
+    // Zero rows is as truthful as five: the flag may land before the first
+    // submission (nothing in flight, nothing recorded).
+    const qlonglong rowsA = countRows( storeA, "SELECT COUNT(*) FROM experiment_runs" );
+    CHECK( rowsA >= 0 );
+    CHECK( rowsA <= 5 );
+    CHECK( countRows( storeA,
+                      "SELECT COUNT(*) FROM experiment_runs WHERE status IN"
+                      " ('completed','failed','cancelled')" ) == rowsA );
     CHECK( countRows( storeB, "SELECT COUNT(*) FROM experiment_runs" ) == 0 );
 
-    // After the queued result landed, the gate reopens and a switch works.
+    // After the queued result landed the gate reopens and a switch works.
     CHECK( dock->openLiveStoreAtPath( storeB ) );
+
+    // A full (uncancelled) study on store B records EVERY sampled point of
+    // the dock's 5-step OAT spec — and store A's pre-cancel truth stays
+    // exactly as it was.
+    runLiveButton( *dock )->click();
+    REQUIRE( waitFor( [ & ] { return !runLiveButton( *dock )->isEnabled(); }, 5000 ) );
+    REQUIRE( waitFor( [ & ] { return runLiveButton( *dock )->isEnabled(); }, 120000 ) );
+    CHECK( matrixStatus( *dock )->text().contains( QStringLiteral( "live study" ) ) );
+    CHECK( countRows( storeB, "SELECT COUNT(*) FROM experiment_runs" ) == 5 );
+    CHECK( countRows( storeA, "SELECT COUNT(*) FROM experiment_runs" ) == rowsA );
 }
 
 TEST_CASE( "studio dock destruction with a study in flight is clean",

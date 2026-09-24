@@ -80,9 +80,11 @@ class ExperimentStudioDock : public QgsDockWidget
     /// typed failure while a live study is in flight.
     bool openLiveStoreAtPath( const QString &path );
 
-    /// Machine-readable session snapshot (refs only, never capsule bodies) —
-    /// the Agent-facing surface, and the offscreen test seam for the honesty
-    /// contracts (synthetic markers, run refs, export path).
+    /// Machine-readable session snapshot — the Agent-facing surface and the
+    /// offscreen test seam for the honesty contracts (synthetic markers, run
+    /// refs, export path). Capsule bodies never enter the session (refs only);
+    /// `lastStudyReport` may carry the full report document by design. UI
+    /// thread only: every mutator runs there.
     sicnu::experiment_studio::StudioSessionState sessionState() const { return m_session; }
 
   private:

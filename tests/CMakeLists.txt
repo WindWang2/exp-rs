@@ -11540,6 +11540,9 @@ target_link_libraries(test_experiment_studio_dock PRIVATE
   qgis_gui
   Sicnu::experiment_studio_live
   Sicnu::dataset
+  # rs:threshold_raster resolves through the operator registry — link it
+  # explicitly instead of leaning on sicnu_jobs' transitive PUBLIC link.
+  sicnu_operators
   GDAL::GDAL
   SQLite::SQLite3
 )

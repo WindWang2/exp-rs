@@ -2265,12 +2265,20 @@ TEST_CASE( "stale evidence: held snapshots stay put and re-records are tracked",
                                                    identity, 0.35 );
     const QString digestBefore = before.snapshotDigest();
 
-    // Re-record the SAME run id with different parameters and outputs.
+    // Re-record the SAME run id's CHECKPOINT evidence with different
+    // parameters and outputs. (The store row itself is lifecycle-immutable —
+    // upsertRun refuses a Running→Running re-write — so a stale-evidence
+    // rebuild is exactly a changed evidence directory under a held snapshot.)
     QHash<QString, QPair<const char *, const char *>> reRecorded = identity;
     reRecorded.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
     reRecorded.insert( QStringLiteral( "area" ), { kHex5, kHex5 } );
-    const RunSnapshot after = lab.recordAndBuild( QStringLiteral( "run-x" ), false,
-                                                  reRecorded, 0.62 );
+    recordCheckpoint( lab.dir.path(), QStringLiteral( "run-x" ), labDefinition( false ),
+                      reRecorded, 0.62 );
+    DirectoryEvidenceSource staleSource( &lab.store, lab.dir.path() );
+    RunSnapshotBuilder staleBuilder( staleSource );
+    const auto rebuilt = staleBuilder.build( QStringLiteral( "run-x" ) );
+    REQUIRE( rebuilt.has_value() );
+    const RunSnapshot &after = rebuilt.value();
 
     // The held snapshot is untouched by the re-record (no lazy aliasing into
     // the store or the checkpoint directory).
