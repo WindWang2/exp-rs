@@ -353,7 +353,9 @@ TEST_CASE( "prepared decisions: deterministic order, refusals never auto-apply",
   CHECK( sawReproject );
 
   // Same inputs -> same plan bytes.
-  IrRepairOutcome outcome2 = planRepairs( crsConflictIr(), analyzeWorkflowIr( crsConflictIr(), conflictFacts() ), conflictFacts() );
+  WorkflowIr ir2 = crsConflictIr();
+  IrAnalysis analysis2 = analyzeWorkflowIr( ir2, conflictFacts() );
+  IrRepairOutcome outcome2 = planRepairs( ir2, analysis2, conflictFacts() );
   CHECK( plan.toJson() == planPreparedDecisions( outcome2 ).toJson() );
 }
 

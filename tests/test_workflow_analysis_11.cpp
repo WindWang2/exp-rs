@@ -18,6 +18,7 @@
 #include "agent/harness/capability_relations.h"
 #include "agent/harness/harness_error.h"
 #include "agent/harness/workflow_analysis.h"
+#include "agent/harness/workflow_ir.h"
 
 using namespace sicnu::agent::harness;
 
@@ -99,8 +100,17 @@ Json::Value changeIr( Json::Value expectations = Json::Value( Json::objectValue 
   return doc;
 }
 
-IrAnalysis analyzeWith( Json::Value ir, Json::Value t1Facts, Json::Value t2Facts )
+WorkflowIr readIr( const Json::Value &doc )
 {
+  WorkflowIr ir;
+  HarnessError error;
+  REQUIRE( readWorkflowIr( doc, ir, error ) );
+  return ir;
+}
+
+IrAnalysis analyzeWith( Json::Value doc, Json::Value t1Facts, Json::Value t2Facts )
+{
+  WorkflowIr ir = readIr( doc );
   IrAnalysisInput input;
   if ( !t1Facts.isNull() )
     input.inputFacts[ "t1" ] = t1Facts;
@@ -120,7 +130,7 @@ TEST_CASE( "temporal calendar: no declared contract is an honest skip", "[analys
   IrAnalysis analysis = analyzeWith( changeIr(), opticalUnderstanding(), opticalUnderstanding() );
   const Json::Value *check = findCheck( analysis, "temporal_calendar" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "skip" );
+  CHECK( (*check)["status"].asString() == "skip" );
   CHECK( findIssue( analysis, "TEMPORAL_CALENDAR_CONFLICT" ) == nullptr );
 }
 
@@ -156,7 +166,7 @@ TEST_CASE( "temporal calendar: dates inside the declared range pass", "[analysis
   CHECK( findIssue( analysis, "TEMPORAL_CALENDAR_CONFLICT" ) == nullptr );
   const Json::Value *check = findCheck( analysis, "temporal_calendar" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "pass" );
+  CHECK( (*check)["status"].asString() == "pass" );
 }
 
 TEST_CASE( "temporal calendar: require_regular fails an irregular folded series", "[analysis11][temporal]" )
@@ -200,7 +210,7 @@ TEST_CASE( "temporal calendar: declared contract with no observable dates is a s
                                      opticalUnderstanding() );
   const Json::Value *check = findCheck( analysis, "temporal_calendar" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "skip" );
+  CHECK( (*check)["status"].asString() == "skip" );
   CHECK( findIssue( analysis, "TEMPORAL_CALENDAR_CONFLICT" ) == nullptr );
 }
 
@@ -250,7 +260,7 @@ TEST_CASE( "numeric domain chain: two reflectance inputs are compatible", "[anal
   CHECK( findIssue( analysis, "NUMERIC_DOMAIN_CHAIN" ) == nullptr );
   const Json::Value *check = findCheck( analysis, "numeric_domain_chain" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "skip" ); // no DECIDABLE conflict pair
+  CHECK( (*check)["status"].asString() == "skip" ); // no DECIDABLE conflict pair
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +285,8 @@ TEST_CASE( "band identity: same source wired to both ports of a role-distinct no
   })" );
   IrAnalysisInput input;
   input.inputFacts[ "primary" ] = opticalUnderstanding();
-  IrAnalysis analysis = analyzeWorkflowIr( doc, input );
+  WorkflowIr ir = readIr( doc );
+  IrAnalysis analysis = analyzeWorkflowIr( ir, input );
   const IrIssue *issue = findIssue( analysis, "BAND_IDENTITY_MISMATCH", "ndx" );
   REQUIRE( issue != nullptr );
   CHECK( issue->severity == "warning" );
@@ -299,11 +310,12 @@ TEST_CASE( "band identity: distinct sources pass, missing demand skips", "[analy
   IrAnalysisInput input;
   input.inputFacts[ "primary" ] = opticalUnderstanding();
   input.inputFacts[ "secondary" ] = opticalUnderstanding();
-  IrAnalysis analysis = analyzeWorkflowIr( doc, input );
+  WorkflowIr ir = readIr( doc );
+  IrAnalysis analysis = analyzeWorkflowIr( ir, input );
   CHECK( findIssue( analysis, "BAND_IDENTITY_MISMATCH" ) == nullptr );
   const Json::Value *check = findCheck( analysis, "band_identity" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "pass" );
+  CHECK( (*check)["status"].asString() == "pass" );
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +340,8 @@ TEST_CASE( "output identity: declared kind disagreeing with the artifact kind fa
   })" );
   IrAnalysisInput input;
   input.inputFacts[ "primary" ] = opticalUnderstanding();
-  IrAnalysis analysis = analyzeWorkflowIr( doc, input );
+  WorkflowIr ir = readIr( doc );
+  IrAnalysis analysis = analyzeWorkflowIr( ir, input );
   const IrIssue *issue = findIssue( analysis, "OUTPUT_IDENTITY_MISMATCH" );
   REQUIRE( issue != nullptr );
   CHECK( issue->severity == "error" );
@@ -354,16 +367,18 @@ TEST_CASE( "output identity: agreeing kinds pass; dangling ports skip", "[analys
   })" );
   IrAnalysisInput input;
   input.inputFacts[ "primary" ] = opticalUnderstanding();
-  IrAnalysis analysis = analyzeWorkflowIr( doc, input );
+  WorkflowIr ir = readIr( doc );
+  IrAnalysis analysis = analyzeWorkflowIr( ir, input );
   CHECK( findIssue( analysis, "OUTPUT_IDENTITY_MISMATCH" ) == nullptr );
   const Json::Value *check = findCheck( analysis, "output_identity" );
   REQUIRE( check != nullptr );
-  CHECK( check["status"].asString() == "pass" );
+  CHECK( (*check)["status"].asString() == "pass" );
 
   // A duplicate declaration of the same port warns even when kinds agree.
   doc["outputs"].append( parse( R"({ "name": "map2", "node": "ndvi", "port": "output",
                                  "kind": "raster" })" ) );
-  IrAnalysis duplicated = analyzeWorkflowIr( doc, input );
+  WorkflowIr irDup = readIr( doc );
+  IrAnalysis duplicated = analyzeWorkflowIr( irDup, input );
   const IrIssue *dup = findIssue( duplicated, "OUTPUT_IDENTITY_MISMATCH" );
   REQUIRE( dup != nullptr );
   CHECK( dup->severity == "warning" );
