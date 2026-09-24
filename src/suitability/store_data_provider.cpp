@@ -38,10 +38,24 @@ bool applyFacetValues( const QVector<QPair<QString, qint64>> &values,
     return truncated;
 }
 
-bool truthy( const QString &value )
+/// Facet truth spelling, case-insensitively. The store never constrains
+/// facet values, so producers write "True"/"TRUE"/"Y" as freely as "true";
+/// reading any of them as absent fabricates a zero. Returns:
+///   1  — truthy spelling ("true", "1", "yes", "y"),
+///   0  — falsy spelling ("", "false", "0", "no", "n"),
+///  -1  — unknown spelling: the caller must mark factsTruncated, because a
+///        count that ignores it silently under-reports.
+int truthSpelling( const QString &value )
 {
-    return value == QStringLiteral( "true" ) || value == QStringLiteral( "1" ) ||
-           value == QStringLiteral( "yes" );
+    const QString lower = value.trimmed().toLower();
+    if ( lower == QLatin1String( "true" ) || lower == QLatin1String( "1" ) ||
+         lower == QLatin1String( "yes" ) || lower == QLatin1String( "y" ) )
+        return 1;
+    if ( lower.isEmpty() || lower == QLatin1String( "false" ) ||
+         lower == QLatin1String( "0" ) || lower == QLatin1String( "no" ) ||
+         lower == QLatin1String( "n" ) )
+        return 0;
+    return -1;
 }
 
 } // namespace
@@ -189,6 +203,7 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
         if ( !pseudoFacet.has_value() )
             return sicnu::data::Result<DatasetFacts>::failure( pseudoFacet.diagnostics() );
         bool folded = false;
+        bool unknownSpelling = false;
         qint64 pseudo = 0;
         bool sawTruthy = false;
         for ( const auto &entry : pseudoFacet->values )
@@ -198,19 +213,23 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
                 folded = true;
                 continue;
             }
-            if ( truthy( entry.first ) )
+            const int spelling = truthSpelling( entry.first );
+            if ( spelling < 0 )
+                unknownSpelling = true;
+            else if ( spelling > 0 )
             {
                 pseudo += entry.second;
                 sawTruthy = true;
             }
         }
-        if ( folded && !sawTruthy )
+        if ( ( folded && !sawTruthy ) || unknownSpelling )
             facts.factsTruncated = true;
         else
             facts.pseudoLabelCount = pseudo;
-        // The folded tail may hide further truthy spellings: the reported
-        // count is a lower bound, so the cap must be reported.
-        if ( folded )
+        // The folded tail may hide further truthy spellings, and values
+        // outside the vocabulary are unjudgeable: the reported count is a
+        // lower bound at best, so the cap must be reported.
+        if ( folded || unknownSpelling )
             facts.factsTruncated = true;
     }
 
@@ -225,6 +244,7 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
             return sicnu::data::Result<DatasetFacts>::failure( missingFacet.diagnostics() );
         qint64 missing = 0;
         bool sawTruthy = false;
+        bool unknownSpelling = false;
         bool folded = false;
         for ( const auto &entry : missingFacet->values )
         {
@@ -233,19 +253,23 @@ sicnu::data::Result<DatasetFacts> StoreDataProvider::datasetFacts(
                 folded = true;
                 continue;
             }
-            if ( truthy( entry.first ) )
+            const int spelling = truthSpelling( entry.first );
+            if ( spelling < 0 )
+                unknownSpelling = true;
+            else if ( spelling > 0 )
             {
                 missing += entry.second;
                 sawTruthy = true;
             }
         }
-        if ( folded && !sawTruthy )
+        if ( ( folded && !sawTruthy ) || unknownSpelling )
             facts.factsTruncated = true;
         else
             facts.missingTimeCount = missing;
-        // A folded missing_time tail may hide further truthy values: the
-        // count is a lower bound, so the cap must be reported.
-        if ( folded )
+        // A folded missing_time tail may hide further truthy values, and
+        // unknown spellings are unjudgeable: the count is a lower bound at
+        // best, so the cap must be reported.
+        if ( folded || unknownSpelling )
             facts.factsTruncated = true;
     }
     else

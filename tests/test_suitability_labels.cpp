@@ -500,6 +500,29 @@ TEST_CASE( "modality mismatch between model and every data source is unsuitable"
     REQUIRE( repaired.level == SuitabilityLevel::Suitable );
 }
 
+TEST_CASE( "model pins a modality but no source reports one stays unknown",
+           "[suitability][model]" )
+{
+    // Band evidence exists, so the all-evidence-absent gate does not fire —
+    // but with an empty modality pool the pinned modality cannot be checked.
+    // Mirroring the GSD handling: unknown, never a silent pass.
+    SuitabilityGoal goal;
+    goal.hasModel = true;
+    goal.modelModality = QStringLiteral( "sar" );
+    const auto resolved = resolveRequirements( goal );
+    REQUIRE( resolved.has_value() );
+
+    SceneCandidate scene = makeScene( QStringLiteral( "roles-only" ) );
+    scene.bandRoles = { QStringLiteral( "red" ), QStringLiteral( "nir" ) };
+    scene.modality.clear();
+    const SuitabilityCriterion criterion =
+        assessModelCompatibility( *resolved, { scene }, std::nullopt );
+    REQUIRE( criterion.level == SuitabilityLevel::Unknown );
+    REQUIRE( criterion.gaps.isEmpty() );
+    REQUIRE( criterion.evidence.value( QStringLiteral( "reason" ) ).toString()
+             == QStringLiteral( "modality_evidence_absent" ) );
+}
+
 TEST_CASE( "in-memory provider hands out held facts or an injected failure",
            "[suitability][labels][provider]" )
 {
