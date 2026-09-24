@@ -12,6 +12,7 @@
 #include "exprs/version.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QProcess>
 #include <QtCore/QtGlobal>
 
 #include "operators/framework/rs_operator_context.h"
@@ -576,10 +577,13 @@ TEST_CASE( "hot reload rolls back to the snapshot when the new code cannot load"
     // before the "dev's next edit" lands, mirroring real usage where the
     // capture completes during the editing gap. A capture that still races
     // an edit is caught by the manifest-identity gate and honestly refused.
+    // (completion 13/15: the dev snapshot is pid-attributed — this process's
+    // own, so snapshotOwnerPid() names the directory.)
     {
         const std::string marker =
             std::filesystem::temp_directory_path().generic_string()
             + "/sicnu-plugin-snapshots/last-good-" + fixture.id
+            + "-" + std::to_string( snapshotOwnerPid() )
             + "/snapshot.marker.json";
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
         while ( !std::filesystem::exists( marker )
@@ -1287,20 +1291,31 @@ TEST_CASE( "uninstallPlugin drains, removes the package AND its snapshot",
              == PluginRegistry::PluginUpgradeStatus::Installed );
     REQUIRE( registry.load( fixture.id ) );
 
-    // A dev-mode load leaves a last-good snapshot; emulate it deterministically
-    // (devMode is off here — drop a marked snapshot in directly).
-    const std::string lastGood = fixture.snapshotRoot + "/last-good-" + fixture.id;
+    // A dev-mode load leaves a pid-attributed last-good snapshot (completion
+    // 13/15); emulate it deterministically (devMode is off here — drop a
+    // marked snapshot in directly), plus the pre-attribution legacy layout
+    // an uninstall must also clean.
+    const std::string lastGood = fixture.snapshotRoot + "/last-good-" + fixture.id + "-"
+                                 + std::to_string( snapshotOwnerPid() );
+    const std::string legacyLastGood = fixture.snapshotRoot + "/last-good-" + fixture.id;
     {
         PluginSnapshotBudget budget;
         const PluginSnapshotResult snap = capturePluginSnapshot(
             fixture.targetDir(), lastGood, fixture.id, budget );
         REQUIRE( snap.ok() );
     }
+    {
+        std::error_code err;
+        std::filesystem::create_directories( legacyLastGood, err );
+        std::ofstream( legacyLastGood + "/x" ) << "x";
+    }
     REQUIRE( std::filesystem::exists( lastGood ) );
+    REQUIRE( std::filesystem::exists( legacyLastGood ) );
 
     REQUIRE( registry.uninstallPlugin( fixture.id ) );
     REQUIRE_FALSE( std::filesystem::exists( fixture.targetDir() ) );
     REQUIRE_FALSE( std::filesystem::exists( lastGood ) ); // no orphan
+    REQUIRE_FALSE( std::filesystem::exists( legacyLastGood ) ); // legacy swept too
 }
 
 TEST_CASE( "snapshot capture is bounded, verified and fail-closed",
@@ -1475,6 +1490,137 @@ TEST_CASE( "snapshot sweep reclaims residue but keeps live and own-pid artifacts
     // The parked dest was restored (crash between the two renames).
     REQUIRE( fs::exists( snapRoot + "/last-good-y", ec ) );
     REQUIRE( fs::exists( snapRoot + "/unrelated-dir", ec ) );
+    fs::remove_all( root, ec );
+}
+
+TEST_CASE( "snapshot sweep keeps a live sibling's pid-attributed last-good (completion 13/15)",
+           "[plugin][snapshot][completion13]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_cross" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string snapRoot = pluginSnapshotRoot( root );
+    fs::create_directories( snapRoot, ec );
+
+    // A guaranteed-LIVE foreign pid: a short-lived sleeper child. While it
+    // runs, its pid-attributed last-good snapshot belongs to a live process —
+    // another instance's sweep (which does not have the plugin in ITS live
+    // set) must never collect it. Master keyed last-good purely on the
+    // sweeping process's live ids and deleted exactly this directory.
+    long siblingPid = 0;
+    {
+#ifdef _WIN32
+        QProcess sleeper;
+        sleeper.setProgram( "cmd.exe" );
+        sleeper.setArguments( { "/c", "timeout /t 8 /nobreak >nul" } );
+        sleeper.start();
+        REQUIRE( sleeper.waitForStarted( 5000 ) );
+        siblingPid = static_cast<long>( sleeper.processId() );
+#else
+        QProcess sleeper;
+        sleeper.start( "sleep", { "8" } );
+        REQUIRE( sleeper.waitForStarted( 5000 ) );
+        siblingPid = static_cast<long>( sleeper.processId() );
+#endif
+        REQUIRE( siblingPid > 0 );
+
+        const std::string name = "last-good-org.sibling-" + std::to_string( siblingPid );
+        {
+            std::error_code err;
+            fs::create_directories( snapRoot + "/" + name, err );
+            std::ofstream( snapRoot + "/" + name + "/x" ) << "x";
+        }
+        // The sweeping process's live set does NOT contain org.sibling — the
+        // exact cross-process shape this attribution fixes.
+        const int removed = sweepPluginSnapshots( root, {} );
+        ( void ) removed;
+        REQUIRE( fs::exists( snapRoot + "/" + name, ec ) );
+
+        // The pid-suffixed name must still parse as a SAFE name (digits and
+        // dashes are); a malformed owner suffix is residue, not a sibling.
+        const long deadPid = static_cast<long>( std::numeric_limits<int>::max() );
+        const std::string deadName = "last-good-org.crashed-" + std::to_string( deadPid );
+        {
+            std::error_code err;
+            fs::create_directories( snapRoot + "/" + deadName, err );
+            std::ofstream( snapRoot + "/" + deadName + "/x" ) << "x";
+        }
+        sweepPluginSnapshots( root, {} );
+        REQUIRE_FALSE( fs::exists( snapRoot + "/" + deadName, ec ) );
+        // The sibling is STILL alive at this point (its QProcess is in scope)
+        // and its snapshot must have survived both sweeps.
+        REQUIRE( fs::exists( snapRoot + "/" + name, ec ) );
+    }
+    fs::remove_all( root, ec );
+}
+
+TEST_CASE( "snapshot sweep keeps the legacy last-good liveness rule unchanged (completion 13/15)",
+           "[plugin][snapshot][completion13]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_legacy" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string snapRoot = pluginSnapshotRoot( root );
+    fs::create_directories( snapRoot, ec );
+    const long ownPid = snapshotOwnerPid();
+
+    const auto seed = [&snapRoot]( const std::string &name ) {
+        std::error_code err;
+        fs::create_directories( snapRoot + "/" + name, err );
+        std::ofstream( snapRoot + "/" + name + "/x" ) << "x";
+    };
+    // Legacy grammar (pre-attribution layout): liveIds rule unchanged —
+    // live here, orphan collected.
+    seed( "last-good-org.legacy.live" );
+    seed( "last-good-org.legacy.orphan" );
+    // Own-pid snapshot: the same-pid rule keeps it even though the id is not
+    // in the live set passed to the sweep (an in-flight capture's dir).
+    seed( "last-good-org.own-" + std::to_string( ownPid ) );
+
+    const int removed = sweepPluginSnapshots( root, { "org.legacy.live" } );
+    ( void ) removed;
+    REQUIRE( fs::exists( snapRoot + "/last-good-org.legacy.live", ec ) );
+    REQUIRE_FALSE( fs::exists( snapRoot + "/last-good-org.legacy.orphan", ec ) );
+    REQUIRE( fs::exists( snapRoot + "/last-good-org.own-" + std::to_string( ownPid ), ec ) );
+    fs::remove_all( root, ec );
+}
+
+TEST_CASE( "snapshot sweep keeps a dead-owner last-good while the plugin id is live "
+           "(completion 13/15)",
+           "[plugin][snapshot][completion13]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_deadowner" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string snapRoot = pluginSnapshotRoot( root );
+    fs::create_directories( snapRoot, ec );
+    // A pid guaranteed dead (see the sweep harness above).
+    const long deadPid = static_cast<long>( std::numeric_limits<int>::max() );
+
+    const auto seed = [&snapRoot]( const std::string &name ) {
+        std::error_code err;
+        fs::create_directories( snapRoot + "/" + name, err );
+        std::ofstream( snapRoot + "/" + name + "/x" ) << "x";
+    };
+    // Owner dead in BOTH readings, but the plugin id is live for the
+    // sweeping registry — the keep must hold through the pid-attributed
+    // reading (a regression reducing the rule to owner-liveness only would
+    // re-delete a live plugin's rollback source).
+    seed( "last-good-org.kept-" + std::to_string( deadPid ) );
+    // Same shape, id unknown to the sweeper — collectible residue.
+    seed( "last-good-org.dropped-" + std::to_string( deadPid ) );
+
+    const int removed = sweepPluginSnapshots( root, { "org.kept" } );
+    ( void ) removed;
+    REQUIRE( fs::exists( snapRoot + "/last-good-org.kept-" + std::to_string( deadPid ), ec ) );
+    REQUIRE_FALSE(
+        fs::exists( snapRoot + "/last-good-org.dropped-" + std::to_string( deadPid ), ec ) );
     fs::remove_all( root, ec );
 }
 

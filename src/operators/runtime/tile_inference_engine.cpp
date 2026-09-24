@@ -2,6 +2,7 @@
 #include "operators/runtime/tile_inference_engine.h"
 
 #include "operators/runtime/eo_preflight.h"
+#include "operators/runtime/model_publish.h"
 #include "operators/framework/artifact_digest.h"
 #include "operators/framework/bounded_math.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -138,30 +139,8 @@ bool readBipWindow( const GdalDatasetWrapper &ds, const std::vector<int> &bands,
 }
 
 // --- Platform 8.0 provenance helpers ----------------------------------------
-
-/// Compact CRS display string for payloads/sidecars: "EPSG:32633" when the
-/// SRS carries an authority code, else a truncated WKT; "" for undeclared.
-std::string crsDisplayName( const QString &wkt )
-{
-  if ( wkt.trimmed().isEmpty() )
-    return {};
-  OGRSpatialReference srs;
-  if ( srs.SetFromUserInput( wkt.toUtf8().constData() ) == OGRERR_NONE )
-  {
-    const char *authority = srs.GetAuthorityName( nullptr );
-    const char *code = srs.GetAuthorityCode( nullptr );
-    if ( authority && code )
-      return std::string( authority ) + ":" + code;
-  }
-  const std::string text = wkt.toStdString();
-  if ( text.size() <= 64 )
-    return text;
-  // Truncate on a safe boundary: never split a UTF-8 multibyte sequence.
-  std::size_t cut = 61;
-  while ( cut > 0 && ( text[cut] & 0xC0 ) == 0x80 )
-    --cut;
-  return text.substr( 0, cut ) + "...";
-}
+// crsDisplayName and the sidecar publisher moved to model_publish.{h,cpp}
+// (completion 13/15): ONE authority shared with the ensemble lanes.
 
 /// Semantic CRS comparison through GDAL (geodetic authority for the
 /// co-registration verdict — string equality of WKT would false-negative on
@@ -185,49 +164,7 @@ int compareCrs( const QString &primaryCrs, const QString &otherCrs )
   return primary.IsSame( &other ) ? 0 : 1;
 }
 
-/// Publishes the provenance sidecar next to a successfully published raster.
-/// Same-directory staged write + rename. The CALLER removes any previous
-/// sidecar BEFORE the product rename, so the on-disk states possible across
-/// a crash are: product+matching sidecar (full success), product without
-/// sidecar (crash before the sidecar rename — detectable absence, never a
-/// stale mismatched one), or the previous product untouched. There is no
-/// consumer-side detection; the next successful run rewrites both.
-bool publishProvenanceSidecar( const QString &finalPath, const std::string &outputPath,
-                               const Json::Value &provenance, std::string *error )
-{
-  const QString sidecarPath = finalPath + QStringLiteral( ".prov.json" );
-  const QString stagePath = sidecarPath + QStringLiteral( ".stage~" );
-  QFile stage( stagePath );
-  if ( !stage.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-  {
-    if ( error )
-      *error = "failed to stage the provenance sidecar: " + stagePath.toStdString();
-    return false;
-  }
-  const Json::Value formatted = provenance;
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  const std::string text = Json::writeString( builder, formatted );
-  stage.write( text.data(), static_cast<qint64>( text.size() ) );
-  stage.close();
-  if ( stage.error() != QFileDevice::NoError )
-  {
-    stage.remove();
-    if ( error )
-      *error = "failed to write the provenance sidecar: " + stagePath.toStdString();
-    return false;
-  }
-  QFile::remove( sidecarPath ); // Windows rename does not overwrite (stage leftovers)
-  if ( !QFile::rename( stagePath, sidecarPath ) )
-  {
-    stage.remove();
-    if ( error )
-      *error = "failed to publish the provenance sidecar: " + sidecarPath.toStdString();
-    return false;
-  }
-  ( void )outputPath;
-  return true;
-}
+/// The sidecar publisher moved to model_publish.{h,cpp} (completion 13/15).
 
 /// Platform 10.0: sentinel-aware morphology on a published single-band
 /// Labels/Mask product. Streaming pass over full-width row bands read with a
@@ -2270,7 +2207,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   {
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {} );
     std::string provError;
-    if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
+    if ( !publishProvenanceSidecar( finalPath, prov, nullptr, &provError ) )
     {
       QFile::remove( finalPath );
       if ( hadExisting )
@@ -3974,7 +3911,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats,
                                                       "multi_input_probability_stack" );
     std::string provError;
-    if ( !publishProvenanceSidecar( finalPath, outputPath, prov, &provError ) )
+    if ( !publishProvenanceSidecar( finalPath, prov, nullptr, &provError ) )
     {
       QFile::remove( finalPath );
       if ( hadExisting )
