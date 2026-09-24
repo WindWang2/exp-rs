@@ -418,4 +418,3 @@ TEST_CASE( "metric names resolve through the dotted-path rule, not top-level key
     for ( int i = 0; i < 5; ++i )
         REQUIRE( curve.points.at( i ).mean == Catch::Approx( 25.0 * i ) );
 }
-

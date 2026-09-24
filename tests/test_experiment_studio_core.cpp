@@ -354,3 +354,27 @@ TEST_CASE( "experiment_studio session roundtrip", "[experiment_studio]" )
     CHECK( back.studyId == s.studyId );
     CHECK( back.selectedPointIds.size() == 2 );
 }
+
+TEST_CASE( "experiment_studio csv export neutralizes formula cells",
+           "[experiment_studio][csv]" )
+{
+    // Operator-supplied strings (error summaries, asset paths) can start
+    // with '=', '+', '-' or '@'; spreadsheet applications execute such
+    // cells as formulas. The exported teaching table must neutralize them.
+    QJsonObject report = syntheticReport( 3 ).toJson();
+    QJsonArray table = report.value( QStringLiteral( "run_table" ) ).toArray();
+    REQUIRE( !table.isEmpty() );
+    QJsonObject row = table.at( 0 ).toObject();
+    row.insert( QStringLiteral( "error_summary" ),
+                QStringLiteral( "=cmd|'/c calc'!A0" ) );
+    row.insert( QStringLiteral( "output_asset_path" ),
+                QStringLiteral( "@SUM(1+1)" ) );
+    table[0] = row;
+    report.insert( QStringLiteral( "run_table" ), table );
+
+    const QString csv = studyRunTableToCsv( report );
+    CHECK( !csv.contains( QStringLiteral( "\n=" ) ) );
+    CHECK( !csv.contains( QStringLiteral( ",=" ) ) );
+    CHECK( !csv.contains( QStringLiteral( ",@" ) ) );
+    CHECK( csv.contains( QStringLiteral( "'=cmd" ) ) );
+}

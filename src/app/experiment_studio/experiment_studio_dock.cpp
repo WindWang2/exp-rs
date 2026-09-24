@@ -365,6 +365,15 @@ void ExperimentStudioDock::applySyntheticRunMatrix()
 {
     const int n = qBound( 2, m_stepsSpin->value(), 1000 );
     m_lastStudyReport = makeSyntheticStudyReport( n );
+    // Export honesty: this report is a teaching scaffold derived from NO
+    // recorded run. Carry the marker on the document itself so the exported
+    // bundle cannot pass it off as recorded analysis; the report parser is
+    // unknown-key tolerant, so the marker survives reloads.
+    m_lastStudyReport.insert( QStringLiteral( "synthetic" ), true );
+    m_lastStudyReport.insert(
+        QStringLiteral( "synthetic_note" ),
+        QStringLiteral( "studio demonstration document, not derived from"
+                        " recorded runs" ) );
     m_session.lastStudyReport = m_lastStudyReport;
     rebuildMatrixTable();
     m_tabs->setCurrentIndex( 1 );
@@ -519,6 +528,11 @@ void ExperimentStudioDock::runFaultTeachingDemo()
                                            QStringLiteral( "/tmp/fault-sandbox-demo" ), originalFp,
                                            originalFp );
     m_lastFaultVm = vm.toJson();
+    m_lastFaultVm.insert( QStringLiteral( "synthetic" ), true );
+    m_lastFaultVm.insert(
+        QStringLiteral( "synthetic_note" ),
+        QStringLiteral( "studio demonstration document, not derived from"
+                        " recorded runs" ) );
     m_session.faultScenarioId = vm.scenarioId;
     m_faultLog->setPlainText(
         QString::fromUtf8( QJsonDocument( m_lastFaultVm ).toJson( QJsonDocument::Indented ) ) );
@@ -545,6 +559,13 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
                    QJsonArray{ QStringLiteral( "upstream_digest" ) } );
     const FirstDivergenceViewModel vm = projectFirstDivergence( report );
     m_lastDivergenceVm = vm.toJson();
+    // Same honesty as the synthetic study report: this divergence view is a
+    // hand-built demonstration, not analyzer output over recorded runs.
+    m_lastDivergenceVm.insert( QStringLiteral( "synthetic" ), true );
+    m_lastDivergenceVm.insert(
+        QStringLiteral( "synthetic_note" ),
+        QStringLiteral( "studio demonstration document, not derived from"
+                        " recorded runs" ) );
     m_session.referenceRunId = vm.referenceRunId;
     m_session.studentRunId = vm.studentRunId;
     m_divergenceLog->setPlainText(
