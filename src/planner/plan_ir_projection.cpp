@@ -4,6 +4,7 @@
 #include "contracts/scientific_contract.h"
 #include "planner/json_util.h"
 
+#include <algorithm>
 #include <map>
 
 namespace sicnu::planner {
