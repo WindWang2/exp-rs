@@ -34,6 +34,21 @@ stored request_digest values differ from pre-R3 runs — the schema shape is
 unchanged (`sicnu.preflight.report/1`); digests were never stable across
 engine revisions by design.)
 
+## Independent review (round 1) — PROCEED WITH FIXES, both fixed
+
+- P1-1: the load-time depth walk initially mis-flagged forward references and
+  dangling parents as "deeper than the merge bound", poisoning the whole
+  projection into Unavailable (regression introduced by PF-3). Fixed by
+  replicating mergeEntry's full stop semantics (visited set + unknown-parent
+  bounded stop); regression tests pin child-first document order, dangling
+  references, and the exact-bound chain.
+- P2-1: policy-gate trace outcome said "finding" for pure-unknown
+  evaluations; now `insufficient_facts`, matching the per-slot unknown paths
+  and the outcomeFor vocabulary. Pinned in the PF-1 integration test.
+- P3-1..P3-7 recorded below unchanged (variant-flag granularity, n=21 mirror
+  tautology note, digest version discontinuity, EACCES message, temporal
+  truncation reachability, combined-evidence narration, falsy empty string).
+
 ## Known limitations / recorded, not fixed
 
 - Ack severity vocabulary (`SPF_CAPABILITY_MIRROR_UNAVAILABLE` /
@@ -44,9 +59,13 @@ engine revisions by design.)
   gates non-ready lifecycles, but per-field evidence grades stay
   rule-constant. Needs a `SlotFacts` schema addition — recorded for the
   adapter-wiring slice.
-- Extends depth check runs per document at `addDocument` time; a chain whose
-  parent arrives in a later document can only be caught by the merge-time
-  bound. Forward references within the real mirror layout do not occur.
+- Extends depth check runs per document at `addDocument` time and mirrors
+  mergeEntry's full stop semantics: unknown parents, cycles and forward
+  references are the merge's own bounded stops (healthy projection, exact
+  query-time behavior), and only a chain that fills the depth budget while
+  still naming an ancestor is flagged. A true over-deep chain whose parents
+  all arrive in later documents is therefore caught at query time by the
+  merge bound alone — the in-tree mirror has no such layout.
 - Mirror declares policy keys no rule consumes (e.g. `crs.requires_projected`
   family defaults) — strategy-vocabulary drift detection remains unbuilt.
 - Empty registry still evaluates to `ok` with no typed marker (P3, cosmetic).

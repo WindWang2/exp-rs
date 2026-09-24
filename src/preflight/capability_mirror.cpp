@@ -209,19 +209,28 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
         // beyond the cut are unreachable. The header promises depth is
         // never silently skipped, so flag it here, at load, where the
         // projection can still fail closed. The walk below mirrors
-        // mergeEntry's loop condition exactly.
+        // mergeEntry's FULL stop semantics — an unknown parent or a cycle
+        // is the merge's own bounded stop (it may resolve later, or never;
+        // either way querying stops safely), and only a chain that fills
+        // the depth budget and still names an ancestor is a real cut.
         {
             int depth = 0;
             Json::Value cursorValue = entry;
+            std::set<std::string> visited;
+            visited.insert( id );
+            bool boundedStop = false;
             while ( cursorValue["extends"].isString() && depth < kMaxMergeDepth )
             {
                 const Entry *parent = findEntry( cursorValue["extends"].asString() );
-                if ( parent == nullptr )
-                    break; // unknown parent is the merge's own bounded stop
+                if ( parent == nullptr || !visited.insert( parent->value["id"].asString() ).second )
+                {
+                    boundedStop = true;
+                    break;
+                }
                 cursorValue = parent->value;
                 ++depth;
             }
-            if ( cursorValue["extends"].isString() )
+            if ( !boundedStop && cursorValue["extends"].isString() )
                 problems_.push_back( origin + ": entry " + id +
                                      ": extends chain deeper than the merge bound" );
         }

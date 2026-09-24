@@ -113,7 +113,9 @@ void policyGateOutcome( RuleResult &result, const RuleFacts &facts,
             std::string( policy ) +
                 " is variant-parameterized and no variant matched the request params" ) );
         result.detail = std::string( policy ) + " unconsultable: no variant matched";
-        result.outcome = "finding";
+        // Same trace vocabulary as the per-slot unknown paths: a rule that
+        // could not decide says insufficient_facts, never "finding".
+        result.outcome = "insufficient_facts";
         return;
     }
     result.detail = std::string( "no " ) + policy + " declared";

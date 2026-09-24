@@ -481,6 +481,49 @@ TEST_CASE( "mirror fails closed on extends chains deeper than the merge bound",
     REQUIRE( mirror.entryForOperator( "deep:f", {} ).status == FactStatus::Unavailable );
 }
 
+TEST_CASE( "mirror keeps a forward-referencing or dangling extends chain loadable",
+           "[preflight][provider]" )
+{
+    // A child loaded before its parent (document order is load order) and a
+    // dangling parent reference are both the merge's own bounded stops at
+    // query time — neither is a depth truncation, so neither may poison the
+    // projection into a global Unavailable.
+    {
+        CapabilityMirrorProjection mirror;
+        Json::Value child( Json::arrayValue );
+        Json::Value childEntry( Json::objectValue );
+        childEntry["id"] = "fwd:child";
+        childEntry["extends"] = "fwd:parent";
+        child.append( childEntry );
+        mirror.addDocument( child, "a_child.json" );
+        Json::Value parent( Json::arrayValue );
+        Json::Value parentEntry( Json::objectValue );
+        parentEntry["id"] = "fwd:parent";
+        Json::Value roles( Json::objectValue );
+        roles["red"] = 1;
+        parentEntry["band_roles"] = roles;
+        parent.append( parentEntry );
+        mirror.addDocument( parent, "b_parent.json" );
+        REQUIRE( mirror.healthy() );
+        const auto merged = mirror.entryForOperator( "fwd:child", {} );
+        REQUIRE( merged.status == FactStatus::Available );
+        REQUIRE( merged.entry["band_roles"]["red"].asInt() == 1 );
+    }
+    // Dangling parent: bounded stop, projection stays healthy and the entry
+    // itself still answers.
+    {
+        CapabilityMirrorProjection mirror;
+        Json::Value doc( Json::arrayValue );
+        Json::Value entry( Json::objectValue );
+        entry["id"] = "dg:entry";
+        entry["extends"] = "dg:nowhere";
+        doc.append( entry );
+        mirror.addDocument( doc, "dangling.json" );
+        REQUIRE( mirror.healthy() );
+        REQUIRE( mirror.entryForOperator( "dg:entry", {} ).status == FactStatus::Available );
+    }
+}
+
 TEST_CASE( "mirror accepts a chain exactly at the merge bound", "[preflight][provider]" )
 {
     // Five entries -> four hops: exactly kMaxMergeDepth. The full chain is
@@ -544,6 +587,16 @@ TEST_CASE( "integration: a variant-only capability gates the verdict instead of 
             ++unknowns;
     REQUIRE( unknowns >= 1 );
     REQUIRE( report.verdict == "requires_ack" );
+    // Trace vocabulary: a check that could not decide says
+    // insufficient_facts, never "finding".
+    bool sawGateTrace = false;
+    for ( const auto &e : report.evaluated )
+        if ( e.ruleId == "preflight.band_role" )
+        {
+            REQUIRE( e.outcome == "insufficient_facts" );
+            sawGateTrace = true;
+        }
+    REQUIRE( sawGateTrace );
 }
 
 TEST_CASE( "a passport without a resolvable asset kind is a typed unknown, not an available slot",
