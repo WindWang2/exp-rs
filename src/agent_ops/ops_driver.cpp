@@ -30,6 +30,19 @@ std::string getStringArg(const Json::Value &args, const char *key)
     return args[key].asString();
 }
 
+/// Strict boolean: only real JSON booleans pass; anything else throws
+/// Json::LogicError, which the apply() boundary translates into the typed
+/// INVALID_ARGS refusal (jsoncpp would otherwise coerce a "false" string
+/// to true and silently arm an approval — fail-open).
+bool getBoolArg(const Json::Value &args, const char *key)
+{
+    if (!args.isObject() || !args.isMember(key))
+        return false;
+    if (!args[key].isBool())
+        throw Json::LogicError(std::string(key) + " must be a boolean");
+    return args[key].asBool();
+}
+
 /// Bounded scan of a journal directory: non-terminal journals with SUBMITTED
 /// runs are restart hazards. Surfaced as a warning on new launches into the
 /// same directory — a blind fresh session would silently redo that science.
@@ -41,10 +54,12 @@ Json::Value scanRestartHazards(const std::string &directory, ResumeReconciler &r
     std::filesystem::directory_iterator it(directory, ec), end;
     if (ec)
         return hazards;
-    for (; it != end && hazards.size() < kMaxScanned; it.increment(ec))
+    std::size_t scanned = 0;
+    for (; it != end && scanned < kMaxScanned; it.increment(ec))
     {
         if (ec || !it->is_regular_file() || it->path().extension() != ".json")
             continue;
+        ++scanned;
         const std::string stem = it->path().stem().string();
         auto recon = reconciler.reconcileFile(directory, stem);
         if (recon.ok && !recon.resumable && recon.duplicateSubmitRisk)
@@ -206,6 +221,17 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                 doc["reconcile"] = recon.toJson();
                 return doc;
             }
+            if (!recon.ok &&
+                std::filesystem::exists(std::filesystem::path(journalDirectory) /
+                                        (namedSession + ".json")))
+            {
+                // A journal file that exists but cannot be loaded is never
+                // bypassed by a silent fresh launch: the operator named THIS
+                // session; the corrupted evidence gets a typed refusal.
+                Json::Value doc = errorDoc(action, "CORRUPTED_OR_MISSING_JOURNAL");
+                doc["reconcile"] = recon.toJson();
+                return doc;
+            }
             if (recon.ok && !recon.resumable && recon.duplicateSubmitRisk)
             {
                 // Same typed code the coordinator resume path reports for
@@ -234,9 +260,7 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                              ? std::string("research")
                              : getStringArg(args, "domain");
         request.role = getStringArg(args, "role");
-        request.approvePendingRepair =
-            args.isObject() && args.isMember("approve_pending_repair") &&
-            args["approve_pending_repair"].asBool();
+        request.approvePendingRepair = getBoolArg(args, "approve_pending_repair");
         OpsRunResult result = mCoordinator.run(request);
         remember(result);
         Json::Value doc = statusFor(result, action);
@@ -278,9 +302,7 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
                              ? std::string("research")
                              : getStringArg(args, "domain");
         request.role = getStringArg(args, "role");
-        request.approvePendingRepair =
-            args.isObject() && args.isMember("approve_pending_repair") &&
-            args["approve_pending_repair"].asBool();
+        request.approvePendingRepair = getBoolArg(args, "approve_pending_repair");
         OpsRunResult result = mCoordinator.resume(journalDirectory, sessionId, request);
         // A refused resume carries no session result (typed refusal only),
         // so remember() is a no-op there and a previously tracked session

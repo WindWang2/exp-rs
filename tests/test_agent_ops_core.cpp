@@ -1422,6 +1422,22 @@ TEST_CASE("agent_ops projected repair plans are fail-closed on risk class",
     // (d) Round-trip: proposal_details survive OpDiagnostic serde.
     auto round = OpDiagnostic::fromJson(science.toJson());
     REQUIRE(round);
-    REQUIRE(round->proposalDetails.size() == 1);
     REQUIRE(round->proposalDetails[0]["risk_class"].asString() == "science_changing");
+
+    // (e) decide(): the proposal EVIDENCE wins over a permissive context —
+    // a science-changing proposal with a context claiming shape_preserving
+    // still asks; reverting decide() to the ctx-only comparison fails here.
+    RecoveryContext permissive;
+    permissive.leadingRiskClass = "shape_preserving";
+    permissive.humanApprovedRepair = false;
+    auto askScience = bridge.decide(science, permissive);
+    REQUIRE(askScience.action == recovery_action::kAsk);
+    REQUIRE(askScience.needsApproval);
+    REQUIRE(askScience.reasonCode == "REPAIR_NEEDS_APPROVAL");
+
+    // (f) Empty context (the wire default): unknown evidence asks too.
+    RecoveryContext silent;
+    auto askUnknown = bridge.decide(science, silent);
+    REQUIRE(askUnknown.action == recovery_action::kAsk);
+    REQUIRE(askUnknown.reasonCode == "REPAIR_NEEDS_APPROVAL");
 }

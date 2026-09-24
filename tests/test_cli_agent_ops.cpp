@@ -193,7 +193,8 @@ TEST_CASE("cli session command: typed exit codes for typed failures",
     auto aborted = runSession(
         {"run", "--goal", "compute NDVI for the scene", "--intent", "ndvi"}, &driver);
     INFO("envelope: " << aborted.envelope.toStyledString());
-    REQUIRE(aborted.exitCode == 1); // GenericError: the session aborted
+    // A user-initiated cancel is the Cancelled exit code, not a failure.
+    REQUIRE(aborted.exitCode == 4);
     // The loop is the authority: the typed stop reason rides the delivery.
     REQUIRE(aborted.envelope["data"]["delivery"]["stop_reason"].asString() == "CANCELLED");
     REQUIRE(runSession({"clear-cancel"}, &driver).exitCode == 0);
