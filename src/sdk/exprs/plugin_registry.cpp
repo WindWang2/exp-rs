@@ -14,14 +14,10 @@
 #include <sstream>
 #include <thread>
 #include <utility>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
 
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_validator.h"
+#include "platform/portable.h"
 
 namespace {
 exprs::PluginState incompatibleStateFor( const std::string &pluginId,
@@ -433,7 +429,13 @@ std::string PluginRegistry::lastGoodSnapshotPath( const std::string &pluginId ) 
     // Path computation is unconditional: reload() consults it, the sweep
     // reconciles it, and uninstallPlugin() removes it. The devMode policy
     // gate lives in refreshLastGoodSnapshot (production captures nothing).
-    return snapshotRoot() + "/last-good-" + pluginId;
+    // pid-attributed (completion 13/15): the snapshot belongs to THIS
+    // process's dev session — the sweep's owner-liveness rule can then
+    // protect a live sibling's rollback source without needing this
+    // process's registry view, and a dead process's tree becomes ordinary
+    // collectible residue.
+    return snapshotRoot() + "/last-good-" + pluginId + "-"
+           + std::to_string( snapshotOwnerPid() );
 }
 
 std::string PluginRegistry::upgradeSnapshotPath( const std::string &pluginId ) const
@@ -1845,10 +1847,14 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     PluginDiagnosticLog log;
     const bool ok = PluginPackage::uninstall( pluginId, log );
     std::string snapshotDir;
+    std::string legacySnapshotDir;
     {
         std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
         mDiagnostics.merge( log );
         snapshotDir = lastGoodSnapshotPath( pluginId );
+        // Pre-attribution layout (completion 13/15): cleaned alongside —
+        // an uninstalled plugin must not leave a rollback source either way.
+        legacySnapshotDir = snapshotRoot() + "/last-good-" + pluginId;
     }
     if ( !ok )
         return false;
@@ -1856,6 +1862,8 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     // the package must not leave it orphaned in the snapshot root.
     std::error_code ec;
     std::filesystem::remove_all( std::filesystem::path( snapshotDir ), ec );
+    std::error_code legacyEc;
+    std::filesystem::remove_all( std::filesystem::path( legacySnapshotDir ), legacyEc );
     refresh();
     return true;
 }
@@ -2079,7 +2087,7 @@ std::string PluginRegistry::userIndexPath() const
 void PluginRegistry::loadUserIndex()
 {
     mDisabledIds.clear();
-    std::ifstream input( userIndexPath() );
+    std::ifstream input( sicnu::portable::pathFromUtf8( userIndexPath() ) );
     if ( !input )
         return;
     std::stringstream buffer;
@@ -2123,7 +2131,7 @@ void PluginRegistry::saveUserIndex() const
     {
         const std::string parent = path.substr( 0, slash );
         std::error_code error;
-        std::filesystem::create_directories( parent, error );
+        std::filesystem::create_directories( sicnu::portable::pathFromUtf8( parent ), error );
     }
     // Hardening 15/20: the temp file is process-unique. The shared fixed
     // "<index>.tmp" let two processes (GUI + CLI, or two CLIs) interleave
@@ -2132,14 +2140,10 @@ void PluginRegistry::saveUserIndex() const
     // In-process writers are serialized by gRegistryMutex; the pid suffix only
     // separates processes, mirroring the per-pid staging idiom the package and
     // snapshot code already use.
-#ifdef _WIN32
-    const long pid = static_cast<long>( ::GetCurrentProcessId() );
-#else
-    const long pid = static_cast<long>( ::getpid() );
-#endif
+    const std::uint32_t pid = sicnu::portable::pid();
     const std::string temp = path + ".tmp." + std::to_string( pid );
     {
-        std::ofstream output( temp, std::ios::trunc );
+        std::ofstream output( sicnu::portable::pathFromUtf8( temp ), std::ios::trunc );
         if ( !output )
             return;
         Json::Value root( Json::objectValue );
@@ -2155,14 +2159,19 @@ void PluginRegistry::saveUserIndex() const
             // A failed write (ENOSPC ...) must NOT be renamed over the real
             // index — that would install a torn document and silently reset
             // the user's disable set on next load.
-            std::remove( temp.c_str() );
+            std::error_code removeError;
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
             return;
         }
     }
     std::error_code renameError;
-    std::filesystem::rename( temp, path, renameError );
+    std::filesystem::rename( sicnu::portable::pathFromUtf8( temp ),
+                             sicnu::portable::pathFromUtf8( path ), renameError );
     if ( renameError )
-        std::remove( temp.c_str() );
+    {
+        std::error_code removeError;
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( temp ), removeError );
+    }
 }
 
 bool PluginRegistry::setEnabled( const std::string &pluginId, bool enabled )

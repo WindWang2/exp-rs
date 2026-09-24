@@ -85,6 +85,12 @@ struct VerificationSpec
 /// oracle-potency discipline, applied at the schema level).
 std::vector<std::string> validateSpec( const VerificationSpec &spec );
 
+/// Kind-specific params validation for ONE check (same rules validateSpec
+/// applies, including the vacuous-check refusal). Engine backstop for
+/// checks that reach evaluation without a full-spec validation. @returns an
+/// empty vector when the params are well-formed for @p check.kind.
+std::vector<std::string> validateCheckParams( const VerificationCheckSpec &check );
+
 /// Canonical spec document (schema marker + sorted keys + 12-significant-
 /// digit doubles). The spec digest is sha256 over this canonical text.
 Json::Value specToJson( const VerificationSpec &spec );
@@ -188,5 +194,10 @@ VerificationReport buildReport( const std::string &specId, const std::string &sc
 /// digest is an order-stability and tamper-EVIDENCE seal, not a
 /// sub-digit-precision tamper lock.
 std::string canonicalJsonText( const Json::Value &value );
+
+/// @returns true when any nested number is non-finite (the same gate the
+/// canonical writer and the report reader apply). Exposed so sibling
+/// readers in this library refuse unsealable bodies identically.
+bool jsonCarriesNonFiniteNumber( const Json::Value &value );
 
 } // namespace sicnu::verify

@@ -40,6 +40,11 @@ struct DetectionTileStats
   int batchReductions = 0;   ///< OOM ladder splits
   int rasterWidth = 0;
   int rasterHeight = 0;
+  /// Platform 8.0 grid provenance of the opened input (filled only after
+  /// every input gate passed, so a presence here IS the verdict) — feeds the
+  /// sidecar inputs block for BOTH the single-model lane and the ensemble
+  /// lane (whose sidecars had none before completion 13/15).
+  std::vector<GridProvenance> inputGrids;
 };
 
 /// Publishes a georeferenced detection vector (GPKG | GeoJSON | ESRI

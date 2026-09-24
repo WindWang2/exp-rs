@@ -68,6 +68,10 @@ data/*
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**
+# RS14-09 scientific planner golden scenarios are small tracked JSON
+# metadata (offline deterministic replays), not local rasters.
+!data/planner/
+!data/planner/**
 # D3 lab content track: LabSpecs/pipelines/data-specs/grading intents are
 # tracked config, not rasters. Generated fixtures stay untracked via the
 # data/labs/_tmp/ rule at the end of this file (last match wins).
@@ -474,3 +478,8 @@ data/labs/_tmp/
 !.planning/RS14-14-agent-benchmark/
 .planning/RS14-14-agent-benchmark/*
 !.planning/RS14-14-agent-benchmark/*.md
+
+# completion-teaching-admin-real-adapters: track planning notes (markdown only; logs stay local).
+!.planning/completion-teaching-admin-real-adapters/
+.planning/completion-teaching-admin-real-adapters/*
+!.planning/completion-teaching-admin-real-adapters/*.md

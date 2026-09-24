@@ -33,6 +33,10 @@ class AssetStateProvider
 {
   public:
     void setResolver( PassportResolver resolver );
+    /// Bundle-provenance id of the wired resolver ("" when none wired).
+    void setResolverAuthority( const std::string &authority ) { mResolverAuthority = authority; }
+    const std::string &resolverAuthority() const { return mResolverAuthority; }
+    bool hasResolver() const { return static_cast<bool>( mResolver ); }
     void clearCache();
     void invalidate( const std::string &assetKey );
     void invalidateAll();
@@ -43,6 +47,7 @@ class AssetStateProvider
 
   private:
     PassportResolver mResolver;
+    std::string mResolverAuthority;
     mutable std::unordered_map<std::string, sicnu::state::RemoteSensingAssetState> mCache;
     std::uint64_t mCatalogGeneration = 0;
 };

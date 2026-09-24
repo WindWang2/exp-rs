@@ -15,6 +15,7 @@
 #include "operators/runtime/detection_postprocess.h"
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
+#include "operators/runtime/provenance_verify.h"
 #include "operators/runtime/tile_inference_engine.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "synthetic_raster_builder.h"
@@ -646,4 +647,321 @@ TEST_CASE( "a sidecar failure keeps the previous raster product and its provenan
   REQUIRE_NOTHROW( runSegment() );
   CHECK( fileExists( sidecar ) );
   ModelCatalog::instance().unregister( "p15-plane-model" );
+}
+
+// ---------------------------------------------------------------------------
+// Completion 13/15: single-model detection products carry the SAME publish
+// contract as every other model lane — a provenance sidecar (exp-rs-prov/1)
+// the consumer-side verifier accepts, with rollback that restores the
+// previous product+sidecar PAIR. Master published detection vectors with no
+// sidecar at all: verifyProductAgainstModel reported MissingSidecar
+// deterministically for the whole lane.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Detection head fake with an explicit provider identity: emits one
+/// candidate per batch element in the xywh_objectness / channels_first
+/// layout, and reports execution-provider details so the test can prove the
+/// execution identity reaches BOTH the payload and the sidecar.
+class DetectHeadRuntime final : public IModelRuntime
+{
+  public:
+    DetectHeadRuntime( std::string artifact )
+        : m_artifact( std::move( artifact ) ) {}
+
+    std::string framework() const override { return "dethead-c"; }
+    std::string backendName() const override { return "detection_fake"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return m_artifact; }
+
+    sicnu::operators::runtime::ProviderRuntimeDetails providerDetails() const override
+    {
+      return { "DummyExecutionProvider", "0.0.0-test" };
+    }
+
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      const int batch = blob.size[0];
+      const int channels = 5 + 2; // xywh + objectness + 2 classes
+      int dims[3] = { batch, channels, 1 };
+      cv::Mat out( 3, dims, CV_32F );
+      out.setTo( 0 );
+      // One candidate per batch element: center (8,8), 4x4, objectness 1.0,
+      // class-0 score 0.9 — clears a 0.25 conf gate, class 1 stays silent.
+      for ( int b = 0; b < batch; ++b )
+      {
+        float *plane = out.ptr<float>( b );
+        plane[0] = 8.0f;
+        plane[dims[2]] = 8.0f;
+        plane[2 * dims[2]] = 4.0f;
+        plane[3 * dims[2]] = 4.0f;
+        plane[4 * dims[2]] = 1.0f;
+        plane[5 * dims[2]] = 0.9f;
+        plane[6 * dims[2]] = 0.2f;
+      }
+      return out;
+    }
+
+  private:
+    std::string m_artifact;
+};
+
+struct DetectProviderGuard
+{
+    DetectProviderGuard()
+    {
+      ModelRuntimeRegistry::instance().registerProvider(
+        "dethead-c",
+        []( const ModelInfo &model, const ModelHardwareCapabilities &,
+            std::string *error ) -> ModelRuntimePtr {
+          if ( model.resolvedArtifactPath.empty() )
+          {
+            if ( error )
+              *error = "no resolved artifact";
+            return nullptr;
+          }
+          return std::make_shared<DetectHeadRuntime>( model.resolvedArtifactPath );
+        } );
+    }
+};
+
+/// Registers the detection manifest and returns the catalog identity tag.
+std::string registerDetectModel( const QTemporaryDir &dir )
+{
+  const QString weights = dir.filePath( QStringLiteral( "det-c.onnx" ) );
+  {
+    QFile f( weights );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "det-c-weights" ) );
+  }
+  Json::Value json( Json::objectValue );
+  json["name"] = "det-sidecar-model";
+  json["task"] = "detection";
+  json["framework"] = "dethead-c";
+  json["artifact"]["path"] = weights.toStdString();
+  json["input"]["width"] = 16;
+  json["input"]["height"] = 16;
+  json["preprocess"]["resize"] = "to_input";
+  json["preprocess"]["normalize"] = "linear";
+  json["preprocess"]["scale"] = 1.0;
+  Json::Value &detection = json["output"]["detection"] = Json::Value( Json::objectValue );
+  detection["layout"] = "xywh_objectness";
+  detection["tensor_layout"] = "channels_first";
+  detection["conf_threshold"] = 0.25;
+  detection["nms_iou"] = 0.45;
+  detection["max_detections"] = 100;
+  Json::Value classes( Json::arrayValue );
+  classes.append( "tree" );
+  classes.append( "shrub" );
+  detection["classes"] = classes;
+  std::string error;
+  REQUIRE( ModelCatalog::instance().registerManifestJson(
+    Json::writeString( Json::StreamWriterBuilder(), json ),
+    dir.filePath( QStringLiteral( "det-sidecar-model/model.json" ) ).toStdString(), &error ) );
+  const auto model = ModelCatalog::instance().find( "det-sidecar-model" );
+  REQUIRE( model.has_value() );
+  return model->identityTag();
+}
+
+ModelExecutionRequest detectRequest( const QTemporaryDir &dir, const QString &suffix = QStringLiteral( ".gpkg" ) )
+{
+  const QString input = dir.filePath( QStringLiteral( "det-c-input.tif" ) );
+  sicnu::testing::RsSyntheticRasterBuilder builder( 16, 16, 3, GDT_Float32 );
+  builder.withConstantValue( 1, 10.0f );
+  builder.withCrs( QStringLiteral( "EPSG:4326" ) ).writeToDisk( input );
+  ModelExecutionRequest request;
+  request.inputPath = input.toStdString();
+  request.outputPath = dir.filePath( QStringLiteral( "det-c-out" ) + suffix ).toStdString();
+  request.modelReference = "det-sidecar-model";
+  request.asDetection = true;
+  return request;
+}
+
+QByteArray readFileBytes( const QString &path )
+{
+  QFile f( path );
+  REQUIRE( f.open( QIODevice::ReadOnly ) );
+  return f.readAll();
+}
+
+} // namespace
+
+TEST_CASE( "a single-model detection product publishes a verifier-accepted provenance sidecar",
+           "[models][detect][publish][p13c]" )
+{
+  ProviderGuard guard;
+  const DetectProviderGuard detectGuard;
+  QTemporaryDir dir;
+  const std::string identityTag = registerDetectModel( dir );
+  ModelExecutionRequest request = detectRequest( dir );
+  const QString output = QString::fromStdString( request.outputPath );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+
+  RSOperatorContext context;
+  sicnu::operators::runtime::ModelExecutionResult result;
+  REQUIRE_NOTHROW( result = sicnu::operators::runtime::runModelInference( request, context ) );
+  REQUIRE( fileExists( output ) );
+
+  // The lane publishes the same sidecar contract as the raster lanes.
+  REQUIRE( fileExists( sidecar ) );
+  const Json::Value prov = [ & ] {
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    const QByteArray bytes = readFileBytes( sidecar );
+    std::string errors;
+    REQUIRE( reader->parse( bytes.constData(), bytes.constData() + bytes.size(), &parsed,
+                            &errors ) );
+    return parsed;
+  }();
+  CHECK( prov["schema"].asString() == "exp-rs-prov/1" );
+  CHECK( prov["model"]["identity_tag"].asString() == identityTag );
+  CHECK( prov["model"]["task"].asString() == "detection" );
+  CHECK( prov["model"]["framework"].asString() == "dethead-c" );
+  CHECK( prov["execution"]["backend"].asString() == "detection_fake" );
+  CHECK( prov["execution"]["device"].asString() == "cpu" );
+  CHECK( prov["execution"]["execution_provider"].asString() == "DummyExecutionProvider" );
+  CHECK( prov["execution"]["runtime_version"].asString() == "0.0.0-test" );
+  // The run identity: effective thresholds + the class vocabulary + counts.
+  CHECK( prov["detection"]["conf_threshold"].asDouble() == Catch::Approx( 0.25 ) );
+  CHECK( prov["detection"]["nms_iou"].asDouble() == Catch::Approx( 0.45 ) );
+  CHECK( prov["detection"]["classes"][0].asString() == "tree" );
+  CHECK( prov["detection"]["detections_kept"].asInt() == 1 );
+  CHECK( prov["output"]["format"].asString() == "vector" );
+  CHECK( prov["output"]["features"].asInt() == 1 );
+  // The input grid: what was actually fed (grid provenance parity).
+  REQUIRE( prov["inputs"].isArray() );
+  REQUIRE( prov["inputs"].size() == 1 );
+  CHECK( prov["inputs"][0]["path"].asString() == request.inputPath );
+  CHECK( prov["inputs"][0]["width"].asInt() == 16 );
+  CHECK( prov["inputs"][0]["height"].asInt() == 16 );
+  CHECK( prov["inputs"][0]["crs"].asString() == "EPSG:4326" );
+  CHECK( !prov["created_utc"].asString().empty() );
+
+  // The consumer-side verifier accepts the product instead of reporting the
+  // deterministic MissingSidecar the lane used to earn.
+  const auto verdict =
+    sicnu::operators::runtime::verifyProductAgainstModel( request.outputPath, "det-sidecar-model" );
+  CHECK( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
+
+  // Payload parity: the detection payload carries the provider identity block
+  // the raster payload already publishes (Platform 9.0 M8).
+  CHECK( result.payload["provider"]["execution_provider"].asString() == "DummyExecutionProvider" );
+  CHECK( result.payload["provider"]["runtime_version"].asString() == "0.0.0-test" );
+  ModelCatalog::instance().unregister( "det-sidecar-model" );
+}
+
+TEST_CASE( "a detection sidecar failure restores the previous vector product and its provenance",
+           "[models][detect][publish][p13c]" )
+{
+  ProviderGuard guard;
+  const DetectProviderGuard detectGuard;
+  QTemporaryDir dir;
+  ( void )registerDetectModel( dir );
+  ModelExecutionRequest request = detectRequest( dir );
+  const QString output = QString::fromStdString( request.outputPath );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  RSOperatorContext context;
+
+  auto runOnce = [ & ]() {
+    ModelExecutionRequest once = request;
+    REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( once, context ) );
+  };
+
+  // First run publishes the product + its provenance sidecar.
+  runOnce();
+  REQUIRE( fileExists( output ) );
+  REQUIRE( fileExists( sidecar ) );
+  const QByteArray originalSidecar = readFileBytes( sidecar );
+
+  // Second run with the sidecar stage forced to fail (a DIRECTORY occupies
+  // the stage path): the run throws AND the previous product+sidecar pair
+  // comes back intact — never a verified product downgraded to MissingSidecar.
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    ModelExecutionRequest second = request;
+    REQUIRE_THROWS( sicnu::operators::runtime::runModelInference( second, context ) );
+    CHECK( fileExists( output ) );
+    CHECK( fileExists( sidecar ) );
+    CHECK( readFileBytes( sidecar ) == originalSidecar );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".det-prev~" ) ) );
+    QDir().rmdir( hostileStage );
+  }
+
+  // With the obstacle gone the run succeeds and republishes normally.
+  runOnce();
+  CHECK( fileExists( sidecar ) );
+  CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".det-prev~" ) ) );
+  ModelCatalog::instance().unregister( "det-sidecar-model" );
+}
+
+TEST_CASE( "a detection republish leaves no backup residue and recovers a crash-orphaned product",
+           "[models][detect][publish][p13c]" )
+{
+  ProviderGuard guard;
+  const DetectProviderGuard detectGuard;
+  QTemporaryDir dir;
+  ( void )registerDetectModel( dir );
+  RSOperatorContext context;
+  const auto residueCount = [ & ]( const QTemporaryDir &target ) {
+    QDir outDir( target.path() );
+    return outDir.entryList( QStringList{ QStringLiteral( "*det-prev~*" ) }, QDir::Files )
+      .size();
+  };
+
+  // A shapefile output exercises the companion family (.dbf/.shx/.prj/.cpg).
+  ModelExecutionRequest request = detectRequest( dir, QStringLiteral( ".shp" ) );
+  const QString output = QString::fromStdString( request.outputPath );
+  const QString shapeBase = QFileInfo( output ).absolutePath() + QStringLiteral( "/det-c-out" );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+
+  ModelExecutionRequest first = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( first, context ) );
+  REQUIRE( fileExists( output ) );
+  REQUIRE( fileExists( sidecar ) );
+  REQUIRE( fileExists( shapeBase + QStringLiteral( ".dbf" ) ) );
+
+  // A successful REPUBLISH must leave no backup residue: the parked
+  // companions of the first product are cleaned by the disarm, not leaked
+  // as hidden stale geodata next to the new product.
+  ModelExecutionRequest second = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( second, context ) );
+  CHECK( fileExists( output ) );
+  CHECK( fileExists( shapeBase + QStringLiteral( ".dbf" ) ) );
+  CHECK( residueCount( dir ) == 0 );
+
+  // A run killed between the park and the publish leaves the final path
+  // ABSENT with the backup family present (crash orphan). The NEXT run must
+  // adopt the parked product back — proven with a run that FAILS at the
+  // sidecar publish: the adopted product+sidecar pair must be back at the
+  // final paths, byte-identical. Delete-and-republish (a vacuous pass:
+  // the ctor's litter pre-clean would also leave no residue) cannot produce
+  // this — a fresh run never publishes the OLD bytes.
+  const QByteArray preCrashProduct = readFileBytes( output );
+  const QByteArray preCrashSidecar = readFileBytes( sidecar );
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".det-prev~" ) ) );
+  REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".det-prev~.prov.json" ) ) );
+  REQUIRE_FALSE( fileExists( output ) );
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    ModelExecutionRequest third = request;
+    REQUIRE_THROWS( sicnu::operators::runtime::runModelInference( third, context ) );
+    // Adoption brought the parked PAIR back before the publish failed.
+    CHECK( fileExists( output ) );
+    CHECK( readFileBytes( output ) == preCrashProduct );
+    CHECK( readFileBytes( sidecar ) == preCrashSidecar );
+    QDir().rmdir( hostileStage );
+  }
+
+  // And with the obstacle gone the lane publishes normally over the
+  // recovered product, leaving no residue.
+  ModelExecutionRequest fourth = request;
+  REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( fourth, context ) );
+  CHECK( fileExists( output ) );
+  CHECK( fileExists( sidecar ) );
+  CHECK( residueCount( dir ) == 0 );
+  ModelCatalog::instance().unregister( "det-sidecar-model" );
 }

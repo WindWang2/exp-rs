@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -41,8 +42,14 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   m_paramsView->setReadOnly( true );
   m_humanInput = new QPlainTextEdit( this );
   m_humanInput->setPlaceholderText( tr( "人工/反思步骤：在此填写结构化证据（不会泄露标准答案）" ) );
+  m_artifactEdit = new QLineEdit( this );
+  m_artifactEdit->setPlaceholderText(
+    tr( "产物路径（处理工具箱输出的文件，用于验证与评分）" ) );
+  m_artifactEdit->setClearButtonEnabled( true );
+  m_artifactEdit->setObjectName( QStringLiteral( "labWorkspaceArtifactEdit" ) );
   m_feedbackView = new QTextEdit( this );
   m_feedbackView->setReadOnly( true );
+  m_feedbackView->setObjectName( QStringLiteral( "labWorkspaceFeedbackView" ) );
 
   auto *nav = new QHBoxLayout;
   m_prevBtn = new QPushButton( tr( "上一步" ), this );
@@ -81,7 +88,6 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
     b["indentation"] = "";
     const QString params = QString::fromStdString( Json::writeString( b, cur->params ) );
     emit runOperatorRequested( QString::fromStdString( cur->operatorId ), params );
-    emit jumpWorkbenchRequested( QString::fromStdString( cur->operatorId ) );
   } );
   connect( m_submitHumanBtn, &QPushButton::clicked, this, [this]() {
     const auto *cur = m_tl.current();
@@ -102,6 +108,8 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   root->addWidget( new QLabel( tr( "参数（教学掩码后）" ), this ) );
   root->addWidget( m_paramsView );
   root->addWidget( m_humanInput );
+  root->addWidget( new QLabel( tr( "待验证产物" ), this ) );
+  root->addWidget( m_artifactEdit );
   root->addLayout( nav );
   root->addWidget( new QLabel( tr( "验证 / 评分反馈" ), this ) );
   root->addWidget( m_feedbackView, 1 );
@@ -169,7 +177,33 @@ void GuidedLabWorkspace::setFeedback( const sicnu::teaching::LabFeedbackProjecti
   }
   if ( !f.capsuleExportRef.empty() )
     text += tr( "\n胶囊引用: %1" ).arg( QString::fromStdString( f.capsuleExportRef ) );
+  // Honest "why": engine refusals, skipped lenses and other issues are part
+  // of the student surface — an indeterminate verdict without its reason is
+  // not honest feedback.
+  for ( const auto &i : f.issuesZh )
+    text += QStringLiteral( "\n⚠ %1" ).arg( QString::fromStdString( i ) );
   m_feedbackView->setPlainText( text );
+}
+
+QString GuidedLabWorkspace::artifactPath() const
+{
+  return m_artifactEdit ? m_artifactEdit->text().trimmed() : QString();
+}
+
+void GuidedLabWorkspace::setArtifactPath( const QString &path )
+{
+  if ( m_artifactEdit ) m_artifactEdit->setText( path );
+}
+
+void GuidedLabWorkspace::clearFeedback()
+{
+  m_feedback = sicnu::teaching::LabFeedbackProjection{};
+  m_feedbackView->clear();
+}
+
+void GuidedLabWorkspace::appendFeedbackNote( const QString &noteZh )
+{
+  m_feedbackView->append( noteZh );
 }
 
 void GuidedLabWorkspace::setWhyMarkdown( const QString &md )

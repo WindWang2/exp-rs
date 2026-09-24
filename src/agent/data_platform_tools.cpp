@@ -28,8 +28,14 @@
 // dispatches (see suitability/suitability_agent_adapter.h for the contract).
 #include "suitability/suitability_agent_adapter.h"
 #include "science_context/agent_adapter.h"
+#include "science_context/capability_facts.h"
+// Live capability authorities for the science tools (single store per kind):
+#include "agent/harness/capability_knowledge.h"
+#include "agent/spatial_tools/spatial_tool.h"
+#include "operators/framework/rs_operator_registry.h"
 #include <json/json.h>
 #include <memory>
+#include <optional>
 #include <QJsonDocument>
 #include <QByteArray>
 // Workspace containment authority (surfacePathOutsideWorkspace): store and
@@ -1424,6 +1430,110 @@ QVariantMap scienceContextJsonToVariant( const Json::Value &value )
     return doc.object().toVariantMap();
 }
 
+// Install the live capability authority on the shared science broker once:
+// facts come from the harness CapabilityKnowledge (the only capability store)
+// and operator/tool presence from the registries those surfaces dispatch
+// through. Without this the broker runs on its labelled builtin fallback.
+void ensureScienceContextAuthorities()
+{
+    using sicnu::science_context::CapabilityFactsLookup;
+    using sicnu::science_context::OperatorPresence;
+    static const bool wired = [] {
+        CapabilityFactsLookup lookup;
+        lookup.authority = "harness.capability_knowledge";
+        // Candidate semantics: every requirement-set the knowledge serves for
+        // the intent — the operator's own base entry plus every variant that
+        // declares the intent. First-match selection would drop
+        // variant-scoped band roles and fabricate feasibility, which the
+        // router must never do under a live_authority label.
+        lookup.entriesForIntent = []( const std::string &intent )
+            -> std::vector<Json::Value> {
+            const auto &knowledge = sicnu::agent::harness::CapabilityKnowledge::instance();
+            std::vector<Json::Value> candidates;
+            for ( const auto &operatorId : knowledge.operatorsForIntent( intent ) )
+            {
+                const Json::Value raw = knowledge.rawEntry( operatorId );
+                const Json::Value merged = knowledge.entryForOperator( operatorId );
+                bool baseServes = false;
+                if ( raw.isObject() && raw["intents"].isArray() )
+                {
+                    for ( const auto &candidate : raw["intents"] )
+                        baseServes =
+                            baseServes || ( candidate.isString() && candidate.asString() == intent );
+                }
+                if ( baseServes && merged.isObject() )
+                {
+                    Json::Value entry = merged;
+                    if ( !entry.isMember( "id" ) )
+                        entry["id"] = operatorId;
+                    candidates.push_back( entry );
+                }
+                if ( raw.isObject() && raw["variants"].isArray() )
+                {
+                    for ( const auto &variant : raw["variants"] )
+                    {
+                        if ( !variant.isObject() || !variant["intents"].isArray() )
+                            continue;
+                        bool variantServes = false;
+                        for ( const auto &candidate : variant["intents"] )
+                            variantServes = variantServes ||
+                                            ( candidate.isString() &&
+                                              candidate.asString() == intent );
+                        if ( !variantServes || !merged.isObject() )
+                            continue;
+                        // Variant constraints OVERRIDE the family-merged
+                        // entry; everything the variant does not declare
+                        // still applies (e.g. family modality/radiometric).
+                        Json::Value entry = merged;
+                        for ( const auto &key : variant.getMemberNames() )
+                        {
+                            if ( key == std::string( "when" ) ||
+                                 key == std::string( "intents" ) )
+                                continue;
+                            entry[key] = variant[key];
+                        }
+                        if ( entry.isMember( "when" ) )
+                            entry.removeMember( "when" );
+                        if ( entry.isMember( "intents" ) )
+                            entry.removeMember( "intents" );
+                        entry["id"] = operatorId;
+                        candidates.push_back( entry );
+                    }
+                }
+            }
+            return candidates;
+        };
+        lookup.presence = []( const std::string &capabilityId,
+                              const std::string &surface ) -> OperatorPresence {
+            if ( capabilityId.empty() )
+                return OperatorPresence::Unknown;
+            if ( surface.empty() || surface == "operator" )
+                return sicnu::operators::RSOperatorRegistry::instance().hasOperator( capabilityId )
+                           ? OperatorPresence::Present
+                           : OperatorPresence::Absent;
+            if ( surface == "data_platform_tool" )
+            {
+                for ( const auto &def : dataPlatformToolDefs() )
+                {
+                    if ( capabilityId == def.name )
+                        return OperatorPresence::Present;
+                }
+                return OperatorPresence::Absent;
+            }
+            if ( surface == "spatial_tool" )
+                return sicnu::agent::spatial_tools::SpatialToolRegistry::instance()
+                                   .find( capabilityId )
+                               ? OperatorPresence::Present
+                               : OperatorPresence::Absent;
+            return OperatorPresence::Unknown;
+        };
+        sicnu::science_context::agent_adapter::sharedBroker().setCapabilityFacts(
+            std::move( lookup ) );
+        return true;
+    }();
+    (void)wired;
+}
+
 Json::Value variantArgsToJson( const QVariantMap &arguments )
 {
     const QJsonDocument doc = QJsonDocument::fromVariant( arguments );
@@ -1673,17 +1783,29 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
     if ( toolId == QLatin1String( "suitability:profiles" ) )
         return sicnu::suitability::agent_adapter::suitabilityProfiles( arguments );
     if ( toolId == QLatin1String( "scientific:context" ) )
+    {
+        ensureScienceContextAuthorities();
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::scientificContext( variantArgsToJson( arguments ) ) );
+    }
     if ( toolId == QLatin1String( "scientific:capabilities" ) )
+    {
+        ensureScienceContextAuthorities();
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::scientificCapabilities( variantArgsToJson( arguments ) ) );
+    }
     if ( toolId == QLatin1String( "data:asset_passport" ) )
+    {
+        ensureScienceContextAuthorities();
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::dataAssetPassport( variantArgsToJson( arguments ) ) );
+    }
     if ( toolId == QLatin1String( "recipe:search" ) )
+    {
+        ensureScienceContextAuthorities();
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::recipeSearch( variantArgsToJson( arguments ) ) );
+    }
     fail( QStringLiteral( "unknown data-platform tool: %1" ).arg( toolId ) );
 }
 

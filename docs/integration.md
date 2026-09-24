@@ -255,3 +255,46 @@ LabSpec labs can embed an exemplar spec
   submission bound, not a scheduler.
 - Open issues in the avoid-list were not touched (see
   `.planning/RS14-07-parameter-studio/recon.md` dedup matrix).
+
+---
+# Integration seams — RS14-09 Scientific Task Planner recovery ↔ platform
+
+`src/planner` (`sicnu_planner`) is a Qt-free leaf linking `sicnu_contracts`
+and jsoncpp only. Planning-only: it never executes operators, never opens
+datasets. All capability facts enter through the injected `CapabilityProvider`
+seam and are cross-checked against the contracts registry.
+
+## 1. Harness capability knowledge → CapabilityProvider
+Project `CapabilityKnowledge` onto `sicnu::planner::CapabilityProvider`
+(`capabilitiesForFamily(family)` over the closed `kFamilySlots`). The planner
+rejects any fact that contradicts `findScientificContract` (typed ambiguity
+question, candidate excluded) — the contracts registry stays the authority.
+
+## 2. Passport / asset state → PlanningContext
+`resolveAssetState` + `claimFor` map onto `PlannerAssetFacts` (`state` uses the
+scientific_state lifecycle vocabulary, mirror drift-pinned). Only `ready`
+assets back hard preconditions (integration §3 above); every other state
+becomes a typed blocking question.
+
+## 3. ScientificPlan → WorkflowIR → existing lowering chain
+`projectPlanToIr(plan, &warnings, &error)` emits a workflow_ir 1.0-shaped
+document (data-level conformance; the harness reader stays the final
+authority). Wire it as `readWorkflowIr(input)` to enter AgentPlan v2 lowering
+unchanged. Domains without an honest artifact_facts token degrade to
+"unknown" WITH a warning — never a fake verdict.
+
+## 4. LLM proposal surfaces → validateProposal
+Untrusted plan documents go through `validateProposal` (closed sorted
+`planner:proposal_*` rejection codes; identity re-minted from content).
+MCP/CLI surfaces can wrap it read-only.
+
+## 5. Teaching layers
+`teachingViews(plan, mode)` gives the hidden-answer view (masks ONLY
+student-decision parameters, teaching + guided/minimal, honest
+`masking_applied`) and the explanation view (rationale, transition whys,
+thinking questions). ADR 0155-aligned: the plan never does the experiment.
+
+## 6. Agent replan (RS14-06)
+Per the debugger section above: a failed execution's `AgentDiagnostic`
+(`code`, `divergence_kind`, `confidence`) is the replan signal; feed a fresh
+`PlanningContext` through `planScientificWork`. No type dependency.

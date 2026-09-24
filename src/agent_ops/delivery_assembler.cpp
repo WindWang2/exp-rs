@@ -2,7 +2,41 @@
 #include "agent_ops/delivery_assembler.h"
 #include "agentbench/trace.h"
 
+#include <cstdint>
+#include <cstdio>
+
 namespace sicnu::agent_ops {
+namespace {
+
+/// Stable 8-hex FNV-1a fingerprint over the full path (same scheme the
+/// loop uses for plan identity).
+std::string pathFingerprint(const std::string &canonical)
+{
+    std::uint64_t hash = 1469598103934665603ULL; // FNV-1a offset basis
+    for (const unsigned char c : canonical)
+    {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    char buffer[9];
+    std::snprintf(buffer, sizeof(buffer), "%08llx", static_cast<unsigned long long>(hash));
+    return std::string(buffer, 8);
+}
+
+/// Portable ref: strips the longest leading directory component (POSIX and
+/// Windows separators) so an export never leaks absolute machine paths, and
+/// disambiguates basename collisions with a stable path fingerprint —
+/// /r1/out.tif and /r2/out.tif stay distinguishable. A path that is already
+/// a bare relative name passes through untouched.
+std::string basenameRef(const std::string &path)
+{
+    const std::size_t slash = path.find_last_of("/\\");
+    if (slash == std::string::npos)
+        return path;
+    return path.substr(slash + 1) + "@" + pathFingerprint(path);
+}
+
+} // namespace
 
 FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult &result,
                                           const DeliveryExtras &extras) const
@@ -27,19 +61,21 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     {
         Json::Value o(Json::objectValue);
         o["path"] = art;
-        // Portability: flag absolute paths but keep basename-ish ref.
-        o["portable_ref"] = art;
+        // Portability: the capsule carries a basename ref only; the raw
+        // (absolute) path stays in the local delivery document.
+        o["portable_ref"] = basenameRef(art);
         d.outputs.append(o);
         d.provenance["artifacts"].append(art);
     }
 
-    // Pull plan / run ids from decisions when present.
+    // Pull plan / run ids from decisions when present. The loop records
+    // submitted runs as decision.inputs["run_id"].
     for (const auto &dec : result.summary.decisions)
     {
         if (dec.selected.isMember("plan_id"))
             d.plan["plan_id"] = dec.selected["plan_id"];
-        if (dec.selected.isMember("run_id"))
-            d.runIds.append(dec.selected["run_id"]);
+        if (dec.inputs.isMember("run_id"))
+            d.runIds.append(dec.inputs["run_id"]);
         if (dec.selected.isMember("action"))
         {
             const std::string action = dec.selected["action"].asString();
@@ -58,19 +94,33 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
         d.traceRef["outcome_claim_success"] = extras.trace->outcomeClaimSuccess;
     }
 
-    // Claims with confidence: delivered => high; refused/aborted => low; unknown ≠ success.
+    // Claims with confidence, gated on the evidence that actually exists:
+    // a delivered claim is high-confidence only when a verifier verdict is
+    // present (dry-run/plan-only deliveries never verify); refused/aborted
+    // claims carry the loop's typed stop reason; unknown ≠ success.
     if (d.claims.empty())
     {
         Json::Value claim(Json::objectValue);
         claim["claim"] = "session_outcome";
         claim["value"] = d.outcome;
+        const std::string verdict = d.verifier["verdict"].asString();
         if (d.outcome == "delivered")
-            claim["confidence"] = 0.9;
+        {
+            if (verdict == "PASS" || verdict == "PASS_WITH_WARNINGS")
+                claim["confidence"] = 0.9;
+            else
+            {
+                claim["confidence"] = 0.0; // delivered without verification: indeterminate
+                claim["evidence_missing"].append("verifier_verdict");
+            }
+        }
         else if (d.outcome == "refused" || d.outcome == "aborted")
             claim["confidence"] = 0.85;
         else
             claim["confidence"] = 0.0; // indeterminate
         claim["evidence_ref"] = "journal:" + d.sessionId;
+        if (!d.stopReason.empty())
+            claim["stop_reason"] = d.stopReason;
         d.claims.append(claim);
     }
     return d;
@@ -95,7 +145,8 @@ Json::Value DeliveryAssembler::capsuleExportDocument(const FinalDelivery &delive
     for (const auto &o : delivery.outputs)
     {
         Json::Value p(Json::objectValue);
-        p["portable_ref"] = o.get("portable_ref", o.get("path", ""));
+        p["portable_ref"] =
+            basenameRef(o.get("portable_ref", o.get("path", "")).asString());
         outs.append(p);
     }
     doc["outputs"] = outs;

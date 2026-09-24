@@ -23,11 +23,7 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
+#include "platform/portable.h"
 
 namespace sicnu::geo::envcheck
 {
@@ -66,11 +62,7 @@ std::string joinStrings( const std::vector<std::string> &parts, const std::strin
 
 std::string currentProcessId()
 {
-#ifdef _WIN32
-  return std::to_string( static_cast<long long>( GetCurrentProcessId() ) );
-#else
-  return std::to_string( static_cast<long long>( ::getpid() ) );
-#endif
+  return std::to_string( static_cast<long long>( sicnu::portable::pid() ) );
 }
 
 /// UTF-8 rendering of a path for JSON/log output — never converts through the
