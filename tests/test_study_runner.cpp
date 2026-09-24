@@ -575,6 +575,9 @@ TEST_CASE( "a lineage link refusal during submit-refusal recording aborts the st
           sicnu::runtime::observability::fault::Mode::NextN, 1, {} } );
     const auto result = runner.run( spec, cancel, fix.outputDir() );
     REQUIRE( result.has_value() );
+    // The stopped reason names the faulting authority — the LEDGER, not the
+    // store (misattributing it would send the operator looking in the wrong
+    // subsystem).
     REQUIRE( result.value().stoppedReason
-             == QStringLiteral( "aborted:study.store_unavailable" ) );
+             == QStringLiteral( "aborted:study.ledger_unavailable" ) );
 }
