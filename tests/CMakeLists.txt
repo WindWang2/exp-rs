@@ -1184,6 +1184,8 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3794,6 +3796,8 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3817,6 +3821,8 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3844,6 +3850,8 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8194,6 +8202,8 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8217,6 +8227,8 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
