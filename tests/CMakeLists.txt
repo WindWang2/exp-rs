@@ -336,6 +336,10 @@ sicnu_add_test(test_study_e2e)
 target_link_libraries(test_study_e2e PRIVATE
   Sicnu::study
   Sicnu::study_bridge
+  Sicnu::experiment
+  Sicnu::experiment_debugger
+  Sicnu::experiment_capsule
+  Sicnu::dataset
   GDAL::GDAL
 )
 # Studio live-execution closed loop: fake + real-shaped backend over the

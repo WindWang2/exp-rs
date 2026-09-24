@@ -24,8 +24,16 @@
 #include <gdal_priv.h>
 
 #include "data/data_manager.h"
+#include "dataset/dataset_store.h"
+#include "experiment/capsule/capsule_builder.h"
+#include "experiment/capsule/capsule_io.h"
+#include "experiment/debugger/evidence_source.h"
+#include "experiment/debugger/run_snapshot.h"
+#include "experiment/debugger/snapshot_builder.h"
 #include "experiment/experiment_matrix.h"
 #include "experiment/experiment_store.h"
+#include "experiment/experiment_types.h"
+#include "experiment/bridge/lab_report.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
@@ -232,4 +240,82 @@ TEST_CASE( "NDVI threshold exemplar study, end to end on the real spine",
                  .toInt() == 9 );
     REQUIRE( document.value( QStringLiteral( "spatial_summaries" ) ).toArray().size() == 8 );
     REQUIRE( document.contains( QStringLiteral( "usage_notes" ) ) );
+
+    // 6. Cross-module identity: the SAME store feeds the capsule, the
+    // debugger and the lab report, and none of them contradict each other —
+    // one recorded run, one identity, wherever it is consumed.
+    const QString probeRunId = ledger.runsForCell( points.first().pointId ).first();
+
+    // (a) Debugger: the snapshot builds from recorded evidence, its pins are
+    // the run's own pins, and rebuilding cannot move the identity digest.
+    sicnu::experiment::debugger::DirectoryEvidenceSource evidenceSource( &store, outputDir );
+    sicnu::experiment::debugger::RunSnapshotBuilder snapshotBuilder( evidenceSource );
+    const auto snapshot = snapshotBuilder.build( probeRunId );
+    REQUIRE( snapshot.has_value() );
+    REQUIRE( snapshot.value().runId() == probeRunId );
+    REQUIRE( snapshot.value().pins().algorithmId
+             == store.runById( probeRunId )->algorithmId() );
+    const auto rebuilt = snapshotBuilder.build( probeRunId );
+    REQUIRE( rebuilt.has_value() );
+    REQUIRE( rebuilt.value().snapshotDigest() == snapshot.value().snapshotDigest() );
+
+    // (b) Capsule: exporting the same run produces an artifact that reloads
+    // through the real load gates with a valid digest.
+    sicnu::dataset::DatasetStore datasets;
+    REQUIRE( datasets.open( workDir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    sicnu::experiment::capsule::CapsuleBuilder capsuleBuilder( store, datasets );
+    sicnu::experiment::capsule::CapsuleOptions capsuleOptions;
+    capsuleOptions.workspaceRoot = workDir.path();
+    const auto capsule = capsuleBuilder.build( probeRunId, capsuleOptions );
+    REQUIRE( capsule.has_value() );
+    const auto exportedCapsule = sicnu::experiment::capsule::CapsuleIO::exportCapsule(
+        capsule.value(), workDir.filePath( QStringLiteral( "probe.sicnu-capsule.json" ) ) );
+    REQUIRE( exportedCapsule.has_value() );
+    const auto reloaded =
+        sicnu::experiment::capsule::CapsuleIO::loadCapsule( exportedCapsule->path );
+    REQUIRE( reloaded.has_value() );
+    REQUIRE( reloaded.value().digestValid() );
+
+    // (c) Lab report: the report's run rows are the store's runs — the
+    // recorded execution fingerprint must equal what the store still derives,
+    // and with no evaluation protocol committed for study points the
+    // statistics section is honestly empty rather than synthesized.
+    sicnu::experiment::LabReportRequest labRequest;
+    labRequest.labId = spec.value().experimentId;
+    sicnu::experiment::LabReportBuilder labBuilder( store, nullptr );
+    const auto labReport = labBuilder.build( labRequest );
+    REQUIRE( labReport.has_value() );
+    const QJsonArray reportRuns =
+        labReport->value( QStringLiteral( "runs" ) ).toArray();
+    REQUIRE( reportRuns.size() == 9 );
+    for ( const QJsonValue &value : reportRuns )
+    {
+        const QJsonObject entry = value.toObject();
+        const auto run = store.runById(
+            entry.value( QStringLiteral( "runId" ) ).toString() );
+        REQUIRE( run.has_value() );
+        REQUIRE( entry.value( QStringLiteral( "executionFingerprint" ) ).toString()
+                 == sicnu::experiment::runExecutionFingerprint(
+                     run.value().executionIdentity() ) );
+    }
+    REQUIRE( labReport->value( QStringLiteral( "statistics" ) ).toArray().isEmpty() );
+
+    // (d) Lineage: every recorded run hangs off the matrix cell identity the
+    // ledger wrote — the same identity the matrix authority derives.
+    for ( const StudyPoint &point : points )
+    {
+        const QStringList cellRuns = ledger.runsForCell( point.pointId );
+        REQUIRE( cellRuns.size() == 1 );
+        sicnu::experiment::LineageGraph graph( datasets, store );
+        const auto ancestors = graph.ancestors(
+            sicnu::experiment::LineageNodeId{ QStringLiteral( "run" ), cellRuns.first() },
+            4, 64 );
+        REQUIRE( !ancestors.budgetExhausted );
+        bool sawCell = false;
+        for ( const sicnu::experiment::LineageNode &node : ancestors.nodes )
+            sawCell = sawCell
+                      || ( node.id.kind == QStringLiteral( "matrix" )
+                           && node.id.id == point.pointId );
+        REQUIRE( sawCell );
+    }
 }
