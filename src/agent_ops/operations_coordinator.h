@@ -48,6 +48,9 @@ struct OpsRunResult {
     std::optional<RecoveryDecision> lastRecovery;
     ReconcileResult reconcile;
     std::string error;
+    /// Non-empty when the live-trajectory benchmark persist failed; the
+    /// session outcome itself stays authoritative.
+    std::string benchmarkError;
 };
 
 class OperationsCoordinator {
@@ -64,8 +67,25 @@ class OperationsCoordinator {
     void requestPause() { mPauseRequested.store(true); }
     void requestCancel() { mCancelRequested.store(true); }
     void clearPause() { mPauseRequested.store(false); }
+    /// Relaunch path: after a cancel was consumed or refused, the driver
+    /// must be able to arm the coordinator for new work again.
+    void clearCancel() { mCancelRequested.store(false); }
     bool isPauseRequested() const { return mPauseRequested.load(); }
     bool isCancelRequested() const { return mCancelRequested.load(); }
+
+    /// Pending repair approval recorded through the session surface
+    /// (approve_repair); consumed by the next launched run() (resume() never
+    /// consults it — its recovery bridge is not evaluated). Note: run()'s
+    /// post-hoc recovery decision is advisory and always asks, so today the
+    /// approval arms driver-side evaluateRecovery() flows rather than
+    /// changing run() outcomes; the wire records that consumption.
+    void setPendingRepairApproval(bool approved) { mPendingRepairApproval = approved; }
+    bool isPendingRepairApproval() const { return mPendingRepairApproval; }
+
+    /// The most recent run()/resume() outcome on this coordinator (nullopt
+    /// before the first one) — the backing store for the status/timeline/
+    /// export surface actions.
+    const std::optional<OpsRunResult> &lastResult() const { return mLastResult; }
 
     /// Run a full session through AgentLoop, recording + projecting + delivering.
     OpsRunResult run(const OpsRunRequest &request);
@@ -98,6 +118,11 @@ class OperationsCoordinator {
     BridgedDiagnoser mBridgedDiagnoser;
     std::atomic<bool> mPauseRequested{false};
     std::atomic<bool> mCancelRequested{false};
+    // Control/mutable state below is NOT atomic: pause/cancel are safe to
+    // request cross-thread, but setPendingRepairApproval/lastResult (like
+    // run() itself) belong to the driver's coordinator thread.
+    bool mPendingRepairApproval = false;
+    std::optional<OpsRunResult> mLastResult;
 };
 
 } // namespace sicnu::agent_ops
