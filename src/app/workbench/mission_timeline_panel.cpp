@@ -56,6 +56,17 @@ MissionTimelinePanel::MissionTimelinePanel( QWidget *parent )
 
     connect( m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
              &MissionTimelinePanel::onSelectionChanged );
+    // The pushed selection must track the authority, not the click: a model
+    // reset (project switch, corrupt-authority reset) silently clears the
+    // table selection WITHOUT a selectionChanged signal, and an incremental
+    // applyEvents changes a selected row's status behind the selection
+    // model's back. Both would leave the SelectionContext snapshot holding a
+    // stale task id/status that availability rules then project onto
+    // commands. Re-derive and re-push on both.
+    connect( m_model, &QAbstractItemModel::modelReset, this,
+             &MissionTimelinePanel::repushSelection );
+    connect( m_model, &QAbstractItemModel::dataChanged, this,
+             &MissionTimelinePanel::repushSelection );
     connect( m_refreshButton, &QPushButton::clicked, this,
              &MissionTimelinePanel::onRefreshClicked );
     connect( m_retryButton, &QPushButton::clicked, this, &MissionTimelinePanel::onRetryClicked );
@@ -96,6 +107,11 @@ QString MissionTimelinePanel::selectedTaskId() const
 }
 
 void MissionTimelinePanel::onSelectionChanged()
+{
+    repushSelection();
+}
+
+void MissionTimelinePanel::repushSelection()
 {
     const QString taskId = selectedTaskId();
     if ( taskId.isEmpty() )

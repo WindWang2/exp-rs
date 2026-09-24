@@ -65,6 +65,10 @@ class MissionTimelinePanel : public QgsDockWidget
     QString selectedTaskId() const;
     MissionTaskStatus selectedTaskStatus( const QString &taskId ) const;
     void updateActionStates();
+    /// Re-derives the selection from the model and pushes it (clears when the
+    /// selection is gone). Connected to the model's reset and dataChanged so
+    /// the pushed task id/status always mirrors the authority.
+    void repushSelection();
 
     MissionTimelineModel *m_model = nullptr;
     QTableView *m_table = nullptr;
