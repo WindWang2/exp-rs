@@ -440,3 +440,44 @@ TEST_CASE( "task lookups stay exact after many mutations and a serialization rou
         REQUIRE( restored.task( id )->status == MissionTaskStatus::Canceled );
     }
 }
+
+TEST_CASE( "fromJson rejects a log whose seqs are not strictly ascending",
+           "[mission][stage]" )
+{
+    MissionTimeline timeline;
+    REQUIRE( timeline.addTask( makeTask( QStringLiteral( "t1" ), MissionStage::Import ) ).applied );
+    MissionRunRef run;
+    run.kind = QStringLiteral( "task_center" );
+    run.id = QStringLiteral( "tc-1" );
+    REQUIRE( timeline.bindRunReference( QStringLiteral( "t1" ), run ).applied );
+    REQUIRE( timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Running,
+                                  QStringLiteral( "t0" ) ).applied );
+    REQUIRE( timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Succeeded,
+                                  QStringLiteral( "t1" ) ).applied );
+    const QJsonObject doc = timeline.toJson();
+
+    // eventsSince() binary-searches strictly ascending seqs; a hand-edited
+    // or rebuilt log must not load into a shape that breaks that.
+    QJsonObject tampered = doc;
+    QJsonArray events = tampered.value( QStringLiteral( "events" ) ).toArray();
+    REQUIRE( events.size() >= 3 );
+    QJsonObject last = events.at( events.size() - 1 ).toObject();
+    last.insert( QStringLiteral( "seq" ), 1 );
+    events.replace( events.size() - 1, last );
+    tampered.insert( QStringLiteral( "events" ), events );
+
+    MissionTimeline decoded;
+    QString error;
+    REQUIRE_FALSE( decoded.fromJson( tampered, &error ) );
+    REQUIRE( error == QStringLiteral( "event_seq_not_ascending" ) );
+
+    // A zero seq is equally out of contract.
+    QJsonObject zero = doc;
+    QJsonArray zeroEvents = zero.value( QStringLiteral( "events" ) ).toArray();
+    QJsonObject first = zeroEvents.at( 0 ).toObject();
+    first.insert( QStringLiteral( "seq" ), 0 );
+    zeroEvents.replace( 0, first );
+    zero.insert( QStringLiteral( "events" ), zeroEvents );
+    REQUIRE_FALSE( decoded.fromJson( zero, &error ) );
+    REQUIRE( error == QStringLiteral( "event_seq_not_ascending" ) );
+}

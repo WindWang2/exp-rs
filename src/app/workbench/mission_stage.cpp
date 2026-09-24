@@ -641,6 +641,7 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
     if ( !eventsValue.isArray() )
         return fail( QStringLiteral( "events_not_array" ) );
 
+    quint64 previousEventSeq = 0;
     for ( const QJsonValue &ev : eventsValue.toArray() )
     {
         if ( !ev.isObject() )
@@ -649,6 +650,12 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
 
         MissionEvent e;
         e.seq = static_cast<quint64>( intFromJson( eo.value( QStringLiteral( "seq" ) ) ) );
+        // eventsSince() answers with a binary search over strictly ascending
+        // seqs; a hand-edited or truncated-then-rebuilt log must never load
+        // into a shape that silently breaks that contract.
+        if ( e.seq == 0 || e.seq <= previousEventSeq )
+            return fail( QStringLiteral( "event_seq_not_ascending" ) );
+        previousEventSeq = e.seq;
         e.taskId = eo.value( QStringLiteral( "task_id" ) ).toString();
         auto from = missionTaskStatusFromKey( eo.value( QStringLiteral( "from" ) ).toString() );
         auto to = missionTaskStatusFromKey( eo.value( QStringLiteral( "to" ) ).toString() );
