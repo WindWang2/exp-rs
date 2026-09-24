@@ -43,7 +43,14 @@ Result<PromotionCriterion> PromotionCriterion::fromJson( const QJsonObject &json
 {
     PromotionCriterion criterion;
     criterion.metric = json.value( QStringLiteral( "metric" ) ).toString();
-    criterion.minValue = json.value( QStringLiteral( "min_value" ) ).toDouble();
+    // The threshold IS the decision rule; a missing or non-numeric one would
+    // silently become "any value >= 0 passes" at the promotion boundary, so
+    // the criterion is rejected instead of defaulted.
+    const auto threshold = json.value( QStringLiteral( "min_value" ) );
+    if ( !threshold.isDouble() )
+        return Result<PromotionCriterion>::failure( promotionError(
+            QStringLiteral( "criterion requires a numeric min_value" ) ) );
+    criterion.minValue = threshold.toDouble();
     if ( criterion.metric.isEmpty() )
         return Result<PromotionCriterion>::failure(
             promotionError( QStringLiteral( "criterion requires a metric" ) ) );

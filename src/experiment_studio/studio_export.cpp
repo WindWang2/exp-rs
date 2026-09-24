@@ -75,6 +75,26 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
         const QJsonObject r = v.toObject();
         auto esc = []( const QString &s ) {
             QString t = s;
+            // CSV formula injection: spreadsheet apps execute a cell whose
+            // first character is =, +, - or @ — an operator-supplied error
+            // summary (or asset path) must not become a live formula in the
+            // exported table.
+            if ( !t.isEmpty() )
+            {
+                const QChar first = t.at( 0 );
+                // '-' only when NOT a plain negative number ("-123" must
+                // survive verbatim — NDVI/coordinates are negative every
+                // day); "=cmd", "+x", "@sum" and "-cmd" are formula bait.
+                const bool negativeNumber = first == QLatin1Char( '-' ) && t.size() > 1
+                                                && t.at( 1 ).isDigit();
+                const bool dangerous =
+                    first == QLatin1Char( '=' ) || first == QLatin1Char( '+' )
+                    || first == QLatin1Char( '@' ) || first == QLatin1Char( '\t' )
+                    || first == QLatin1Char( '\r' )
+                    || ( first == QLatin1Char( '-' ) && !negativeNumber );
+                if ( dangerous )
+                    t.prepend( QLatin1Char( '\'' ) );
+            }
             t.replace( QLatin1Char( '"' ), QStringLiteral( "\"\"" ) );
             if ( t.contains( QLatin1Char( ',' ) ) || t.contains( QLatin1Char( '"' ) )
                  || t.contains( QLatin1Char( '\n' ) ) )

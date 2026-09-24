@@ -133,8 +133,10 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
     // Identity twins via the indexed fingerprint column (12.0): the hash IS
     // the identity semantics, so the index lookup is exact, not heuristic.
     const QString identityHash = runExecutionFingerprint( identity );
-    const QStringList twins =
-        m_store->runIdsByExecutionFingerprint( identityHash, /*limit=*/50 );
+    const auto twinLookup = m_store->runIdsByExecutionFingerprint( identityHash, /*limit=*/50 );
+    if ( !twinLookup )
+        return Result<Verdict>::failure( twinLookup.diagnostics() );
+    const QStringList twins = twinLookup.value();
 
     for ( const QString &runId : twins )
     {
@@ -154,6 +156,19 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
                 environmentDrift( recorded->environment(), *repeatEnvironment );
     }
 
+    // Every identity twin is unreadable: twins.isNotEmpty means the indexed
+    // fingerprint matched real rows, so calling this "New" lies about the
+    // store, and any duplicate/rerun verdict would be invented from zero
+    // readable evidence. Typed failure beats a plausible guess.
+    if ( !twins.isEmpty() && verdict.matchedRunIds.isEmpty() )
+        return Result< Verdict >::failure( Diagnostic{
+            QStringLiteral( "experiment.repeat_unreadable_twin" ),
+            QStringLiteral( "%1 identity twin(s) matched the execution fingerprint"
+                            " but none of their run records parse; refusing to"
+                            " classify on unreadable evidence" )
+                .arg( twins.size() ),
+            DiagnosticSeverity::Error } );
+
     if ( twins.isEmpty() )
     {
         // No identity twin. A platform execution that ALREADY recorded runs
@@ -161,7 +176,10 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
         // experiment.
         if ( !executionRef.isEmpty() )
         {
-            const QStringList byRef = m_store->runIdsByExecutionRef( executionRef, 10 );
+            const auto byRefLookup = m_store->runIdsByExecutionRef( executionRef, 10 );
+            if ( !byRefLookup )
+                return Result<Verdict>::failure( byRefLookup.diagnostics() );
+            const QStringList byRef = byRefLookup.value();
             for ( const QString &runId : byRef )
             {
                 const std::optional<ExperimentRun> recorded = m_store->runById( runId );

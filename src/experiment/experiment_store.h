@@ -81,14 +81,17 @@ class ExperimentStore
     /// recency). Bounded paged scan over the run JSON: a cold-path
     /// reconciliation helper, not a per-event lookup — callers tracking
     /// executions live keep their own ref→runId map.
-    QStringList runIdsByExecutionRef( const QString &executionRef,
-                                      qint64 limit = 10 ) const;
+    /// Identity-critical lookups answer from the WHOLE bounded scan or fail:
+    /// a prepare/step fault mid-scan must not masquerade as "no matches" to
+    /// restart reconciliation or the duplicate-ingest guard.
+    sicnu::data::Result<QStringList> runIdsByExecutionRef( const QString &executionRef,
+                                                           qint64 limit = 10 ) const;
     /// Run ids whose stored execution fingerprint (the identity hash column)
     /// equals @p fingerprint — an indexed lookup (12.0): the seam the
     /// repeat-execution classifier and any duplicate-ingest guard use at
     /// 100k-run scale, where scanning every run's JSON is not acceptable.
-    QStringList runIdsByExecutionFingerprint( const QString &fingerprint,
-                                              qint64 limit = 50 ) const;
+    sicnu::data::Result<QStringList> runIdsByExecutionFingerprint(
+        const QString &fingerprint, qint64 limit = 50 ) const;
 
     // --- run retention / prune (12.0) ----------------------------------------
     /// Retention policy for recorded runs. Every rule is re-derived against
@@ -179,8 +182,10 @@ class ExperimentStore
     sicnu::data::Result<void> savePromotionRecord( const PromotionRecord &record );
     std::optional<PromotionRecord> promotionById( const QString &promotionId ) const;
     /// Promotion evidence for one model catalog id (ascending creation order).
-    QVector<PromotionRecord> promotionsForModel( const QString &modelId,
-                                                 qint64 limit = 100 ) const;
+    /// A stored promotion row that no longer parses is a typed failure —
+    /// promotion decisions must not silently ignore evidence they know about.
+    sicnu::data::Result<QVector<PromotionRecord>> promotionsForModel(
+        const QString &modelId, qint64 limit = 100 ) const;
 
     // --- benchmark definitions / results (D19; additive tables, schema stays v1) ---
     /// Persist a published BenchmarkDefinition. Same id@version with different
@@ -194,8 +199,10 @@ class ExperimentStore
     /// Persist a BenchmarkResult by result_id (conflict on different content).
     sicnu::data::Result<void> saveBenchmarkResult( const BenchmarkResult &result );
     std::optional<BenchmarkResult> benchmarkResultById( const QString &resultId ) const;
-    QVector<BenchmarkResult> benchmarkResultsFor( const QString &benchmarkId,
-                                                  qint64 limit = 100 ) const;
+    /// Same fail-closed contract as promotionsForModel: an unreadable stored
+    /// result refuses the listing instead of vanishing from it.
+    sicnu::data::Result<QVector<BenchmarkResult>> benchmarkResultsFor(
+        const QString &benchmarkId, qint64 limit = 100 ) const;
 
   private:
     /// The real upsert path; `upsertRun()` wraps it with the unified-trace

@@ -380,3 +380,41 @@ TEST_CASE( "analysis keeps cancelled as its own point status", "[study][analysis
     }
     REQUIRE( checked );
 }
+
+TEST_CASE( "metric names resolve through the dotted-path rule, not top-level keys only",
+           "[study][analysis][metrics]" )
+{
+    // metric_path.h declares ONE lookup rule for matrix + promotion; the
+    // study analysis must not fork a second, weaker rule (top-level keys
+    // only) or the same spec yields two different sensitivities.
+    Fixture fix;
+    fix.ensureExperiment( QStringLiteral( "exp-analysis" ) );
+    auto spec = oatSpec();
+    spec.metricNames = QStringList{ QStringLiteral( "quality.maskedPercent" ) };
+    const auto points = sampleStudyPoints( spec ).value();
+    REQUIRE( points.size() == 5 );
+
+    for ( const StudyPoint &point : points )
+    {
+        const double threshold =
+            point.parameters.value( QStringLiteral( "threshold" ) ).toDouble();
+        QJsonObject quality;
+        quality.insert( QStringLiteral( "maskedPercent" ), threshold * 100.0 );
+        QJsonObject metrics;
+        metrics.insert( QStringLiteral( "quality" ), quality );
+        fix.recordRun( spec, point, metrics, point.seed );
+    }
+
+    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysis.points.size() == 5 );
+    for ( const PointAggregate &aggregate : analysis.points )
+        REQUIRE( aggregate.status == QStringLiteral( "recorded" ) );
+
+    REQUIRE( analysis.curves.size() == 1 );
+    const SensitivityCurve &curve = analysis.curves.first();
+    REQUIRE( curve.metricName == QStringLiteral( "quality.maskedPercent" ) );
+    REQUIRE( curve.points.size() == 5 );
+    REQUIRE( curve.trend == QStringLiteral( "increasing" ) );
+    for ( int i = 0; i < 5; ++i )
+        REQUIRE( curve.points.at( i ).mean == Catch::Approx( 25.0 * i ) );
+}

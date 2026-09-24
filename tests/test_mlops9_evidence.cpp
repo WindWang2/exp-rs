@@ -451,8 +451,9 @@ TEST_CASE( "promotion seam: criteria, benchmark gap, approval metadata (M8)",
     CHECK( persisted->decidedBy == QStringLiteral( "release-board" ) );
     CHECK( persisted->decidedAtUtc.isValid() );
     const auto forModel = fixture.store.promotionsForModel( QStringLiteral( "model-a" ) );
-    REQUIRE( forModel.size() == 1 );
-    CHECK( forModel.first().promotionId == promotionId.value() );
+    REQUIRE( forModel.has_value() );
+    REQUIRE( forModel.value().size() == 1 );
+    CHECK( forModel.value().first().promotionId == promotionId.value() );
 
     // A criterion the run did not record is a named gap, never a pass.
     PromotionCriterion boundary;

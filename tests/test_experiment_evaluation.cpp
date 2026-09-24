@@ -5,17 +5,21 @@
 // explicit zero-denominator policy, boundary F-score, detection AP,
 // protocol binding, comparability-first comparison, environment secret
 // filtering, and the reproduction bundle/validator.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "dataset/dataset_store.h"
 #include "dataset/split.h"
+#include "experiment/evidence.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 #include "experiment/lineage.h"
+#include "experiment/promotion.h"
 #include "experiment/repeat_execution.h"
 #include "experiment/reproduction_bundle.h"
 #include "experiment/reproduction_bundle_import.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -537,15 +541,21 @@ TEST_CASE( "execution ref lookup matches JSON-escaped refs (#1056)",
     plain.setStatus( RunStatus::Created );
     REQUIRE( store.upsertRun( plain ).has_value() );
 
-    const auto ids = store.runIdsByExecutionRef( escapedRef );
-    REQUIRE( ids.size() == 1 );
-    CHECK( ids.first() == QStringLiteral( "run-ref" ) );
+    const auto lookup = store.runIdsByExecutionRef( escapedRef );
+    REQUIRE( lookup.has_value() );
+    REQUIRE( lookup.value().size() == 1 );
+    CHECK( lookup.value().first() == QStringLiteral( "run-ref" ) );
 
-    const auto otherIds = store.runIdsByExecutionRef( QStringLiteral( "job\\42\"batch\u0002x" ) );
-    REQUIRE( otherIds.size() == 1 );
-    CHECK( otherIds.first() == QStringLiteral( "run-other" ) );
+    const auto otherLookup =
+        store.runIdsByExecutionRef( QStringLiteral( "job\\42\"batch\u0002x" ) );
+    REQUIRE( otherLookup.has_value() );
+    REQUIRE( otherLookup.value().size() == 1 );
+    CHECK( otherLookup.value().first() == QStringLiteral( "run-other" ) );
 
-    CHECK( store.runIdsByExecutionRef( QStringLiteral( "absent-ref" ) ).isEmpty() );
+    const auto absent =
+        store.runIdsByExecutionRef( QStringLiteral( "absent-ref" ) );
+    REQUIRE( absent.has_value() );
+    CHECK( absent.value().isEmpty() );
 }
 
 TEST_CASE( "lineage traverses ancestors/descendants, cuts cycles, flags tombs",
@@ -1199,6 +1209,11 @@ TEST_CASE( "metric records refuse foreign layout versions", "[experiment][metric
     MetricRecord record;
     record.runId = QStringLiteral( "run-metrics-version" );
     record.metrics = QJsonObject{ { QStringLiteral( "overallAccuracy" ), 0.75 } };
+    // The protocol gate parses and validates BEFORE the version gate, so
+    // an empty protocol made this refusal carry the protocol code and the
+    // test silently exercised the wrong gate (found round-2).
+    record.protocol.setDatasetVersionId( QStringLiteral( "dv-version" ) );
+    record.protocol.setSplitManifestId( QStringLiteral( "sm-version" ) );
 
     QJsonObject foreign = record.toJson();
     foreign.insert( QStringLiteral( "metrics_schema_version" ), 99 );
@@ -1356,4 +1371,539 @@ TEST_CASE( "bundle integrity gate: an emptied checksums.txt never passes vacuous
                QByteArray( "deadbeef  run_config.json\n" ) );
     const auto truncated = exporter.validateBundle( bundle, hooks );
     CHECK( truncated.level == ReproductionLevel::Impossible );
+}
+TEST_CASE( "promotion criteria demand an explicit numeric threshold",
+           "[experiment][promotion]" )
+{
+    // A criterion without min_value means "promote on any >= 0 value" —
+    // a decision rule that cannot fail is not a rule. fromJson is the
+    // CLI/agent trust boundary, so the omission is a typed rejection.
+    const auto missing = PromotionCriterion::fromJson(
+        QJsonObject{ { QStringLiteral( "metric" ), QStringLiteral( "overall_accuracy" ) } } );
+    CHECK( !missing.has_value() );
+
+    const auto textual = PromotionCriterion::fromJson( QJsonObject{
+        { QStringLiteral( "metric" ), QStringLiteral( "overall_accuracy" ) },
+        { QStringLiteral( "min_value" ), QStringLiteral( "0.9" ) } } );
+    CHECK( !textual.has_value() );
+
+    const auto explicitValue = PromotionCriterion::fromJson( QJsonObject{
+        { QStringLiteral( "metric" ), QStringLiteral( "overall_accuracy" ) },
+        { QStringLiteral( "min_value" ), 0.9 } } );
+    REQUIRE( explicitValue.has_value() );
+    CHECK( explicitValue->minValue == Catch::Approx( 0.9 ) );
+}
+
+TEST_CASE( "repeat classifier refuses verdicts on unreadable identity twins",
+           "[experiment][repeat][identity]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "unreadable twins" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-corrupt-twin" ),
+                                 experiment.experimentId() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    run.artifacts().append( ExperimentRun::Artifact{
+        QStringLiteral( "out.tif" ), QStringLiteral( "primary" ),
+        QStringLiteral( "digest-a" ), 100 } );
+    run.setMetrics( QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.85 } } );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    // Corrupt the twin's JSON out-of-band while keeping the indexed
+    // execution-fingerprint column intact — the shape a half-torn write or
+    // tampered store leaves behind.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dir.filePath( QStringLiteral( "experiments.db" ) )
+                                      .toUtf8()
+                                      .constData(),
+                                  &raw, SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *update = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "UPDATE experiment_runs SET json=? WHERE run_id=?",
+                                     -1, &update, nullptr ) == SQLITE_OK );
+        sqlite3_bind_text( update, 1, "{not-json-twin", -1, SQLITE_TRANSIENT );
+        sqlite3_bind_text( update, 2, run.runId().toUtf8().constData(), -1,
+                           SQLITE_TRANSIENT );
+        REQUIRE( sqlite3_step( update ) == SQLITE_DONE );
+        sqlite3_finalize( update );
+        sqlite3_close( raw );
+    }
+
+    RepeatExecutionClassifier classifier( store );
+    const QString resultFp = runResultFingerprint(
+        { QStringLiteral( "digest-a" ) },
+        QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.85 } } );
+
+    // With result evidence: the twin exists but cannot back a verdict.
+    // Falling through to EquivalentRerun would invent a rerun from zero
+    // readable evidence; SameIdentity with an empty match list claims to
+    // match nothing.
+    const auto withResult = classifier.classify( run.executionIdentity(), resultFp );
+    CHECK( !withResult.has_value() );
+
+    const auto withoutResult = classifier.classify( run.executionIdentity() );
+    CHECK( !withoutResult.has_value() );
+}
+
+TEST_CASE( "persisted metric records commit to a verified content hash",
+           "[experiment][metrics][hash]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "metrics hashing" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-hash" ), experiment.experimentId() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    MetricRecord record;
+    record.runId = QStringLiteral( "run-hash" );
+    record.protocol.setDatasetVersionId( run.datasetVersionId() );
+    record.protocol.setSplitManifestId( run.splitManifestId() );
+    // Insertion order a: accuracy before f1.
+    QJsonObject metricsA;
+    metricsA.insert( QStringLiteral( "overall_accuracy" ), 0.85 );
+    metricsA.insert( QStringLiteral( "boundary_f1" ), 0.5 );
+    record.metrics = metricsA;
+    REQUIRE( store.saveMetricRecord( record ).has_value() );
+
+    // 1. A producer exists: the persisted record carries a hash that no
+    //    caller had to invent, so the evidence projector's metrics
+    //    dimension is honestly present (the round-1 audit found every real
+    //    run reporting "metric record carries no content hash").
+    const auto stored = store.metricRecordForRun( QStringLiteral( "run-hash" ) );
+    REQUIRE( stored.has_value() );
+    CHECK( !stored->metricsHash.isEmpty() );
+    const auto summary = EvidenceProjector::summarize( { run, stored.value() } );
+    REQUIRE( summary.has_value() );
+    bool metricsPresent = false;
+    const QJsonArray dimensions = summary->value( QStringLiteral( "completeness" ) )
+                                      .toObject()
+                                      .value( QStringLiteral( "dimensions" ) )
+                                      .toArray();
+    for ( const auto &item : dimensions )
+        if ( item.toObject().value( QStringLiteral( "name" ) ).toString()
+                 == QLatin1String( "metrics" ) )
+            metricsPresent = item.toObject().value( QStringLiteral( "present" ) ).toBool();
+    CHECK( metricsPresent );
+
+    // 2. The hash is a content hash: canonical bytes make key insertion
+    //    order irrelevant (same record through a SECOND store instance with
+    //    the opposite insertion order), and any content change moves it.
+    QTemporaryDir dirB;
+    ExperimentStore storeB;
+    REQUIRE( storeB.open( dirB.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    REQUIRE( storeB.upsertExperiment( experiment ).has_value() );
+    REQUIRE( storeB.upsertRun( run ).has_value() );
+    MetricRecord reordered = record;
+    QJsonObject metricsB;
+    metricsB.insert( QStringLiteral( "boundary_f1" ), 0.5 );
+    metricsB.insert( QStringLiteral( "overall_accuracy" ), 0.85 );
+    reordered.metrics = metricsB;
+    REQUIRE( storeB.saveMetricRecord( reordered ).has_value() );
+    const auto storedB = storeB.metricRecordForRun( QStringLiteral( "run-hash" ) );
+    REQUIRE( storedB.has_value() );
+    CHECK( storedB->metricsHash == stored->metricsHash );
+
+    MetricRecord changed = record;
+    changed.runId = QStringLiteral( "run-hash-b" );
+    changed.metrics = QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.99 },
+                                   { QStringLiteral( "boundary_f1" ), 0.5 } };
+    // One metric record per run (UNIQUE run_id): the changed-content probe
+    // lives on a sibling run; hashes differ because content differs.
+    ExperimentRun runB = makeRun( QStringLiteral( "run-hash-b" ), experiment.experimentId() );
+    runB.setStatus( RunStatus::Completed );
+    runB.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertRun( runB ).has_value() );
+    REQUIRE( store.saveMetricRecord( changed ).has_value() );
+    const auto storedChanged = store.metricRecordForRun( QStringLiteral( "run-hash-b" ) );
+    REQUIRE( storedChanged.has_value() );
+    CHECK( storedChanged->metricsHash != stored->metricsHash );
+
+    // 3. A non-empty hash that disagrees with the content is tamper
+    //    evidence, refused at the boundary — never persisted as-is.
+    MetricRecord forged = record;
+    forged.runId = QStringLiteral( "run-forged" );
+    forged.metricsHash = QStringLiteral( "deadbeef" );
+    const auto refused = store.saveMetricRecord( forged );
+    REQUIRE( !refused.has_value() );
+    REQUIRE( !refused.diagnostics().isEmpty() );
+    CHECK( refused.diagnostics().first().code
+           == QLatin1String( "experiment.metrics_hash_mismatch" ) );
+    CHECK( !store.metricRecordForRun( QStringLiteral( "run-forged" ) ).has_value() );
+}
+
+TEST_CASE( "bundle import identity gate cannot be waived; seeds survive verbatim",
+           "[experiment][repro][import][identity]" )
+{
+    // --- export from store A: a run whose seed lives above 2^53 -------------
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    // 2^53 + 1: the smallest seed a JSON double round-trip corrupts.
+    const quint64 hugeSeed = ( quint64{ 1 } << 53 ) + 1;
+    run.setSeed( hugeSeed );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    MetricRecord metricRecord;
+    metricRecord.runId = QStringLiteral( "run-src" );
+    metricRecord.protocol.setDatasetVersionId( committed->versionId() );
+    metricRecord.protocol.setSplitManifestId( run.splitManifestId() );
+    metricRecord.metrics = QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.9 } };
+    REQUIRE( experiments.saveMetricRecord( metricRecord ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    // --- leg 1: the round trip preserves the seed and therefore identity ----
+    ExperimentStore target;
+    REQUIRE( target.open( dir.filePath( QStringLiteral( "target.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions importOptions;
+    importOptions.bundleDir = exportReport.bundlePath;
+    importOptions.targetExperimentId = QStringLiteral( "exp-dst" );
+    const auto importReport = importer.importRun( importOptions );
+    REQUIRE( importReport.ok );
+    const auto installed = target.runById( importReport.runId );
+    REQUIRE( installed.has_value() );
+    CHECK( installed->seed() == hugeSeed );
+
+    // --- leg 2: deleting the fingerprint key cannot waive the identity gate -
+    // A tamperer who re-forges checksums.txt wholesale can strip
+    // run_config.json's execution_fingerprint; the gate must treat that
+    // deletion as a refusal, never as "nothing to check".
+    const QString runConfigPath = QDir( exportReport.bundlePath )
+                                      .filePath( QStringLiteral( "run_config.json" ) );
+    QFile runConfigFile( runConfigPath );
+    REQUIRE( runConfigFile.open( QIODevice::ReadOnly ) );
+    QJsonObject runConfig =
+        QJsonDocument::fromJson( runConfigFile.readAll() ).object();
+    runConfigFile.close();
+    REQUIRE( !runConfig.value( QStringLiteral( "execution_fingerprint" ) )
+                  .toString()
+                  .isEmpty() );
+    runConfig.remove( QStringLiteral( "execution_fingerprint" ) );
+    const QByteArray stripped =
+        QJsonDocument( runConfig ).toJson( QJsonDocument::Indented );
+    REQUIRE( QFile::remove( runConfigPath ) );
+    {
+        QFile out( runConfigPath );
+        REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( out.write( stripped ) == stripped.size() );
+    }
+    const QString checksumsPath = QDir( exportReport.bundlePath )
+                                      .filePath( QStringLiteral( "checksums.txt" ) );
+    QFile checksumsFile( checksumsPath );
+    REQUIRE( checksumsFile.open( QIODevice::ReadOnly ) );
+    QStringList lines =
+        QString::fromUtf8( checksumsFile.readAll() )
+            .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+    checksumsFile.close();
+    const QString digest =
+        QString::fromLatin1( QCryptographicHash::hash( stripped,
+                                                       QCryptographicHash::Sha256 )
+                                 .toHex() );
+    for ( QString &line : lines )
+        if ( line.endsWith( QStringLiteral( "  run_config.json" ) ) )
+            line = digest + QStringLiteral( "  run_config.json" );
+    const QByteArray rewritten = lines.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+    REQUIRE( QFile::remove( checksumsPath ) );
+    {
+        QFile out( checksumsPath );
+        REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( out.write( rewritten ) == rewritten.size() );
+    }
+
+    ExperimentStore targetB;
+    REQUIRE( targetB.open( dir.filePath( QStringLiteral( "target-b.db" ) ) ) );
+    Experiment homeB;
+    homeB.setExperimentId( QStringLiteral( "exp-dst-b" ) );
+    homeB.setName( QStringLiteral( "destination-b" ) );
+    REQUIRE( targetB.upsertExperiment( homeB ).has_value() );
+    ReproductionBundleImporter importerB( targetB );
+    ReproductionBundleImportOptions optionsB;
+    optionsB.bundleDir = exportReport.bundlePath;
+    optionsB.targetExperimentId = QStringLiteral( "exp-dst-b" );
+    const auto refused = importerB.importRun( optionsB );
+    CHECK( !refused.ok );
+    CHECK( targetB.runCount() == 0 );
+}
+
+TEST_CASE( "bundle import refuses corrupted member documents instead of half-installing",
+           "[experiment][repro][import][fail-closed]" )
+{
+    // A bundle whose environment.json is present but unparsable must not
+    // import with a silently EMPTY environment, and a metrics document that
+    // cannot install must not silently drop the run's only recorded numbers
+    // while the import reports ok. Both shapes are evidence loss dressed as
+    // success — the round-2 adversarial review found the second leg of this
+    // oracle was vacuous (environment corruption leaked into it) and the
+    // hash-mismatch gate was never exercised; all three legs are now real.
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    const QString envPath = QDir( exportReport.bundlePath )
+                                .filePath( QStringLiteral( "environment.json" ) );
+    const QString metricsPath = QDir( exportReport.bundlePath )
+                                    .filePath( QStringLiteral( "metrics.json" ) );
+    const QString checksumsPath = QDir( exportReport.bundlePath )
+                                      .filePath( QStringLiteral( "checksums.txt" ) );
+
+    // Rewrites one member and re-signs checksums.txt for it (the tamper
+    // shape an attacker with the bundle directory can always produce).
+    const auto writeMemberAndResign = [&]( const QString &member,
+                                           const QByteArray &content ) {
+        const QDir bundleDir( exportReport.bundlePath );
+        QFile out( bundleDir.filePath( member ) );
+        REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( out.write( content ) == content.size() );
+        out.close();
+        QFile checksumsFile( checksumsPath );
+        REQUIRE( checksumsFile.open( QIODevice::ReadOnly ) );
+        QStringList lines =
+            QString::fromUtf8( checksumsFile.readAll() )
+                .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+        checksumsFile.close();
+        const QString digest =
+            QString::fromLatin1(
+                QCryptographicHash::hash( content, QCryptographicHash::Sha256 ).toHex() );
+        for ( QString &line : lines )
+            if ( line.endsWith( QStringLiteral( "  " ) + member ) )
+                line = digest + QStringLiteral( "  " ) + member;
+        const QByteArray rewritten = lines.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+        REQUIRE( QFile::remove( checksumsPath ) );
+        QFile rewrittenFile( checksumsPath );
+        REQUIRE( rewrittenFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        REQUIRE( rewrittenFile.write( rewritten ) == rewritten.size() );
+    };
+
+    const auto importIntoFreshStore = [&]( const QString &storeName,
+                                           const QString &experimentId ) {
+        ExperimentStore target;
+        REQUIRE( target.open( dir.filePath( storeName ) ) );
+        Experiment home;
+        home.setExperimentId( experimentId );
+        home.setName( experimentId );
+        REQUIRE( target.upsertExperiment( home ).has_value() );
+        ReproductionBundleImporter importer( target );
+        ReproductionBundleImportOptions options;
+        options.bundleDir = exportReport.bundlePath;
+        options.targetExperimentId = experimentId;
+        const auto report = importer.importRun( options );
+        return std::pair<bool, qint64>( report.ok, target.runCount() );
+    };
+
+    // Leg 1: environment.json present but not a JSON object → refused.
+    {
+        writeMemberAndResign( QStringLiteral( "environment.json" ),
+                              QByteArray( "{not-an-environment" ) );
+        const auto [ok, runs] = importIntoFreshStore( QStringLiteral( "t1.db" ),
+                                                      QStringLiteral( "exp-t1" ) );
+        CHECK( !ok );
+        CHECK( runs == 0 );
+    }
+
+    // Leg 2: metrics.json present, NON-empty, but not a metric record →
+    // refused. (An empty metrics object {} is legal: runs without metrics.)
+    {
+        writeMemberAndResign( QStringLiteral( "environment.json" ),
+                              QByteArray( "{}\n" ) );
+        writeMemberAndResign( QStringLiteral( "metrics.json" ),
+                              QByteArray( "{not-a-metric-record" ) );
+        const auto [ok, runs] = importIntoFreshStore( QStringLiteral( "t2.db" ),
+                                                      QStringLiteral( "exp-t2" ) );
+        CHECK( !ok );
+        CHECK( runs == 0 );
+    }
+
+    // Leg 3: re-signed bundle whose embedded metrics_hash disagrees with its
+    // own metrics content → refused by the store's hash gate, and the
+    // refusal FAILS THE IMPORT instead of installing an evidence-less run.
+    {
+        writeMemberAndResign( QStringLiteral( "metrics.json" ),
+                              QByteArray( "{}\n" ) );
+        // A healthy environment.json is already in place from leg 2's reset;
+        // metrics.json now parses as a record but carries no content hash —
+        // the store derives it, so the tamper leg needs a WRONG hash.
+        writeMemberAndResign(
+            QStringLiteral( "metrics.json" ),
+            QJsonDocument( QJsonObject{
+                { QStringLiteral( "run_id" ), QStringLiteral( "run-src" ) },
+                { QStringLiteral( "metrics_schema_version" ), 1 },
+                { QStringLiteral( "protocol" ),
+                  QJsonObject{ { QStringLiteral( "dataset_version_id" ),
+                                 committed->versionId() },
+                               { QStringLiteral( "split_manifest_id" ),
+                                 run.splitManifestId() } } },
+                { QStringLiteral( "metrics" ),
+                  QJsonObject{ { QStringLiteral( "overall_accuracy" ), 0.9 } } },
+                { QStringLiteral( "metrics_hash" ), QStringLiteral( "deadbeef" ) } } )
+                .toJson( QJsonDocument::Indented ) );
+        const auto [ok, runs] = importIntoFreshStore( QStringLiteral( "t3.db" ),
+                                                      QStringLiteral( "exp-t3" ) );
+        CHECK( !ok );
+        CHECK( runs == 0 );
+    }
+}
+
+TEST_CASE( "metric records survive the bundle round trip byte-identically, "
+           "secret-shaped keys included",
+           "[experiment][repro][metrics][hash]" )
+{
+    // The exporter must NOT re-run the secret denylist over the metric
+    // record: the record was scrubbed at ingestion, and its metrics_hash
+    // binds the stored content. Re-redacting at export would rewrite a
+    // legitimate "token_accuracy" key into "***", break the hash gate on
+    // re-import and drop the evidence (the round-2 P0-2 finding).
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-src" ) );
+    experiment.setName( QStringLiteral( "source" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run = makeRun( QStringLiteral( "run-src" ), QStringLiteral( "exp-src" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    // Direct store save (bypassing the recorder's ingestion redaction) is
+    // the legacy-record shape: secret-SHAPED content enters the store
+    // verbatim, and the content hash binds exactly that.
+    MetricRecord record;
+    record.runId = QStringLiteral( "run-src" );
+    record.protocol.setDatasetVersionId( committed->versionId() );
+    record.protocol.setSplitManifestId( run.splitManifestId() );
+    record.metrics = QJsonObject{ { QStringLiteral( "token_accuracy" ), 0.9 } };
+    REQUIRE( experiments.saveMetricRecord( record ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-src" ), exportOptions );
+    REQUIRE( exportReport.ok );
+
+    // The exported document must carry the STORE content, not a re-redacted
+    // variant.
+    QFile exportedMetrics( QDir( exportReport.bundlePath )
+                               .filePath( QStringLiteral( "metrics.json" ) ) );
+    REQUIRE( exportedMetrics.open( QIODevice::ReadOnly ) );
+    const QJsonObject exported =
+        QJsonDocument::fromJson( exportedMetrics.readAll() ).object();
+    exportedMetrics.close();
+    CHECK( exported.value( QStringLiteral( "metrics" ) )
+               .toObject()
+               .value( QStringLiteral( "token_accuracy" ) )
+               .toDouble() == Catch::Approx( 0.9 ) );
+
+    ExperimentStore target;
+    REQUIRE( target.open( dir.filePath( QStringLiteral( "target.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-dst" );
+    const auto report = importer.importRun( options );
+    REQUIRE( report.ok );
+    const auto installed = target.metricRecordForRun( report.runId );
+    REQUIRE( installed.has_value() );
+    CHECK( installed->metrics.value( QStringLiteral( "token_accuracy" ) ).toDouble()
+           == Catch::Approx( 0.9 ) );
 }

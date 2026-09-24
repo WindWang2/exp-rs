@@ -217,13 +217,22 @@ struct MetricRecord
     QString runId;
     EvaluationProtocol protocol;
     QJsonObject metrics;   ///< typed metric documents (confusion_matrix, regression, …)
-    QString metricsHash;   ///< content hash binding the record
+    /// Content hash binding the record: SHA-256 over canonical JSON of
+    /// {protocol, metrics, metrics_schema_version}. Producers may
+    /// leave it empty (the store derives it at persistence time and refuses
+    /// non-empty hashes that disagree with the content — a tamper gate, not
+    /// a decoration); legacy pre-hashing rows read back empty and are
+    /// honestly reported as "no content hash" by the evidence projector.
+    QString metricsHash;
     /// Layout version of the metrics documents (M4); 1 = pre-versioning
     /// records, which read back unchanged.
     qint64 metricsSchemaVersion = 1;
 
     QJsonObject toJson() const;
     static Result<MetricRecord> fromJson( const QJsonObject &json );
+    /// The canonical content hash this record's bytes commit to. Pure:
+    /// never mutates the record or invents inputs.
+    QString contentHash() const;
 };
 
 } // namespace sicnu::experiment

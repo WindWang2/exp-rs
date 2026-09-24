@@ -98,7 +98,9 @@ TEST_CASE( "100k-run store: bounded paged access and pinned counts (M9)",
     // contains it (exec-4242 would also match exec-42420…exec-42429).
     QElapsedTimer refTimer;
     refTimer.start();
-    const auto refs = store.runIdsByExecutionRef( QStringLiteral( "exec-99999" ) );
+    const auto refLookup = store.runIdsByExecutionRef( QStringLiteral( "exec-99999" ) );
+    REQUIRE( refLookup.has_value() );
+    const QStringList refs = refLookup.value();
     const qint64 refMs = refTimer.elapsed();
     INFO( "execution_ref_scan_ms=" << refMs );
     REQUIRE( refs.size() == 1 );

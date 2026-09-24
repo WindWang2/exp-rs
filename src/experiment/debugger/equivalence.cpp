@@ -401,20 +401,47 @@ QVector<InvariantCheckResult> evaluateInvariants( const QVector<Invariant> &inva
                 }
                 else
                 {
-                    const StepSnapshot &last = snapshot.steps().constLast();
-                    check.passed = last.outputDigest == invariant.digest;
-                    check.detail = check.passed
-                        ? QStringLiteral( "final output digest matches" )
-                        : QStringLiteral( "final output digest %1 != declared %2" )
-                              .arg( last.outputDigest.isEmpty()
-                                        ? QStringLiteral( "<absent>" )
-                                        : last.outputDigest,
-                                    invariant.digest );
-                    if ( last.outputDigest.isEmpty() )
+                    // "Final" must mean a SINK of the recorded pipeline, not
+                    // "whatever happens to sort last": steps are stored in
+                    // (topological, stepId) order, so a renamed multi-branch
+                    // pipeline could pin this check onto a non-terminal step
+                    // and flip pass/fail without any execution change. One
+                    // sink decides; several sinks are a named ambiguity.
+                    QSet<QString> dependedOn;
+                    for ( const StepSnapshot &step : snapshot.steps() )
+                        for ( const QString &dependency : step.dependencies )
+                            dependedOn.insert( dependency );
+                    QList<const StepSnapshot *> sinks;
+                    for ( const StepSnapshot &step : snapshot.steps() )
+                        if ( !dependedOn.contains( step.stepId ) )
+                            sinks.append( &step );
+                    if ( sinks.size() != 1 )
                     {
                         check.evaluable = false;
-                        check.detail = QStringLiteral( "final step carries no output digest" );
                         check.passed = false;
+                        check.detail =
+                            QStringLiteral( "pipeline ends with %1 sink steps;"
+                                            " the final digest is undefined"
+                                            " without naming one" )
+                                .arg( sinks.size() );
+                    }
+                    else
+                    {
+                        const StepSnapshot *finalStep = sinks.first();
+                        check.passed = finalStep->outputDigest == invariant.digest;
+                        check.detail = check.passed
+                            ? QStringLiteral( "final output digest matches" )
+                            : QStringLiteral( "final output digest %1 != declared %2" )
+                                  .arg( finalStep->outputDigest.isEmpty()
+                                            ? QStringLiteral( "<absent>" )
+                                            : finalStep->outputDigest,
+                                        invariant.digest );
+                        if ( finalStep->outputDigest.isEmpty() )
+                        {
+                            check.evaluable = false;
+                            check.detail = QStringLiteral( "final step carries no output digest" );
+                            check.passed = false;
+                        }
                     }
                 }
                 break;

@@ -306,9 +306,13 @@ ReplayReadinessReport CapsuleReadiness::assess( const CapsuleDocument &doc,
             }
             else
             {
+                // Artifact sizes are qint64 end-to-end (experiment_types.h);
+                // toInt() would turn > 2^31 outputs into the default 0 and
+                // let a size-checking hook pass or fail on a fiction (the
+                // round-1 evaluation.cpp defect class).
                 const bool available = readinessHooks.outputAvailable(
                     ref, output.value( QStringLiteral( "digest" ) ).toString(),
-                    output.value( QStringLiteral( "size_bytes" ) ).toInt() );
+                    output.value( QStringLiteral( "size_bytes" ) ).toInteger() );
                 check.status = available ? ReplayStatus::Ok : ReplayStatus::Missing;
                 check.detail = available ? QStringLiteral( "resolvable with matching content" )
                                          : QStringLiteral( "output not available here" );

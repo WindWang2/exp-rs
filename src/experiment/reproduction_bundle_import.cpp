@@ -124,6 +124,17 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     ExperimentRun run;
     report.executionFingerprint =
         runConfig->value( QStringLiteral( "execution_fingerprint" ) ).toString();
+    // The identity gate below only means something when the bundle states
+    // the fingerprint it claims. A bundle that "forgot" the key must not
+    // skip the gate — key deletion is exactly what a wholesale checksum
+    // re-forgery looks like. Missing key = refused, not waived.
+    if ( report.executionFingerprint.isEmpty() )
+    {
+        report.warnings.append( QStringLiteral(
+            "run_config.json states no execution_fingerprint; the identity gate"
+            " cannot be evaluated, so the bundle is refused" ) );
+        return report;
+    }
     report.resultFingerprint =
         runConfig->value( QStringLiteral( "result_fingerprint" ) ).toString();
     run.setAlgorithmId( runConfig->value( QStringLiteral( "algorithm_id" ) ).toString() );
@@ -138,8 +149,25 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         runConfig->value( QStringLiteral( "split_manifest_id" ) ).toString() );
     run.setSplitFingerprint(
         runConfig->value( QStringLiteral( "split_fingerprint" ) ).toString() );
-    run.setSeed( static_cast<quint64>(
-        runConfig->value( QStringLiteral( "seed" ) ).toDouble( 0 ) ) );
+    // Seeds are 64-bit; JSON numbers survive a double round-trip exactly
+    // only below 2^53. The exporter writes a lossless seed_hex pin (same
+    // contract as the run-bridge RunPins); the decimal key stays supported
+    // for bundles written before the hex pin existed.
+    const QString seedHex = runConfig->value( QStringLiteral( "seed_hex" ) ).toString();
+    if ( !seedHex.isEmpty() )
+    {
+        bool seedOk = false;
+        run.setSeed( seedHex.toULongLong( &seedOk, 16 ) );
+        if ( !seedOk )
+        {
+            report.warnings.append(
+                QStringLiteral( "run_config.json seed_hex is not valid hexadecimal" ) );
+            return report;
+        }
+    }
+    else
+        run.setSeed( static_cast<quint64>(
+            runConfig->value( QStringLiteral( "seed" ) ).toDouble( 0 ) ) );
     if ( runConfig->contains( QStringLiteral( "determinism_note" ) ) )
         run.setDeterminismNote(
             runConfig->value( QStringLiteral( "determinism_note" ) ).toString() );
@@ -157,7 +185,14 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         run.setEnvironment( parsed.value() );
     }
     else
+    {
+        // The exporter ALWAYS writes environment.json; a bundle without a
+        // parsable one is incomplete or tampered. Importing with an empty
+        // environment would forge a false "no environment" negative in the
+        // evidence completeness projection downstream.
         report.warnings.append( warnings );
+        return report;
+    }
     warnings.clear();
 
     // Model pin (empty document = the run had no model identity).
@@ -167,7 +202,12 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         run.setModelDigest( modelRefs->value( QStringLiteral( "model_digest" ) ).toString() );
     }
     else
+    {
+        // Same contract as environment.json: always written by the exporter
+        // (possibly empty), so absence is a bundle defect, not a shrug.
         report.warnings.append( warnings );
+        return report;
+    }
     warnings.clear();
 
     // 4. Identity must be self-consistent: the recorded execution
@@ -175,8 +215,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     // were tampered (checksums forged wholesale) still cannot disagree with
     // its own hash.
     const QString computedFingerprint = runExecutionFingerprint( run.executionIdentity() );
-    if ( !report.executionFingerprint.isEmpty() &&
-         computedFingerprint != report.executionFingerprint )
+    if ( computedFingerprint != report.executionFingerprint )
     {
         report.warnings.append(
             QStringLiteral( "identity pins do not reproduce the recorded execution"
@@ -201,8 +240,18 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
 
     // 6. Duplicate-ingest guard: a run with this execution fingerprint may
     // already carry this bundle (idempotent re-import).
-    const QStringList twins =
+    const auto twinsLookup =
         m_experimentStore->runIdsByExecutionFingerprint( computedFingerprint, 1 );
+    if ( !twinsLookup )
+    {
+        report.warnings.append(
+            QStringLiteral( "duplicate-ingest guard could not scan the store: %1" )
+                .arg( twinsLookup.diagnostics().isEmpty()
+                          ? QStringLiteral( "unknown store error" )
+                          : twinsLookup.diagnostics().first().message ) );
+        return report;
+    }
+    const QStringList twins = twinsLookup.value();
     if ( !twins.isEmpty() )
     {
         report.ok = true;
@@ -235,7 +284,53 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     else
         run.setRunId( QUuid::createUuid().toString( QUuid::WithoutBraces ) );
 
-    const auto installed = m_experimentStore->upsertRun( run );
+    // 6b. Metrics evidence — installed BEFORE the run so a refusal here
+    // leaves zero partial state (no half-installed run without its numbers) (protocol + recorded numbers).
+    if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings ) )
+    {
+        if ( !metrics->isEmpty() )
+        {
+            QJsonObject metricJson = *metrics;
+            metricJson.insert( QStringLiteral( "run_id" ), run.runId() );
+            const auto record = MetricRecord::fromJson( metricJson );
+            if ( !record )
+            {
+                // A metrics document that exists but cannot install would
+                // silently DROP the run's only recorded numbers while the
+                // import still reports ok — evidence loss disguised as
+                // success. Refuse the import instead.
+                report.warnings.append( QStringLiteral( "metrics.json does not parse as a"
+                                                        " metric record" ) );
+                return report;
+            }
+            else
+            {
+                const auto saved = m_experimentStore->saveMetricRecord( record.value() );
+                if ( !saved )
+                {
+                    // Includes the metrics-hash mismatch gate: a bundle whose
+                    // embedded hash disagrees with its own content is tamper
+                    // evidence. Installing the run while dropping its only
+                    // recorded numbers would be evidence loss dressed as
+                    // success — refuse the import instead.
+                    report.warnings.append(
+                        QStringLiteral( "metric record install failed: %1" )
+                            .arg( saved.diagnostics().isEmpty()
+                                      ? QStringLiteral( "unknown error" )
+                                      : saved.diagnostics().first().message ) );
+                    return report;
+                }
+            }
+        }
+    }
+    else
+    {
+        report.warnings.append( warnings );
+        return report;
+    }
+    warnings.clear();
+
+const auto installed = m_experimentStore->upsertRun( run );
     if ( !installed )
     {
         report.warnings.append(
@@ -246,36 +341,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         return report;
     }
 
-    // 7. Metrics evidence (protocol + recorded numbers).
-    if ( const auto metrics = loadJson( dir, QStringLiteral( "metrics.json" ), &warnings ) )
-    {
-        if ( !metrics->isEmpty() )
-        {
-            QJsonObject metricJson = *metrics;
-            metricJson.insert( QStringLiteral( "run_id" ), run.runId() );
-            const auto record = MetricRecord::fromJson( metricJson );
-            if ( !record )
-            {
-                report.warnings.append( QStringLiteral( "metrics.json does not parse as a"
-                                                        " metric record" ) );
-            }
-            else
-            {
-                const auto saved = m_experimentStore->saveMetricRecord( record.value() );
-                if ( !saved )
-                    report.warnings.append(
-                        QStringLiteral( "metric record install failed: %1" )
-                            .arg( saved.diagnostics().isEmpty()
-                                      ? QStringLiteral( "unknown error" )
-                                      : saved.diagnostics().first().message ) );
-            }
-        }
-    }
-    else
-        report.warnings.append( warnings );
-    warnings.clear();
-
-    // 8. Portable payload relocation (best-effort; the bundle stays
+    // 7. Portable payload relocation (best-effort; the bundle stays
     // authoritative if the target is unusable).
     const QDir dataDir( dir.filePath( QStringLiteral( "data" ) ) );
     if ( dataDir.exists() )
@@ -303,7 +369,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         }
     }
 
-    // 9. Best-effort availability notes (never verdicts, never blockers).
+    // 8. Best-effort availability notes (never verdicts, never blockers).
     if ( !run.modelId().isEmpty() && hooks.modelAvailable &&
          !hooks.modelAvailable( run.modelId(), run.modelDigest() ) )
         report.warnings.append(

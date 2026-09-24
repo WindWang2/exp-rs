@@ -28,6 +28,12 @@ const QStringList kIdentitySections{
 const QStringList kReportedSections{
     QStringLiteral( "environment" ), QStringLiteral( "evidence" ),
     QStringLiteral( "created_utc" ), QStringLiteral( "capsule_id" ),
+    // Software facts (recorded revision + allowlisted platform fields
+    // projected from the run's captured environment) are REPORTED machine
+    // context, not identity: omitting them here made the diff treat a
+    // platform difference as an identity break, contradicting the
+    // environment-drift contract two sections below.
+    QStringLiteral( "software" ),
 };
 
 /// Compact scalar rendering for diff entries (strings verbatim, everything

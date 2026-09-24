@@ -1,7 +1,11 @@
 // evaluation.cpp — metric implementations (single-sourced formulas).
 #include "evaluation.h"
 
+#include "data/execution_fingerprint.h"
+
 #include <QJsonArray>
+
+#include <QCryptographicHash>
 
 #include <algorithm>
 #include <cmath>
@@ -253,7 +257,22 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                                              QStringLiteral( "confusion matrix needs labels" ),
                                              DiagnosticSeverity::Error } );
     }
-    matrix.m_counts = QVector<qint64>( int( matrix.size() * matrix.size() ), 0 );
+    // A hostile or torn matrix document can declare absurd label counts:
+    // labels^2 in int arithmetic overflows near 46341 classes into a
+    // negative allocation and a crash on this READ path. Refuse instead —
+    // remote-sensing confusion matrices stay orders of magnitude below the
+    // cap, and the cap keeps the multiplication provably inside int.
+    constexpr int kMaxConfusionLabels = 8192;
+    if ( matrix.size() > kMaxConfusionLabels )
+    {
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "evaluation.invalid" ),
+            QStringLiteral( "confusion matrix refuses %1 labels (cap %2)" )
+                .arg( matrix.size() )
+                .arg( kMaxConfusionLabels ),
+            DiagnosticSeverity::Error } );
+    }
+    matrix.m_counts = QVector<qint64>( int( qint64( matrix.size() ) * matrix.size() ), 0 );
     const QJsonArray rows = json.value( QStringLiteral( "counts" ) ).toArray();
     if ( rows.size() != int( matrix.size() ) )
     {
@@ -647,6 +666,25 @@ Result<MetricRecord> MetricRecord::fromJson( const QJsonObject &json )
                                              DiagnosticSeverity::Error } );
     }
     return ResultT::success( record );
+}
+
+QString MetricRecord::contentHash() const
+{
+    // Binds the record CONTENT (protocol, metric document, layout version)
+    // over the same canonical-JSON recipe the execution and result
+    // fingerprints use (data/execution_fingerprint.h). The run id is
+    // deliberately excluded: it is the record's row identity (re-keyed
+    // legally by the offline bundle importer), while this hash certifies
+    // what the record says. Key insertion order and formatting must not
+    // move the hash; distinct doubles must.
+    QJsonObject body;
+    body.insert( QStringLiteral( "protocol" ), protocol.toJson() );
+    body.insert( QStringLiteral( "metrics" ), metrics );
+    body.insert( QStringLiteral( "metrics_schema_version" ), metricsSchemaVersion );
+    return QString::fromLatin1(
+        QCryptographicHash::hash( sicnu::data::canonicalizeJsonRfc8785( body ),
+                                  QCryptographicHash::Sha256 )
+            .toHex() );
 }
 
 } // namespace sicnu::experiment

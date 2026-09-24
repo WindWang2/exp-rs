@@ -172,7 +172,18 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
                 message = d.message;
                 break;
             }
-        recorder.markFailed( runId.value(), QStringLiteral( "study.run_submit_refused" ), message );
+        // A refused failure transition leaves the run hanging in Running
+        // while the study already counted it failed — the ledger and the
+        // store would then disagree about the point. That is a store fault,
+        // not a tolerable result: abort with it named.
+        const auto refused = recorder.markFailed(
+            runId.value(), QStringLiteral( "study.run_submit_refused" ), message );
+        if ( !refused )
+        {
+            emitProgress( StudyProgress::Phase::Aborted, point.pointId,
+                          QStringLiteral( "store refused the failure transition" ), 0 );
+            return false;
+        }
         m_ledger->link( point.pointId, runId.value() );
         summary.runIds.append( runId.value() );
         ++summary.failedCount;
