@@ -376,3 +376,67 @@ TEST_CASE( "the timeline keeps ids, never live pointers, across host destruction
     REQUIRE( applyReconciliation( timeline, rec, QStringLiteral( "t1" ) ) == 1 );
     REQUIRE( timeline.task( QStringLiteral( "t1" ) )->status == MissionTaskStatus::Stale );
 }
+
+TEST_CASE( "a task may not enter the timeline claiming Running without a run authority",
+           "[mission][stage]" )
+{
+    // The transition path rejects Pending -> Running without a bound run; the
+    // insertion path must not smuggle the same illegal state in.
+    MissionTimeline timeline;
+    MissionTask smuggled = makeTask( QStringLiteral( "t1" ), MissionStage::Analyze );
+    smuggled.status = MissionTaskStatus::Running;
+    REQUIRE_FALSE( timeline.addTask( smuggled ).applied );
+    REQUIRE_FALSE( timeline.hasTask( QStringLiteral( "t1" ) ) );
+    REQUIRE( timeline.tasks().isEmpty() );
+
+    // With a run authority the insertion is legal.
+    MissionTask bound = makeTask( QStringLiteral( "t2" ), MissionStage::Analyze );
+    bound.status = MissionTaskStatus::Running;
+    bound.run.kind = QStringLiteral( "task_center" );
+    bound.run.id = QStringLiteral( "tc-1" );
+    REQUIRE( timeline.addTask( bound ).applied );
+    REQUIRE( timeline.task( QStringLiteral( "t2" ) )->status == MissionTaskStatus::Running );
+}
+
+TEST_CASE( "task lookups stay exact after many mutations and a serialization round-trip",
+           "[mission][stage]" )
+{
+    // The id -> position index must behave exactly like the linear scan it
+    // replaced: every id resolvable, unknown ids absent, and positions valid
+    // after copies (value semantics) and a fromJson rebuild.
+    MissionTimeline timeline;
+    constexpr int kTasks = 64;
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        MissionTask task = makeTask( QStringLiteral( "t-%1" ).arg( i ),
+                                     static_cast<MissionStage>( i % 5 ) );
+        REQUIRE( timeline.addTask( task ).applied );
+    }
+
+    MissionTimeline copy = timeline;
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        const QString id = QStringLiteral( "t-%1" ).arg( i );
+        REQUIRE( copy.hasTask( id ) );
+        REQUIRE( copy.task( id ) != nullptr );
+        REQUIRE( copy.task( id )->id == id );
+        // Mutate through the copy: the underlying task must really change.
+        REQUIRE( copy.transition( id, MissionTaskStatus::Canceled,
+                                  QStringLiteral( "2026-09-25T00:00:00Z" ) ).applied );
+        REQUIRE( copy.task( id )->status == MissionTaskStatus::Canceled );
+        REQUIRE( timeline.task( id )->status == MissionTaskStatus::Pending );
+    }
+    REQUIRE_FALSE( copy.hasTask( QStringLiteral( "ghost" ) ) );
+    REQUIRE( copy.task( QStringLiteral( "ghost" ) ) == nullptr );
+
+    MissionTimeline restored;
+    QString error;
+    REQUIRE( restored.fromJson( copy.toJson(), &error ) );
+    REQUIRE( restored == copy );
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        const QString id = QStringLiteral( "t-%1" ).arg( i );
+        REQUIRE( restored.task( id ) != nullptr );
+        REQUIRE( restored.task( id )->status == MissionTaskStatus::Canceled );
+    }
+}

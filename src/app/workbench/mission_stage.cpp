@@ -222,27 +222,23 @@ bool missionTransitionAllowed( MissionTaskStatus from, MissionTaskStatus to )
 
 MissionTask *MissionTimeline::mutableTask( const QString &taskId )
 {
-    for ( MissionTask &task : mTasks )
-    {
-        if ( task.id == taskId )
-            return &task;
-    }
-    return nullptr;
+    const auto it = mTaskIndex.constFind( taskId );
+    if ( it == mTaskIndex.constEnd() || *it < 0 || *it >= mTasks.size() )
+        return nullptr;
+    return &mTasks[ *it ];
 }
 
 const MissionTask *MissionTimeline::task( const QString &taskId ) const
 {
-    for ( const MissionTask &t : mTasks )
-    {
-        if ( t.id == taskId )
-            return &t;
-    }
-    return nullptr;
+    const auto it = mTaskIndex.constFind( taskId );
+    if ( it == mTaskIndex.constEnd() || *it < 0 || *it >= mTasks.size() )
+        return nullptr;
+    return &mTasks.at( *it );
 }
 
 bool MissionTimeline::hasTask( const QString &taskId ) const
 {
-    return task( taskId ) != nullptr;
+    return mTaskIndex.contains( taskId );
 }
 
 MissionOutcome MissionTimeline::addTask( const MissionTask &task )
@@ -251,7 +247,13 @@ MissionOutcome MissionTimeline::addTask( const MissionTask &task )
         return MissionOutcome::rejected( QLatin1String( kMissionErrEmptyTaskId ) );
     if ( hasTask( task.id ) )
         return MissionOutcome::rejected( QLatin1String( kMissionErrDuplicateTask ) );
+    // Same fail-closed rule as the state machine: a task may not ENTER the
+    // timeline claiming Running without a run authority (the transition path
+    // rejects it, so the insertion path must not smuggle it in).
+    if ( task.status == MissionTaskStatus::Running && task.run.isNull() )
+        return MissionOutcome::rejected( QLatin1String( kMissionErrStaleRun ) );
 
+    mTaskIndex.insert( task.id, mTasks.size() );
     mTasks.push_back( task );
     MissionEvent ev;
     ev.seq = ++mSeq;
@@ -631,6 +633,7 @@ bool MissionTimeline::fromJson( const QJsonObject &obj, QString *error )
         t.run.kind = runObj.value( QStringLiteral( "kind" ) ).toString();
         t.run.id = runObj.value( QStringLiteral( "id" ) ).toString();
 
+        decoded.mTaskIndex.insert( t.id, decoded.mTasks.size() );
         decoded.mTasks.push_back( std::move( t ) );
     }
 
