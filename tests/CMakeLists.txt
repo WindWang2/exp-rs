@@ -10818,6 +10818,7 @@ sicnu_discover_tests(test_mission_e2e_scaffolding)
 set(SICNU_MISSION_TASK_SPACE_SOURCES
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
 )
 
 function(sicnu_add_mission_test NAME)
