@@ -70,6 +70,12 @@ public:
   bool openWorkspaceStore( const QString &projectFile );
   /// Closes any open store and reopens at @p projectFile (Save As path).
   bool reopenWorkspaceStore( const QString &projectFile );
+  /// Closes the governance store (memory-only mode) and drops the cached
+  /// governed document. Used when a project open fails after the store was
+  /// bound to the target file: the session falls back to the same
+  /// memory-only state as a never-opened project instead of staying bound
+  /// to a file that failed to load.
+  void closeWorkspaceStore();
 
   display::QgisDisplayManager &displayManager();
   const display::QgisDisplayManager &displayManager() const;

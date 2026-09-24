@@ -22,6 +22,8 @@ qt_add_library(sicnu_qgis_display STATIC
     display/qgs_display_stretch.h
     project_context.cpp
     project_context.h
+    workbench/project_session_boundary.cpp
+    workbench/project_session_boundary.h
 )
 add_library(Sicnu::qgis_display ALIAS sicnu_qgis_display)
 target_include_directories(sicnu_qgis_display
@@ -282,6 +284,7 @@ add_executable(sicnu_geo_rs
     # Layer and map tool managers
     active_view_host.cpp
     shell/secondary_map_view_widget.cpp
+    shell/secondary_map_view_session.cpp
     shell/rs_dual_viewport_sync_controller.cpp
     shell/gui_job_adapter.cpp
     shell/gui_job_adapter.h

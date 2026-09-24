@@ -691,7 +691,12 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                 }
                 return payload;
             } );
-        sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
+        // Scoped registration: the token (a window member) releases
+        // workbench:context when the window dies — the registry is
+        // process-wide and first-wins, so an un-released registration would
+        // both pin dead guarded state forever and silently shadow a
+        // re-assembled shell's fresh tool.
+        m_contextToolRegistration.arm(
             sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
     }
 
@@ -707,7 +712,9 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         sources.session = editSession;
         sources.snapping = snappingController;
         auto *editStateTool = new RsEditAgentTool( sources );
-        sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
+        // Same scoped registration as workbench:context above — the token
+        // releases editing:state at window teardown.
+        m_editToolRegistration.arm(
           sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool } );
     }
 

@@ -190,6 +190,24 @@ QgsLayoutDesignerDialog::QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layou
     // QgsMasterLayoutInterface is also a QgsLayout (via QgsPrintLayout).
     mLayout = dynamic_cast<QgsLayout *>(layout);
 
+    // The layout is owned by the project's layout manager, not by this
+    // dialog: project clear (New/Open Project), layout removal and project
+    // destruction all delete it under an open designer. mLayout being a
+    // QPointer keeps method guards honest, but the open window would keep
+    // rendering a dead scene — rulers/undo/inspector observers and a paint
+    // pass can still touch the corpse before any user notice. Close the
+    // designer the moment its layout dies (late-signal safe: close() only
+    // touches mWindow, and WA_DeleteOnClose + the mWindow-destroyed hook
+    // retire the dialog afterwards).
+    if ( QObject *layoutObject = dynamic_cast<QObject *>( layout ) )
+    {
+        connect( layoutObject, &QObject::destroyed, this, [this] {
+            mMasterLayout = nullptr;
+            mLayout.clear();
+            close();
+        } );
+    }
+
     setupUi();
     setupItemPropertiesPanel();
     setupMenus();
