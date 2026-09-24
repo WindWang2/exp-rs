@@ -235,8 +235,10 @@ TEST_CASE( "100k catalog + 10k runs: batch ingest, cursor paging, indexed "
 
     // --- indexed identity lookup --------------------------------------------
     timer.restart();
-    const QStringList twinIds = experimentStore.runIdsByExecutionFingerprint(
+    const auto twinLookup = experimentStore.runIdsByExecutionFingerprint(
         runExecutionFingerprint( identity ), ExperimentStore::kMaxPageSize );
+    REQUIRE( twinLookup.has_value() );
+    const QStringList twinIds = twinLookup.value();
     const qint64 fpLookupMs = timer.elapsed();
     CHECK( twinIds.size() == 500 ); // page-bound slice of the 10k identity twins
     {

@@ -22,6 +22,23 @@ using sicnu::dataset::DiagnosticSeverity;
 constexpr int kBridgedStepLimit = 256;
 constexpr int kMaxLiveRefs = 10000;
 
+template <typename Map>
+void evictHalfWhenOver( Map &map, int cap )
+{
+    // Same policy as the warm ref map: evict half (hash iteration order)
+    // instead of clear-all, so a pathological producer cannot grow the
+    // in-process handshake maps without bound while recent entries still
+    // stay warm.
+    if ( map.size() < cap )
+        return;
+    int remaining = map.size() / 2;
+    for ( auto it = map.begin(); it != map.end() && remaining > 0; )
+    {
+        it = map.erase( it );
+        --remaining;
+    }
+}
+
 Diagnostic bridgeDiag( QString code, QString message )
 {
     return Diagnostic{ std::move( code ), std::move( message ), DiagnosticSeverity::Error };
@@ -171,6 +188,9 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
     {
         // Not started yet (or not in this session): park as the per-execution
         // override; handleExecutionEvent(Running) resolves it at start time.
+        // Handshake state only (start consumes the entry); a producer that
+        // attaches without starting must not grow the map without bound.
+        evictHalfWhenOver( m_pinsByExecution, kMaxLiveRefs );
         if ( pins.isEmpty() )
             m_pinsByExecution.remove( executionRef );
         else
@@ -295,8 +315,16 @@ QString ExperimentRunBridge::resolveRunId( const QString &executionRef ) const
     if ( !mapped.isEmpty() )
         return mapped;
     // Cold path (bridge attached after a restart): bounded store scan.
-    const QStringList ids = m_store->runIdsByExecutionRef( executionRef );
-    return ids.isEmpty() ? QString() : ids.first();
+    const auto lookup = m_store->runIdsByExecutionRef( executionRef );
+    if ( !lookup )
+        return QString(); // the live-event path will surface the store error
+    const QStringList ids = lookup.value();
+    if ( ids.isEmpty() )
+        return QString();
+    // Store order is oldest-first; a ref with several recorded runs (repeat
+    // ingestion) belongs to the NEWEST recording — the one a re-attached
+    // execution would still be writing to.
+    return ids.last();
 }
 
 Result<QString> ExperimentRunBridge::startFromEvent( const ExecutionEvent &event,

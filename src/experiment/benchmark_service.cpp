@@ -43,8 +43,10 @@ Result<void> BenchmarkService::hydrateFromStore( qint64 definitionLimit, qint64 
     {
         if ( remaining <= 0 )
             break;
-        const QVector<BenchmarkResult> rows =
-            m_store->benchmarkResultsFor( benchmarkId, remaining );
+        const auto page = m_store->benchmarkResultsFor( benchmarkId, remaining );
+        if ( !page )
+            return ResultT::failure( page.diagnostics() );
+        const QVector<BenchmarkResult> rows = page.value();
         for ( const BenchmarkResult &result : rows )
         {
             if ( m_resultIndex.contains( result.resultId() ) )
@@ -168,7 +170,14 @@ QVector<BenchmarkResult> BenchmarkService::resultsFor( const QString &benchmarkI
             return out;
     }
     if ( out.isEmpty() && m_store && m_store->isOpen() )
-        return m_store->benchmarkResultsFor( benchmarkId, limit );
+    {
+        const auto page = m_store->benchmarkResultsFor( benchmarkId, limit );
+        if ( page )
+            return page.value();
+        // The store refused to answer; an empty cache view is the honest
+        // response here, not a fabricated listing.
+        return out;
+    }
     return out;
 }
 
