@@ -336,6 +336,16 @@ target_link_libraries(test_study_e2e PRIVATE
   Sicnu::study_bridge
   GDAL::GDAL
 )
+# Studio live-execution closed loop: fake + real-shaped backend over the
+# studio_live bridge, then the real spine E2E (study → spatial → divergence →
+# fault sandbox → capsule reload → refs-only export). Heavy for the same
+# reason as test_study_e2e.
+sicnu_add_test(test_studio_live_e2e)
+target_link_libraries(test_studio_live_e2e PRIVATE
+  Sicnu::experiment_studio_live
+  GDAL::GDAL
+  SQLite::SQLite3
+)
 sicnu_add_io_test(test_io_crs_policy)
 sicnu_add_io_test(test_io_raster_contract)
 sicnu_add_io_test(test_io_vector_contract)
@@ -358,6 +368,21 @@ sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
+
+# Cross-platform Completion: header-only portability primitives
+# (src/platform/portable.h). Lightest possible lane — Catch2 only, no sicnu
+# library, no Qt/QGIS/GDAL — so the UTF-8/path/pid contract compiles and
+# runs on every platform lane.
+add_executable(test_platform_portability test_platform_portability.cpp)
+target_link_libraries(test_platform_portability PRIVATE Catch2::Catch2WithMain)
+target_include_directories(test_platform_portability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_platform_portability PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_platform_portability)
 
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
@@ -9750,7 +9775,60 @@ target_link_libraries(test_verifier_schema PRIVATE
   Catch2::Catch2WithMain
   sicnu_verifier
 )
-sicnu_discover_tests(test_verifier_schema)
+sicnu_discover_tests(test_verifier_schema TEST_PREFIX "test_verifier_schema::")
+
+# Unified Scientific Verifier engine completion (#1191 slices B..G): check
+# dispatch, packs, two-level rollup, renders, projections and the
+# adversarial battery. All light targets: sicnu_verifier + Catch2 + jsoncpp
+# only — no Qt, no GDAL, no QGIS link.
+add_executable(test_verifier_engine test_verifier_engine.cpp)
+target_link_libraries(test_verifier_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_engine TEST_PREFIX "test_verifier_engine::")
+
+add_executable(test_verifier_numeric test_verifier_numeric.cpp)
+target_link_libraries(test_verifier_numeric PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_numeric TEST_PREFIX "test_verifier_numeric::")
+
+add_executable(test_verifier_provenance test_verifier_provenance.cpp)
+target_link_libraries(test_verifier_provenance PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_provenance TEST_PREFIX "test_verifier_provenance::")
+
+add_executable(test_verifier_packs test_verifier_packs.cpp)
+target_link_libraries(test_verifier_packs PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_packs TEST_PREFIX "test_verifier_packs::")
+
+add_executable(test_verifier_levels test_verifier_levels.cpp)
+target_link_libraries(test_verifier_levels PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_levels TEST_PREFIX "test_verifier_levels::")
+
+add_executable(test_verifier_render test_verifier_render.cpp)
+target_link_libraries(test_verifier_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_render TEST_PREFIX "test_verifier_render::")
+
+add_executable(test_verifier_adversarial test_verifier_adversarial.cpp)
+target_link_libraries(test_verifier_adversarial PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+sicnu_discover_tests(test_verifier_adversarial TEST_PREFIX "test_verifier_adversarial::")
 
 # RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
 # PreflightReport schema (pure C++; no Qt/GDAL link).
@@ -9769,6 +9847,20 @@ target_link_libraries(test_repair_planner_schema PRIVATE
   sicnu_repair_planner
 )
 sicnu_discover_tests(test_repair_planner_schema)
+
+# RS14-03 completion: requirement synthesis, provider-driven candidates,
+# auto policy, deterministic plan/result/fragment, teaching/agent views and
+# the tamper-evident planning state (Qt-free leaf; the integration case reads
+# the real capability knowledge documents).
+add_executable(test_repair_planner_completion test_repair_planner_completion.cpp)
+target_link_libraries(test_repair_planner_completion PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_repair_planner
+)
+target_compile_definitions(test_repair_planner_completion PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_repair_planner_completion)
 
 # RS14-20 Scientific Recipe Compiler (#1206): schema, compiler, validator,
 # registry, lookup, equivalence and the lab document/source contract —
@@ -9885,6 +9977,29 @@ target_link_libraries(test_grader_schema PRIVATE
   sicnu_grader
 )
 sicnu_discover_tests(test_grader_schema)
+
+# RS14-05 Slices B/C: matching/scoring engine, document-shape adapters and
+# report renderers (same leaf lane, no new links).
+add_executable(test_grader_engine test_grader_engine.cpp)
+target_link_libraries(test_grader_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_engine)
+
+add_executable(test_grader_adapters test_grader_adapters.cpp)
+target_link_libraries(test_grader_adapters PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_adapters)
+
+add_executable(test_grader_render test_grader_render.cpp)
+target_link_libraries(test_grader_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+sicnu_discover_tests(test_grader_render)
 
 # LabSpec v3 runtime: checkpoint verify, hint policy, session state/store,
 # spec runtime (sicnu_lab_runtime links jsoncpp PUBLIC).
@@ -12490,6 +12605,24 @@ target_link_libraries(test_scientific_state_review PRIVATE Sicnu::ScientificStat
 # Science Context Broker & Skill Router (Qt-free; Sicnu::ScienceContext).
 sicnu_add_sdk_test(test_science_context_broker)
 target_link_libraries(test_science_context_broker PRIVATE Sicnu::ScienceContext)
+
+# Science context live-authority probes: broker + real ScientificRecipeRegistry
+# (in-repo pack via CMAKE_SOURCE_DIR) + real GDAL facts collector (io lane).
+add_executable(test_science_context_live_authorities test_science_context_live_authorities.cpp)
+target_link_libraries(test_science_context_live_authorities PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::ScienceContext
+  sicnu_recipes
+  Sicnu::ScientificStateGdal
+)
+target_include_directories(test_science_context_live_authorities PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_science_context_live_authorities PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_science_context_live_authorities PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_science_context_live_authorities)
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)
@@ -12700,6 +12833,60 @@ function(sicnu_add_teaching_test NAME)
 endfunction()
 
 sicnu_add_teaching_test(test_teaching_lab_cockpit)
+
+# Undergraduate Lab Cockpit offscreen widget smoke (completion
+# teaching-cockpit-live-integration): drives the REAL dock widgets over the
+# REAL authorities — runtime registry probe, OutputVerifier grading engine
+# (real GTiff + shipped rules), ExperimentStore + CapsuleBuilder + CapsuleIO
+# export, and the session file across a restart. Compiles the dock TUs;
+# heavy deps (qgis/processing/operators) arrive transitively via sicnu_agent.
+add_executable(test_teaching_cockpit_smoke
+  test_teaching_cockpit_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_validate_service.cpp
+)
+target_link_libraries(test_teaching_cockpit_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::dataset
+  Sicnu::experiment_capsule
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_sample_foundry
+)
+target_include_directories(test_teaching_cockpit_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_teaching_cockpit_smoke PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_teaching_cockpit_smoke PROPERTIES
+  AUTOMOC ON
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+set(_smoke_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_smoke_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
+catch_discover_tests(test_teaching_cockpit_smoke
+  DISCOVERY_MODE PRE_TEST
+  TEST_PREFIX "teaching_cockpit_smoke: "
+  ${_smoke_dl_paths}
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 # ── Teacher Authoring & Assessment Console (Catch2 + Sicnu::teaching_admin) ──
 function(sicnu_add_teaching_admin_test NAME)
   add_executable(${NAME} ${NAME}.cpp)
@@ -12718,7 +12905,51 @@ function(sicnu_add_teaching_admin_test NAME)
   )
   sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
 endfunction()
+# Fake grading CLI (plain C++, no Qt): same exit/transcript contract as
+# `sicnu_geo_rs_cli lab --grade` — lets test_teaching_admin_core drive the
+# real-shaped grader path hermetically (see helper file header).
+add_executable(test_teaching_fake_grader_cli helper_teaching_fake_grader_cli.cpp)
+set_target_properties(test_teaching_fake_grader_cli PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
 sicnu_add_teaching_admin_test(test_teaching_admin_core)
+target_compile_definitions(test_teaching_admin_core PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+# The core suite spawns the fake grader CLI by path: make a target-scoped
+# build (no `all`) produce it too.
+add_dependencies(test_teaching_admin_core test_teaching_fake_grader_cli)
+
+# Offscreen widget smoke for the Teacher Authoring dock: compiles the dock TU
+# into the test (no QGIS, no app binary) and drives one real batch-grade
+# round trip through the fake grader CLI.
+add_executable(test_teaching_admin_dock_smoke
+  test_teaching_admin_dock_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin/teaching_admin_dock.h
+)
+target_link_libraries(test_teaching_admin_dock_smoke PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching_admin
+  Qt6::Widgets
+)
+target_include_directories(test_teaching_admin_dock_smoke PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching_admin
+)
+target_compile_definitions(test_teaching_admin_dock_smoke PRIVATE
+  FAKE_GRADER_CLI_DIR="${CMAKE_BINARY_DIR}"
+)
+add_dependencies(test_teaching_admin_dock_smoke test_teaching_fake_grader_cli)
+set_target_properties(test_teaching_admin_dock_smoke PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_admin_dock_smoke TEST_PREFIX "test_teaching_admin_dock_smoke::")
 
 # Teaching foundation E2E (hardening/curriculum-lab-recipes-foundry): foundry
 # → lab documents → v3 runtime/checkpoint → recipe compile → pack/grading
@@ -12759,3 +12990,368 @@ catch_discover_tests(test_teaching_foundation_e2e
   ${_e2e_dl_paths}
   PROPERTIES ${_e2e_discovery_props}
 )
+
+# ── Workbench/Project lifecycle shell track (completion/workbench-project-lifecycle-shell-fixtures) ──
+# The openProject transaction (probe → clear → story boundary → store → read
+# + failure rollback), testable headless via ProjectContext::createHeadless.
+add_executable(test_project_session_boundary
+  test_project_session_boundary.cpp
+)
+target_link_libraries(test_project_session_boundary PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+  qgis_core
+)
+target_include_directories(test_project_session_boundary PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_project_session_boundary)
+set_target_properties(test_project_session_boundary PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_project_session_boundary)
+
+# B4: the layout designer must retire itself when its layout dies (project
+# clear, layout removal, direct destruction) instead of rendering a dead
+# scene.
+add_executable(test_layout_designer_lifecycle
+  test_layout_designer_lifecycle.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layout/qgslayoutdesignerdialog.cpp
+)
+target_link_libraries(test_layout_designer_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_agent
+)
+target_include_directories(test_layout_designer_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_layout_designer_lifecycle)
+set_target_properties(test_layout_designer_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_layout_designer_lifecycle)
+
+# B2: the secondary view session (widget + engine view + pixel sync) —
+# close→reopen must re-create the sync controller and land on a fresh
+# engine view without duplicated connections.
+add_executable(test_secondary_map_view_session
+  test_secondary_map_view_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/secondary_map_view_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/secondary_map_view_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_dual_viewport_sync_controller.cpp
+)
+target_link_libraries(test_secondary_map_view_session PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Sicnu::qgis_display
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_secondary_map_view_session PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_secondary_map_view_session)
+set_target_properties(test_secondary_map_view_session PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_secondary_map_view_session)
+
+# Scoped SpatialTool registrations: the process-wide registry gains
+# unregister/token semantics so session hosts release their tools.
+add_executable(test_spatial_tool_registration
+  test_spatial_tool_registration.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/agent_context_tool.cpp
+)
+target_link_libraries(test_spatial_tool_registration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+target_include_directories(test_spatial_tool_registration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_spatial_tool_registration)
+set_target_properties(test_spatial_tool_registration PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_spatial_tool_registration)
+# ── Explainable Workflow (RS14-15): live adapters + guidance corpus ───────
+# The explain core (sicnu_explain) stays Qt/engine/operator free; these tests
+# cover the adapter layer that attaches authoritative sources to it, the
+# authored guidance corpus on disk, and the consumers (builder/validator/
+# view model/agent tool) that were designed in
+# .planning/rs14-explainable-workflow/slices.md (Slices B–G).
+function(sicnu_add_explain_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Sicnu::explain
+  )
+  sicnu_link_jsoncpp(${NAME})
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+  sicnu_discover_tests(${NAME} TEST_PREFIX "${NAME}::")
+endfunction()
+
+# Core semantics over fakes: builder composition, validator matrix, guidance
+# store loader, deterministic view model.
+sicnu_add_explain_test(test_explain_builder)
+sicnu_add_explain_test(test_explain_validator)
+sicnu_add_explain_test(test_explain_guidance_store)
+sicnu_add_explain_test(test_explain_view_model)
+
+# Live adapters: real RSOperatorRegistry, real WorkflowDocument/StepDef IR,
+# real provenance_<runId>.json envelopes.
+add_executable(test_explain_registry_adapter test_explain_registry_adapter.cpp)
+target_link_libraries(test_explain_registry_adapter PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+)
+sicnu_link_jsoncpp(test_explain_registry_adapter)
+target_include_directories(test_explain_registry_adapter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_explain_registry_adapter PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_registry_adapter TEST_PREFIX "test_explain_registry_adapter::")
+
+add_executable(test_explain_projection test_explain_projection.cpp)
+target_link_libraries(test_explain_projection PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_explain_projection)
+target_include_directories(test_explain_projection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_explain_projection PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_projection TEST_PREFIX "test_explain_projection::")
+
+# Coverage oracle: the authored guidance corpus must stay in lockstep with
+# the live registry (operator ids resolve, rationale parameters exist in the
+# live schema).
+add_executable(test_explain_guidance_coverage test_explain_guidance_coverage.cpp)
+target_link_libraries(test_explain_guidance_coverage PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+)
+sicnu_link_jsoncpp(test_explain_guidance_coverage)
+target_include_directories(test_explain_guidance_coverage PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_explain_guidance_coverage PRIVATE
+  SICNU_EXPLAIN_GUIDANCE_DIR="${CMAKE_SOURCE_DIR}/data/explain/guidance"
+)
+set_target_properties(test_explain_guidance_coverage PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_guidance_coverage TEST_PREFIX "test_explain_guidance_coverage::")
+
+# explain:step tool logic: the tool TU is compiled directly (it holds no
+# SpatialToolRegistry symbols by design); registry registration and catalog
+# visibility are exercised by the heavy agent tool lane (test_agent_tools_3).
+add_executable(test_explain_agent_tool
+  test_explain_agent_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/explain_step_tool.cpp
+)
+target_link_libraries(test_explain_agent_tool PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::explain_adapters
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_explain_agent_tool)
+target_include_directories(test_explain_agent_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_explain_agent_tool PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_explain_agent_tool PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_explain_agent_tool TEST_PREFIX "test_explain_agent_tool::")
+# Completion 13/15: the in-process plugin model runtime bridge — first
+# direct coverage of the IModelRuntime forward-serialization contract at
+# the plugin adapter gate (model_runtime.h: implementations serialize).
+# Narrow target: links only the bridge + operators seams, never the app.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+  add_executable(test_plugin_model_bridge test_plugin_model_bridge.cpp)
+  target_link_libraries(test_plugin_model_bridge PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_plugins_framework
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  sicnu_link_jsoncpp(test_plugin_model_bridge)
+  target_include_directories(test_plugin_model_bridge PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_plugin_model_bridge)
+endif()
+# RS14-09 Scientific Task Planner recovery (PR #1193 implementation never
+# landed; this restores it on the current contracts/capability API).
+# Qt-free leaves: Catch2 + sicnu_planner (jsoncpp + sicnu_contracts only) —
+# no Qt, no QGIS — so planner suites build and run in seconds.
+add_executable(test_scientific_planner_vocab test_scientific_planner_vocab.cpp)
+target_link_libraries(test_scientific_planner_vocab PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_vocab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_vocab TEST_PREFIX "test_scientific_planner_vocab::")
+
+add_executable(test_scientific_planner_schema test_scientific_planner_schema.cpp)
+target_link_libraries(test_scientific_planner_schema PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_schema PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_schema TEST_PREFIX "test_scientific_planner_schema::")
+
+add_executable(test_scientific_planner_core test_scientific_planner_core.cpp)
+target_link_libraries(test_scientific_planner_core PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_core PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_core TEST_PREFIX "test_scientific_planner_core::")
+
+add_executable(test_scientific_planner_constraints test_scientific_planner_constraints.cpp)
+target_link_libraries(test_scientific_planner_constraints PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_constraints PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_constraints PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_constraints TEST_PREFIX "test_scientific_planner_constraints::")
+
+add_executable(test_scientific_planner_teaching test_scientific_planner_teaching.cpp)
+target_link_libraries(test_scientific_planner_teaching PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_teaching PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_teaching PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_teaching TEST_PREFIX "test_scientific_planner_teaching::")
+
+add_executable(test_scientific_planner_proposal test_scientific_planner_proposal.cpp)
+target_link_libraries(test_scientific_planner_proposal PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_proposal PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_proposal PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_proposal TEST_PREFIX "test_scientific_planner_proposal::")
+
+add_executable(test_scientific_planner_ir test_scientific_planner_ir.cpp)
+target_link_libraries(test_scientific_planner_ir PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_ir PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_ir PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_ir TEST_PREFIX "test_scientific_planner_ir::")
+
+add_executable(test_scientific_planner_golden test_scientific_planner_golden.cpp)
+target_link_libraries(test_scientific_planner_golden PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_golden PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_scientific_planner_golden PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_scientific_planner_golden TEST_PREFIX "test_scientific_planner_golden::")
+
+add_executable(test_scientific_planner_drift test_scientific_planner_drift.cpp)
+target_link_libraries(test_scientific_planner_drift PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+  sicnu_scientific_state
+)
+target_include_directories(test_scientific_planner_drift PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_drift TEST_PREFIX "test_scientific_planner_drift::")
+
+add_executable(test_scientific_planner_review test_scientific_planner_review.cpp)
+target_link_libraries(test_scientific_planner_review PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner
+)
+target_include_directories(test_scientific_planner_review PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_scientific_planner_review TEST_PREFIX "test_scientific_planner_review::")
+# RS14-02 Scientific Preflight Engine slice B: deterministic rule engine,
+# builtin rule families, provider seam and teaching/agent projections —
+# Qt/GDAL-free leaf tests over sicnu_preflight; the provider test adds the
+# sicnu_preflight_state_adapter (passport projection) over sicnu_scientific_state.
+add_executable(test_preflight_engine test_preflight_engine.cpp)
+target_link_libraries(test_preflight_engine PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_engine TEST_PREFIX "test_preflight_engine::")
+
+add_executable(test_preflight_rules test_preflight_rules.cpp)
+target_link_libraries(test_preflight_rules PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_rules TEST_PREFIX "test_preflight_rules::")
+
+add_executable(test_preflight_render test_preflight_render.cpp)
+target_link_libraries(test_preflight_render PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_render TEST_PREFIX "test_preflight_render::")
+
+add_executable(test_preflight_provider test_preflight_provider.cpp)
+target_compile_definitions(test_preflight_provider PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_preflight_provider PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+)
+sicnu_discover_tests(test_preflight_provider TEST_PREFIX "test_preflight_provider::")
+
+add_executable(test_preflight_golden test_preflight_golden.cpp)
+target_link_libraries(test_preflight_golden PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+)
+sicnu_discover_tests(test_preflight_golden TEST_PREFIX "test_preflight_golden::")

@@ -13,9 +13,9 @@ Json::Value ReconcileResult::toJson() const
     doc["stage"] = stage;
     doc["terminal_state"] = terminalState;
     Json::Value runs(Json::arrayValue);
-    for (const auto &id : successfulRunIds)
+    for (const auto &id : submittedRunIds)
         runs.append(id);
-    doc["successful_run_ids"] = runs;
+    doc["submitted_run_ids"] = runs;
     doc["details"] = details;
     return doc;
 }
@@ -34,18 +34,22 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
     r.details["replan_count"] = replay.replanCount;
     r.details["entries"] = static_cast<Json::UInt64>(journal.size());
 
-    // Collect successful execute decisions / run ids.
+    // Collect run ids from the loop's recorded wire shape: the execute
+    // stage records the SUBMISSION as decision.inputs["run_id"] with
+    // selected["action"] == "run" (scientific_agent_session stageExecute),
+    // before any outcome exists — so these are submitted runs, not
+    // successful ones.
     for (const auto &entry : journal.entries())
     {
-        if (!entry.decision)
+        if (!entry.decision || entry.stage != "execute")
             continue;
-        const auto &sel = entry.decision->selected;
-        if (sel.isMember("run_id") && sel.get("succeeded", false).asBool())
-            r.successfulRunIds.insert(sel["run_id"].asString());
-        if (entry.stage == "execute" && sel.get("action", "").asString() == "execute_succeeded")
+        const auto &decision = *entry.decision;
+        if (decision.selected.get("action", "").asString() == "run" &&
+            decision.inputs.isMember("run_id"))
         {
-            if (sel.isMember("run_id"))
-                r.successfulRunIds.insert(sel["run_id"].asString());
+            const std::string runId = decision.inputs["run_id"].asString();
+            if (!runId.empty())
+                r.submittedRunIds.insert(runId);
         }
     }
 
@@ -56,25 +60,19 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
         r.reasonCode = "ALREADY_TERMINAL";
         // Delivered sessions must not re-submit.
         r.duplicateSubmitRisk = (replay.terminalState == "delivered");
+        r.details["submitted_run_ids"] = static_cast<Json::UInt64>(r.submittedRunIds.size());
         return r;
     }
 
-    // After execute before verify: resumable at verify; do not re-begin execute
-    // if a successful run id is already recorded.
-    if (replay.finalStage == "execute" && !r.successfulRunIds.empty())
-    {
-        r.ok = true;
-        r.resumable = true;
-        r.duplicateSubmitRisk = true; // coordinator must skip re-submit
-        r.reasonCode = "RESUME_AFTER_EXECUTE_SKIP_RESUBMIT";
-        return r;
-    }
-
-    if (replay.finalStage == "verify" || replay.finalStage == "diagnose" ||
-        replay.finalStage == "replan" || replay.finalStage == "delivery" ||
-        replay.finalStage == "preflight" || replay.finalStage == "plan_request" ||
-        replay.finalStage == "repair_approval" || replay.finalStage == "data_state_snapshot" ||
-        replay.finalStage == "goal_normalization")
+    // Loop authority (ScientificAgentSession::resume): only PRE-PLAN stages
+    // carry enough journalled state to resume; everything from plan_request
+    // onward would run real seams over default-constructed state and
+    // fabricate a delivery, so the loop refuses it. The reconciler mirrors
+    // that contract for non-terminal journals (it stays deliberately
+    // conservative on terminal ones: a cancelled pre-plan abort could
+    // resume, but restarting as a new session is always safe).
+    if (replay.finalStage == "goal_normalization" ||
+        replay.finalStage == "data_state_snapshot")
     {
         r.ok = true;
         r.resumable = true;
@@ -82,10 +80,22 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
         return r;
     }
 
-    // Unknown stage / empty — not success.
-    r.ok = false;
+    if (replay.finalStage.empty())
+    {
+        // Unknown stage / empty — not success.
+        r.ok = false;
+        r.resumable = false;
+        r.reasonCode = "INDETERMINATE_STATE";
+        return r;
+    }
+
+    r.ok = true;
     r.resumable = false;
-    r.reasonCode = "INDETERMINATE_STATE";
+    r.reasonCode = "RESUME_PAST_PLAN_SEAM";
+    r.details["resume_constraint"] =
+        "agent_loop resumes only goal_normalization/data_state_snapshot; "
+        "restart as a new session";
+    r.details["submitted_run_ids"] = static_cast<Json::UInt64>(r.submittedRunIds.size());
     return r;
 }
 

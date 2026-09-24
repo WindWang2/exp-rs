@@ -62,7 +62,11 @@ OpsProjection OpsProjector::project(const sicnu::agent_loop::SessionJournal &jou
     const bool terminal = !replay.terminalState.empty();
     p.controls["pause"] = pauseAvailable && !terminal;
     p.controls["cancel"] = !terminal;
-    p.controls["resume"] = terminal == false && !replay.finalStage.empty();
+    // Honest resume advisory: only the loop's pre-plan stages are
+    // resumable; anything past the plan seam restarts as a new session.
+    p.controls["resume"] =
+        !terminal && (replay.finalStage == "goal_normalization" ||
+                      replay.finalStage == "data_state_snapshot");
     p.controls["approve_repair"] = !terminal;
     p.controls["export"] = true;
     // Explicit: UI cannot bypass loop — controls are advisory to coordinator.

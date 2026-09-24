@@ -1,5 +1,38 @@
 # Changelog
 
+## [RS14-09 Scientific Task Planner Recovery] - completion/scientific-planner-recovery
+
+- **Goal → explainable ScientificPlan decision layer restored** (PR #1193's
+  implementation never landed; only its phase 0-2 planning docs merged). New
+  Qt-free leaf `src/planner` (`sicnu_planner`, links `sicnu_contracts` +
+  jsoncpp only): versioned fail-closed `scientific_goal/1.0`,
+  `planning_context/1.0`, `scientific_plan/1.0` documents with canonical
+  key-sorted JSON and SHA-256/16 content fingerprints (plan_id excluded).
+- **Deterministic baseline planner** (`planScientificWork`): staged spine per
+  goal kind (import → grid-alignment gate → numeric-domain calibration gate →
+  analyze → verify → publish) with contracts-verified operator bridges; every
+  unmet need is a typed open question (insufficient_data / ambiguity /
+  decision_required) — no silent fallbacks; every lawful analysis variant
+  becomes a ranked candidate with alternatives (why/whyNot + candidateIndex).
+- **Constraints/budgets**: forbidden operators, required determinism and
+  family allowlists narrow candidates while a lawful sibling exists; step/RAM/
+  cost-class budget overruns add `resource_over_budget` risks + blocking
+  decisions while keeping the plan fully visible.
+- **Untrusted proposal seam**: deterministic validator over external
+  `scientific_plan/1.0` documents with a closed sorted `planner:proposal_*`
+  rejection-code vocabulary; accepted proposals re-mint identity from content.
+- **Projections**: teaching views (honest hidden-answer masking of
+  student-decision parameters in teaching+guided/minimal only; explanation
+  view with per-step rationale, transition whys, thinking questions) and a
+  workflow_ir 1.0-shaped projection with an explicit, fully covering
+  contracts→artifact_facts domain map (honest "unknown" degradations carry
+  warnings). Planning-only: never executes operators, never opens datasets.
+- **Provider seam**: all capability facts enter via injected
+  `CapabilityProvider` and are cross-checked against the linked contracts
+  registry (single truth source); 4 offline golden scenarios with
+  update-by-env-var discipline; drift tests pin the asset-lifecycle, domain
+  and intent mirrors against their authorities.
+
 ## [Cartography Production 11.0] - zcode/cartography-production-11
 
 - **Governed production chain**: `cartography:produce` (agent tool +

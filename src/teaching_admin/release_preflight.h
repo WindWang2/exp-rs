@@ -18,6 +18,7 @@ struct PreflightInput
     QJsonObject pipeline;          ///< optional recipe (read-only)
     QSet<QString> knownLabIds;
     QSet<QString> knownOperators;
+    QJsonObject operatorParamSchemas; ///< operator id → {"properties": {…}}
     QJsonObject labRules;          ///< optional
     QJsonObject processRubric;     ///< optional
     QJsonObject packDocument;      ///< optional pack under test

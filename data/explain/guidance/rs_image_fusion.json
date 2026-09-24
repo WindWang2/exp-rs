@@ -1,0 +1,36 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:image_fusion",
+  "purpose": "把全色波段的空间细节与多波段数据的光谱信息融合（pan-sharpening），生成高分辨率多波段产品；支持 linear、brovey、pca、ihs、gram_schmidt、hpf 六种融合方法。",
+  "whenToUse": "需要高分辨率多波段底图做目视解译、制图或小地物识别时；前提是 pan 与 ms 已相互配准。",
+  "prerequisitesNote": [
+    "pan 与 ms 必须已配准（同 CRS、网格可对齐）。",
+    "ihs 方法恰需 3 个 MS 波段映射到 R/G/B。",
+    "pan 与 ms 应处于同一辐射状态（同为 DN 或同为反射率）。"
+  ],
+  "assumptions": [
+    "pan 与 ms 在重叠光谱范围内相关且来自同一时相场景；除 gram_schmidt 外多数方法存在不同程度的光谱畸变。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "method",
+      "rationale": "融合方法的科学含义：linear 加权平均（panWeight/msWeights 控制权重）、brovey 比值拉伸、pca 主成分替换、ihs RGB-IHS 变换（恰需 3 个 MS 波段）、gram_schmidt 光谱畸变最小、hpf 高通细节注入。",
+      "misconfigurationConsequence": "对 4 个以上波段的数据用 ihs，red/green/blueIdx 之外的波段被直接丢弃，多光谱信息损失。"
+    },
+    {
+      "parameter": "panWeight",
+      "rationale": "linear 融合中全色分量的权重（默认 0.5），控制空间细节与光谱保真之间的权衡。",
+      "misconfigurationConsequence": "权重过高输出偏向灰阶细节、光谱失真，过低则接近原始 ms 分辨率，融合失去意义。"
+    },
+    {
+      "parameter": "qualityReport",
+      "rationale": "可选的融合质量 JSON 报告路径，输出 ERGAS/CC/SSIM/Q/RASE 指标与光谱失真守卫判定（qualityPassed）。",
+      "misconfigurationConsequence": "不写报告就无从发现所选方法的光谱畸变超限，低质量融合悄悄进入制图。"
+    }
+  ],
+  "skipConsequence": {
+    "summary": "空间分辨率停留在多波段数据级别，细小地物的解译与制图精度受限。",
+    "downstreamRoles": ["目视解译", "制图"]
+  },
+  "teachingNote": "融合不定义新的辐射状态：输出沿用输入的辐射语义，但 brovey/ihs 等方法会轻微重塑光谱幅度，定量反演前建议用 qualityReport 检查光谱失真守卫。"
+}

@@ -1,0 +1,269 @@
+{
+  "capabilities" : 
+  {
+    "analysis" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 256,
+        "input_domain" : "",
+        "operator_id" : "rs:mndwi",
+        "output_domain" : "index"
+      },
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 256,
+        "input_domain" : "",
+        "operator_id" : "rs:ndwi",
+        "output_domain" : "index"
+      },
+      {
+        "cost_class" : "high",
+        "deterministic" : true,
+        "estimated_ram_mb" : 4096,
+        "input_domain" : "features",
+        "operator_id" : "rs:change",
+        "output_domain" : "none"
+      }
+    ],
+    "calibration" : 
+    [
+      {
+        "cost_class" : "medium",
+        "deterministic" : true,
+        "estimated_ram_mb" : 512,
+        "input_domain" : "dn",
+        "operator_id" : "rs:brdf_normalization",
+        "output_domain" : "reflectance"
+      },
+      {
+        "cost_class" : "medium",
+        "deterministic" : true,
+        "estimated_ram_mb" : 384,
+        "input_domain" : "dn",
+        "operator_id" : "rs:band_math",
+        "output_domain" : "features"
+      }
+    ],
+    "data_import" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 128,
+        "input_domain" : "",
+        "operator_id" : "rs:mosaic",
+        "output_domain" : ""
+      }
+    ],
+    "publication" : 
+    [
+      {
+        "cost_class" : "low",
+        "deterministic" : true,
+        "estimated_ram_mb" : 64,
+        "input_domain" : "",
+        "operator_id" : "io:translate",
+        "output_domain" : ""
+      }
+    ]
+  },
+  "context" : 
+  {
+    "assets" : 
+    [
+      {
+        "asset_kind" : "raster",
+        "band_roles" : [ "green", "nir" ],
+        "crs" : "EPSG:32648",
+        "dates" : [ "2024-01-10" ],
+        "modality" : "optical",
+        "numeric_domain" : "dn",
+        "quality_mask_available" : true,
+        "ref" : "asset-jan",
+        "resolution_m" : 10.0,
+        "state" : "ready"
+      },
+      {
+        "asset_kind" : "raster",
+        "band_roles" : [ "green", "nir" ],
+        "crs" : "EPSG:32648",
+        "dates" : [ "2024-03-10" ],
+        "modality" : "optical",
+        "numeric_domain" : "dn",
+        "quality_mask_available" : true,
+        "ref" : "asset-mar",
+        "resolution_m" : 10.0,
+        "state" : "ready"
+      }
+    ],
+    "constraints" : {},
+    "kind" : "planning_context",
+    "mode" : 
+    {
+      "autonomy" : "full",
+      "kind" : "agent",
+      "student_decision_default" : false
+    },
+    "quality" : {},
+    "resource_budget" : {},
+    "schema_version" : "1.0"
+  },
+  "description" : "two-date water change with three lawful analysis variants: ranked candidates + alternatives with why/whyNot",
+  "expected" : 
+  {
+    "blocking_questions" : 0,
+    "candidate_count" : 3,
+    "sequence" : "import:rs:mosaic->analyze:rs:mndwi->publish:io:translate",
+    "verdict" : "feasible"
+  },
+  "expected_fingerprint" : "7497acf883b848f8",
+  "expected_plan" : 
+  {
+    "alternatives" : 
+    [
+      {
+        "alternative_id" : "alt-1",
+        "candidate_index" : 1,
+        "summary" : "analysis via rs:ndwi",
+        "why_not" : "ranked after the primary by deterministic tiebreak"
+      },
+      {
+        "alternative_id" : "alt-2",
+        "candidate_index" : 2,
+        "summary" : "analysis via rs:change",
+        "why_not" : "higher aggregate cost class"
+      }
+    ],
+    "cost" : 
+    {
+      "aggregate_cost_class" : "low",
+      "total_estimated_ram_mb" : 448
+    },
+    "goal_id" : "goal-water-change-02",
+    "goal_kind" : "change",
+    "kind" : "scientific_plan",
+    "mode" : 
+    {
+      "autonomy" : "full",
+      "kind" : "agent"
+    },
+    "plan_id" : "plan-7497acf883b848f8",
+    "rules_revision" : "planner-rules/1",
+    "schema_version" : "1.0",
+    "steps" : 
+    [
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 128,
+        "family" : "data_import",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "asset_ref" : "asset-jan"
+          },
+          {
+            "as" : "input",
+            "asset_ref" : "asset-mar"
+          }
+        ],
+        "operator_id" : "rs:mosaic",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-jan",
+            "detail" : "asset ready at plan time",
+            "kind" : "asset_state"
+          },
+          {
+            "asset_ref" : "asset-mar",
+            "detail" : "asset ready at plan time",
+            "kind" : "asset_state"
+          }
+        ],
+        "role" : "import",
+        "step_id" : "step-import-01"
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 256,
+        "expected_transitions" : 
+        [
+          {
+            "asset_ref" : "asset-jan",
+            "from_domain" : "dn",
+            "to_domain" : "index"
+          },
+          {
+            "asset_ref" : "asset-mar",
+            "from_domain" : "dn",
+            "to_domain" : "index"
+          }
+        ],
+        "family" : "analysis",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-import-01"
+          }
+        ],
+        "operator_id" : "rs:mndwi",
+        "preconditions" : 
+        [
+          {
+            "asset_ref" : "asset-jan",
+            "detail" : "analysis consumes the bridged data scale",
+            "domain" : "dn",
+            "kind" : "numeric_domain"
+          },
+          {
+            "asset_ref" : "asset-mar",
+            "detail" : "analysis consumes the bridged data scale",
+            "domain" : "dn",
+            "kind" : "numeric_domain"
+          }
+        ],
+        "role" : "analyze",
+        "step_id" : "step-analyze-02"
+      },
+      {
+        "cost_class" : "low",
+        "estimated_ram_mb" : 64,
+        "family" : "publication",
+        "inputs" : 
+        [
+          {
+            "as" : "input",
+            "from_step_id" : "step-analyze-02"
+          }
+        ],
+        "operator_id" : "io:translate",
+        "role" : "publish",
+        "step_id" : "step-publish-03"
+      }
+    ],
+    "verdict" : "feasible"
+  },
+  "goal" : 
+  {
+    "goal_id" : "goal-water-change-02",
+    "goal_kind" : "change",
+    "kind" : "scientific_goal",
+    "schema_version" : "1.0",
+    "subject" : "surface water extent change between two dates",
+    "temporal_scope" : 
+    {
+      "end" : "2024-03-10",
+      "max_gap_days" : 20,
+      "min_scenes" : 2,
+      "start" : "2024-01-10"
+    }
+  },
+  "kind" : "planner_golden_scenario",
+  "scenario" : "02_water_change_two_date",
+  "schema_version" : "1.0"
+}

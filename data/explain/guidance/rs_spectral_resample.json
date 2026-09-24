@@ -1,0 +1,29 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:spectral_resample",
+  "purpose": "把成像光谱数据按相邻波段中心波长的线性插值重采样到目标波段网格（如 Landsat / Sentinel-2 波位），实现跨传感器比较与光谱库匹配。",
+  "whenToUse": "高光谱到多光谱的降维（如 224 波段成像光谱仪重采样到 Sentinel-2 波位），或把光谱库条目重采样到影像波段网格做匹配前。",
+  "prerequisitesNote": [
+    "输入至少需要 2 个波段；波段须携带 WAVELENGTH 元数据（产品堆栈写入），或用 sourceWavelengths 显式给出。"
+  ],
+  "assumptions": [
+    "相邻波段中心波长之间的光谱近似线性变化；该线性插值近似忽略传感器光谱响应函数的形状差异。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "wavelengths",
+      "rationale": "目标波段中心波长（nm）数组，决定输出波段数与每个输出波段的谱位置；是本算子的语义核心。",
+      "misconfigurationConsequence": "目标波长超出源波长覆盖范围时该波段输出 NaN（不做外推），下游将出现整波段无效数据。"
+    },
+    {
+      "parameter": "sourceWavelengths",
+      "rationale": "源波段中心波长数组；缺省时逐波段读取 WAVELENGTH 元数据，全部缺失时以类型化错误拒绝并要求显式提供。",
+      "misconfigurationConsequence": "手工填错源波长会把吸收特征搬到错误的谱位置，重采样结果与目标传感器响应系统性错配。"
+    }
+  ],
+  "skipConsequence": {
+    "summary": "波段网格不匹配时，高光谱数据无法与光谱库或多光谱产品逐波段对齐比较。",
+    "downstreamRoles": ["光谱库匹配", "跨传感器对比"]
+  },
+  "teachingNote": "只改波段（波长）网格，不改辐射状态：输入是反射率输出仍是反射率，输入是辐亮度输出仍是辐亮度；本步骤不定义状态转换，其正确性取决于波长元数据的完整性。"
+}

@@ -21,6 +21,7 @@
 #include "lab/session_store.h"
 #include "lab/sha256.h"
 #include "lab/spec_runtime.h"
+#include "platform/portable.h"
 #include "recipes/lab_document.h"
 #include "recipes/lab_source.h"
 #include "recipes/provider_interfaces.h"
@@ -36,10 +37,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-#if !defined(_WIN32)
-#include <unistd.h>
-#endif
 
 using namespace sicnu::lab;
 using namespace sicnu::recipes;
@@ -62,7 +59,7 @@ std::string makeTempDir( const char *tag )
   static unsigned counter = 0;
   const fs::path dir = fs::temp_directory_path() /
                        ( std::string( "sicnu_teaching_e2e_" ) + tag + "_" +
-                         std::to_string( ++counter ) + "_" + std::to_string( ::getpid() ) );
+                         std::to_string( ++counter ) + "_" + std::to_string( sicnu::portable::pid() ) );
   fs::create_directories( dir );
   return dir.string();
 }

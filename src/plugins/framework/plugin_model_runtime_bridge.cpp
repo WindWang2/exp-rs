@@ -76,6 +76,18 @@ public:
 
     cv::Mat infer( const cv::Mat &nchwBlob, const std::string &outputName ) override
     {
+        // Completion 13/15 — forward-serialization enforcement. The
+        // IModelRuntime contract (model_runtime.h: "hands out shared_ptr
+        // sessions that are safe to use from any thread — implementations
+        // serialize forward passes internally"; the runtime-architecture
+        // doc names the same contract) is kept HERE at the host-side gate
+        // between the registry pool and plugin code: plugin infer()
+        // implementations are not required to be re-entrant, and a shared
+        // cached session can be driven from several operator threads at
+        // once. One mutex per adapter — the same idiom as the built-in
+        // OpenCV DNN provider — instead of scattering locks into callers.
+        std::lock_guard<std::mutex> inferLock( m_inferMutex );
+
         // Execution barrier (#747): the runtime object lives in plugin code.
         // A failed acquisition means the plugin is draining/unloaded — the
         // raw pointer must not be touched.
@@ -138,6 +150,9 @@ private:
     std::string mDeviceName;
     std::vector<std::string> mOutputTensorNames;
     std::unique_ptr<exprs::IPluginModelRuntimeV1> mRuntime;
+    // Serializes forward passes through the plugin implementation (the
+    // documented IModelRuntime session contract, enforced at the bridge).
+    std::mutex m_inferMutex;
 };
 #endif
 

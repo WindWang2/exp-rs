@@ -34,11 +34,13 @@ class QStackedWidget;
 class ActiveViewHost;
 class QSplitter;
 class SecondaryMapViewWidget;
+class SecondaryMapSession;
 class QPainter;
 
 #include "display/qgis_display_manager.h"
 #include "app/workbench/mission_context.h"
 #include "app/workbench/mission_runtime_store.h"
+#include "agent/spatial_tools/spatial_tool.h"
 class QTextBrowser;
 class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
@@ -174,6 +176,18 @@ class QgisDesktopWindow : public QMainWindow
 public:
     explicit QgisDesktopWindow(QWidget *parent = nullptr);
     ~QgisDesktopWindow() override;
+
+    /** Recorded lab-run context for the open project (empty db path = no lab
+     *  recording context; the cockpit capsule export then fails honestly).
+     *  Single derivation lives in ensureLabRecordingForProject(); the setters
+     *  are also called at project story boundaries (new/failed open) so the
+     *  cockpit never sees a stale previous-project context. */
+    QString labExperimentDbPath() const { return m_labExperimentDbPath; }
+    QString labExperimentId() const { return m_labExperimentId; }
+    QString labWorkspaceRoot() const { return m_labWorkspaceRoot; }
+    void setLabRecordingContext(const QString &dbPath,
+                                const QString &experimentId,
+                                const QString &workspaceRoot);
 
     void setupUi();
     void setupMapCanvas();
@@ -515,8 +529,9 @@ private:
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
     QWidget *m_mapCanvasContainer = nullptr;
     QSplitter *m_mapSplitter = nullptr;
-    class SecondaryMapViewWidget *m_secondaryMapView = nullptr;
-    sicnu::display::DisplayViewId m_secondaryViewId;
+    /// Secondary Display View lifecycle (widget + engine view id + pixel
+    /// sync) as one session object; created lazily on first open.
+    class SecondaryMapSession *m_secondaryMapSession = nullptr;
     /// Session windows registered as secondary Display Views (Wave E).
     sicnu::display::DisplayViewId m_classifyViewId;
     sicnu::display::DisplayViewId m_obiaViewId;
@@ -525,7 +540,13 @@ private:
     sicnu::display::DisplayViewId m_georefI2MSrcViewId;
     QAction *m_secondaryViewAction = nullptr;
     QAction *m_dualViewportSyncAction = nullptr;
-    class RsDualViewportSyncController *m_dualViewportSync = nullptr;
+    /// Session-scoped SpatialTool registrations (workbench:context,
+    /// editing:state). The registry is process-wide and first-registration-
+    /// wins; the tokens release the window's tools at teardown so a
+    /// re-assembled shell registers fresh tools instead of silently reusing
+    /// registrations whose guarded targets are long dead.
+    sicnu::agent::spatial_tools::SpatialToolRegistry::RegistrationToken m_contextToolRegistration;
+    sicnu::agent::spatial_tools::SpatialToolRegistry::RegistrationToken m_editToolRegistration;
     /// Linked Visual Analytics 11.0 (created with the workbench panels).
     sicnu::app::va::VaSelectionHub *m_vaSelectionHub = nullptr;
     sicnu::app::ViewLinkController *m_viewLinkController = nullptr;
@@ -588,6 +609,7 @@ private:
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_labCockpitDock = nullptr;
+    QString m_labExperimentDbPath, m_labExperimentId, m_labWorkspaceRoot;
     // Teacher Authoring Console (#teaching-admin; parallel-safe vs lab cockpit)
     QgsDockWidget *m_teachingAdminDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;

@@ -203,6 +203,11 @@ bool ProjectContext::reopenWorkspaceStore( const QString &projectFile ) {
   return openWorkspaceStore( projectFile );
 }
 
+void ProjectContext::closeWorkspaceStore() {
+  m_workspaceService.closeStore();
+  m_workspaceService.clearCachedDocument();
+}
+
 display::QgisDisplayManager &ProjectContext::displayManager() {
   return m_displayManager;
 }

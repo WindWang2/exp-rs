@@ -8,6 +8,7 @@
 #include <QWidget>
 
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QTextEdit;
@@ -25,7 +26,13 @@ public:
   void setReadiness( const sicnu::teaching::LabReadiness &r );
   void setAutonomy( const sicnu::teaching::AutonomyEffectiveDisplay &a );
   void setFeedback( const sicnu::teaching::LabFeedbackProjection &f );
+  void clearFeedback();
+  void appendFeedbackNote( const QString &noteZh );
   void setWhyMarkdown( const QString &md );
+
+  /// Student-produced artifact to validate / grade (empty = nothing yet).
+  QString artifactPath() const;
+  void setArtifactPath( const QString &path );
 
   sicnu::teaching::LabStepTimeline timeline() const { return m_tl; }
 
@@ -55,6 +62,7 @@ private:
   QTextEdit *m_whyView = nullptr;
   QTextEdit *m_paramsView = nullptr;
   QPlainTextEdit *m_humanInput = nullptr;
+  QLineEdit *m_artifactEdit = nullptr;
   QTextEdit *m_feedbackView = nullptr;
   QPushButton *m_prevBtn = nullptr;
   QPushButton *m_nextBtn = nullptr;

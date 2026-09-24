@@ -21,7 +21,8 @@ bool requireObject( const Json::Value &doc, std::vector<std::string> &issues )
 
 const char *kAllowedKeys[] = {
   "schema", "session_id", "course_id", "module_id", "lab_id", "experiment_id",
-  "run_id", "step_index", "evidence_refs", "autonomy_policy_ref",
+  "run_id", "step_index", "evidence_refs", "artifact_path",
+  "autonomy_policy_ref",
   "last_validation_summary", "capsule_export_ref", "mode", "lab_status",
 };
 
@@ -80,6 +81,13 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   s.labId = strOf( doc, "lab_id" );
   s.experimentId = strOf( doc, "experiment_id" );
   s.runId = strOf( doc, "run_id" );
+  if ( doc.isMember( "artifact_path" ) ) {
+    if ( !doc["artifact_path"].isString() ) {
+      s.issuesZh.push_back( "artifact_path 类型错误" );
+      return s;
+    }
+    s.artifactPath = doc["artifact_path"].asString();
+  }
   s.autonomyPolicyRef = strOf( doc, "autonomy_policy_ref" );
   s.capsuleExportRef = strOf( doc, "capsule_export_ref" );
 
@@ -155,6 +163,7 @@ Json::Value LabSessionState::toJson() const
   Json::Value ev( Json::arrayValue );
   for ( const auto &e : evidenceRefs ) ev.append( e );
   root["evidence_refs"] = ev;
+  root["artifact_path"] = artifactPath;
   root["autonomy_policy_ref"] = autonomyPolicyRef;
   root["last_validation_summary"] = lastValidationSummary.isNull()
                                       ? Json::Value( Json::objectValue )

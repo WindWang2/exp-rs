@@ -150,6 +150,9 @@ add_library(sicnu_agent SHARED
   spatial_tools/governance_tools.h
   spatial_tools/spatial_tool.cpp
   spatial_tools/spatial_tool_registry.cpp
+  # RS14-15 Explainable Workflow: the explain:step agent surface (composes
+  # explanations through Sicnu::explain_adapters; no registry symbols here).
+  spatial_tools/explain_step_tool.cpp
   # Mission Runtime 13.0 — the real mission:* tool objects plus the Qt-Core
   # mission value model they project. The QGIS-dependent persistence chain
   # (mission_context*, mission_runtime_store) stays in the app layer behind
@@ -161,6 +164,7 @@ add_library(sicnu_agent SHARED
   ../app/workbench/mission_run_authority.cpp
   tools/geometric_tool.cpp
   spatial_tools/spatial_tool.h
+  spatial_tools/explain_step_tool.h
   spatial_tools/mission_tools.h
   spatial_tools/raster_inspect_tool.cpp
   spatial_tools/raster_inspect_tool.h
@@ -263,6 +267,9 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
   # decision engine the lab copilot and the plan executor gate on.
   Sicnu::autonomy
+  # RS14-15 Explainable Workflow: explain core + live adapters (registry
+  # knowledge, workflow projection) behind the explain:step tool surface.
+  Sicnu::explain_adapters
   ${JSONCPP_LIBRARIES}
 )
 

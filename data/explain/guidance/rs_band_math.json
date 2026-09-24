@@ -1,0 +1,21 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:band_math",
+  "purpose": "用任意逐像元波段表达式（如 (b1-b2)/(b1+b2)、min(b1, 10)）对多波段栅格做自定义算术，是内置指数未覆盖时的通用计算出口。",
+  "whenToUse": "需要 rs:spectral_index 指数族之外的自定义波段组合或局部运算时；表达式使用 1-based 波段引用 b1、b2、…，支持 min/max 与 std::min/std::max 的混合数值类型。",
+  "assumptions": [
+    "表达式作者对结果的物理含义负责：归一化类表达式输出无量纲指数，简单缩放类表达式的输出仍保持输入的辐射量纲。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "expression",
+      "rationale": "定义逐像元计算本身：b1、b2 按 1-based 引用输入波段，是本算子唯一的科学语义载体。",
+      "misconfigurationConsequence": "波段引用错位产生系统性错误值；分母形如 b1+b2 的表达式在暗像元上除零会产生 NaN，污染下游统计。"
+    }
+  ],
+  "skipConsequence": {
+    "summary": "只能依赖内置指数族，无法表达自定义波段组合与非常规公式。",
+    "downstreamRoles": ["定制指数分析", "科研试算"]
+  },
+  "teachingNote": "本步骤不理解辐射状态：输出量纲完全取决于表达式，建议在下游节点或文档中写明输出含义。当表达式在数学上等价于内置指数（如 NDVI）时，优先用 rs:ndvi 以获得语义化节点与参数校验。"
+}

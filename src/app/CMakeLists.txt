@@ -22,6 +22,8 @@ qt_add_library(sicnu_qgis_display STATIC
     display/qgs_display_stretch.h
     project_context.cpp
     project_context.h
+    workbench/project_session_boundary.cpp
+    workbench/project_session_boundary.h
 )
 add_library(Sicnu::qgis_display ALIAS sicnu_qgis_display)
 target_include_directories(sicnu_qgis_display
@@ -282,6 +284,7 @@ add_executable(sicnu_geo_rs
     # Layer and map tool managers
     active_view_host.cpp
     shell/secondary_map_view_widget.cpp
+    shell/secondary_map_view_session.cpp
     shell/rs_dual_viewport_sync_controller.cpp
     shell/gui_job_adapter.cpp
     shell/gui_job_adapter.h
@@ -399,6 +402,8 @@ target_sources(sicnu_geo_rs PRIVATE
     teaching/guided_lab_workspace.h
     teaching/lab_cockpit_dock.cpp
     teaching/lab_cockpit_dock.h
+    teaching/lab_validate_service.cpp
+    teaching/lab_validate_service.h
     teaching/status_badge.h
 )
 if(TARGET Sicnu::teaching)
@@ -443,10 +448,16 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::experiment
     Sicnu::study
     Sicnu::experiment_studio
+    # Studio live-execution bridge: dock runs real studies through the
+    # ExecutionPlane spine, real GDAL compare, debugger evidence, faultlab
+    # sandbox and capsule IO.
+    Sicnu::experiment_studio_live
     Sicnu::teaching_admin
     # D5: desktop lab auto-recording surface + lab report builder (bridge
     # converts coordinator truth into experiment records).
     Sicnu::experiment_bridge
+    # lab cockpit submit/export consumes the existing capsule contract
+    Sicnu::experiment_capsule
     Sicnu::Geospatial
     sicnu_core
     sicnu_processing

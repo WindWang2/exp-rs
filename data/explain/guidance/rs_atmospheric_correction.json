@@ -1,0 +1,44 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:atmospheric_correction",
+  "purpose": "先按 gain/bias 把 DN 归算为 radiance，再用暗目标法（DOS1/DOS2）或 QUAC 估计并扣除大气路径散射，把大气顶数据进一步还原为地表反射率（BOA）。",
+  "whenToUse": "计算光谱指数、跨日期比较或任何需要真实反射率量纲的场合；在预处理流程中位于 rs:radiometric_calibration 之后、指数计算之前。",
+  "prerequisitesNote": [
+    "输入应为光学栅格；gain/bias 缺省时由 MTL/MTD 产品元数据自动解析，显式值总是优先。"
+  ],
+  "assumptions": [
+    "DOS 假设场景内存在零反射暗目标，其观测值全部来自大气路径散射；QUAC 假设场景包含足够多的端元材料供经验估计。",
+    "校正后数据近似地表反射率，但不替代基于辐射传输模型的 6S/MODTRAN 级别校正。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "method",
+      "rationale": "dn_to_radiance 只做线性定标（输出停在 Radiance 域）；dos1/dos2 在其上估计并扣除路径散射（dos2 额外用 airmass 做透射修正）；quac 为全场景经验方法。",
+      "misconfigurationConsequence": "对已校正数据重复施用 DOS，会把真实暗目标信号当作大气散射扣除，BOA 反射率系统性偏低。"
+    },
+    {
+      "parameter": "gain",
+      "rationale": "DN 到 radiance 的线性斜率（与 bias 配对）；省略时从产品元数据解析，显式提供时覆盖元数据。",
+      "misconfigurationConsequence": "手工填错 gain/bias，radiance 与其后的 BOA 反射率整体按错误比例缩放，所有依赖绝对反射率的下游全部失真。"
+    },
+    {
+      "parameter": "airmass",
+      "rationale": "DOS2 的相对大气质量项，用于透射修正；对 dos1、quac、dn_to_radiance 不起作用。",
+      "misconfigurationConsequence": "把 airmass 设成远离 1 的值会使 dos2 的反射率换算失真；在 dos1 上调它则是无效操作。"
+    }
+  ],
+  "stateNarrative": { "before": "DN", "after": "BOA" },
+  "skipConsequence": {
+    "summary": "指数在 TOA 或 DN 域计算，气溶胶与散射误差留在结果里，跨日期可比性明显下降。",
+    "downstreamRoles": ["光谱指数", "变化检测"]
+  },
+  "references": [
+    {
+      "title": "Chavez, An improved dark-object subtraction technique for atmospheric scattering correction of multispectral data",
+      "kind": "paper",
+      "locator": "Remote Sensing of Environment 24(3):459-479, 1988",
+      "note": "DOS 暗目标校正族（dos1/dos2）的方法学出处。"
+    }
+  ],
+  "teachingNote": "完整链条是 DN -> Radiance（gain/bias）-> BOA（DOS 扣散射），默认 method=dos1 对应 DN 进 BOA 出；band 参数指定参与校正的 1-based 波段（默认第 1 波段）。"
+}

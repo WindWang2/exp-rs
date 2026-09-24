@@ -1,0 +1,34 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:continuum_removal",
+  "purpose": "对每个像元光谱拟合凸包连续体（continuum），并把各波段反射率归一化到包络线上，突出水分子、黏土矿物、叶绿素等吸收特征的相对深度，是高光谱填图的前置增强。",
+  "whenToUse": "高光谱矿物填图与植被生化参量反演；常与波段深度分析或 rs:sam_classify 组合做吸收特征匹配。",
+  "prerequisitesNote": [
+    "输入应为反射率（0..1）多波段栅格；波段应携带 WAVELENGTH 元数据（产品堆栈时写入），否则整体回退为按波段序号处理。"
+  ],
+  "assumptions": [
+    "反射光谱可分解为连续体（散射背景）与叠加其上的吸收特征，凸包归一化后的特征深度与材料含量相关（Clark & Roush, 1984）。",
+    "波长轴应随波段索引递增；乱序波段会被内部排序恢复轴序后再计算。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "input",
+      "rationale": "唯一的数据入口，必须是反射率型多波段栅格；包络线与比值只有在反射率量纲下才有物理意义。",
+      "misconfigurationConsequence": "输入 DN 时凸包与比值失去物理意义，得到的特征深度不可解释；波长元数据若只有部分波段存在，算子会整体回退为按序号处理，避免混合轴造成凸包畸变。"
+    }
+  ],
+  "stateNarrative": { "before": "BOA", "after": "Index" },
+  "skipConsequence": {
+    "summary": "吸收特征被连续体背景淹没，矿物与生化参量填图的判别力显著下降。",
+    "downstreamRoles": ["矿物填图", "高光谱分类"]
+  },
+  "references": [
+    {
+      "title": "Clark & Roush, Reflectance spectroscopy: Quantitative analysis techniques for remote sensing applications",
+      "kind": "paper",
+      "locator": "Journal of Geophysical Research 89(B7):6329-6340, 1984",
+      "note": "continuum removal 与波段深度分析的经典出处。"
+    }
+  ],
+  "teachingNote": "输出是无量纲比值，值域 (0, 1]，恰在包络线上取 1；它不再是物理辐亮度或反射率，而是归一化的光谱形状（教学上归入 Index 域），不要再把它当反射率参与后续辐射量运算。"
+}

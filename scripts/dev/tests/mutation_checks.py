@@ -114,6 +114,21 @@ MUTATIONS = [
     return True, holder''',
         new='''    return True, holder''',
     ),
+    Mutation(
+        name="narrow-target-exact-match",
+        tool="narrow_targets.py",
+        test_module="test_narrow_targets.py",
+        test_class="NarrowTargetsTest",
+        # Realistic defect: the exact source-list index stops contributing
+        # hits, so mappings silently degrade to weak/unwired and the
+        # "build only what changed" contract is gone.
+        old='''    for raw in paths:
+        rel = raw
+        strong_hits = list(by_rel.get(rel, []))''',
+        new='''    for raw in paths:
+        rel = raw
+        strong_hits: list[str] = []''',
+    ),
 ]
 
 

@@ -8,6 +8,12 @@
 add_library( sicnu_repair_planner STATIC
     repair_sha256.cpp
     repair_schema.cpp
+    repair_requirement.cpp
+    repair_provider.cpp
+    repair_policy.cpp
+    repair_planner.cpp
+    repair_view.cpp
+    repair_state.cpp
 )
 
 target_include_directories( sicnu_repair_planner PUBLIC ${CMAKE_SOURCE_DIR}/src )

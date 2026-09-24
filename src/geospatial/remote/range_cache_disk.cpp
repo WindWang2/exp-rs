@@ -17,6 +17,8 @@
 #include <mutex>
 #include <vector>
 
+#include "platform/portable.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -54,17 +56,12 @@ DiskState &disk()
   return state;
 }
 
-/// Portable process id for staging-name uniqueness. Repo idiom: Win32
-/// GetCurrentProcessId (declared by <windows.h>), POSIX getpid (declared by
-/// <unistd.h>). `::getpid()` is NOT a Windows API and only compiles there by
-/// accident when <process.h> arrives transitively (MSVC deprecation C4996).
+/// Portable process id for staging-name uniqueness (platform/portable.h).
+/// `::getpid()` is NOT a Windows API and only compiles there by accident
+/// when <process.h> arrives transitively (MSVC deprecation C4996).
 long long currentProcessId()
 {
-#ifdef _WIN32
-  return static_cast<long long>( ::GetCurrentProcessId() );
-#else
-  return static_cast<long long>( ::getpid() );
-#endif
+  return static_cast<long long>( sicnu::portable::pid() );
 }
 
 /// Block file name: content-keyed, fixed layout

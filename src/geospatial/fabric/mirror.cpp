@@ -15,6 +15,7 @@
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/sha256.h"
 #include "geospatial/util/time_normalization.h"
+#include "platform/portable.h"
 
 #include <cpl_vsi.h>
 
@@ -310,7 +311,7 @@ class MirrorWriterLock
     /// crashed run is distinguishable from a live one.
     void stampOwner()
     {
-      const std::string stamp = std::to_string( static_cast<long>( ::getpid() ) ) + " " +
+      const std::string stamp = std::to_string( static_cast<long>( sicnu::portable::pid() ) ) + " " +
                                 std::to_string( std::time( nullptr ) ) + "\n";
 #ifdef _WIN32
       // The pid form differs across platforms; the AGE fallback below
