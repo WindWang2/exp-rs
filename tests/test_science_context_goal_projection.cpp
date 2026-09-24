@@ -26,8 +26,12 @@
 #include "preflight/capability_mirror.h"
 #include "science_context/bundle.h"
 #include "science_context/planner_goal_projection.h"
+#include "scientific_state/asset_state_resolver.h"
 
 #include <json/json.h>
+
+#include <map>
+#include <set>
 
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."
@@ -288,6 +292,73 @@ TEST_CASE( "Conflicted evidence and constraints travel into the projection",
     conflicted.assets[0].conflictAlternatives = { "path-a", "path-b" };
     const auto projection = projectPlannerInputs( conflicted );
     REQUIRE( hasIssue( projection, projection_issue::kConflictedEvidence, "scene-a" ) );
+}
+
+TEST_CASE( "Asset ids the planner cannot lawfully carry are named and skipped",
+           "[goal_projection]" )
+{
+    // A ref beyond the planner's 64-char bound cannot survive the plan's own
+    // fail-closed schema: the projection names it instead of emitting a
+    // context that cannot round-trip.
+    ScientificContextBundle oversized = bundle( "ndvi" );
+    oversized.assets[0].assetId = "scene-" + std::string( 59, 'a' ); // 65 chars
+    auto projection = projectPlannerInputs( oversized );
+    REQUIRE( projection.context.assets.empty() );
+    REQUIRE( hasIssue( projection, projection_issue::kOversizedAssetId, "scene-a" ) );
+
+    // A duplicate id projects ONCE and is named — planning_contextFromJson
+    // types duplicate refs invalid_field, so emitting both would manufacture
+    // an invalid context.
+    ScientificContextBundle duplicated = bundle( "ndvi" );
+    duplicated.assets.push_back( duplicated.assets[0] );
+    projection = projectPlannerInputs( duplicated );
+    REQUIRE( projection.context.assets.size() == 1 );
+    REQUIRE( hasIssue( projection, projection_issue::kDuplicateAssetId, "scene-a" ) );
+}
+
+TEST_CASE( "An unrecognized autonomy level plans conservatively AND says so",
+           "[goal_projection]" )
+{
+    ScientificContextBundle odd = bundle( "ndvi" );
+    odd.constraints.autonomyLevel = "L9";
+    const auto projection = projectPlannerInputs( odd );
+    REQUIRE( projection.context.mode.autonomy == "minimal" ); // conservative
+    REQUIRE( hasIssue( projection, projection_issue::kUnmappedAutonomyLevel, "L9" ) );
+}
+
+TEST_CASE( "Drift pins: radiometric map tracks the passport authority and contracts",
+           "[goal_projection]" )
+{
+    for ( const auto &[unit, domain] : radiometricUnitToDomainMap() )
+    {
+        INFO( unit << " -> " << domain );
+        std::string normalized;
+        REQUIRE( sicnu::state::normalizeRadiometricToken( unit, normalized ) );
+        REQUIRE( sicnu::planner::isKnownContractsNumericDomain( domain ) );
+    }
+}
+
+TEST_CASE( "Drift pins: every projected intent is a live harness intent", "[goal_projection]" )
+{
+    // Mirror of the closed harness intent vocabulary (intent_vocabulary.h):
+    // the projection must never invent an intent the harness cannot serve.
+    // Pinned here because the Qt-free projection cannot link the harness.
+    const std::set<std::string> kHarnessIntents = {
+        "ndvi",     "change",   "sar_change", "classify", "phenology", "evi",
+        "savi",     "ndre",     "ndwi",       "mndwi",    "ndsi",      "nbr",
+        "dnbr",     "ndbi",     "bsi",        "water",    "flood",     "sar_water",
+        "sar_flood", "sar",     "ship",       "temporal", "terrain",   "accuracy",
+        "qa",       "preprocess", "inference", "zonal",
+    };
+    const std::map<std::string, std::string> map = intentToGoalKindMap();
+    for ( const auto &[intent, kind] : map )
+    {
+        INFO( intent << " -> " << kind );
+        REQUIRE( kHarnessIntents.count( intent ) == 1 );
+    }
+    // Deliberately unmapped live intents stay loud, not guessed.
+    for ( const char *intent : { "sar", "terrain", "zonal", "accuracy", "qa", "preprocess" } )
+        REQUIRE( map.find( intent ) == map.end() );
 }
 
 TEST_CASE( "Mode policy and determinism constraints project from the bundle", "[goal_projection]" )

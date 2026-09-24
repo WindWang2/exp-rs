@@ -34,6 +34,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #ifndef CMAKE_SOURCE_DIR
 #define CMAKE_SOURCE_DIR "."
 #endif
@@ -53,46 +55,15 @@ Json::Value parse( const std::string &text )
     return out;
 }
 
-std::string readFile( const std::string &path )
-{
-    std::ifstream in( path, std::ios::binary );
-    return std::string( ( std::istreambuf_iterator<char>( in ) ),
-                        std::istreambuf_iterator<char>() );
-}
-
-/// Minimal real-shaped mirror documents: a family default plus operator
-/// entries that extend it, keyed to the operators the test plans over.
-Json::Value familyDefault( const std::string &family, const std::string &costClass )
-{
-    Json::Value entry( Json::objectValue );
-    entry["id"] = "family:" + family;
-    entry["kind"] = "family_default";
-    entry["family"] = family;
-    Json::Value resource( Json::objectValue );
-    resource["cost_class"] = costClass;
-    entry["resource"] = resource;
-    return entry;
-}
-
-Json::Value operatorEntry( const std::string &id, const std::string &family,
-                           const std::string &costClass )
-{
-    Json::Value entry( Json::objectValue );
-    entry["id"] = id;
-    entry["family"] = family;
-    entry["extends"] = "family:" + family;
-    Json::Value resource( Json::objectValue );
-    resource["cost_class"] = costClass;
-    entry["resource"] = resource;
-    return entry;
-}
-
 /// A synthetic mirror directory with one document per named entry set.
-/// Returns the directory path (created under the test's temp dir).
+/// Unique per process (pid suffix), wiped before writing so stale content
+/// from an older run cannot leak into loadDirectory.
 std::string writeMirrorDir( const std::string &name,
                             const std::vector<std::pair<std::string, Json::Value>> &documents )
 {
-    const std::string dir = "/tmp/planner_live_" + name;
+    const std::string dir = "/tmp/planner_live_" + name + "_"
+                            + std::to_string( static_cast<long>( ::getpid() ) );
+    std::filesystem::remove_all( dir );
     std::filesystem::create_directories( dir );
     for ( const auto &[fileName, array] : documents )
     {
@@ -172,6 +143,28 @@ TEST_CASE( "LiveCapabilityProvider fails closed on unusable mirrors", "[planner_
         std::string error;
         REQUIRE_FALSE( LiveCapabilityProvider::create( mirror, provider, error ) );
         REQUIRE( error.find( "unhealthy" ) != std::string::npos );
+    }
+    SECTION( "hostile resource shape degrades to a counted skip, never an abort" )
+    {
+        // The mirror's fail-closed validation does not police `resource`;
+        // an entry authoring a non-object resource must come back as a
+        // typed skip, not an exception out of create().
+        sicnu::preflight::CapabilityMirrorProjection mirror;
+        mirror.addDocument(
+            parse( R"( [
+                {"id":"family:spectral_index","kind":"family_default","family":"spectral_index",
+                 "resource":{"cost_class":"light"}},
+                {"id":"rs:ndvi","family":"spectral_index","extends":"family:spectral_index",
+                 "resource":"heavy"},
+                {"id":"rs:evi","family":"spectral_index","extends":"family:spectral_index",
+                 "resource":{"cost_class":42}}
+            ] )" ),
+            "hostile.json" );
+        LiveCapabilityProvider provider;
+        std::string error;
+        REQUIRE( LiveCapabilityProvider::create( mirror, provider, error ) );
+        REQUIRE( provider.capabilitiesForFamily( "analysis" ).empty() );
+        REQUIRE( provider.stats().skippedNoCostClass.size() == 2 );
     }
 }
 

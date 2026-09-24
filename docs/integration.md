@@ -283,6 +283,10 @@ mirror's verification/publication entries do not exist, so those slots stay
 honestly unprojected; everything skipped is listed in `stats()`. The
 provider carries `revision()` (a digest over the projected merged entries):
 a replan after an authority change is attributable to facts, not drift.
+RAM honesty: the mirror declares cost classes but no memory estimates, so
+every projected fact carries `estimatedRamMb = 0` — under this provider a
+`max_estimated_ram_mb` budget cannot trip (the cost-class budget stays
+enforced) until the authority declares RAM facts.
 Unprojected slots are inert by declaration; the planner asks instead of
 default-filling.
 

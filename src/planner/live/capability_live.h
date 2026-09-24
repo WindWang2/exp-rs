@@ -83,10 +83,14 @@ class LiveCapabilityProvider final : public CapabilityProvider
     /// Authority id for provenance consumers (stable wire spelling).
     static const char *authorityId() { return "planner.capability_mirror"; }
 
-    /// sha256/16 over the sorted "(origin)\n(entryJson)" set of the mirror —
-    /// the authority revision handle. Two providers over the same documents
-    /// carry the same revision; any document change moves it, so a replan
-    /// after a revision change is attributable to facts, not drift.
+    /// sha256/16 over the sorted "id\nmergedJson" set of the PROJECTED
+    /// PLANNING FACTS (the rs: operator entries this provider serves, after
+    /// merge) — the planning-facts revision handle. Two providers over the
+    /// same planning facts carry the same revision; any change to those
+    /// facts (entry removed, merged content edited) moves it, so a replan
+    /// after a revision change is attributable to facts, not drift. Mirror
+    /// content that plans nothing (non-rs: tool ids, family defaults) is
+    /// intentionally out of scope.
     std::string revision() const { return mRevision; }
 
     /// The planner family slots this adapter can serve (sorted). The planner
@@ -106,6 +110,13 @@ class LiveCapabilityProvider final : public CapabilityProvider
 /// The mirror cost-class vocabulary projected onto the planner cost
 /// vocabulary. Returns "" for anything the mirror does not declare —
 /// the caller then skips the entry (never maps unknown → "low").
+std::string plannerCostClassForMirrorCostClass( const std::string &mirrorCostClass );
+
+/// RAM honesty: the mirror declares cost classes but NO memory estimates,
+/// so every projected fact carries estimatedRamMb = 0 (undeclared). A
+/// caller setting max_estimated_ram_mb therefore gets a plan whose RAM
+/// budget is VACUOUS under this provider — the cost-class budget stays
+/// enforced, the RAM one cannot trip until the authority declares RAM.
 std::string plannerCostClassForMirrorCostClass( const std::string &mirrorCostClass );
 
 } // namespace sicnu::planner

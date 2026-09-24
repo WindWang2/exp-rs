@@ -200,8 +200,23 @@ bool LiveCapabilityProvider::create( const sicnu::preflight::CapabilityMirrorPro
             skippedNoContract.push_back( id );
             continue;
         }
+        const Json::Value &resource = entry.entry["resource"];
+        if ( !resource.isObject() )
+        {
+            skippedNoCostClass.push_back( id );
+            continue;
+        }
+        const Json::Value &costClassValue = resource["cost_class"];
+        // Hostile-shape guard: the mirror's fail-closed validation does not
+        // police `resource`, so a non-object resource or non-string cost
+        // class must degrade to a counted skip — never an exception path.
+        if ( !costClassValue.isString() )
+        {
+            skippedNoCostClass.push_back( id );
+            continue;
+        }
         const std::string costClass = plannerCostClassForMirrorCostClass(
-            entry.entry["resource"]["cost_class"].asString() );
+            costClassValue.asString() );
         if ( costClass.empty() )
         {
             skippedNoCostClass.push_back( id );

@@ -18,6 +18,9 @@ namespace {
 /// candidate). Codes describing an UNKNOWN fact (the authority could not
 /// answer) stay deliberately unmapped: an unknown is not an actionable
 /// data-prep need, and a repair offer over it would fabricate feasibility.
+/// The same holds for the observed-but-not-actionable
+/// SPF_TEMPORAL_DATES_TRUNCATED (a provider-side display cap, not a data
+/// gap an operator could repair) and for the request/budget guards.
 const std::map<std::string, std::string> &findingCodeTable()
 {
     static const std::map<std::string, std::string> kTable = {

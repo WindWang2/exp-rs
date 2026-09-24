@@ -39,15 +39,23 @@ Json::Value sectionSourceToJson( const SectionSource &source )
 
 /// Autonomy level (L0..L5 wire spelling) → planner mode policy. The bundle's
 /// constraint block is the authority for how much the machine may decide.
-sicnu::planner::ModePolicy modeForAutonomyLevel( const std::string &level )
+/// Conservative for every input (unknown levels plan with maximal
+/// escalation), but unknown levels are ALSO named as issues — silent
+/// conservative mapping would still be default-filling.
+sicnu::planner::ModePolicy modeForAutonomyLevel( const std::string &level, bool &known )
 {
     sicnu::planner::ModePolicy mode;
     mode.kind = "agent";
     mode.autonomy = "minimal"; // L0-L2 default: every decision escalates
+    known = true;
     if ( level == "L5" )
         mode.autonomy = "full";
     else if ( level == "L3" || level == "L4" )
         mode.autonomy = "guided";
+    else if ( level == "L0" || level == "L1" || level == "L2" )
+        mode.autonomy = "minimal";
+    else
+        known = false;
     return mode;
 }
 
@@ -55,6 +63,12 @@ sicnu::planner::ModePolicy modeForAutonomyLevel( const std::string &level )
 
 std::map<std::string, std::string> intentToGoalKindMap()
 {
+    // Deliberately UNMAPPED live intents (loud unresolved_intent, never a
+    // guessed kind): "sar" (change vs water vs ship — the caller must
+    // disambiguate), "terrain" (no planner goal kind owns terrain products),
+    // "zonal" (statistics over zones — no analysis slot projects it yet),
+    // "accuracy"/"qa"/"preprocess" (not science goals). Drift-pinned against
+    // the harness intent vocabulary by tests/test_science_context_goal_projection.
     static const std::map<std::string, std::string> kMap = {
         // spectral index measurement (the planner's measurement kind)
         { "ndvi", "measurement" },   { "evi", "measurement" },
@@ -79,6 +93,12 @@ std::map<std::string, std::string> intentToGoalKindMap()
 
 std::map<std::string, std::string> radiometricUnitToDomainMap()
 {
+    // Keys must stay members of scientific_state's normalized radiometric
+    // vocabulary (normalizeRadiometricToken, asset_state_resolver.h) and
+    // values must be contracts numeric domains — both pinned by
+    // test_science_context_goal_projection. A unit added to the passport
+    // authority without a map entry degrades LOUDLY (foreign_radiometric_unit
+    // issue + undeclared domain), so the drift is contained, never silent.
     static const std::map<std::string, std::string> kMap = {
         { "digital_number", "dn" },
         { "radiance", "radiance" },
@@ -115,10 +135,22 @@ PlannerProjectionResult projectPlannerInputs( const ScientificContextBundle &bun
     }
     goal.subject = bundle.goal;
 
-    // Deterministic identity from the projected content (provenance-stable:
-    // the same bundle projects the same goal id; a changed bundle does not).
+    // Deterministic identity from the projected content. The digest covers
+    // bundleId, the projected intent/goal AND the projected asset id set, so
+    // bundles that differ in their assets project different goal ids even
+    // when a caller reuses a bundleId (callers are expected to carry the
+    // broker's computeBundleId, but the projection does not trust that).
+    std::vector<std::string> assetIdMaterial;
+    assetIdMaterial.reserve( bundle.assets.size() );
+    for ( const auto &asset : bundle.assets )
+        assetIdMaterial.push_back( asset.assetId );
+    std::sort( assetIdMaterial.begin(), assetIdMaterial.end() );
+    std::string assetMaterial;
+    for ( const auto &id : assetIdMaterial )
+        assetMaterial += id + ";";
     goal.goalId = "goal-" + sicnu::planner::fingerprint16( bundle.bundleId + "|" + bundle.intent
-                                                           + "|" + bundle.goal );
+                                                           + "|" + bundle.goal + "|"
+                                                           + assetMaterial );
 
     // ---- assets ----------------------------------------------------------
     std::set<std::string> bundleAssetIds;
@@ -130,11 +162,35 @@ PlannerProjectionResult projectPlannerInputs( const ScientificContextBundle &bun
                                      "bundle carries an asset without an id — skipped" ) );
             continue;
         }
-        bundleAssetIds.insert( asset.assetId );
+        // The planner bounds asset refs at PlanLimits::kMaxIdChars; a longer
+        // id cannot survive the plan's own fail-closed schema, so it is
+        // named and skipped instead of flowing into a plan that cannot
+        // round-trip.
+        if ( asset.assetId.size() > sicnu::planner::PlanLimits::kMaxIdChars )
+        {
+            issues.push_back( issue( projection_issue::kOversizedAssetId,
+                                     "asset id \"" + asset.assetId + "\" exceeds the "
+                                         + std::to_string(
+                                               sicnu::planner::PlanLimits::kMaxIdChars )
+                                         + "-char planner bound — skipped" ) );
+            continue;
+        }
+        if ( !bundleAssetIds.insert( asset.assetId ).second )
+        {
+            issues.push_back( issue( projection_issue::kDuplicateAssetId,
+                                     "asset id \"" + asset.assetId
+                                         + "\" is declared more than once — projected once" ) );
+            continue;
+        }
 
         sicnu::planner::PlannerAssetFacts facts;
         facts.ref = asset.assetId;
         facts.kind = "raster"; // bundle assets are RS raster surfaces by schema
+        // Modality projection onto the planner's closed axis. Loud-unknown
+        // beats silent projection: hyperspectral is optical-family imaging
+        // (mapped), but thermal has no honest planner home (kAssetModalities
+        // carries no thermal) — it degrades to "unknown" WITH an issue
+        // instead of quietly becoming optical.
         const std::string modality =
             ( asset.modality == "optical" || asset.modality == "hyperspectral" )
                 ? "optical"
@@ -249,7 +305,15 @@ PlannerProjectionResult projectPlannerInputs( const ScientificContextBundle &bun
 
     // ---- constraints / quality / mode -------------------------------------
     result.context.constraints.requiredDeterminism = bundle.constraints.determinismRequired;
-    result.context.mode = modeForAutonomyLevel( bundle.constraints.autonomyLevel );
+    bool autonomyKnown = false;
+    result.context.mode = modeForAutonomyLevel( bundle.constraints.autonomyLevel, autonomyKnown );
+    if ( !autonomyKnown )
+    {
+        issues.push_back( issue( projection_issue::kUnmappedAutonomyLevel,
+                                 "autonomy level \"" + bundle.constraints.autonomyLevel
+                                     + "\" is outside L0..L5 — planning conservatively with "
+                                       "minimal autonomy" ) );
+    }
 
     // ---- provenance --------------------------------------------------------
     Json::Value provenance( Json::objectValue );

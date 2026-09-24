@@ -47,6 +47,9 @@ inline constexpr const char *kUnmappedModality = "unmapped_modality";
 inline constexpr const char *kConflictedEvidence = "conflicted_evidence";
 inline constexpr const char *kEnrichmentRejected = "enrichment_rejected";
 inline constexpr const char *kEmptyAssetId = "empty_asset_id";
+inline constexpr const char *kOversizedAssetId = "oversized_asset_id";
+inline constexpr const char *kDuplicateAssetId = "duplicate_asset_id";
+inline constexpr const char *kUnmappedAutonomyLevel = "unmapped_autonomy_level";
 } // namespace projection_issue
 
 struct ProjectionIssue
