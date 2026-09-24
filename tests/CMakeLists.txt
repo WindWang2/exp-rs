@@ -11364,6 +11364,7 @@ add_executable(test_workflow_durability_13 test_workflow_durability_13.cpp
   ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
   ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
   ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  ${CMAKE_SOURCE_DIR}/src/geospatial/util/atomic_fs.cpp
   ${SICNU_FAULT_REGISTRY_SOURCE}
 )
 target_link_libraries(test_workflow_durability_13 PRIVATE
