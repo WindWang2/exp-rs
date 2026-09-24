@@ -20,6 +20,7 @@
 #include <json/json.h>
 
 #include <memory>
+#include <QJsonObject>
 
 using namespace sicnu::workflow;
 

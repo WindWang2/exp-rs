@@ -36,6 +36,7 @@
 #define SICNU_TEST_GETPID ::_getpid
 #else
 #include <unistd.h>
+#include <QJsonArray>
 #define SICNU_TEST_GETPID ::getpid
 #endif
 

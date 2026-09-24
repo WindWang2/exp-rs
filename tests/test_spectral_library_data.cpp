@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "processing/algorithms/spectral_library.h"
+#include <QJsonValue>
 
 using SpectralLibrary::Entry;
 using SpectralLibrary::Library;

@@ -45,6 +45,7 @@
 #include "study/bridge/study_execution_plane.h"
 #include "study/study_sampling.h"
 #include "study/study_spec.h"
+#include <QJsonValue>
 
 using namespace sicnu::experiment_studio;
 using namespace sicnu::experiment_studio::live;

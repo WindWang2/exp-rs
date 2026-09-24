@@ -11,6 +11,9 @@
 #include "workflow/contract_checker.h"
 #include "workflow/workflow_ir_v2.h"
 #include "workflow/workflow_repair_engine.h"
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 
 using namespace sicnu::agent::tools;
 using namespace sicnu::workflow;

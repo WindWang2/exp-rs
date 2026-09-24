@@ -25,6 +25,7 @@
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
+#include <QJsonValue>
 
 using sicnu::agent::LabDataPack;
 using sicnu::agent::LabDataPackResult;

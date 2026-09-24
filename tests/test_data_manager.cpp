@@ -15,6 +15,7 @@
 #include "data/internal/source_provider.h"
 #include "data/internal/source_provider_registry.h"
 #include "data/source_descriptor.h"
+#include <QJsonObject>
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetLease;

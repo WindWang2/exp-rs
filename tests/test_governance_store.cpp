@@ -10,6 +10,7 @@
 #include <QVariantMap>
 
 #include <sqlite3.h>
+#include <QJsonObject>
 
 using namespace sicnu::workspace;
 

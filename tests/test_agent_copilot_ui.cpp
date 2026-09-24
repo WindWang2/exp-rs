@@ -26,6 +26,7 @@
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
+#include <QJsonArray>
 
 using namespace sicnu::agent;
 using namespace sicnu::data;
