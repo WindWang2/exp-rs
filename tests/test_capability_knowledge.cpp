@@ -25,6 +25,7 @@
 #include "agent/harness/capability_catalog.h"
 #include "agent/harness/capability_graph.h"
 #include "agent/harness/capability_knowledge.h"
+#include "agent/harness/repair_capability_source.h"
 #include "agent/harness/capability_pages.h"
 #include "agent/harness/capability_relations.h"
 #include "agent/spatial_tools/spatial_tool.h"
@@ -633,4 +634,57 @@ TEST_CASE( "D8 query API: bounded browsing over the closed families",
           listsAtmospheric = true;
     }
     CHECK( listsAtmospheric );
+}
+
+// ---------------------------------------------------------------------------
+// R3 repair-planner integration: the live knowledge feeds the repair
+// provider seam; deleted entries cannot keep offering candidates.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "live repair capability source routes the real knowledge documents",
+           "[capability][d8][repair]" )
+{
+    CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+    knowledge.setDirectory( std::string( kSourceDir ) + "/data/agent/capabilities" );
+    knowledge.reload();
+    REQUIRE( knowledge.loadProblems().empty() );
+
+    sicnu::repair::RepairError error;
+    sicnu::repair::JsonRepairCapabilityProvider provider;
+    REQUIRE( sicnu::agent::harness::liveRepairCapabilityProvider( provider, error ) );
+
+    // The shipped grid operators are the ones the closed routing table
+    // names; the adapter adds no id of its own.
+    REQUIRE( provider.knowsRequirementKind( "grid_align" ) );
+    std::set<std::string> gridIds;
+    for ( const Json::Value &entry : provider.capabilitiesForRequirement( "grid_align" ) )
+        gridIds.insert( entry["id"].asString() );
+    CHECK( gridIds.count( "rs:resample" ) == 1 );
+    CHECK( gridIds.count( "rs:align" ) == 1 );
+
+    // Determinism: the same knowledge produces an identical provider twice.
+    sicnu::repair::JsonRepairCapabilityProvider again;
+    REQUIRE( sicnu::agent::harness::liveRepairCapabilityProvider( again, error ) );
+    std::set<std::string> againIds;
+    for ( const Json::Value &entry : again.capabilitiesForRequirement( "grid_align" ) )
+        againIds.insert( entry["id"].asString() );
+    CHECK( againIds == gridIds );
+
+    // Deletion oracle: a knowledge base that no longer ships an operator
+    // cannot offer it — the router reads the entries, not a second table.
+    auto entries = sicnu::agent::harness::liveRepairCapabilityEntries();
+    REQUIRE( entries.size() > 20 );
+    std::vector<Json::Value> shrunken;
+    for ( const Json::Value &entry : entries )
+        if ( entry["id"].asString() != "rs:resample" )
+            shrunken.push_back( entry );
+    sicnu::repair::JsonRepairCapabilityProvider withoutResample;
+    REQUIRE( sicnu::repair::JsonRepairCapabilityProvider::buildFromCapabilityEntries(
+                 shrunken, withoutResample, error ) );
+    std::set<std::string> shrunkenIds;
+    for ( const Json::Value &entry :
+          withoutResample.capabilitiesForRequirement( "grid_align" ) )
+        shrunkenIds.insert( entry["id"].asString() );
+    CHECK( shrunkenIds.count( "rs:resample" ) == 0 );
+    CHECK( shrunkenIds.count( "rs:align" ) == 1 );
 }
