@@ -44,6 +44,9 @@
 #include "explain/adapters/registry_operator_knowledge.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
+// The why-this-step document provider dereferences the D17 designer dock
+// (created on demand — main_window.h only forward-declares it).
+#include "pipeline/ir2_pipeline_designer_dock.h"
 #include "workflow/workflow_ir_v2.h"
 
 #include <optional>

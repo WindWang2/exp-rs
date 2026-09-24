@@ -51,7 +51,9 @@ public:
   // Loads every provenance_<runId>.json directly inside @p directory
   // (sorted, bounded). Never throws: bad files are recorded in the load
   // problems and skipped; the returned adapter is always non-null
-  // (possibly empty).
+  // (possibly empty). Names without a usable run id are treated as
+  // not-a-record by the scan (no problem emitted); the single-record
+  // loader reports them as malformed_name instead.
   static std::unique_ptr<ProvenanceFileEvidence> loadFromDirectory(
     const std::string &directory, std::vector<EvidenceLoadProblem> &problems );
 

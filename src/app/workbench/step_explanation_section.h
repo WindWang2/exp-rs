@@ -64,6 +64,15 @@ class StepExplanationSection : public InspectorSection
     /// Story boundary / new run starting: drop the previous run's evidence.
     void clearRunEvidence();
 
+    /// The D17 document identity changed (workflowId + content fingerprint).
+    /// The dock RE-ANNOUNCES identity on every canvas interaction, so an
+    /// unchanged key is a no-op — a re-announce must never wipe live run
+    /// evidence. A real change (New document / LabSpec lift / content edit)
+    /// drops the previous run's evidence and returns true (the shell then
+    /// also clears the stale pipeline-node selection, which lives in the
+    /// selection context — a layer above this section).
+    bool noteWorkflowIdentity( const QString &workflowId, const QString &fingerprint );
+
     /// The run id evidence is currently scoped to (empty = none).
     QString currentRunId() const { return m_runId; }
     /// Typed load problems of the current evidence source (surfaced by the
@@ -78,6 +87,7 @@ class StepExplanationSection : public InspectorSection
     std::unique_ptr<sicnu::explain::adapters::ProvenanceFileEvidence> m_evidence;
     QString m_runId;
     QStringList m_evidenceProblemCodes;
+    QString m_identityKey;
 };
 
 } // namespace sicnu::app

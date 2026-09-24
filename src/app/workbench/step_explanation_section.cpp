@@ -108,6 +108,17 @@ void StepExplanationSection::clearRunEvidence()
     m_evidenceProblemCodes.clear();
 }
 
+bool StepExplanationSection::noteWorkflowIdentity( const QString &workflowId,
+                                                   const QString &fingerprint )
+{
+    const QString key = workflowId + QLatin1Char( '/' ) + fingerprint;
+    if ( m_identityKey == key )
+        return false; // re-announce: live run evidence stays
+    m_identityKey = key;
+    clearRunEvidence();
+    return true;
+}
+
 QStringList StepExplanationSection::evidenceProblemCodes() const
 {
     return m_evidenceProblemCodes;

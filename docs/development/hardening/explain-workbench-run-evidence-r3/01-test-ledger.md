@@ -21,14 +21,14 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 
 | Suite | Result |
 |---|---|
-| `test_explain_step_panel` | **ALL PASSED 148/148, 15/15 — ×2** |
+| `test_explain_step_panel` | **ALL PASSED 163/163, 16/16 — ×2** |
 | `test_explain_agent_tool` | **ALL PASSED 78/78, 12/12 — ×2** (includes 6 new run-scoped cases) |
 | `test_explain_projection` | **110/110, 8/8 — ×2** (record-name grammar + single-record load pinned) |
 | `test_selection_context` | **72/72, 15/15 — ×2** (node-selection push/coalescing/clear covered) |
 | `test_inspector_host` | 27 assertions / 6 cases (adjacent) |
 | `test_provenance_section` | 61 assertions / 6 cases (adjacent) |
 | `test_build_wiring_drift` | 34 assertions / 7 cases (CMake changed) |
-| `sicnu_geo_rs` | named product target built (see PR body for final state) |
+| `sicnu_geo_rs` | **named product target: compiled + linked clean** (shell TUs + link closure) |
 
 ## Sabotage evidence (each run on the exact tree, then reverted and re-verified green)
 
@@ -37,15 +37,22 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 | S1: tool reverted to master shape (no `runId`/`provenanceDirectory` handling) | `test_explain_agent_tool` 4 cases / 8 assertions FAIL |
 | S2: panel honest-unknown branch removed (`if (false && !executionShown)`) | `test_explain_step_panel` 6 cases / 7 assertions FAIL |
 | S3: section keeps the previous run's adapter when a re-attach fails to parse | tampered-re-attach case FAIL (stale 状态: Succeeded served after the record corrupted) |
+| S4: identity gate removed (every dock identity re-announce clears evidence) | identity re-announce case FAIL 5 assertions (feature unreachable through select→run→click) |
 
-## Review round (independent adversarial review, all blocking findings fixed)
+## Review round (independent adversarial review, all blocking findings fixed + re-reviewed)
 
 - **P1-1 (stale scope across boundaries)** — the shell cleared run evidence only on
   `pipelineRunStarted`; a project switch or a replaced D17 document (New / LabSpec lift)
   left the previous run's evidence attached and the stale node id selected. Fixed: the
-  dock's `workflowIdentityChanged` now clears evidence + node selection, and the project
-  story boundary (empty-session render + open transaction hook, next to the mission/lab
-  resets) calls `resetStepExplanationSession()` (clear evidence + clear node selection).
+  project story boundary (empty-session render + open transaction hook, next to the
+  mission/lab resets) calls `resetStepExplanationSession()`.
+- **P0-review-round-1→2 (identity re-announce)** — the first fix wired the clears to
+  `workflowIdentityChanged`, but the dock re-announces identity on every canvas
+  interaction, wiping freshly attached evidence (run-scoped rendering was unreachable
+  through the natural select→run→click flow). Re-fixed: the gate lives IN the section
+  (`noteWorkflowIdentity(workflowId, fingerprint)` — unchanged key ⇒ no-op, real change
+  ⇒ clears evidence and reports true so the shell also clears the node selection), with
+  a seam-level regression oracle (S4).
 - **P1-2 (notify path untested)** — `notifyPipelineNodeSelection` (trim, idempotence,
   clear-on-empty, debounce coalescing) now has direct `test_selection_context` coverage.
 - **P2-1 (duplicated record-name grammar)** — the section's local name parser is gone;
@@ -58,6 +65,9 @@ lifecycle. No new product direction; no explanation semantics outside `sicnu_exp
 - **P2-4 (GUI-thread directory scan on run finish)** — the section loads exactly ONE
   record via the new `ProvenanceFileEvidence::loadFromFile` (no directory scan; the
   load cost is the record itself).
+- Product-target compile caught an incomplete-type error in the registration TU
+  (forward-declared designer dock dereferenced in the document provider) — fixed with
+  the real include; `sicnu_geo_rs` relinked clean.
 
 ## Honesty contract pinned by the oracles
 

@@ -596,6 +596,54 @@ TEST_CASE( "section populate projects the node and surfaces run evidence lifecyc
     CHECK_FALSE( section.panel()->renderedText().contains( "sha256full:feed" ) );
 }
 
+TEST_CASE( "identity re-announce never wipes live evidence; a real identity change does",
+           "[explain][section][lifecycle]" )
+{
+    ensureApp();
+    // Shell flow pinned at the section seam: the dock re-announces identity
+    // on EVERY canvas interaction (node clicks, Run clicks). If a
+    // re-announce cleared run evidence, the natural flow select→run→click
+    // would always degrade to plan-only and the run-scoped surface would be
+    // unreachable in the app.
+    TempDir evidenceDir( "explain_section_identity" );
+    writeAndLoadRun( evidenceDir, QStringLiteral( "run-42" ), ExecutionState::Succeeded, QString(),
+                     QStringLiteral( "sha256full:abc123" ), 4321 );
+
+    TempDir dir( "explain_section_identity_guidance" );
+    std::vector<GuidanceLoadProblem> problems;
+    const auto guidance = GuidanceStore::loadFromDirectory( dir.path.string(), problems );
+
+    const WorkflowDocument document = parsedDocument();
+    StepExplanationSection section(
+        liveKnowledge(), [&]() -> const IAuthoredGuidance * { return guidance.get(); },
+        [&]() -> std::optional<WorkflowDocument> { return document; } );
+
+    // Dock creation seeds the identity (first announce is a real change).
+    CHECK( section.noteWorkflowIdentity( QStringLiteral( "wf-1" ), QStringLiteral( "fp-1" ) ) );
+
+    // Run finished → evidence attached; user clicks the SAME document's node
+    // repeatedly — each click re-announces the same identity.
+    section.attachRunProvenance(
+        QString::fromStdString( ( evidenceDir.path / "provenance_run-42.json" ).string() ) );
+    SelectionContextSnapshot snapshot;
+    snapshot.selectedPipelineNodeId = QStringLiteral( "n1" );
+    section.populate( snapshot );
+    CHECK( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
+
+    for ( int click = 0; click < 3; ++click )
+        CHECK_FALSE( section.noteWorkflowIdentity( QStringLiteral( "wf-1" ), QStringLiteral( "fp-1" ) ) );
+    section.populate( snapshot );
+    CHECK( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
+    CHECK( section.panel()->renderedText().contains( "sha256full:abc123" ) );
+
+    // A real change (New document / LabSpec lift / content edit) clears.
+    CHECK( section.noteWorkflowIdentity( QStringLiteral( "wf-2" ), QStringLiteral( "fp-2" ) ) );
+    section.populate( snapshot );
+    CHECK_FALSE( section.panel()->renderedText().contains( QStringLiteral( "状态: Succeeded" ) ) );
+    CHECK_FALSE( section.panel()->renderedText().contains( "sha256full:abc123" ) );
+    CHECK( section.currentRunId().isEmpty() );
+}
+
 TEST_CASE( "tampered provenance records surface as typed problems and stay unknown",
            "[explain][section][hostile]" )
 {
