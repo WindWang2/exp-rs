@@ -27,13 +27,7 @@
 #include <mutex>
 #include <set>
 #include <sstream>
-
-#ifdef _WIN32
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <windows.h>
-#endif
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -59,14 +53,14 @@ std::string parentOf( const std::string &path )
 bool isDirectoryLocal( const std::string &path )
 {
   std::error_code ec;
-  return fs::is_directory( fs::u8path( path ), ec );
+  return fs::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 bool readFileText( const std::string &path, std::string &out )
 {
-  // Open via u8path so Windows uses the wide API (#1178) — a narrow
-  // ifstream round-trips non-ASCII paths through the ANSI code page.
-  std::ifstream in( fs::u8path( path ), std::ios::binary );
+  // Open via the UTF-8 path boundary so Windows uses the wide API (#1178) —
+  // a narrow ifstream round-trips non-ASCII paths through the ANSI code page.
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
   std::ostringstream buffer;
@@ -75,39 +69,12 @@ bool readFileText( const std::string &path, std::string &out )
   return true;
 }
 
-/// UTF-8 process environment value. Windows: GetEnvironmentVariableW → UTF-8
-/// (std::getenv returns ACP bytes that corrupt fs::u8path). Elsewhere: getenv.
+/// UTF-8 process environment value — the sanctioned platform/portable.h
+/// boundary (Windows reads through GetEnvironmentVariableW; the ACP getenv
+/// would corrupt the UTF-8 path text built from it below).
 std::string utf8Getenv( const char *name )
 {
-  if ( !name || !*name )
-    return {};
-#ifdef _WIN32
-  const int nameWideLen = MultiByteToWideChar( CP_UTF8, 0, name, -1, nullptr, 0 );
-  if ( nameWideLen <= 0 )
-    return {};
-  std::wstring nameWide( static_cast<std::size_t>( nameWideLen ), L'\0' );
-  MultiByteToWideChar( CP_UTF8, 0, name, -1, nameWide.data(), nameWideLen );
-  const DWORD needed = GetEnvironmentVariableW( nameWide.c_str(), nullptr, 0 );
-  if ( needed == 0 )
-    return {};
-  std::wstring valueWide( needed, L'\0' );
-  const DWORD written = GetEnvironmentVariableW( nameWide.c_str(), valueWide.data(), needed );
-  if ( written == 0 || written >= needed )
-    return {};
-  valueWide.resize( written );
-  const int utf8Len = WideCharToMultiByte( CP_UTF8, 0, valueWide.data(),
-                                           static_cast<int>( valueWide.size() ),
-                                           nullptr, 0, nullptr, nullptr );
-  if ( utf8Len <= 0 )
-    return {};
-  std::string out( static_cast<std::size_t>( utf8Len ), '\0' );
-  WideCharToMultiByte( CP_UTF8, 0, valueWide.data(), static_cast<int>( valueWide.size() ),
-                       out.data(), utf8Len, nullptr, nullptr );
-  return out;
-#else
-  const char *raw = std::getenv( name );
-  return ( raw && *raw ) ? std::string( raw ) : std::string();
-#endif
+  return sicnu::portable::envUtf8( name ? name : "" );
 }
 
 // Schema 2.0 (ADR 0159): v1 stays readable with its historical rules; v2
@@ -650,7 +617,7 @@ std::vector<std::string> sensorProfileKeys( std::vector<std::string> *warnings )
   }
   std::error_code ec;
   int visited = 0;
-  for ( fs::directory_iterator it( fs::u8path( dir ), ec ), end;
+  for ( fs::directory_iterator it( sicnu::portable::pathFromUtf8( dir ), ec ), end;
         !ec && it != end && visited < kMaxFamilyFiles; it.increment( ec ) )
   {
     ++visited;
@@ -741,7 +708,7 @@ std::vector<SensorProfileValidationIssue> validateSensorProfiles()
   std::map<std::string, std::vector<std::pair<std::string, const Json::Value *>>> entriesByKey;
   std::error_code ec;
   int visited = 0;
-  for ( fs::directory_iterator it( fs::u8path( dir ), ec ), end;
+  for ( fs::directory_iterator it( sicnu::portable::pathFromUtf8( dir ), ec ), end;
         !ec && it != end && visited < kMaxFamilyFiles; it.increment( ec ) )
   {
     ++visited;

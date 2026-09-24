@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include "platform/portable.h"
 
 namespace sicnu::recipes {
 
@@ -27,9 +28,11 @@ std::string ScientificRecipeRegistry::directory() const
 
 std::string ScientificRecipeRegistry::defaultDirectory() const
 {
-  if ( const char *env = std::getenv( "SICNU_SCIENTIFIC_RECIPES_DIR" ) )
-    if ( *env && fs::is_directory( env ) )
-      return env;
+  // Path-valued env: UTF-8 boundary + UTF-8 path decode (the narrow
+  // fs::is_directory(env) would decode ACP bytes on Windows).
+  const std::string env = sicnu::portable::envUtf8( "SICNU_SCIENTIFIC_RECIPES_DIR" );
+  if ( !env.empty() && fs::is_directory( sicnu::portable::pathFromUtf8( env ) ) )
+    return env;
 
   const fs::path cwd = fs::current_path() / "data" / "agent" / "scientific_recipes";
   if ( fs::is_directory( cwd ) )

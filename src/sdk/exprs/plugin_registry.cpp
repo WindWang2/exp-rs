@@ -136,8 +136,14 @@ void PluginRegistry::configure( const PluginRegistryOptions &options )
                 PluginDiscovery::defaultRoots( mOptions.appDir, mOptions.installDataDir );
         if ( mOptions.tempDirectory.empty() )
         {
-            const char *temp = std::getenv( "TMPDIR" );
-            mOptions.tempDirectory = ( temp ? temp : "/tmp" );
+            // Temp root is a path value: read it as UTF-8 (the ACP getenv
+            // would corrupt a non-ASCII temp directory on Windows). A
+            // set-but-empty TMPDIR falls through to "/tmp", like an unset
+            // variable.
+            std::string temp = sicnu::portable::envUtf8( "TMPDIR" );
+            if ( temp.empty() )
+                temp = "/tmp";
+            mOptions.tempDirectory = temp;
         }
         if ( !mOptions.logSink )
         {
