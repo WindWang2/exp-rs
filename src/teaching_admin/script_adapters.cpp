@@ -1,8 +1,11 @@
 #include "script_adapters.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <algorithm>
 
@@ -12,6 +15,7 @@ QJsonObject ScriptRunResult::toJson() const
 {
     return QJsonObject{
         { QStringLiteral( "started" ), started },
+        { QStringLiteral( "crashed" ), crashed },
         { QStringLiteral( "exit_code" ), exitCode },
         { QStringLiteral( "timed_out" ), timedOut },
         { QStringLiteral( "stdout_bytes" ), stdoutBytes.size() },
@@ -52,6 +56,17 @@ ScriptRunResult runScript( const ScriptRunRequest &req )
         out.error = QStringLiteral( "timeout" );
         return out;
     }
+    // exitCode() is not meaningful for an abnormal exit (Qt docs): a grader
+    // that crashed must never be read as a normal exit-0 verdict.
+    if ( proc.exitStatus() != QProcess::NormalExit )
+    {
+        out.crashed = true;
+        out.exitCode = -1;
+        out.stdoutBytes = proc.readAllStandardOutput();
+        out.stderrBytes = proc.readAllStandardError();
+        out.error = QStringLiteral( "process crashed abnormally" );
+        return out;
+    }
     out.exitCode = proc.exitCode();
     out.stdoutBytes = proc.readAllStandardOutput();
     out.stderrBytes = proc.readAllStandardError();
@@ -78,12 +93,14 @@ QJsonObject BundleVerifyResult::toJson() const
         { QStringLiteral( "ok" ), ok },
         { QStringLiteral( "exit_code" ), exitCode },
         { QStringLiteral( "summary" ), summary },
+        { QStringLiteral( "manifest_schema" ), manifestSchema },
+        { QStringLiteral( "bundle_version" ), bundleVersion },
         { QStringLiteral( "findings" ), findingsArr },
     };
 }
 
 BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &bundleDir,
-                                        const QString &pythonExe )
+                                        const QString &pythonExe, const QString &expectedVersion )
 {
     BundleVerifyResult r;
     const QString script = QDir( repoRoot ).filePath( QStringLiteral( "scripts/verify_bundle_manifest.py" ) );
@@ -100,7 +117,7 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     req.timeoutMs = 120000;
     const ScriptRunResult sr = runScript( req );
     r.exitCode = sr.exitCode;
-    if ( !sr.started || sr.timedOut )
+    if ( !sr.started || sr.timedOut || sr.crashed )
     {
         r.verifiable = false;
         r.summary = sr.error;
@@ -128,16 +145,87 @@ BundleVerifyResult verifyOfflineBundle( const QString &repoRoot, const QString &
     }
     if ( r.summary.isEmpty() )
         r.summary = r.ok ? QStringLiteral( "verified_ok" ) : QStringLiteral( "verified_failed" );
+
+    // Version pin: the manifest is metadata the teacher pinned at export
+    // time. A mismatch is a typed failed verification — the digest authority
+    // itself is unchanged (the canonical script).
+    const BundleManifestInfo manifest = inspectBundleManifest( bundleDir );
+    r.manifestSchema = manifest.schema;
+    r.bundleVersion = manifest.bundleVersion;
+    if ( !expectedVersion.isEmpty() && manifest.ok && manifest.bundleVersion != expectedVersion )
+    {
+        r.ok = false;
+        r.findings.append( QStringLiteral( "version_mismatch: declared %1, expected %2" )
+                             .arg( manifest.bundleVersion, expectedVersion ) );
+        r.summary = QStringLiteral( "version_mismatch" );
+    }
     return r;
 }
 
-ScriptRunResult buildOfflineBundle( const QString &repoRoot, const QString &buildDir, const QString &outDir,
-                                    const QString &version, int maxMb )
+BundleManifestInfo inspectBundleManifest( const QString &bundleDir )
+{
+    BundleManifestInfo info;
+    const QString path = QDir( bundleDir ).filePath( QStringLiteral( "manifest.json" ) );
+    QFile f( path );
+    if ( !f.open( QIODevice::ReadOnly ) )
+    {
+        info.issues.push_back( { QStringLiteral( "manifest_unreadable" ), QStringLiteral( "manifest.json" ),
+                                 QStringLiteral( "bundle manifest missing or unreadable" ),
+                                 QStringLiteral( "error" ) } );
+        return info;
+    }
+    const QJsonObject manifest = QJsonDocument::fromJson( f.readAll() ).object();
+    if ( manifest.isEmpty() )
+    {
+        info.issues.push_back( { QStringLiteral( "manifest_invalid" ), QStringLiteral( "manifest.json" ),
+                                 QStringLiteral( "bundle manifest is not a JSON object" ),
+                                 QStringLiteral( "error" ) } );
+        return info;
+    }
+    info.ok = true;
+    info.schema = manifest.value( QStringLiteral( "schema" ) ).toString();
+    info.bundleVersion = manifest.value( QStringLiteral( "bundle_version" ) ).toString();
+    info.fileCount = manifest.value( QStringLiteral( "files" ) ).toArray().size();
+    if ( info.bundleVersion.isEmpty() )
+        info.issues.push_back( { QStringLiteral( "manifest_version_missing" ),
+                                 QStringLiteral( "bundle_version" ),
+                                 QStringLiteral( "manifest carries no bundle_version" ),
+                                 QStringLiteral( "warning" ) } );
+    return info;
+}
+
+QJsonObject BundleManifestInfo::toJson() const
+{
+    QJsonArray issueArr;
+    for ( const auto &i : issues )
+        issueArr.append( i.toJson() );
+    return QJsonObject{
+        { QStringLiteral( "ok" ), ok },
+        { QStringLiteral( "schema" ), schema },
+        { QStringLiteral( "bundle_version" ), bundleVersion },
+        { QStringLiteral( "file_count" ), fileCount },
+        { QStringLiteral( "issues" ), issueArr },
+    };
+}
+
+ScriptRunRequest bundleBuilderRequest( const QString &repoRoot, const QString &buildDir,
+                                       const QString &outDir, const QString &version, int maxMb,
+                                       bool windows )
 {
     ScriptRunRequest req;
-    req.program = QStringLiteral( "bash" );
-    req.arguments = {
-        QDir( repoRoot ).filePath( QStringLiteral( "scripts/build_offline_bundle.sh" ) ),
+    if ( windows )
+    {
+        req.program = QStringLiteral( "cmd.exe" );
+        req.arguments = QStringList{ QStringLiteral( "/c" ),
+                                     QDir( repoRoot ).filePath(
+                                       QStringLiteral( "scripts/build_offline_bundle.cmd" ) ) };
+    }
+    else
+    {
+        req.program = QStringLiteral( "bash" );
+        req.arguments = QStringList{ QDir( repoRoot ).filePath( QStringLiteral( "scripts/build_offline_bundle.sh" ) ) };
+    }
+    req.arguments += QStringList{
         QStringLiteral( "--build-dir" ),
         buildDir,
         QStringLiteral( "--out" ),
@@ -152,7 +240,71 @@ ScriptRunResult buildOfflineBundle( const QString &repoRoot, const QString &buil
     }
     req.workingDirectory = repoRoot;
     req.timeoutMs = 600000;
+    return req;
+}
+
+ScriptRunResult buildOfflineBundle( const QString &repoRoot, const QString &buildDir, const QString &outDir,
+                                    const QString &version, int maxMb )
+{
+#ifdef Q_OS_WIN
+    const ScriptRunRequest req = bundleBuilderRequest( repoRoot, buildDir, outDir, version, maxMb, true );
+#else
+    const ScriptRunRequest req = bundleBuilderRequest( repoRoot, buildDir, outDir, version, maxMb, false );
+#endif
     return runScript( req );
+}
+
+QJsonObject PackDriftCheck::toJson() const
+{
+    return QJsonObject{
+        { QStringLiteral( "ran" ), ran },
+        { QStringLiteral( "exit_code" ), exitCode },
+        { QStringLiteral( "in_sync" ), inSync },
+        { QStringLiteral( "drift_files" ), QJsonArray::fromStringList( driftFiles ) },
+        { QStringLiteral( "summary" ), summary },
+    };
+}
+
+PackDriftCheck checkLabPackDrift( const QString &repoRoot, const QString &pythonExe )
+{
+    PackDriftCheck check;
+    const QString script = QDir( repoRoot ).filePath( QStringLiteral( "scripts/gen_lab_packs.py" ) );
+    if ( !QFileInfo::exists( script ) )
+    {
+        check.summary = QStringLiteral( "foundry_script_missing" );
+        return check;
+    }
+    ScriptRunRequest req;
+    req.program = pythonExe;
+    req.arguments = { script, QStringLiteral( "--check" ) };
+    req.workingDirectory = repoRoot;
+    req.timeoutMs = 120000;
+    const ScriptRunResult sr = runScript( req );
+    check.ran = sr.started && !sr.timedOut && !sr.crashed;
+    check.exitCode = sr.exitCode;
+    if ( !sr.started )
+    {
+        check.summary = sr.error;
+        return check;
+    }
+    if ( sr.timedOut || sr.crashed )
+    {
+        check.summary = sr.timedOut ? QStringLiteral( "timeout" ) : sr.error;
+        return check;
+    }
+    const QString text = QString::fromUtf8( sr.stdoutBytes ) + QStringLiteral( "\n" )
+                         + QString::fromUtf8( sr.stderrBytes );
+    for ( const QString &line : text.split( QLatin1Char( '\n' ), Qt::SkipEmptyParts ) )
+    {
+        const QString trimmed = line.trimmed();
+        if ( trimmed.startsWith( QLatin1String( "DRIFT " ) ) )
+            check.driftFiles.append( trimmed.mid( 6 ).trimmed() );
+    }
+    check.inSync = ( sr.exitCode == 0 );
+    check.summary = check.inSync ? QStringLiteral( "packs in sync" )
+                                 : QStringLiteral( "pack drift detected (%1 files)" )
+                                     .arg( check.driftFiles.size() );
+    return check;
 }
 
 ScriptRunResult runClassroomBatch( const QString &repoRoot, const QString &cliPath, const QString &labId,

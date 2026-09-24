@@ -1,0 +1,44 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:sar_speckle",
+  "purpose": "用经典自适应核（lee、enhanced_lee、frost、kuan、gamma_map、refined_lee）或多时相堆栈滤波抑制 SAR 相干斑噪声，输出保持输入网格与数值域的 Float32 强度数据。",
+  "whenToUse": "rs:sar_calibrate 之后、纹理分析、分类或变化检测之前；多时相滤波需要提供同网格配准的场景列表 companionScenes。",
+  "prerequisitesNote": [
+    "输入应为校准后的强度（线性功率）数据：所有滤波假设 power 域，不适用于幅度或 dB。",
+    "multitemporal 方法要求 companionScenes 列出 co-registered same-grid 的伴景路径。"
+  ],
+  "assumptions": [
+    "斑点服从乘性噪声模型（lee/kuan/gamma_map 的统计基础），场景内局部均值与方差可用于区分斑点与真实结构。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "method",
+      "rationale": "滤波核选择：lee/enhanced_lee/kuan/gamma_map 面向单景乘性噪声，frost 用指数衰减加权核，refined_lee 保边能力更强，multitemporal 在时间域用伴景滤波并以 deviationK 门控拒绝离群场景。",
+      "misconfigurationConsequence": "对 dB 数据滤波违反功率域假设，局部统计失真，真实边缘被抹平。"
+    },
+    {
+      "parameter": "kernelSize",
+      "rationale": "奇数滤波窗口边长，范围 [3, 15]；窗口大小决定局部统计的空间支撑。",
+      "misconfigurationConsequence": "窗口过大会把细小道路、建筑边缘一并抹掉，过小则斑点抑制不足。"
+    },
+    {
+      "parameter": "looks",
+      "rationale": "等效视数（refined Lee 与多时相滤波使用），是乘性斑点噪声理论强度的参数，应与产品的实际处理视数一致。",
+      "misconfigurationConsequence": "把单视产品按多视（如 4 视）处理，滤波强度不足，斑点大量残留。"
+    }
+  ],
+  "stateNarrative": { "before": "", "after": "" },
+  "skipConsequence": {
+    "summary": "相干斑直接进入纹理与分类，类别图出现椒盐噪声、变化检测虚警增多。",
+    "downstreamRoles": ["纹理分析", "SAR 分类", "SAR 变化检测"]
+  },
+  "references": [
+    {
+      "title": "Lee, Digital image enhancement and noise filtering by use of local statistics",
+      "kind": "paper",
+      "locator": "IEEE Transactions on Pattern Analysis and Machine Intelligence PAMI-2(2):165-168, 1980",
+      "note": "lee 滤波与局部统计去斑方法的标准出处。"
+    }
+  ],
+  "teachingNote": "滤波不改变辐射状态域：sigma0 线性功率进、线性功率出，SAR 域不在光学状态词表内，故 before/after 留空；multitemporal 中被 deviationK 门控拒收的像元回退为通过场景的时间均值。"
+}

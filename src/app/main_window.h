@@ -177,6 +177,18 @@ public:
     explicit QgisDesktopWindow(QWidget *parent = nullptr);
     ~QgisDesktopWindow() override;
 
+    /** Recorded lab-run context for the open project (empty db path = no lab
+     *  recording context; the cockpit capsule export then fails honestly).
+     *  Single derivation lives in ensureLabRecordingForProject(); the setters
+     *  are also called at project story boundaries (new/failed open) so the
+     *  cockpit never sees a stale previous-project context. */
+    QString labExperimentDbPath() const { return m_labExperimentDbPath; }
+    QString labExperimentId() const { return m_labExperimentId; }
+    QString labWorkspaceRoot() const { return m_labWorkspaceRoot; }
+    void setLabRecordingContext(const QString &dbPath,
+                                const QString &experimentId,
+                                const QString &workspaceRoot);
+
     void setupUi();
     void setupMapCanvas();
     void initLayerTree();
@@ -597,6 +609,7 @@ private:
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_labCockpitDock = nullptr;
+    QString m_labExperimentDbPath, m_labExperimentId, m_labWorkspaceRoot;
     // Teacher Authoring Console (#teaching-admin; parallel-safe vs lab cockpit)
     QgsDockWidget *m_teachingAdminDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;

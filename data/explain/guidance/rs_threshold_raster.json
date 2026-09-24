@@ -1,0 +1,43 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:threshold_raster",
+  "purpose": "把单波段分数/强度栅格（如变化强度、指数层）按 manual、otsu、percentile 或 statistical 阈值转成 UInt8 二值掩膜，支持形态学清理与最小图斑过滤，并回写 thresholdUsed 等质检统计。",
+  "whenToUse": "rs:change_difference、rs:change_cva 等度量原语之后生成变化掩膜；或任何连续分数到事件/目标掩膜的决策环节。",
+  "prerequisitesNote": [
+    "输入必须是单波段分数/强度栅格（多波段输入仅取第 1 波段），语义上是连续量而非类别。"
+  ],
+  "assumptions": [
+    "分数分布中事件与背景可分：otsu 假设直方图双峰，statistical 假设超过 mean + k*stddev 的尾部即事件。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "thresholdMethod",
+      "rationale": "阈值策略选择：manual 固定值、otsu 直方图自动阈值、percentile 控制掩膜占比、statistical 基于均值加 k 倍标准差。",
+      "misconfigurationConsequence": "用 manual 却照抄默认 0.5，而输入分数不在 [0,1] 量纲（如 CVA 幅度）时，掩膜可能全 0 或全 1，决策完全失效。"
+    },
+    {
+      "parameter": "threshold",
+      "rationale": "manual 策略下的判定值，达到即记为掩膜像元；结果中的 thresholdUsed 会回写实际生效阈值。",
+      "misconfigurationConsequence": "非 manual 策略下此值被忽略，误以为它在控制阈值会得出与预期不符的掩膜。"
+    },
+    {
+      "parameter": "minAreaPixels",
+      "rationale": "最小制图单元：丢弃小于该像元数的连通成分（0 关闭），与 cleanup 形态学清理共同控制掩膜碎片。",
+      "misconfigurationConsequence": "不设 MMU 时碎斑噪声进入掩膜，下游面积统计与制图虚高。"
+    }
+  ],
+  "stateNarrative": { "before": "Index", "after": "Mask" },
+  "skipConsequence": {
+    "summary": "连续分数无法变成可操作的二值决策，受灾范围、变化范围提取不出去。",
+    "downstreamRoles": ["灾害制图", "变化掩膜"]
+  },
+  "references": [
+    {
+      "title": "Otsu, A threshold selection method from gray-level histograms",
+      "kind": "paper",
+      "locator": "IEEE Transactions on Systems, Man, and Cybernetics 9(1):62-66, 1979",
+      "note": "thresholdMethod=otsu 的自动阈值出处。"
+    }
+  ],
+  "teachingNote": "输出掩膜中 255 表示 NoData 像元；maskedPixels、maskedPercent 与 thresholdUsed 写入结果，可直接用作质检指标。"
+}

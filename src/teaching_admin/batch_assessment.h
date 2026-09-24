@@ -44,6 +44,15 @@ struct BatchRowResult
     QString labVersion;
     QString softwareVersion;
     bool missingEvidence = false;
+    // Real-grader traceability (cliGradeCallable): digest of the
+    // sicnu.lab.grade/1 transcript body and the first deduction id. Empty for
+    // non-grader rows; additive fields, sorted-key serialization unchanged.
+    QString graderDigest;
+    QString topDeduction;
+    /// Mandatory when status == "unavailable" and the cause is grader-side
+    /// (vocabulary of src/cli/lab_batch_runner.h); never set for
+    /// missing-evidence rows.
+    QString unavailableReason;
 
     QJsonObject toJson() const;
 };
@@ -70,6 +79,10 @@ struct BatchAssessmentReport
     int corrupted = 0;
     int cancelled = 0;
     int missingEvidence = 0;
+    /// Rows whose grade could not be produced at all (grader missing/timeout),
+    /// counted after the run from final row status. Distinct from
+    /// missingEvidence (evidence never arrived) — neither is a silent zero.
+    int unavailable = 0;
     bool cancelledEarly = false;
     QString rubricVersion;
     QString labVersion;

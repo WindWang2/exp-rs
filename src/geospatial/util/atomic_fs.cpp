@@ -8,6 +8,8 @@
 
 #include "geospatial/util/atomic_fs.h"
 
+#include "platform/portable.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -41,22 +43,15 @@ std::atomic<unsigned> &stagingCounter()
 /// (two processes otherwise generate identical staged names).
 std::uint64_t stagingProcessId()
 {
-#ifdef _WIN32
-  return static_cast<std::uint64_t>( GetCurrentProcessId() );
-#else
-  return static_cast<std::uint64_t>( ::getpid() );
-#endif
+  return static_cast<std::uint64_t>( sicnu::portable::pid() );
 }
 
 #ifdef _WIN32
+// Single implementation lives in platform/portable.h — this local name
+// keeps the existing call sites unchanged.
 std::wstring wideFromUtf8( const std::string &text )
 {
-  if ( text.empty() )
-    return std::wstring();
-  const int size = MultiByteToWideChar( CP_UTF8, 0, text.c_str(), static_cast<int>( text.size() ), nullptr, 0 );
-  std::wstring wide( static_cast<std::size_t>( size ), L'\0' );
-  MultiByteToWideChar( CP_UTF8, 0, text.c_str(), static_cast<int>( text.size() ), wide.data(), size );
-  return wide;
+  return sicnu::portable::wideFromUtf8( text );
 }
 
 void throwLastWindowsError( const std::string &context, const std::string &path )

@@ -32,12 +32,21 @@ struct LabFeedbackProjection {
   std::vector<FeedbackCheckRow> rows;
   std::vector<std::string> issuesZh;
   std::string capsuleExportRef; // pointer only
-  Json::Value graderScore;      // optional {earned,max} without leaking answers
+  /// {score,passing_score,capped_by_blocking} for a sicnu.lab.grade/1 body,
+  /// {earned,max} for rubric reports — scale only, never golden answers.
+  Json::Value graderScore;
 
   static LabFeedbackProjection fromReports( const std::string &labId,
                                             const Json::Value &verifierReport,
                                             const Json::Value &graderReport,
                                             const std::string &capsuleRef = {} );
+
+  /// Re-materialize a persisted toJson() document (restart restore).
+  /// Fail-closed: a wrong-schema document is refused outright (ok=false);
+  /// a schema-valid document with an illegal overall_status or wrong types
+  /// keeps ok=true but downgrades to an indeterminate overall that can
+  /// never count as pass — a restored summary never fabricates a pass.
+  static LabFeedbackProjection fromJson( const Json::Value &doc );
 
   Json::Value toJson() const;
 };

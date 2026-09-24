@@ -68,6 +68,7 @@ Json::Value assetToJson( const AssetSummary &a )
     o["evidence_paths"] = stringArray( a.evidencePaths );
     o["conflict_alternatives"] = stringArray( a.conflictAlternatives );
     o["path_hint"] = a.pathHint;
+    o["source"] = a.source;
     return o;
 }
 
@@ -97,6 +98,73 @@ Json::Value recipeToJson( const RecipeEntry &r )
     o["has_verifier_hooks"] = r.hasVerifierHooks;
     o["matched"] = stringArray( r.matched );
     return o;
+}
+
+} // namespace
+
+std::string contentSourceToString( ContentSource source )
+{
+    switch ( source )
+    {
+        case ContentSource::Unavailable:
+            return "unavailable";
+        case ContentSource::InlineInput:
+            return "inline_input";
+        case ContentSource::BuiltinFallback:
+            return "builtin_fallback";
+        case ContentSource::LiveAuthority:
+            return "live_authority";
+    }
+    return "unavailable";
+}
+
+bool contentSourceFromString( const std::string &text, ContentSource &out )
+{
+    if ( text == "unavailable" )
+    {
+        out = ContentSource::Unavailable;
+        return true;
+    }
+    if ( text == "inline_input" )
+    {
+        out = ContentSource::InlineInput;
+        return true;
+    }
+    if ( text == "builtin_fallback" )
+    {
+        out = ContentSource::BuiltinFallback;
+        return true;
+    }
+    if ( text == "live_authority" )
+    {
+        out = ContentSource::LiveAuthority;
+        return true;
+    }
+    return false;
+}
+
+namespace {
+
+Json::Value sectionSourceToJson( const SectionSource &s )
+{
+    Json::Value o( Json::objectValue );
+    o["source"] = contentSourceToString( s.source );
+    o["authority"] = s.authority;
+    o["revision"] = Json::UInt64( s.revision );
+    o["degraded"] = s.degraded;
+    return o;
+}
+
+SectionSource sectionSourceFromJson( const Json::Value &o )
+{
+    SectionSource s;
+    if ( !o.isObject() )
+        return s;
+    contentSourceFromString( o.get( "source", "unavailable" ).asString(), s.source );
+    s.authority = o.get( "authority", "" ).asString();
+    s.revision = o.get( "revision", 0 ).asUInt64();
+    s.degraded = o.get( "degraded", false ).asBool();
+    return s;
 }
 
 } // namespace
@@ -199,6 +267,13 @@ Json::Value bundleToJson( const ScientificContextBundle &bundle )
     trunc["final_bytes"] = bundle.truncation.finalBytes;
     root["truncation"] = trunc;
 
+    Json::Value sources( Json::objectValue );
+    sources["assets"] = sectionSourceToJson( bundle.sources.assets );
+    sources["capabilities"] = sectionSourceToJson( bundle.sources.capabilities );
+    sources["recipes"] = sectionSourceToJson( bundle.sources.recipes );
+    sources["planner_facts"] = sectionSourceToJson( bundle.sources.plannerFacts );
+    root["sources"] = sources;
+
     root["observability"] = bundle.observability;
     return root;
 }
@@ -246,6 +321,7 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         s.evidencePaths = readStringArray( a["evidence_paths"] );
         s.conflictAlternatives = readStringArray( a["conflict_alternatives"] );
         s.pathHint = a.get( "path_hint", "" ).asString();
+        s.source = a.get( "source", "unavailable" ).asString();
         b.assets.push_back( std::move( s ) );
     }
 
@@ -319,6 +395,15 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.truncation.droppedQuestions = trunc.get( "dropped_questions", 0 ).asInt();
         b.truncation.originalBytes = trunc.get( "original_bytes", 0 ).asInt();
         b.truncation.finalBytes = trunc.get( "final_bytes", 0 ).asInt();
+    }
+
+    const Json::Value &sources = json["sources"];
+    if ( sources.isObject() )
+    {
+        b.sources.assets = sectionSourceFromJson( sources["assets"] );
+        b.sources.capabilities = sectionSourceFromJson( sources["capabilities"] );
+        b.sources.recipes = sectionSourceFromJson( sources["recipes"] );
+        b.sources.plannerFacts = sectionSourceFromJson( sources["planner_facts"] );
     }
 
     b.observability = json.get( "observability", Json::objectValue );

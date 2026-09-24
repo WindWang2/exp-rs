@@ -349,9 +349,26 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
         wchar_t pathBuffer[ MAX_PATH ];
         std::wstring bare = utf8ToWide( program );
         wchar_t *filePart = nullptr;
-        const DWORD searched = ::SearchPathW( nullptr, bare.c_str(), L".exe",
-                                              MAX_PATH, pathBuffer, &filePart );
-        if ( searched == 0 || searched >= MAX_PATH )
+        DWORD searched = ::SearchPathW( nullptr, bare.c_str(), L".exe",
+                                        MAX_PATH, pathBuffer, &filePart );
+        if ( searched >= MAX_PATH )
+        {
+            // SearchPathW reports the required size when the stack buffer is
+            // too small: retry once on the heap so a hit beyond MAX_PATH is
+            // still recognized (it used to surface as "not found"). Still too
+            // long fails with the same diagnostic as a miss.
+            const DWORD required = searched + 1;
+            std::wstring longPath( required, L'\0' );
+            const DWORD retried =
+                ::SearchPathW( nullptr, bare.c_str(), L".exe", required,
+                               longPath.data(), &filePart );
+            if ( retried == 0 || retried >= required )
+            {
+                error = "program '" + program + "' not found in PATH";
+                return false;
+            }
+        }
+        else if ( searched == 0 )
         {
             error = "program '" + program + "' not found in PATH";
             return false;

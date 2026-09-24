@@ -10,6 +10,7 @@
 
 #include <json/json.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,35 @@ enum class EvidenceBucket
 std::string evidenceBucketToString( EvidenceBucket bucket );
 bool evidenceBucketFromString( const std::string &text, EvidenceBucket &out );
 
+/// Provenance of a bundle section's content. Consumers must be able to tell
+/// authority data from caller input, broker fallback tables, or absence.
+enum class ContentSource
+{
+    Unavailable,     ///< authority missing or lookup failed; nothing fabricated
+    InlineInput,     ///< caller-supplied for this request (inline passports, seeded docs)
+    BuiltinFallback, ///< broker builtin table because no authority was wired (degraded)
+    LiveAuthority    ///< resolved from the owning authority
+};
+
+std::string contentSourceToString( ContentSource source );
+bool contentSourceFromString( const std::string &text, ContentSource &out );
+
+struct SectionSource
+{
+    ContentSource source = ContentSource::Unavailable;
+    std::string authority;      ///< owning authority id, "" when unavailable
+    std::uint64_t revision = 0; ///< authority revision/digest when known
+    bool degraded = false;      ///< fallback/partial — never mistaken for authority truth
+};
+
+struct BundleSources
+{
+    SectionSource assets;
+    SectionSource capabilities;
+    SectionSource recipes;
+    SectionSource plannerFacts;
+};
+
 struct AssetSummary
 {
     std::string assetId;
@@ -42,6 +72,7 @@ struct AssetSummary
     std::vector<std::string> evidencePaths; ///< claim paths supporting the bucket
     std::vector<std::string> conflictAlternatives;
     std::string pathHint; ///< basename-only or redacted; never casual absolute paths
+    std::string source;   ///< per-asset provenance: contentSourceToString
 };
 
 struct CapabilityEntry
@@ -116,6 +147,7 @@ struct ScientificContextBundle
     std::vector<std::string> openQuestions;
     PlannerProjection planner;
     TruncationMeta truncation;
+    BundleSources sources; ///< per-section provenance (live/inline/fallback/unavailable)
     Json::Value observability{Json::objectValue}; ///< lightweight metrics for Control Center later
 };
 

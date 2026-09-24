@@ -54,6 +54,12 @@ class BridgedDiagnoser final : public sicnu::agent_loop::IDiagnoser {
 
     const std::optional<OpDiagnostic> &lastOpsDiagnostic() const { return mLast; }
 
+    /// Drop the cached diagnostic. Drivers MUST call this between runs: the
+    /// cache is evidence about ONE diagnose invocation, and a stale entry
+    /// from a previous session would otherwise be attributed to a later,
+    /// unrelated failure.
+    void resetLastDiagnostic() { mLast.reset(); }
+
   private:
     sicnu::agent_loop::IDiagnoser *mInner = nullptr;
     DiagnosticBridge mBridge;

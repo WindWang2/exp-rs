@@ -1,6 +1,7 @@
 // tile_checkpoint.cpp — see tile_checkpoint.h.
 #include "tile_checkpoint.h"
 #include "fsync_compat.h"
+#include "platform/portable.h"
 
 #include <cstddef>
 #include <atomic>
@@ -9,13 +10,6 @@
 #include <fstream>
 #include <vector>
 
-#if !defined( _WIN32 )
-#include <fcntl.h>
-#include <unistd.h>
-#else
-#include <process.h>
-#endif
-
 #include <filesystem>
 
 namespace sicnu::runtime::chunk
@@ -23,15 +17,6 @@ namespace sicnu::runtime::chunk
 
 namespace
 {
-int currentPid()
-{
-#if !defined( _WIN32 )
-    return ::getpid();
-#else
-    return _getpid();
-#endif
-}
-
 #pragma pack( push, 1 )
 struct TileCheckpointFile
 {
@@ -94,10 +79,10 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
     // Unique per CALL (F-A-15): pid alone collides for two threads saving
     // the same path concurrently — the counter makes each attempt distinct.
     static std::atomic<unsigned long long> saveCounter{ 0 };
-    const std::string tmp = path + ".tmp." + std::to_string( currentPid() ) + "."
+    const std::string tmp = path + ".tmp." + std::to_string( portable::pid() ) + "."
                             + std::to_string( saveCounter.fetch_add( 1 ) );
     {
-        std::ofstream out( tmp, std::ios::binary | std::ios::trunc );
+        std::ofstream out( portable::pathFromUtf8( tmp ), std::ios::binary | std::ios::trunc );
         if ( !out )
             return false;
         out.write( reinterpret_cast<const char *>( &file ), sizeof( file ) );
@@ -107,7 +92,8 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
         if ( !out )
         {
             out.close();
-            std::remove( tmp.c_str() );
+            std::error_code removeEc;
+            std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
             return false;
         }
     }
@@ -117,22 +103,23 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
     }
     catch ( const std::exception & )
     {
-        std::remove( tmp.c_str() );
+        std::error_code removeEc;
+        std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
         return false; // fail-closed: undurable checkpoint must not publish
     }
     std::error_code ec;
-    std::filesystem::rename( tmp, path, ec );
+    std::filesystem::rename( portable::pathFromUtf8( tmp ), portable::pathFromUtf8( path ), ec );
     if ( ec )
     {
         std::error_code removeEc;
-        std::filesystem::remove( tmp, removeEc );
+        std::filesystem::remove( portable::pathFromUtf8( tmp ), removeEc );
         return false;
     }
-    if ( auto dir = std::filesystem::path( path ).parent_path(); !dir.empty() )
+    if ( auto dir = portable::pathFromUtf8( path ).parent_path(); !dir.empty() )
     {
         try
         {
-            fsyncPath( dir.string(), /*directory=*/true );
+            fsyncPath( portable::pathToUtf8( dir ), /*directory=*/true );
         }
         catch ( const std::exception & )
         {
@@ -147,10 +134,10 @@ std::optional<TileCheckpoint> TileCheckpointWriter::load(
     std::uint64_t expectedInputIdentity )
 {
     std::error_code ec;
-    if ( !std::filesystem::exists( path, ec ) )
+    if ( !std::filesystem::exists( portable::pathFromUtf8( path ), ec ) )
         return std::nullopt;
 
-    std::ifstream in( path, std::ios::binary );
+    std::ifstream in( portable::pathFromUtf8( path ), std::ios::binary );
     if ( !in )
         return std::nullopt;
     TileCheckpointFile file{};
@@ -198,15 +185,19 @@ std::optional<TileCheckpoint> TileCheckpointWriter::load(
 void TileCheckpointWriter::remove( const std::string &path )
 {
     std::error_code ec;
-    std::filesystem::remove( path, ec );
+    std::filesystem::remove( portable::pathFromUtf8( path ), ec );
     // Best-effort tmp sweep from a crashed save in the same directory.
+    // Names are compared as UTF-8 bytes on both sides (path::string() would
+    // be ACP on Windows and never match the narrow base name).
     for ( const auto &entry : std::filesystem::directory_iterator(
-              std::filesystem::path( path ).parent_path(), ec ) )
+              portable::pathFromUtf8( path ).parent_path(), ec ) )
     {
         if ( ec )
             break;
-        const auto name = entry.path().filename().string();
-        if ( name.rfind( std::filesystem::path( path ).filename().string() + ".tmp.", 0 ) == 0 )
+        const auto name = portable::pathToUtf8( entry.path().filename() );
+        if ( name.rfind( portable::pathToUtf8( portable::pathFromUtf8( path ).filename() ) +
+                             ".tmp.",
+                         0 ) == 0 )
         {
             std::error_code removeEc;
             std::filesystem::remove( entry.path(), removeEc );

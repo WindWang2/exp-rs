@@ -805,6 +805,11 @@ add_subdirectory(src/runtime)
 # Scientific Fault Injection Lab Framework (RS14-13). Qt-free C++20 leaf over
 # jsoncpp only; placed after the runtime/data leaves, before consumers.
 add_subdirectory(src/faultlab)
+# Experiment Exploration Studio live-execution bridge: composes the REAL
+# providers (StudyRunner + execution spine, GDAL summarizer, debugger
+# evidence, faultlab sandbox, capsule IO) with the projection leaf. Opt-in
+# surface for the dock/tests; after every alias it links.
+add_subdirectory(src/experiment_studio/live)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)
@@ -847,6 +852,10 @@ add_subdirectory(src/operators)
 # Contract Platform 9.0: canonical descriptors, contract graph and the
 # mechanical drift scanners (test/tooling side, zero product runtime cost).
 add_subdirectory(src/contracts)
+# RS14-09 Scientific Task Planner (recovery of PR #1193): goal → explainable
+# ScientificPlan decision layer. Pure C++20, links sicnu_contracts only.
+# Planning-only: never executes operators (kill-switch = no target links it).
+add_subdirectory(src/planner)
 # RS14-11: evidence-first agent session orchestration — pure C++20 core
 # (state machine, decision records, journal, seams). The Qt-capable
 # production adapter and tool live in src/agent/tools.

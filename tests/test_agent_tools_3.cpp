@@ -10,7 +10,9 @@
 #include "agent/spatial_tools/temporal_workspace_tools.h"
 #include "agent/contracts/spatial_contracts.h"
 #include "agent/spatial_tools/spatial_tool.h"
+#include "agent/spatial_tools/spatial_tool_provider.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
+#include "agent/tool_catalog/surface_registry.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -358,4 +360,39 @@ TEST_CASE( "#1155: temporal:ingest_stac refuses a deeply-nested depth bomb clean
     const sicnu::agent::spatial_tools::SpatialToolResult ok = tool.execute( okInput );
     REQUIRE( ok.success );
     REQUIRE( ok.output["scene_count"].asInt() == 2 );
+}
+
+// ── RS14-15 Explainable Workflow: explain:step surface ────────────────────
+// The tool object is exercised by the narrow explain lane
+// (test_explain_agent_tool compiles the TU directly); what needs the full
+// agent link set is the REGISTRY and CATALOG surface: the tool must be
+// registered under its single namespace and listed by the spatial tool
+// provider (no ghost surface), and the MCP allow-prefix table must accept
+// the family so tools/call can route it.
+TEST_CASE( "explain:step registers into the spatial tool registry (RS14-15)",
+           "[d16][agent][explain]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    const auto tool = SpatialToolRegistry::instance().find( "explain:step" );
+    REQUIRE( tool.has_value() );
+    CHECK( tool.value()->name() == "explain:step" );
+}
+
+TEST_CASE( "explain:step is listed by the spatial tool provider (RS14-15)",
+           "[d16][agent][explain]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    sicnu::agent::spatial_tools::SpatialToolProvider provider;
+    const auto tools = provider.provideTools();
+    bool listed = false;
+    for ( const auto &agentTool : tools )
+        listed = listed || agentTool.name == "explain:step";
+    CHECK( listed );
+}
+
+TEST_CASE( "explain: family is an allowed MCP surface prefix (RS14-15)",
+           "[d16][agent][explain]" )
+{
+    const QStringList prefixes = surfaceAllowedPrefixes();
+    CHECK( prefixes.contains( QStringLiteral( "explain:" ) ) );
 }

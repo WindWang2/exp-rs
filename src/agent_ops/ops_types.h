@@ -95,7 +95,9 @@ struct FinalDelivery {
     Json::Value runIds{Json::arrayValue};
     Json::Value capsule{Json::objectValue};
     Json::Value benchmarkRefs{Json::arrayValue};
-    Json::Value claims{Json::arrayValue}; ///< [{claim, confidence, evidence_ref}]
+    Json::Value claims{Json::arrayValue}; ///< [{claim, value, confidence,
+                                          ///  evidence_ref, stop_reason?,
+                                          ///  evidence_missing?}]
     Json::Value budgets{Json::objectValue};
     Json::Value stages{Json::arrayValue};
     Json::Value decisions{Json::arrayValue};

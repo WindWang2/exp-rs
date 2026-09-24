@@ -1,0 +1,45 @@
+{
+  "schema": "exp.step_guidance.v1",
+  "operatorId": "rs:sam_classify",
+  "purpose": "逐像元比较光谱与参考光谱（端元或光谱库条目），把每个像元标为光谱角 SAM（或光谱信息散度 SID）最小的类别，输出类别 id 栅格，可选输出逐像元最小角度图。",
+  "whenToUse": "拥有可靠端元或经验证光谱库、要做矿物或地表类型填图时；SAM 对乘性光照差异不敏感，特别适合高光谱数据。",
+  "prerequisitesNote": [
+    "参考光谱与输入必须同波段顺序、同单位（建议同为反射率）；参考可经 refs 内联、refsRef 工件（端元提取输出或光谱库）或 libraryPath（配 libraryMaterials）三条路径之一提供。",
+    "波长元数据在两侧同时存在时可自动把库重采样到输入波段网格。"
+  ],
+  "assumptions": [
+    "SAM 把光谱视为高维向量、以夹角度量相似性，因此对乘性光照变化不变。",
+    "SID 从信息论角度比较光谱的概率分布，要求非负的反射率型光谱，零或负值波段会使该像元对失效。"
+  ],
+  "parameterRationale": [
+    {
+      "parameter": "refs",
+      "rationale": "内联参考光谱（数组的数组，每条长度等于输入波段数），是分类的类别定义本身。",
+      "misconfigurationConsequence": "波段顺序与输入不一致时，每条光谱在高维空间中整体错位，分类结果系统性错误。"
+    },
+    {
+      "parameter": "metric",
+      "rationale": "匹配度量选择：sam（默认，光照不变的光谱夹角）或 sid（额外捕捉光谱亮度差异，要求非负反射率型光谱）。",
+      "misconfigurationConsequence": "在含负值的辐亮度数据上选用 sid 会产生无效散度，分类输出不可信。"
+    },
+    {
+      "parameter": "angleOut",
+      "rationale": "可选输出逐像元最小光谱角/散度栅格，是分类置信度的连续量依据。",
+      "misconfigurationConsequence": "不输出时无法区分确信匹配与勉强最近，纯类别图无法做置信度过滤或拒判。"
+    }
+  ],
+  "stateNarrative": { "before": "BOA", "after": "Mask" },
+  "skipConsequence": {
+    "summary": "没有基于光谱参照的逐像元标注，地表类型填图只能退回非光谱手段。",
+    "downstreamRoles": ["矿物填图", "地表分类"]
+  },
+  "references": [
+    {
+      "title": "Kruse et al., The spectral image processing system (SIPS) - interactive visualization and analysis of imaging spectrometer data",
+      "kind": "paper",
+      "locator": "Remote Sensing of Environment 44(2-3):145-163, 1993",
+      "note": "SAM 光谱角匹配方法的标准出处。"
+    }
+  ],
+  "teachingNote": "输出是类别 id 栅格（每类一个整数），不是物理量，教学上归入 Mask 域；angleOut 才是连续量。SID 对负值敏感，建议在 BOA 反射率上使用。"
+}

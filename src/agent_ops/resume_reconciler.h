@@ -23,7 +23,9 @@ struct ReconcileResult {
     std::string reasonCode;
     std::string stage;
     std::string terminalState;
-    std::set<std::string> successfulRunIds;
+    /// Run ids the loop SUBMITTED through the executor seam (recorded at
+    /// submission, before any outcome) — an audit list, not a success list.
+    std::set<std::string> submittedRunIds;
     Json::Value details{Json::objectValue};
 
     Json::Value toJson() const;

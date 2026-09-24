@@ -2,6 +2,8 @@
 #include "disk_tile_store.h"
 #include "fsync_compat.h"
 
+#include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
+
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -153,7 +155,7 @@ void fsyncBestEffort( const std::string &path, bool directory = false )
 TilePayload readFileImpl( const std::string &path )
 {
     TileFileHeader header{};
-    std::ifstream in( path, std::ios::binary );
+    std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
     if ( !in )
         throw ChunkCorruptTile( path );
     in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
@@ -165,7 +167,8 @@ TilePayload readFileImpl( const std::string &path )
     // header field.
     {
         std::error_code sizeEc;
-        const auto fileSize = std::filesystem::file_size( path, sizeEc );
+        const auto fileSize =
+            std::filesystem::file_size( sicnu::portable::pathFromUtf8( path ), sizeEc );
         if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
             throw ChunkCorruptTile( path );
     }
@@ -189,7 +192,8 @@ void DiskTileStore::write( const ScratchLease &lease, const TilePayload &payload
     const TileFileHeader header = makeHeader( payload, bytes, fnv1a( data, bytes ) );
 
     {
-        std::ofstream out( lease.path(), std::ios::binary | std::ios::trunc );
+        std::ofstream out( sicnu::portable::pathFromUtf8( lease.path() ),
+                           std::ios::binary | std::ios::trunc );
         if ( !out )
             throw std::runtime_error( "disk tile write: cannot open " + lease.path() );
         out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
@@ -231,7 +235,8 @@ void DiskTileStore::writeFile( const std::string &finalPath, const TilePayload &
 
     const std::string tmpPath = finalPath + ".part";
     {
-        std::ofstream out( tmpPath, std::ios::binary | std::ios::trunc );
+        std::ofstream out( sicnu::portable::pathFromUtf8( tmpPath ),
+                           std::ios::binary | std::ios::trunc );
         if ( !out )
             throw std::runtime_error( "disk tile write: cannot open " + tmpPath );
         out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
@@ -243,7 +248,7 @@ void DiskTileStore::writeFile( const std::string &finalPath, const TilePayload &
         {
             out.close();
             std::error_code removeEc;
-            std::filesystem::remove( tmpPath, removeEc );
+            std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), removeEc );
             throw std::runtime_error( "disk tile write: short write on " + tmpPath );
         }
     }
@@ -251,11 +256,12 @@ void DiskTileStore::writeFile( const std::string &finalPath, const TilePayload &
     std::error_code renameEc;
     // Rename is the atomicity boundary (Windows fsync is best-effort; the
     // same contract as ScratchLease::finalize / TileCheckpointWriter::save).
-    std::filesystem::rename( tmpPath, finalPath, renameEc );
+    std::filesystem::rename( sicnu::portable::pathFromUtf8( tmpPath ),
+                             sicnu::portable::pathFromUtf8( finalPath ), renameEc );
     if ( renameEc )
     {
         std::error_code removeEc;
-        std::filesystem::remove( tmpPath, removeEc );
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), removeEc );
         throw std::runtime_error( "disk tile write: rename failed on " + finalPath + " ("
                                   + renameEc.message() + ")" );
     }
@@ -263,8 +269,8 @@ void DiskTileStore::writeFile( const std::string &finalPath, const TilePayload &
     // the file — that was fsynced above) so a committed tile cannot vanish
     // under the journal on power loss (POSIX; no-op on Windows).
     std::error_code parentEc;
-    const auto parent = std::filesystem::path( finalPath ).parent_path();
-    fsyncBestEffort( parent.empty() ? std::string( "." ) : parent.generic_string(),
+    const auto parent = sicnu::portable::pathFromUtf8( finalPath ).parent_path();
+    fsyncBestEffort( parent.empty() ? std::string( "." ) : sicnu::portable::pathToUtf8( parent ),
                      /*directory=*/true );
     (void)parentEc;
 }

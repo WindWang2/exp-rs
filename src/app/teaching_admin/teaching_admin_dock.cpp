@@ -5,10 +5,13 @@
 #include "teaching_admin/curriculum_editor.h"
 #include "teaching_admin/data_pack_manager.h"
 #include "teaching_admin/feedback_pack.h"
+#include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/labspec_authoring.h"
+#include "teaching_admin/operator_catalog.h"
 #include "teaching_admin/release_preflight.h"
 #include "teaching_admin/rubric_builder.h"
 #include "teaching_admin/script_adapters.h"
+#include "teaching_admin/student_projection.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -63,10 +66,13 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         m_labSpecEdit = new QPlainTextEdit;
         m_labSpecEdit->setPlaceholderText( tr( "Paste LabSpec JSON…" ) );
         lay->addWidget( m_labSpecEdit, 1 );
-        m_operatorsEdit = new QLineEdit( QStringLiteral( "rs:extract_bands,rs:resample,rs:ndvi" ) );
+        // Real registry truth only: operator ids/param schemas come from the
+        // repo's capability sidecars — never a hand-typed allow-list.
+        m_operatorRegistryLabel = new QLabel;
+        m_operatorRegistryLabel->setObjectName( QStringLiteral( "teachingAdminOperatorRegistry" ) );
+        m_operatorRegistryLabel->setWordWrap( true );
+        lay->addWidget( m_operatorRegistryLabel );
         auto *row = new QHBoxLayout;
-        row->addWidget( new QLabel( tr( "known operators" ) ) );
-        row->addWidget( m_operatorsEdit, 1 );
         auto *btn = new QPushButton( tr( "Validate LabSpec" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateLabSpec );
         row->addWidget( btn );
@@ -101,6 +107,11 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onInventoryPacks );
         row->addWidget( btn );
         lay->addLayout( row );
+        auto *driftBtn = new QPushButton( tr( "Check Foundry Drift (gen_lab_packs.py --check)" ) );
+        driftBtn->setObjectName( QStringLiteral( "teachingAdminPackDriftButton" ) );
+        driftBtn->setToolTip( tr( "Reuses the pack foundry contract: exit 0 = in sync, DRIFT lines are listed." ) );
+        connect( driftBtn, &QPushButton::clicked, this, &TeachingAdminDock::onCheckPackDrift );
+        lay->addWidget( driftBtn );
         lay->addStretch( 1 );
         m_tabs->addTab( page, tr( "D 数据包" ) );
     }
@@ -140,12 +151,19 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         auto *page = new QWidget;
         auto *lay = new QFormLayout( page );
         m_submissionsDirEdit = new QLineEdit;
+        m_submissionsDirEdit->setObjectName( QStringLiteral( "teachingAdminSubmissionsDir" ) );
         m_labIdEdit = new QLineEdit( QStringLiteral( "lab15_data_inspection" ) );
+        m_labIdEdit->setObjectName( QStringLiteral( "teachingAdminLabId" ) );
         m_batchOutEdit = new QLineEdit( QDir::temp().filePath( QStringLiteral( "teaching_admin_batch" ) ) );
+        m_batchOutEdit->setObjectName( QStringLiteral( "teachingAdminBatchOut" ) );
         lay->addRow( tr( "submissions dir" ), m_submissionsDirEdit );
         lay->addRow( tr( "lab id" ), m_labIdEdit );
         lay->addRow( tr( "out prefix" ), m_batchOutEdit );
-        auto *btn = new QPushButton( tr( "Batch Grade (local mock-capable)" ) );
+        auto *btn = new QPushButton( tr( "Batch Grade (real grader CLI)" ) );
+        btn->setObjectName( QStringLiteral( "teachingAdminBatchButton" ) );
+        btn->setToolTip(
+            tr( "Grades via sicnu_geo_rs_cli lab --grade (OutputVerifier authority). "
+                "Missing CLI ⇒ typed unavailable rows, never fabricated scores." ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunBatch );
         lay->addRow( btn );
         m_tabs->addTab( page, tr( "G 批量评分" ) );
@@ -163,10 +181,13 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
     }
 
     m_log = new QPlainTextEdit;
+    m_log->setObjectName( QStringLiteral( "teachingAdminLog" ) );
     m_log->setReadOnly( true );
     m_log->setMaximumBlockCount( 2000 );
     root->addWidget( new QLabel( tr( "Console" ) ) );
     root->addWidget( m_log, 1 );
+
+    refreshOperatorRegistryLabel();
 }
 
 QString TeachingAdminDock::repoRoot() const
@@ -188,6 +209,25 @@ QString TeachingAdminDock::repoRoot() const
 void TeachingAdminDock::appendLog( const QString &text )
 {
     m_log->appendPlainText( text );
+}
+
+sicnu::teaching_admin::OperatorCatalog TeachingAdminDock::loadOperatorCatalog() const
+{
+    return sicnu::teaching_admin::loadOperatorCatalog(
+        QDir( repoRoot() ).filePath( QStringLiteral( "data/processing/algorithm_meta/capability" ) ) );
+}
+
+void TeachingAdminDock::refreshOperatorRegistryLabel()
+{
+    if ( !m_operatorRegistryLabel )
+        return;
+    const auto catalog = loadOperatorCatalog();
+    m_operatorRegistryLabel->setText(
+        catalog.operatorIds.isEmpty()
+          ? tr( "operator registry: unavailable (%1 issues) — validation stays fail-closed" )
+              .arg( catalog.issues.size() )
+          : tr( "operator registry: %1 operators (capability sidecars)" )
+              .arg( catalog.operatorIds.size() ) );
 }
 
 void TeachingAdminDock::onValidateCurriculum()
@@ -219,13 +259,17 @@ void TeachingAdminDock::onValidateLabSpec()
         appendLog( tr( "labspec: invalid JSON" ) );
         return;
     }
-    QSet<QString> ops;
-    for ( const QString &o : m_operatorsEdit->text().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
-        ops.insert( o.trimmed() );
-    const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), ops );
+    const auto catalog = loadOperatorCatalog();
+    refreshOperatorRegistryLabel();
+    const auto vr = sicnu::teaching_admin::validateLabSpec( doc.object(), catalog.operatorIds,
+                                                            catalog.paramSchemas, repoRoot() );
     appendLog( QString::fromUtf8( QJsonDocument( vr.toJson() ).toJson( QJsonDocument::Compact ) ) );
+    // Both projections derive from the same authoring truth: the teacher sees
+    // the recipe compile view, the student-side view is answer-masked.
     const auto recipe = sicnu::teaching_admin::projectRecipeCompileView( doc.object() );
     appendLog( QString::fromUtf8( QJsonDocument( recipe ).toJson( QJsonDocument::Compact ) ) );
+    const auto student = sicnu::teaching_admin::projectStudentLabView( doc.object() );
+    appendLog( QString::fromUtf8( QJsonDocument( student ).toJson( QJsonDocument::Compact ) ) );
 }
 
 void TeachingAdminDock::onValidateRubric()
@@ -251,6 +295,13 @@ void TeachingAdminDock::onInventoryPacks()
     appendLog( QString::fromUtf8( QJsonDocument( inv.toJson() ).toJson( QJsonDocument::Compact ) ) );
 }
 
+void TeachingAdminDock::onCheckPackDrift()
+{
+    const auto check = sicnu::teaching_admin::checkLabPackDrift( repoRoot() );
+    appendLog( tr( "foundry drift: %1" ).arg( check.summary ) );
+    appendLog( QString::fromUtf8( QJsonDocument( check.toJson() ).toJson( QJsonDocument::Compact ) ) );
+}
+
 void TeachingAdminDock::onRunPreflight()
 {
     using namespace sicnu::teaching_admin;
@@ -271,10 +322,9 @@ void TeachingAdminDock::onRunPreflight()
         else
             in.labRules = rub.object();
     }
-    QSet<QString> ops;
-    for ( const QString &o : m_operatorsEdit->text().split( QLatin1Char( ',' ), Qt::SkipEmptyParts ) )
-        ops.insert( o.trimmed() );
-    in.knownOperators = ops;
+    const auto catalog = loadOperatorCatalog();
+    in.knownOperators = catalog.operatorIds;
+    in.operatorParamSchemas = catalog.paramSchemas;
     CurriculumPaths paths;
     paths.labsDir = m_labsDirEdit->text();
     paths.packsDir = QDir( paths.labsDir ).filePath( QStringLiteral( "packs" ) );
@@ -302,53 +352,17 @@ void TeachingAdminDock::onRunBatch()
     cfg.labVersion = QStringLiteral( "ui-1" );
     cfg.softwareVersion = m_softwareVersionEdit->text();
 
+    // Real grading authority only: the lab CLI shell of
+    // OutputVerifier::gradeArtifact. When the CLI is absent every row is
+    // typed unavailable with a reason — the console never scores by itself.
+    GraderCliConfig grader;
+    grader.cliPath = resolveGraderCli();
+    grader.labIdOrRulesPath = m_labIdEdit->text();
+    if ( grader.cliPath.isEmpty() )
+        appendLog( tr( "grader CLI not found (set SICNU_GEO_RS_CLI); rows will be typed unavailable" ) );
+
     std::atomic<bool> cancel{ false };
-    const auto report = runBatchAssessment(
-        cfg,
-        [&]( const SubmissionItem &item ) {
-            BatchRowResult row;
-            row.studentId = item.studentId;
-            row.labId = cfg.labId;
-            row.artifactPath = item.path;
-            QFile f( item.path );
-            if ( !f.open( QIODevice::ReadOnly ) )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "cannot open submission" );
-                return row;
-            }
-            const QByteArray bytes = f.readAll();
-            if ( bytes.isEmpty() )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "empty submission" );
-                return row;
-            }
-            if ( bytes.startsWith( "CORRUPT" ) )
-            {
-                row.status = QStringLiteral( "corrupted" );
-                row.verdict = QStringLiteral( "error" );
-                row.message = QStringLiteral( "corrupt marker" );
-                return row;
-            }
-            if ( bytes.startsWith( "MISSING_EVIDENCE" ) )
-            {
-                row.status = QStringLiteral( "unavailable" );
-                row.verdict = QStringLiteral( "unavailable" );
-                row.missingEvidence = true;
-                row.score = -1;
-                row.message = QStringLiteral( "missing evidence — not a silent zero" );
-                return row;
-            }
-            row.status = QStringLiteral( "pass" );
-            row.verdict = QStringLiteral( "pass" );
-            row.score = 80.0;
-            row.message = QStringLiteral( "local dry-run grade" );
-            return row;
-        },
-        &cancel );
+    const auto report = runBatchAssessment( cfg, cliGradeCallable( grader ), &cancel );
 
     publishBatchOutputsAtomic( report, m_batchOutEdit->text() );
     appendLog( QString::fromUtf8( QJsonDocument( report.toJson() ).toJson( QJsonDocument::Compact ) ) );

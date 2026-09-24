@@ -111,7 +111,7 @@ struct RepairAction
     RepairRisk risk;
     bool factsSufficient = true;         ///< false => missingFacts explains what is missing
     std::string refusalCause;            ///< closed refusal vocabulary ("" = offerable)
-    Json::Value sourceFinding{Json::objectValue}; ///< {code, severity, item_id?}
+    Json::Value sourceFinding{Json::objectValue}; ///< {code, severity, requirement_id?}
     Json::Value factsUsed{Json::objectValue};
     Json::Value missingFacts{Json::arrayValue};
 };

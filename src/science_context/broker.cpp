@@ -3,6 +3,7 @@
 
 #include "science_context/capability_router.h"
 #include "science_context/observed_state.h"
+#include "recipes/recipe_registry.h"
 
 #include <algorithm>
 #include <sstream>
@@ -30,23 +31,79 @@ std::string assetDigestOf( const std::vector<AssetSummary> &assets,
 
 } // namespace
 
+void ScienceContextBroker::setCapabilityFacts( CapabilityFactsLookup lookup )
+{
+    mCapFacts = std::move( lookup );
+    // Bundles computed under the previous facts authority must not survive an
+    // authority reinstall.
+    mCache.clear();
+}
+
+void ScienceContextBroker::setRecipeRegistry(
+    sicnu::recipes::ScientificRecipeRegistry *registry )
+{
+    mRecipeRegistry = registry;
+}
+
+bool ScienceContextBroker::refreshRecipes()
+{
+    if ( !mRecipeRegistry )
+        return false;
+    const bool ok = mRecipes.loadFromRegistry( *mRecipeRegistry );
+    // Stale projections must never outlive an authority refresh.
+    mCache.clear();
+    return ok;
+}
+
+void ScienceContextBroker::invalidateAsset( const std::string &assetKey )
+{
+    mAssets.invalidate( assetKey );
+    // Bundles embedding this asset are keyed by its digest; drop them so a
+    // re-synthesize picks up the mutated passport instead of a stale match.
+    mCache.clear();
+}
+
+void ScienceContextBroker::invalidateAllAssets()
+{
+    mAssets.invalidateAll();
+    mCache.clear();
+}
+
+void ScienceContextBroker::notifyProjectSwitch()
+{
+    mAssets.invalidateAll();
+    mCache.clear();
+}
+
 SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &request )
 {
     SynthesizeResult result;
     ContextConstraints constraints = request.constraints;
     constraints.allowAutonomousExec = autonomyAllowsExec( constraints.autonomyLevel );
 
-    // Resolve assets
+    // Resolve assets — provenance per asset: inline (caller passports),
+    // live (wired resolver), unavailable (lookup failed; unknown ≠ default).
     std::vector<AssetSummary> summaries;
     std::vector<sicnu::state::RemoteSensingAssetState> states;
     Json::Value mergedObserved( Json::objectValue );
     bool conflicted = false;
     bool unknown = false;
+    bool anyMissing = false;
+    bool anyLive = false;
+    bool anyInline = false;
+    // Provenance of the planner-facts primary: it is states.front(), which is
+    // an inline passport whenever the caller supplied one (passports are
+    // appended first), otherwise the first live-resolved asset.
+    bool firstStateInline = !request.passports.empty();
+    const std::string liveAuthority = mAssets.resolverAuthority();
 
     for ( const auto &passport : request.passports )
     {
-        summaries.push_back( AssetStateProvider::summarize( passport ) );
+        AssetSummary summary = AssetStateProvider::summarize( passport );
+        summary.source = contentSourceToString( ContentSource::InlineInput );
+        summaries.push_back( summary );
         states.push_back( passport );
+        anyInline = true;
     }
     for ( const auto &key : request.assetKeys )
     {
@@ -55,8 +112,11 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
         auto resolved = mAssets.resolve( req );
         if ( resolved.ok )
         {
+            resolved.summary.source =
+                contentSourceToString( ContentSource::LiveAuthority );
             summaries.push_back( resolved.summary );
             states.push_back( resolved.state );
+            anyLive = true;
         }
         else
         {
@@ -64,8 +124,10 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             missing.assetId = key;
             missing.evidence = EvidenceBucket::Unknown;
             missing.evidencePaths.push_back( "identity" );
+            missing.source = contentSourceToString( ContentSource::Unavailable );
             summaries.push_back( missing );
             unknown = true;
+            anyMissing = true;
         }
     }
 
@@ -92,6 +154,9 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             mergedObserved["grid_conflicted"] = true;
     }
 
+    const CapabilityFactsLookup *capFacts = capabilityFacts();
+    const bool haveCapProvider = capFacts && static_cast<bool>( capFacts->entriesForIntent );
+
     CacheKeyMaterial keyMat;
     keyMat.assetDigest = assetDigestOf( summaries, states );
     keyMat.catalogGeneration = mAssets.catalogGeneration();
@@ -101,6 +166,15 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     keyMat.goal = request.goal;
     keyMat.intent = request.intent;
     keyMat.offline = constraints.offline;
+    keyMat.maxBytes = request.budget.maxBytes;
+    keyMat.maxRecipes = request.budget.maxRecipes;
+    keyMat.maxCapabilities = request.budget.maxCapabilities;
+    keyMat.maxOpenQuestions = request.budget.maxOpenQuestions;
+    keyMat.maxAssets = request.budget.maxAssets;
+    keyMat.determinismRequired = constraints.determinismRequired;
+    keyMat.capabilityAuthority =
+        haveCapProvider ? capFacts->authority : std::string( "__builtin__" );
+    keyMat.capabilityRevision = haveCapProvider ? capFacts->revision : 0;
     const std::string cacheKey = makeCacheKey( keyMat );
 
     if ( request.useCache )
@@ -124,6 +198,7 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     cq.observedState = mergedObserved;
     cq.constraints = constraints;
     cq.limit = request.budget.maxCapabilities;
+    cq.facts = capFacts;
     CapabilityRouterResult caps = routeCapabilities( cq );
 
     RecipeQuery rq;
@@ -144,6 +219,74 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     bundle.constraints = constraints;
     bundle.openQuestions = caps.openQuestions;
 
+    // Section provenance — consumers must be able to tell live authority
+    // data from caller input, broker fallbacks, or absence.
+    SectionSource &assetsSource = bundle.sources.assets;
+    if ( summaries.empty() )
+    {
+        assetsSource.source = ContentSource::Unavailable;
+    }
+    else if ( anyLive )
+    {
+        assetsSource.source = ContentSource::LiveAuthority;
+        assetsSource.authority = liveAuthority;
+        assetsSource.revision = mAssets.catalogGeneration();
+        assetsSource.degraded = anyMissing;
+    }
+    else if ( anyInline )
+    {
+        assetsSource.source = ContentSource::InlineInput;
+        assetsSource.authority = "inline_passport";
+        assetsSource.degraded = anyMissing;
+    }
+    else
+    {
+        // Only failed lookups: nothing authority-backed and nothing inline.
+        assetsSource.source = ContentSource::Unavailable;
+        assetsSource.degraded = true;
+    }
+
+    SectionSource &capsSource = bundle.sources.capabilities;
+    if ( haveCapProvider )
+    {
+        capsSource.source = ContentSource::LiveAuthority;
+        capsSource.authority = capFacts->authority;
+        capsSource.revision = capFacts->revision;
+        capsSource.degraded = caps.presenceUnknown;
+    }
+    else if ( !caps.entries.empty() )
+    {
+        capsSource.source = ContentSource::BuiltinFallback;
+        capsSource.authority = "broker_builtin_spec";
+        capsSource.degraded = true; // builtin table, never authority output
+    }
+    else
+    {
+        capsSource.source = ContentSource::Unavailable;
+    }
+
+    const RecipeSourceInfo recipeInfo = mRecipes.sourceInfo();
+    SectionSource &recipesSource = bundle.sources.recipes;
+    switch ( recipeInfo.mode )
+    {
+        case RecipeSourceMode::LiveAuthority:
+            recipesSource.source = ContentSource::LiveAuthority;
+            recipesSource.authority = recipeInfo.authority;
+            recipesSource.revision = recipeInfo.revision;
+            recipesSource.degraded = recipeInfo.registryStatus != "ok" ||
+                                     recipeInfo.registryProblems > 0;
+            break;
+        case RecipeSourceMode::InlineInput:
+            recipesSource.source = ContentSource::InlineInput;
+            recipesSource.authority = recipeInfo.authority;
+            recipesSource.revision = recipeInfo.revision;
+            recipesSource.degraded = false;
+            break;
+        case RecipeSourceMode::None:
+            recipesSource.source = ContentSource::Unavailable;
+            break;
+    }
+
     // Offline: note limitation, do not invent remote facts.
     if ( constraints.offline )
         bundle.openQuestions.push_back( "offline_mode_no_remote_enrichment" );
@@ -152,6 +295,22 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     if ( !states.empty() )
     {
         bundle.planner.inputFacts["primary"] = understandingEnvelopeFromPassport( states.front() );
+    }
+    SectionSource &factsSource = bundle.sources.plannerFacts;
+    if ( states.empty() )
+    {
+        factsSource.source = ContentSource::Unavailable;
+    }
+    else if ( firstStateInline )
+    {
+        factsSource.source = ContentSource::InlineInput;
+        factsSource.authority = "inline_passport";
+    }
+    else
+    {
+        factsSource.source = ContentSource::LiveAuthority;
+        factsSource.authority = liveAuthority;
+        factsSource.revision = mAssets.catalogGeneration();
     }
     applyPlannerProjection( bundle );
 
@@ -163,7 +322,9 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     // Keep live counters OFF the bundle (byte-stable contract). Metrics live on
     // BrokerObservability for a future Control Center — never mutate scientific bytes.
     bundle.observability = Json::Value( Json::objectValue );
-    bundle.bundleId.clear();
+    // Same-width placeholder so the budget loop measures the emitted form:
+    // the real id is assigned right after budgeting.
+    bundle.bundleId = std::string( 16, '0' );
     applyContextBudget( bundle, request.budget );
     bundle.bundleId = computeBundleId( bundle );
     // bundle_id is assigned after budgeting; refresh final_bytes to match emitted form.
