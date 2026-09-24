@@ -8,6 +8,7 @@ namespace sicnu::science_context {
 void applyContextBudget( ScientificContextBundle &bundle, const BudgetPolicy &policy )
 {
     TruncationMeta meta;
+    bundle.truncation = TruncationMeta{};
     const std::string before = serializeBundle( bundle );
     meta.originalBytes = static_cast<int>( before.size() );
 
@@ -68,62 +69,83 @@ void applyContextBudget( ScientificContextBundle &bundle, const BudgetPolicy &po
     trimRecipes( policy.maxRecipes );
     trimQuestions( policy.maxOpenQuestions );
 
-    // Byte budget: progressively tighten caps, then strip heavy planner payloads.
+    // Byte budget: progressively tighten caps, then strip heavy payloads.
+    // Every pass measures the EMITTED form — the truncation metadata itself
+    // is part of the payload, so it is stored before measuring. Otherwise the
+    // loop undershoots by the size of the metadata it must eventually write.
     int capLimit = std::min( policy.maxCapabilities, static_cast<int>( bundle.capabilities.size() ) );
     int recipeLimit = std::min( policy.maxRecipes, static_cast<int>( bundle.recipes.size() ) );
     int qLimit = std::min( policy.maxOpenQuestions, static_cast<int>( bundle.openQuestions.size() ) );
-    for ( int pass = 0; pass < 24; ++pass )
+
+    // Converged measurement: serializing with finalBytes = last measurement
+    // is a fixed point after two rounds (only the digit count can move).
+    auto measureEmitted = [&]() {
+        meta.finalBytes = 0;
+        bundle.truncation = meta;
+        meta.finalBytes = static_cast<int>( serializeBundle( bundle ).size() );
+        bundle.truncation = meta;
+        return static_cast<int>( serializeBundle( bundle ).size() );
+    };
+    int emitted = measureEmitted();
+
+    for ( int pass = 0; pass < 24 && emitted > policy.maxBytes; ++pass )
     {
-        const std::string cur = serializeBundle( bundle );
-        if ( static_cast<int>( cur.size() ) <= policy.maxBytes )
-            break;
         meta.truncated = true;
         if ( recipeLimit > 0 )
         {
             --recipeLimit;
             trimRecipes( recipeLimit );
-            continue;
         }
-        if ( capLimit > 0 )
+        else if ( capLimit > 0 )
         {
             --capLimit;
             trimCaps( capLimit );
-            continue;
         }
-        if ( qLimit > 0 )
+        else if ( qLimit > 0 )
         {
             --qLimit;
             trimQuestions( qLimit );
-            continue;
         }
-        if ( !bundle.planner.inputFacts.empty() )
+        else if ( !bundle.planner.inputFacts.empty() )
         {
             bundle.planner.inputFacts = Json::Value( Json::objectValue );
             meta.sections.push_back( "planner_input_facts" );
-            continue;
         }
-        if ( !bundle.assets.empty() )
+        else if ( !bundle.assets.empty() )
         {
             bundle.assets.clear();
             meta.sections.push_back( "assets" );
-            continue;
         }
-        // Last resort: drop observability blob.
-        if ( !bundle.observability.empty() )
+        else if ( !bundle.observability.empty() )
         {
             bundle.observability = Json::Value( Json::objectValue );
             meta.sections.push_back( "observability" );
-            continue;
         }
-        break;
+        else
+        {
+            break; // nothing left to trim
+        }
+        emitted = measureEmitted();
     }
 
     std::sort( meta.sections.begin(), meta.sections.end() );
     meta.sections.erase( std::unique( meta.sections.begin(), meta.sections.end() ),
                          meta.sections.end() );
+    if ( emitted > policy.maxBytes )
+        meta.truncated = true; // floor reached; the report must say so
 
-    const std::string after = serializeBundle( bundle );
-    meta.finalBytes = static_cast<int>( after.size() );
+    // Settle the final measurement: setting finalBytes changes the payload by
+    // its own digit width, which is a fixed point after two iterations.
+    for ( int pass = 0; pass < 3; ++pass )
+    {
+        meta.finalBytes = emitted;
+        bundle.truncation = meta;
+        const int reMeasured = static_cast<int>( serializeBundle( bundle ).size() );
+        if ( reMeasured == emitted )
+            break;
+        emitted = reMeasured;
+    }
+    meta.finalBytes = emitted;
     bundle.truncation = meta;
     bundle.constraints.maxBytes = policy.maxBytes;
     bundle.constraints.maxRecipes = policy.maxRecipes;
