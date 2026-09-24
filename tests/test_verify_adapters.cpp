@@ -23,7 +23,6 @@
 
 #include <chrono>
 #include <clocale>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -341,6 +340,17 @@ TEST_CASE( "CheckpointStateView projects the recorded workflow vocabulary",
         const adapters::CheckpointReadResult gated =
             adapters::readCheckpoint( dir.file( "checkpoint_r-9.json" ) );
         CHECK( gated.status == adapters::CheckpointReadStatus::ForeignEnvelope );
+    }
+    SECTION( "hostile documents: the view answers nullopt, never throws" )
+    {
+        // Non-object documents must load as unusable — jsoncpp's non-const
+        // operator[] would throw here if objectness were not settled first.
+        adapters::CheckpointStateView arrayView( Json::Value( Json::arrayValue ) );
+        CHECK_FALSE( arrayView.state( "node/a/state" ).has_value() );
+        adapters::CheckpointStateView stringView( Json::Value( "d17_pipeline_checkpoint" ) );
+        CHECK_FALSE( stringView.state( "run/id" ).has_value() );
+        adapters::CheckpointStateView nullView( Json::Value{ Json::nullValue } );
+        CHECK_FALSE( nullView.state( "node/a/state" ).has_value() );
     }
     SECTION( "oversized checkpoint is capped, not buffered" )
     {

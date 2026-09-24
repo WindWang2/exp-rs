@@ -98,15 +98,22 @@ CheckpointStateView::CheckpointStateView( Json::Value document )
 {
     // Same closed envelope as readCheckpoint — a direct construction must
     // not smuggle in a version this platform never wrote (a projected state
-    // of a foreign document could otherwise read as success).
+    // of a foreign document could otherwise read as success). Objectness is
+    // settled FIRST: jsoncpp's non-const operator[] would throw on a
+    // non-object document, and this ctor answers nullopt, never throws.
+    if ( !document.isObject() )
+    {
+        mUsable = false;
+        return;
+    }
     const Json::Value &kind = document["kind"];
     const Json::Value &version = document["version"];
     const bool knownVersion =
         version.isString() && ( version.asString() == kCheckpointVersionCurrent ||
                                 version.asString() == kCheckpointVersionLegacy );
     const bool envelopeOk =
-        document.isObject() && kind.isString() && kind.asString() == kCheckpointKind &&
-        knownVersion && document["nodes"].isArray();
+        kind.isString() && kind.asString() == kCheckpointKind && knownVersion &&
+        document["nodes"].isArray();
     if ( !envelopeOk )
     {
         mUsable = false;
