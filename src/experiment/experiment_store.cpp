@@ -56,8 +56,24 @@ class Stmt
     Stmt &operator=( const Stmt & ) = delete;
     explicit operator bool() const { return m_stmt != nullptr; }
     QString error( sqlite3 *db ) const { return QString::fromUtf8( sqlite3_errmsg( db ) ); }
-    bool step() const { return sqlite3_step( m_stmt ) == SQLITE_DONE; }
-    bool stepRow() const { return sqlite3_step( m_stmt ) == SQLITE_ROW; }
+    bool step()
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_DONE;
+    }
+    bool stepRow()
+    {
+        m_lastRc = sqlite3_step( m_stmt );
+        return m_lastRc == SQLITE_ROW;
+    }
+    /// True when the last step()/stepRow() ended in an ERROR (not DONE/ROW):
+    /// SQLITE_CORRUPT/IOERR mid-scan would otherwise fold into "finished",
+    /// and fail-closed readers would answer identity questions from a
+    /// silently partial result.
+    bool stepFailed() const
+    {
+        return m_lastRc != SQLITE_ROW && m_lastRc != SQLITE_DONE && m_lastRc != SQLITE_OK;
+    }
     int changes( sqlite3 *db ) const { return sqlite3_changes( db ); }
     void reset() { sqlite3_reset( m_stmt ); sqlite3_clear_bindings( m_stmt ); }
     void bind( int idx, const QString &v ) const
@@ -74,6 +90,7 @@ class Stmt
 
   private:
     sqlite3_stmt *m_stmt = nullptr;
+    int m_lastRc = SQLITE_OK;
 };
 
 } // namespace
@@ -415,8 +432,14 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
     QMutexLocker lock( &m_impl->mutex );
     qint64 total = 0;
     {
+        // Same contract as the rows query below: a failed COUNT must not
+        // silently read as "zero experiments" while rows still come back —
+        // the page (total, rows) pair would lie about the store.
         Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM experiments" ) );
-        if ( count && count.stepRow() )
+        if ( !count )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                count.error( m_impl->db ) ) );
+        if ( count.stepRow() )
             total = count.i64( 0 );
     }
     Stmt stmt( m_impl->db, QStringLiteral(
@@ -1167,41 +1190,49 @@ qint64 ExperimentStore::runCount() const
     return -1; // query error: fail closed, not "empty"
 }
 
-QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
-                                                   qint64 limit ) const
+sicnu::data::Result<QStringList> ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
+                                                                         qint64 limit ) const
 {
-    // The execution ref lives inside the run JSON (no dedicated column), so
-    // this is a bounded paged scan, not an index lookup: it exists for
-    // restart-time reconciliation, not per-event hot paths. Callers that
-    // track executions live should keep their own ref→runId map (the bridge
-    // does) and treat this as the cold-path fallback.
+    using ResultT = sicnu::data::Result<QStringList>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
     QStringList ids;
-    if ( !m_impl || executionRef.isEmpty() )
-        return ids;
+    if ( executionRef.isEmpty() )
+        return ResultT::success( ids );
     limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
     QMutexLocker lock( &m_impl->mutex );
-    // One deferred read transaction so OFFSET pages share a single snapshot
-    // under concurrent writers (skip/dup risk with per-page implicit snapshots).
     m_impl->exec( "BEGIN", nullptr );
     constexpr qint64 kPage = 200;
     qint64 lastCreatedMs = 0;
     QString lastRunId;
     bool pastFirstPage = false;
-    // Keyset pagination after the first page: (created_ms, run_id) avoids
-    // OFFSET drift entirely under concurrent writers.
+    bool queryFailed = false;
+    QString queryError;
     while ( qint64( ids.size() ) < limit )
     {
+        // Newest-first: consumers resolving "THE run for this ref"
+        // (restart reconciliation, duplicate guard) want the LATEST
+        // recording; ascending order made ids.last() the 10th-OLDEST run
+        // whenever a ref outgrew its limit.
         Stmt stmt( m_impl->db,
                    !pastFirstPage
                        ? QStringLiteral(
                              "SELECT run_id, json, created_ms FROM experiment_runs"
-                             " ORDER BY created_ms, run_id LIMIT ?" )
+                             " ORDER BY created_ms DESC, run_id DESC LIMIT ?" )
                        : QStringLiteral(
                              "SELECT run_id, json, created_ms FROM experiment_runs"
-                             " WHERE (created_ms > ?) OR (created_ms = ? AND run_id > ?)"
-                             " ORDER BY created_ms, run_id LIMIT ?" ) );
+                             " WHERE (created_ms < ?) OR (created_ms = ? AND run_id < ?)"
+                             " ORDER BY created_ms DESC, run_id DESC LIMIT ?" ) );
         if ( !stmt )
+        {
+            // A scan fault must NOT read as "no matches": restart
+            // reconciliation and the duplicate-ingest guard both make
+            // identity decisions from this answer.
+            queryFailed = true;
+            queryError = stmt.error( m_impl->db );
             break;
+        }
         if ( !pastFirstPage )
         {
             stmt.bind( 1, kPage );
@@ -1213,11 +1244,9 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
             stmt.bind( 3, lastRunId );
             stmt.bind( 4, kPage );
         }
-        bool pageEmpty = true;
         int rows = 0;
         while ( stmt.stepRow() )
         {
-            pageEmpty = false;
             ++rows;
             lastRunId = stmt.text( 0 );
             lastCreatedMs = stmt.i64( 2 );
@@ -1227,36 +1256,56 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
             if ( qint64( ids.size() ) >= limit )
                 break;
         }
-        if ( pageEmpty || rows < kPage )
+        if ( stmt.stepFailed() )
+        {
+            // A mid-scan step ERROR (CORRUPT/IOERR) must not read as
+            // "finished" — identity decisions would run on a partial scan.
+            queryFailed = true;
+            queryError = stmt.error( m_impl->db );
+            break;
+        }
+        if ( rows < kPage )
             break;
         pastFirstPage = true;
     }
     m_impl->exec( "COMMIT", nullptr );
-    return ids;
+    if ( queryFailed )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            queryError ) );
+    return ResultT::success( ids );
 }
 
-QStringList ExperimentStore::runIdsByExecutionFingerprint( const QString &fingerprint,
-                                                           qint64 limit ) const
+
+sicnu::data::Result<QStringList> ExperimentStore::runIdsByExecutionFingerprint( const QString &fingerprint,
+                                                                   qint64 limit ) const
 {
+    using ResultT = sicnu::data::Result<QStringList>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
     // Indexed column lookup (12.0): execution_fingerprint is stamped on every
-    // run row by upsertRun, so the repeat-execution classifier can find
-    // identity twins without scanning run JSON.
+    // run row by upsertRun, so identity-twin lookups never scan run JSON.
     QStringList ids;
-    if ( !m_impl || fingerprint.isEmpty() )
-        return ids;
+    if ( fingerprint.isEmpty() )
+        return ResultT::success( ids );
     limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
     QMutexLocker lock( &m_impl->mutex );
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT run_id FROM experiment_runs WHERE execution_fingerprint=?"
         " ORDER BY created_ms, run_id LIMIT ?" ) );
     if ( !stmt )
-        return ids;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     stmt.bind( 1, fingerprint );
     stmt.bind( 2, limit );
     while ( stmt.stepRow() )
         ids.append( stmt.text( 0 ) );
-    return ids;
+    if ( stmt.stepFailed() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
+    return ResultT::success( ids );
 }
+
 
 // --- run retention / prune (12.0) -----------------------------------------------
 
@@ -1612,7 +1661,21 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
     if ( !validated )
         return ResultT::failure( validated.diagnostics() );
 
-    const QString json = jsonToText( record.toJson() );
+    // Content-hash gate: the persisted record always commits to its own
+    // bytes. An empty hash is derived here (one authority for hashing —
+    // every producer path through the store); a non-empty hash that
+    // disagrees with the content is a tamper signal and rejects the write.
+    MetricRecord stored = record;
+    if ( stored.metricsHash.isEmpty() )
+        stored.metricsHash = stored.contentHash();
+    else if ( stored.metricsHash != stored.contentHash() )
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.metrics_hash_mismatch" ),
+            QStringLiteral( "metric record for run %1 carries a hash that does not"
+                            " match its content" )
+                .arg( record.runId ) ) );
+
+    const QString json = jsonToText( stored.toJson() );
     // #1173 doctrine (same as upsertExperiment): BEGIN IMMEDIATE around the
     // conflict check + insert so a concurrent connection cannot race a second
     // insert past the SELECT and degrade the UNIQUE failure into a generic
@@ -1631,7 +1694,13 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecord( const MetricRecord 
         existing.bind( 1, record.runId );
         if ( existing.stepRow() )
         {
-            const bool same = existing.text( 0 ) == json;
+            // Content comparison, not text comparison: a legacy row written
+            // before metrics_hash existed re-saves with a derived hash — the
+            // json TEXT differs, the record does not. Only true content
+            // differences are conflicts.
+            const auto existingRecord = MetricRecord::fromJson( textToJson( existing.text( 0 ) ) );
+            const bool same = existingRecord.has_value() &&
+                              existingRecord->contentHash() == stored.contentHash();
             m_impl->rollback();
             if ( same )
                 return ResultT::success();
@@ -1692,7 +1761,21 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecordsBatch(
             m_impl->rollback();
             return ResultT::failure( validated.diagnostics() );
         }
-        const QString json = jsonToText( record.toJson() );
+        // Same content-hash gate as saveMetricRecord (empty → derived,
+        // mismatching → typed refusal; the batch stays all-or-nothing).
+        MetricRecord stored = record;
+        if ( stored.metricsHash.isEmpty() )
+            stored.metricsHash = stored.contentHash();
+        else if ( stored.metricsHash != stored.contentHash() )
+        {
+            m_impl->rollback();
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.metrics_hash_mismatch" ),
+                QStringLiteral( "metric record for run %1 carries a hash that does not"
+                                " match its content" )
+                    .arg( record.runId ) ) );
+        }
+        const QString json = jsonToText( stored.toJson() );
         {
             Stmt existing( m_impl->db, QStringLiteral(
                 "SELECT json FROM run_metrics WHERE run_id=?" ) );
@@ -1704,13 +1787,23 @@ sicnu::data::Result<void> ExperimentStore::saveMetricRecordsBatch(
                     existing.error( m_impl->db ) ) );
             }
             existing.bind( 1, record.runId );
-            if ( existing.stepRow() && existing.text( 0 ) != json )
+            if ( existing.stepRow() )
             {
-                m_impl->rollback();
-                return ResultT::failure( storeDiag(
-                    QStringLiteral( "experiment.conflict" ),
-                    QStringLiteral( "metrics for run %1 exist with different content" )
-                        .arg( record.runId ) ) );
+                // Content comparison, not text comparison (see
+                // saveMetricRecord): legacy rows re-saved with a derived
+                // hash differ in text, not in content.
+                const auto existingRecord =
+                    MetricRecord::fromJson( textToJson( existing.text( 0 ) ) );
+                const bool same = existingRecord.has_value() &&
+                                  existingRecord->contentHash() == stored.contentHash();
+                if ( !same )
+                {
+                    m_impl->rollback();
+                    return ResultT::failure( storeDiag(
+                        QStringLiteral( "experiment.conflict" ),
+                        QStringLiteral( "metrics for run %1 exist with different content" )
+                            .arg( record.runId ) ) );
+                }
             }
         }
         Stmt insert( m_impl->db, QStringLiteral(
@@ -2028,29 +2121,44 @@ std::optional<PromotionRecord> ExperimentStore::promotionById( const QString &pr
     return parsed.value();
 }
 
-QVector<PromotionRecord> ExperimentStore::promotionsForModel( const QString &modelId,
-                                                              qint64 limit ) const
+sicnu::data::Result<QVector<PromotionRecord>> ExperimentStore::promotionsForModel(
+    const QString &modelId, qint64 limit ) const
 {
-    QVector<PromotionRecord> records;
+    using ResultT = sicnu::data::Result<QVector<PromotionRecord>>;
     if ( !m_impl )
-        return records;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
     QMutexLocker lock( &m_impl->mutex );
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM model_promotions WHERE model_id=?"
         " ORDER BY created_ms, promotion_id LIMIT ?" ) );
     if ( !stmt )
-        return records;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     stmt.bind( 1, modelId );
     stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+    QVector<PromotionRecord> records;
     while ( stmt.stepRow() )
     {
+        if ( stmt.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                stmt.error( m_impl->db ) ) );
         const auto record = PromotionRecord::fromJson(
             QJsonDocument::fromJson( stmt.text( 0 ).toUtf8() ).object() );
-        if ( record.has_value() )
-            records.append( record.value() );
+        // Promotion evidence must answer for every row the store knows: a
+        // record that no longer parses is tamper or torn-write evidence,
+        // and finishing the decision without it is exactly the fail-open
+        // the promotion gate exists to prevent.
+        if ( !record )
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                QStringLiteral( "stored promotion record for model %1 does not parse" )
+                    .arg( modelId ) ) );
+        records.append( record.value() );
     }
-    return records;
+    return ResultT::success( records );
 }
+
 
 
 // --- benchmark definitions / results (D19) --------------------------------------
@@ -2183,8 +2291,14 @@ ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
     while ( stmt.stepRow() )
     {
         auto parsed = BenchmarkDefinition::fromJson( textToJson( stmt.text( 0 ) ) );
-        if ( parsed )
-            rows.append( parsed.value() );
+        // The COUNT above includes every stored row; returning fewer than it
+        // counts would silently hide definitions and corrupt the pagination
+        // contract, so an unreadable row fails the page instead.
+        if ( !parsed )
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                QStringLiteral( "stored benchmark definition does not parse" ) ) );
+        rows.append( parsed.value() );
     }
     return ResultT::success( qMakePair( total, rows ) );
 }
@@ -2277,27 +2391,40 @@ std::optional<BenchmarkResult> ExperimentStore::benchmarkResultById( const QStri
     return parsed ? std::optional<BenchmarkResult>( parsed.value() ) : std::nullopt;
 }
 
-QVector<BenchmarkResult> ExperimentStore::benchmarkResultsFor( const QString &benchmarkId,
-                                                               qint64 limit ) const
+sicnu::data::Result<QVector<BenchmarkResult>> ExperimentStore::benchmarkResultsFor(
+    const QString &benchmarkId, qint64 limit ) const
 {
-    QVector<BenchmarkResult> rows;
+    using ResultT = sicnu::data::Result<QVector<BenchmarkResult>>;
     if ( !m_impl )
-        return rows;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
     QMutexLocker lock( &m_impl->mutex );
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT json FROM benchmark_results WHERE benchmark_id=?"
         " ORDER BY created_ms, result_id LIMIT ?" ) );
     if ( !stmt )
-        return rows;
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
     stmt.bind( 1, benchmarkId );
     stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+    QVector<BenchmarkResult> rows;
     while ( stmt.stepRow() )
     {
+        if ( stmt.stepFailed() )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                stmt.error( m_impl->db ) ) );
         const auto parsed = BenchmarkResult::fromJson( textToJson( stmt.text( 0 ) ) );
-        if ( parsed )
-            rows.append( parsed.value() );
+        // Same contract as promotionsForModel: unreadable stored results
+        // refuse the listing instead of quietly vanishing from it.
+        if ( !parsed )
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                QStringLiteral( "stored result for benchmark %1 does not parse" )
+                    .arg( benchmarkId ) ) );
+        rows.append( parsed.value() );
     }
-    return rows;
+    return ResultT::success( rows );
 }
+
 
 } // namespace sicnu::experiment
