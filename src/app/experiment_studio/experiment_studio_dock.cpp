@@ -798,32 +798,6 @@ void ExperimentStudioDock::rebuildChart()
 
 void ExperimentStudioDock::runFaultTeachingDemo()
 {
-<<<<<<< HEAD
-    QJsonObject scenario;
-    scenario.insert( QStringLiteral( "scenario_id" ), QStringLiteral( "fault.demo.all_nodata" ) );
-    scenario.insert( QStringLiteral( "title" ), QStringLiteral( "All NoData teaching fault" ) );
-    scenario.insert( QStringLiteral( "learning_objective" ),
-                     QStringLiteral( "Recognize all-nodata scientific fault" ) );
-    scenario.insert( QStringLiteral( "expected_diagnosis_signature" ),
-                     QStringLiteral( "all_nodata" ) );
-    auto prior = projectFaultScenarioPredict( scenario );
-    const QString prediction = m_faultPrediction->text().trimmed().isEmpty()
-                                   ? QStringLiteral( "all_nodata" )
-                                   : m_faultPrediction->text().trimmed();
-    const QString originalFp = QStringLiteral( "sha256:original-demo" );
-    const auto vm = projectFaultDiagnosis( prior, prediction, QStringLiteral( "all_nodata" ),
-                                           QJsonObject{ { QStringLiteral( "observable" ),
-                                                          QStringLiteral( "all_nodata" ) } },
-                                           QStringLiteral( "/tmp/fault-sandbox-demo" ), originalFp,
-                                           originalFp );
-    m_lastFaultVm = vm.toJson();
-    m_lastFaultVm.insert( QStringLiteral( "synthetic" ), true );
-    m_lastFaultVm.insert(
-        QStringLiteral( "synthetic_note" ),
-        QStringLiteral( "studio demonstration document, not derived from"
-                        " recorded runs" ) );
-    m_session.faultScenarioId = vm.scenarioId;
-=======
     // LIVE fault teaching: a real sicnu.lab.faults/1 scenario runs through
     // the REAL faultlab sandbox pipeline (copy → inject into the copy →
     // re-digest the source). No scenario file → typed refusal, never a
@@ -866,7 +840,6 @@ void ExperimentStudioDock::runFaultTeachingDemo()
     }
     m_lastFaultVm = vm.value().toJson();
     m_session.faultScenarioId = vm->scenarioId;
->>>>>>> origin/master
     m_faultLog->setPlainText(
         QString::fromUtf8( QJsonDocument( m_lastFaultVm ).toJson( QJsonDocument::Indented ) ) );
 }
