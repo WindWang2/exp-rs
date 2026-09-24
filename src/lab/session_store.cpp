@@ -4,6 +4,8 @@
 
 #include "session_store.h"
 
+#include "platform/portable.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -106,7 +108,10 @@ bool writeFileSync( const std::string &path, const std::string &bytes, std::stri
   ::close( fd );
   return true;
 #else
-  std::ofstream out( path, std::ios::binary | std::ios::trunc );
+  // path strings hold UTF-8 bytes; open through the fs::path overload so a
+  // non-ASCII store directory survives the Windows ANSI code page.
+  std::ofstream out( sicnu::portable::pathFromUtf8( path ),
+                     std::ios::binary | std::ios::trunc );
   if ( !out.good() )
   {
     error = "cannot open for write";
@@ -128,7 +133,8 @@ bool writeFileSync( const std::string &path, const std::string &bytes, std::stri
   // Windows counterpart of fsync(2) above: the tmp file must reach stable
   // storage before rename() publishes it, or a crash can lose a save the
   // caller was told succeeded (the documented old-or-new contract).
-  const HANDLE handle = ::CreateFileA( path.c_str(), GENERIC_WRITE,
+  const std::wstring widePath = sicnu::portable::wideFromUtf8( path );
+  const HANDLE handle = ::CreateFileW( widePath.c_str(), GENERIC_WRITE,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
   if ( handle == INVALID_HANDLE_VALUE )
@@ -157,7 +163,7 @@ std::unique_ptr<Json::CharReader> makeStrictReader()
 
 bool readJsonFile( const std::string &path, Json::Value &out, std::string &error )
 {
-  std::ifstream in( path, std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.good() )
   {
     error = "cannot read file";
@@ -252,7 +258,7 @@ LabResult<LabSession> LabSessionStore::create( const LabRuntimePlan &plan, const
     }
     for ( const std::filesystem::directory_entry &entry : it )
     {
-      const std::string name = entry.path().filename().string();
+      const std::string name = sicnu::portable::pathToUtf8( entry.path().filename() );
       const std::string prefix = meta.studentId + "-";
       const std::string suffix = ".session.json";
       if ( name.size() <= prefix.size() + suffix.size() ||
@@ -290,7 +296,7 @@ LabResult<> LabSessionStore::save( const LabSession &session )
 
   std::error_code ec;
   std::filesystem::create_directories(
-    std::filesystem::path( finalPath ).parent_path(), ec );
+    sicnu::portable::pathFromUtf8( finalPath ).parent_path(), ec );
   if ( ec )
     return LabResult<>::failure( { LabDiag{ "lab.session.io",
                                             "cannot create store directory: " + ec.message() } } );
@@ -298,24 +304,21 @@ LabResult<> LabSessionStore::save( const LabSession &session )
   const std::string bytes = sessionToCanonicalBytes( session );
   // Unique per-save tmp name: concurrent saves of the same session can never
   // interleave on a shared tmp file (WorkflowCheckpointManager discipline).
-#ifdef _WIN32
-  const int pid = ::_getpid();
-#else
-  const int pid = ::getpid();
-#endif
+  const std::uint32_t pid = sicnu::portable::pid();
   const std::string tmpPath = finalPath + ".tmp." + std::to_string( pid ) + "." +
                               std::to_string( s_tmpCounter.fetch_add( 1 ) );
   std::string error;
   if ( !writeFileSync( tmpPath, bytes, error ) )
   {
-    std::filesystem::remove( tmpPath, ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), ec );
     return LabResult<>::failure( { LabDiag{ "lab.session.io", error } } );
   }
   // rename(2) / MoveFileEx(REPLACE_EXISTING): atomic replace, old-or-new.
-  std::filesystem::rename( std::filesystem::path( tmpPath ), std::filesystem::path( finalPath ), ec );
+  std::filesystem::rename( sicnu::portable::pathFromUtf8( tmpPath ),
+                           sicnu::portable::pathFromUtf8( finalPath ), ec );
   if ( ec )
   {
-    std::filesystem::remove( tmpPath, ec );
+    std::filesystem::remove( sicnu::portable::pathFromUtf8( tmpPath ), ec );
     return LabResult<>::failure( { LabDiag{ "lab.session.io",
                                             "rename failed: " + ec.message() } } );
   }
@@ -384,14 +387,14 @@ LabSessionStore::Listing LabSessionStore::listSessions() const
       if ( ec )
         break;
       if ( entry.is_regular_file() && entry.path().extension() == ".json" &&
-           entry.path().filename().string().ends_with( ".session.json" ) )
+           sicnu::portable::pathToUtf8( entry.path().filename() ).ends_with( ".session.json" ) )
         files.push_back( entry.path() );
     }
   }
 
   for ( const std::filesystem::path &file : files )
   {
-    auto loaded = loadFromPath( file.string() );
+    auto loaded = loadFromPath( sicnu::portable::pathToUtf8( file ) );
     if ( !loaded.ok )
     {
       for ( const LabDiag &diag : loaded.diagnostics )

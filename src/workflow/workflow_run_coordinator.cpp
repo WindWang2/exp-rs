@@ -10,11 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
+#include "platform/portable.h"
 
 #include <algorithm>
 #include <chrono>
@@ -134,11 +130,7 @@ bool rehydrateMovedOutput( const StepPlan &plan )
     if ( !QDir().mkpath( destInfo.absolutePath() ) )
         return false;
     const QString tmp = destination + QStringLiteral( ".%1.resume.tmp" )
-#ifdef _WIN32
-                            .arg( static_cast<int>( ::_getpid() ) );
-#else
-                            .arg( ::getpid() );
-#endif
+                            .arg( static_cast<int>( sicnu::portable::pid() ) );
     QFile::remove( tmp );
     if ( !QFile::copy( object->poolPath, tmp ) )
     {
