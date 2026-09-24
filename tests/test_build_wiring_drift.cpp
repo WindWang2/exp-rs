@@ -46,21 +46,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <QHostInfo>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonParseError>
-#include <QJsonValue>
-#include <QLocalServer>
-#include <QLocalSocket>
-#include <QLockFile>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QSignalSpy>
-#include <QTemporaryDir>
-#include <QTemporaryFile>
 
 namespace fs = std::filesystem;
 
