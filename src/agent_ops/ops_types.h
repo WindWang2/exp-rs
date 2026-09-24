@@ -72,6 +72,10 @@ struct RecoveryDecision {
     int replanCount = 0;
     int repairCount = 0;
     int retryCount = 0;
+    /// True when the decision authorizes a repair: a repair execution
+    /// returning success is NOT a repaired claim — fresh preflight and
+    /// fresh verification must run before anything is called repaired.
+    bool requiresReverification = false;
     Json::Value repairPlan{Json::Value()}; ///< RepairPlan JSON when present
     Json::Value diagnostic{Json::objectValue};
     Json::Value budgets{Json::objectValue};

@@ -2,6 +2,7 @@
 #include "agent_ops/session_surface.h"
 
 #include "agent_ops/delivery_assembler.h"
+#include "agent_ops/repair_approval.h"
 
 namespace sicnu::agent_ops {
 
@@ -59,6 +60,23 @@ Json::Value errorDoc(const std::string &action, const std::string &error)
     return doc;
 }
 
+/// Reads the run/resume approval arguments into the request. The legacy
+/// bare-bool `approve_pending_repair` spelling is refused explicitly: an
+/// approval without a bound token is exactly what this surface must never
+/// accept. A driver-held token is verified by the coordinator at launch.
+std::string readApprovalArgs(const std::string &action, const Json::Value &args,
+                             OpsRunRequest &request)
+{
+    if (args.isObject() && args.isMember("approve_pending_repair"))
+        return "APPROVAL_TOKEN_REQUIRED";
+    if (args.isObject() && args["repair_approval"].isObject())
+        request.repairApproval = args["repair_approval"];
+    if (args.isObject() && args["approval_now_ms"].isInt64())
+        request.approvalNowMs = args["approval_now_ms"].asInt64();
+    (void)action;
+    return {};
+}
+
 } // namespace
 
 Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::string &action,
@@ -80,7 +98,9 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         request.journalDirectory = args.get("journal_directory", "").asString();
         request.domain = args.get("domain", "research").asString();
         request.role = args.get("role", "").asString();
-        request.approvePendingRepair = args.get("approve_pending_repair", false).asBool();
+        const std::string approvalError = readApprovalArgs(action, args, request);
+        if (!approvalError.empty())
+            return errorDoc(action, approvalError);
         doc = sessionSurfaceStatus(coordinator.run(request));
         doc["schema"] = kSessionSurfaceSchema;
         doc["action"] = action;
@@ -118,7 +138,9 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         request.journalDirectory = args["journal_directory"].asString();
         request.domain = args.get("domain", "research").asString();
         request.role = args.get("role", "").asString();
-        request.approvePendingRepair = args.get("approve_pending_repair", false).asBool();
+        const std::string approvalError = readApprovalArgs(action, args, request);
+        if (!approvalError.empty())
+            return errorDoc(action, approvalError);
         doc = sessionSurfaceStatus(
             coordinator.resume(request.journalDirectory, args["session_id"].asString(),
                                request));
@@ -134,9 +156,33 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     }
     if (action == "approve_repair")
     {
-        coordinator.setPendingRepairApproval(args.get("approve", true).asBool());
+        // The human gate mints a token bound to the plan the driver last
+        // saw: (this coordinator, plan_id, expiry window, digest). An
+        // approval that binds nothing is refused — never a bare flag.
+        const std::string planId = coordinator.lastProjectedRepairPlanId();
+        if (planId.empty())
+            return errorDoc(action, "NO_PENDING_REPAIR_PLAN");
+        if (args.isObject() && args.isMember("plan_id") &&
+            (!args["plan_id"].isString() || args["plan_id"].asString() != planId))
+            return errorDoc(action, "APPROVAL_WRONG_PLAN");
+        const Json::Int64 nowMs = args.isObject() && args["now_ms"].isInt64()
+                                      ? args["now_ms"].asInt64()
+                                      : 0;
+        const Json::Int64 ttlMs = args.isObject() && args["ttl_ms"].isInt64()
+                                      ? args["ttl_ms"].asInt64()
+                                      : 0;
+        Json::Value token = mintRepairApprovalToken(planId, coordinator.instanceId(), nowMs,
+                                                    ttlMs);
+        if (token.isNull())
+            return errorDoc(action, "APPROVAL_MINTING_FAILED");
+        const std::string armError = coordinator.armRepairApproval(token, nowMs);
+        if (!armError.empty())
+            return errorDoc(action, armError);
         doc["ok"] = true;
-        doc["pending_repair_approval"] = coordinator.isPendingRepairApproval();
+        doc["plan_id"] = planId;
+        doc["repair_approval"] = token;
+        doc["expires_at_ms"] = token["expires_at_ms"];
+        doc["pending_repair_approval"] = coordinator.hasPendingRepairApproval();
         return doc;
     }
     if (action == "export")

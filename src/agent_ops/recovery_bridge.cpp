@@ -1,45 +1,122 @@
 // src/agent_ops/recovery_bridge.cpp
 #include "agent_ops/recovery_bridge.h"
 #include "agent_ops/autonomy_ops_gate.h"
+#include "repair_planner/repair_planner.h"
 #include "repair_planner/repair_schema.h"
 
 namespace sicnu::agent_ops {
+namespace {
 
-Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
-                                              const std::string &intent) const
+/// The typed finding documents the repair planner consumes, derived from the
+/// diagnostic's structured evidence. The preflight report embedded in
+/// `sources` is the typed producer in the ops path: its issues already carry
+/// the finding code vocabulary the requirement synthesizer maps. Nothing is
+/// guessed from prose, and proposals (rule ids) are deliberately NOT turned
+/// into findings — they are another layer's output, not evidence. The live
+/// run() path embeds the bridged diagnostic under sources["bridge"], so its
+/// preflight report is consulted there too (same producer, one indirection).
+std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagnostic)
+{
+    std::vector<Json::Value> findings;
+    if (!diagnostic.sources.isObject())
+        return findings;
+    const Json::Value *preflight = nullptr;
+    if (diagnostic.sources["preflight"].isObject())
+        preflight = &diagnostic.sources["preflight"];
+    else if (diagnostic.sources["bridge"].isObject() &&
+             diagnostic.sources["bridge"]["sources"].isObject() &&
+             diagnostic.sources["bridge"]["sources"]["preflight"].isObject())
+        preflight = &diagnostic.sources["bridge"]["sources"]["preflight"];
+    if (preflight == nullptr || !(*preflight)["issues"].isArray())
+        return findings;
+    for (const Json::Value &issue : (*preflight)["issues"])
+    {
+        if (!issue.isObject() || !issue["code"].isString() || issue["code"].asString().empty())
+            continue;
+        Json::Value finding(Json::objectValue);
+        finding["code"] = issue["code"];
+        if (issue["severity"].isString())
+            finding["severity"] = issue["severity"];
+        if (issue["subject"].isString())
+            finding["subject"] = issue["subject"];
+        Json::Value evidence(Json::objectValue);
+        if (issue.isMember("message"))
+            evidence["message"] = issue["message"];
+        finding["evidence"] = evidence;
+        findings.push_back(finding);
+    }
+    return findings;
+}
+
+/// Typed no-safe-repair envelope for the cases where the bridge cannot plan
+/// honestly (no capability knowledge wired, no typed findings, malformed
+/// findings). A repair_plan/1.0 document with a counted cause — never a
+/// fabricated candidate list.
+Json::Value noSafeRepairPlan(const std::string &intent, const std::string &cause,
+                             const std::string &detail)
 {
     sicnu::repair::RepairPlan plan;
     plan.intent = intent.empty() ? "ops_recovery" : intent;
-    plan.subject = diagnostic.rootCauseCode;
-    plan.status = diagnostic.proposals.empty() ? sicnu::repair::plan_status::kNoSafeRepair
-                                               : sicnu::repair::plan_status::kPlanned;
-    plan.resolvesAllBlockers = !diagnostic.proposals.empty();
+    plan.status = sicnu::repair::plan_status::kNoSafeRepair;
+    plan.resolvesAllBlockers = false;
     plan.provenance["planner"] = sicnu::repair::kPlannerId;
     plan.provenance["source"] = "agent_ops.recovery_bridge";
-    int n = 0;
-    for (const auto &ruleId : diagnostic.proposals)
-    {
-        sicnu::repair::RepairAction action;
-        action.id = "ra-ops-" + std::to_string(++n);
-        action.ruleId = ruleId;
-        action.kind = sicnu::repair::action_kind::kCapabilityRef;
-        action.operatorId = ruleId.find(':') != std::string::npos ? ruleId : ("rs:" + ruleId);
-        action.riskClass = sicnu::repair::repair_risk::kShapePreserving;
-        action.risk.riskClass = action.riskClass;
-        action.risk.severity = "low";
-        action.cost.rank = 2;
-        action.cost.costClass = "light";
-        action.sourceFinding["code"] = diagnostic.rootCauseCode;
-        plan.selected.push_back(action);
-    }
-    if (plan.selected.empty())
-    {
-        plan.noSafeRepair = Json::objectValue;
-        plan.noSafeRepair["cause"] = "no_proposals";
-        plan.noSafeRepair["root_cause"] = diagnostic.rootCauseCode;
-    }
+    Json::Value entry(Json::objectValue);
+    entry["requirement_id"] = "";
+    entry["cause"] = cause;
+    if (!detail.empty())
+        entry["detail"] = detail;
+    plan.unresolved.push_back(entry);
+    plan.noSafeRepair = entry;
     sicnu::repair::assignRepairPlanIdentity(plan);
     return sicnu::repair::repairPlanToJson(plan);
+}
+
+} // namespace
+
+RecoveryBridge::RecoveryBridge(const sicnu::repair::RepairCapabilityProvider *provider)
+    : mProvider(provider)
+{
+}
+
+Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
+                                              const RecoveryContext &ctx) const
+{
+    const std::string intent = ctx.intent.empty() ? "ops_recovery" : ctx.intent;
+
+    if (mProvider == nullptr)
+        return noSafeRepairPlan(intent, "no_provider",
+                                "no capability provider wired; no candidate is fabricated");
+
+    const std::vector<Json::Value> findings = repairFindingsFromDiagnostic(diagnostic);
+    if (findings.empty())
+        return noSafeRepairPlan(intent, "no_findings",
+                                "the diagnostic carries no typed preflight findings");
+
+    // Autonomy for the plan's policy record comes from the SAME gate the
+    // recovery decision uses on the neutral execute key — one authority, no
+    // second derivation of "what autonomy allows".
+    OpsAutonomyRequest execReq;
+    execReq.mutateKind = ops_mutate::kExecute;
+    execReq.domain = ctx.domain;
+    execReq.role = ctx.role;
+    execReq.intent = ctx.intent;
+    execReq.actionKey = "ops:run";
+    const sicnu::repair::RepairPolicyContext policyContext{
+        ctx.domain, ctx.role, gateMutatingOp(ctx.autonomyPolicy, execReq).allowed,
+        ctx.humanApprovedRepair};
+
+    sicnu::repair::RepairPlannerOutcome outcome;
+    sicnu::repair::RepairError error;
+    sicnu::repair::RepairPlannerOptions options;
+    options.intent = intent;
+    if (!sicnu::repair::planRepairsForFindings(findings, *mProvider, policyContext, options,
+                                               outcome, error))
+        return noSafeRepairPlan(intent, "invalid_findings", error.message);
+
+    Json::Value planDoc = sicnu::repair::repairPlanToJson(outcome.plan);
+    planDoc["planning_only"] = true;
+    return planDoc;
 }
 
 RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
@@ -116,9 +193,38 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
     {
         if (ctx.repairCount >= ctx.budgets.maxRepairs)
             return abortWith("MAX_REPAIRS");
-        out.repairPlan = projectRepairPlan(diagnostic, ctx.intent);
+
+        // The plan is the authority: provider-backed planning over the
+        // diagnostic's typed findings. A plan that could not honestly plan
+        // (no knowledge, no findings, only refusals) is a human decision —
+        // never an auto path, never fabricated candidates.
+        out.repairPlan = projectRepairPlan(diagnostic, ctx);
+        const std::string planStatus =
+            out.repairPlan.isObject() && out.repairPlan["status"].isString()
+                ? out.repairPlan["status"].asString()
+                : std::string();
+        if (planStatus != sicnu::repair::plan_status::kPlanned)
+        {
+            out.action = recovery_action::kAsk;
+            out.reasonCode = "NO_SAFE_REPAIR_PLAN";
+            out.needsApproval = true;
+            out.autonomyAllowed = true;
+            out.autonomyReasonCode = sicnu::agent::autonomy::autonomy_reason_codes::kAllowed;
+            return out;
+        }
+
+        // The risk class that gates the repair comes from the plan's own
+        // candidate contract — the caller's leadingRiskClass claim cannot
+        // downgrade a radiometric or science-changing repair into an
+        // auto path.
+        std::string leadingRisk = ctx.leadingRiskClass;
+        const Json::Value &selected = out.repairPlan["selected"];
+        if (selected.isArray() && !selected.empty() && selected[0].isObject() &&
+            selected[0]["risk_class"].isString() && !selected[0]["risk_class"].asString().empty())
+            leadingRisk = selected[0]["risk_class"].asString();
+
         const bool scienceChanging =
-            ctx.leadingRiskClass == "radiometric" || ctx.leadingRiskClass == "science_changing";
+            leadingRisk == "radiometric" || leadingRisk == "science_changing";
         if (scienceChanging && !ctx.humanApprovedRepair)
         {
             out.action = recovery_action::kAsk;
@@ -134,7 +240,7 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         req.role = ctx.role;
         req.intent = ctx.intent;
         req.actionKey = "ops:repair";
-        req.riskClass = ctx.leadingRiskClass;
+        req.riskClass = leadingRisk;
         const auto gate = gateMutatingOp(ctx.autonomyPolicy, req);
         out.autonomyAllowed = gate.allowed;
         out.autonomyReasonCode = gate.reasonCode;
@@ -147,6 +253,11 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         }
         out.action = recovery_action::kRepair;
         out.reasonCode = "REPAIR_PROCEED";
+        // Exit 0 on a repair is NOT "repaired": fresh preflight and fresh
+        // verification must run before any repaired claim. The decision
+        // carries that obligation on the wire so no caller can project a
+        // repaired outcome from the execution fact alone.
+        out.requiresReverification = true;
         return out;
     }
 
