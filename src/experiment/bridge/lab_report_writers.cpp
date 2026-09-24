@@ -197,11 +197,11 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
         md += QStringLiteral( "<details><summary>step %1 — %2</summary>\n\n" )
                   .arg( QString::number( step.value( "index" ).toInt() ),
                         mdEscape( step.value( "operator" ).toString() ) );
-        md += QStringLiteral( "```json\n%1\n```\n\n" )
+        md += QStringLiteral( "````json\n%1\n````\n\n" )
                   .arg( compactJson( step.value( QStringLiteral( "params" ) ) ) );
         const QJsonValue result = step.value( QStringLiteral( "result" ) );
         if ( !result.isNull() && result.type() != QJsonValue::Undefined )
-            md += QStringLiteral( "```json\n%1\n```\n\n" ).arg( compactJson( result ) );
+            md += QStringLiteral( "````json\n%1\n````\n\n" ).arg( compactJson( result ) );
         md += QStringLiteral( "</details>\n\n" );
     }
 
@@ -210,7 +210,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
     if ( statistics.isEmpty() )
         md += QStringLiteral( "_none_\n\n" );
     for ( const QJsonValue &value : statistics )
-        md += QStringLiteral( "```json\n%1\n```\n\n" ).arg( compactJson( value ) );
+        md += QStringLiteral( "````json\n%1\n````\n\n" ).arg( compactJson( value ) );
 
     md += QStringLiteral( "## 成绩 (grade)\n\n" );
     const QJsonObject grade = document.value( QStringLiteral( "grade" ) ).toObject();
@@ -218,7 +218,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
     {
         md += QStringLiteral( "recorded — ref `%1`\n\n" )
                   .arg( mdEscape( grade.value( "gradingRef" ).toString() ) );
-        md += QStringLiteral( "```json\n%1\n```\n\n" )
+        md += QStringLiteral( "````json\n%1\n````\n\n" )
                   .arg( compactJson( grade.value( QStringLiteral( "inline" ) ) ) );
     }
     else
@@ -262,7 +262,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
 
     md += QStringLiteral( "## 环境 (environment)\n\n" );
     const QJsonObject environment = document.value( QStringLiteral( "environment" ) ).toObject();
-    md += QStringLiteral( "```json\n%1\n```\n\n" )
+    md += QStringLiteral( "````json\n%1\n````\n\n" )
               .arg( compactJson( environment.value( QStringLiteral( "fields" ) ) ) );
 
     md += QStringLiteral( "## 缩略图 (thumbnails)\n\n" );
