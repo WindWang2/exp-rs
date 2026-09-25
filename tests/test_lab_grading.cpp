@@ -21,10 +21,12 @@
 // the derivation notes in data/labs/grading/*.rules.json) — never "JSON
 // non-null" weak asserts (issue #814 precedent avoided).
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "agent/output_verifier.h"
 #include "geospatial/gdal_guard.h"
+#include "teaching_admin/grader_cli_adapter.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -742,6 +744,12 @@ TEST_CASE( "lab_grading.absurd band indices grade as failures without OOB",
 namespace
 {
 
+QJsonObject toQJson( const Json::Value &value )
+{
+    const std::string text = Json::writeString( Json::StreamWriterBuilder(), value );
+    return QJsonDocument::fromJson( QByteArray::fromStdString( text ) ).object();
+}
+
 int exitCodeFor( const OutputVerifier::LabGradeResult &result )
 {
     if ( result.graded )
@@ -794,7 +802,7 @@ TEST_CASE( "lab_grading.in-process result and CLI transcript mapper agree on eve
         REQUIRE( transcript["schema"].asString() == "sicnu.lab.grade/1" );
         REQUIRE( transcript["digest"].asString() == result.digest.toStdString() );
 
-        const auto mapped = gradeFromTranscript( exitCodeFor( result ), transcript.object() );
+        const auto mapped = gradeFromTranscript( exitCodeFor( result ), toQJson( transcript ) );
 
         // verdict/status parity
         if ( result.graded )
@@ -822,7 +830,7 @@ TEST_CASE( "lab_grading.in-process result and CLI transcript mapper agree on eve
         const auto result = grade( "no_such_lab_parity", fixturePath( "change_detect_reference.tif" ) );
         REQUIRE_FALSE( result.graded );
         REQUIRE( result.errorClass == QLatin1String( "usage" ) );
-        const auto mapped = gradeFromTranscript( 2, result.toJson( "parity-test-utc" ).object() );
+        const auto mapped = gradeFromTranscript( 2, toQJson( result.toJson( "parity-test-utc" ) ) );
         REQUIRE( mapped.status == QLatin1String( "error" ) );
         REQUIRE( mapped.score < 0.0 );
         REQUIRE_FALSE( mapped.message.isEmpty() );
@@ -835,7 +843,7 @@ TEST_CASE( "lab_grading.in-process result and CLI transcript mapper agree on eve
                                        fixturePath( "change_detect_wrong_inverted.tif" ) );
         REQUIRE( result.graded );
         REQUIRE( result.verdict == QLatin1String( "fail" ) );
-        const auto mapped = gradeFromTranscript( 0, result.toJson( "parity-test-utc" ).object() );
+        const auto mapped = gradeFromTranscript( 0, toQJson( result.toJson( "parity-test-utc" ) ) );
         REQUIRE( mapped.status == QLatin1String( "unavailable" ) );
         REQUIRE( mapped.unavailableReason == QLatin1String( "grader_exit_verdict_mismatch" ) );
         REQUIRE( mapped.score < 0.0 );

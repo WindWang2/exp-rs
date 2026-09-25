@@ -446,7 +446,9 @@ std::vector<PackDocument> PackVerifier::loadPacksFromDir(
     if ( !std::filesystem::is_regular_file( entry, statEc ) || statEc )
       continue;
     const std::string name = u8( entry );
-    if ( name.size() < 10 || name.rfind( ".pack.json" ) != name.size() - 10 )
+    if ( name.empty() || name.front() == '.' )
+      continue; // hidden files never match the *.pack.json glob
+    if ( name.size() <= 10 || name.rfind( ".pack.json" ) != name.size() - 10 )
       continue;
     entries.push_back( entry );
   }

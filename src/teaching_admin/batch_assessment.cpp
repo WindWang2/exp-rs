@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMutex>
+#include <QSet>
 #include <QSaveFile>
 #include <algorithm>
 #include <cstring>
@@ -82,8 +83,22 @@ QVector<BatchRowResult> loadCheckpointRows( const QString &path, const QString &
     QVector<BatchRowResult> rows;
     const QJsonArray arr = doc.value( QStringLiteral( "rows" ) ).toArray();
     rows.reserve( arr.size() );
+    // Adopt only rows whose status is in the orchestrator's own vocabulary:
+    // a tampered or corrupt checkpoint degrades to a fresh start for that
+    // row instead of importing garbage into the published report.
+    static const QSet<QString> kKnownStatuses = {
+        QStringLiteral( "pass" ),   QStringLiteral( "fail" ),
+        QStringLiteral( "error" ),  QStringLiteral( "timeout" ),
+        QStringLiteral( "crash" ),  QStringLiteral( "unavailable" ),
+        QStringLiteral( "corrupted" ),
+    };
     for ( const auto &v : arr )
-        rows.append( BatchRowResult::fromJson( v.toObject() ) );
+    {
+        BatchRowResult row = BatchRowResult::fromJson( v.toObject() );
+        if ( !kKnownStatuses.contains( row.status ) || row.studentId.isEmpty() )
+            continue;
+        rows.append( row );
+    }
     return rows;
 }
 
@@ -267,8 +282,10 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     auto items = discoverSubmissions( cfg.submissionsDir );
     const int discovered = items.size();
     report.total = discovered;
+    // maxSubmissions >= 0 caps the processed count (0 = dry-run: nothing
+    // graded, everything typed truncated); negative means unlimited.
     const int processLimit =
-      cfg.maxSubmissions > 0 ? std::min( discovered, cfg.maxSubmissions ) : discovered;
+      cfg.maxSubmissions >= 0 ? std::min( discovered, cfg.maxSubmissions ) : discovered;
     report.truncated = discovered - processLimit;
 
     // Slot per submission, written by exactly one worker / adoption; final
@@ -330,6 +347,7 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 return; // slot stays empty → typed cancelled row below
             if ( filled[static_cast<std::size_t>( i )] )
                 continue; // adopted from the checkpoint — do not re-grade
+            int newlyDone = 0;
             BatchRowResult row;
             try
             {
@@ -356,11 +374,24 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 row.softwareVersion = cfg.softwareVersion;
             if ( row.artifactPath.isEmpty() )
                 row.artifactPath = items[i].path;
-            rowSlot[static_cast<std::size_t>( i )] = row;
-            filled[static_cast<std::size_t>( i )] = true;
+            {
+                // Publish under the checkpoint mutex: checkpointAll() reads
+                // ALL slots while holding it, so the writers must take it
+                // too for the release/acquire edge (a plain write races
+                // with a sibling worker's snapshot and can tear a QString).
+                QMutexLocker locker( &checkpointMutex );
+                rowSlot[static_cast<std::size_t>( i )] = row;
+                filled[static_cast<std::size_t>( i )] = true;
+                newlyDone = doneRows.fetch_add( 1 ) + 1;
+            }
             if ( progress )
-                progress( doneRows.fetch_add( 1 ) + 1, processLimit );
-            if ( !cfg.checkpointPath.isEmpty() )
+                progress( newlyDone, processLimit );
+            const bool finalRow = newlyDone == processLimit;
+            // Throttled durable checkpoint: a full rewrite after every row
+            // is O(n^2) bytes on large classes; every 16th row (plus the
+            // final row and the post-loop write) bounds the loss of a hard
+            // crash to 15 rows while staying linear overall.
+            if ( !cfg.checkpointPath.isEmpty() && ( finalRow || newlyDone % 16 == 0 ) )
                 checkpointAll();
         }
     };

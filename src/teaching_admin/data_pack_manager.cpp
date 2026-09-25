@@ -52,7 +52,6 @@ bool staysUnderRoot( const QString &repoRoot, const QString &rel )
 ValidationResult validateInputContainment( const QJsonArray &inputs, const QString &repoRoot )
 {
     ValidationResult r;
-    QSet<QString> lexicalSeen;
     for ( int i = 0; i < inputs.size(); ++i )
     {
         const QJsonObject in = inputs.at( i ).toObject();
@@ -70,7 +69,6 @@ ValidationResult validateInputContainment( const QJsonArray &inputs, const QStri
             r.addError( QStringLiteral( "path_escape" ), at,
                         QStringLiteral( "pack input resolves outside the repo root" ) );
         }
-        lexicalSeen.insert( path );
     }
     return r;
 }
@@ -228,7 +226,12 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
                         const QString actual = sha256OfFile( abs );
                         if ( actual != declaredSha )
                         {
-                            digestsOk = false;
+                            // Strength follows the tier (leaf policy): only
+                            // a committed fixture's digest pins availability;
+                            // elsewhere the mismatch stays an informative
+                            // warning so admin and agent agree on the verdict.
+                            if ( committed )
+                                digestsOk = false;
                             e.issues.push_back(
                               { QStringLiteral( "digest_mismatch" ), at,
                                 QStringLiteral( "sha256 mismatch: declared %1, computed %2" )

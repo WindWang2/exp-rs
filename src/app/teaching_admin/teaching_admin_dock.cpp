@@ -399,23 +399,50 @@ void TeachingAdminDock::onRunBatch()
     m_batchCancelButton->setEnabled( true );
 
     const QString outPrefix = m_batchOutEdit->text();
-    m_batchThread = std::thread( [this, cfg, grader, outPrefix, total]() {
-        sicnu::teaching_admin::BatchProgressFn progress =
-          [this, total]( int done, int processedTotal ) {
-              QMetaObject::invokeMethod(
-                this,
-                [this, done, processedTotal]() {
-                    m_batchProgressLabel->setText(
-                      tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
-                },
-                Qt::QueuedConnection );
-          };
-        const auto report = runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
-        publishBatchOutputsAtomic( report, outPrefix );
-        QMetaObject::invokeMethod(
-          this,
-          [this, report, total]() { finishBatchOnUiThread( report.toJson() ); },
-          Qt::QueuedConnection );
+    m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
+        // Exception barrier: a throw leaving a std::thread function is
+        // std::terminate — the GUI must survive a failed batch.
+        try
+        {
+            sicnu::teaching_admin::BatchProgressFn progress =
+              [this]( int done, int processedTotal ) {
+                  QMetaObject::invokeMethod(
+                    this,
+                    [this, done, processedTotal]() {
+                        m_batchProgressLabel->setText(
+                          tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
+                    },
+                    Qt::QueuedConnection );
+              };
+            const auto report =
+              runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
+            publishBatchOutputsAtomic( report, outPrefix );
+            QMetaObject::invokeMethod(
+              this,
+              [this, report]() { finishBatchOnUiThread( report.toJson() ); },
+              Qt::QueuedConnection );
+        }
+        catch ( const std::exception &e )
+        {
+            const QString what = QString::fromUtf8( e.what() );
+            QMetaObject::invokeMethod(
+              this, [this, what]() {
+                  m_batchProgressLabel->setText( tr( "batch failed: %1" ).arg( what ) );
+                  m_batchCancelButton->setEnabled( false );
+                  appendLog( tr( "batch failed: %1" ).arg( what ) );
+              },
+              Qt::QueuedConnection );
+        }
+        catch ( ... )
+        {
+            QMetaObject::invokeMethod(
+              this, [this]() {
+                  m_batchProgressLabel->setText( tr( "batch failed (unknown error)" ) );
+                  m_batchCancelButton->setEnabled( false );
+                  appendLog( tr( "batch failed (unknown error)" ) );
+              },
+              Qt::QueuedConnection );
+        }
     } );
 }
 
