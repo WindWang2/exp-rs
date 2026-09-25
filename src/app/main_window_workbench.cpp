@@ -1084,10 +1084,15 @@ void QgisDesktopWindow::refreshMissionRuntime()
     {
         // Incremental when the mission is unchanged and no tasks appeared:
         // the panel then applies only the events after the cursor instead of
-        // resetting the view.
+        // resetting the view. The cursor must also still be INSIDE the
+        // retained event window — after a long agent burst the bounded log
+        // truncated past it, and applying "the tail" would adopt the fresh
+        // task data while repainting only part of the table.
         const bool incremental = !previous.missionId().isEmpty()
                                  && previous.missionId() == state.timeline.missionId()
-                                 && previous.tasks().size() == state.timeline.tasks().size();
+                                 && previous.tasks().size() == state.timeline.tasks().size()
+                                 && missionTimelineCursorRetained( state.timeline,
+                                                                   previous.lastEventSeq() );
         if ( incremental )
             m_missionPanel->applyEvents( state.timeline, previous.lastEventSeq() );
         else

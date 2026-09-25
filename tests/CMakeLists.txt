@@ -10862,6 +10862,43 @@ sicnu_add_mission_test(test_mission_stage)
 sicnu_add_mission_test(test_mission_surface_parity)
 sicnu_add_mission_test(test_mission_scale_benchmark)
 
+# Mission timeline desktop surface lifecycle: the selection the panel pushes
+# into SelectionContext must mirror the authority (a model reset clears it, an
+# incremental apply refreshes its status). The panel is a QgsDockWidget, so
+# this target — unlike the task-space gates above — links qgis_gui; the value
+# model underneath stays Qt Core only.
+add_executable(test_mission_timeline_surface
+  test_mission_timeline_surface.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+)
+target_link_libraries(test_mission_timeline_surface PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mission_timeline_surface PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mission_timeline_surface PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mission_timeline_surface PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mission_timeline_surface)
+
 
 add_executable(test_agent_workbench_context
   test_agent_workbench_context.cpp
