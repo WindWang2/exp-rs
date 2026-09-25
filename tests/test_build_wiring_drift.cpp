@@ -449,6 +449,7 @@ struct Helper
     std::vector<std::string> params;  // declared parameter names, in order
     std::set<std::string> multi_kws;  // cmake_parse_arguments multi-value keywords
     std::set<std::string> single_kws; // cmake_parse_arguments single-value keywords
+    std::string parse_prefix;         // cmake_parse_arguments <PREFIX> ("" when absent)
     std::vector<std::string> body_target_args; // tokens after ${PARAM} in the target cmd
     std::vector<std::vector<std::string>> body_link_lists; // per target_link_libraries
     std::vector<std::string> body_include_dirs; // target_include_directories tokens
@@ -768,18 +769,30 @@ bool is_link_scope_kw( const std::string &tok )
 // values of script-local set() variables. A token that *is* exactly ${VAR}
 // expands to all of the variable's tokens; anything needing an unknown
 // variable stays unresolved (the caller records it — fail-open).
-void expand_wiring_token( const std::string &tok,
-                          const std::map<std::string, std::vector<std::string>> &vars,
-                          std::vector<std::string> &out, bool &unknown )
+void expand_wiring_token_impl( const std::string &tok,
+                               const std::map<std::string, std::vector<std::string>> &vars,
+                               std::vector<std::string> &out, bool &unknown,
+                               std::set<std::string> &stack )
 {
+    if ( out.size() > 4096 )
+    {
+        unknown = true; // runaway list: stop expanding, fail open
+        return;
+    }
     if ( tok.size() > 3 && tok[0] == '$' && tok[1] == '{' && tok.back() == '}' )
     {
         const std::string var = tok.substr( 2, tok.size() - 3 );
         const auto it = vars.find( var );
         if ( it != vars.end() )
         {
+            if ( !stack.insert( var ).second )
+            {
+                unknown = true; // self-referencing list(X APPEND … ${X}): stop
+                return;
+            }
             for ( const std::string &v : it->second )
-                expand_wiring_token( v, vars, out, unknown );
+                expand_wiring_token_impl( v, vars, out, unknown, stack );
+            stack.erase( var );
             return;
         }
     }
@@ -806,7 +819,7 @@ void expand_wiring_token( const std::string &tok,
                 {
                     std::vector<std::string> nested;
                     bool nested_unknown = false;
-                    expand_wiring_token( it->second[0], vars, nested, nested_unknown );
+                    expand_wiring_token_impl( it->second[0], vars, nested, nested_unknown, stack );
                     if ( nested_unknown || nested.empty() )
                     {
                         unknown = true;
@@ -826,6 +839,14 @@ void expand_wiring_token( const std::string &tok,
             norm.push_back( tok[k++] );
     }
     out.push_back( norm );
+}
+
+void expand_wiring_token( const std::string &tok,
+                          const std::map<std::string, std::vector<std::string>> &vars,
+                          std::vector<std::string> &out, bool &unknown )
+{
+    std::set<std::string> stack;
+    expand_wiring_token_impl( tok, vars, out, unknown, stack );
 }
 
 // Resolve an expanded token (with \x01R/\x01W markers) to an absolute path
@@ -869,7 +890,8 @@ struct BoundTarget
 // (sicnu_link_jsoncpp-style link helpers).
 BoundTarget bind_helper_call( const RepoModel &m, const std::string &helper_name,
                               const std::map<std::string, std::vector<std::string>> &bindings,
-                              const fs::path &root, const fs::path &calling_dir, int depth )
+                              const fs::path &root, const fs::path &calling_dir, int depth,
+                              const std::map<std::string, std::vector<std::string>> &calling_vars )
 {
     BoundTarget out;
     if ( depth > 3 )
@@ -884,7 +906,12 @@ BoundTarget bind_helper_call( const RepoModel &m, const std::string &helper_name
         // ${PARAM} / ${KW_GROUP} → bound call-site tokens
         if ( raw.size() > 3 && raw[0] == '$' && raw[1] == '{' && raw.back() == '}' )
         {
-            const std::string name = raw.substr( 2, raw.size() - 3 );
+            std::string name = raw.substr( 2, raw.size() - 3 );
+            // parse_arguments exposes keyword groups as <PREFIX>_<KW>; call
+            // sites pass the bare KW spelling (${D17_LIBS} ← LIBS x y)
+            if ( !bindings.count( name ) && !h.parse_prefix.empty() &&
+                 name.rfind( h.parse_prefix + "_", 0 ) == 0 )
+                name = name.substr( h.parse_prefix.size() + 1 );
             const auto bit = bindings.find( name );
             if ( bit != bindings.end() )
             {
@@ -895,10 +922,21 @@ BoundTarget bind_helper_call( const RepoModel &m, const std::string &helper_name
                         dst.push_back( v );
                         continue;
                     }
-                    const std::string rp = resolve_expanded_path( v, root, calling_dir );
-                    if ( !rp.empty() )
-                        dst.push_back( rp );
-                    else if ( v.find( '$' ) != std::string::npos )
+                    // call-site path tokens may compose calling-script
+                    // variables (${D17_ENGINE_SOURCES}) on top of the
+                    // root/current markers — expand them first
+                    std::vector<std::string> ex;
+                    bool vunk = false;
+                    expand_wiring_token( v, calling_vars, ex, vunk );
+                    for ( const std::string &e : ex )
+                    {
+                        const std::string rp = resolve_expanded_path( e, root, calling_dir );
+                        if ( !rp.empty() )
+                            dst.push_back( rp );
+                        else if ( e.find( '$' ) != std::string::npos )
+                            unknown = true;
+                    }
+                    if ( ex.empty() && vunk )
                         unknown = true;
                 }
                 return;
@@ -1013,7 +1051,8 @@ BoundTarget bind_helper_call( const RepoModel &m, const std::string &helper_name
         if ( !argval.empty() )
             nested_bindings[nested->second.param] = argval;
         const BoundTarget nested_out =
-            bind_helper_call( m, nh.first, nested_bindings, root, calling_dir, depth + 1 );
+            bind_helper_call( m, nh.first, nested_bindings, root, calling_dir, depth + 1,
+                              calling_vars );
         out.links.insert( out.links.end(), nested_out.links.begin(), nested_out.links.end() );
         out.unknown_link = out.unknown_link || nested_out.unknown_link;
     }
@@ -1154,17 +1193,18 @@ RepoModel build_model( const fs::path &root )
                 model.assigned_vars.insert( toks[0] );
             if ( cmd.name == "set" && toks.size() >= 2 && valid_target_name( toks[0] ) )
             {
+                // keep ${…}-composed tokens too: the chain-resolution pass
+                // below expands the resolvable ones (${CMAKE_SOURCE_DIR}/x,
+                // references to earlier variables of the same script)
                 for ( std::size_t ti = 1; ti < toks.size(); ++ti )
-                    if ( toks[ti].find( '$' ) == std::string::npos )
-                        model.script_set_vars[s.path][toks[0]].push_back( toks[ti] );
+                    model.script_set_vars[s.path][toks[0]].push_back( toks[ti] );
             }
             else if ( cmd.name == "list" && toks.size() >= 3 && toks[0] == "APPEND" &&
                       valid_target_name( toks[1] ) )
             {
                 // list(APPEND VAR a b …): the QGIS-style staged source lists
                 for ( std::size_t ti = 2; ti < toks.size(); ++ti )
-                    if ( toks[ti].find( '$' ) == std::string::npos )
-                        model.script_set_vars[s.path][toks[1]].push_back( toks[ti] );
+                    model.script_set_vars[s.path][toks[1]].push_back( toks[ti] );
             }
         }
     }
@@ -1190,7 +1230,8 @@ RepoModel build_model( const fs::path &root )
                     }
                     std::vector<std::string> ex;
                     bool unk = false;
-                    expand_wiring_token( tok, sv.second, ex, unk );
+                    std::set<std::string> chain_stack{ entry.first };
+                    expand_wiring_token_impl( tok, sv.second, ex, unk, chain_stack );
                     if ( ex.empty() )
                     {
                         next.push_back( tok );
@@ -1313,8 +1354,15 @@ RepoModel build_model( const fs::path &root )
                             std::vector<std::string> a = split_args( bc.args );
                             if ( !a.empty() && a[0] == "PARSE_ARGV" && a.size() >= 3 )
                                 a.erase( a.begin(), a.begin() + 3 );
+                            // strip the wrapping quotes of <options>/<single>/<multi>
+                            for ( auto &t : a )
+                            {
+                                t.erase( std::remove( t.begin(), t.end(), '"' ), t.end() );
+                            }
+                            // <prefix> <options> <single> <multi> ${ARGN}
                             if ( a.size() >= 4 )
                             {
+                                h.parse_prefix = a[0];
                                 const auto read_kw_list = [&]( const std::string &semi ) {
                                     std::set<std::string> out;
                                     std::string cur;
@@ -1333,8 +1381,8 @@ RepoModel build_model( const fs::path &root )
                                         out.insert( cur );
                                     return out;
                                 };
-                                h.single_kws = read_kw_list( a[1] );
-                                h.multi_kws = read_kw_list( a[2] );
+                                h.single_kws = read_kw_list( a[2] );
+                                h.multi_kws = read_kw_list( a[3] );
                             }
                         }
                         else if ( bc.name == "set" )
@@ -1639,7 +1687,7 @@ RepoModel build_model( const fs::path &root )
                 const std::string subject = name_it->second[0];
                 const BoundTarget bound =
                     bind_helper_call( model, cmd.name, bindings, model.root,
-                                      s.path.parent_path(), 0 );
+                                      s.path.parent_path(), 0, vars );
                 TargetInfo &info = model.target_info[subject];
                 info.script = si;
                 info.helper_created = true;
@@ -2138,7 +2186,8 @@ Demandable demandable_identifiers( const std::string &code )
     // `class X;` is a forward declaration and names an outside entity; the
     // (?!:) keeps `class A::B` elaborated declarations (outside types) from
     // registering a bogus one-word tag
-    static const std::regex tag_re( R"(\b(?:class|struct|enum)\s+([A-Za-z_]\w*)\s*(?:\{|\z|:(?!:)))" );
+    // enums are header-complete: using one never needs a body
+    static const std::regex tag_re( R"(\b(?:class|struct)\s+([A-Za-z_]\w*)\s*(?:\{|\z|:(?!:)))" );
     for ( std::sregex_iterator it( code.begin(), code.end(), tag_re ), end; it != end; ++it )
         out.by_name.emplace( ( *it )[1].str(), Demandable::Kind::Tag );
     // function declarations: name( … ) followed by `;` (no body in the header)
@@ -2464,21 +2513,40 @@ std::vector<std::string> check_embed_link_requirements( const RepoModel &m )
             if ( !is_under( src, m.root / "src" ) )
                 continue; // embed rules cover production sources only
             const tu::Closure c = tu::analyze_tu( src, roots );
+            // the TU's include needs live in its own text or its stem header
+            // (range_cache_disk.cpp's <json/json.h> sits in
+            // range_cache_disk.h) — one compilation unit. Includes reached
+            // through unrelated headers demand nothing: their inline
+            // functions may never be called by this TU.
+            const fs::path stem_header = src.parent_path() / ( src.stem().string() + ".h" );
             for ( const auto &fa : c.angle_by_file )
             {
-                if ( fs::weakly_canonical( fa.first ) != fs::weakly_canonical( src ) )
-                    continue; // header-carried needs need usage the TU may never make
+                const bool own_unit = fs::weakly_canonical( fa.first ) ==
+                                              fs::weakly_canonical( src ) ||
+                                      fs::weakly_canonical( fa.first ) ==
+                                          fs::weakly_canonical( stem_header );
+                if ( !own_unit )
+                    continue;
                 const tu::CppFile &ff = tu::load_cpp( fa.first );
                 for ( const std::string &inc : fa.second )
                 {
                     const auto req = required_lib_for_include( inc );
+                    // When even the over-approximated closure (every link
+                    // edge followed) lacks the dependency, the embed is
+                    // certainly missing it — that is the #1298/#1302 class.
+                    // Where the closure DOES contain it, provability ends:
+                    // whether that transit is PUBLIC-reliable is not
+                    // statically decidable (sicnu_link_jsoncpp exists because
+                    // it sometimes is not), so the check records unknown and
+                    // stays silent rather than false-red.
                     if ( !req || closure_unknown || missing.count( req->name ) )
                         continue;
                     if ( !uses_lib_symbols( ff.code, inc ) )
                         continue;
+                    const std::set<std::string> &pool = leaves;
                     bool provided = false;
                     for ( const std::string &sp : req->spellings )
-                        if ( leaves.count( sp ) )
+                        if ( pool.count( sp ) )
                         {
                             provided = true;
                             break;
@@ -2542,7 +2610,7 @@ std::vector<std::string> check_embed_companion_sources( const RepoModel &m )
                         return tu::mentions_identifier( tu_file.code, pat );
                     };
                     if ( usage( "new " + id.first ) || usage( "make_unique<" + id.first ) ||
-                         usage( "make_shared<" + id.first ) )
+                         usage( "make_shared<" + id.first ) || usage( id.first + "::" ) )
                     {
                         used = true;
                         break;
@@ -3176,7 +3244,9 @@ TEST_CASE( "wiring oracle rules kill injected faults (mutation)", "[build_wiring
         fx2b.append( "tests/CMakeLists.txt", "target_link_libraries(test_req PRIVATE jsoncpp_lib)\n" );
         REQUIRE( wiring::check_embed_link_requirements( fx2b.model() ).empty() );
 
-        // transitive provision: links a lib that links jsoncpp
+        // transitive provision: links a lib that links jsoncpp — accepted,
+        // because the closure here is the over-approximation (every edge
+        // followed): if even it lacked jsoncpp the link would certainly fail
         Fixture fx3 = json_fixture( "reqlink_trans" );
         fx3.overwrite( "src/lib/CMakeLists.txt",
                        "add_library(fxlib a.cpp)\ntarget_link_libraries(fxlib PRIVATE jsoncpp)\n" );
