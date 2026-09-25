@@ -26,6 +26,9 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <chrono>
+#include <stdexcept>
+#include <thread>
 
 using namespace sicnu::teaching_admin;
 
@@ -910,18 +913,23 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
 
     auto makePack = []( const QJsonArray &inputs ) {
         return QJsonObject{ { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+                            { QStringLiteral( "lab_id" ), QStringLiteral( "demo" ) },
+                            { QStringLiteral( "pack_version" ), QStringLiteral( "1" ) },
+                            { QStringLiteral( "license" ), QStringLiteral( "generated-in-repo" ) },
                             { QStringLiteral( "inputs" ), inputs } };
     };
 
-    // in-root input is fine (role required by the authority)
+    // in-root input is fine (role AND provenance required by the authority)
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
-                                             { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } ),
+                                             { QStringLiteral( "role" ), QStringLiteral( "sample" ) },
+                                             { QStringLiteral( "provenance" ),
+                                               QStringLiteral( "generated-samples" ) } } } ),
           root );
         REQUIRE( r.ok );
     }
-    // missing role is now a typed error, as in the pack authority loader
+    // missing role is a typed authority rejection (lab.pack_input class)
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) } } } ),
@@ -929,11 +937,12 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
         REQUIRE_FALSE( r.ok );
         bool missingRole = false;
         for ( const auto &i : r.issues )
-            if ( i.code == QLatin1String( "missing_role" ) )
+            if ( i.code == QLatin1String( "pack_input" ) )
                 missingRole = true;
         REQUIRE( missingRole );
     }
-    // backslash paths are rejected, not normalized
+    // backslash paths are rejected, not normalized (authority rule surfaced
+    // through the shared parser, code class pack_input)
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{ QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data\\ok.tif" ) },
@@ -942,7 +951,7 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
         REQUIRE_FALSE( r.ok );
         bool backslash = false;
         for ( const auto &i : r.issues )
-            if ( i.code == QLatin1String( "backslash_path" ) )
+            if ( i.code == QLatin1String( "pack_input" ) )
                 backslash = true;
         REQUIRE( backslash );
     }
@@ -986,30 +995,159 @@ TEST_CASE( "pack validation enforces containment and provenance contract",
         QFile::remove( outside );
     }
 #endif
-    // committed fixture requires a sha256 pin; bad provenance is rejected
+    // committed fixture requires a sha256 pin; bad provenance is rejected —
+    // both are authority rejections surfaced as pack_input (one at a time:
+    // the shared parser is first-error-wins, like the agent-side loader)
     {
         const auto r = validatePackDocument(
           makePack( QJsonArray{
             QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
                          { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
                          { QStringLiteral( "bytes" ), 4096 },
-                         { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) } },
+                         { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) } } } ),
+          root );
+        REQUIRE_FALSE( r.ok );
+        bool missingSha = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_input" ) )
+                missingSha = true;
+        REQUIRE( missingSha );
+    }
+    {
+        const auto r = validatePackDocument(
+          makePack( QJsonArray{
             QJsonObject{ { QStringLiteral( "path" ), QStringLiteral( "data/ok.tif" ) },
                          { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
                          { QStringLiteral( "provenance" ), QStringLiteral( "random-internet" ) } } } ),
           root );
         REQUIRE_FALSE( r.ok );
-        bool missingSha = false;
         bool badProv = false;
         for ( const auto &i : r.issues )
-        {
-            if ( i.code == QLatin1String( "missing_sha256" ) )
-                missingSha = true;
-            if ( i.code == QLatin1String( "invalid_provenance" ) )
+            if ( i.code == QLatin1String( "pack_input" ) )
                 badProv = true;
-        }
-        REQUIRE( missingSha );
         REQUIRE( badProv );
+    }
+}
+
+TEST_CASE( "pack validation shares the authority parser (no second pack truth)",
+           "[teaching_admin][packs][authority_parity]" )
+{
+    // The admin validator must inherit the sicnu.lab-pack/1 authority's
+    // strictness (src/lab_pack, previously src/agent/lab_data_pack), not
+    // re-implement it. Each case below is a rejection class the AUTHORITY
+    // enforces; the admin console used to accept some of them — a pack the
+    // deployment loader refuses must never be inventoried as available.
+    auto basePack = []() {
+        QJsonObject pack{
+            { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+            { QStringLiteral( "lab_id" ), QStringLiteral( "x" ) },
+            { QStringLiteral( "pack_version" ), QStringLiteral( "1.0" ) },
+            { QStringLiteral( "license" ), QStringLiteral( "generated-in-repo" ) },
+        };
+        return pack;
+    };
+
+    // (1) UPPERCASE sha256: the authority pins 64 LOWERCASE hex chars. The
+    // admin's own hex check used to accept A-F, green-lighting packs the
+    // agent-side loader rejects.
+    {
+        QJsonObject pack = basePack();
+        pack.insert( QStringLiteral( "inputs" ),
+                     QJsonArray{ QJsonObject{
+                         { QStringLiteral( "path" ), QStringLiteral( "data/a.tif" ) },
+                         { QStringLiteral( "role" ), QStringLiteral( "fixture" ) },
+                         { QStringLiteral( "provenance" ), QStringLiteral( "committed-fixture" ) },
+                         { QStringLiteral( "sha256" ), QString( 64, QLatin1Char( 'A' ) ) },
+                         { QStringLiteral( "bytes" ), 1 } } } );
+        const auto r = validatePackDocument( pack, QStringLiteral( "/tmp" ) );
+        REQUIRE_FALSE( r.ok );
+        bool rejected = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_input" ) )
+                rejected = true;
+        REQUIRE( rejected );
+    }
+
+    // (2) Empty inputs array: the authority refuses the pack; the admin used
+    // to mark such packs offlineAvailable=true (allPresent over zero rows).
+    {
+        QJsonObject pack = basePack();
+        pack.insert( QStringLiteral( "inputs" ), QJsonArray{} );
+        const auto r = validatePackDocument( pack, QStringLiteral( "/tmp" ) );
+        REQUIRE_FALSE( r.ok );
+        bool rejected = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_field" ) )
+                rejected = true;
+        REQUIRE( rejected );
+    }
+
+    // (3) Missing license: required string in the authority.
+    {
+        QJsonObject pack{
+            { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
+            { QStringLiteral( "lab_id" ), QStringLiteral( "x" ) },
+            { QStringLiteral( "pack_version" ), QStringLiteral( "1.0" ) },
+            { QStringLiteral( "inputs" ),
+              QJsonArray{ QJsonObject{
+                  { QStringLiteral( "path" ), QStringLiteral( "data/a.tif" ) },
+                  { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } } };
+        const auto r = validatePackDocument( pack, QStringLiteral( "/tmp" ) );
+        REQUIRE_FALSE( r.ok );
+        bool rejected = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_field" ) )
+                rejected = true;
+        REQUIRE( rejected );
+    }
+
+    // (4) Duplicate input path: authority rejection (first-error wins), same
+    // code class as the other input-level failures.
+    {
+        QJsonObject input{
+            { QStringLiteral( "path" ), QStringLiteral( "data/a.tif" ) },
+            { QStringLiteral( "role" ), QStringLiteral( "sample" ) } };
+        QJsonObject pack = basePack();
+        pack.insert( QStringLiteral( "inputs" ), QJsonArray{ input, input } );
+        const auto r = validatePackDocument( pack, QStringLiteral( "/tmp" ) );
+        REQUIRE_FALSE( r.ok );
+        bool rejected = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_input" ) )
+                rejected = true;
+        REQUIRE( rejected );
+    }
+
+    // (5) A valid minimal pack still passes (no over-restriction drift).
+    // provenance is REQUIRED by the authority (the admin used to default it —
+    // one of the divergences this delegation removed).
+    {
+        QJsonObject pack = basePack();
+        pack.insert( QStringLiteral( "inputs" ),
+                     QJsonArray{ QJsonObject{
+                         { QStringLiteral( "path" ), QStringLiteral( "data/a.tif" ) },
+                         { QStringLiteral( "role" ), QStringLiteral( "sample" ) },
+                         { QStringLiteral( "provenance" ),
+                           QStringLiteral( "generated-samples" ) } } } );
+        const auto r = validatePackDocument( pack, QString() );
+        REQUIRE( r.ok );
+    }
+
+    // (6) Missing provenance is a typed authority rejection — never a silent
+    // default tier (the old admin defaulted to generated-samples).
+    {
+        QJsonObject pack = basePack();
+        pack.insert( QStringLiteral( "inputs" ),
+                     QJsonArray{ QJsonObject{
+                         { QStringLiteral( "path" ), QStringLiteral( "data/a.tif" ) },
+                         { QStringLiteral( "role" ), QStringLiteral( "sample" ) } } } );
+        const auto r = validatePackDocument( pack, QString() );
+        REQUIRE_FALSE( r.ok );
+        bool rejected = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == QLatin1String( "pack_input" ) )
+                rejected = true;
+        REQUIRE( rejected );
     }
 }
 
@@ -1039,6 +1177,7 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
         { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
         { QStringLiteral( "lab_id" ), QStringLiteral( "demo" ) },
         { QStringLiteral( "pack_version" ), QStringLiteral( "1" ) },
+        { QStringLiteral( "license" ), QStringLiteral( "generated-in-repo" ) },
         { QStringLiteral( "declared_offline_bytes" ), static_cast<double>( goodBytes.size() ) },
         { QStringLiteral( "inputs" ),
           QJsonArray{ QJsonObject{
@@ -1107,6 +1246,8 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
         QJsonObject generatedPack{
             { QStringLiteral( "schema_version" ), QStringLiteral( "sicnu.lab-pack/1" ) },
             { QStringLiteral( "lab_id" ), QStringLiteral( "gen" ) },
+            { QStringLiteral( "pack_version" ), QStringLiteral( "1" ) },
+            { QStringLiteral( "license" ), QStringLiteral( "generated-in-repo" ) },
             { QStringLiteral( "inputs" ),
               QJsonArray{ QJsonObject{
                 { QStringLiteral( "path" ), QStringLiteral( "data/labs/_tmp/absent.tif" ) },
@@ -1473,4 +1614,373 @@ TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",
         REQUIRE( g.reportDigest.size() == 64 );
     else
         REQUIRE_FALSE( g.unavailableReason.isEmpty() );
+}
+
+// ---------------------------------------------------------------------------
+// Batch resilience R3: bounded concurrency, typed caps, durable checkpoints.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Creates @p count flat one-file student directories under @p dir and
+/// returns the submissions directory path.
+QString makeStudentDirs( const QTemporaryDir &dir, int count )
+{
+    QDir root( dir.path() );
+    for ( int i = 1; i <= count; ++i )
+    {
+        const QString sid = QStringLiteral( "s%1" ).arg( i, 3, 10, QLatin1Char( '0' ) );
+        REQUIRE( root.mkpath( sid ) );
+        QFile f( root.filePath( sid + QStringLiteral( "/a.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "GOOD" ) );
+    }
+    return dir.path();
+}
+
+BatchAssessmentConfig batchCfgFor( const QString &submissionsDir, const QString &labId )
+{
+    BatchAssessmentConfig cfg;
+    cfg.labId = labId;
+    cfg.submissionsDir = submissionsDir;
+    cfg.rubricVersion = QStringLiteral( "r1" );
+    cfg.labVersion = QStringLiteral( "l1" );
+    cfg.softwareVersion = QStringLiteral( "sw1" );
+    return cfg;
+}
+
+BatchRowResult passRow( const SubmissionItem &item, const BatchAssessmentConfig &cfg )
+{
+    BatchRowResult row;
+    row.studentId = item.studentId;
+    row.labId = cfg.labId;
+    row.artifactPath = item.path;
+    row.status = QStringLiteral( "pass" );
+    row.verdict = QStringLiteral( "pass" );
+    row.score = 90.0;
+    return row;
+}
+
+} // namespace
+
+TEST_CASE( "batch honors maxConcurrency with bounded parallel workers",
+           "[teaching_admin][batch][concurrency]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = makeStudentDirs( dir, 8 );
+    BatchAssessmentConfig cfg = batchCfgFor( submissions, QStringLiteral( "lab15" ) );
+    cfg.maxConcurrency = 4;
+
+    std::atomic<int> inflight{ 0 };
+    std::atomic<int> maxInflight{ 0 };
+    const auto report = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            const int now = inflight.fetch_add( 1 ) + 1;
+            int prevMax = maxInflight.load();
+            while ( now > prevMax && !maxInflight.compare_exchange_weak( prevMax, now ) )
+            {
+            }
+            std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+            inflight.fetch_sub( 1 );
+            return passRow( item, cfg );
+        } );
+
+    REQUIRE( report.graded == 8 );
+    // A serial orchestrator never exceeds 1 in flight; the bounded pool must.
+    REQUIRE( maxInflight.load() >= 2 );
+    REQUIRE( maxInflight.load() <= 4 );
+}
+
+TEST_CASE( "batch submission cap is typed, never silent truncation",
+           "[teaching_admin][batch][cap]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = makeStudentDirs( dir, 5 );
+    BatchAssessmentConfig cfg = batchCfgFor( submissions, QStringLiteral( "lab15" ) );
+    cfg.maxSubmissions = 2;
+
+    const auto report = runBatchAssessment(
+        cfg, [&]( const SubmissionItem &item ) { return passRow( item, cfg ); } );
+
+    // total stays the DISCOVERED count; the cap shows up as a typed counter
+    // over the deterministic (sorted) first submissions — never silent.
+    REQUIRE( report.total == 5 );
+    REQUIRE( report.rows.size() == 2 );
+    REQUIRE( report.truncated == 3 );
+    REQUIRE( report.graded == 2 );
+    REQUIRE( report.rows.first().studentId == QLatin1String( "s001" ) );
+    REQUIRE( report.rows.last().studentId == QLatin1String( "s002" ) );
+}
+
+TEST_CASE( "batch checkpoint makes a cancelled run resumable with durable partial results",
+           "[teaching_admin][batch][checkpoint]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString submissions = makeStudentDirs( dir, 6 );
+    // The checkpoint lives OUTSIDE the submissions tree: durable partial
+    // results must never be re-discovered as submissions.
+    QTemporaryDir outDir;
+    REQUIRE( outDir.isValid() );
+    BatchAssessmentConfig cfg = batchCfgFor( submissions, QStringLiteral( "lab15" ) );
+    const QString checkpoint = QDir( outDir.path() ).filePath( QStringLiteral( "cp.json" ) );
+    cfg.checkpointPath = checkpoint;
+
+    // Run 1 (serial so the cancel point is deterministic): cancel from inside
+    // the callable after two completions.
+    std::atomic<bool> cancel{ false };
+    std::atomic<int> completed{ 0 };
+    cfg.maxConcurrency = 1;
+    const auto first = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            if ( completed.fetch_add( 1 ) == 1 )
+                cancel.store( true ); // remaining items must not be graded
+            return passRow( item, cfg );
+        },
+        &cancel );
+    REQUIRE( first.cancelledEarly );
+    REQUIRE( first.graded + first.cancelled == first.total );
+    REQUIRE( first.graded == 2 );
+    REQUIRE( first.resumed == 0 );
+    REQUIRE_FALSE( first.truncated );
+
+    // The checkpoint durably holds exactly the completed rows (not the
+    // cancelled placeholders).
+    {
+        QFile cpFile( checkpoint );
+        REQUIRE( cpFile.open( QIODevice::ReadOnly ) );
+        const auto cp = QJsonDocument::fromJson( cpFile.readAll() ).object();
+        REQUIRE( cp.value( QStringLiteral( "schema" ) ).toString()
+                 == QLatin1String( "sicnu.teaching.batch_checkpoint/1" ) );
+        REQUIRE( cp.value( QStringLiteral( "rows" ) ).toArray().size() == 2 );
+        REQUIRE_FALSE( cp.value( QStringLiteral( "config_digest" ) ).toString().isEmpty() );
+    }
+
+    // Run 2 (restart): the two durable rows are adopted, the four cancelled
+    // items are re-graded — the final report is complete and identical to a
+    // fresh uninterrupted run.
+    cancel.store( false );
+    completed.store( 0 );
+    const auto second = runBatchAssessment(
+        cfg,
+        [&]( const SubmissionItem &item ) {
+            completed.fetch_add( 1 );
+            return passRow( item, cfg );
+        },
+        &cancel );
+    REQUIRE( second.resumed == 2 );
+    REQUIRE( completed.load() == 4 ); // only the interrupted items re-graded
+    REQUIRE( second.graded == 6 );
+    REQUIRE( second.cancelled == 0 );
+    REQUIRE_FALSE( second.cancelledEarly );
+
+    // Restart identity: same final report as an uninterrupted run.
+    BatchAssessmentConfig freshCfg = batchCfgFor( submissions, QStringLiteral( "lab15" ) );
+    const auto fresh = runBatchAssessment(
+        freshCfg,
+        [&]( const SubmissionItem &item ) { return passRow( item, freshCfg ); } );
+    REQUIRE( regradeTraceability( second ).value( QStringLiteral( "report_digest" ) ).toString()
+             == regradeTraceability( fresh ).value( QStringLiteral( "report_digest" ) ).toString() );
+
+    // A checkpoint from a DIFFERENT config is never adopted (digest guard).
+    BatchAssessmentConfig other = cfg;
+    other.labId = QStringLiteral( "other_lab" );
+    const auto mismatch = runBatchAssessment(
+        other, [&]( const SubmissionItem &item ) { return passRow( item, other ); } );
+    REQUIRE( mismatch.resumed == 0 );
+    REQUIRE( mismatch.graded == 6 );
+}
+
+TEST_CASE( "batch scale oracle: 1000 mixed outcomes stay deterministic and durable",
+           "[teaching_admin][batch][scale]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    QDir root( dir.path() );
+    const int kCount = 1000;
+    for ( int i = 1; i <= kCount; ++i )
+    {
+        const QString sid = QStringLiteral( "stu%1" ).arg( i, 4, 10, QLatin1Char( '0' ) );
+        REQUIRE( root.mkpath( sid ) );
+        QFile f( root.filePath( sid + QStringLiteral( "/a.tif" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( QByteArray( "GOOD" ) );
+    }
+    BatchAssessmentConfig cfg = batchCfgFor( dir.path(), QStringLiteral( "lab15" ) );
+    cfg.maxConcurrency = 4;
+    QTemporaryDir outDir;
+    REQUIRE( outDir.isValid() );
+    const QString checkpoint = QDir( outDir.path() ).filePath( QStringLiteral( "cp.json" ) );
+    cfg.checkpointPath = checkpoint;
+
+    auto mixedRow = [&]( const SubmissionItem &item ) {
+        const int id = item.studentId.mid( 3 ).toInt();
+        BatchRowResult row = passRow( item, cfg );
+        switch ( id % 4 )
+        {
+            case 0: // grader crash → isolated typed error
+                throw std::runtime_error( "grader crashed" );
+            case 1: // grader timeout (typed by the grader adapter)
+                row.status = QStringLiteral( "timeout" );
+                row.verdict = QStringLiteral( "error" );
+                row.message = QStringLiteral( "grader exceeded 120000 ms" );
+                return row;
+            case 2: // corrupted artifact
+                row.status = QStringLiteral( "corrupted" );
+                row.verdict = QStringLiteral( "error" );
+                row.message = QStringLiteral( "corrupt" );
+                return row;
+            default:
+                return row;
+        }
+    };
+
+    const auto a = runBatchAssessment( cfg, mixedRow );
+    const auto b = runBatchAssessment( cfg, mixedRow );
+
+    REQUIRE( a.total == kCount );
+    REQUIRE( a.rows.size() == kCount );
+    // 250 of each class: pass (graded), throw (error→failed), timeout
+    // (→failed), corrupted.
+    REQUIRE( a.graded == 250 );
+    REQUIRE( a.corrupted == 250 );
+    REQUIRE( a.failed == 500 );
+    REQUIRE( a.unavailable == 0 );
+    REQUIRE( a.cancelled == 0 );
+    // Deterministic under concurrency: identical reports across runs.
+    REQUIRE( regradeTraceability( a ).value( QStringLiteral( "report_digest" ) ).toString()
+             == regradeTraceability( b ).value( QStringLiteral( "report_digest" ) ).toString() );
+    // Rows stay ordered by student id.
+    QString previous;
+    for ( const auto &row : a.rows )
+    {
+        REQUIRE( row.studentId >= previous );
+        previous = row.studentId;
+    }
+    // The checkpoint durably holds every row (restart after a crash).
+    QFile cpFile( checkpoint );
+    REQUIRE( cpFile.open( QIODevice::ReadOnly ) );
+    const auto cp = QJsonDocument::fromJson( cpFile.readAll() ).object();
+    REQUIRE( cp.value( QStringLiteral( "rows" ) ).toArray().size() == kCount );
+}
+
+// ---------------------------------------------------------------------------
+// Teacher-notes leak oracle (course-home projection).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "course home projection passes the teacher-notes leak oracle; mutations die",
+           "[teaching_admin][curriculum][adversarial]" )
+{
+    QJsonObject manifest = minimalCurriculum();
+    QJsonArray modules = manifest.value( QStringLiteral( "modules" ) ).toArray();
+    QJsonObject m01 = modules.at( 0 ).toObject();
+    QJsonArray labs = m01.value( QStringLiteral( "labs" ) ).toArray();
+    QJsonObject lab = labs.at( 0 ).toObject();
+    lab.insert( QStringLiteral( "teacher_notes" ),
+                QJsonObject{
+                    { QStringLiteral( "objectives_zh" ),
+                      QJsonArray{ QStringLiteral( "掌握波段角色的判读方法" ) } },
+                    { QStringLiteral( "grading_hook_zh" ),
+                      QStringLiteral( "评分钩子：NoData 比例超过 5% 直接降档" ) },
+                    { QStringLiteral( "common_mistakes_zh" ),
+                      QJsonArray{ QJsonObject{
+                          { QStringLiteral( "mistake_zh" ),
+                            QStringLiteral( "凭目视颜色猜波段角色" ) },
+                          { QStringLiteral( "why_zh" ),
+                            QStringLiteral( "RGB 通道映射不等于波段角色" ) },
+                          { QStringLiteral( "check_zh" ),
+                            QStringLiteral( "对照 sensor_truth 波段角色表核对" ) } } } } } );
+    labs.replace( 0, lab );
+    m01.insert( QStringLiteral( "labs" ), labs );
+    modules.replace( 0, m01 );
+    manifest.insert( QStringLiteral( "modules" ), modules );
+
+    // The real projection must pass its own oracle.
+    const auto preview = projectCourseHomePreview( manifest );
+    const auto clean = assertNoTeacherNotesLeak( preview, manifest );
+    REQUIRE( clean.ok );
+
+    auto mustFail = [&]( const QJsonObject &mutant, const QString &expectedCode ) {
+        const auto r = assertNoTeacherNotesLeak( mutant, manifest );
+        REQUIRE_FALSE( r.ok );
+        bool found = false;
+        for ( const auto &i : r.issues )
+            if ( i.code == expectedCode )
+                found = true;
+        REQUIRE( found );
+    };
+
+    // (1) teacher_notes re-added wholesale
+    QJsonObject m1 = preview;
+    m1.insert( QStringLiteral( "teacher_notes" ),
+               manifest.value( QStringLiteral( "modules" ) )
+                 .toArray()
+                 .at( 0 )
+                 .toObject()
+                 .value( QStringLiteral( "labs" ) )
+                 .toArray()
+                 .at( 0 )
+                 .toObject()
+                 .value( QStringLiteral( "teacher_notes" ) ) );
+    mustFail( m1, QStringLiteral( "teacher_only_field" ) );
+
+    // (2) grading hook smuggled into a module summary
+    QJsonObject m2 = preview;
+    {
+        QJsonArray mods = m2.value( QStringLiteral( "modules" ) ).toArray();
+        QJsonObject mod = mods.at( 0 ).toObject();
+        mod.insert( QStringLiteral( "summary_zh" ),
+                    QStringLiteral( "评分钩子：NoData 比例超过 5% 直接降档" ) );
+        mods.replace( 0, mod );
+        m2.insert( QStringLiteral( "modules" ), mods );
+    }
+    mustFail( m2, QStringLiteral( "teacher_notes_leak" ) );
+
+    // (3) a common-mistake string smuggled into a lab role
+    QJsonObject m3 = preview;
+    {
+        QJsonArray mods = m3.value( QStringLiteral( "modules" ) ).toArray();
+        QJsonObject mod = mods.at( 0 ).toObject();
+        QJsonArray labsOut = mod.value( QStringLiteral( "labs" ) ).toArray();
+        QJsonObject labOut = labsOut.at( 0 ).toObject();
+        labOut.insert( QStringLiteral( "role" ),
+                       QStringLiteral( "凭目视颜色猜波段角色" ) );
+        labsOut.replace( 0, labOut );
+        mod.insert( QStringLiteral( "labs" ), labsOut );
+        mods.replace( 0, mod );
+        m3.insert( QStringLiteral( "modules" ), mods );
+    }
+    mustFail( m3, QStringLiteral( "teacher_notes_leak" ) );
+
+    // The committed real curriculum projection also passes (repo truth).
+    const QString repo = QString::fromUtf8( qgetenv( "SICNU_SOURCE_DIR" ) );
+    QString root = repo;
+    if ( root.isEmpty() )
+    {
+        QDir d = QDir::current();
+        for ( int i = 0; i < 6; ++i )
+        {
+            if ( QFileInfo::exists(
+                   d.filePath( QStringLiteral( "data/curriculum/undergraduate_rs.curriculum.json" ) ) ) )
+            {
+                root = d.absolutePath();
+                break;
+            }
+            if ( !d.cdUp() )
+                break;
+        }
+    }
+    QFile real( QDir( root ).filePath(
+      QStringLiteral( "data/curriculum/undergraduate_rs.curriculum.json" ) ) );
+    if ( real.open( QIODevice::ReadOnly ) )
+    {
+        const auto realDoc = QJsonDocument::fromJson( real.readAll() ).object();
+        const auto realPreview = projectCourseHomePreview( realDoc );
+        const auto realCheck = assertNoTeacherNotesLeak( realPreview, realDoc );
+        REQUIRE( realCheck.ok );
+    }
 }
