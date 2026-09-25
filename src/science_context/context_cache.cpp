@@ -50,27 +50,58 @@ std::string makeCacheKey( const CacheKeyMaterial &material )
 
 void ContextCache::put( const std::string &key, const ScientificContextBundle &bundle )
 {
-    if ( mEntries.size() >= kMaxEntries && mEntries.find( key ) == mEntries.end() )
-        mEntries.clear(); // deterministic bounded projection
-    mEntries[key] = bundle;
+    auto it = mEntries.find( key );
+    if ( it != mEntries.end() )
+    {
+        it->second.bundle = bundle;
+        mLru.splice( mLru.begin(), mLru, it->second.lruIt );
+        return;
+    }
+    mLru.push_front( key );
+    mEntries[key] = Entry{ bundle, mLru.begin() };
+    evictOverflow();
 }
 
-std::optional<ScientificContextBundle> ContextCache::get( const std::string &key ) const
+std::optional<ScientificContextBundle> ContextCache::get( const std::string &key )
 {
     auto it = mEntries.find( key );
     if ( it == mEntries.end() )
+    {
+        ++mMisses;
         return std::nullopt;
-    return it->second;
+    }
+    ++mHits;
+    mLru.splice( mLru.begin(), mLru, it->second.lruIt );
+    return it->second.bundle;
 }
 
 void ContextCache::invalidate( const std::string &key )
 {
-    mEntries.erase( key );
+    auto it = mEntries.find( key );
+    if ( it == mEntries.end() )
+        return;
+    mLru.erase( it->second.lruIt );
+    mEntries.erase( it );
 }
 
 void ContextCache::clear()
 {
     mEntries.clear();
+    mLru.clear();
+}
+
+void ContextCache::evictOverflow()
+{
+    while ( mEntries.size() > kMaxEntries )
+    {
+        // Deterministic eviction: least-recently-used by access order, never
+        // unordered_map iteration order. The list node and the map entry are
+        // the SAME element — remove them once.
+        auto victim = mEntries.find( mLru.back() );
+        mLru.pop_back();
+        mEntries.erase( victim );
+        ++mEvictions;
+    }
 }
 
 } // namespace sicnu::science_context

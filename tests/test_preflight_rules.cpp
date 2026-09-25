@@ -16,6 +16,7 @@
 #include "preflight/rules.h"
 
 #include <algorithm>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -237,6 +238,36 @@ TEST_CASE( "pair_crs: mismatching pair is blocked; unknown CRS is typed require_
     REQUIRE( hasCode( unknownReport, "SPF_CRS_UNKNOWN" ) );
     REQUIRE( findings( unknownReport, "SPF_CRS_UNKNOWN" )[0]->basis == "unknown" );
     REQUIRE( trace( unknownReport, "preflight.pair_crs" )->outcome == "insufficient_facts" );
+}
+
+TEST_CASE( "non-finite facts degrade to typed unknowns, never mismatch verdicts",
+           "[preflight][rules]" )
+{
+    // A NaN pixel size passes every <= 0 gate and poisons the ratio: both
+    // ratio comparisons read false, so the rule graded a require_ack
+    // "mismatch" on a value nobody measured. NaN is an unknown, always.
+    Loaded pair;
+    SlotFacts nan = opticalScene();
+    nan.pixelSizeX = std::numeric_limits<double>::quiet_NaN();
+    SlotFacts b = opticalScene();
+    b.assetRef = "scene-b";
+    pair.facts.set( "scene-a", nan );
+    pair.facts.set( "scene-b", b );
+    const PreflightReport report =
+        pair.run( { { "primary", "scene-a" }, { "secondary", "scene-b" } } );
+    REQUIRE_FALSE( hasCode( report, "SPF_GRID_RESOLUTION_MISMATCH" ) );
+    REQUIRE( findings( report, "SPF_RESOLUTION_UNKNOWN" ).size() == 1 );
+
+    // NaN cloud cover: has_cloud_cover claims evidence the value cannot
+    // back; the check degrades to an explicit quality unknown.
+    Loaded cloud;
+    SlotFacts cloudy = opticalScene();
+    cloudy.hasCloudCover = true;
+    cloudy.cloudCoverPercent = std::numeric_limits<double>::quiet_NaN();
+    cloud.facts.set( "scene-a", cloudy );
+    const PreflightReport cloudReport = cloud.run();
+    REQUIRE_FALSE( hasCode( cloudReport, "SPF_CLOUD_COVER_HIGH" ) );
+    REQUIRE( hasCode( cloudReport, "SPF_QUALITY_UNKNOWN" ) );
 }
 
 TEST_CASE( "pair_resolution_ratio: ratio thresholds separate require_ack from block",

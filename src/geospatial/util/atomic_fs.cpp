@@ -68,14 +68,14 @@ void throwLastWindowsError( const std::string &context, const std::string &path 
 bool fileExists( const std::string &path )
 {
   std::error_code ec;
-  const fs::file_status status = fs::status( fs::u8path( path ), ec );
+  const fs::file_status status = fs::status( sicnu::portable::pathFromUtf8( path ), ec );
   return !ec && fs::exists( status ) && !fs::is_directory( status );
 }
 
 std::uintmax_t fileSize( const std::string &path )
 {
   std::error_code ec;
-  const auto size = fs::file_size( fs::u8path( path ), ec );
+  const auto size = fs::file_size( sicnu::portable::pathFromUtf8( path ), ec );
   return ec ? 0 : size;
 }
 
@@ -87,7 +87,7 @@ std::string stagedPathFor( const std::string &targetPath )
     const std::u8string text = p.u8string();
     return std::string( text.begin(), text.end() );
   };
-  const fs::path target = fs::u8path( targetPath );
+  const fs::path target = sicnu::portable::pathFromUtf8( targetPath );
   const fs::path directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
   const std::string filename = u8( target.filename() );
   // Keep the final extension in place: extension-driven drivers (ESRI
@@ -172,7 +172,7 @@ void fsyncFile( const std::string &path )
 /// the call site in publishStagedFile.
 void fsyncDirectoryQuiet( const std::string &path )
 {
-  const fs::path target = fs::u8path( path );
+  const fs::path target = sicnu::portable::pathFromUtf8( path );
   const fs::path directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
   const int fd = ::open( directory.c_str(), O_RDONLY );
   if ( fd < 0 )
@@ -188,7 +188,7 @@ void fsyncDirectoryQuiet( const std::string &path )
 void copyFileOverwriting( const std::string &srcPath, const std::string &dstPath )
 {
   std::error_code ec;
-  fs::copy_file( fs::u8path( srcPath ), fs::u8path( dstPath ),
+  fs::copy_file( sicnu::portable::pathFromUtf8( srcPath ), sicnu::portable::pathFromUtf8( dstPath ),
                  fs::copy_options::overwrite_existing, ec );
   if ( ec )
     throw GeoError( ErrorCode::IoError, "publish: copy failed for " + srcPath + " → " + dstPath,
@@ -287,7 +287,7 @@ bool removeFileQuiet( const std::string &path )
   if ( !fileExists( path ) )
     return true;
   std::error_code ec;
-  fs::remove( fs::u8path( path ), ec );
+  fs::remove( sicnu::portable::pathFromUtf8( path ), ec );
   return !ec;
 }
 

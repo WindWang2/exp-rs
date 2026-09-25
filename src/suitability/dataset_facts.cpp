@@ -1,5 +1,7 @@
 #include "dataset_facts.h"
 
+#include "suitability_time.h"
+
 #include <QJsonArray>
 
 #include <algorithm>
@@ -216,10 +218,21 @@ sicnu::data::Result<DatasetFacts> DatasetFacts::fromJson( const QJsonObject &jso
     facts.hasTemporalExtent = json.value( QStringLiteral( "has_temporal_extent" ) ).toBool( false );
     if ( facts.hasTemporalExtent )
     {
-        facts.temporalStartUtc = QDateTime::fromString(
-            json.value( QStringLiteral( "temporal_start_utc" ) ).toString(), Qt::ISODate );
-        facts.temporalEndUtc = QDateTime::fromString(
-            json.value( QStringLiteral( "temporal_end_utc" ) ).toString(), Qt::ISODate );
+        // Same posture as the scene reader: a claimed temporal extent that
+        // cannot be parsed must fail typed — an invalid QDateTime would
+        // silently read as "no temporal evidence" downstream. Zoneless
+        // stamps bind to UTC (keys say _utc; shared module helper).
+        facts.temporalStartUtc =
+            parseIsoUtc( json.value( QStringLiteral( "temporal_start_utc" ) ).toString() );
+        facts.temporalEndUtc =
+            parseIsoUtc( json.value( QStringLiteral( "temporal_end_utc" ) ).toString() );
+        if ( !facts.temporalStartUtc.isValid() || !facts.temporalEndUtc.isValid() )
+        {
+            return sicnu::data::Result<DatasetFacts>::failure( sicnu::data::Diagnostic{
+                QStringLiteral( "suitability.facts_invalid" ),
+                QStringLiteral( "dataset facts carry an unparsable temporal extent" ),
+                sicnu::data::DiagnosticSeverity::Error } );
+        }
     }
     return sicnu::data::Result<DatasetFacts>::success( facts );
 }

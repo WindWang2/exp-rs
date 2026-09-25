@@ -28,6 +28,7 @@
 #include <cctype>
 #include <filesystem>
 #include <utility>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -51,7 +52,7 @@ std::string baseNameOf( const std::string &path )
 bool isDirectoryLocal( const std::string &path )
 {
   std::error_code ec;
-  return std::filesystem::is_directory( std::filesystem::u8path( path ), ec );
+  return std::filesystem::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 std::string parentOfLocal( const std::string &path )
@@ -78,7 +79,7 @@ ProductAssets enumerateCnProduct( const std::string &path, ProductKind kind,
     // Product directory: the family name lives on the sidecar/image files.
     // Bounded listing; the first matching name claims the directory.
     std::error_code ec;
-    for ( std::filesystem::directory_iterator it( std::filesystem::u8path( path ), ec ), end;
+    for ( std::filesystem::directory_iterator it( sicnu::portable::pathFromUtf8( path ), ec ), end;
           !ec && it != end; it.increment( ec ) )
     {
       const std::u8string u8 = it->path().generic_u8string();
@@ -296,7 +297,7 @@ class CnAdapter final : public ProductAdapter
         return false;
       std::error_code ec;
       int visited = 0;
-      for ( std::filesystem::directory_iterator it( std::filesystem::u8path( path ), ec ), end;
+      for ( std::filesystem::directory_iterator it( sicnu::portable::pathFromUtf8( path ), ec ), end;
             !ec && it != end && visited < 512; it.increment( ec ) )
       {
         ++visited;

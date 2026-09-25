@@ -41,7 +41,7 @@ namespace fs = std::filesystem;
 bool isDirectory( const std::string &path )
 {
     std::error_code error;
-    return fs::symlink_status( fs::path( path ), error ).type() == fs::file_type::directory;
+    return fs::symlink_status( sicnu::portable::pathFromUtf8( path ), error ).type() == fs::file_type::directory;
 }
 
 /// True when @p candidate is strictly inside @p root (lexical containment,
@@ -60,15 +60,15 @@ bool contained( const std::string &root, const std::string &candidate )
 bool copyTree( const std::string &source, const std::string &target, std::string &error )
 {
     std::error_code iteratorError;
-    fs::directory_iterator iterator( fs::path( source ), iteratorError );
+    fs::directory_iterator iterator( sicnu::portable::pathFromUtf8( source ), iteratorError );
     if ( iteratorError )
     {
         error = "cannot open " + source;
         return false;
     }
     std::error_code createError;
-    fs::create_directory( fs::path( target ), createError );
-    if ( createError && !fs::is_directory( fs::path( target ) ) )
+    fs::create_directory( sicnu::portable::pathFromUtf8( target ), createError );
+    if ( createError && !fs::is_directory( sicnu::portable::pathFromUtf8( target ) ) )
     {
         error = "cannot create " + target;
         return false;
@@ -104,8 +104,9 @@ bool copyTree( const std::string &source, const std::string &target, std::string
         }
         else if ( status.type() == fs::file_type::regular )
         {
-            std::ifstream input( childSource, std::ios::binary );
-            std::ofstream output( childTarget, std::ios::binary | std::ios::trunc );
+            std::ifstream input( sicnu::portable::pathFromUtf8( childSource ), std::ios::binary );
+            std::ofstream output( sicnu::portable::pathFromUtf8( childTarget ),
+                                  std::ios::binary | std::ios::trunc );
             if ( !input || !output )
             {
                 error = "cannot copy " + childSource;
@@ -249,7 +250,7 @@ private:
 /// Streaming SHA-256 of a file (lowercase hex). "" when unreadable.
 std::string fileSha256Hex( const std::string &path )
 {
-    std::ifstream input( path, std::ios::binary );
+    std::ifstream input( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
     if ( !input )
         return std::string();
     Sha256 hash;

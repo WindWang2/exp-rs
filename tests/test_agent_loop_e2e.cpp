@@ -465,3 +465,79 @@ TEST_CASE( "re-approved repair proposals keep the plan identity stable", "[agent
     REQUIRE( result.stopReason == stop_reasons::kNoProgress );
     REQUIRE( result.summary.budgets[ "replans_used" ].asInt() == 3 );
 }
+
+// ---------------------------------------------------------------------------
+// R3: the opt-in checkpoint sink. Crash-evidence flushing WITHOUT a second
+// state machine: the sink only ever OBSERVES journal snapshots; when unset
+// the loop behaves exactly as before (every other case here proves that).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "checkpoint sink observes each append and the flushed snapshots reload",
+           "[agent_loop][e2e]" )
+{
+    FakeScenario scenario;
+    scenario.execution = { { true, "", { "ndvi.tif" } } };
+    scenario.verification = { { "PASS", "" } };
+    SessionPolicy policy = SessionPolicy::defaults();
+    policy.mode = RunMode::ExecuteWithVerify;
+    FakeSeams seams( scenario );
+    ScientificAgentSession session( policy, makeDependencies( seams ), {}, "sess-checkpoint" );
+
+    std::vector< Json::Value > snapshots;
+    session.setCheckpointSink( [ &snapshots ]( const SessionJournal &journal ) {
+        snapshots.push_back( journal.toJson() );
+    } );
+
+    const SessionResult result = session.run( makeRequest() );
+    REQUIRE( result.ok );
+
+    // One snapshot per journal entry, in append order, each one exactly one
+    // entry longer than the previous — the on-disk prefix a hard kill would
+    // leave behind.
+    REQUIRE( snapshots.size() == result.journal.size() );
+    for ( std::size_t i = 0; i < snapshots.size(); ++i )
+    {
+        auto parsed = SessionJournal::fromJson( snapshots[ i ] );
+        REQUIRE( parsed );
+        REQUIRE( parsed->size() == i + 1 );
+    }
+
+    // The final flushed snapshot is byte-identical to the loop's own journal
+    // (the flushed evidence IS the loop's evidence, not a projection).
+    REQUIRE( jsonToString( snapshots.back() ) == jsonToString( result.journal.toJson() ) );
+}
+
+TEST_CASE( "resumed sessions keep checkpointing the adopted journal", "[agent_loop][e2e]" )
+{
+    // Cancel early, resume pre-plan, and verify the sink continues on the
+    // ADOPTED journal (sequence + decisions preserved) rather than a fresh one.
+    FakeScenario scenario;
+    scenario.execution = { { true, "", { "ndvi.tif" } } };
+    scenario.verification = { { "PASS", "" } };
+    SessionPolicy policy = SessionPolicy::defaults();
+    policy.mode = RunMode::ExecuteWithVerify;
+    FakeSeams seams( scenario );
+    ScientificAgentSession first( policy, makeDependencies( seams ), {}, "sess-ckpt-resume" );
+    first.requestCancel();
+    const SessionResult cancelled = first.run( makeRequest() );
+    REQUIRE( cancelled.terminalState == terminal_states::kAborted );
+    REQUIRE( cancelled.stopReason == stop_reasons::kCancelled );
+
+    auto resumed = ScientificAgentSession::resume( cancelled.journal, policy,
+                                                   makeDependencies( seams ) );
+    REQUIRE( resumed );
+
+    std::vector< std::size_t > sizes;
+    resumed->setCheckpointSink(
+        [ &sizes ]( const SessionJournal &journal ) { sizes.push_back( journal.size() ); } );
+    const SessionResult done = resumed->run( makeRequest() );
+    REQUIRE( done.ok );
+
+    // Strictly growing from where the cancelled session left off: the first
+    // observed size is already larger than the adopted journal's size minus
+    // one append (the sink fires AFTER each append, starting with the first
+    // entry the resumed leg adds).
+    REQUIRE( sizes.size() == done.journal.size() - cancelled.journal.size() );
+    for ( std::size_t i = 0; i < sizes.size(); ++i )
+        REQUIRE( sizes[ i ] == cancelled.journal.size() + i + 1 );
+}

@@ -236,6 +236,129 @@ void DetectionPublishGuard::disarm()
   removeBackupFamily();
 }
 
+void ProductPublishGuard::removeBackupFamily()
+{
+  QFile::remove( m_backup );
+  QFile::remove( m_backup + QStringLiteral( ".prov.json" ) );
+}
+
+ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
+                                          const char *parkFaultPoint,
+                                          const QString &stageForCleanup )
+    : m_final( finalPath ),
+      m_backup( finalPath + backupSuffix ),
+      m_stageForCleanup( stageForCleanup )
+{
+  const QString provPath = m_final + QStringLiteral( ".prov.json" );
+  const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+  // Every throw path below must not leave the freshly written stage behind
+  // (a throwing constructor never runs the destructor — same stage cleanup
+  // the inline park ladders this guard replaced performed).
+  const auto fail = [ & ]( const char *what ) {
+    if ( !m_stageForCleanup.isEmpty() )
+      QFile::remove( m_stageForCleanup );
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           std::string( what ) + finalPath.toStdString() );
+  };
+
+  // Crash-orphan recovery (mirror of DetectionPublishGuard's adoption): the
+  // two half-published states a killed run leaves are folded back to the
+  // last PUBLISHED pair before anything else touches the path. Sidecar
+  // restore always precedes the main restore so a crash mid-adoption leaves
+  // the main parked — exactly the state the next run's adoption re-enters.
+  const bool finalPresent = QFile::exists( m_final );
+  const bool backupPresent = QFile::exists( m_backup );
+  if ( !finalPresent && backupPresent )
+  {
+    // Window A: crash between the main park and the swap. Restore the parked
+    // sidecar (when one was parked) and the product. A sidecar on the final
+    // path with no parked counterpart is the interrupted-adoption re-entry
+    // (restored by a run that died mid-adoption, before the main rename):
+    // it IS the parked product's own sidecar, so it stays — leaving it pairs
+    // the restored product with exactly what it was published with.
+    if ( QFile::exists( backupProv ) )
+      QFile::rename( backupProv, provPath );
+    if ( !QFile::rename( m_backup, m_final ) )
+      fail( "publish could not recover the previously parked product: " );
+  }
+  else if ( finalPresent && backupPresent && !QFile::exists( provPath )
+            && QFile::exists( backupProv ) )
+  {
+    // Window B: crash between the swap and the sidecar publish — the file on
+    // the final path never completed publication (no sidecar), while the
+    // parked pair is the last complete one. Adopt the parked pair.
+    QFile::remove( m_final );
+    QFile::rename( backupProv, provPath );
+    if ( !QFile::rename( m_backup, m_final ) )
+      fail( "publish could not recover the previously parked product: " );
+  }
+
+  m_hadExisting = QFile::exists( m_final );
+  if ( !m_hadExisting )
+  {
+    // A genuine first publish: pre-clean stray backup litter from an
+    // interrupted run so it can never resurface or wedge a later park
+    // (Windows rename does not overwrite).
+    removeBackupFamily();
+    return;
+  }
+
+  // Park the provenance sidecar FIRST, the main file LAST: a park failure
+  // rolls back its already-parked predecessor, and the least-likely park to
+  // fail (the main rename) opens the shortest visibility window.
+  removeBackupFamily();
+  m_hadProv = QFile::exists( provPath );
+  if ( m_hadProv && !QFile::rename( provPath, backupProv ) )
+    fail( "publish could not back up the previous provenance sidecar: " );
+  const bool parkFailed = ( parkFaultPoint && SICNU_FAULT_POINT( parkFaultPoint ) )
+                          || !QFile::rename( m_final, m_backup );
+  if ( parkFailed )
+  {
+    if ( m_hadProv )
+      QFile::rename( backupProv, provPath );
+    fail( "publish could not back up the previous product: " );
+  }
+}
+
+ProductPublishGuard::~ProductPublishGuard()
+{
+  if ( m_disarmed )
+    return;
+  // Remove the partial NEW product and its sidecar, then restore the parked
+  // previous pair — sidecar first, the main file LAST: a crash mid-restore
+  // leaves the main parked, i.e. exactly the state the next run's adoption
+  // branch re-enters through.
+  QFile::remove( m_final );
+  QFile::remove( m_final + QStringLiteral( ".prov.json" ) );
+  if ( !m_hadExisting )
+    return;
+  const QString provPath = m_final + QStringLiteral( ".prov.json" );
+  const QString backupProv = m_backup + QStringLiteral( ".prov.json" );
+  if ( m_hadProv && QFile::exists( backupProv ) )
+    QFile::rename( backupProv, provPath );
+  QFile::rename( m_backup, m_final );
+}
+
+void ProductPublishGuard::publishStaged( const QString &stagePath, const char *swapFaultPoint,
+                                         const std::string &errorWhat )
+{
+  const bool swapFailed = ( swapFaultPoint && SICNU_FAULT_POINT( swapFaultPoint ) )
+                          || !QFile::rename( stagePath, m_final );
+  if ( swapFailed )
+  {
+    QFile::remove( stagePath );
+    throw RSOperatorError( ErrorCode::FileNotWritable, errorWhat );
+  }
+}
+
+void ProductPublishGuard::disarm()
+{
+  m_disarmed = true;
+  // Drop the backup family unconditionally (idempotent removes): an adopted
+  // crash orphan must be cleaned exactly like a live backup.
+  removeBackupFamily();
+}
+
 Json::Value buildDetectionProvenance( const ModelInfo &model, const ModelRuntimePtr &runtime,
                                       const DetectionTileStats &stats )
 {
@@ -303,13 +426,21 @@ Json::Value buildDetectionProvenance( const ModelInfo &model, const ModelRuntime
   detectionJson["classes"] = classesJson;
   prov["detection"] = detectionJson;
 
-  // Input grid — the same block the raster lanes record (Platform 8.0).
+  // Input grid — the same block the raster lanes record (Platform 8.0),
+  // including the prepared-feed lineage (parity with buildProvenanceDocument).
   Json::Value inputs( Json::arrayValue );
   for ( const GridProvenance &grid : stats.inputGrids )
   {
     Json::Value input( Json::objectValue );
     input["name"] = grid.name;
     input["path"] = grid.path;
+    if ( !grid.preparedFrom.empty() )
+    {
+      Json::Value prepared( Json::arrayValue );
+      for ( const std::string &origin : grid.preparedFrom )
+        prepared.append( origin );
+      input["prepared_from"] = prepared;
+    }
     if ( !grid.crs.empty() )
       input["crs"] = grid.crs;
     input["crs_verified"] = grid.crsVerified;

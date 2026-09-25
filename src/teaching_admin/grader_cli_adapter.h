@@ -58,6 +58,17 @@ QString resolveGraderCli( const QString &explicitPath = QString() );
 /// of scripts/run_classroom_batch.py's canonical argv). Never throws.
 GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactPath );
 
+/// Pure transcript-contract mapper — the ONE (exit code, transcript) → grade
+/// mapping shared by BOTH paths: the CLI process shell (gradeViaCli) and an
+/// in-process caller that already holds a sicnu.lab.grade/1 document
+/// ({schema, digest, generated_utc, report}, e.g. emitted by
+/// OutputVerifier::LabGradeResult::toJson). Cross-checks the exit contract
+/// (0 pass / 1 fail / 2 usage / 3 unverifiable) against the transcript
+/// verdict; a broken authority is refused as typed unavailable, never
+/// trusted. Never throws.
+GraderCliGrade gradeFromTranscript( int exitCode, const QJsonObject &transcript,
+                                    const QString &usageText = QString() );
+
 /// GradeCallable factory for runBatchAssessment: unavailable outcomes become
 /// typed unavailable rows; grader verdicts become graded rows verbatim.
 GradeCallable cliGradeCallable( const GraderCliConfig &cfg );

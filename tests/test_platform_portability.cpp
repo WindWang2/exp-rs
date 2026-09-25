@@ -13,9 +13,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
+
 
 #if !defined( _WIN32 )
 #include <unistd.h>
@@ -126,6 +128,124 @@ TEST_CASE( "isWindowsReservedName classifies device names", "[platform][windows]
   REQUIRE( isWindowsReservedName( "con.txt.txt" ) ); // base before the first dot is CON
   REQUIRE_FALSE( isWindowsReservedName( "" ) );
   REQUIRE_FALSE( isWindowsReservedName( ".txt" ) );
+}
+
+TEST_CASE( "envUtf8: a set-but-empty variable and a missing variable are both "
+           "empty, and callers' missing-value semantics are unchanged",
+           "[platform][env]" )
+{
+  const char *name = "SICNU_PORTABLE_EMPTY_VAR";
+#if !defined( _WIN32 )
+  ::setenv( name, "", 1 );
+  REQUIRE( envUtf8( name ).empty() );    // set-but-empty -> empty bytes
+#else
+  ::SetEnvironmentVariableW( sicnu::portable::wideFromUtf8( name ).c_str(), L"" );
+  REQUIRE( envUtf8( name ).empty() );
+#endif
+  REQUIRE( envUtf8( "SICNU_PORTABLE_ABSENT_VAR_XYZ" ).empty() ); // missing -> empty
+
+  // The old const char* idiom `if (raw && *raw)` maps onto `value.empty()`
+  // without changing either branch's outcome.
+  const std::string value = envUtf8( name );
+  const bool usableOldWay = !value.empty();
+  REQUIRE_FALSE( usableOldWay );
+}
+
+TEST_CASE( "path<->UTF-8 is byte-transparent even for bytes that are not "
+           "valid UTF-8 (and for Windows-style spellings on any platform)",
+           "[platform][utf8]" )
+{
+  // Raw non-UTF-8 bytes (e.g. a POSIX filename in a legacy encoding): the
+  // bytes must pass through untouched — any locale/ACP detour would corrupt
+  // them. On Windows this exact sequence has no ACP mapping, which is why
+  // the conversion must ride the wide API, never path::string().
+  const std::string raw = std::string( "raw-\xC3\x28-\xFF-\xFE.txt" );
+  REQUIRE( sicnu::portable::pathToUtf8( sicnu::portable::pathFromUtf8( raw ) ) == raw );
+
+  // Windows-style spellings are byte strings on POSIX (drive/UNC/long
+  // prefix fixtures). Round-trip is exact everywhere; what these bytes DO on
+  // a Windows host (drive resolution, long-prefix opt-out of MAX_PATH
+  // stripping) is compile/static evidence on this lane, not runtime-verified.
+  const std::string windowsFlavors[] = {
+    "C:\\Users\\café\\数据.tif",
+    "\\\\server\\share\\数据\\x.tif",
+    "\\\\?\\C:\\long\\カタカナ\\x.tif",
+  };
+  for ( const std::string &flavor : windowsFlavors )
+    REQUIRE( sicnu::portable::pathToUtf8( sicnu::portable::pathFromUtf8( flavor ) )
+             == flavor );
+
+  // Reserved-name classification applies to the BASE NAME of Windows-bound
+  // writes; drive-qualified spellings must never be fed here, but the helper
+  // still answers for its documented input domain.
+  REQUIRE( isWindowsReservedName( "CON" ) );
+  REQUIRE_FALSE( isWindowsReservedName( "C:" ) );
+}
+
+TEST_CASE( "fileOpenUtf8 opens through the UTF-8 boundary", "[platform][fs]" )
+{
+  const fs::path base = fs::temp_directory_path() / "sicnu-portable-fopen-实验-🌍";
+  fs::remove_all( base );
+  fs::create_directories( base );
+  const std::string path = sicnu::portable::pathToUtf8( base / "block.dat" );
+
+  {
+    std::FILE *out = sicnu::portable::fileOpenUtf8( path, "wb" );
+    REQUIRE( out != nullptr );
+    REQUIRE( std::fwrite( "0123456789", 1, 10, out ) == 10 );
+    std::fclose( out );
+  }
+  {
+    std::FILE *in = sicnu::portable::fileOpenUtf8( path, "rb" );
+    REQUIRE( in != nullptr );
+    char buffer[ 11 ] = {};
+    REQUIRE( std::fread( buffer, 1, 10, in ) == 10 );
+    std::fclose( in );
+    REQUIRE( std::string( buffer ) == "0123456789" );
+  }
+  // Missing file -> nullptr, like fopen.
+  REQUIRE( sicnu::portable::fileOpenUtf8(
+             sicnu::portable::pathToUtf8( base / "absent.dat" ), "rb" ) == nullptr );
+
+  fs::remove_all( base );
+}
+
+TEST_CASE( "syncFileUtf8 flushes an existing file and fails a missing one; "
+           "directory sync is best-effort silent",
+           "[platform][fs][durability]" )
+{
+  const fs::path base = fs::temp_directory_path() / "sicnu-portable-fsync";
+  fs::remove_all( base );
+  fs::create_directories( base );
+  const std::string file = sicnu::portable::pathToUtf8( base / "doc.txt" );
+  {
+    std::ofstream out( file, std::ios::binary );
+    out << "payload";
+  }
+  REQUIRE( sicnu::portable::syncFileUtf8( file ) );
+  REQUIRE_FALSE( sicnu::portable::syncFileUtf8(
+    sicnu::portable::pathToUtf8( base / "absent.txt" ) ) );
+  // Best-effort: never throws, whatever the target (missing, file-not-dir).
+  sicnu::portable::syncDirectoryBestEffortUtf8(
+    sicnu::portable::pathToUtf8( base / "doc.txt" ) );
+  sicnu::portable::syncDirectoryBestEffortUtf8(
+    sicnu::portable::pathToUtf8( base / "absent-dir" / "x" ) );
+
+  // The save→fsync→rename→reopen sequence the publish contract names, over
+  // the primitives themselves (the journal suite drives it end-to-end).
+  {
+    std::ofstream out( file, std::ios::binary | std::ios::trunc );
+    out << "payload-v2";
+  }
+  REQUIRE( sicnu::portable::syncFileUtf8( file ) );
+  const std::string published = sicnu::portable::pathToUtf8( base / "published.txt" );
+  fs::rename( sicnu::portable::pathFromUtf8( file ), sicnu::portable::pathFromUtf8( published ) );
+  std::ifstream in( published, std::ios::binary );
+  std::string body( ( std::istreambuf_iterator<char>( in ) ),
+                    std::istreambuf_iterator<char>() );
+  REQUIRE( body == "payload-v2" );
+
+  fs::remove_all( base );
 }
 
 #if !defined( _WIN32 )

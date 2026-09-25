@@ -73,6 +73,7 @@ ProjectContext::ProjectContext()
   , m_displayManager( &m_dataManager )
 {
   m_workspaceService.bindDataManager( &m_dataManager );
+  installRunStateMirror();
 }
 
 ProjectContext::ProjectContext( const data::internal::NetworkProbe *probe )
@@ -83,6 +84,39 @@ ProjectContext::ProjectContext( const data::internal::NetworkProbe *probe )
   , m_displayManager( &m_dataManager )
 {
   m_workspaceService.bindDataManager( &m_dataManager );
+  installRunStateMirror();
+}
+
+void ProjectContext::installRunStateMirror() {
+  // Truthful run-state mirror (issue #754): workflow lifecycle transitions
+  // land in the governance runs index through this queued connection, so
+  // project:summary / search / bundles report what actually happened
+  // instead of a fabricated "Completed". Connected exactly once per context:
+  // it used to be wired inside every openWorkspaceStore() call, so after N
+  // project opens / Save As one run transition ran N queued recordRun
+  // writes and entityChanged broadcasts (data stayed correct — recordRun is
+  // a by-id merge — but the writes and broadcasts grew without bound).
+  // With the store closed the recordRun is a harmless no-op: the store
+  // refuses reads/writes without an impl.
+  sicnu::workflow::WorkflowRunCoordinator &coordinator =
+      sicnu::workflow::WorkflowRunCoordinator::instance();
+  // QueuedConnection: the coordinator emits with its mutex held — the
+  // governance write must run after the coordinator lock is released, never
+  // inside it.
+  QObject::connect( &coordinator, &sicnu::workflow::WorkflowRunCoordinator::runStateChanged,
+                    &m_workspaceService,
+                    [ this ]( const QString &runId, const QString &workflowId,
+                              const QString &state, qint64 startedMs, qint64 finishedMs ) {
+                      sicnu::workspace::RunRecord run;
+                      run.id = runId;
+                      run.workflowId = workflowId;
+                      run.state = state;
+                      run.startedMs = startedMs;
+                      run.finishedMs = finishedMs;
+                      run.header.name = workflowId.isEmpty() ? runId : workflowId;
+                      m_workspaceService.recordRun( run );
+                    },
+                    Qt::QueuedConnection );
 }
 
 ProjectContext::~ProjectContext() {
@@ -169,31 +203,8 @@ bool ProjectContext::openWorkspaceStore( const QString &projectFile ) {
   const bool opened = m_workspaceService.openStore( storePath, &error );
   if ( opened ) {
     m_workspaceService.mirrorAllAssets( /*reconcileGhosts=*/true );
-    // Truthful run-state mirror (issue #754): workflow lifecycle transitions
-    // land in the governance runs index through this queued connection, so
-    // project:summary / search / bundles report what actually happened
-    // instead of a fabricated "Completed". The WorkspaceService member is
-    // the connection context: the binding dies with it, so the singleton
-    // coordinator can never invoke into destroyed state.
-    sicnu::workflow::WorkflowRunCoordinator &coordinator =
-        sicnu::workflow::WorkflowRunCoordinator::instance();
-    // QueuedConnection: the coordinator emits with its mutex held — the
-    // governance write must run after the coordinator lock is released, never
-    // inside it.
-    QObject::connect( &coordinator, &sicnu::workflow::WorkflowRunCoordinator::runStateChanged,
-                      &m_workspaceService,
-                      [ this ]( const QString &runId, const QString &workflowId,
-                                const QString &state, qint64 startedMs, qint64 finishedMs ) {
-                        sicnu::workspace::RunRecord run;
-                        run.id = runId;
-                        run.workflowId = workflowId;
-                        run.state = state;
-                        run.startedMs = startedMs;
-                        run.finishedMs = finishedMs;
-                        run.header.name = workflowId.isEmpty() ? runId : workflowId;
-                        m_workspaceService.recordRun( run );
-                      },
-                      Qt::QueuedConnection );
+    // The run-state mirror is connected once, in installRunStateMirror()
+    // (constructor) — see there for why it must not accumulate per open.
   }
   return opened;
 }

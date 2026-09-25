@@ -24,6 +24,7 @@
 #include <json/reader.h>
 
 #include <filesystem>
+#include "platform/portable.h"
 
 namespace fs = std::filesystem;
 
@@ -53,7 +54,8 @@ void writeLedger( const StageRecord &record )
   builder["indentation"] = "  ";
   const std::string text = Json::writeString( builder, json );
   atomic_fs::writeFileAtomic( stageLedgerPath( record.finalPath ), [ & ]( const std::string &stagedPath ) {
-    std::ofstream file( stagedPath, std::ios::binary | std::ios::trunc );
+    std::ofstream file( sicnu::portable::pathFromUtf8( stagedPath ),
+                        std::ios::binary | std::ios::trunc );
     if ( !file )
       throw GeoError( ErrorCode::IoError, "stage ledger: cannot create " + stagedPath );
     file.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -194,8 +196,8 @@ void recordStaged( const StageRecord &record )
   // publish is a same-directory rename, and a foreign-directory "staged"
   // path would let a journal rename an arbitrary file onto the target.
   {
-    const fs::path finalParent = fs::u8path( record.finalPath ).parent_path().lexically_normal();
-    const fs::path stagedParent = fs::u8path( record.stagedPath ).parent_path().lexically_normal();
+    const fs::path finalParent = sicnu::portable::pathFromUtf8( record.finalPath ).parent_path().lexically_normal();
+    const fs::path stagedParent = sicnu::portable::pathFromUtf8( record.stagedPath ).parent_path().lexically_normal();
     if ( finalParent != stagedParent )
       throw GeoError( ErrorCode::InvalidArgument,
                       "stage ledger: staged path must live in the target's directory" );
@@ -389,7 +391,7 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
 {
   std::error_code ec;
   {
-    fs::directory_iterator probe( fs::u8path( directory ), ec );
+    fs::directory_iterator probe( sicnu::portable::pathFromUtf8( directory ), ec );
     if ( ec )
       throw GeoError( ErrorCode::IoError, "sweep: cannot read directory " + directory );
   }
@@ -399,7 +401,7 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
 
   // Pass 1: staged-shaped files are the anchors of every leftover group.
   std::vector<std::string> stagedMains;
-  for ( const fs::directory_entry &entry : fs::directory_iterator( fs::u8path( directory ) ) )
+  for ( const fs::directory_entry &entry : fs::directory_iterator( sicnu::portable::pathFromUtf8( directory ) ) )
   {
     if ( entry.is_directory() )
       continue;
@@ -444,7 +446,7 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
   // reported as such and never swept.
   std::set<std::string> liveStagedPaths;
   static const char *kOurSuffixes[] = { kStageLedgerSuffix, kFinalizeManifestSuffix };
-  for ( const fs::directory_entry &entry : fs::directory_iterator( fs::u8path( directory ) ) )
+  for ( const fs::directory_entry &entry : fs::directory_iterator( sicnu::portable::pathFromUtf8( directory ) ) )
   {
     if ( entry.is_directory() )
       continue;

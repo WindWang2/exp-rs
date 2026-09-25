@@ -12,8 +12,19 @@
 
 namespace sicnu::science_context {
 
-using PassportResolver = std::function<std::optional<sicnu::state::RemoteSensingAssetState>(
-    const std::string &assetKey )>;
+/// Resolver outcome with a typed failure channel: a passport is optional,
+/// but WHY a key has no passport must survive to the bundle/tool surface
+/// (gdal_open_failed ≠ asset_not_found ≠ resolver_unavailable).
+struct PassportResolution
+{
+    std::optional<sicnu::state::RemoteSensingAssetState> state;
+    std::string errorCode;   ///< typed reason when state is empty ("" = not found)
+    std::string errorDetail; ///< bounded human detail ("" when none)
+
+    explicit operator bool() const { return state.has_value(); }
+};
+
+using PassportResolver = std::function<PassportResolution( const std::string &assetKey )>;
 
 struct AssetResolveRequest
 {
@@ -27,6 +38,7 @@ struct AssetResolveResult
     AssetSummary summary;
     sicnu::state::RemoteSensingAssetState state;
     std::string error;
+    std::string errorDetail;
 };
 
 class AssetStateProvider

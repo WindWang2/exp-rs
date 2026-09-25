@@ -30,14 +30,13 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "platform/portable.h"
 
-#ifdef _WIN32
-#include <process.h>
-#define SICNU_TEST_GETPID ::_getpid
-#else
-#include <unistd.h>
-#define SICNU_TEST_GETPID ::getpid
-#endif
+#define SICNU_TEST_GETPID sicnu_pid_shim
+namespace
+{
+inline int sicnu_pid_shim() { return static_cast<int>( sicnu::portable::pid() ); }
+} // namespace
 
 using namespace sicnu::explain;
 using namespace sicnu::explain::adapters;
@@ -372,4 +371,54 @@ TEST_CASE( "malformed provenance files are typed refusals, not empty success",
   CHECK( missing->runCount() == 0 );
   CHECK( !missingProblems.empty() );
   CHECK( missingProblems.front().code == "directory_missing" );
+}
+
+TEST_CASE( "the record-name grammar and single-record load are shared, precise helpers",
+           "[explain][projection][provenance]" )
+{
+  // Grammar: valid ids parse; empty / whitespace / '#' / wrong suffix refuse.
+  using PFE = ProvenanceFileEvidence;
+  CHECK( PFE::runIdFromFileName( "provenance_run-42.json" ).value_or( "" ) == "run-42" );
+  CHECK( PFE::runIdFromFileName( "provenance_a+b:1.json" ).value_or( "" ) == "a+b:1" );
+  CHECK( !PFE::runIdFromFileName( "provenance_.json" ).has_value() );
+  CHECK( !PFE::runIdFromFileName( "provenance_a b.json" ).has_value() );
+  CHECK( !PFE::runIdFromFileName( "provenance_run#1.json" ).has_value() );
+  CHECK( !PFE::runIdFromFileName( "checkpoint_run-1.json" ).has_value() );
+  CHECK( !PFE::runIdFromFileName( "provenance_run-1.txt" ).has_value() );
+
+  // Single-record load: a good record loads exactly one run; a refused one
+  // yields an empty adapter plus its typed problem — never a partial success.
+  EvidenceDir dir;
+  const WorkflowDocument document = parsedDocument();
+  QHash<QString, NodeStatusSnapshot> statuses;
+  NodeStatusSnapshot ok;
+  ok.nodeId = "n1";
+  ok.state = ExecutionState::Succeeded;
+  ok.elapsedMs = 99;
+  statuses.insert( QStringLiteral( "n1" ), ok );
+  const ProvenanceGraph graph =
+    ProvenanceGraph::fromRunState( QStringLiteral( "run-1" ), document, statuses, QStringLiteral( "s" ) );
+  dir.write( "provenance_run-1.json", QJsonDocument( graph.toJson() ).toJson() );
+  dir.write( "provenance_broken.json", QByteArray( "{ not json " ) );
+
+  std::vector<EvidenceLoadProblem> problems;
+  const auto good = PFE::loadFromFile( ( dir.path / "provenance_run-1.json" ).string(), problems );
+  REQUIRE( good != nullptr );
+  CHECK( good->runCount() == 1 );
+  CHECK( problems.empty() );
+  CHECK( good->evidenceFor( "run-1", "n1" ).has_value() );
+
+  std::vector<EvidenceLoadProblem> refused;
+  const auto broken = PFE::loadFromFile( ( dir.path / "provenance_broken.json" ).string(), refused );
+  REQUIRE( broken != nullptr );
+  CHECK( broken->runCount() == 0 );
+  REQUIRE( refused.size() == 1 );
+  CHECK( refused.front().code == "parse_failed" );
+
+  std::vector<EvidenceLoadProblem> malformed;
+  const auto badName = PFE::loadFromFile( ( dir.path / "checkpoint_run-1.json" ).string(), malformed );
+  REQUIRE( badName != nullptr );
+  CHECK( badName->runCount() == 0 );
+  REQUIRE( malformed.size() == 1 );
+  CHECK( malformed.front().code == "malformed_name" );
 }

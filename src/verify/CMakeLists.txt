@@ -11,6 +11,7 @@
 
 add_library( sicnu_verifier STATIC
     verify_status.cpp
+    verify_locale.cpp
     verify_error_codes.cpp
     verify_sha256.cpp
     verify_types.cpp

@@ -28,11 +28,20 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <atomic>
 
 namespace sicnu::app::teaching_admin {
+
+TeachingAdminDock::~TeachingAdminDock()
+{
+    // A destroyed console must not leave a batch thread touching `this`.
+    m_batchCancel.store( true );
+    if ( m_batchThread.joinable() )
+        m_batchThread.join();
+}
 
 TeachingAdminDock::TeachingAdminDock( QWidget *parent )
     : QWidget( parent )
@@ -166,6 +175,19 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
                 "Missing CLI ⇒ typed unavailable rows, never fabricated scores." ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunBatch );
         lay->addRow( btn );
+        m_batchCancelButton = new QPushButton( tr( "Cancel Batch" ) );
+        m_batchCancelButton->setObjectName( QStringLiteral( "teachingAdminBatchCancelButton" ) );
+        m_batchCancelButton->setEnabled( false );
+        m_batchCancelButton->setToolTip(
+            tr( "Stops before the next not-yet-started submission: completed rows are kept, "
+                "never-started rows are typed cancelled (never disguised failures)." ) );
+        connect( m_batchCancelButton, &QPushButton::clicked, this, &TeachingAdminDock::onCancelBatch );
+        lay->addRow( m_batchCancelButton );
+        m_batchProgressLabel = new QLabel( tr( "idle" ) );
+        m_batchProgressLabel->setObjectName( QStringLiteral( "teachingAdminBatchProgress" ) );
+        lay->addRow( m_batchProgressLabel );
+        // Progress is push-based (worker → queued UI update); the timer
+        // member stays for future pull-based diagnostics.
         m_tabs->addTab( page, tr( "G 批量评分" ) );
     }
 
@@ -344,6 +366,12 @@ void TeachingAdminDock::onVerifyBundle()
 void TeachingAdminDock::onRunBatch()
 {
     using namespace sicnu::teaching_admin;
+    if ( m_batchThread.joinable() )
+    {
+        appendLog( tr( "a batch is already running — cancel it first" ) );
+        return;
+    }
+
     BatchAssessmentConfig cfg;
     cfg.labId = m_labIdEdit->text();
     cfg.submissionsDir = m_submissionsDirEdit->text();
@@ -351,6 +379,11 @@ void TeachingAdminDock::onRunBatch()
     cfg.rubricVersion = QStringLiteral( "ui-1" );
     cfg.labVersion = QStringLiteral( "ui-1" );
     cfg.softwareVersion = m_softwareVersionEdit->text();
+    // Durable partial results beside the published outputs: a re-run over
+    // the same class resumes instead of re-grading completed submissions,
+    // and a cancelled run still publishes the completed rows.
+    cfg.checkpointPath = m_batchOutEdit->text() + QStringLiteral( ".checkpoint.json" );
+    m_batchCancel.store( false );
 
     // Real grading authority only: the lab CLI shell of
     // OutputVerifier::gradeArtifact. When the CLI is absent every row is
@@ -361,13 +394,116 @@ void TeachingAdminDock::onRunBatch()
     if ( grader.cliPath.isEmpty() )
         appendLog( tr( "grader CLI not found (set SICNU_GEO_RS_CLI); rows will be typed unavailable" ) );
 
-    std::atomic<bool> cancel{ false };
-    const auto report = runBatchAssessment( cfg, cliGradeCallable( grader ), &cancel );
+    const int total = sicnu::teaching_admin::discoverSubmissions( cfg.submissionsDir ).size();
+    m_batchProgressLabel->setText( tr( "running 0 / %1" ).arg( total ) );
+    m_batchCancelButton->setEnabled( true );
 
-    publishBatchOutputsAtomic( report, m_batchOutEdit->text() );
-    appendLog( QString::fromUtf8( QJsonDocument( report.toJson() ).toJson( QJsonDocument::Compact ) ) );
-    appendLog( QString::fromUtf8(
-        QJsonDocument( buildClassSummary( report ) ).toJson( QJsonDocument::Compact ) ) );
+    const QString outPrefix = m_batchOutEdit->text();
+    m_batchThread = std::thread( [this, cfg, grader, outPrefix]() {
+        // Exception barrier: a throw leaving a std::thread function is
+        // std::terminate — the GUI must survive a failed batch.
+        try
+        {
+            sicnu::teaching_admin::BatchProgressFn progress =
+              [this]( int done, int processedTotal ) {
+                  QMetaObject::invokeMethod(
+                    this,
+                    [this, done, processedTotal]() {
+                        m_batchProgressLabel->setText(
+                          tr( "running %1 / %2" ).arg( done ).arg( processedTotal ) );
+                    },
+                    Qt::QueuedConnection );
+              };
+            const auto report =
+              runBatchAssessment( cfg, cliGradeCallable( grader ), &m_batchCancel, progress );
+            publishBatchOutputsAtomic( report, outPrefix );
+            QMetaObject::invokeMethod(
+              this,
+              [this, report]() { finishBatchOnUiThread( report.toJson() ); },
+              Qt::QueuedConnection );
+        }
+        catch ( const std::exception &e )
+        {
+            const QString what = QString::fromUtf8( e.what() );
+            QMetaObject::invokeMethod(
+              this, [this, what]() {
+                  m_batchProgressLabel->setText( tr( "batch failed: %1" ).arg( what ) );
+                  m_batchCancelButton->setEnabled( false );
+                  appendLog( tr( "batch failed: %1" ).arg( what ) );
+              },
+              Qt::QueuedConnection );
+        }
+        catch ( ... )
+        {
+            QMetaObject::invokeMethod(
+              this, [this]() {
+                  m_batchProgressLabel->setText( tr( "batch failed (unknown error)" ) );
+                  m_batchCancelButton->setEnabled( false );
+                  appendLog( tr( "batch failed (unknown error)" ) );
+              },
+              Qt::QueuedConnection );
+        }
+    } );
+}
+
+void TeachingAdminDock::onCancelBatch()
+{
+    // Typed cooperation, not a kill: the orchestrator finishes the item in
+    // flight, keeps completed rows, and types the remainder cancelled.
+    m_batchCancel.store( true );
+    m_batchCancelButton->setEnabled( false );
+    m_batchProgressLabel->setText( m_batchProgressLabel->text() + tr( " — cancelling…" ) );
+}
+
+
+
+void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson )
+{
+    if ( m_batchThread.joinable() )
+        m_batchThread.join();
+    m_batchCancelButton->setEnabled( false );
+    const QString state =
+      reportJson.value( QStringLiteral( "cancelled_early" ) ).toBool()
+        ? tr( "cancelled (durable partial results published)" )
+        : tr( "finished" );
+    m_batchProgressLabel->setText(
+      tr( "%1 — graded %2 / %3" )
+        .arg( state )
+        .arg( reportJson.value( QStringLiteral( "graded" ) ).toInt() )
+        .arg( reportJson.value( QStringLiteral( "total" ) ).toInt() ) );
+    appendLog( QString::fromUtf8( QJsonDocument( reportJson ).toJson( QJsonDocument::Compact ) ) );
+
+    // Class summary from the SAME published truth (the report on disk), not
+    // from a parallel in-memory copy.
+    QFile f( m_batchOutEdit->text() + QStringLiteral( ".json" ) );
+    if ( f.open( QIODevice::ReadOnly ) )
+    {
+        sicnu::teaching_admin::BatchAssessmentReport report;
+        const auto doc = QJsonDocument::fromJson( f.readAll() ).object();
+        report.labId = doc.value( QStringLiteral( "lab_id" ) ).toString();
+        report.total = doc.value( QStringLiteral( "total" ) ).toInt();
+        report.rubricVersion = doc.value( QStringLiteral( "rubric_version" ) ).toString();
+        report.labVersion = doc.value( QStringLiteral( "lab_version" ) ).toString();
+        report.softwareVersion = doc.value( QStringLiteral( "software_version" ) ).toString();
+        for ( const auto &rv : doc.value( QStringLiteral( "rows" ) ).toArray() )
+        {
+            const QJsonObject o = rv.toObject();
+            sicnu::teaching_admin::BatchRowResult row;
+            row.studentId = o.value( QStringLiteral( "student_id" ) ).toString();
+            row.labId = o.value( QStringLiteral( "lab_id" ) ).toString();
+            row.status = o.value( QStringLiteral( "status" ) ).toString();
+            row.score = o.value( QStringLiteral( "score" ) ).toDouble( -1 );
+            row.verdict = o.value( QStringLiteral( "verdict" ) ).toString();
+            row.message = o.value( QStringLiteral( "message" ) ).toString();
+            row.missingEvidence = o.value( QStringLiteral( "missing_evidence" ) ).toBool();
+            row.rubricVersion = o.value( QStringLiteral( "rubric_version" ) ).toString();
+            row.labVersion = o.value( QStringLiteral( "lab_version" ) ).toString();
+            row.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
+            report.rows.push_back( row );
+        }
+        appendLog( QString::fromUtf8( QJsonDocument(
+          sicnu::teaching_admin::buildClassSummary( report ) ).toJson( QJsonDocument::Compact ) ) );
+    }
 }
 
 void TeachingAdminDock::onBuildFeedbackAndSummary()

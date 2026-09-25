@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include "platform/portable.h"
 
 namespace sicnu::recipes {
 
@@ -253,9 +254,10 @@ std::vector<LabSourceEntry> loadLabDirectory( const std::string &labsDir,
 
 std::string defaultLabDirectory()
 {
-  if ( const char *env = std::getenv( "SICNU_LAB_DIR" ) )
-    if ( *env && fs::is_directory( env ) )
-      return env;
+  // Path-valued env: UTF-8 boundary + UTF-8 path decode (see recipe_registry).
+  const std::string env = sicnu::portable::envUtf8( "SICNU_LAB_DIR" );
+  if ( !env.empty() && fs::is_directory( sicnu::portable::pathFromUtf8( env ) ) )
+    return env;
 
   const fs::path cwd = fs::current_path() / "data" / "labs";
   if ( fs::is_directory( cwd ) )

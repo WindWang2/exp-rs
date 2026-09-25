@@ -45,8 +45,10 @@ std::optional<PreflightSeverity> severityFromString( const std::string &text );
 /// Wire vocabulary shared with src/agent/harness/workflow_ir.h fact status.
 bool isValidFactBasis( const std::string &basis );
 
-/// Report-level verdicts. Distinct from harness "ok|fixable|blocked" and
-/// planner "feasible*" — mapping documented in docs/adr/0174.
+/// Report-level verdicts ("ok" | "requires_ack" | "blocked"). Deliberately
+/// distinct from the harness "ok|fixable|blocked" vocabulary and the
+/// planner's "feasible*" family — preflight verdicts gate a run on
+/// scientific grounds and are not interchangeable with either.
 bool isValidVerdict( const std::string &verdict );
 
 struct PreflightFinding

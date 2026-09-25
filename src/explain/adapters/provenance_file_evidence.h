@@ -51,9 +51,26 @@ public:
   // Loads every provenance_<runId>.json directly inside @p directory
   // (sorted, bounded). Never throws: bad files are recorded in the load
   // problems and skipped; the returned adapter is always non-null
-  // (possibly empty).
+  // (possibly empty). Names without a usable run id are treated as
+  // not-a-record by the scan (no problem emitted); the single-record
+  // loader reports them as malformed_name instead.
   static std::unique_ptr<ProvenanceFileEvidence> loadFromDirectory(
     const std::string &directory, std::vector<EvidenceLoadProblem> &problems );
+
+  // Loads exactly ONE provenance_<runId>.json. Prefer this when the caller
+  // knows the record's path (e.g. PipelineRunCoordinator::provenancePath()):
+  // no directory scan, so the load cost is the record itself. Same typed
+  // problems as the directory loader (plus malformed_name for a name without
+  // a usable run id); the returned adapter is always non-null (empty on
+  // refusal).
+  static std::unique_ptr<ProvenanceFileEvidence> loadFromFile(
+    const std::string &filePath, std::vector<EvidenceLoadProblem> &problems );
+
+  // The pinned record-name grammar: "provenance_<runId>.json" where <runId>
+  // can produce a valid evidence link (non-empty, no '#', no whitespace).
+  // nullopt for anything else. Single source of the grammar for every
+  // surface that names a record.
+  static std::optional<std::string> runIdFromFileName( const std::string &fileName );
 
   // Run/step lookup over the loaded records. Unknown run or step → nullopt.
   std::optional<StepEvidence> evidenceFor( const std::string &runId,

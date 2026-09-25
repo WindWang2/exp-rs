@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "agent/mcp_server.h"
+#include "agent_ops/ops_driver.h"
 #include "data/asset_types.h"
 #include "data/data_manager.h"
 #include "data/data_result.h"
@@ -1846,4 +1847,126 @@ TEST_CASE( "OutputCommitter re-commit over the stable path advances the revision
   const auto provenance = manager->provenance( committedId );
   REQUIRE( provenance.has_value() );
   CHECK( provenance->algorithmId == QStringLiteral( "rs:second" ) );
+}
+
+// ---------------------------------------------------------------------------
+// R3: scientific:agent_session — one MCP tool over the shared session
+// surface. Fail-closed without an injected driver; driver envelopes pass
+// through verbatim when one is injected.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "mcp agent_session tool fails closed without an injected driver",
+           "[mcp][agent_ops]" )
+{
+    TestMcpServer server;
+    server.setAgentOpsDriver( nullptr );
+
+    // MCP gate: other requests are refused until the initialize handshake.
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 70;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    QVariantMap initParams;
+    initParams[QStringLiteral( "protocolVersion" )] = QStringLiteral( "2024-11-05" );
+    initReq[QStringLiteral( "params" )] = initParams;
+    server.testHandleRequest( initReq );
+    QVariantMap notifReq;
+    notifReq[QStringLiteral( "method" )] = QStringLiteral( "notifications/initialized" );
+    server.testHandleRequest( notifReq );
+
+    QVariantMap req;
+    req[QStringLiteral( "id" )] = 71;
+    req[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap params;
+    params[QStringLiteral( "name" )] = QStringLiteral( "scientific:agent_session" );
+    QVariantMap args;
+    args[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    params[QStringLiteral( "arguments" )] = args;
+    req[QStringLiteral( "params" )] = params;
+    server.testHandleRequest( req );
+
+    CHECK( server.lastResponseId.toInt() == 71 );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString()
+           == QStringLiteral( "AGENT_OPS_UNAVAILABLE" ) );
+}
+
+TEST_CASE( "mcp agent_session tool drives the shared driver envelope",
+           "[mcp][agent_ops][parity]" )
+{
+    TestMcpServer server;
+    // No production science seams injected: the driver refuses run with the
+    // SAME typed code the CLI reports, and discovery/status stay live.
+    static sicnu::agent_ops::OpsDriver driver{ sicnu::agent_ops::OpsDriver::Options{} };
+    server.setAgentOpsDriver( &driver );
+
+    // MCP gate: other requests are refused until the initialize handshake.
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 70;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    QVariantMap initParams;
+    initParams[QStringLiteral( "protocolVersion" )] = QStringLiteral( "2024-11-05" );
+    initReq[QStringLiteral( "params" )] = initParams;
+    server.testHandleRequest( initReq );
+    QVariantMap notifReq;
+    notifReq[QStringLiteral( "method" )] = QStringLiteral( "notifications/initialized" );
+    server.testHandleRequest( notifReq );
+
+    // Missing action: typed invalid parameter.
+    QVariantMap noAction;
+    noAction[QStringLiteral( "id" )] = 72;
+    noAction[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap naParams;
+    naParams[QStringLiteral( "name" )] = QStringLiteral( "scientific:agent_session" );
+    naParams[QStringLiteral( "arguments" )] = QVariantMap{};
+    noAction[QStringLiteral( "params" )] = naParams;
+    server.testHandleRequest( noAction );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    CHECK( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString()
+           == QStringLiteral( "INVALID_PARAMETER" ) );
+
+    // Discovery: the tool result carries the driver's actions document.
+    QVariantMap discReq;
+    discReq[QStringLiteral( "id" )] = 73;
+    discReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap dParams;
+    dParams[QStringLiteral( "name" )] = QStringLiteral( "scientific:agent_session" );
+    QVariantMap dArgs;
+    dArgs[QStringLiteral( "action" )] = QStringLiteral( "actions" );
+    dParams[QStringLiteral( "arguments" )] = dArgs;
+    discReq[QStringLiteral( "params" )] = dParams;
+    server.testHandleRequest( discReq );
+    CHECK( server.lastResponseId.toInt() == 73 );
+    CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    const QString actionsText = server.lastResponseResult.value( QStringLiteral( "content" ) )
+                                    .toList()
+                                    .first()
+                                    .toMap()
+                                    .value( QStringLiteral( "text" ) )
+                                    .toString();
+    CHECK( actionsText.contains( QStringLiteral( "reconcile" ) ) );
+    CHECK( actionsText.contains( QStringLiteral( "clear_cancel" ) ) );
+    CHECK( actionsText.contains( QStringLiteral( "sicnu.agent_ops.ops_driver/v1" ) ) );
+
+    // run without seams: the TOOL call succeeds; the ENVELOPE inside carries
+    // the typed fail-closed refusal (wire parity with the CLI `session run`).
+    QVariantMap runReq;
+    runReq[QStringLiteral( "id" )] = 74;
+    runReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap rParams;
+    rParams[QStringLiteral( "name" )] = QStringLiteral( "scientific:agent_session" );
+    QVariantMap rArgs;
+    rArgs[QStringLiteral( "action" )] = QStringLiteral( "run" );
+    rArgs[QStringLiteral( "goal" )] = QStringLiteral( "compute NDVI for the scene" );
+    rParams[QStringLiteral( "arguments" )] = rArgs;
+    runReq[QStringLiteral( "params" )] = rParams;
+    server.testHandleRequest( runReq );
+    CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+    const QString runText = server.lastResponseResult.value( QStringLiteral( "content" ) )
+                                .toList()
+                                .first()
+                                .toMap()
+                                .value( QStringLiteral( "text" ) )
+                                .toString();
+    CHECK( runText.contains( QStringLiteral( "SEAMS_UNAVAILABLE" ) ) );
+    CHECK( runText.contains( QStringLiteral( "missing_seams" ) ) );
 }

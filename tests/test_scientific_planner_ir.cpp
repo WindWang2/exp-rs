@@ -89,9 +89,12 @@ TEST_CASE( "projected document carries the workflow_ir 1.0 field shape",
     // node wiring uses the node/output/as form
     CHECK( doc["nodes"][1]["inputs"][0]["node"].asString() == std::string( "step-preprocess-01" ) );
     CHECK( doc["nodes"][1]["inputs"][0]["output"].asString() == std::string( "output" ) );
-    // asset input becomes a document input slot
+    // asset input becomes a document input slot (readWorkflowIr — the final
+    // conformance authority — requires string 'name' and 'ref'; the pin used
+    // to echo the projection's own drifted "reference" key, a spelling no
+    // reader accepts)
     REQUIRE( doc["inputs"].size() == 1 );
-    CHECK( doc["inputs"][0]["reference"].asString() == std::string( "asset-a" ) );
+    CHECK( doc["inputs"][0]["ref"].asString() == std::string( "asset-a" ) );
     // publish step declares the output
     REQUIRE( doc["outputs"].size() == 1 );
     CHECK( doc["outputs"][0]["node"].asString() == std::string( "step-publish-01" ) );
