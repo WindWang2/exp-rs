@@ -9666,6 +9666,10 @@ sicnu_link_jsoncpp(test_tool_shortlist)
 # lowering with provenance.
 sicnu_add_test(test_workflow_planner)
 sicnu_link_jsoncpp(test_workflow_planner)
+# R3 track 14: the ScientificPlan → projectPlanToIr → compileWorkflow chain
+# cases compile into this target (planner is a Qt-free leaf; the harness
+# compiler stays the only lowering authority).
+target_link_libraries(test_workflow_planner PRIVATE sicnu_planner)
 
 sicnu_add_test(test_harness_catalog)
 sicnu_link_jsoncpp(test_harness_catalog)
@@ -12714,6 +12718,22 @@ set_target_properties(test_science_context_live_authorities PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_science_context_live_authorities)
+
+# R3 track 14 seam 2: science_context bundle → planner goal/context
+# projection (Qt-free: ScienceContext + planner + planner_live read path);
+# pins unknown-intent refusal, loud foreign-unit degradation, validated
+# enrichment and byte-stable projection over the live capability authority.
+add_executable(test_science_context_goal_projection test_science_context_goal_projection.cpp)
+target_link_libraries(test_science_context_goal_projection PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::ScienceContext
+  sicnu_planner_live
+)
+target_include_directories(test_science_context_goal_projection PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_science_context_goal_projection PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_science_context_goal_projection TEST_PREFIX "test_science_context_goal_projection::")
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)
@@ -13457,6 +13477,40 @@ target_link_libraries(test_scientific_planner_review PRIVATE
 )
 target_include_directories(test_scientific_planner_review PRIVATE ${CMAKE_SOURCE_DIR}/src)
 sicnu_discover_tests(test_scientific_planner_review TEST_PREFIX "test_scientific_planner_review::")
+
+# R3 track 14: the live capability seam for the planner. Qt-free leaf test
+# over sicnu_planner_live (planner + preflight mirror read path); pins the
+# REAL data/agent/capabilities documents, authority deletion/replan and
+# byte-stable replanning.
+add_executable(test_planner_live_capability test_planner_live_capability.cpp)
+target_link_libraries(test_planner_live_capability PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner_live
+)
+target_include_directories(test_planner_live_capability PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_planner_live_capability PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_planner_live_capability TEST_PREFIX "test_planner_live_capability::")
+
+# R3 track 14: the handoff chain up to the WorkflowIR document boundary —
+# bundle → planner inputs → plan (live capability authority) → projectPlanToIr
+# → preflight (real rules/mirror) → repair planning → proposal/teaching/
+# identity round-trips. Qt-free (planner leaves + ScienceContext + repair);
+# the steps beyond the document boundary (readWorkflowIr → AgentPlan v2 →
+# engine JSON) need the harness link and live in test_workflow_planner.
+add_executable(test_planner_handoff_e2e test_planner_handoff_e2e.cpp)
+target_link_libraries(test_planner_handoff_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner_live
+  Sicnu::ScienceContext
+  sicnu_repair_planner
+)
+target_include_directories(test_planner_handoff_e2e PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_planner_handoff_e2e PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_planner_handoff_e2e TEST_PREFIX "test_planner_handoff_e2e::")
 # RS14-02 Scientific Preflight Engine slice B: deterministic rule engine,
 # builtin rule families, provider seam and teaching/agent projections —
 # Qt/GDAL-free leaf tests over sicnu_preflight; the provider test adds the
