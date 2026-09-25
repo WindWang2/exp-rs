@@ -16,6 +16,7 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <numeric>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -302,8 +303,8 @@ TEST_CASE( "pool stress: eviction-while-held keeps evicted sessions fully usable
   // (LRU bound + releaseAll) while the holders keep their shared_ptrs.
   QTemporaryDir dir;
   ModelInfo model = stressModel( "held-model", distinctArtifact( dir, "held-model" ) );
-  const auto onCuda0 = registry.acquire( model, RequestedDevice::cuda( 0 ), nullptr );
-  const auto onCuda1 = registry.acquire( model, RequestedDevice::cuda( 1 ), nullptr );
+  auto onCuda0 = registry.acquire( model, RequestedDevice::cuda( 0 ), nullptr );
+  auto onCuda1 = registry.acquire( model, RequestedDevice::cuda( 1 ), nullptr );
   REQUIRE( onCuda0 );
   REQUIRE( onCuda1 );
   CHECK( onCuda0->deviceName() == "cuda:0" );
@@ -324,7 +325,24 @@ TEST_CASE( "pool stress: eviction-while-held keeps evicted sessions fully usable
   CHECK( onCuda0->deviceName() == "cuda:0" );
   CHECK( onCuda1->deviceName() == "cuda:1" );
 
-  // The ledger is clean: releaseAll dropped every reservation.
+  // #1160: reservations follow the SESSION, not the cache entry — while
+  // the callers above still hold the evicted sessions, the ledger MUST
+  // keep counting their occupancy (pinned by test_device_planner's
+  // "externally held session keeps its ledger reservation past eviction").
+  // The ledger only reads clean once the last references drop and the
+  // #1160 deleters release.
+  {
+    const auto report = registry.deviceReport();
+    const auto pinned = std::accumulate(
+      report.begin(), report.end(), 0,
+      []( int sum, const sicnu::operators::runtime::VramLedger::DeviceState &device ) {
+        return sum + device.reservedMb;
+      } );
+    CHECK( pinned == 64 ); // two held sessions × 32 MiB stay accounted
+  }
+
+  onCuda0.reset();
+  onCuda1.reset();
   for ( const auto &device : registry.deviceReport() )
     CHECK( device.reservedMb == 0 );
 }

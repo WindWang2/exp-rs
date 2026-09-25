@@ -376,3 +376,108 @@ TEST_CASE( "the timeline keeps ids, never live pointers, across host destruction
     REQUIRE( applyReconciliation( timeline, rec, QStringLiteral( "t1" ) ) == 1 );
     REQUIRE( timeline.task( QStringLiteral( "t1" ) )->status == MissionTaskStatus::Stale );
 }
+
+TEST_CASE( "a task may not enter the timeline claiming Running without a run authority",
+           "[mission][stage]" )
+{
+    // The transition path rejects Pending -> Running without a bound run; the
+    // insertion path must not smuggle the same illegal state in.
+    MissionTimeline timeline;
+    MissionTask smuggled = makeTask( QStringLiteral( "t1" ), MissionStage::Analyze );
+    smuggled.status = MissionTaskStatus::Running;
+    REQUIRE_FALSE( timeline.addTask( smuggled ).applied );
+    REQUIRE_FALSE( timeline.hasTask( QStringLiteral( "t1" ) ) );
+    REQUIRE( timeline.tasks().isEmpty() );
+
+    // With a run authority the insertion is legal.
+    MissionTask bound = makeTask( QStringLiteral( "t2" ), MissionStage::Analyze );
+    bound.status = MissionTaskStatus::Running;
+    bound.run.kind = QStringLiteral( "task_center" );
+    bound.run.id = QStringLiteral( "tc-1" );
+    REQUIRE( timeline.addTask( bound ).applied );
+    REQUIRE( timeline.task( QStringLiteral( "t2" ) )->status == MissionTaskStatus::Running );
+}
+
+TEST_CASE( "task lookups stay exact after many mutations and a serialization round-trip",
+           "[mission][stage]" )
+{
+    // The id -> position index must behave exactly like the linear scan it
+    // replaced: every id resolvable, unknown ids absent, and positions valid
+    // after copies (value semantics) and a fromJson rebuild.
+    MissionTimeline timeline;
+    constexpr int kTasks = 64;
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        MissionTask task = makeTask( QStringLiteral( "t-%1" ).arg( i ),
+                                     static_cast<MissionStage>( i % 5 ) );
+        REQUIRE( timeline.addTask( task ).applied );
+    }
+
+    MissionTimeline copy = timeline;
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        const QString id = QStringLiteral( "t-%1" ).arg( i );
+        REQUIRE( copy.hasTask( id ) );
+        REQUIRE( copy.task( id ) != nullptr );
+        REQUIRE( copy.task( id )->id == id );
+        // Mutate through the copy: the underlying task must really change.
+        REQUIRE( copy.transition( id, MissionTaskStatus::Canceled,
+                                  QStringLiteral( "2026-09-25T00:00:00Z" ) ).applied );
+        REQUIRE( copy.task( id )->status == MissionTaskStatus::Canceled );
+        REQUIRE( timeline.task( id )->status == MissionTaskStatus::Pending );
+    }
+    REQUIRE_FALSE( copy.hasTask( QStringLiteral( "ghost" ) ) );
+    REQUIRE( copy.task( QStringLiteral( "ghost" ) ) == nullptr );
+
+    MissionTimeline restored;
+    QString error;
+    REQUIRE( restored.fromJson( copy.toJson(), &error ) );
+    REQUIRE( restored == copy );
+    for ( int i = 0; i < kTasks; ++i )
+    {
+        const QString id = QStringLiteral( "t-%1" ).arg( i );
+        REQUIRE( restored.task( id ) != nullptr );
+        REQUIRE( restored.task( id )->status == MissionTaskStatus::Canceled );
+    }
+}
+
+TEST_CASE( "fromJson rejects a log whose seqs are not strictly ascending",
+           "[mission][stage]" )
+{
+    MissionTimeline timeline;
+    REQUIRE( timeline.addTask( makeTask( QStringLiteral( "t1" ), MissionStage::Import ) ).applied );
+    MissionRunRef run;
+    run.kind = QStringLiteral( "task_center" );
+    run.id = QStringLiteral( "tc-1" );
+    REQUIRE( timeline.bindRunReference( QStringLiteral( "t1" ), run ).applied );
+    REQUIRE( timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Running,
+                                  QStringLiteral( "t0" ) ).applied );
+    REQUIRE( timeline.transition( QStringLiteral( "t1" ), MissionTaskStatus::Succeeded,
+                                  QStringLiteral( "t1" ) ).applied );
+    const QJsonObject doc = timeline.toJson();
+
+    // eventsSince() binary-searches strictly ascending seqs; a hand-edited
+    // or rebuilt log must not load into a shape that breaks that.
+    QJsonObject tampered = doc;
+    QJsonArray events = tampered.value( QStringLiteral( "events" ) ).toArray();
+    REQUIRE( events.size() >= 3 );
+    QJsonObject last = events.at( events.size() - 1 ).toObject();
+    last.insert( QStringLiteral( "seq" ), 1 );
+    events.replace( events.size() - 1, last );
+    tampered.insert( QStringLiteral( "events" ), events );
+
+    MissionTimeline decoded;
+    QString error;
+    REQUIRE_FALSE( decoded.fromJson( tampered, &error ) );
+    REQUIRE( error == QStringLiteral( "event_seq_not_ascending" ) );
+
+    // A zero seq is equally out of contract.
+    QJsonObject zero = doc;
+    QJsonArray zeroEvents = zero.value( QStringLiteral( "events" ) ).toArray();
+    QJsonObject first = zeroEvents.at( 0 ).toObject();
+    first.insert( QStringLiteral( "seq" ), 0 );
+    zeroEvents.replace( 0, first );
+    zero.insert( QStringLiteral( "events" ), zeroEvents );
+    REQUIRE_FALSE( decoded.fromJson( zero, &error ) );
+    REQUIRE( error == QStringLiteral( "event_seq_not_ascending" ) );
+}

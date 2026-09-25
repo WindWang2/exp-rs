@@ -21,10 +21,12 @@
 // the derivation notes in data/labs/grading/*.rules.json) — never "JSON
 // non-null" weak asserts (issue #814 precedent avoided).
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "agent/output_verifier.h"
 #include "geospatial/gdal_guard.h"
+#include "teaching_admin/grader_cli_adapter.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -723,5 +725,127 @@ TEST_CASE( "lab_grading.absurd band indices grade as failures without OOB",
         REQUIRE( result.graded );
         REQUIRE( result.verdict == QLatin1String( "fail" ) );
         REQUIRE( hasDeduction( result, "x" ) );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CLI / in-process transcript-contract parity (R3 teaching admin track).
+//
+// The CLI process shell and an in-process caller must produce the SAME grade
+// from the SAME artifact: the engine's LabGradeResult is serialized to its
+// canonical sicnu.lab.grade/1 transcript (exactly what `sicnu_geo_rs_cli lab
+// --grade` writes to --out), handed to the teaching admin's ONE
+// gradeFromTranscript mapper (the same function gradeViaCli uses for real
+// subprocess transcripts), and the mapped verdict/status/score/digest/
+// top-deduction must agree with the engine result. A drift here means the
+// teacher console and the process-isolated CLI disagree about a student.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+QJsonObject toQJson( const Json::Value &value )
+{
+    const std::string text = Json::writeString( Json::StreamWriterBuilder(), value );
+    return QJsonDocument::fromJson( QByteArray::fromStdString( text ) ).object();
+}
+
+int exitCodeFor( const OutputVerifier::LabGradeResult &result )
+{
+    if ( result.graded )
+        return result.verdict == QLatin1String( "pass" ) ? 0 : 1;
+    return result.errorClass == QLatin1String( "usage" ) ? 2 : 3;
+}
+
+QString topDeductionOf( const OutputVerifier::LabGradeResult &result )
+{
+    QString top;
+    double topWeight = -1.0;
+    for ( const auto &d : result.deductions )
+    {
+        if ( top.isEmpty() || d.weight > topWeight )
+        {
+            top = d.assertionId;
+            topWeight = d.weight;
+        }
+    }
+    return top;
+}
+
+} // namespace
+
+TEST_CASE( "lab_grading.in-process result and CLI transcript mapper agree on every artifact class",
+           "[lab_grading][parity]" )
+{
+    using sicnu::teaching_admin::gradeFromTranscript;
+
+    struct Case
+    {
+        const char *rules;
+        const char *artifact;
+    };
+    // pass (reference corpus), fail (wrong-answer corpus), unverifiable
+    // (corrupt bytes) — the three exit-contract classes.
+    const std::vector<Case> cases = {
+        { "change_detect.rules.json", "change_detect_reference.tif" },
+        { "change_detect.rules.json", "change_detect_wrong_inverted.tif" },
+        { "change_detect.rules.json", "change_detect_wrong_all_nodata.tif" },
+    };
+    for ( const Case &c : cases )
+    {
+        const auto result = gradeFile( std::string( rulesDir() ) + "/" + c.rules,
+                                       fixturePath( c.artifact ) );
+        INFO( c.artifact << " -> " << result.verdict.toStdString() );
+
+        // The transcript the real CLI would have written for this grade.
+        const Json::Value transcript = result.toJson( "parity-test-utc" );
+        REQUIRE( transcript["schema"].asString() == "sicnu.lab.grade/1" );
+        REQUIRE( transcript["digest"].asString() == result.digest.toStdString() );
+
+        const auto mapped = gradeFromTranscript( exitCodeFor( result ), toQJson( transcript ) );
+
+        // verdict/status parity
+        if ( result.graded )
+        {
+            REQUIRE( ( mapped.status == "pass" || mapped.status == "fail" ) );
+            REQUIRE( mapped.verdict == result.verdict );
+            REQUIRE( mapped.score == Catch::Approx( result.score ).margin( 1e-9 ) );
+            REQUIRE( mapped.unavailableReason.isEmpty() );
+        }
+        else
+        {
+            REQUIRE( result.errorClass == QLatin1String( "artifact" ) );
+            REQUIRE( mapped.status == QLatin1String( "unavailable" ) );
+            REQUIRE( mapped.unavailableReason == QLatin1String( "artifact_unverifiable" ) );
+            REQUIRE( mapped.score < 0.0 );
+        }
+        // digest parity: the mapper forwards the transcript digest verbatim
+        REQUIRE( mapped.reportDigest == result.digest );
+        // top deduction parity: highest-weight failed assertion, same definition
+        REQUIRE( mapped.topDeduction == topDeductionOf( result ) );
+    }
+
+    // usage class parity: an unknown lab maps to exit 2 / typed error.
+    {
+        const auto result = grade( "no_such_lab_parity", fixturePath( "change_detect_reference.tif" ) );
+        REQUIRE_FALSE( result.graded );
+        REQUIRE( result.errorClass == QLatin1String( "usage" ) );
+        const auto mapped = gradeFromTranscript( 2, toQJson( result.toJson( "parity-test-utc" ) ) );
+        REQUIRE( mapped.status == QLatin1String( "error" ) );
+        REQUIRE( mapped.score < 0.0 );
+        REQUIRE_FALSE( mapped.message.isEmpty() );
+    }
+
+    // broken-authority guard parity: exit 0 with a fail transcript is refused
+    // by the shared mapper (never trusted into a pass).
+    {
+        const auto result = gradeFile( std::string( rulesDir() ) + "/change_detect.rules.json",
+                                       fixturePath( "change_detect_wrong_inverted.tif" ) );
+        REQUIRE( result.graded );
+        REQUIRE( result.verdict == QLatin1String( "fail" ) );
+        const auto mapped = gradeFromTranscript( 0, toQJson( result.toJson( "parity-test-utc" ) ) );
+        REQUIRE( mapped.status == QLatin1String( "unavailable" ) );
+        REQUIRE( mapped.unavailableReason == QLatin1String( "grader_exit_verdict_mismatch" ) );
+        REQUIRE( mapped.score < 0.0 );
     }
 }

@@ -9,6 +9,7 @@
 #include "suitability_teaching.h"
 #include "scene_candidate.h"
 
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -132,15 +133,19 @@ QVariantMap suitabilityAssess( const QVariantMap &args )
 
     const QString versionId = args.value( QStringLiteral( "dataset_version_id" ) ).toString();
     const QString dbPath = args.value( QStringLiteral( "dataset_db" ) ).toString();
-    // Same open path and read-only convention as the dataset: tools — note
-    // DatasetStore::open CREATES the file when the path does not exist yet
-    // (the dataset: tools' precedent; an assessment on a fresh store simply
-    // reports unknown facts). The store and its borrowed projection provider
-    // live only for this call.
+    // This channel is READ-ONLY: DatasetStore::open CREATES the file when
+    // the path does not exist (the dataset: tools' precedent for writers),
+    // so a typo'd path would silently assess an empty store and leave
+    // droppings on disk. Refuse a missing file instead — an assessment of a
+    // store that does not exist has no legitimate use.
     std::unique_ptr<sicnu::dataset::DatasetStore> store;
     std::unique_ptr<StoreDataProvider> provider;
     if ( !dbPath.isEmpty() )
     {
+        if ( !QFileInfo::exists( dbPath ) )
+            fail( QStringLiteral( "dataset_db does not exist at '%1' "
+                                  "(assess never creates a store)" )
+                      .arg( dbPath ) );
         store = std::make_unique<sicnu::dataset::DatasetStore>();
         QString error;
         if ( !store->open( dbPath, &error ) )

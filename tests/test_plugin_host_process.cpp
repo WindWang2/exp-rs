@@ -151,6 +151,14 @@ void writeManifest( const Json::Value &access = Json::Value() )
     runtime["description"] = "identity tensor backend (known-answer)";
     runtime["gpu"] = false;
     runtimes.append( runtime );
+    // Track 13: the deliberately non-reentrant backend the infer
+    // serialization oracle drives (registration is manifest-gated).
+    Json::Value stateful( Json::objectValue );
+    stateful["framework"] = "iso-stateful";
+    stateful["display_name"] = "Isolation Stateful";
+    stateful["description"] = "non-reentrant backend (serialization oracle)";
+    stateful["gpu"] = false;
+    runtimes.append( stateful );
     manifest["model_runtimes"] = runtimes;
 
     Json::Value tools( Json::arrayValue );
@@ -936,6 +944,64 @@ TEST_CASE( "model runtime identity infer is a known-answer round-trip",
     REQUIRE( result.output.data == input.data ); // exact identity, no tolerance
     REQUIRE( result.output.channels == 2 );
     REQUIRE( result.output.cols == 3 );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "worker serializes concurrent model infer into one runtime (Track 13)",
+           "[hostprocess][model][concurrency][serialize]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( stack.sink.modelFactories.count( "iso-stateful" ) == 1 );
+
+    std::string error;
+    PluginModelRequestV1 request;
+    request.modelName = "stateful-fixture";
+    // ONE host-side proxy — in production the registry hands every caller
+    // the same cached session object, so concurrent infer lands on the same
+    // runtime instance inside the worker.
+    auto runtime = stack.sink.modelFactories.at( "iso-stateful" )( request, error );
+    REQUIRE( runtime );
+
+    // IPluginModelRuntimeV1 documents no thread-safety contract; the
+    // worker's ModelRuntimeCache::infer mutex is the serialization. The
+    // iso-stateful fixture is deliberately non-reentrant (a shared scratch
+    // is verified after an interleaving window), so any torn forward comes
+    // back success=false. Removing that mutex makes this test fail in
+    // bulk; with it, every request answers with its own pattern.
+    constexpr int kThreads = 6;
+    constexpr int kRounds = 6;
+    std::atomic<int> torn{ 0 };
+    std::atomic<int> ok{ 0 };
+    std::vector<std::thread> threads;
+    for ( int threadIdx = 0; threadIdx < kThreads; ++threadIdx )
+    {
+        threads.emplace_back( [ &runtime, &torn, &ok, threadIdx ] {
+            for ( int round = 0; round < kRounds; ++round )
+            {
+                exprs::PluginTensorV1 input;
+                input.batch = 1;
+                input.channels = 1;
+                input.rows = 1;
+                input.cols = 4;
+                const float tag = static_cast<float>( threadIdx * 100 + round ) + 1.0f;
+                input.data.assign( 4, tag );
+                const auto result = runtime->infer( input, "output" );
+                if ( result.success && result.output.data == input.data )
+                    ok.fetch_add( 1 );
+                else
+                    torn.fetch_add( 1 );
+            }
+        } );
+    }
+    for ( std::thread &thread : threads )
+        thread.join();
+
+    INFO( "torn=" << torn.load() << " ok=" << ok.load() );
+    CHECK( ok.load() == kThreads * kRounds );
+    REQUIRE( torn.load() == 0 );
 
     REQUIRE( registry.unload( kPluginId ) );
 }

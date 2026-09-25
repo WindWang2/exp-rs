@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <system_error>
+#include "platform/portable.h"
 
 namespace sicnu::geo::io
 {
@@ -74,7 +75,7 @@ CheckedPath checkTargetPath( const std::string &raw )
                                    ? std::string( "." )
                                    : path.substr( 0, lastSlash == 0 ? 1 : lastSlash );
       std::error_code ec;
-      if ( !std::filesystem::is_directory( std::filesystem::u8path( parent ), ec ) || ec )
+      if ( !std::filesystem::is_directory( sicnu::portable::pathFromUtf8( parent ), ec ) || ec )
       {
         Json::Value details;
         details["reason"] = "target_directory_missing";

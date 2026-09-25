@@ -453,6 +453,58 @@ public:
     std::vector<std::string> outputTensorNames() const override { return { "output" }; }
 };
 
+/// Model runtime (Track 13): deliberately NON-reentrant identity backend.
+/// IPluginModelRuntimeV1 documents no thread-safety contract — the worker's
+/// ModelRuntimeCache::infer mutex is what makes concurrent requests safe.
+/// This runtime violates re-entrancy on purpose: it copies the caller's
+/// pattern into a SHARED scratch member, sleeps through an interleaving
+/// window, and only answers when the scratch still holds its own pattern.
+/// A mutation that removes the worker's infer serialization tears forwards
+/// (success=false, diagnostics torn=true), which the concurrency oracle in
+/// test_plugin_host_process.cpp kills.
+class IsoStatefulRuntime : public exprs::IPluginModelRuntimeV1
+{
+public:
+    std::string backendName() const override { return "iso-stateful"; }
+    std::string deviceName() const override { return "cpu"; }
+
+    bool load( const exprs::PluginModelRequestV1 &, std::string & ) override { return true; }
+
+    exprs::PluginInferenceResultV1 infer( const exprs::PluginTensorV1 &input,
+                                          const std::string & ) override
+    {
+        exprs::PluginInferenceResultV1 result;
+        // Phase 1: capture the caller's pattern in the SHARED scratch.
+        m_scratch.assign( input.data.begin(), input.data.end() );
+        // Phase 2: the interleaving window — a concurrent forward overwrites
+        // m_scratch exactly here. Eight short sleeps keep the window wide
+        // without slowing the serialized path meaningfully (8 ms once).
+        for ( int i = 0; i < 8; ++i )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        // Phase 3: the scratch must still hold OUR pattern.
+        const bool intact = m_scratch.size() == input.data.size()
+                            && std::equal( m_scratch.begin(), m_scratch.end(),
+                                           input.data.begin() );
+        if ( !intact )
+        {
+            Json::Value diagnostics( Json::objectValue );
+            diagnostics[ "backend" ] = "iso-stateful";
+            diagnostics[ "torn" ] = true;
+            result.diagnostics = diagnostics;
+            result.error = "forward was interleaved (shared scratch overwritten mid-run)";
+            return result;
+        }
+        result.success = true;
+        result.output = input;
+        return result;
+    }
+
+    std::vector<std::string> outputTensorNames() const override { return { "output" }; }
+
+private:
+    std::vector<float> m_scratch;
+};
+
 class IsolationPlugin : public exprs::PluginV1
 {
 public:
@@ -494,6 +546,12 @@ public:
         context.registerDataProvider( "test:iso-store",
                                       std::make_shared<IsoStoreProvider>( mTempDirectory ) );
         context.registerAgentTool( "test:iso-tool", std::make_shared<IsoEchoTool>() );
+        context.registerModelRuntime(
+            "iso-stateful",
+            []( const exprs::PluginModelRequestV1 &, std::string & )
+                -> exprs::PluginModelRuntimePtrV1 {
+                return std::make_unique<IsoStatefulRuntime>();
+            } );
         context.registerModelRuntime(
             "iso-identity",
             []( const exprs::PluginModelRequestV1 &, std::string & )

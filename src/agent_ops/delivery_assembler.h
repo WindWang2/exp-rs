@@ -22,6 +22,13 @@ struct DeliveryExtras {
     std::optional<sicnu::agentbench::AgentTrace> trace;
     Json::Value questions{Json::arrayValue};
     Json::Value claims{Json::arrayValue};
+    /// Optional unified Scientific Verifier report document
+    /// ("sicnu.verification.report/1"). When present it participates in the
+    /// claim-evidence gate: a delivery may only claim high confidence when
+    /// the loop's own verdict passed AND the unified report is not present
+    /// with a non-pass overall (its "indeterminate" can never read as
+    /// success). Consumed as a JSON contract; no verifier link.
+    Json::Value verificationReport{Json::objectValue};
 };
 
 class DeliveryAssembler {

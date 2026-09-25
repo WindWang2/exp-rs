@@ -21,6 +21,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QTimeZone>
 #include <QJsonObject>
 
 using sicnu::data::AssetState;
@@ -148,6 +149,34 @@ TEST_CASE( "dataset facts fromJson fails typed on foreign schema or missing iden
     const auto parsedNoIdentity = DatasetFacts::fromJson( noIdentity );
     REQUIRE( !parsedNoIdentity.has_value() );
     REQUIRE( parsedNoIdentity.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+}
+
+TEST_CASE( "dataset facts claiming a temporal extent must parse it typed",
+           "[suitability][spectral]" )
+{
+    // has_temporal_extent=true with an unparsable stamp used to survive as
+    // an invalid QDateTime that later read as "no temporal evidence" — a
+    // silent fact loss. Same posture as the scene reader: fail typed.
+    QJsonObject broken = DatasetFacts().toJson();
+    broken.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-t" ) );
+    broken.insert( QStringLiteral( "has_temporal_extent" ), true );
+    broken.insert( QStringLiteral( "temporal_start_utc" ), QStringLiteral( "not-a-date" ) );
+    const auto parsedBroken = DatasetFacts::fromJson( broken );
+    REQUIRE( !parsedBroken.has_value() );
+    REQUIRE( parsedBroken.diagnostics().first().code == QStringLiteral( "suitability.facts_invalid" ) );
+
+    // Zoneless stamps are bound to UTC like every other _utc key.
+    QJsonObject zoneless = DatasetFacts().toJson();
+    zoneless.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-t" ) );
+    zoneless.insert( QStringLiteral( "has_temporal_extent" ), true );
+    zoneless.insert( QStringLiteral( "temporal_start_utc" ), QStringLiteral( "2023-01-01T00:00:00" ) );
+    zoneless.insert( QStringLiteral( "temporal_end_utc" ), QStringLiteral( "2024-06-30T00:00:00Z" ) );
+    const auto parsedZoneless = DatasetFacts::fromJson( zoneless );
+    REQUIRE( parsedZoneless.has_value() );
+    if ( !parsedZoneless.has_value() )
+        return;
+    REQUIRE( parsedZoneless->temporalStartUtc.timeZone() == QTimeZone::utc() );
+    REQUIRE( parsedZoneless->temporalEndUtc.timeZone() == QTimeZone::utc() );
 }
 
 TEST_CASE( "spectral bands without a requirement is not applicable", "[suitability][spectral]" )

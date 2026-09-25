@@ -130,6 +130,7 @@ struct TruncationMeta
     int droppedRecipes = 0;
     int droppedCapabilities = 0;
     int droppedQuestions = 0;
+    int droppedAssets = 0;
     int originalBytes = 0;
     int finalBytes = 0;
 };

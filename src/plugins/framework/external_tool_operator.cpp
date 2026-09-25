@@ -10,6 +10,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include "platform/portable.h"
 
 namespace sicnu::plugins {
 
@@ -75,7 +76,7 @@ void ensureParentDirectory( const std::string &path )
 {
     // #1097: filesystem::path handles Windows backslashes; rfind('/') alone
     // left parents uncreated for Windows output paths and publish always failed.
-    const std::filesystem::path parent = std::filesystem::u8path( path ).parent_path();
+    const std::filesystem::path parent = sicnu::portable::pathFromUtf8( path ).parent_path();
     if ( parent.empty() )
         return;
     std::error_code error;
@@ -118,7 +119,7 @@ bool ExternalToolOperator::buildArgv( const Json::Value &params,
         {
             // #1097: path::extension so Windows backslash paths still get a
             // suffix; rfind('.') + find('/') mis-detects e.g. C:\a.b\out.
-            const auto ext = std::filesystem::u8path( finalPath ).extension().u8string();
+            const auto ext = sicnu::portable::pathFromUtf8( finalPath ).extension().u8string();
             if ( !ext.empty() )
                 suffix.assign( ext.begin(), ext.end() );
         }

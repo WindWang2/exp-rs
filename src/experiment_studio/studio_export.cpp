@@ -101,11 +101,19 @@ QString studyRunTableToCsv( const QJsonObject &studyReportJson )
                 return QStringLiteral( "\"%1\"" ).arg( t );
             return t;
         };
+        // Exact seed width: the report's "seed_u64" decimal string survives
+        // seeds a JSON double cannot hold (>2^53 — and ≥2^63 flips sign on
+        // the old double→qint64 cast); the double form is a legacy fallback.
+        const QString seedText =
+            r.contains( QStringLiteral( "seed_u64" ) )
+                ? r.value( QStringLiteral( "seed_u64" ) ).toString()
+                : QString::number(
+                      static_cast<qint64>( r.value( QStringLiteral( "seed" ) ).toDouble() ) );
         ts << esc( r.value( QStringLiteral( "point_id" ) ).toString() ) << ','
            << r.value( QStringLiteral( "replicate_index" ) ).toInt() << ','
            << esc( r.value( QStringLiteral( "run_id" ) ).toString() ) << ','
            << esc( r.value( QStringLiteral( "status" ) ).toString() ) << ','
-           << static_cast<qint64>( r.value( QStringLiteral( "seed" ) ).toDouble() ) << ','
+           << esc( seedText ) << ','
            << esc( r.value( QStringLiteral( "error_summary" ) ).toString() ) << ','
            << esc( r.value( QStringLiteral( "output_asset_path" ) ).toString() ) << '\n';
     }
