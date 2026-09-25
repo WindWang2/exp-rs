@@ -164,6 +164,9 @@ class Wiring:
         # PRIVATE is kept but flagged)
         self.links: dict[str, list[tuple[str, str]]] = {}
         self.alias_of: dict[str, str] = {}
+        # targets registered with the ctest harness (sicnu_discover_tests /
+        # catch_discover_tests / add_test) — the only ones ctest can run
+        self.ctest_registered: set[str] = set()
         self._scan()
 
     def _cmake_scripts(self) -> list[Path]:
@@ -289,6 +292,11 @@ class Wiring:
                     entry = self.targets.setdefault(
                         toks[0], {"script": s, "sources": [], "implicit": False})
                     harvest(entry, toks[1:], s)
+                elif name in ("sicnu_discover_tests", "catch_discover_tests", "add_test",
+                              "gtest_discover_tests", "catch_discover_tests"):
+                    tname = _first_token(args)
+                    if _is_target_name(tname) and "$" not in tname:
+                        self.ctest_registered.add(tname)
                 elif name in ("target_link_libraries", "link_libraries"):
                     toks = args.split()
                     scope = ""
@@ -496,7 +504,8 @@ def map_paths(wiring: Wiring, paths: list[str]) -> dict:
                                  "kind": "executable",
                                  "verification": "link+test",
                                  "reason": "links " + ", ".join(consumers[consumer])}
-        ctest.append(consumer)
+        if consumer in wiring.ctest_registered:
+            ctest.append(consumer)
 
     return {
         "build_targets": sorted(details),

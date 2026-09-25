@@ -188,6 +188,7 @@ class LinkGraphTest(unittest.TestCase):
         (root / "tests" / "CMakeLists.txt").write_text(
             "add_executable(test_uses_mid test_uses_mid.cpp)\n"
             "target_link_libraries(test_uses_mid PRIVATE fxmid)\n"
+            "sicnu_discover_tests(test_uses_mid)\n"
             "add_executable(test_unrelated test_unrelated.cpp)\n", encoding="utf-8")
         for f in ("test_uses_mid", "test_unrelated"):
             (root / "tests" / (f + ".cpp")).write_text("int main(){return 0;}\n",
