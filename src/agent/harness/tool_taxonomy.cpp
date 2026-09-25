@@ -28,8 +28,9 @@ struct Override {
 
 /// Explicit classifications for tools whose name alone does not determine the
 /// taxonomy. Prefix rules handle the rest (see classifyByPrefix).
-constexpr std::array<Override, 86> kOverrides = { {
+constexpr std::array<Override, 87> kOverrides = { {
   // data:
+  { "preflight:check", "context", "preflight" },
   { "data:list_layers", "data", "inspect" },
   { "data:describe_dataset", "data", "inspect" },
   { "data:get_lineage", "provenance", "inspect" },
