@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <QJsonParseError>
 
 using sicnu::contracts::CommandRefScanner;
 using sicnu::contracts::CommandRefReport;

@@ -39,6 +39,7 @@
 
 #include <cmath>
 #include <vector>
+#include <QJsonObject>
 
 namespace
 {

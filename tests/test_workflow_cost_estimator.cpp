@@ -8,6 +8,7 @@
 
 #include "workflow/plan_optimizer.h"
 #include "workflow/workflow_cost_estimator.h"
+#include <QJsonObject>
 
 using namespace sicnu::workflow;
 

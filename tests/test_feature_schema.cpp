@@ -12,6 +12,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <QJsonValue>
 
 using Catch::Approx;
 

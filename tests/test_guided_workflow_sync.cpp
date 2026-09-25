@@ -13,6 +13,7 @@
 
 #include "app/pipeline/guided_workflow_workbench.h"
 #include "workflow/workflow_ir_v2.h"
+#include <QJsonValue>
 
 using namespace sicnu::app::workbench;
 using sicnu::workflow::WorkflowIR;

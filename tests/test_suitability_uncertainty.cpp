@@ -28,6 +28,7 @@
 #include <QJsonObject>
 
 #include <limits>
+#include <QJsonValue>
 
 using sicnu::data::AssetState;
 using sicnu::data::Diagnostic;

@@ -6,6 +6,9 @@
 #include "rs_class_order.h"
 
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 
 using Catch::Approx;
 

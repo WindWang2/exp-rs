@@ -13,6 +13,7 @@
 #include <cmath>
 
 #include <QTemporaryDir>
+#include <QJsonObject>
 
 using namespace sicnu::experiment;
 using namespace sicnu::dataset;

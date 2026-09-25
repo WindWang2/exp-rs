@@ -7,6 +7,7 @@
 #include <QSet>
 
 #include "data/derivation_record.h"
+#include <QJsonValue>
 
 using namespace sicnu::data;
 

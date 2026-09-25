@@ -53,6 +53,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <QJsonObject>
 #endif
 
 using sicnu::TaskCenter;

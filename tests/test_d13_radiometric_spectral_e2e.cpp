@@ -33,6 +33,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <QJsonValue>
 
 using namespace exp_radiometric;
 using namespace exp_spectral;

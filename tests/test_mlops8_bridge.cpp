@@ -17,6 +17,7 @@
 #include <QMap>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QJsonObject>
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;
