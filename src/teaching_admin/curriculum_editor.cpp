@@ -354,4 +354,58 @@ QJsonObject projectCourseHomePreview( const QJsonObject &manifest )
     };
 }
 
+ValidationResult assertNoTeacherNotesLeak( const QJsonObject &projection,
+                                           const QJsonObject &manifest )
+{
+    ValidationResult r;
+    const QString blob =
+      QString::fromUtf8( QJsonDocument( projection ).toJson( QJsonDocument::Compact ) );
+
+    // The teacher_notes key must not exist anywhere in the projection.
+    if ( projection.contains( QStringLiteral( "teacher_notes" ) ) )
+        r.addError( QStringLiteral( "teacher_only_field" ), QStringLiteral( "teacher_notes" ),
+                    QStringLiteral( "teacher-only field must not appear in the student projection" ) );
+
+    // Every teacher-note string (objectives_zh, mistake_zh/why_zh/check_zh,
+    // grading_hook_zh) must not appear verbatim in the projection. CJK text
+    // has no whitespace tokens, so containment is checked on the full
+    // strings; the length floor skips fragments too short to be meaningful.
+    QStringList secrets;
+    const auto collect = [&secrets]( const QJsonValue &v, auto &&self ) -> void {
+        if ( v.isObject() )
+        {
+            const QJsonObject o = v.toObject();
+            for ( auto it = o.begin(); it != o.end(); ++it )
+                self( it.value(), self );
+        }
+        else if ( v.isArray() )
+        {
+            for ( const auto &item : v.toArray() )
+                self( item, self );
+        }
+        else if ( v.isString() )
+        {
+            const QString s = v.toString();
+            if ( s.size() >= 6 )
+                secrets.append( s );
+        }
+    };
+    for ( const auto &mv : manifest.value( QStringLiteral( "modules" ) ).toArray() )
+    {
+        const QJsonObject mod = mv.toObject();
+        for ( const auto &lv : mod.value( QStringLiteral( "labs" ) ).toArray() )
+            collect( lv.toObject().value( QStringLiteral( "teacher_notes" ) ), collect );
+    }
+    for ( const QString &secret : std::as_const( secrets ) )
+    {
+        if ( blob.contains( secret ) )
+        {
+            r.addError( QStringLiteral( "teacher_notes_leak" ), QStringLiteral( "teacher_notes" ),
+                        QStringLiteral( "teacher-note text leaked into the student projection" ) );
+            break;
+        }
+    }
+    return r;
+}
+
 } // namespace sicnu::teaching_admin

@@ -1184,8 +1184,6 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3796,8 +3794,6 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3821,8 +3817,6 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3850,8 +3844,6 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8202,8 +8194,6 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8227,8 +8217,6 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -10579,6 +10567,10 @@ target_include_directories(benchmark_scale8 PRIVATE
 # OutputVerifier::gradeArtifact teaching seam.
 sicnu_add_test(test_lab_grading TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_grading)
+# CLI/in-process transcript-contract parity oracle: the in-process engine
+# (OutputVerifier::gradeArtifact) is mapped through the teaching admin's ONE
+# gradeFromTranscript mapper and must agree verdict/score/digest-wise.
+target_link_libraries(test_lab_grading PRIVATE Sicnu::teaching_admin)
 
 # D7 batch grading: streaming engine + CSV export over the gradeArtifact
 # seam; CLI-level contract for --batch (error isolation, BOM, schema).
@@ -10587,8 +10579,22 @@ sicnu_link_jsoncpp(test_lab_batch)
 target_link_libraries(test_lab_batch PRIVATE sicnu_lab_batch)
 
 # teaching-lab-platform-11: sicnu.lab-pack/1 data pack contract (load + verify).
-sicnu_add_test(test_lab_data_pack TIMEOUT 300)
-sicnu_link_jsoncpp(test_lab_data_pack)
+# The pack parser/validator truth is the Qt-free sicnu_lab_pack leaf; this
+# test links ONLY the leaf (+jsoncpp via the leaf) instead of the heavy
+# sicnu_agent closure the pack contract never needed.
+add_executable(test_lab_data_pack test_lab_data_pack.cpp)
+target_link_libraries(test_lab_data_pack PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_pack
+)
+target_compile_definitions(test_lab_data_pack PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_lab_data_pack PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_lab_data_pack TIMEOUT 300)
 
 # teaching-lab-platform-11: batch classroom v2 (identity, roster, caps, cancel,
 # deterministic summaries).
@@ -10732,9 +10738,6 @@ add_executable(test_mission_context
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  # selection_context.cpp references WorkbenchHost (same pairing as
-  # test_object_identity / test_mission_runtime_store).
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_context PRIVATE
   Catch2::Catch2WithMain
@@ -10800,9 +10803,6 @@ add_executable(test_mission_e2e_scaffolding
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  # selection_context.cpp references WorkbenchHost (same pairing as
-  # test_object_identity / test_mission_runtime_store).
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   Catch2::Catch2WithMain
@@ -11514,8 +11514,6 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
-  # classification_studio_widget → object_identity.h → <json/json.h>
-  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
