@@ -251,6 +251,7 @@ target_link_libraries(test_sample_fixtures PRIVATE
   sicnu_sample_foundry
 )
 target_include_directories(test_sample_fixtures PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/tools
   ${CMAKE_BINARY_DIR}
 )
@@ -383,6 +384,18 @@ set_target_properties(test_platform_portability PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_platform_portability)
+
+# Cross-platform R2: static-evidence source contract (reads the repo's own
+# sources; same lane as test_platform_portability).
+add_executable(test_portability_source_contract test_portability_source_contract.cpp)
+target_link_libraries(test_portability_source_contract PRIVATE Catch2::Catch2WithMain)
+target_compile_definitions(test_portability_source_contract PRIVATE
+  SICNU_TEST_CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_portability_source_contract PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_portability_source_contract)
 
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
@@ -9732,6 +9745,15 @@ target_link_libraries(test_agent_loop_core PRIVATE
   sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_core)
+
+# RS14-11 journal publication oracle: torn-publish stress, Unicode/deep-path
+# reopen, failed-publish recovery (pure C++; no Qt/GDAL link).
+add_executable(test_agent_loop_journal_durability test_agent_loop_journal_durability.cpp)
+target_link_libraries(test_agent_loop_journal_durability PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_journal_durability)
 
 # RS14-11: seam interfaces, deterministic offline doubles, session policy.
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
