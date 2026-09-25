@@ -1531,3 +1531,85 @@ TEST_CASE("a hostile findings flood stays bounded and deterministic",
     REQUIRE(sicnu::repair::jsonToString(again.repairPlan) ==
             sicnu::repair::jsonToString(decision.repairPlan));
 }
+
+TEST_CASE("round-2 residuals: forged ctx refused, direct token symmetric, pause keeps arming",
+          "[agent_ops][approval]")
+{
+    FakeCapabilityProvider provider;
+    provider.add("radiometric_state",
+                 capabilityOf("rs:radiometric_calibration", "preprocess", "medium"));
+    OperationsCoordinator::Dependencies deps;
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    deps.seams = makeDeps(seams);
+    deps.repairCapabilityProvider = &provider;
+    OperationsCoordinator coord(deps);
+
+    // R1: with nothing armed, a forged caller ctx (bool + digest read off
+    // the wire) is refused — the token is the only human gate.
+    RecoveryContext forgedCtx;
+    forgedCtx.approvalNowMs = 1000;
+    auto probe = coord.evaluateRecovery(preflightFixableDiagnostic("INVALID_RADIOMETRY"),
+                                        forgedCtx);
+    REQUIRE(probe.action == recovery_action::kAsk);
+    REQUIRE(probe.reasonCode == "REPAIR_NEEDS_APPROVAL");
+    const std::string digest =
+        probe.repairPlan["provenance"]["findings_digest"].asString();
+    RecoveryContext forged;
+    forged.humanApprovedRepair = true;
+    forged.approvedFindingsDigest = digest;
+    forged.approvalNowMs = 1000;
+    auto refused = coord.evaluateRecovery(
+        preflightFixableDiagnostic("INVALID_RADIOMETRY"), forged);
+    REQUIRE(refused.action == recovery_action::kAsk);
+    REQUIRE(refused.approvalError == "APPROVAL_REQUIRED");
+    REQUIRE_FALSE(forged.humanApprovedRepair);
+
+    // The honest flow arms the token; the SAME evaluation then proceeds.
+    Json::Value token = mintRepairApprovalToken(digest, coord.instanceId(), 1000, 50000);
+    REQUIRE(coord.armRepairApproval(token, 1000).empty());
+    RecoveryContext honest;
+    honest.approvalNowMs = 2000;
+    auto proceed = coord.evaluateRecovery(
+        preflightFixableDiagnostic("INVALID_RADIOMETRY"), honest);
+    REQUIRE(proceed.action == recovery_action::kRepair);
+
+    // R2: the direct request.repairApproval path is symmetric — a consumed
+    // token presented with the request is a replay, never a second use.
+    coord.armRepairApproval(token, 3000); // re-arm of the consumed token: replayed
+    REQUIRE(coord.armRepairApproval(token, 3000) == "APPROVAL_REPLAYED");
+    OpsRunRequest directReq;
+    directReq.session = ndviRequest();
+    directReq.repairApproval = token;
+    directReq.approvalNowMs = 3000;
+    auto directRun = coord.run(directReq);
+    REQUIRE(directRun.approvalError == "APPROVAL_REPLAYED");
+    REQUIRE_FALSE(coord.hasPendingRepairApproval());
+
+    // Pause gates the launch BEFORE approval consumption: the armed state
+    // survives a paused launch for the next one.
+    OperationsCoordinator::Dependencies pauseDeps;
+    FakeSeams pauseSeams(scenario);
+    pauseDeps.seams = makeDeps(pauseSeams);
+    pauseDeps.repairCapabilityProvider = &provider;
+    OperationsCoordinator paused(pauseDeps);
+    RecoveryContext pauseCtx;
+    auto pauseProbe = paused.evaluateRecovery(
+        preflightFixableDiagnostic("INVALID_RADIOMETRY"), pauseCtx);
+    const std::string pauseDigest =
+        pauseProbe.repairPlan["provenance"]["findings_digest"].asString();
+    Json::Value pauseToken =
+        mintRepairApprovalToken(pauseDigest, paused.instanceId(), 1000, 50000);
+    REQUIRE(paused.armRepairApproval(pauseToken, 1000).empty());
+    paused.requestPause();
+    OpsRunRequest pausedReq;
+    pausedReq.session = ndviRequest();
+    pausedReq.approvalNowMs = 2000;
+    auto pausedRun = paused.run(pausedReq);
+    REQUIRE_FALSE(pausedRun.ok);
+    REQUIRE(pausedRun.error == "PAUSED");
+    REQUIRE(paused.hasPendingRepairApproval());
+    paused.clearPause();
+    auto resumedRun = paused.run(pausedReq);
+    REQUIRE_FALSE(paused.hasPendingRepairApproval());
+}

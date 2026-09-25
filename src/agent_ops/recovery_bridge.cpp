@@ -132,6 +132,8 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
 
     Json::Value planDoc = sicnu::repair::repairPlanToJson(outcome.plan);
     planDoc["planning_only"] = true;
+    if (findings.size() >= kMaxBridgeFindings)
+        planDoc["provenance"]["findings_dropped_by_bridge"] = true;
     return planDoc;
 }
 
@@ -234,8 +236,9 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         // downgrade a radiometric or science-changing repair into an auto
         // path. The gate reads the MAXIMUM risk over ALL selected
         // candidates: a plan is executed whole, so one radiometric or
-        // science-changing candidate makes the whole launch approval-gated.
-        std::string leadingRisk = ctx.leadingRiskClass;
+        // science-changing candidate makes the whole launch approval-gated,
+        // and the autonomy gate always sees the strictest class present.
+        std::string leadingRisk;
         bool anyRadiometricOrScience = false;
         const Json::Value &selected = out.repairPlan["selected"];
         if (selected.isArray())
@@ -248,10 +251,14 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
                                              : std::string();
                 if (risk == "radiometric" || risk == "science_changing")
                     anyRadiometricOrScience = true;
-                if (leadingRisk.empty() || leadingRisk == "shape_preserving")
-                    leadingRisk = risk.empty() ? leadingRisk : risk;
+                if (risk == "science_changing")
+                    leadingRisk = risk;
+                else if (leadingRisk.empty())
+                    leadingRisk = risk;
             }
         }
+        if (leadingRisk.empty())
+            leadingRisk = ctx.leadingRiskClass;
 
         // An approval is bound to ONE repair science (the findings digest in
         // the plan's provenance). A token minted for a different finding set

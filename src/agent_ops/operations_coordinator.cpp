@@ -63,8 +63,8 @@ std::string OperationsCoordinator::lastProjectedFindingsDigest() const
     return {};
 }
 
-std::string OperationsCoordinator::verifyApprovalAgainstLastPlan(const Json::Value &tokenDoc,
-                                                                 long long nowMs) const
+std::string OperationsCoordinator::verifyApprovalAgainstLastProjection(
+    const Json::Value &tokenDoc, long long nowMs) const
 {
     const std::string targetDigest = lastProjectedFindingsDigest();
     if (targetDigest.empty())
@@ -89,7 +89,7 @@ std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc
             return "APPROVAL_REPLAYED";
     }
 
-    const std::string error = verifyApprovalAgainstLastPlan(tokenDoc, nowMs);
+    const std::string error = verifyApprovalAgainstLastProjection(tokenDoc, nowMs);
     if (!error.empty())
         return error;
 
@@ -260,14 +260,35 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     std::string approvalError;
     if (request.repairApproval.isObject() && !request.repairApproval.isNull())
     {
-        const std::string directError = verifyApprovalAgainstLastPlan(
-            request.repairApproval, request.approvalNowMs);
-        if (directError.empty())
-            mPendingRepairApproval =
-                ArmedApproval{request.repairApproval,
-                              request.repairApproval["findings_digest"].asString()};
-        else if (approvalError.empty())
-            approvalError = directError;
+        // Single-use is symmetric: a driver-held token goes through the
+        // SAME consumed ring as an armed one — a consumed token presented
+        // with the request is a replay, never a second authorization.
+        const std::string tokenDigest = request.repairApproval["digest"].asString();
+        bool replayed = false;
+        for (const std::string &consumed : mConsumedApprovalDigests)
+        {
+            if (consumed == tokenDigest)
+            {
+                replayed = true;
+                break;
+            }
+        }
+        if (replayed)
+        {
+            if (approvalError.empty())
+                approvalError = "APPROVAL_REPLAYED";
+        }
+        else
+        {
+            const std::string directError = verifyApprovalAgainstLastProjection(
+                request.repairApproval, request.approvalNowMs);
+            if (directError.empty())
+                mPendingRepairApproval =
+                    ArmedApproval{request.repairApproval,
+                                  request.repairApproval["findings_digest"].asString()};
+            else if (approvalError.empty())
+                approvalError = directError;
+        }
     }
     bool pendingApproval = false;
     std::string approvedPlanId;
@@ -480,9 +501,20 @@ RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &dia
                                                          RecoveryContext &ctx)
 {
     // The human gate is the armed token, never the caller's bool: verify
-    // and consume it here, then derive what the bridge may trust.
+    // and consume it here, then derive what the bridge may trust. With
+    // nothing armed the caller's assertion is cleared — a forged ctx
+    // (the findings digest is public wire content) must not arm the gate.
     std::string tokenErrorOut;
-    if (mPendingRepairApproval)
+    if (!mPendingRepairApproval)
+    {
+        if (ctx.humanApprovedRepair || !ctx.approvedFindingsDigest.empty())
+        {
+            ctx.humanApprovedRepair = false;
+            ctx.approvedFindingsDigest.clear();
+            tokenErrorOut = "APPROVAL_REQUIRED";
+        }
+    }
+    else
     {
         const std::string targetDigest = lastProjectedFindingsDigest();
         const char *check = verifyRepairApprovalToken(

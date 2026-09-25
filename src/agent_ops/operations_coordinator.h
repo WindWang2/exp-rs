@@ -147,8 +147,9 @@ class OperationsCoordinator {
                         const std::string &approvalError);
 
     /// Verifies `tokenDoc` against this coordinator and the last projected
-    /// recovery plan at clock `nowMs`. Empty string = ok, else typed code.
-    std::string verifyApprovalAgainstLastPlan(const Json::Value &tokenDoc, long long nowMs) const;
+    /// repair science at clock `nowMs`. Empty string = ok, else typed code.
+    std::string verifyApprovalAgainstLastProjection(const Json::Value &tokenDoc,
+                                                    long long nowMs) const;
 
     Dependencies mDeps;
     LiveSessionRecorder mRecorder;
@@ -176,8 +177,9 @@ class OperationsCoordinator {
     std::string mLastProjectedFindingsDigest;
     /// Digests of tokens already consumed by a launch: re-presenting one is
     /// a replay, refused even though the token itself is still intact. The
-    /// ring is bounded (oldest forgotten after kMaxConsumedDigests); a
-    /// forgotten token is still refused by its expiry at re-arm time.
+    /// ring is bounded; once the oldest digest is forgotten, a long-TTL
+    /// token can arm again — TTL bounds bound that window (mint with a
+    /// sane ttlMs; expiry is enforced at every verify).
     std::vector<std::string> mConsumedApprovalDigests;
     static constexpr std::size_t kMaxConsumedDigests = 16;
     std::optional<OpsRunResult> mLastResult;

@@ -35,3 +35,17 @@
 ## 复审
 
 修复后全套件：test_agent_ops_core 34 cases / 326+ assertions 全绿；test_repair_planner_completion 34 cases 全绿；test_capability_knowledge 除**既有** D8 sidecar 漂移（rs:temporal_decompose，#1244 引入、旧 master 同样失败，非本 PR 范围）外全绿；wiring drift / schema 全绿。
+
+# Adversarial Review round 2 → fixes
+
+复审结论：P0-1 / P1-2 关闭（设计成立，oracle 有效）；P1-3 关闭（armed 路径）；全部 P2 关闭确认。剩余 R1–R7：
+
+- **R1 (P2) 无 armed token 时伪造 ctx 直通 gate** → `evaluateRecovery` 在无 armed token 时清空调用方 `humanApprovedRepair/approvedFindingsDigest` 并给出 `decision.approvalError=APPROVAL_REQUIRED`；负测试钉死（forged bool+公开 digest 不再能武装）。
+- **R2 (P2) run() 直传 token 不查消费环（单一用途不对称）** → 直传路径入环检查，与 armed 路径对称；`APPROVAL_REPLAYED` 行为测试钉死。
+- **R3 (P3) 混合计划 autonomy gate 用了较弱风险类** → gate 请求 riskClass 升级为存在中的最严类（science_changing > radiometric > shape_preserving）。
+- **R4 (P3) 环注释过度声明** → 改写：环有界，遗忘后长 TTL token 可再武装，TTL 即边界（mint 时给合理 ttl）。
+- **R5 (P3) bridge 截断无计数** → 计划 provenance 增 `findings_dropped_by_bridge` 标记（触发于 1024 上界被命中）。
+- **R6 (P3) oracle 缺口** → 新增：direct token run 路径（含 replay）、PAUSED 早退保留 armed 状态的行为测试、forged-ctx 负测试。
+- **R7 (P3) 命名陈旧** → `verifyApprovalAgainstLastPlan` → `verifyApprovalAgainstLastProjection`。
+
+复验：test_agent_ops_core 35 cases / 341 assertions 全绿。
