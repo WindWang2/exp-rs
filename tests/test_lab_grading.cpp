@@ -34,6 +34,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include <fstream>

@@ -1049,6 +1049,8 @@ sicnu_link_jsoncpp(test_explain_step_panel)
 set_target_properties(test_explain_step_panel PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
+  # embedded inspector_host.cpp declares a Q_OBJECT (drift gate rule 13).
+  AUTOMOC ON
 )
 sicnu_discover_tests(test_explain_step_panel TEST_PREFIX "test_explain_step_panel::")
 
