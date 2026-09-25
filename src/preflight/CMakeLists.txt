@@ -35,6 +35,7 @@ target_link_libraries( sicnu_preflight_state_adapter PUBLIC
 set_target_properties( sicnu_preflight_state_adapter PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
 )
 add_library( Sicnu::PreflightStateAdapter ALIAS sicnu_preflight_state_adapter )
 
@@ -43,6 +44,10 @@ target_include_directories( sicnu_preflight PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_preflight PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # Consumers include the shared sicnu_agent library (preflight:check tool
+    # shell) — same PIC requirement the recipes libraries carry for the same
+    # reason (fix/build precedent 39cd3f862).
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: canonical target when it

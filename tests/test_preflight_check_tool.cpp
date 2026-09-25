@@ -50,19 +50,6 @@ void ensureApp()
         new QCoreApplication( appArgc(), appArgv );
 }
 
-Json::Value toJsonText( const QJsonObject &object )
-{
-    const QByteArray raw = QJsonDocument( object ).toJson( QJsonDocument::Compact );
-    Json::Value parsed;
-    Json::CharReaderBuilder rb;
-    std::unique_ptr<Json::CharReader> reader( rb.newCharReader() );
-    std::string errors;
-    const std::string text( raw.constData(), static_cast<std::size_t>( raw.size() ) );
-    if ( !reader->parse( text.data(), text.data() + text.size(), &parsed, &errors ) )
-        FAIL( "fixture JSON does not re-parse: " << errors );
-    return parsed;
-}
-
 QString jsonToText( const Json::Value &value )
 {
     return QString::fromStdString( Json::writeString( Json::StreamWriterBuilder(), value ) );
@@ -387,55 +374,106 @@ TEST_CASE( "preflight:check resolves temporal collections from the workspace "
     CapabilityFixture fixture;
     fixture.publish( temporalCapabilityDocument() );
 
-    // A collection whose stored dates are out of order (as registered).
-    sicnu::temporal::TemporalCollection collection;
-    for ( const auto &date : { "2026-01-15", "2026-01-01", "2026-02-01" } )
-    {
-        sicnu::temporal::TemporalSceneRef scene;
-        scene.path = QStringLiteral( "/data/scene.tif" );
-        scene.time = sicnu::temporal::parseAcquisitionTime( QLatin1String( date ) );
-        REQUIRE( scene.time.valid );
-        collection.scenes().append( scene );
-    }
-    const std::string descriptorText =
-        Json::writeString( Json::StreamWriterBuilder(), collection.toJson() );
-
-    sicnu::data::DataManager dm;
-    sicnu::data::TemporalCollectionCreateRequest request;
-    request.displayName = QStringLiteral( "checkdemo-series" );
-    request.descriptor = QString::fromStdString( descriptorText );
-    const auto created = dm.createTemporalCollection( request );
-    REQUIRE( created.diagnostics.isEmpty() );
-    const QString collectionId = created.collectionId.toString();
-    const CatalogGuard catalogGuard( &dm );
-
-    // Passport pointing at the registered collection.
-    QJsonObject passport = passportObject( "asset-series" );
-    QJsonArray refs;
-    QJsonObject ref;
-    ref.insert( QLatin1String( "collection_id" ), collectionId );
-    ref.insert( QLatin1String( "role" ), QLatin1String( "series" ) );
-    refs.append( ref );
-    QJsonObject temporalObj;
-    temporalObj.insert( QLatin1String( "present" ), true );
-    temporalObj.insert( QLatin1String( "refs" ), refs );
-    passport.insert( QLatin1String( "temporal" ), temporalObj );
-
-    const QVariantMap result = runCheck( checkArgsVariant( "NDVI", passport ) );
-    REQUIRE( jsonStr( result, "report", "verdict" ) == "blocked" );
-    bool sawOrderInvalid = false;
-    for ( const auto &f : findingList( result ) )
-    {
-        const QVariantMap fm = f.toMap();
-        if ( fm.value( QStringLiteral( "code" ) ).toString() ==
-             QStringLiteral( "SPF_TEMPORAL_ORDER_INVALID" ) )
+    // The runtime temporal authority normalizes scene order at parse time
+    // (TemporalCollection::fromJson sorts), so the adversarial series that
+    // CAN reach the engine through this surface are oversized gaps and
+    // scenes without a parseable time. Unsorted declared lists are covered
+    // by the Qt-free TemporalFactsProvider oracle.
+    auto makeCollection = []( sicnu::data::DataManager &dm, const QString &name,
+                              std::vector<std::pair<const char *, bool>> scenes ) {
+        sicnu::temporal::TemporalCollection collection;
+        for ( const auto &[ date, valid ] : scenes )
         {
-            sawOrderInvalid = true;
-            REQUIRE( fm.value( QStringLiteral( "basis" ) ).toString() ==
-                     QLatin1String( "observed" ) );
+            sicnu::temporal::TemporalSceneRef scene;
+            scene.path = QStringLiteral( "/data/scene.tif" );
+            scene.time = valid ? sicnu::temporal::parseAcquisitionTime( QLatin1String( date ) )
+                               : sicnu::temporal::AcquisitionTime{};
+            scene.originalIndex = static_cast<int>( collection.scenes().size() );
+            collection.scenes().append( scene );
         }
+        const std::string descriptorText =
+            Json::writeString( Json::StreamWriterBuilder(), collection.toJson() );
+        sicnu::data::TemporalCollectionCreateRequest request;
+        request.displayName = name;
+        request.descriptor = QString::fromStdString( descriptorText );
+        const auto created = dm.createTemporalCollection( request );
+        REQUIRE( created.diagnostics.isEmpty() );
+        return created.collectionId.toString();
+    };
+
+    // Series with parseable, ordered dates but a 59-day gap against a
+    // 40-day budget: SPF_TEMPORAL_GAP_EXCEEDED (require_ack, observed).
+    QJsonObject gappedPassport = passportObject( "asset-series" );
+    QJsonObject invalidPassport = passportObject( "asset-series-bad" );
+    {
+        sicnu::data::DataManager dm;
+        const CatalogGuard catalogGuard( &dm );
+        const QString gappedId = makeCollection(
+            dm, QStringLiteral( "checkdemo-gap" ),
+            { { "2026-01-01", true }, { "2026-01-15", true }, { "2026-03-15", true } } );
+        const QString invalidId = makeCollection(
+            dm, QStringLiteral( "checkdemo-invalid" ),
+            { { "2026-01-01", true }, { "not-a-date", false }, { "2026-02-01", true } } );
+
+        QJsonArray refs;
+        QJsonObject ref;
+        ref.insert( QLatin1String( "collection_id" ), gappedId );
+        ref.insert( QLatin1String( "role" ), QLatin1String( "series" ) );
+        refs.append( ref );
+        QJsonObject temporalObj;
+        temporalObj.insert( QLatin1String( "present" ), true );
+        temporalObj.insert( QLatin1String( "refs" ), refs );
+        gappedPassport.insert( QLatin1String( "temporal" ), temporalObj );
+
+        QJsonArray refs2;
+        QJsonObject ref2;
+        ref2.insert( QLatin1String( "collection_id" ), invalidId );
+        ref2.insert( QLatin1String( "role" ), QLatin1String( "series" ) );
+        refs2.append( ref2 );
+        QJsonObject temporalObj2;
+        temporalObj2.insert( QLatin1String( "present" ), true );
+        temporalObj2.insert( QLatin1String( "refs" ), refs2 );
+        invalidPassport.insert( QLatin1String( "temporal" ), temporalObj2 );
+
+        const QVariantMap gapRun = runCheck( checkArgsVariant( "NDVI", gappedPassport ) );
+        REQUIRE( jsonStr( gapRun, "report", "verdict" ) == "requires_ack" );
+        bool sawGap = false;
+        for ( const auto &f : findingList( gapRun ) )
+        {
+            const QVariantMap fm = f.toMap();
+            if ( fm.value( QStringLiteral( "code" ) ).toString() ==
+                 QStringLiteral( "SPF_TEMPORAL_GAP_EXCEEDED" ) )
+            {
+                sawGap = true;
+                REQUIRE( fm.value( QStringLiteral( "basis" ) ).toString() ==
+                         QLatin1String( "observed" ) );
+                REQUIRE( fm.value( QStringLiteral( "evidence" ) ).toMap()
+                             .value( QStringLiteral( "max_gap_days_found" ) )
+                             .toInt() == 59 );
+            }
+        }
+        REQUIRE( sawGap );
+
+        const QVariantMap invalidRun = runCheck( checkArgsVariant( "NDVI", invalidPassport ) );
+        REQUIRE( jsonStr( invalidRun, "report", "verdict" ) == "requires_ack" );
+        bool sawIncomplete = false;
+        for ( const auto &f : findingList( invalidRun ) )
+        {
+            const QVariantMap fm = f.toMap();
+            if ( fm.value( QStringLiteral( "code" ) ).toString() ==
+                 QStringLiteral( "SPF_TEMPORAL_TIME_INCOMPLETE" ) )
+            {
+                sawIncomplete = true;
+                REQUIRE( fm.value( QStringLiteral( "evidence" ) ).toMap()
+                             .value( QStringLiteral( "invalid_time_scenes" ) )
+                             .toInt() == 1 );
+                REQUIRE( fm.value( QStringLiteral( "evidence" ) ).toMap()
+                             .value( QStringLiteral( "declared_scenes" ) )
+                             .toInt() == 3 );
+            }
+        }
+        REQUIRE( sawIncomplete );
     }
-    REQUIRE( sawOrderInvalid );
 }
 
 TEST_CASE( "preflight:check rejects malformed arguments with typed failures",
