@@ -16,7 +16,9 @@
  *   EXP_RS_MCP_ARGS       extra CLI args appended to --mcp
  *   EXP_RS_TOOL_CATEGORIES comma-separated tool prefixes to bridge
  *                         (default: "meta,spatial,data,temporal,cartography,symbology,workflow,workspace,layout,harness,mission"; e.g. add "rs,gdal,otb")
- *   SICNU_MCP_WORKSPACE   passed through to restrict server file access
+ *   SICNU_MCP_WORKSPACE   passed through; sandbox root for server file access.
+ *                         Unset = the directory Pi runs in (the server
+ *                         inherits Pi's CWD and sandboxes to it).
  *   SICNU_MODELS_DIR      passed through to locate model manifests
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

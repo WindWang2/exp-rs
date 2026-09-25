@@ -265,6 +265,11 @@ int main(int argc, char *argv[])
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;
+        // Review P1-1/P1-2: resolve the workspace sandbox (default-deny: an
+        // unset SICNU_MCP_WORKSPACE falls back to the CWD, or
+        // ~/.exp-rs/workspace when the CWD is / or $HOME), publish it and
+        // make it the working directory BEFORE any service reads it.
+        McpServer::installWorkspaceSandbox();
         // Bare DataManager gives the MCP tool-call dispatcher its asset
         // authority headlessly (same idiom as RsPipelineRunner, TICKET-23).
         auto mcpDataManager = std::make_unique<sicnu::data::DataManager>();

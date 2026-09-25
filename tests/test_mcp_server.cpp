@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "agent/mcp_server.h"
+#include "agent/tool_catalog/surface_registry.h"
+#include "agent/tool_catalog/workspace_containment.h"
 #include "agent_ops/ops_driver.h"
 #include "data/asset_types.h"
 #include "data/data_manager.h"
@@ -34,12 +36,26 @@
 #include "processing/providers/otb_tools/provider.h"
 #include <QCoreApplication>
 #include <QTemporaryDir>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include "dataset/dataset_types.h"
 #include "experiment/experiment_store.h"
 #include <QThread>
 #include <QTimer>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
+
+// Review P1-1: the MCP sandbox is default-deny (unset SICNU_MCP_WORKSPACE =
+// the process CWD). This binary's fixtures live at arbitrary absolute paths
+// (QTemporaryDir, /tmp/...), so it opts into the widest sandbox explicitly —
+// the documented SICNU_MCP_WORKSPACE=/ — unless the caller configured one.
+// Sandbox-specific test cases set (and restore) their own root.
+static const bool kFixtureWorkspaceInstalled = [] {
+    if ( qEnvironmentVariableIsEmpty( "SICNU_MCP_WORKSPACE" ) )
+        qputenv( "SICNU_MCP_WORKSPACE", QDir::rootPath().toUtf8() );
+    return true;
+}();
 
 // Helper subclass of McpServer to expose handlers directly for unit testing
 class TestMcpServer : public McpServer
@@ -1413,6 +1429,246 @@ TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every executio
             QStringLiteral( "aaaaaaaa-0000-4000-8000-0000000m1033" );
         const QVariantMap submitted = server.testRunWorkflow( args );
         CHECK( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+    }
+}
+
+namespace
+{
+/// Saves/restores SICNU_MCP_WORKSPACE, SICNU_MCP_ALLOW_REMOTE, HOME and the
+/// CWD around the default-deny sandbox tests (review P1-1..P1-3).
+struct SandboxEnvGuard
+{
+    QByteArray workspace = qgetenv( "SICNU_MCP_WORKSPACE" );
+    bool hadWorkspace = qEnvironmentVariableIsSet( "SICNU_MCP_WORKSPACE" );
+    QByteArray remote = qgetenv( "SICNU_MCP_ALLOW_REMOTE" );
+    bool hadRemote = qEnvironmentVariableIsSet( "SICNU_MCP_ALLOW_REMOTE" );
+    QByteArray home = qgetenv( "HOME" );
+    QString cwd = QDir::currentPath();
+    ~SandboxEnvGuard()
+    {
+        QDir::setCurrent( cwd );
+        if ( hadWorkspace ) qputenv( "SICNU_MCP_WORKSPACE", workspace ); else qunsetenv( "SICNU_MCP_WORKSPACE" );
+        if ( hadRemote ) qputenv( "SICNU_MCP_ALLOW_REMOTE", remote ); else qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+        qputenv( "HOME", home );
+    }
+};
+
+QString writeFile( const QString &path, const QByteArray &bytes )
+{
+    QDir().mkpath( QFileInfo( path ).absolutePath() );
+    QFile file( path );
+    if ( !file.open( QIODevice::WriteOnly ) )
+        return QString();
+    file.write( bytes );
+    return path;
+}
+
+QVariantMap callTool( TestMcpServer &server, int id, const QString &name, const QVariantMap &arguments )
+{
+    QVariantMap callParams;
+    callParams[QStringLiteral( "name" )] = name;
+    callParams[QStringLiteral( "arguments" )] = arguments;
+    QVariantMap req;
+    req[QStringLiteral( "id" )] = id;
+    req[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    req[QStringLiteral( "params" )] = callParams;
+    server.testHandleRequest( req );
+    return server.lastResponseResult;
+}
+
+QString toolText( const QVariantMap &result )
+{
+    return result.value( QStringLiteral( "content" ) ).toList().value( 0 ).toMap()
+        .value( QStringLiteral( "text" ) ).toString();
+}
+
+void initializeServer( TestMcpServer &server )
+{
+    QVariantMap initReq;
+    initReq[QStringLiteral( "id" )] = 1;
+    initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+    initReq[QStringLiteral( "params" )] = QVariantMap();
+    server.testHandleRequest( initReq );
+}
+} // namespace
+
+TEST_CASE( "MCP sandbox is default-deny when SICNU_MCP_WORKSPACE is unset", "[agent][mcp][sandbox][security]" )
+{
+    const SandboxEnvGuard guard;
+    qunsetenv( "SICNU_MCP_WORKSPACE" );
+    qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+
+    QTemporaryDir project;
+    QTemporaryDir outside;
+    REQUIRE( project.isValid() );
+    REQUIRE( outside.isValid() );
+    const QString secret = writeFile( outside.filePath( QStringLiteral( "id_rsa" ) ), "PRIVATE KEY\n" );
+    const QString inside = writeFile( project.filePath( QStringLiteral( "notes.txt" ) ), "project notes\n" );
+    REQUIRE( !secret.isEmpty() );
+    REQUIRE( !inside.isEmpty() );
+    REQUIRE( QDir::setCurrent( project.path() ) );
+
+    namespace containment = sicnu::agent::tool_catalog::containment;
+    CHECK( containment::effectiveMcpWorkspaceRoot() == QDir( project.path() ).canonicalPath() );
+
+    TestMcpServer server;
+    initializeServer( server );
+
+    SECTION( "artifact_read refuses files outside the default workspace" )
+    {
+        const QVariantMap result = callTool( server, 10, QStringLiteral( "artifact_read" ),
+                                             { { QStringLiteral( "path" ), secret } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( toolText( result ).contains( QStringLiteral( "rejected" ) ) );
+        CHECK_FALSE( toolText( result ).contains( QStringLiteral( "PRIVATE KEY" ) ) );
+    }
+
+    SECTION( "artifact_read still serves files inside the default workspace" )
+    {
+        const QVariantMap result = callTool( server, 11, QStringLiteral( "artifact_read" ),
+                                             { { QStringLiteral( "path" ), QStringLiteral( "notes.txt" ) } } );
+        CHECK_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( toolText( result ).contains( QStringLiteral( "project notes" ) ) );
+    }
+
+    SECTION( "execution entry points reject outside paths without any configuration" )
+    {
+        try
+        {
+            server.testPreflightAlgorithm( "rs:no_such_algorithm",
+                                           { { QStringLiteral( "input" ), secret } } );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Path outside" ) ) );
+        }
+    }
+
+    SECTION( "remote references stay default-deny with no workspace configured" )
+    {
+        try
+        {
+            server.testPreflightAlgorithm( "rs:no_such_algorithm",
+                                           { { QStringLiteral( "input" ),
+                                               QStringLiteral( "https://169.254.169.254/latest/meta-data" ) } } );
+            FAIL( "expected remote reference rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "SICNU_MCP_ALLOW_REMOTE" ) ) );
+        }
+    }
+}
+
+TEST_CASE( "MCP default workspace avoids / and $HOME", "[agent][mcp][sandbox][security]" )
+{
+    const SandboxEnvGuard guard;
+    qunsetenv( "SICNU_MCP_WORKSPACE" );
+    QTemporaryDir fakeHome;
+    REQUIRE( fakeHome.isValid() );
+    qputenv( "HOME", fakeHome.path().toUtf8() );
+    namespace containment = sicnu::agent::tool_catalog::containment;
+    const QString expected = QDir( fakeHome.path() ).filePath( QStringLiteral( ".exp-rs/workspace" ) );
+
+    SECTION( "CWD == HOME" )
+    {
+        REQUIRE( QDir::setCurrent( fakeHome.path() ) );
+        const QString root = containment::effectiveMcpWorkspaceRoot();
+        CHECK( root == QDir( expected ).canonicalPath() );
+        CHECK( QFileInfo( root ).isDir() );
+    }
+    SECTION( "CWD == filesystem root" )
+    {
+        REQUIRE( QDir::setCurrent( QDir::rootPath() ) );
+        // Resolve first: the fallback directory is created on demand, so its
+        // canonical path only exists after effectiveMcpWorkspaceRoot() ran.
+        const QString root = containment::effectiveMcpWorkspaceRoot();
+        CHECK( root == QDir( expected ).canonicalPath() );
+        CHECK( QFileInfo( root ).isDir() );
+    }
+    SECTION( "an explicit SICNU_MCP_WORKSPACE always wins" )
+    {
+        qputenv( "SICNU_MCP_WORKSPACE", "/" );
+        REQUIRE( QDir::setCurrent( fakeHome.path() ) );
+        CHECK( containment::effectiveMcpWorkspaceRoot() == QStringLiteral( "/" ) );
+    }
+}
+
+TEST_CASE( "MCP installWorkspaceSandbox publishes the root and anchors relative paths", "[agent][mcp][sandbox][security]" )
+{
+    const SandboxEnvGuard guard;
+    QTemporaryDir launchDir;
+    QTemporaryDir workspace;
+    REQUIRE( launchDir.isValid() );
+    REQUIRE( workspace.isValid() );
+
+    SECTION( "unset variable: the launch directory becomes the published workspace" )
+    {
+        qunsetenv( "SICNU_MCP_WORKSPACE" );
+        REQUIRE( QDir::setCurrent( launchDir.path() ) );
+        const QString installed = McpServer::installWorkspaceSandbox();
+        CHECK( installed == QDir( launchDir.path() ).canonicalPath() );
+        CHECK( qEnvironmentVariable( "SICNU_MCP_WORKSPACE" ) == installed );
+    }
+
+    SECTION( "explicit workspace != CWD: relative paths open where they were validated (P1-2)" )
+    {
+        // Same relative name exists in both places; only the workspace copy
+        // may ever be opened.
+        writeFile( launchDir.filePath( QStringLiteral( "Documents/secret.tif" ) ), "cwd-copy" );
+        writeFile( workspace.filePath( QStringLiteral( "Documents/secret.tif" ) ), "workspace-copy" );
+        qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
+        REQUIRE( QDir::setCurrent( launchDir.path() ) );
+        McpServer::installWorkspaceSandbox();
+        CHECK( QDir::current().canonicalPath() == QDir( workspace.path() ).canonicalPath() );
+        QFile opened( QStringLiteral( "Documents/secret.tif" ) );
+        REQUIRE( opened.open( QIODevice::ReadOnly ) );
+        CHECK( opened.readAll() == QByteArray( "workspace-copy" ) );
+    }
+}
+
+TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (P1-3)", "[agent][mcp][sandbox][security]" )
+{
+    const SandboxEnvGuard guard;
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE( workspace.isValid() );
+    REQUIRE( outside.isValid() );
+    const QString link = workspace.filePath( QStringLiteral( "link" ) );
+    if ( !QFile::link( outside.path(), link ) )
+        SKIP( "symlinks unavailable on this filesystem" );
+    qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
+    REQUIRE( QDir::setCurrent( workspace.path() ) );
+
+    using sicnu::agent::tool_catalog::surfacePathOutsideWorkspace;
+    // The review reproduction: one missing level was caught, two were not.
+    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/file.tif" ), workspace.path() ) );
+    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/newdir/file.tif" ), workspace.path() ) );
+    CHECK( surfacePathOutsideWorkspace( link + QStringLiteral( "/a/b/c/file.tif" ), workspace.path() ) );
+    CHECK( surfacePathOutsideWorkspace( QStringLiteral( "link/newdir/file.tif" ), workspace.path() ) );
+    // ".." after a missing component cannot be resolved safely -> rejected.
+    CHECK( surfacePathOutsideWorkspace( QStringLiteral( "sub/missing/../../x.tif" ), workspace.path() ) );
+    // Dangling symlink: open(O_CREAT) would follow it outside.
+    REQUIRE( QFile::link( outside.filePath( QStringLiteral( "not-yet" ) ),
+                          workspace.filePath( QStringLiteral( "dangling" ) ) ) );
+    CHECK( surfacePathOutsideWorkspace( QStringLiteral( "dangling" ), workspace.path() ) );
+    // Legitimate deep outputs inside the workspace stay allowed.
+    CHECK_FALSE( surfacePathOutsideWorkspace( workspace.filePath( QStringLiteral( "out/a/b/c.tif" ) ),
+                                              workspace.path() ) );
+    CHECK_FALSE( surfacePathOutsideWorkspace( QStringLiteral( "out/a/b/c.tif" ), workspace.path() ) );
+
+    // And through the MCP gate itself.
+    TestMcpServer server;
+    try
+    {
+        server.testPreflightAlgorithm( "rs:no_such_algorithm",
+                                       { { QStringLiteral( "output" ), QStringLiteral( "link/newdir/deeper/out.tif" ) } } );
+        FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Path outside" ) ) );
     }
 }
 
