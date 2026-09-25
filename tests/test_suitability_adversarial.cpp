@@ -1182,9 +1182,10 @@ TEST_CASE( "grid sampled grading matches the brute-force selected pair count at 
     qint64 expectedBlocking = 0;
     for ( qint64 checked = 0; checked < pairsChecked; ++checked )
     {
-        const qint64 linear = checked * totalPairs / pairsChecked;
+        // Tail-inclusive stride mirror of criteria_grid.cpp.
+        const qint64 linear = ( checked + 1 ) * totalPairs / pairsChecked - 1;
         const auto pair = decodeLinearPair( linear, sceneCount );
-        if ( pair.first == 20 || pair.second == 20 )
+        if ( ( pair.first == 20 ) || ( pair.second == 20 ) )
             ++expectedBlocking;
     }
 
@@ -1205,6 +1206,73 @@ TEST_CASE( "grid sampled grading matches the brute-force selected pair count at 
              == expectedBlocking );
     REQUIRE( criterion.notes.join( QLatin1String( " " ) )
                  .contains( QStringLiteral( "sampled %1 of %2 pairs" ).arg( pairsChecked ).arg( totalPairs ) ) );
+}
+
+TEST_CASE( "grid tail-scene sampling: a lone tail mismatch cannot escape the sample",
+           "[suitability][adversarial]" )
+{
+    // 1000 scenes -> 499500 pairs -> 200 sampled. The ONLY mismatched scene
+    // is the last one: every pair it participates in lives in the final 999
+    // linear indices, while the old floor-stride sample stopped at
+    // floor(199*499500/200) = 497002 — the entire tail block was unsampled
+    // and the criterion graded Suitable with zero blocking pairs.
+    QVector< SceneCandidate > scenes;
+    for ( int i = 0; i < 1000; ++i )
+    {
+        SceneCandidate scene = baseScene( QStringLiteral( "s%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) );
+        scene.grid = makeGrid( i == 999 ? 20.0 : 10.0 );
+        scenes.append( scene );
+    }
+    SuitabilityGoal goal;
+    goal.taskFamily = sicnu::dataset::BenchmarkTaskFamily::TemporalPrediction;
+
+    const SuitabilityCriterion criterion = assessGridCompatibility( resolved( goal ), scenes );
+    REQUIRE( criterion.evidence.value( QStringLiteral( "pairs_total" ) ).toInteger() == 499500 );
+    REQUIRE( criterion.evidence.value( QStringLiteral( "pairs_checked" ) ).toInteger() == 200 );
+    // The tail-inclusive stride always judges the final pair (998, 999),
+    // which is blocking here.
+    REQUIRE( criterion.evidence.value( QStringLiteral( "blocking_pair_count" ) ).toInteger() >= 1 );
+    REQUIRE( ( criterion.level == SuitabilityLevel::Unsuitable
+               || criterion.level == SuitabilityLevel::Marginal ) );
+}
+
+TEST_CASE( "grid sampled pass degrades to Marginal, matching the label-sampling posture",
+           "[suitability][adversarial]" )
+{
+    // 1000 identical grids: nothing blocks, but only 200 of 499500 pairs
+    // were judged — a pass over a sampled space must not read as Suitable.
+    QVector< SceneCandidate > scenes;
+    for ( int i = 0; i < 1000; ++i )
+    {
+        SceneCandidate scene = baseScene( QStringLiteral( "s%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) );
+        scene.grid = makeGrid();
+        scenes.append( scene );
+    }
+    SuitabilityGoal goal;
+    goal.taskFamily = sicnu::dataset::BenchmarkTaskFamily::TemporalPrediction;
+
+    const SuitabilityCriterion criterion = assessGridCompatibility( resolved( goal ), scenes );
+    REQUIRE( criterion.evidence.value( QStringLiteral( "blocking_pair_count" ) ).toInteger() == 0 );
+    REQUIRE( criterion.level == SuitabilityLevel::Marginal );
+    REQUIRE( criterion.notes.join( QLatin1String( " " ) ).contains( QStringLiteral( "sampled" ) ) );
+}
+
+TEST_CASE( "grid unsampled clean pass stays Suitable", "[suitability][adversarial]" )
+{
+    // Below the sampling cap, a genuinely clean comparison is still Suitable.
+    QVector< SceneCandidate > scenes;
+    for ( int i = 0; i < 12; ++i )
+    {
+        SceneCandidate scene = baseScene( QStringLiteral( "s%1" ).arg( i ) );
+        scene.grid = makeGrid();
+        scenes.append( scene );
+    }
+    SuitabilityGoal goal;
+    goal.taskFamily = sicnu::dataset::BenchmarkTaskFamily::TemporalPrediction;
+
+    const SuitabilityCriterion criterion = assessGridCompatibility( resolved( goal ), scenes );
+    REQUIRE( criterion.evidence.value( QStringLiteral( "pairs_checked" ) ).toInteger() == 66 );
+    REQUIRE( criterion.level == SuitabilityLevel::Suitable );
 }
 
 // ---------------------------------------------------------------------------

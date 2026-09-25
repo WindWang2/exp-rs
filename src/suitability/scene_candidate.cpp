@@ -1,5 +1,7 @@
 #include "scene_candidate.h"
 
+#include "suitability_time.h"
+
 #include "data/band_role.h"
 
 #include <QJsonArray>
@@ -175,7 +177,7 @@ sicnu::data::Result<SceneCandidate> SceneCandidate::fromJson( const QJsonObject 
     const QString acquisitionText = json.value( QStringLiteral( "acquisition_time_utc" ) ).toString();
     if ( !acquisitionText.isEmpty() )
     {
-        QDateTime acquisition = QDateTime::fromString( acquisitionText, Qt::ISODate );
+        QDateTime acquisition = parseIsoUtc( acquisitionText );
         if ( !acquisition.isValid() )
         {
             // A persisted candidate with an unparsable timestamp must not come
@@ -186,8 +188,6 @@ sicnu::data::Result<SceneCandidate> SceneCandidate::fromJson( const QJsonObject 
                     .arg( acquisitionText ),
                 sicnu::data::DiagnosticSeverity::Error } );
         }
-        if ( acquisition.timeSpec() == Qt::LocalTime )
-            acquisition.setTimeZone( QTimeZone::utc() );
         candidate.acquisitionTimeUtc = acquisition;
     }
 
@@ -245,14 +245,9 @@ SceneCandidate sceneCandidateFromRasterStructure(
     const QString acquisitionHint = hints.value( QStringLiteral( "acquisition_time_utc" ) ).toString();
     if ( !acquisitionHint.isEmpty() )
     {
-        QDateTime acquisition = QDateTime::fromString( acquisitionHint, Qt::ISODate );
+        QDateTime acquisition = parseIsoUtc( acquisitionHint );
         if ( acquisition.isValid() )
-        {
-            // A zoneless ISO timestamp is read as UTC (key says _utc).
-            if ( acquisition.timeSpec() == Qt::LocalTime )
-                acquisition.setTimeZone( QTimeZone::utc() );
             candidate.acquisitionTimeUtc = acquisition;
-        }
         // Unparsable hint leaves the field unset — unknown stays unknown.
     }
 

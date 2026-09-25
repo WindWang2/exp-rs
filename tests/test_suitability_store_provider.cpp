@@ -270,3 +270,43 @@ TEST_CASE( "store provider leaves label evidence unknown when the manifest has n
     REQUIRE( facts.pseudoLabelCount == -1 );
     REQUIRE( facts.missingTimeCount == 0 ); // scanned all zero rows
 }
+
+TEST_CASE( "facet truth spellings beyond lowercase are not read as absent",
+           "[suitability][store]" )
+{
+    StoreFixture fixture;
+    StoreDataProvider provider( &fixture.store );
+
+    // A free-form facet store cannot forbid capitalizations: "True" and "Y"
+    // are truth spellings, and reading them as absent fabricates a zero
+    // that flips change-detection style profiles to a green labels check.
+    fixture.addSample( true, { FacetEntry{ QStringLiteral( "pseudo_label" ), QStringLiteral( "True" ) } } );
+    fixture.addSample( true, { FacetEntry{ QStringLiteral( "pseudo_label" ), QStringLiteral( "Y" ) } } );
+    const auto truthy = provider.datasetFacts( fixture.versionId.toString(), FactsLimits{} );
+    REQUIRE( truthy.has_value() );
+    REQUIRE( truthy->pseudoLabelCount == 2 );
+
+    // A spelling that is neither truthy nor falsy must mark the facts
+    // truncated — the count would otherwise claim certainty it cannot have.
+    fixture.addSample( true, { FacetEntry{ QStringLiteral( "pseudo_label" ), QStringLiteral( "semi-automatic" ) } } );
+    const auto strange = provider.datasetFacts( fixture.versionId.toString(), FactsLimits{} );
+    REQUIRE( strange.has_value() );
+    REQUIRE( strange->factsTruncated );
+
+    // Same posture for missing_time: capitalized "True" still counts.
+    fixture.addSample( false, { FacetEntry{ QStringLiteral( "missing_time" ), QStringLiteral( "True" ) } } );
+    const auto missing = provider.datasetFacts( fixture.versionId.toString(), FactsLimits{} );
+    REQUIRE( missing.has_value() );
+    REQUIRE( missing->missingTimeCount >= 1 );
+
+    // Lowercase-mixed falsy spellings read as absent, case-insensitively:
+    // a store holding only falsy values counts zero without any truncation.
+    StoreFixture clean;
+    StoreDataProvider cleanProvider( &clean.store );
+    clean.addSample( true, { FacetEntry{ QStringLiteral( "pseudo_label" ), QStringLiteral( "FALSE" ) } } );
+    clean.addSample( true, { FacetEntry{ QStringLiteral( "pseudo_label" ), QStringLiteral( "No" ) } } );
+    const auto falsy = cleanProvider.datasetFacts( clean.versionId.toString(), FactsLimits{} );
+    REQUIRE( falsy.has_value() );
+    REQUIRE( falsy->pseudoLabelCount == 0 );
+    REQUIRE( !falsy->factsTruncated );
+}

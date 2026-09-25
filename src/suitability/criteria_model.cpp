@@ -209,18 +209,28 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
         }
     }
     const QString modelModality = normalizedToken( req.modelModality );
-    if ( !modelModality.isEmpty() && !modalityPool.isEmpty()
-         && !modalityPool.contains( modelModality ) )
+    bool modalityUnverifiable = false;
+    if ( !modelModality.isEmpty() )
     {
-        unsuitable = true;
-        SuitabilityGap gap = makeGap(
-            criterion.id, QStringLiteral( "model.modality_mismatch" ),
-            QStringLiteral( "The model expects modality '%1', but every data source reports a different modality." )
-                .arg( modelModality ) );
-        gap.evidence.insert( QStringLiteral( "model_modality" ), modelModality );
-        gap.evidence.insert( QStringLiteral( "modality_pool" ),
-                             QJsonArray::fromStringList( modalityPool ) );
-        criterion.gaps.append( gap );
+        if ( modalityPool.isEmpty() )
+        {
+            // The model pins a modality but no source reports one: unknown,
+            // never a silent pass on missing metadata (mirrors the GSD
+            // handling above).
+            modalityUnverifiable = true;
+        }
+        else if ( !modalityPool.contains( modelModality ) )
+        {
+            unsuitable = true;
+            SuitabilityGap gap = makeGap(
+                criterion.id, QStringLiteral( "model.modality_mismatch" ),
+                QStringLiteral( "The model expects modality '%1', but every data source reports a different modality." )
+                    .arg( modelModality ) );
+            gap.evidence.insert( QStringLiteral( "model_modality" ), modelModality );
+            gap.evidence.insert( QStringLiteral( "modality_pool" ),
+                                 QJsonArray::fromStringList( modalityPool ) );
+            criterion.gaps.append( gap );
+        }
     }
 
     if ( unsuitable )
@@ -256,6 +266,18 @@ SuitabilityCriterion assessModelCompatibility( const ResolvedRequirements &req,
             QStringLiteral( "reason" ),
             invalidGsdCount > 0 ? QStringLiteral( "gsd_evidence_invalid" )
                                 : QStringLiteral( "gsd_evidence_absent" ) );
+        return criterion;
+    }
+
+    if ( modalityUnverifiable )
+    {
+        criterion.level = SuitabilityLevel::Unknown;
+        criterion.summary = QStringLiteral(
+            "The model pins a modality but no source reports any modality; modality fit is unmeasured." );
+        criterion.notes.append( QStringLiteral( "no modality evidence available" ) );
+        criterion.evidence.insert( QStringLiteral( "status" ), QStringLiteral( "unknown" ) );
+        criterion.evidence.insert( QStringLiteral( "reason" ),
+                                   QStringLiteral( "modality_evidence_absent" ) );
         return criterion;
     }
 

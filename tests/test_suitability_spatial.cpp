@@ -21,6 +21,9 @@
 #include "suitability/suitability_goal.h"
 #include "suitability/suitability_report.h"
 #include "suitability/suitability_types.h"
+#include <QTimeZone>
+
+#include "suitability/suitability_time.h"
 
 #include "data/band_role.h"
 
@@ -747,4 +750,82 @@ TEST_CASE( "assessor produces a deterministic report for a legal subject", "[sui
     const auto infeasible = SuitabilityAssessor::assess( wishful );
     REQUIRE( infeasible.has_value() );
     REQUIRE( infeasible->overallLevel() == SuitabilityLevel::Unsuitable );
+}
+
+TEST_CASE( "goal scalars of the wrong JSON type fail typed instead of reading as defaults",
+           "[suitability][spatial]" )
+{
+    // A string "40" used to read as 0 via toDouble(), i.e. "unset" — the
+    // operator's limit silently vanished and the goal ran unlimited.
+    QJsonObject wrongType;
+    wrongType.insert( QStringLiteral( "schema_version" ), sicnu::suitability::kSuitabilityGoalSerializationVersion );
+    wrongType.insert( QStringLiteral( "max_cloud_cover_percent" ), QStringLiteral( "40" ) );
+    const auto parsedWrong = SuitabilityGoal::fromJson( wrongType );
+    REQUIRE( !parsedWrong.has_value() );
+    REQUIRE( parsedWrong.diagnostics().first().code == QStringLiteral( "suitability.goal_invalid" ) );
+
+    // The numeric form keeps working.
+    QJsonObject numeric( wrongType );
+    numeric.insert( QStringLiteral( "max_cloud_cover_percent" ), 40.0 );
+    const auto parsedNumeric = SuitabilityGoal::fromJson( numeric );
+    REQUIRE( parsedNumeric.has_value() );
+    if ( !parsedNumeric.has_value() )
+        return;
+    REQUIRE( parsedNumeric->maxCloudCoverPercent == 40.0 );
+}
+
+TEST_CASE( "goal time window JSON reads zoneless stamps as UTC", "[suitability][spatial]" )
+{
+    QJsonObject zoneless;
+    zoneless.insert( QStringLiteral( "schema_version" ), sicnu::suitability::kSuitabilityGoalSerializationVersion );
+    zoneless.insert( QStringLiteral( "has_time_window" ), true );
+    zoneless.insert( QStringLiteral( "window_start_utc" ), QStringLiteral( "2024-03-01T00:00:00" ) );
+    zoneless.insert( QStringLiteral( "window_end_utc" ), QStringLiteral( "2024-03-02T00:00:00" ) );
+    const auto parsedZoneless = SuitabilityGoal::fromJson( zoneless );
+    REQUIRE( parsedZoneless.has_value() );
+    if ( !parsedZoneless.has_value() )
+        return;
+    // Host-independent: a zoneless stamp is bound to UTC, never left backed
+    // by the system zone (Qt parses it as Qt::LocalTime or Qt::TimeZone
+    // depending on the environment) — otherwise two hosts disagree on the
+    // absolute window while pairing the same goalDigest with opposite
+    // verdicts.
+    REQUIRE( parsedZoneless->windowStartUtc.timeZone() == QTimeZone::utc() );
+    REQUIRE( parsedZoneless->windowEndUtc.timeZone() == QTimeZone::utc() );
+
+    QJsonObject stamped( zoneless );
+    stamped.insert( QStringLiteral( "window_start_utc" ), QStringLiteral( "2024-03-01T00:00:00Z" ) );
+    stamped.insert( QStringLiteral( "window_end_utc" ), QStringLiteral( "2024-03-02T00:00:00Z" ) );
+    const auto parsedStamped = SuitabilityGoal::fromJson( stamped );
+    REQUIRE( parsedStamped.has_value() );
+    if ( !parsedStamped.has_value() )
+        return;
+    // Identical absolute moments: zoneless and Z-stamped agree on the epoch.
+    REQUIRE( parsedZoneless->windowStartUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowStartUtc.toMSecsSinceEpoch() );
+    REQUIRE( parsedZoneless->windowEndUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowEndUtc.toMSecsSinceEpoch() );
+    // Round-trip stability: re-parsing the normalized wire form keeps the
+    // absolute window (the "+00:00" re-serializes as an explicit offset).
+    const auto reparsed = SuitabilityGoal::fromJson( parsedZoneless->toJson() );
+    REQUIRE( reparsed.has_value() );
+    if ( !reparsed.has_value() )
+        return;
+    REQUIRE( reparsed->windowStartUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowStartUtc.toMSecsSinceEpoch() );
+    REQUIRE( reparsed->windowEndUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowEndUtc.toMSecsSinceEpoch() );
+
+    // An explicit offset is already absolute and lands on the same instants.
+    QJsonObject offset( zoneless );
+    offset.insert( QStringLiteral( "window_start_utc" ), QStringLiteral( "2024-03-01T08:00:00+08:00" ) );
+    offset.insert( QStringLiteral( "window_end_utc" ), QStringLiteral( "2024-03-02T08:00:00+08:00" ) );
+    const auto parsedOffset = SuitabilityGoal::fromJson( offset );
+    REQUIRE( parsedOffset.has_value() );
+    if ( !parsedOffset.has_value() )
+        return;
+    REQUIRE( parsedOffset->windowStartUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowStartUtc.toMSecsSinceEpoch() );
+    REQUIRE( parsedOffset->windowEndUtc.toMSecsSinceEpoch()
+             == parsedStamped->windowEndUtc.toMSecsSinceEpoch() );
 }

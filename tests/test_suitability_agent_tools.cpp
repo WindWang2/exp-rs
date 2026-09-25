@@ -20,9 +20,11 @@
 #include "suitability/suitability_level.h"
 #include "suitability/suitability_report.h"
 
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 
 #include <stdexcept>
 
@@ -144,6 +146,39 @@ TEST_CASE( "suitability:assess happy path returns a verifiable report",
     CHECK( result.contains( QStringLiteral( "gaps" ) ) );
     const auto teaching = result.value( QStringLiteral( "teaching" ) ).toList();
     CHECK( !teaching.isEmpty() );
+}
+
+TEST_CASE( "suitability:assess with a missing dataset_db fails without creating it",
+           "[suitability][agenttools]" )
+{
+    // The assessment channel is read-only. DatasetStore::open would happily
+    // CREATE the file at any path (the dataset: tools precedent), so a
+    // typo'd path silently evaluated an empty store and left droppings on
+    // disk. The adapter must refuse first.
+    QTemporaryDir dir;
+    // The directory exists; only the file is missing. This is exactly the
+    // typo scenario: DatasetStore::open would CREATE datasets.db and the
+    // assessment would silently run on an empty store.
+    const QString missing = dir.filePath( QStringLiteral( "datasets.db" ) );
+    REQUIRE( !QFileInfo::exists( missing ) );
+
+    QVariantMap args;
+    args.insert( QStringLiteral( "goal" ), goalText( QJsonObject{ { "schema_version", 1 } } ) );
+    args.insert( QStringLiteral( "scenes" ), scenesText( twoScenes() ) );
+    args.insert( QStringLiteral( "dataset_db" ), missing );
+
+    bool refused = false;
+    try
+    {
+        const auto result = suitabilityAssess( args );
+        refused = !result.value( QStringLiteral( "valid" ) ).toBool();
+    }
+    catch ( const std::runtime_error & )
+    {
+        refused = true;
+    }
+    REQUIRE( refused );
+    REQUIRE( !QFileInfo::exists( missing ) );
 }
 
 TEST_CASE( "suitability:assess goal content failure is soft", "[suitability][agenttools]" )

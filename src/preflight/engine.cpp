@@ -77,6 +77,19 @@ Json::Value PreflightRequest::toRequestJson() const
     for ( const auto &code : acknowledgements )
         acks.append( code );
     j["acknowledgements"] = acks;
+    Json::Value subjects( Json::arrayValue );
+    for ( const auto &ack : acknowledgedSubjects )
+    {
+        Json::Value entry( Json::objectValue );
+        entry["code"] = ack.code;
+        entry["subject"] = ack.subject;
+        subjects.append( entry );
+    }
+    j["acknowledged_subjects"] = subjects;
+
+    // Budgets belong in the digest: they change what gets truncated, so two
+    // runs that differ only here must not share a provenance handle.
+    j["budgets"] = budgets.toJson();
     return j;
 }
 
@@ -321,6 +334,17 @@ PreflightReport PreflightEngine::evaluate( const PreflightRequest &request,
             {
                 f.acknowledged = true;
                 break;
+            }
+        }
+        if ( !f.acknowledged )
+        {
+            for ( const auto &ack : request.acknowledgedSubjects )
+            {
+                if ( ack.code == f.code && ack.subject == f.subject )
+                {
+                    f.acknowledged = true;
+                    break;
+                }
             }
         }
     }
