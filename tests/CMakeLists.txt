@@ -9572,6 +9572,13 @@ target_compile_definitions(test_plugin_host_process PRIVATE
 # #1186: target-scoped builds must build runtime-loaded fixtures first.
 add_dependencies(test_plugin_host_process isolation_plugin exprs_plugin_host_worker)
 
+# Review P1-5: legacy in-process PluginHost allowlist / IID gate. Default
+# configuration (sicnu_core only); test_plugin_host needs SICNU_EMBED_PYTHON.
+add_executable(test_plugin_host_allowlist test_plugin_host_allowlist.cpp)
+target_link_libraries(test_plugin_host_allowlist PRIVATE Catch2::Catch2WithMain Qt6::Core sicnu_core)
+target_include_directories(test_plugin_host_allowlist PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_plugin_host_allowlist)
+
 sicnu_add_test(test_plugin_manifest)
 target_link_libraries(test_plugin_manifest PRIVATE sicnu_sdk)
 
