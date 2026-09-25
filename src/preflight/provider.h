@@ -33,6 +33,10 @@ struct CapabilityEntryResult
   FactStatus status = FactStatus::Unavailable;
   Json::Value entry{ Json::objectValue };  ///< Merged capability entry (Available only).
   std::string detail;
+  /// True when the operator declares variant-parameterized policies but no
+  /// variant matched the given params: policy keys absent from the merged
+  /// entry are declared-but-unconsultable, not undeclared (rules must gate).
+  bool variantPoliciesDropped = false;
 };
 
 /// Asset-facts authority (scientific_state passport projection).

@@ -8,6 +8,8 @@
 
 #include <QHash>
 
+#include <algorithm>
+
 namespace sicnu::app
 {
 
@@ -26,9 +28,7 @@ void MissionTimelineModel::setTimeline( const MissionTimeline &timeline )
     beginResetModel();
     mTimeline = timeline;
     mTasks = mTimeline.tasks();
-    mLastTouchedSerial.clear();
     mSessionRows.clear();
-    mSerial = 0;
     mRowIndex.clear();
     mRowIndex.reserve( mTasks.size() );
     for ( int i = 0; i < mTasks.size(); ++i )
@@ -85,39 +85,53 @@ int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 
     if ( incoming.size() > mTasks.size() )
         appendNewTasks( incoming );
 
-    // Rows whose task actually changed. Driven by the events (O(1) id lookup
-    // against the incrementally maintained index — the whole point of this
-    // model: an event costs one lookup, not a table scan) PLUS any task whose
-    // payload moved without an event (reconciliation makes a task Stale
-    // directly; retry() brings one back). The comparison is cheap because it
-    // only runs for tasks that already carry an event in this batch.
+    // The event batch IS the work list: every applied mutation appends an
+    // event (reconciliation and retry go through the state machine), so the
+    // touched rows are the event rows — O(events), never a scan of the table.
+    // The event log is bounded, so one apply is bounded even for a
+    // 100k-event mission.
     const QVector<MissionEvent> events = timeline.eventsSince( sinceSeq );
     mSessionRows.clear();
-    ++mSerial;
+    QVector<int> rows;
+    rows.reserve( events.size() );
     for ( const MissionEvent &ev : events )
     {
         ++mLookupOps;
+        ++mScannedRows;
         auto it = mRowIndex.constFind( ev.taskId );
         if ( it == mRowIndex.constEnd() )
             continue;
-        mLastTouchedSerial.insert( ev.taskId, mSerial );
+        rows.push_back( *it );
     }
 
-    const int n = qMin( mTasks.size(), incoming.size() );
-    for ( int row = 0; row < n; ++row )
+    // Adopt the incoming state BEFORE emitting: every observer of
+    // dataChanged (views, and the panel's selection re-push) must read the
+    // NEW task data from data() — emitting first handed them the stale
+    // snapshot.
+    mTasks = incoming;
+    mTimeline = timeline;
+    mVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
+    // The authority is append-only through the shell contract; a timeline
+    // that somehow arrived with fewer tasks must not leave rowCount()
+    // pointing past the data.
+    mVisible = qMin( mVisible, mTasks.size() );
+    ++mApplyCount;
+
+    // Ascending, one entry per row even when two events hit the same task in
+    // one batch (the honest per-call bound; the cumulative counter still
+    // counts both events as work).
+    std::sort( rows.begin(), rows.end() );
+    rows.erase( std::unique( rows.begin(), rows.end() ), rows.end() );
+    for ( const int row : rows )
     {
-        if ( mLastTouchedSerial.value( incoming.at( row ).id ) != mSerial )
-            continue;
         // Emit even when nothing observable changed: the event says the task
-        // moved, and a view is entitled to refresh on that.
+        // moved, and a view is entitled to refresh on that. Rows beyond the
+        // paged-in prefix have no widget to refresh but are still reported
+        // as touched work.
         emitRowChanged( row );
         mSessionRows.push_back( row );
     }
 
-    mTasks = incoming;
-    mTimeline = timeline;
-    mVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
-    ++mApplyCount;
     emit timelineChanged( mTimeline.revision() );
     return mSessionRows.size();
 }

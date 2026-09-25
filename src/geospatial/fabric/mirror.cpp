@@ -114,7 +114,7 @@ Json::Value readManifest( const std::string &mirrorDirectory )
     return Json::Value();   // corrupt-by-contract (oversized) — caller counts the skip
   // The stream opens the UTF-8 path — a narrow-char open would route a
   // non-ASCII mirror root through the Windows ANSI code page and fail.
-  std::ifstream in( std::filesystem::u8path( path ), std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in )
     // Stat succeeded but the open failed (permissions, transient lock):
     // an UNREADABLE manifest, not an empty one — reporting it empty
@@ -332,7 +332,7 @@ class MirrorWriterLock
     StaleLockInfo inspectStaleLock() const
     {
       StaleLockInfo info;
-      std::ifstream in( mLockPath );
+      std::ifstream in( sicnu::portable::pathFromUtf8( mLockPath ) );
       if ( in )
       {
         long pid = -1;
@@ -751,7 +751,7 @@ MirrorVerifyReport verifyMirror( const std::string &mirrorDirectory )
   // never a chunk payload and is never followed.
   const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
   std::error_code ec;
-  for ( std::filesystem::directory_iterator it( std::filesystem::u8path( chunkDir ), ec ), end;
+  for ( std::filesystem::directory_iterator it( sicnu::portable::pathFromUtf8( chunkDir ), ec ), end;
         !ec && it != end; it.increment( ec ) )
   {
     // A fresh error_code per probe: one transient stat failure (a racing
@@ -883,7 +883,7 @@ RepairCleanupResult repairCleanup( const std::string &mirrorDirectory )
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
       // The staged path is UTF-8 — open it as such, not through the
       // Windows ANSI code page (a non-ASCII mirror root would fail here).
-      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
+      std::ofstream out( sicnu::portable::pathFromUtf8( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -1007,7 +1007,7 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
       // The staged path is UTF-8 — open it as such, not through the
       // Windows ANSI code page (a non-ASCII mirror root would fail here).
-      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
+      std::ofstream out( sicnu::portable::pathFromUtf8( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -1533,7 +1533,7 @@ MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
   }
   const std::string chunkDir = mirrorDirectory + "/" + kMirrorChunkDir;
   std::error_code ec;
-  for ( std::filesystem::directory_iterator it( std::filesystem::u8path( chunkDir ), ec ), end;
+  for ( std::filesystem::directory_iterator it( sicnu::portable::pathFromUtf8( chunkDir ), ec ), end;
         !ec && it != end; it.increment( ec ) )
   {
     // 13.0: classify by symlink_status — a symlink/reparse point is never
@@ -1600,7 +1600,7 @@ MirrorPruneReport pruneMirror( const std::string &mirrorDirectory,
       const std::string text = Json::writeString( Json::StreamWriterBuilder(), manifest );
       // The staged path is UTF-8 — open it as such, not through the
       // Windows ANSI code page (a non-ASCII mirror root would fail here).
-      std::ofstream out( std::filesystem::u8path( staged ), std::ios::binary | std::ios::trunc );
+      std::ofstream out( sicnu::portable::pathFromUtf8( staged ), std::ios::binary | std::ios::trunc );
       if ( !out )
         throw GeoError( ErrorCode::IoError, "mirror manifest: cannot create " + staged );
       out.write( text.data(), static_cast<std::streamsize>( text.size() ) );

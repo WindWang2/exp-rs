@@ -42,6 +42,25 @@ std::string bandDataTypeName( GDALRasterBandH band )
     return GDALGetDataTypeName( GDALGetRasterDataType( band ) );
 }
 
+/// Bounded single-line CPL detail: the typed error carries the reason, but
+/// never an unbounded driver message.
+std::string boundedCplDetail()
+{
+    const char *message = CPLGetLastErrorMsg();
+    if ( !message )
+        return std::string();
+    std::string detail = message;
+    for ( char &c : detail )
+    {
+        if ( c == '\n' || c == '\r' || c == '\t' )
+            c = ' ';
+    }
+    constexpr std::size_t kMaxDetail = 256;
+    if ( detail.size() > kMaxDetail )
+        detail.resize( kMaxDetail );
+    return detail;
+}
+
 } // namespace
 
 std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
@@ -130,7 +149,8 @@ std::optional<DatasetFacts> collectDatasetFacts( GDALDatasetH dataset,
     return facts;
 }
 
-std::optional<DatasetFacts> collectDatasetFacts( const std::string &path, std::string &error )
+std::optional<DatasetFacts> collectDatasetFacts( const std::string &path,
+                                                 GdalFactsError *error )
 {
     GDALAllRegister();
 
@@ -138,6 +158,7 @@ std::optional<DatasetFacts> collectDatasetFacts( const std::string &path, std::s
     // failures (missing files, non-raster drivers) — the typed error carries
     // the outcome.
     CPLPushErrorHandler( CPLQuietErrorHandler );
+    CPLErrorReset();
     GDALDatasetH dataset =
         GDALOpenEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_VERBOSE_ERROR, nullptr, nullptr,
                     nullptr );
@@ -145,14 +166,39 @@ std::optional<DatasetFacts> collectDatasetFacts( const std::string &path, std::s
 
     if ( !dataset )
     {
-        error = "cannot open raster dataset: " + path;
+        if ( error )
+            *error = GdalFactsError{ "gdal_open_failed", path, boundedCplDetail() };
         return std::nullopt;
     }
 
-    std::optional<DatasetFacts> facts = collectDatasetFacts( dataset, path, error );
+    std::string innerError;
+    CPLErrorReset(); // never attribute the open phase's error to the collect phase
+    std::optional<DatasetFacts> facts = collectDatasetFacts( dataset, path, innerError );
     GDALClose( dataset );
     if ( !facts )
-        error = "cannot collect facts: " + path;
+    {
+        if ( error )
+        {
+            std::string detail = boundedCplDetail();
+            if ( detail.empty() )
+                detail = innerError;
+            *error = GdalFactsError{ "gdal_facts_failed", path, detail };
+        }
+        return std::nullopt;
+    }
+    if ( error )
+        *error = GdalFactsError{};
+    return facts;
+}
+
+std::optional<DatasetFacts> collectDatasetFacts( const std::string &path, std::string &error )
+{
+    GdalFactsError typed;
+    std::optional<DatasetFacts> facts = collectDatasetFacts( path, &typed );
+    if ( !facts )
+        error = typed.code + ": " + typed.detail + " (" + typed.path + ")";
+    else
+        error.clear();
     return facts;
 }
 

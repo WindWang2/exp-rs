@@ -31,6 +31,7 @@
  ***************************************************************************/
 #pragma once
 
+#include <QHash>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -281,6 +282,11 @@ private:
     QString mMissionId;
     QString mProjectRef;
     QVector<MissionTask> mTasks;
+    /// id -> position in mTasks. Tasks are append-only (no removal, no
+    /// reordering), so the positions are stable and every task lookup is
+    /// O(1) — a 100k-event mission costs one hash lookup per transition,
+    /// not a scan of the whole task vector.
+    QHash<QString, int> mTaskIndex;
     QVector<MissionEvent> mEvents;
     quint64 mSeq = 0;
     quint64 mRevision = 0;

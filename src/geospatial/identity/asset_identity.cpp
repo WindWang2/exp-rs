@@ -38,10 +38,10 @@ namespace
 std::string canonicalLocalPath( const std::string &path )
 {
   std::error_code ec;
-  fs::path canonical = fs::weakly_canonical( fs::u8path( path ), ec );
+  fs::path canonical = fs::weakly_canonical( sicnu::portable::pathFromUtf8( path ), ec );
   if ( ec )
   {
-    canonical = fs::u8path( path ).lexically_normal();
+    canonical = sicnu::portable::pathFromUtf8( path ).lexically_normal();
     if ( canonical.is_relative() )
       return sicnu::portable::pathToUtf8( canonical );
   }
@@ -155,7 +155,7 @@ LocalIdentityToken localIdentityToken( const std::string &path, const LocalIdent
   if ( path.empty() )
     return result; // unprovable
 
-  const LocalFacts facts = localFacts( fs::u8path( path ) );
+  const LocalFacts facts = localFacts( sicnu::portable::pathFromUtf8( path ) );
   if ( !facts.readable )
     return result; // fail-closed: missing/unreadable ⇒ no identity claim
 
@@ -167,7 +167,7 @@ LocalIdentityToken localIdentityToken( const std::string &path, const LocalIdent
   if ( budget > 0 )
   {
     std::uintmax_t hashed = 0;
-    if ( !hashFilePrefix( fs::u8path( path ), budget, contentHex, hashed ) )
+    if ( !hashFilePrefix( sicnu::portable::pathFromUtf8( path ), budget, contentHex, hashed ) )
       return result; // read failure ⇒ unprovable
     result.hashedBytes = hashed;
   }

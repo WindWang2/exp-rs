@@ -25,6 +25,7 @@ namespace fs = std::filesystem;
 #include <sstream>
 #include <thread>
 #include <utility>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -282,7 +283,7 @@ void stampItemProvenance( StacItem &item, const std::string &url )
 /// chain escaping the base directory is refused (never a guess).
 std::string resolveLocalReference( const std::string &basePath, const std::string &reference )
 {
-  const fs::path base = fs::u8path( basePath ).parent_path();
+  const fs::path base = sicnu::portable::pathFromUtf8( basePath ).parent_path();
   if ( reference.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: empty local asset href" );
   std::error_code ec;
@@ -291,7 +292,7 @@ std::string resolveLocalReference( const std::string &basePath, const std::strin
     baseAbsolute = fs::absolute( base, ec );
   if ( ec )
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: item provenance path is not absolute" );
-  const fs::path merged = baseAbsolute / fs::u8path( reference );
+  const fs::path merged = baseAbsolute / sicnu::portable::pathFromUtf8( reference );
   const fs::path normalized = merged.lexically_normal();
   // Containment (9.0 review: separator-agnostic — path separators differ on
   // Windows, so prefix string compare breaks there): the normalized path
@@ -306,7 +307,8 @@ std::string resolveLocalReference( const std::string &basePath, const std::strin
     details["hint"] = "relative asset hrefs must stay within the item's directory tree";
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: asset href escapes the item directory", details );
   }
-  return normalized.string();
+  // UTF-8 out (the value re-enters pathFromUtf8 downstream).
+  return sicnu::portable::pathToUtf8( normalized );
 }
 
 /// 9.0 M4: bounded response cache key — method, URL, canonical compact body

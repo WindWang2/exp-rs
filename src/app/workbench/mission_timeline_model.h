@@ -34,6 +34,17 @@
 namespace sicnu::app
 {
 
+/// True when every event after @p sinceSeq is still retained by @p timeline,
+/// i.e. applyEvents( timeline, sinceSeq ) would see every mutation since the
+/// cursor. The event log is bounded: a cursor that predates the retained
+/// window (long agent burst against a stale GUI) can only be served by a
+/// full setTimeline() — applyEvents would adopt the fresh task data while
+/// repainting just the tail, leaving the rest of the table stale.
+inline bool missionTimelineCursorRetained( const MissionTimeline &timeline, quint64 sinceSeq )
+{
+    return !timeline.eventsTruncated() || sinceSeq + 1 >= timeline.firstRetainedEventSeq();
+}
+
 class MissionTimelineModel : public QAbstractTableModel
 {
     Q_OBJECT
@@ -70,6 +81,15 @@ public:
     /// The benchmark uses size() as the per-call work bound.
     const QVector<int> &lastTouchedRows() const { return mSessionRows; }
 
+    /// Rows this model ITERATED over inside applyEvents(). This is the
+    /// anti-regression twin of lookupOps(): the touched-row set is derived
+    /// from the event batch directly (O(events)), so a change that REPLACES
+    /// that derivation with a whole-table diff shows up as scannedRows
+    /// growing with the mission size instead of with the event count. A
+    /// scan ADDED after the event loop is caught by the wall-clock ceiling
+    /// in the scale benchmark, not by this counter.
+    long long scannedRows() const { return mScannedRows; }
+
     /// Projection of a single row — the exact bytes the MCP `mission:timeline`
     /// tool returns for the same task (surface parity by construction).
     QJsonObject projectionAt( int row ) const;
@@ -88,6 +108,11 @@ public:
     void setPageSize( int size );
 
     int resetCount() const { return mResets; }
+    /// Structural tripwire: the model has no code path that emits a
+    /// table-wide dataChanged (emitRowChanged is the only emission point and
+    /// is row-scoped), so this stays 0 unless such a path is introduced —
+    /// in which case the new path must increment it here and the benchmark's
+    /// == 0 assertions turn the introduction into a failure.
     int fullRangeDataChangedCount() const { return mFullRangeChanges; }
     long long touchedRows() const { return mTouchedRows; }
     int incrementalApplyCount() const { return mApplyCount; }
@@ -104,18 +129,14 @@ private:
     void emitRowChanged( int row );
     void appendNewTasks( const QVector<MissionTask> &tasks );
 
-    /// Task -> the applyEvents() serial in which it was last reported. An
-    /// event may repeat a row (two transitions in one batch); those are still
-    /// two rows worth of work, so the model reports both.
-    QHash<QString, int> mLastTouchedSerial;
-    /// Rows touched by the current applyEvents() call. Reconciliation can drop
-    /// a reference from a task WITHOUT any event and `retry()` can bring a
-    /// stale task back, so the model cannot assume "changed tasks have events":
-    /// it reports the rows whose task actually changed, which is the honest
-    /// bound. Rows are never removed (positions are stable and the history is
-    /// provenance), so no index has to move.
+    /// Rows touched by the current applyEvents() call, ascending. Derived
+    /// directly from the event batch: every mutation that changes a task
+    /// appends an event (reconciliation, retry and rename all go through the
+    /// state machine), so the events are the complete work list — the model
+    /// never scans rows whose task did not move. Rows are never removed
+    /// (positions are stable and the history is provenance), so no index has
+    /// to move.
     QVector<int> mSessionRows;
-    int mSerial = 0;
 
     MissionTimeline mTimeline;
     QVector<MissionTask> mTasks;   ///< in insertion order; index == row
@@ -126,6 +147,7 @@ private:
     int mFullRangeChanges = 0;
     long long mTouchedRows = 0;
     long long mLookupOps = 0;
+    long long mScannedRows = 0;
     int mApplyCount = 0;
 };
 

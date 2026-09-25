@@ -42,11 +42,10 @@ GraderCliGrade unavailableGrade( const QString &reason, const QString &message =
     return g;
 }
 
-/// Cross-checks the CLI exit contract against the transcript verdict; a
-/// process that claims pass with exit 1 (or similar) is a broken authority,
-/// not a grade.
-GraderCliGrade mapTranscript( const GraderCliConfig &cfg, int exitCode, const QJsonObject &doc,
-                              const QString &usageText )
+} // namespace
+
+GraderCliGrade gradeFromTranscript( int exitCode, const QJsonObject &doc,
+                                    const QString &usageText )
 {
     GraderCliGrade g;
     g.started = true;
@@ -133,8 +132,6 @@ GraderCliGrade mapTranscript( const GraderCliConfig &cfg, int exitCode, const QJ
                                      QStringLiteral( "unexpected grader exit code " ) + QString::number( exitCode ) );
     }
 }
-
-} // namespace
 
 QJsonObject GraderCliGrade::toJson() const
 {
@@ -241,8 +238,8 @@ GraderCliGrade gradeViaCli( const GraderCliConfig &cfg, const QString &artifactP
         return unavailableGrade( QStringLiteral( "grader_transcript_invalid" ),
                                  QStringLiteral( "no parsable transcript on --out or stdout" ) );
 
-    const QString usageText = QString::fromUtf8( sr.stderrBytes ).trimmed();
-    return mapTranscript( cfg, sr.exitCode, doc.object(), usageText );
+    return gradeFromTranscript( sr.exitCode, doc.object(),
+                                QString::fromUtf8( sr.stderrBytes ).trimmed() );
 }
 
 GradeCallable cliGradeCallable( const GraderCliConfig &cfg )

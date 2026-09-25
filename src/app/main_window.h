@@ -58,6 +58,9 @@ class ClassificationStudioWidget;
 namespace sicnu::app::pipeline {
 class Ir2PipelineDesignerDock;
 }
+namespace sicnu::app {
+class ProjectContext;
+}
 
 class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
@@ -220,6 +223,21 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
+
+    /// The project Data/Display authority this shell was constructed around
+    /// (null when its creation failed at startup). Read-only view for
+    /// surfaces that must observe governance/display state without owning it.
+    sicnu::app::ProjectContext *projectContext() const { return m_projectContext.get(); }
+    /// The live secondary map view session (null before the first open).
+    SecondaryMapSession *secondaryMapSession() const { return m_secondaryMapSession; }
+    /// The mission sidecar paths the out-of-process watcher currently arms
+    /// (empty when disarmed). The binding — old project's sidecar vs. the
+    /// current one — is the contract Save As must re-establish.
+    QStringList watchedMissionSidecars() const
+    {
+        return m_missionSidecarWatcher ? m_missionSidecarWatcher->files()
+                                       : QStringList();
+    }
 
     /// Workbench 5.0 infrastructure (owned by the window, valid after setupUi).
     sicnu::app::WorkbenchHost *workbenchHost() const { return m_workbenchHost; }
@@ -422,6 +440,18 @@ public:
     void toggleSecondaryMapView( bool on );
     void openSecondaryMapView();
     void closeSecondaryMapView();
+    /**
+     * Open @p filePath through the one open transaction and render the
+     * typed outcome — everything openProject() does after its file dialog,
+     * testable without a modal dialog. Returns false on any failure stage.
+     */
+    bool openProjectFrom(const QString &filePath);
+    /**
+     * Save As to @p filePath — everything saveProjectAs() does after its
+     * file dialog: identity/store/mission-watcher rebind on success, roll
+     * back to the prior identity on failure.
+     */
+    bool saveProjectAsTo(const QString &filePath);
     /** Linked Visual Analytics 11.0: registers any display view (main,
      * secondary, session) with the link controllers. Safe before setup. */
     void registerLinkedVisualView( sicnu::display::DisplayViewId viewId );
@@ -503,6 +533,15 @@ private:
      * silently dropped. Returns false when the user aborts the operation.
      */
     bool confirmWorkbenchShutdown(const QString &actionTitle);
+    /**
+     * The story boundary shared by New Project and the open transaction:
+     * the session is (about to be) empty, so the previous project's story
+     * must not survive — lab recording stops, the recording context is
+     * cleared, and the mission runtime/panel/sidecar watcher reset. Called
+     * by newProject after a successful clear, and by openProjectSession's
+     * onSessionEmptied hook (whether the read then succeeds or fails).
+     */
+    void resetSessionStoryState();
     /** Acquire the exclusive Edit Lease for an Asset-backed vector layer. */
     bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true);
     /** Commit the Edit Lease (advances Asset Revision, refreshes other layers). */
@@ -518,6 +557,13 @@ private:
 
     void updateCanvasEmptyState();
     void updateLayersEmptyState();
+    /**
+     * Render the consistent EMPTY session shell (New Project, or the open
+     * transaction's ReadFailed rollback): canvas back to pan with no
+     * layers, empty-state overlays, editing UI off, title and governance
+     * panel re-projected from the emptied session.
+     */
+    void renderEmptySessionShell();
 
     // QGIS C++ components
     QgsMapCanvas *m_mapCanvas = nullptr;

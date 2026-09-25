@@ -92,13 +92,15 @@ int commandPassport( QStringList args, const CliIO &io )
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, "unknown argument: " + args.first().toStdString() );
 
-    std::string collectError;
+    sicnu::state::GdalFactsError collectError;
     const std::optional<sicnu::state::DatasetFacts> facts =
-        sicnu::state::collectDatasetFacts( path.toStdString(), collectError );
+        sicnu::state::collectDatasetFacts( path.toStdString(), &collectError );
     if ( !facts.has_value() )
         return io.finish( false, "passport", {},
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, collectError );
+                          {},
+                          collectError.code + ": " + collectError.detail + " (" +
+                              collectError.path + ")" );
 
     sicnu::state::StateResolutionInput input;
     input.dataset = *facts;

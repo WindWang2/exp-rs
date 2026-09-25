@@ -98,8 +98,15 @@ endif()
 # Defined before the shell so Sicnu::help_gui resolves below.
 add_subdirectory(help)
 
-add_executable(sicnu_geo_rs
-    main.cpp
+# The desktop shell's translation units live in ONE static library
+# (sicnu_geo_rs_shell) that both the product executable and the
+# full-shell offscreen lifecycle test link. A duplicated source list in the
+# test was the alternative — that second truth source is exactly the
+# direct-TU-embed drift class the #1295–#1309 CI run kept tripping.
+# Resources (icons.qrc / help_content.qrc) intentionally stay in the
+# executable: RCC initializers inside static libraries are dropped by the
+# linker.
+add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     main_window.cpp
     main_window_menus.cpp
     main_window_docks.cpp
@@ -394,11 +401,92 @@ add_executable(sicnu_geo_rs
     ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 
+add_executable(sicnu_geo_rs main.cpp)
+# The shell library is PRIVATE: the executable is its only production
+# consumer, and static-library PRIVATE deps still resolve at final link.
+target_link_libraries(sicnu_geo_rs PRIVATE sicnu_geo_rs_shell)
+set_target_properties(sicnu_geo_rs_shell PROPERTIES
+    AUTOMOC ON
+    # Same contract as the executable had: the dialog headers name ui_*.h
+    # files that do not exist as .ui sources — AUTOUIC must not try.
+    AUTOUIC OFF
+    QT_QML_MODULE_NO_IMPORT_SCAN TRUE
+)
+
+target_include_directories(sicnu_geo_rs_shell PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/sdk
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/dialogs
+    ${CMAKE_CURRENT_SOURCE_DIR}/map_tools
+    ${CMAKE_CURRENT_SOURCE_DIR}/widgets
+    ${CMAKE_CURRENT_SOURCE_DIR}/maptools
+    ${CMAKE_CURRENT_SOURCE_DIR}/vertextool
+    ${CMAKE_CURRENT_SOURCE_DIR}/selecttools
+    ${CMAKE_SOURCE_DIR}/src/agent
+    ${GDAL_INCLUDE_DIR}
+)
+
+# The shell library mirrors the executable's link interface (PRIVATE) so
+# consumers that are not the executable — the full-shell test — resolve the
+# whole closure through this one line.
+target_link_libraries(sicnu_geo_rs_shell PRIVATE
+    sicnu_plugins_framework
+    sicnu_sdk
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Xml
+    Qt6::Svg
+    Qt6::Sql
+    qgis_core
+    qgis_gui
+    qgis_native
+    qgis_analysis
+    qgis_app_georef
+    Sicnu::qgis_display
+    Sicnu::session_map
+    Sicnu::help_gui
+    Sicnu::dataset
+    Sicnu::experiment
+    Sicnu::study
+    Sicnu::experiment_studio
+    # Studio live-execution bridge: dock runs real studies through the
+    # ExecutionPlane spine, real GDAL compare, debugger evidence, faultlab
+    # sandbox and capsule IO.
+    Sicnu::experiment_studio_live
+    Sicnu::teaching_admin
+    # D5: desktop lab auto-recording surface + lab report builder (bridge
+    # converts coordinator truth into experiment records).
+    Sicnu::experiment_bridge
+    # lab cockpit submit/export consumes the existing capsule contract
+    Sicnu::experiment_capsule
+    Sicnu::Geospatial
+    sicnu_core
+    sicnu_processing
+    sicnu_operators
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_jobs
+    sicnu_task_center
+    sicnu_agent
+  # unified-trace bootstrap in main.cpp (Verification 7.0)
+    sicnu_runtime
+    jsoncpp
+    CURL::libcurl
+    ${PCRE2_16}
+    ${PCRE2_8}
+)
+if(TARGET Sicnu::teaching)
+    target_link_libraries(sicnu_geo_rs_shell PRIVATE Sicnu::teaching)
+endif()
+
 # Desktop shell embeds no QML; skip Qt's configure-time qmlimportscanner pass
 # (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
 
 # Undergraduate Lab Cockpit (student-facing projection UI)
-target_sources(sicnu_geo_rs PRIVATE
+target_sources(sicnu_geo_rs_shell PRIVATE
     teaching/course_home_page.cpp
     teaching/course_home_page.h
     teaching/guided_lab_workspace.cpp
@@ -483,7 +571,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
 )
 
 if(SICNU_EMBED_PYTHON)
-    target_sources(sicnu_geo_rs PRIVATE
+    target_sources(sicnu_geo_rs_shell PRIVATE
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
         ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
@@ -495,18 +583,18 @@ if(SICNU_EMBED_PYTHON)
         widgets/python_script_editor.cpp
         widgets/python_script_editor.h
     )
-    target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/python/isolated ${CMAKE_SOURCE_DIR}/src/app/python)
-    target_link_libraries(sicnu_geo_rs PRIVATE Python::Python sicnu_python_isolated)
-    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_EMBED_PYTHON=1)
+    target_include_directories(sicnu_geo_rs_shell PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/python/isolated ${CMAKE_SOURCE_DIR}/src/app/python)
+    target_link_libraries(sicnu_geo_rs_shell PRIVATE Python::Python sicnu_python_isolated)
+    target_compile_definitions(sicnu_geo_rs_shell PRIVATE SICNU_EMBED_PYTHON=1)
 endif()
 
 # Phase 10A — Pixel-Based Classification. Link only when the static
 # library was actually built (OpenCV ml component available).
 if(TARGET qgis_app_classify)
-    target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_classify)
-    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_CLASSIFY=1)
+    target_link_libraries(sicnu_geo_rs_shell PRIVATE qgis_app_classify)
+    target_compile_definitions(sicnu_geo_rs_shell PRIVATE SICNU_HAS_CLASSIFY=1)
     # Workbench 5.0 session adapter wraps the classification lab window.
-    target_sources(sicnu_geo_rs PRIVATE
+    target_sources(sicnu_geo_rs_shell PRIVATE
         workbench/session_adapters.cpp
         workbench/interactive_session.cpp
     )
@@ -515,8 +603,8 @@ endif()
 # Phase 10B — OBIA Classification. Link only when the static library
 # was actually built (OpenCV ml component available).
 if(TARGET qgis_app_obia)
-    target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_obia)
-    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_OBIA=1)
+    target_link_libraries(sicnu_geo_rs_shell PRIVATE qgis_app_obia)
+    target_compile_definitions(sicnu_geo_rs_shell PRIVATE SICNU_HAS_OBIA=1)
 endif()
 
 set_target_properties(sicnu_geo_rs PROPERTIES
@@ -525,6 +613,23 @@ set_target_properties(sicnu_geo_rs PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     OUTPUT_NAME "sicnu_geo_rs"
 )
+
+# Split-drift guard: the executable is main.cpp + resources ONLY; every
+# shell TU lives in sicnu_geo_rs_shell so the full-shell offscreen lifecycle
+# test keeps linking the real shell through one library. A rebasing branch
+# that appends target_sources(sicnu_geo_rs ...) would apply cleanly and
+# silently bypass that test — fail the configure instead.
+get_target_property(_sicnu_geo_rs_sources sicnu_geo_rs SOURCES)
+foreach(_src ${_sicnu_geo_rs_sources})
+    if(NOT _src MATCHES "(^|/)main\\.cpp$" AND NOT _src MATCHES "\\.qrc$")
+        message(FATAL_ERROR
+            "sicnu_geo_rs may contain only main.cpp and resource (.qrc) "
+            "files, got '${_src}'. Shell translation units belong in "
+            "sicnu_geo_rs_shell (see the split comment at the top of this "
+            "file).")
+    endif()
+endforeach()
+unset(_sicnu_geo_rs_sources)
 
 install(TARGETS sicnu_geo_rs
     RUNTIME DESTINATION bin

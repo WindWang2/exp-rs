@@ -251,6 +251,7 @@ target_link_libraries(test_sample_fixtures PRIVATE
   sicnu_sample_foundry
 )
 target_include_directories(test_sample_fixtures PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/tools
   ${CMAKE_BINARY_DIR}
 )
@@ -383,6 +384,18 @@ set_target_properties(test_platform_portability PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_platform_portability)
+
+# Cross-platform R2: static-evidence source contract (reads the repo's own
+# sources; same lane as test_platform_portability).
+add_executable(test_portability_source_contract test_portability_source_contract.cpp)
+target_link_libraries(test_portability_source_contract PRIVATE Catch2::Catch2WithMain)
+target_compile_definitions(test_portability_source_contract PRIVATE
+  SICNU_TEST_CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_portability_source_contract PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_portability_source_contract)
 
 # Offline classroom deployment (goal D7): the offline gate refuses remote
 # requests without any network attempt — typed error + GDAL cloud deny.
@@ -1219,8 +1232,6 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3831,8 +3842,6 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3856,8 +3865,6 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3885,8 +3892,6 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8237,8 +8242,6 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8262,8 +8265,6 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
-# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
-target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -9701,6 +9702,10 @@ sicnu_link_jsoncpp(test_tool_shortlist)
 # lowering with provenance.
 sicnu_add_test(test_workflow_planner)
 sicnu_link_jsoncpp(test_workflow_planner)
+# R3 track 14: the ScientificPlan → projectPlanToIr → compileWorkflow chain
+# cases compile into this target (planner is a Qt-free leaf; the harness
+# compiler stays the only lowering authority).
+target_link_libraries(test_workflow_planner PRIVATE sicnu_planner)
 
 sicnu_add_test(test_harness_catalog)
 sicnu_link_jsoncpp(test_harness_catalog)
@@ -9763,6 +9768,15 @@ target_link_libraries(test_agent_loop_core PRIVATE
   sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_core)
+
+# RS14-11 journal publication oracle: torn-publish stress, Unicode/deep-path
+# reopen, failed-publish recovery (pure C++; no Qt/GDAL link).
+add_executable(test_agent_loop_journal_durability test_agent_loop_journal_durability.cpp)
+target_link_libraries(test_agent_loop_journal_durability PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_loop
+)
+sicnu_discover_tests(test_agent_loop_journal_durability)
 
 # RS14-11: seam interfaces, deterministic offline doubles, session policy.
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
@@ -9876,6 +9890,29 @@ target_link_libraries(test_verifier_adversarial PRIVATE
   sicnu_verifier
 )
 sicnu_discover_tests(test_verifier_adversarial TEST_PREFIX "test_verifier_adversarial::")
+
+# ADR 0172 real provider adapters (R3 track): filesystem/provenance/
+# checkpoint adapters driving the REAL engine over real records, the
+# cross-projection no-verdict-flip seam (harness / lab evidence / teaching)
+# and the canonical-text locale-invariant contract. Qt/GDAL-free.
+add_executable(test_verify_adapters test_verify_adapters.cpp)
+target_link_libraries(test_verify_adapters PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+  sicnu_verify_adapters
+  sicnu_teaching
+)
+sicnu_discover_tests(test_verify_adapters TEST_PREFIX "test_verify_adapters::")
+
+# The GDAL grid probe over real GTiff/VRT fixtures written through the
+# driver itself: size/bands/CRS/NoData/NaN fractions, open failure,
+# tamper-evidence and CRS-less mismatches through the real engine.
+add_executable(test_verify_adapters_grid test_verify_adapters_grid.cpp)
+target_link_libraries(test_verify_adapters_grid PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verify_adapters_gdal
+)
+sicnu_discover_tests(test_verify_adapters_grid TEST_PREFIX "test_verify_adapters_grid::")
 
 # RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
 # PreflightReport schema (pure C++; no Qt/GDAL link).
@@ -10614,6 +10651,10 @@ target_include_directories(benchmark_scale8 PRIVATE
 # OutputVerifier::gradeArtifact teaching seam.
 sicnu_add_test(test_lab_grading TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_grading)
+# CLI/in-process transcript-contract parity oracle: the in-process engine
+# (OutputVerifier::gradeArtifact) is mapped through the teaching admin's ONE
+# gradeFromTranscript mapper and must agree verdict/score/digest-wise.
+target_link_libraries(test_lab_grading PRIVATE Sicnu::teaching_admin)
 
 # D7 batch grading: streaming engine + CSV export over the gradeArtifact
 # seam; CLI-level contract for --batch (error isolation, BOM, schema).
@@ -10622,8 +10663,22 @@ sicnu_link_jsoncpp(test_lab_batch)
 target_link_libraries(test_lab_batch PRIVATE sicnu_lab_batch)
 
 # teaching-lab-platform-11: sicnu.lab-pack/1 data pack contract (load + verify).
-sicnu_add_test(test_lab_data_pack TIMEOUT 300)
-sicnu_link_jsoncpp(test_lab_data_pack)
+# The pack parser/validator truth is the Qt-free sicnu_lab_pack leaf; this
+# test links ONLY the leaf (+jsoncpp via the leaf) instead of the heavy
+# sicnu_agent closure the pack contract never needed.
+add_executable(test_lab_data_pack test_lab_data_pack.cpp)
+target_link_libraries(test_lab_data_pack PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_lab_pack
+)
+target_compile_definitions(test_lab_data_pack PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_lab_data_pack PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_lab_data_pack TIMEOUT 300)
 
 # teaching-lab-platform-11: batch classroom v2 (identity, roster, caps, cancel,
 # deterministic summaries).
@@ -10767,9 +10822,6 @@ add_executable(test_mission_context
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  # selection_context.cpp references WorkbenchHost (same pairing as
-  # test_object_identity / test_mission_runtime_store).
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_context PRIVATE
   Catch2::Catch2WithMain
@@ -10835,9 +10887,6 @@ add_executable(test_mission_e2e_scaffolding
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
-  # selection_context.cpp references WorkbenchHost (same pairing as
-  # test_object_identity / test_mission_runtime_store).
-  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   Catch2::Catch2WithMain
@@ -10896,6 +10945,43 @@ endfunction()
 sicnu_add_mission_test(test_mission_stage)
 sicnu_add_mission_test(test_mission_surface_parity)
 sicnu_add_mission_test(test_mission_scale_benchmark)
+
+# Mission timeline desktop surface lifecycle: the selection the panel pushes
+# into SelectionContext must mirror the authority (a model reset clears it, an
+# incremental apply refreshes its status). The panel is a QgsDockWidget, so
+# this target — unlike the task-space gates above — links qgis_gui; the value
+# model underneath stays Qt Core only.
+add_executable(test_mission_timeline_surface
+  test_mission_timeline_surface.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_projection.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+)
+target_link_libraries(test_mission_timeline_surface PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mission_timeline_surface PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mission_timeline_surface PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mission_timeline_surface PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mission_timeline_surface)
 
 
 add_executable(test_agent_workbench_context
@@ -11549,11 +11635,45 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
-  # classification_studio_widget → object_identity.h → <json/json.h>
-  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
+
+# ExperimentStudioDock offscreen lifecycle fixture (R3 studio track): the real
+# dock TU is compiled into the test (Package G pattern) and driven headlessly
+# through the public seams — no file dialogs, no display server.
+add_executable(test_experiment_studio_dock
+  test_experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+)
+target_link_libraries(test_experiment_studio_dock PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  # rs:threshold_raster resolves through the operator registry — link it
+  # explicitly instead of leaning on sicnu_jobs' transitive PUBLIC link.
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_experiment_studio_dock PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+# dock → studio_live → faultlab/jsoncpp headers
+sicnu_link_jsoncpp(test_experiment_studio_dock)
+set_target_properties(test_experiment_studio_dock PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_experiment_studio_dock TIMEOUT 300 TEST_PREFIX "test_experiment_studio_dock::")
 
 # Package I: full-pipeline E2E + lab grading contracts (needs the agent
 # grader seam, jsoncpp for the OutputVerifier header, GDAL for synthesis).
@@ -12689,6 +12809,22 @@ set_target_properties(test_science_context_live_authorities PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_science_context_live_authorities)
+
+# R3 track 14 seam 2: science_context bundle → planner goal/context
+# projection (Qt-free: ScienceContext + planner + planner_live read path);
+# pins unknown-intent refusal, loud foreign-unit degradation, validated
+# enrichment and byte-stable projection over the live capability authority.
+add_executable(test_science_context_goal_projection test_science_context_goal_projection.cpp)
+target_link_libraries(test_science_context_goal_projection PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::ScienceContext
+  sicnu_planner_live
+)
+target_include_directories(test_science_context_goal_projection PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_science_context_goal_projection PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_science_context_goal_projection TEST_PREFIX "test_science_context_goal_projection::")
 # RS14 agent-benchmark harness: pure-C++ trajectory benchmark lane
 # (sicnu_agentbench; no Qt, no GDAL, no engine — see src/agentbench/CMakeLists.txt).
 add_executable(test_agentbench_core test_agentbench_core.cpp)
@@ -13132,6 +13268,59 @@ sicnu_link_jsoncpp(test_secondary_map_view_session)
 set_target_properties(test_secondary_map_view_session PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_secondary_map_view_session)
 
+# R3 full-shell recovery: the workflow run-state mirror must be connected
+# exactly once per ProjectContext (it used to stack a connection per
+# openWorkspaceStore call — open + Save As ⇒ N deliveries per transition).
+add_executable(test_project_context_run_mirror
+  test_project_context_run_mirror.cpp
+)
+target_link_libraries(test_project_context_run_mirror PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_workflow_runtime
+  qgis_core
+)
+target_include_directories(test_project_context_run_mirror PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_project_context_run_mirror)
+sicnu_discover_tests(test_project_context_run_mirror)
+
+# R3 full-shell recovery: the full QgisDesktopWindow lifecycle fixture —
+# open/open-fail/save/new/close, Save As store+watcher rebind, secondary
+# view reopen, designer retirement and the shutdown policy, driven offscreen
+# through the real window's dialog-free entry points. Links the SAME shell
+# library the product executable links (sicnu_geo_rs_shell) — no embedded
+# TU copy, so central-file drift breaks this suite loudly.
+add_executable(test_workbench_full_shell_lifecycle
+  test_workbench_full_shell_lifecycle.cpp
+)
+target_link_libraries(test_workbench_full_shell_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  # qgis usage requirements (include dirs for moc + TU) must come from a
+  # direct link: the shell library's PRIVATE deps propagate symbols only.
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+)
+target_include_directories(test_workbench_full_shell_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_workbench_full_shell_lifecycle)
+set_target_properties(test_workbench_full_shell_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_full_shell_lifecycle)
+
 # Scoped SpatialTool registrations: the process-wide registry gains
 # unregister/token semantics so session hosts release their tools.
 add_executable(test_spatial_tool_registration
@@ -13379,6 +13568,40 @@ target_link_libraries(test_scientific_planner_review PRIVATE
 )
 target_include_directories(test_scientific_planner_review PRIVATE ${CMAKE_SOURCE_DIR}/src)
 sicnu_discover_tests(test_scientific_planner_review TEST_PREFIX "test_scientific_planner_review::")
+
+# R3 track 14: the live capability seam for the planner. Qt-free leaf test
+# over sicnu_planner_live (planner + preflight mirror read path); pins the
+# REAL data/agent/capabilities documents, authority deletion/replan and
+# byte-stable replanning.
+add_executable(test_planner_live_capability test_planner_live_capability.cpp)
+target_link_libraries(test_planner_live_capability PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner_live
+)
+target_include_directories(test_planner_live_capability PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_planner_live_capability PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_planner_live_capability TEST_PREFIX "test_planner_live_capability::")
+
+# R3 track 14: the handoff chain up to the WorkflowIR document boundary —
+# bundle → planner inputs → plan (live capability authority) → projectPlanToIr
+# → preflight (real rules/mirror) → repair planning → proposal/teaching/
+# identity round-trips. Qt-free (planner leaves + ScienceContext + repair);
+# the steps beyond the document boundary (readWorkflowIr → AgentPlan v2 →
+# engine JSON) need the harness link and live in test_workflow_planner.
+add_executable(test_planner_handoff_e2e test_planner_handoff_e2e.cpp)
+target_link_libraries(test_planner_handoff_e2e PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_planner_live
+  Sicnu::ScienceContext
+  sicnu_repair_planner
+)
+target_include_directories(test_planner_handoff_e2e PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_planner_handoff_e2e PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_planner_handoff_e2e TEST_PREFIX "test_planner_handoff_e2e::")
 # RS14-02 Scientific Preflight Engine slice B: deterministic rule engine,
 # builtin rule families, provider seam and teaching/agent projections —
 # Qt/GDAL-free leaf tests over sicnu_preflight; the provider test adds the

@@ -204,6 +204,36 @@ void CapabilityMirrorProjection::addDocument( const Json::Value &documentArray,
             problems_.push_back( origin + ": entry cap exceeded" );
             return;
         }
+        // The merge walks at most kMaxMergeDepth extends hops; a deeper
+        // chain would be silently truncated at query time and policies
+        // beyond the cut are unreachable. The header promises depth is
+        // never silently skipped, so flag it here, at load, where the
+        // projection can still fail closed. The walk below mirrors
+        // mergeEntry's FULL stop semantics — an unknown parent or a cycle
+        // is the merge's own bounded stop (it may resolve later, or never;
+        // either way querying stops safely), and only a chain that fills
+        // the depth budget and still names an ancestor is a real cut.
+        {
+            int depth = 0;
+            Json::Value cursorValue = entry;
+            std::set<std::string> visited;
+            visited.insert( id );
+            bool boundedStop = false;
+            while ( cursorValue["extends"].isString() && depth < kMaxMergeDepth )
+            {
+                const Entry *parent = findEntry( cursorValue["extends"].asString() );
+                if ( parent == nullptr || !visited.insert( parent->value["id"].asString() ).second )
+                {
+                    boundedStop = true;
+                    break;
+                }
+                cursorValue = parent->value;
+                ++depth;
+            }
+            if ( !boundedStop && cursorValue["extends"].isString() )
+                problems_.push_back( origin + ": entry " + id +
+                                     ": extends chain deeper than the merge bound" );
+        }
         entries_.push_back( Entry{ entry, origin } );
     }
 }
@@ -356,6 +386,7 @@ CapabilityEntryResult CapabilityMirrorProjection::entryForOperator(
 
     Json::Value merged = mergeEntry( *entry );
     const Json::Value &variants = entry->value["variants"];
+    bool matchedVariant = false;
     if ( variants.isArray() && variantParams.isObject() )
     {
         for ( const auto &variant : variants )
@@ -379,9 +410,15 @@ CapabilityEntryResult CapabilityMirrorProjection::entryForOperator(
                 if ( key != "when" )
                     merged[key] = variant[key];
             }
+            matchedVariant = true;
             break; // first matching variant only
         }
     }
+    // A variant-parameterized operator whose policies were not consulted must
+    // say so: rules read absent policy keys as "undeclared -> pass", which
+    // would silently drop checks like band_roles that only live in variants.
+    result.variantPoliciesDropped =
+        variants.isArray() && !variants.empty() && !matchedVariant;
     result.status = FactStatus::Available;
     result.entry = std::move( merged );
     return result;

@@ -1828,9 +1828,38 @@ static bool runFileCheck( const QString &artifactPath, const LabKernelSpec &spec
                  : QDir( QFileInfo( artifactPath ).absolutePath() ).filePath( ref );
         // Sibling resolution stays INSIDE the artifact directory: a rules file
         // must not probe unrelated files through the graded transcript.
-        const QString probe = QFileInfo( path ).absolutePath();
-        const QString bound = QFileInfo( artifactPath ).absolutePath();
-        if ( !probe.startsWith( bound ) )
+        //
+        // Both sides resolve through canonicalFilePath(): absolutePath() is
+        // lexical only, so it neither resolves an in-tree symlink pointing
+        // outside, nor bounds the prefix — startsWith("…/sub") also matched
+        // the sibling directory "…/sub-evil". Not-yet-existing probes
+        // (exists:false assertions are legal) anchor on the canonical parent
+        // plus the lexical file name; a probe whose parent cannot be
+        // canonicalized at all is refused rather than trusted lexically.
+        QString bound = QFileInfo( artifactPath ).dir().canonicalPath();
+        if ( bound.isEmpty() )
+            bound = QFileInfo( artifactPath ).absolutePath();
+        const QFileInfo probeInfo( path );
+        QString probeResolved;
+        if ( probeInfo.exists() )
+            probeResolved = probeInfo.canonicalFilePath();
+        if ( probeResolved.isEmpty() )
+        {
+            const QString parentCanon = probeInfo.dir().canonicalPath();
+            if ( parentCanon.isEmpty() )
+            {
+                outcome.passed = false;
+                outcome.message =
+                  QStringLiteral( "file_check path escapes the submission directory" );
+                outcome.observed["path"] = path.toStdString();
+                outcome.expected["within"] = bound.toStdString();
+                return true;
+            }
+            probeResolved = parentCanon + QLatin1Char( '/' ) + probeInfo.fileName();
+        }
+        const bool insideBound =
+          probeResolved == bound || probeResolved.startsWith( bound + QLatin1Char( '/' ) );
+        if ( !insideBound )
         {
             outcome.passed = false;
             outcome.message =

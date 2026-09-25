@@ -15,6 +15,7 @@
 #include "dataset/split.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "recipes/recipe_registry.h"
 
 #include <QDir>
 #include <QFile>
@@ -566,4 +567,91 @@ TEST_CASE(
     const auto unconfined = handleDataPlatformTool( QStringLiteral( "reproducibility:inspect" ), args );
     CHECK( artifactStatus( unconfined, outsideArtifact ) == QStringLiteral( "ok" ) );
     CHECK( artifactStatus( unconfined, insideArtifact ) == QStringLiteral( "ok" ) );
+}
+
+
+TEST_CASE(
+    "scientific: tools answer from live wired authorities",
+    "[agent][mcp][data_platform][science_context]" )
+{
+    // End-to-end wiring probe: capability facts from the harness knowledge
+    // pack (with its live revision), recipes from the scientific recipe
+    // registry, passports from scientific_state+GDAL — all through the same
+    // tool dispatch MCP uses.
+    using sicnu::agent::handleDataPlatformTool;
+
+    // Same guard pattern as test_science_context_live_authorities: the test
+    // binary has no SICNU_SOURCE_DIR define, so point the registry's
+    // documented env override at the in-repo pack before anything loads.
+#ifdef _WIN32
+    (void)_putenv_s( "SICNU_SCIENTIFIC_RECIPES_DIR",
+                     ( std::string( CMAKE_SOURCE_DIR ) +
+                       "/data/agent/scientific_recipes" ).c_str() );
+#else
+    ::setenv( "SICNU_SCIENTIFIC_RECIPES_DIR",
+              ( std::string( CMAKE_SOURCE_DIR ) +
+                "/data/agent/scientific_recipes" ).c_str(), 1 );
+#endif
+
+    sicnu::recipes::ScientificRecipeRegistry probe;
+    REQUIRE( probe.reload() > 0 ); // environment guard: in-repo pack present
+
+    // recipe:search serves the registry-backed projection, never auto-executes.
+    QVariantMap search;
+    search.insert( QStringLiteral( "text" ), QStringLiteral( "change detection" ) );
+    const QJsonDocument searchDoc = QJsonDocument::fromVariant(
+        handleDataPlatformTool( QStringLiteral( "recipe:search" ), search ) );
+    REQUIRE( searchDoc.isObject() );
+    CHECK( searchDoc.object().value( "total" ).toInt() >= 1 );
+    CHECK( searchDoc.object()
+               .value( "hits" )
+               .toArray()
+               .first()
+               .toObject()
+               .value( "recipe_id" )
+               .toString()
+               .startsWith( QStringLiteral( "lab." ) ) );
+    CHECK( searchDoc.object().value( "auto_execute" ).toBool() == false );
+
+    // scientific:context: capabilities and recipes carry live_authority
+    // provenance, and the capability section exposes the authority revision.
+    QVariantMap ctx;
+    ctx.insert( QStringLiteral( "goal" ), QStringLiteral( "compute an ndvi" ) );
+    ctx.insert( QStringLiteral( "intent" ), QStringLiteral( "ndvi" ) );
+    const QJsonDocument ctxDoc = QJsonDocument::fromVariant(
+        handleDataPlatformTool( QStringLiteral( "scientific:context" ), ctx ) );
+    REQUIRE( ctxDoc.isObject() );
+    CHECK( ctxDoc.object().value( "schema" ).toString() ==
+           QStringLiteral( "exp.science_context.v1" ) );
+    const QJsonObject sources = ctxDoc.object().value( "sources" ).toObject();
+    CHECK( sources.value( QStringLiteral( "capabilities" ) )
+               .toObject()
+               .value( QStringLiteral( "source" ) )
+               .toString() == QStringLiteral( "live_authority" ) );
+    CHECK( sources.value( QStringLiteral( "capabilities" ) )
+               .toObject()
+               .value( QStringLiteral( "revision" ) )
+               .toVariant()
+               .toULongLong() >= 1 );
+    CHECK( sources.value( QStringLiteral( "recipes" ) )
+               .toObject()
+               .value( QStringLiteral( "source" ) )
+               .toString() == QStringLiteral( "live_authority" ) );
+
+    // A dataset path that GDAL cannot open keeps its typed reason in the
+    // bundle problem channel — distinct from asset_not_found.
+    QVariantMap missing;
+    missing.insert( QStringLiteral( "goal" ), QStringLiteral( "inspect" ) );
+    missing.insert( QStringLiteral( "asset_id" ),
+                    QStringLiteral( "/definitely/not/here.tif" ) );
+    const QJsonDocument missingDoc = QJsonDocument::fromVariant(
+        handleDataPlatformTool( QStringLiteral( "scientific:context" ), missing ) );
+    REQUIRE( missingDoc.isObject() );
+    bool gdalTyped = false;
+    for ( const auto &question :
+          missingDoc.object().value( "open_questions" ).toArray() )
+        gdalTyped = gdalTyped ||
+                    question.toString().startsWith(
+                        QStringLiteral( "asset_resolve_failed:gdal_open_failed" ) );
+    CHECK( gdalTyped );
 }

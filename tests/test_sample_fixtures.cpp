@@ -41,6 +41,8 @@
 #include <utility>
 #include <vector>
 
+#include "platform/portable.h"
+
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -73,11 +75,7 @@ struct TempDir
     {
         static std::atomic<int> counter{ 0 };
         const int n = counter.fetch_add( 1 );
-#ifdef _WIN32
-        const int pid = _getpid();
-#else
-        const int pid = static_cast<int>( getpid() );
-#endif
+        const int pid = static_cast<int>( sicnu::portable::pid() );
         path = fs::temp_directory_path() / ( "sicnu-foundry-test-" + std::to_string( pid ) +
                                              "-" + std::to_string( n ) );
         fs::remove_all( path );

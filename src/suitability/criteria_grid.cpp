@@ -110,9 +110,14 @@ SuitabilityCriterion assessGridCompatibility( const ResolvedRequirements &req,
 
     // Equal strides over the linear pair index space keep the sample
     // deterministic and spread across all scenes; linear -> (i, j), i < j.
+    // The stride is tail-inclusive: the last sampled index is always the
+    // final pair, so a lone mismatched scene at the end of the list can
+    // never fall entirely outside the sample (a plain floor stride leaves
+    // the last ~totalPairs/pairsChecked indices unjudged).
     for ( qint64 checked = 0; checked < pairsChecked; ++checked )
     {
-        const qint64 linear = sampled ? checked * totalPairs / pairsChecked : checked;
+        const qint64 linear =
+            sampled ? ( checked + 1 ) * totalPairs / pairsChecked - 1 : checked;
         qint64 pairI = 0;
         qint64 rest = linear;
         while ( rest >= sceneCount - pairI - 1 )
@@ -187,6 +192,18 @@ SuitabilityCriterion assessGridCompatibility( const ResolvedRequirements &req,
 
     if ( blockingPairs == 0 )
     {
+        if ( sampled )
+        {
+            // Same truncation posture as the label-sampling criterion: a
+            // pass over a sampled space is Marginal, never Suitable — the
+            // pairs outside the sample were never judged.
+            criterion.level = SuitabilityLevel::Marginal;
+            criterion.summary = QStringLiteral(
+                                     "No blocking pixel-grid mismatch in the judged scene pairs; %1 of %2 pairs were sampled." )
+                                     .arg( pairsChecked )
+                                     .arg( totalPairs );
+            return criterion;
+        }
         criterion.level = SuitabilityLevel::Suitable;
         criterion.summary = QStringLiteral( "No blocking pixel-grid mismatch across the compared scene pairs." );
         return criterion;

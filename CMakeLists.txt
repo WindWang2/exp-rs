@@ -742,6 +742,10 @@ add_subdirectory(src/data)
 # RS14-05 Process-aware Experiment Grader (ADR 0174): pure C++20 + jsoncpp
 # leaf library (sicnu_grader) — zero Qt/GDAL/sicnu dependencies, no I/O.
 add_subdirectory(src/grader)
+# sicnu.lab-pack/1 data pack contract: Qt-free shared leaf — the ONE
+# parser/validator consumed by both sicnu::agent (Qt façade) and
+# sicnu::teaching_admin (pack inventory/preflight). No second pack truth.
+add_subdirectory(src/lab_pack)
 # Dataset, Experiment & Reproducibility Foundation 5.0 (ADR 0134-0138): the
 # science-core stores over sicnu_data (dataset identity/manifest/splits) and
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
@@ -799,6 +803,11 @@ add_subdirectory(src/explain)
 # Geospatial I/O Foundation 4.0 (Qt-free leaf: canonical metadata, CRS policy,
 # raster/vector I/O contracts, format profiles, COG, STAC, multidim, doctor).
 add_subdirectory(src/geospatial)
+# ADR 0172 real provider adapters (filesystem/exp-rs-prov/d17 checkpoint,
+# GDAL grid probe): they adapt the authorities above onto the verifier's
+# provider seam and judge nothing. Placed after geospatial (the gdal variant
+# links Sicnu::Geospatial); the verifier leaf itself stays dependency-free.
+add_subdirectory(src/verify_adapters)
 # Execution & Data Plane 3.0 runtime services (chunk graph, GPU plane, worker
 # host, telemetry). Qt-free leaf; must precede processing (fused-chain executor).
 add_subdirectory(src/runtime)
@@ -856,6 +865,9 @@ add_subdirectory(src/contracts)
 # ScientificPlan decision layer. Pure C++20, links sicnu_contracts only.
 # Planning-only: never executes operators (kill-switch = no target links it).
 add_subdirectory(src/planner)
+# R3 planner live capability seam: the capability-mirror → CapabilityProvider
+# adapter (production implementation of the injected seam; core unchanged).
+add_subdirectory(src/planner/live)
 # RS14-11: evidence-first agent session orchestration — pure C++20 core
 # (state machine, decision records, journal, seams). The Qt-capable
 # production adapter and tool live in src/agent/tools.
