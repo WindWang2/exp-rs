@@ -2,10 +2,11 @@
 //
 // RS14-15 Slice G: the explain:step agent surface, exercised against the
 // live operator registry and a fixture guidance corpus. This test compiles
-// the tool TU directly (it holds no registry symbols) so the narrow lane
-// needs no sicnu_agent link; registration into SpatialToolRegistry and
-// catalog visibility are covered by the heavy agent tool lane
-// (test_agent_tools_3).
+// the tool TU directly; explain_step_tool.cpp pulls registry-initialization
+// symbols from sicnu_operators_core and spatial-tool family symbols from
+// sicnu_agent (build-wiring drift rule 11), so both are linked here.
+// Registration into SpatialToolRegistry and catalog visibility are covered
+// by the heavy agent tool lane (test_agent_tools_3).
 //
 // Pinned behavior: closed modes; fail-closed on unknown operators and
 // unknown nodes; hostile documents are typed refusals; guidance conflicts

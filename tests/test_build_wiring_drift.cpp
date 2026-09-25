@@ -1277,6 +1277,64 @@ RepoModel build_model( const fs::path &root )
             if ( epos == std::string::npos || epos < body_begin )
                 continue;
             const std::string body = s.text.substr( body_begin, epos - body_begin );
+
+            // link-only helpers (sicnu_link_jsoncpp(tgt …)): the body links
+            // ${PARAM} without creating a target. Their call sites wire the
+            // body's links onto an existing target — the canonical jsoncpp
+            // idiom, invisible to a target-creating-only helper model.
+            for ( const Cmd &bc : scan_commands( body ) )
+            {
+                if ( bc.name != "target_link_libraries" )
+                    continue;
+                const std::vector<std::string> btoks = split_args( bc.args );
+                if ( btoks.empty() || btoks[0].size() <= 3 ||
+                     btoks[0].rfind( "${", 0 ) != 0 || btoks[0].back() != '}' )
+                    continue;
+                const std::string lparam = btoks[0].substr( 2, btoks[0].size() - 3 );
+                if ( !pset.count( lparam ) )
+                    continue;
+                Helper lh;
+                lh.param = lparam;
+                lh.params = params;
+                lh.body_link_lists.push_back( btoks );
+                for ( const Cmd &pc : scan_commands( body ) )
+                {
+                    if ( pc.name != "cmake_parse_arguments" )
+                        continue;
+                    std::vector<std::string> pa = split_args( pc.args );
+                    if ( !pa.empty() && pa[0] == "PARSE_ARGV" && pa.size() >= 3 )
+                        pa.erase( pa.begin(), pa.begin() + 3 );
+                    for ( auto &t2 : pa )
+                        t2.erase( std::remove( t2.begin(), t2.end(), '"' ), t2.end() );
+                    if ( pa.size() >= 4 )
+                    {
+                        lh.parse_prefix = pa[0];
+                        const auto read_kw_list2 = [&]( const std::string &semi ) {
+                            std::set<std::string> out2;
+                            std::string cur2;
+                            for ( const char c : semi )
+                            {
+                                if ( c == ';' )
+                                {
+                                    if ( !cur2.empty() )
+                                        out2.insert( cur2 );
+                                    cur2.clear();
+                                }
+                                else
+                                    cur2.push_back( c );
+                            }
+                            if ( !cur2.empty() )
+                                out2.insert( cur2 );
+                            return out2;
+                        };
+                        lh.single_kws = read_kw_list2( pa[2] );
+                        lh.multi_kws = read_kw_list2( pa[3] );
+                    }
+                }
+                model.helpers[fname] = std::move( lh );
+                break;
+            }
+
             for ( const std::string &tc : target_cmds )
             {
                 std::size_t pos = body.find( tc + "(" );
@@ -1445,7 +1503,14 @@ RepoModel build_model( const fs::path &root )
         {
             const bool target_cmd = target_cmds.count( cmd.name ) != 0;
             auto hit = model.helpers.find( cmd.name );
-            const bool helper_cmd = s.main_tree && hit != model.helpers.end();
+            // link-only helpers (sicnu_link_jsoncpp…) wire an EXISTING
+            // target; their call sites are not definitions
+            const bool link_only_helper =
+                hit != model.helpers.end() && hit->second.body_target_args.empty() &&
+                !hit->second.body_qt_cmd && !hit->second.body_link_lists.empty() &&
+                hit->second.template_dir.empty() && !hit->second.has_template;
+            const bool helper_cmd = s.main_tree && hit != model.helpers.end() &&
+                                    !link_only_helper;
             // custom targets share the CMP0002 namespace but cannot be
             // linked — def site only, never a link-closure target
             const bool custom_cmd = cmd.name == "add_custom_target";
@@ -1676,6 +1741,9 @@ RepoModel build_model( const fs::path &root )
             {
                 // helper call site: bind body facts to the created target
                 const Helper &h = hit->second;
+                const bool link_only = h.body_target_args.empty() && !h.body_qt_cmd &&
+                                       !h.body_link_lists.empty() &&
+                                       h.template_dir.empty() && !h.has_template;
                 if ( toks.empty() )
                     continue;
                 const std::map<std::string, std::vector<std::string>> bindings =
@@ -1685,12 +1753,14 @@ RepoModel build_model( const fs::path &root )
                      !valid_target_name( name_it->second[0] ) )
                     continue;
                 const std::string subject = name_it->second[0];
+                if ( link_only && !model.targets.count( subject ) )
+                    continue; // never fabricate targets for link-only helpers
                 const BoundTarget bound =
                     bind_helper_call( model, cmd.name, bindings, model.root,
                                       s.path.parent_path(), 0, vars );
                 TargetInfo &info = model.target_info[subject];
                 info.script = si;
-                info.helper_created = true;
+                info.helper_created = !link_only;
                 for ( const fs::path &p : bound.sources )
                     info.sources.insert( p );
                 for ( const std::string &l : bound.links )
@@ -1699,7 +1769,8 @@ RepoModel build_model( const fs::path &root )
                 if ( bound.automoc || bound.qt_cmd )
                     info.automoc = 1;
                 info.include_dirs.insert( bound.include_dirs.begin(), bound.include_dirs.end() );
-                model.targets.insert( subject );
+                if ( !link_only )
+                    model.targets.insert( subject );
             }
         }
     }
@@ -2398,6 +2469,32 @@ bool tests_scoped( const RepoModel &m, const TargetInfo &info )
     return info.script < m.scripts.size() && is_under( m.scripts[info.script].path, m.root / "tests" );
 }
 
+// True when two sites of one script sit under enclosing conditions that are
+// textual complements (`if(FOO)…` / `if(NOT FOO)…`): CMake executes at most
+// one of them, so neither can pair with the other into a double-configure.
+// Only bare NOT-negations count — anything richer is not decodable here.
+bool complementary_guards( const Script &sa, std::size_t la, std::size_t lb )
+{
+    const auto &fa = frames_at( sa, la );
+    const auto &fb = frames_at( sa, lb );
+    const std::size_t n = std::min( fa.size(), fb.size() );
+    const auto norm = []( const std::string &c ) {
+        std::string out;
+        for ( const char ch : c )
+            if ( !isspace( static_cast<unsigned char>( ch ) ) )
+                out += ch;
+        return out;
+    };
+    for ( std::size_t d = 0; d < n; ++d )
+    {
+        const std::string a = norm( fa[d].cond );
+        const std::string b = norm( fb[d].cond );
+        if ( a == "NOT" + b || b == "NOT" + a )
+            return true;
+    }
+    return false;
+}
+
 // Rule 9 — duplicate add_subdirectory (directory-level CMP0002 class). Two
 // calls resolving to the same directory that can both execute in one
 // configure process the target tree twice.
@@ -2441,7 +2538,9 @@ std::vector<std::string> check_duplicate_subdirs( const RepoModel &m )
                 if ( in_dead_branch( sa, v[i].line, m.assigned_vars ) ||
                      in_dead_branch( sb, v[j].line, m.assigned_vars ) )
                     continue;
-                if ( v[i].script == v[j].script && branch_separated( sa, v[i].line, v[j].line ) )
+                if ( v[i].script == v[j].script &&
+                     ( branch_separated( sa, v[i].line, v[j].line ) ||
+                       complementary_guards( sa, v[i].line, v[j].line ) ) )
                     continue;
                 out.push_back( "duplicate add_subdirectory (CMP0002 class): " + entry.first.string() +
                                "\n  " + sa.path.string() + ":" + std::to_string( v[i].line ) +
@@ -2537,8 +2636,8 @@ std::vector<std::string> check_embed_link_requirements( const RepoModel &m )
                     // Where the closure DOES contain it, provability ends:
                     // whether that transit is PUBLIC-reliable is not
                     // statically decidable (sicnu_link_jsoncpp exists because
-                    // it sometimes is not), so the check records unknown and
-                    // stays silent rather than false-red.
+                    // it sometimes is not), so the check stays silent —
+                    // silence is the recorded unknown — never a false red.
                     if ( !req || closure_unknown || missing.count( req->name ) )
                         continue;
                     if ( !uses_lib_symbols( ff.code, inc ) )
@@ -3209,6 +3308,16 @@ TEST_CASE( "wiring oracle rules kill injected faults (mutation)", "[build_wiring
                        "add_subdirectory(tests)\n"
                        "if(FOO)\nadd_subdirectory(src/lib)\nelse()\nadd_subdirectory(src/lib)\nendif()\n" );
         REQUIRE( wiring::check_duplicate_subdirs( fx2.model() ).empty() );
+
+        // complementary guards (if(FOO)… / if(NOT FOO)…) can both host the
+        // same directory: at most one executes
+        Fixture fx4 = Fixture::make( "dup_subdir_complement" );
+        fx4.overwrite( "CMakeLists.txt",
+                       "cmake_minimum_required(VERSION 3.20)\nproject(fx CXX)\n"
+                       "option(FOO \"doc\" OFF)\nadd_subdirectory(tests)\n"
+                       "if(FOO)\nadd_subdirectory(src/lib)\nendif()\n"
+                       "if(NOT FOO)\nadd_subdirectory(src/lib)\nendif()\n" );
+        REQUIRE( wiring::check_duplicate_subdirs( fx4.model() ).empty() );
 
         // duplicates across scripts (root and a subdir script) collide too
         Fixture fx3 = Fixture::make( "dup_subdir_cross" );

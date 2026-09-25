@@ -44,7 +44,7 @@ work — checkpoints are now committed per slice).
 
 ## Wiring fixes driven by the new rules (all mechanical, test-only)
 
-- 67 direct Qt includes across 43 test TUs — the exact class of
+- 52 direct Qt include lines across 42 test TUs — the exact class of
   #1306/#1308–#1313 (uses QJsonObject/QJsonValue/QJsonArray/QJsonParseError/
   QTemporaryDir/QNetworkRequest/QLocalServer/QLocalSocket/QLockFile/QSignalSpy
   without including them; green today only via transitive includes that
@@ -77,6 +77,21 @@ work — checkpoints are now committed per slice).
   needs with no header declaration — the #1300 MissionTimelineModel case is
   this class and is covered only transitively (the d17 engine sources now
   embed it).
+- Helper-mediated wiring is bound by both tools now (target-creating and
+  link-only helpers such as `sicnu_link_jsoncpp`), but the two parsers
+  (C++ gate vs Python mapper) remain independent implementations of the
+  same wiring semantics; the mapper's consumer closure and the gate's
+  rule 10 deliberately follow every link edge (over-approximation), and
+  script `set()` variables accumulate all assignments, so a target can be
+  believed to compile sources it does not — that direction only masks
+  findings, it never fabricates one.
+- Further fail-open scoping (review findings, documented not fixed): rule
+  12 scans every tests/**.cpp with no linkage filter (a dead file would
+  be judged); rule 13's `emit` attribution is stem-loose when the emitted
+  signal belongs to another class whose moc a provider carries; rule 11's
+  construction detector can read a function declaration as construction;
+  `QT_FORWARD_DECLARE_CLASS` is not honored as a forward declaration; the
+  lexer does not handle C++ raw strings.
 - Windows/MSVC link semantics (no `--gc-sections`, whole-object inclusion)
   are the reason several of these embeds are latent rather than burning on
   every lane; the gate proves the wiring facts, not the linker.
@@ -94,6 +109,21 @@ this machine **with this branch's changes stashed** (identical with them
 applied): `test_dev_common` trunk-divergence, `test_preflight` worktree
 report, `test_stale_branches` merged-branch — all git-environment dependent
 (developed against different git defaults), none touched by this track.
+
+## Adversarial review round
+
+An independent reviewer audited the branch (P0–P3). Fixed before PR:
+- P0: mapper consumer closure was blind to helper-body link edges (75 of
+  111 sicnu_add_test targets invisible) and the ctest-registered set was
+  empty — helper bodies (target-creating AND link-only helpers) are now
+  bound at their call sites; the review's own repro
+  (`src/data/artifact_object_pool.cpp`) yields the full consumer set.
+- P1: `sicnu_link_jsoncpp` (the canonical jsoncpp idiom, 195 call sites)
+  is now visible to both tools; rule 9 accepts complementary guards
+  (`if(FOO)… / if(NOT FOO)…`), fixture-covered.
+- Comment rot fixed: test_explain_agent_tool's header claimed the narrow
+  lane needs no sicnu_agent link (no longer true); rule 10's comment now
+  says "stays silent" rather than claiming a recorded unknown.
 
 ## Rollback
 
