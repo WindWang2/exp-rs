@@ -11606,6 +11606,42 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
 
+# ExperimentStudioDock offscreen lifecycle fixture (R3 studio track): the real
+# dock TU is compiled into the test (Package G pattern) and driven headlessly
+# through the public seams — no file dialogs, no display server.
+add_executable(test_experiment_studio_dock
+  test_experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+)
+target_link_libraries(test_experiment_studio_dock PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  # rs:threshold_raster resolves through the operator registry — link it
+  # explicitly instead of leaning on sicnu_jobs' transitive PUBLIC link.
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_experiment_studio_dock PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+# dock → studio_live → faultlab/jsoncpp headers
+sicnu_link_jsoncpp(test_experiment_studio_dock)
+set_target_properties(test_experiment_studio_dock PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_experiment_studio_dock TIMEOUT 300 TEST_PREFIX "test_experiment_studio_dock::")
+
 # Package I: full-pipeline E2E + lab grading contracts (needs the agent
 # grader seam, jsoncpp for the OutputVerifier header, GDAL for synthesis).
 add_executable(test_d15_classification_change_e2e
