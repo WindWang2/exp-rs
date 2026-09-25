@@ -14,6 +14,10 @@ namespace sicnu::experiment {
 class WorkflowExperimentMonitor;
 }
 
+namespace sicnu::agent_ops {
+class OpsDriver;
+}
+
 #include "processing/framework/execution_id.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
@@ -100,6 +104,14 @@ public:
       mDispatcher.setDataManager( dataManager );
     }
 
+    /// Injects the agent-ops driver backing the `scientific:agent_session`
+    /// tool. Call before start(). Without an injected driver the tool fails
+    /// closed (typed AGENT_OPS_UNAVAILABLE) — no fake sessions.
+    void setAgentOpsDriver( sicnu::agent_ops::OpsDriver *driver )
+    {
+      m_agentOpsDriver = driver;
+    }
+
 private slots:
     void onLineRead(const QString &line);
     /// Surface-11 progress relay: projects TaskCenter task updates into MCP
@@ -171,6 +183,7 @@ protected:
     QVariantMap handleRunWorkflow(const QVariantMap &arguments);
     QVariantMap handleGetWorkflowStatus(long pipelineId);
     QVariantMap handleResumeWorkflow(const QString &runId);
+    QVariantMap handleAgentSession(const QVariantMap &arguments);
     QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);
 
     /// Surface-11 large-result handle (meta tool `artifact_read`): bounded
@@ -197,6 +210,7 @@ private:
     QCoreApplication *mApp = nullptr;
     /// Data Manager asset authority for lineage/provenance queries.
     sicnu::data::DataManager *m_dataManager = nullptr;
+    sicnu::agent_ops::OpsDriver *m_agentOpsDriver = nullptr;
     /// rpc request id -> TaskCenter task id for in-flight tools/call
     /// executions, so a notifications/cancelled can cancel the mapped task
     /// (#634). Bound: entries are only added, never queried after terminal.

@@ -179,6 +179,30 @@ const std::vector<MetaToolDef> &table()
             { "offset", "integer", "Byte offset to start reading from (default 0).", false },
             { "length", "integer", "Max bytes to read; clamped to 262144 (256 KiB). Default: the cap.", false },
             { "encoding", "string", "'text' (default, must be valid UTF-8) or 'base64' for binary slices.", false } } },
+        // Agent ops driver (R3): one tool over the shared session surface —
+        // run/resume/cancel/status/export parity with the CLI `session`
+        // command and the workbench panel. The host must inject an
+        // OpsDriver; without one the call fails closed (typed
+        // AGENT_OPS_UNAVAILABLE), never a fake session.
+        { "scientific:agent_session",
+          "Drive a scientific agent session through the OperationsCoordinator "
+          "(agent_loop is the only state machine). Actions: run (goal[,intent,"
+          "mode,journal_directory,session_id,domain,role,refs]), resume "
+          "(journal_directory,session_id,goal), reconcile (journal_directory,"
+          "session_id — inspect a journal without resuming, incl. "
+          "duplicate-submit hazards), status/timeline/export "
+          "(session_id), pause/cancel/clear_pause/clear_cancel, "
+          "approve_repair, actions.",
+          { { "action", "string", "One of the session surface actions.", true },
+            { "goal", "string", "Session goal (run/resume).", false },
+            { "intent", "string", "Intent hint, e.g. 'ndvi'.", false },
+            { "mode", "string", "'dry_run' | 'plan_only' | 'execute_with_verify'.", false },
+            { "journal_directory", "string", "Directory holding session journals.", false },
+            { "session_id", "string", "Session id for resume/reconcile/status/export.", false },
+            { "refs", "object", "Slot -> reference map (paths / asset ids) for run.", false },
+            { "domain", "string", "Autonomy domain (default 'research').", false },
+            { "role", "string", "Autonomy role.", false },
+            { "approve", "boolean", "approve_repair: record one-shot pending approval.", false } } },
     };
     return kMetaTools;
 }

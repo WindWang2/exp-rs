@@ -85,7 +85,7 @@ namespace
     GDALDatasetH ds = GDALCreate( driver, path.c_str(), width, height, 1, GDT_Byte, nullptr );
     if ( !ds )
       return false;
-    GDALSetGeoTransform( ds, const_cast<double *>( geoTransform ) );
+    GDALSetGeoTransform( ds, geoTransform );
     GDALSetProjection( ds, projectionWkt.c_str() );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
     GDALSetRasterNoDataValue( band, 0 );

@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include "platform/portable.h"
 
 namespace sicnu::data
 {
@@ -715,11 +716,13 @@ void ExecutionResultCache::ensurePersistentTierLocked()
   const bool enabled = env && ( env[0] == '1' || env[0] == 't' || env[0] == 'T' );
   if ( !enabled )
     return;
-  QString root;
-  if ( const char *rootEnv = std::getenv( "SICNU_ARTIFACT_CACHE_DIR" ) )
-    root = QString::fromUtf8( rootEnv );
-  else
-    root = QDir::home().filePath( QStringLiteral( ".rs_studio/artifact-cache" ) );
+  // Path value: read as UTF-8 (getenv hands back ANSI code page bytes on
+  // Windows, which QString::fromUtf8 would then mis-decode). A set-but-empty
+  // value falls through to the default cache root, like an unset variable.
+  const std::string rootEnv = sicnu::portable::envUtf8( "SICNU_ARTIFACT_CACHE_DIR" );
+  const QString root =
+    rootEnv.empty() ? QDir::home().filePath( QStringLiteral( ".rs_studio/artifact-cache" ) )
+                    : QString::fromStdString( rootEnv );
   auto pool = std::make_unique<sicnu::data::ArtifactObjectPool>();
   if ( pool->enable( root ) )
     m_persistent = std::move( pool );

@@ -65,6 +65,12 @@ class MissionTimelinePanel : public QgsDockWidget
     QString selectedTaskId() const;
     MissionTaskStatus selectedTaskStatus( const QString &taskId ) const;
     void updateActionStates();
+    /// Re-derives the selection from the model and pushes it (clears when the
+    /// selection is gone). Connected to the model's reset and dataChanged so
+    /// the pushed task id/status always mirrors the authority.
+    void repushSelection();
+    /// Emits taskSelected unless the identical pair was already pushed.
+    void pushSelection( const QString &taskId, MissionTaskStatus status );
 
     MissionTimelineModel *m_model = nullptr;
     QTableView *m_table = nullptr;
@@ -72,6 +78,10 @@ class MissionTimelinePanel : public QgsDockWidget
     QPushButton *m_refreshButton = nullptr;
     QPushButton *m_retryButton = nullptr;
     QPushButton *m_resumeButton = nullptr;
+    /// Last pair announced through taskSelected (dedupe for the per-row
+    /// dataChanged storm an incremental batch produces).
+    QString m_pushedTaskId;
+    MissionTaskStatus m_pushedStatus = MissionTaskStatus::Pending;
 };
 
 } // namespace sicnu::app

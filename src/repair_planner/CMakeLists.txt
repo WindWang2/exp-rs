@@ -21,6 +21,9 @@ target_include_directories( sicnu_repair_planner PUBLIC ${CMAKE_SOURCE_DIR}/src 
 set_target_properties( sicnu_repair_planner PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # Embedded into SHARED consumers (sicnu_agent's live capability adapter):
+    # the leaf must stay linkable into shared libraries.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: the canonical target when the

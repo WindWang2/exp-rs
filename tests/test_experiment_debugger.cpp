@@ -2192,3 +2192,107 @@ TEST_CASE( "Round-2: final-digest invariant evaluates the pipeline SINK, not the
     CHECK( singleSink.first().evaluable );
     CHECK( singleSink.first().passed );
 }
+
+// ============================================================================
+// R3 studio track — cross-store identity independence + stale-evidence
+// oracles over REAL recorded evidence (checkpoints + ExperimentStore).
+// ============================================================================
+
+TEST_CASE( "snapshot identity is store-instance independent (cross-store evidence)",
+           "[debugger][r3][cross-store]" )
+{
+    // The same recorded content held by a DIFFERENT ExperimentStore instance
+    // must yield a byte-identical snapshot digest: divergence verdicts follow
+    // the evidence, never the store identity (rowids, open handles, session
+    // state). This is the contract the Studio's single-store divergence flow
+    // leans on when a run's evidence is compared after a store reopen.
+    LabHarness labA;
+    QHash<QString, QPair<const char *, const char *>> refIdentity;
+    refIdentity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    refIdentity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    refIdentity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    RunSnapshot snapA = labA.recordAndBuild( QStringLiteral( "run-ref" ), false,
+                                             refIdentity, 0.35 );
+
+    // A second, independent store + directory with IDENTICAL content.
+    LabHarness labB;
+    RunSnapshot snapB = labB.recordAndBuild( QStringLiteral( "run-ref" ), false,
+                                             refIdentity, 0.35 );
+    CHECK( snapA.snapshotDigest() == snapB.snapshotDigest() );
+
+    // The student run lives in yet another store: cross-store sources still
+    // produce the canonical divergence the same-store test pins.
+    QHash<QString, QPair<const char *, const char *>> stuIdentity = refIdentity;
+    stuIdentity.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
+    stuIdentity.insert( QStringLiteral( "area" ), { kHex5, kHex5 } );
+    RunSnapshot snapStu = labB.recordAndBuild( QStringLiteral( "run-stu" ), false,
+                                               stuIdentity, 0.62 );
+
+    DirectoryEvidenceSource sourceA( &labA.store, labA.dir.path() );
+    DirectoryEvidenceSource sourceB( &labB.store, labB.dir.path() );
+    RunSnapshotBuilder builderA( sourceA );
+    RunSnapshotBuilder builderB( sourceB );
+    const auto reference = builderA.build( QStringLiteral( "run-ref" ) );
+    const auto student = builderB.build( QStringLiteral( "run-stu" ) );
+    REQUIRE( reference.has_value() );
+    REQUIRE( student.has_value() );
+
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-ref" ) ),
+        makeStoredRun( QStringLiteral( "run-stu" ) ),
+        reference.value(), student.value() );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+    CHECK( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+    CHECK( report->firstDivergence.confidence == CausalConfidence::High );
+}
+
+TEST_CASE( "stale evidence: held snapshots stay put and re-records are tracked",
+           "[debugger][r3][stale]" )
+{
+    // The studio/debugger hold snapshots while evidence can be re-recorded
+    // under the same run id (a student re-runs the lab). The snapshot must OWN
+    // its content — a re-record may never reach back into a held snapshot —
+    // and the freshly built snapshot must reflect exactly the new evidence.
+    LabHarness lab;
+    QHash<QString, QPair<const char *, const char *>> identity;
+    identity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    identity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    identity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+
+    const RunSnapshot before = lab.recordAndBuild( QStringLiteral( "run-x" ), false,
+                                                   identity, 0.35 );
+    const QString digestBefore = before.snapshotDigest();
+
+    // Re-record the SAME run id's CHECKPOINT evidence with different
+    // parameters and outputs. (The store row itself is lifecycle-immutable —
+    // upsertRun refuses a Running→Running re-write — so a stale-evidence
+    // rebuild is exactly a changed evidence directory under a held snapshot.)
+    QHash<QString, QPair<const char *, const char *>> reRecorded = identity;
+    reRecorded.insert( QStringLiteral( "threshold" ), { kHex4, kHex4 } );
+    reRecorded.insert( QStringLiteral( "area" ), { kHex5, kHex5 } );
+    recordCheckpoint( lab.dir.path(), QStringLiteral( "run-x" ), labDefinition( false ),
+                      reRecorded, 0.62 );
+    DirectoryEvidenceSource staleSource( &lab.store, lab.dir.path() );
+    RunSnapshotBuilder staleBuilder( staleSource );
+    const auto rebuilt = staleBuilder.build( QStringLiteral( "run-x" ) );
+    REQUIRE( rebuilt.has_value() );
+    const RunSnapshot &after = rebuilt.value();
+
+    // The held snapshot is untouched by the re-record (no lazy aliasing into
+    // the store or the checkpoint directory).
+    CHECK( before.snapshotDigest() == digestBefore );
+    // The rebuilt snapshot reflects exactly the new evidence.
+    CHECK( after.snapshotDigest() != digestBefore );
+
+    // Comparing the stale snapshot against the re-recorded run localizes the
+    // divergence deterministically at the step whose evidence moved.
+    auto report = FirstDivergenceAnalyzer::analyze(
+        makeStoredRun( QStringLiteral( "run-x" ) ),
+        makeStoredRun( QStringLiteral( "run-x" ) ), before, after );
+    REQUIRE( report.has_value() );
+    CHECK( report->verdict == QStringLiteral( "divergent" ) );
+    CHECK( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
+    CHECK( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+}

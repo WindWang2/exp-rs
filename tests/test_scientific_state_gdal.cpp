@@ -188,6 +188,38 @@ TEST_CASE( "collector refuses missing files with a typed error",
     REQUIRE( !error.empty() );
 }
 
+TEST_CASE( "typed GDAL failure keeps code and bounded CPL detail",
+           "[scientific_state][r3]" )
+{
+    ensureGdal();
+    GdalFactsError error;
+    const std::optional<DatasetFacts> facts =
+        collectDatasetFacts( "/definitely/not/here.tif", &error );
+    REQUIRE( !facts.has_value() );
+    CHECK( error.code == "gdal_open_failed" );
+    CHECK( error.path == "/definitely/not/here.tif" );
+    CHECK_FALSE( error.empty() );
+    CHECK( error.detail.find( '\n' ) == std::string::npos ); // single line, bounded
+
+    // String overload composes code + detail + path for plain-text surfaces.
+    std::string legacy;
+    REQUIRE( !collectDatasetFacts( "/definitely/not/here.tif", legacy ).has_value() );
+    CHECK( legacy.rfind( "gdal_open_failed:", 0 ) == 0 );
+    CHECK( legacy.find( "/definitely/not/here.tif" ) != std::string::npos );
+
+    // Success resets the typed error channel.
+    const std::string dir = CMAKE_SOURCE_DIR + std::string( "/build-rs14-passport" );
+    const std::string okPath = ( fs::path( dir ) / "typed_ok.tif" ).string();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, okPath.c_str(), 2, 2, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    GDALClose( dataset );
+    GdalFactsError success;
+    REQUIRE( collectDatasetFacts( okPath, &success ).has_value() );
+    CHECK( success.empty() );
+}
+
 TEST_CASE( "metadata cap drops are counted, never silent",
            "[scientific_state][review2][p2_cap]" )
 {

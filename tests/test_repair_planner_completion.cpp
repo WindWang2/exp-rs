@@ -1302,3 +1302,116 @@ TEST_CASE( "planning state reload rejects wrong versions and over-capacity histo
   CHECK( !RepairPlanningState::fromJson( overCapacity, sink, error ) );
   CHECK( error.code == "invalid_document" );
 }
+
+// ---------------------------------------------------------------------------
+// R3 planning-state deep probes: restart/eviction continuity, audit
+// counters, digest-linking negatives, and input-validation polarity.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "planning state rejects negative sequences, accepts the zero origin",
+           "[repair][state]" )
+{
+  RepairPlanningState state;
+  RepairError error;
+
+  RepairPlanningRecord negative;
+  negative.subject = "asset-neg";
+  negative.findingsDigest = "0123456789abcdef";
+  negative.planId = "srp-aaaabbbbccccdddd";
+  negative.planFingerprint = "aaaabbbbccccdddd";
+  negative.status = plan_status::kPlanned;
+  negative.sequence = -1;
+  CHECK( !state.record( negative, error ) );
+  CHECK( error.code == "invalid_state" );
+  CHECK( state.size() == 0 );
+
+  // A caller-supplied monotonic order may legitimately start at zero; only
+  // garbage (negative) is refused.
+  RepairPlanningRecord zero = negative;
+  zero.sequence = 0;
+  CHECK( state.record( zero, error ) );
+  CHECK( state.size() == 1 );
+}
+
+TEST_CASE( "planning state eviction continues after a restart from serialized form",
+           "[repair][state]" )
+{
+  RepairError error;
+  RepairPlanningState state;
+  for ( int i = 0; i < 10; ++i )
+  {
+    RepairPlanningRecord r;
+    r.subject = "asset-" + std::to_string( i );
+    r.findingsDigest = "dddddddddddddddd";
+    const std::string digits = std::to_string( 100000 + i );
+    r.planId = "srp-" + digits + "aaaaaaaaaa";
+    r.planFingerprint = digits + "aaaaaaaaaa";
+    r.status = plan_status::kPlanned;
+    r.sequence = i;
+    REQUIRE( state.record( r, error ) );
+  }
+  REQUIRE( state.size() == RepairPlanningState::kCapacity );
+  REQUIRE( state.evictedCount() == 2 );
+
+  // Restart: the serialized form carries the audit counter; the reloaded
+  // state continues evicting from the restored lowest sequence and keeps
+  // counting, so the audit trail never resets across a restart.
+  RepairPlanningState reloaded;
+  REQUIRE( RepairPlanningState::fromJson( state.toJson(), reloaded, error ) );
+  CHECK( reloaded.evictedCount() == 2 );
+
+  RepairPlanningRecord fresh;
+  fresh.subject = "asset-fresh";
+  fresh.findingsDigest = "cccccccccccccccc";
+  fresh.planId = "srp-99999999aaaaaaaa";
+  fresh.planFingerprint = "99999999aaaaaaaa";
+  fresh.status = plan_status::kPlanned;
+  fresh.sequence = 10;
+  REQUIRE( reloaded.record( fresh, error ) );
+  CHECK( reloaded.size() == RepairPlanningState::kCapacity );
+  CHECK( reloaded.evictedCount() == 3 );
+  CHECK( !reloaded.contains( "asset-2", "dddddddddddddddd" ) );
+  CHECK( reloaded.contains( "asset-3", "dddddddddddddddd" ) );
+
+  // The reloaded-and-evolved state still round-trips byte-identically.
+  RepairPlanningState again;
+  REQUIRE( RepairPlanningState::fromJson( reloaded.toJson(), again, error ) );
+  CHECK( jsonToString( again.toJson() ) == jsonToString( reloaded.toJson() ) );
+}
+
+TEST_CASE( "result digest linking refuses unknown plans and wrong digests",
+           "[repair][state]" )
+{
+  RepairPlanningState state;
+  RepairError error;
+  RepairPlanningRecord record;
+  record.subject = "asset-1";
+  record.findingsDigest = "0123456789abcdef";
+  record.planId = "srp-aaaabbbbccccdddd";
+  record.planFingerprint = "aaaabbbbccccdddd";
+  record.status = plan_status::kPlanned;
+  record.sequence = 1;
+  REQUIRE( state.record( record, error ) );
+
+  Json::Value result( Json::objectValue );
+  result["kind"] = "repair_result";
+  result["plan_id"] = "srp-aaaabbbbccccdddd";
+  result["findings_digest"] = "0123456789abcdef";
+  CHECK( state.resultDigestMatches( result ) );
+
+  // Unknown plan id: no link, never a silent true.
+  Json::Value unknown = result;
+  unknown["plan_id"] = "srp-ffffffffffffffff";
+  CHECK_FALSE( state.resultDigestMatches( unknown ) );
+
+  // Known plan, wrong findings digest: the link refuses.
+  Json::Value wrong = result;
+  wrong["findings_digest"] = "ffffffffffffffff";
+  CHECK_FALSE( state.resultDigestMatches( wrong ) );
+
+  // Malformed envelopes are false, not exceptions.
+  CHECK_FALSE( state.resultDigestMatches( Json::Value() ) );
+  Json::Value notAResult = result;
+  notAResult["kind"] = "something_else";
+  CHECK_FALSE( state.resultDigestMatches( notAResult ) );
+}

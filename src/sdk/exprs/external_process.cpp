@@ -786,6 +786,30 @@ bool drainFd( int fd, BoundedSink &sink )
 
 } // namespace
 
+bool programInSearchPath( const std::string &program, const std::string &searchPath,
+                          char separator,
+                          const std::function<bool( const std::string & )> &isExecutable )
+{
+    size_t start = 0;
+    while ( start <= searchPath.size() )
+    {
+        const size_t next = searchPath.find( separator, start );
+        const size_t end = next == std::string::npos ? searchPath.size() : next;
+        const std::string entry = searchPath.substr( start, end - start );
+        // An empty entry is the CURRENT DIRECTORY (the POSIX exec
+        // convention) — the previous splice built "/program" and probed the
+        // filesystem root instead of the publisher's working directory.
+        const std::string candidate =
+            ( entry.empty() ? std::string( "." ) : entry ) + "/" + program;
+        if ( isExecutable( candidate ) )
+            return true;
+        if ( next == std::string::npos )
+            break;
+        start = next + 1;
+    }
+    return false;
+}
+
 bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::string &error )
 {
     if ( argv.empty() || argv.front().empty() )
@@ -799,24 +823,10 @@ bool ExternalProcess::validateArgv( const std::vector<std::string> &argv, std::s
         // Resolved via PATH at exec time; verify presence now for diagnostics.
         const char *path = std::getenv( "PATH" );
         const std::string searchPath = path ? path : "/usr/bin:/bin";
-        size_t start = 0;
-        bool found = false;
-        while ( start <= searchPath.size() )
-        {
-            const size_t colon = searchPath.find( ':', start );
-            const size_t end = colon == std::string::npos ? searchPath.size() : colon;
-            const std::string candidate =
-                searchPath.substr( start, end - start ) + "/" + program;
-            if ( ::access( candidate.c_str(), X_OK ) == 0 )
-            {
-                found = true;
-                break;
-            }
-            if ( colon == std::string::npos )
-                break;
-            start = colon + 1;
-        }
-        if ( !found )
+        const auto executable = []( const std::string &candidate ) {
+            return ::access( candidate.c_str(), X_OK ) == 0;
+        };
+        if ( !programInSearchPath( program, searchPath, ':', executable ) )
         {
             error = "program '" + program + "' not found in PATH";
             return false;

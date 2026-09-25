@@ -72,6 +72,59 @@ class DetectionPublishGuard
     bool m_disarmed = false;
 };
 
+/// Owns the PREVIOUS single-file product (main + provenance sidecar) across
+/// the staged publish and the sidecar write — the raster / scene lanes'
+/// counterpart of DetectionPublishGuard (which adds shapefile companions on
+/// top of the same invariants). The previous pair is parked sidecar-FIRST,
+/// main-LAST; a throw from the swap OR the sidecar publish restores it
+/// exactly. The two crash windows the ladder can leave behind are adopted
+/// back on the next publish of the same path:
+///   * final ABSENT, backup present (crash between main park and swap)
+///     -> restore sidecar first, main last;
+///   * final present WITHOUT its sidecar, backup present WITH one (crash
+///     between swap and sidecar publish — the new product never completed
+///     publication) -> the parked pair is the last PUBLISHED product and is
+///     adopted back, replacing the unpublished file.
+/// A crash AFTER the sidecar publish only leaves backup litter, which the
+/// park's pre-clean drops — the new pair was complete, so nothing is
+/// adopted. Every fault point routes through the REAL failure branch
+/// (Verification Platform 8.0 pattern); nullptr disables.
+class ProductPublishGuard
+{
+  public:
+    /// @param stageForCleanup freshly written staged file removed when the
+    /// constructor throws (a throwing constructor never runs the destructor);
+    /// empty when the caller has no stage yet.
+    ProductPublishGuard( const QString &finalPath, const QString &backupSuffix,
+                         const char *parkFaultPoint,
+                         const QString &stageForCleanup = QString() );
+    ~ProductPublishGuard();
+
+    /// Atomically swaps a fully-written staged file onto the final path.
+    /// On a fired fault or a failed rename the stage is removed and the
+    /// error is thrown — the destructor then restores the parked pair.
+    void publishStaged( const QString &stagePath, const char *swapFaultPoint,
+                        const std::string &errorWhat );
+
+    /// Drops the whole backup family after a successful publish (the parked
+    /// pair — an adopted crash orphan is cleaned exactly like a live backup).
+    void disarm();
+
+    ProductPublishGuard( const ProductPublishGuard & ) = delete;
+    ProductPublishGuard &operator=( const ProductPublishGuard & ) = delete;
+
+  private:
+    /// Removes the backup family (main + prov sidecar backup).
+    void removeBackupFamily();
+
+    QString m_final;
+    QString m_backup;
+    QString m_stageForCleanup;
+    bool m_hadExisting = false;
+    bool m_hadProv = false;
+    bool m_disarmed = false;
+};
+
 /// Builds the single-model detection provenance document (schema
 /// exp-rs-prov/1): model identity (including the task intent — a detection
 /// product names itself a detection product, mirroring the scene artifact),

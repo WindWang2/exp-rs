@@ -390,7 +390,7 @@ PluginSnapshotResult capturePluginSnapshot(
         marker["files"] = static_cast<Json::UInt64>( files );
         marker["bytes"] = static_cast<Json::UInt64>( bytes );
         const std::string markerPath = stagingDir + "/" + kPluginSnapshotMarker;
-        std::ofstream out( markerPath, std::ios::trunc );
+        std::ofstream out( sicnu::portable::pathFromUtf8( markerPath ), std::ios::trunc );
         if ( !out )
             return fail( PluginSnapshotStatus::IoError,
                          "cannot write the snapshot marker" );
@@ -453,7 +453,7 @@ bool verifyPluginSnapshot( const std::string &snapshotDir,
         error = "snapshot has no completion marker (partial or legacy copy)";
         return false;
     }
-    std::ifstream input( markerPath );
+    std::ifstream input( sicnu::portable::pathFromUtf8( markerPath ) );
     if ( !input )
     {
         error = "snapshot marker is unreadable";
@@ -495,11 +495,11 @@ bool verifyPluginSnapshot( const std::string &snapshotDir,
     const uint64_t declaredBytes = marker["bytes"].asUInt64();
 
     // Bounded re-walk: recount payload files (marker excluded) and compare.
-    const fs::path rootNorm = fs::path( snapshotDir ).lexically_normal();
+    const fs::path rootNorm = sicnu::portable::pathFromUtf8( snapshotDir ).lexically_normal();
     uint64_t files = 0;
     uint64_t bytes = 0;
     for ( fsn::recursive_directory_iterator it(
-              fs::path( snapshotDir ), fsn::directory_options::skip_permission_denied, ec ),
+              sicnu::portable::pathFromUtf8( snapshotDir ), fsn::directory_options::skip_permission_denied, ec ),
           end;
           !ec && it != end; it.increment( ec ) )
     {

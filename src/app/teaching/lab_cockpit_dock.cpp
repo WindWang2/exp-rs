@@ -34,6 +34,7 @@
 #include <sstream>
 #include <string_view>
 #include <vector>
+#include "platform/portable.h"
 
 // Forward-declare main window slots we may call without pulling the full header
 // in unit-test builds; in the app we include main_window.h from the cpp TU
@@ -46,11 +47,14 @@ namespace {
 QString repoDataRoot()
 {
   // Prefer SICNU_SOURCE_DIR / SICNU_DATA_DIR, else walk up from cwd.
-  if ( const char *d = std::getenv( "SICNU_DATA_DIR" ) ) {
-    if ( d[0] ) return QString::fromUtf8( d );
+  {
+    // Path-valued env vars: read through the UTF-8 boundary.
+    const std::string d = sicnu::portable::envUtf8( "SICNU_DATA_DIR" );
+    if ( !d.empty() ) return QString::fromStdString( d );
   }
-  if ( const char *s = std::getenv( "SICNU_SOURCE_DIR" ) ) {
-    if ( s[0] ) return QString::fromUtf8( s ) + QStringLiteral( "/data" );
+  {
+    const std::string s = sicnu::portable::envUtf8( "SICNU_SOURCE_DIR" );
+    if ( !s.empty() ) return QString::fromStdString( s ) + QStringLiteral( "/data" );
   }
   QDir dir = QDir::current();
   for ( int i = 0; i < 8; ++i ) {
