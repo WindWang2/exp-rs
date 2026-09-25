@@ -689,6 +689,7 @@ TEST_CASE( "live repair capability source routes the real knowledge documents",
         shrunkenIds.insert( entry["id"].asString() );
     CHECK( shrunkenIds.count( "rs:resample" ) == 0 );
     CHECK( shrunkenIds.count( "rs:align" ) == 1 );
+}
 
 TEST_CASE( "D8 revision seam: content changes advance the generation, "
            "same-content rescans do not",
