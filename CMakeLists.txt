@@ -742,6 +742,10 @@ add_subdirectory(src/data)
 # RS14-05 Process-aware Experiment Grader (ADR 0174): pure C++20 + jsoncpp
 # leaf library (sicnu_grader) — zero Qt/GDAL/sicnu dependencies, no I/O.
 add_subdirectory(src/grader)
+# sicnu.lab-pack/1 data pack contract: Qt-free shared leaf — the ONE
+# parser/validator consumed by both sicnu::agent (Qt façade) and
+# sicnu::teaching_admin (pack inventory/preflight). No second pack truth.
+add_subdirectory(src/lab_pack)
 # Dataset, Experiment & Reproducibility Foundation 5.0 (ADR 0134-0138): the
 # science-core stores over sicnu_data (dataset identity/manifest/splits) and
 # sicnu_dataset (experiment/run/metrics). Qt-free leaves; tests and src/app
