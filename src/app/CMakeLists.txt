@@ -558,6 +558,9 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # agent-ops driver: the MCP `scientific:agent_session` tool delegates to
+    # an OpsDriver injected at startup (Qt-free core lib).
+    Sicnu::agent_ops
   # RS14-15 R3: the why-this-step section composes through the explain
   # adapters directly (registry knowledge / workflow projection / provenance
   # evidence) — not via sicnu_agent's private link.

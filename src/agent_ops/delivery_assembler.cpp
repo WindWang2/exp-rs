@@ -190,6 +190,9 @@ Json::Value DeliveryAssembler::capsuleExportDocument(const FinalDelivery &delive
     }
     doc["outputs"] = outs;
     doc["benchmark_refs"] = delivery.benchmarkRefs;
+    // Pending approval asks travel with the capsule: an exported outcome
+    // must not silently drop an unanswered science-changing repair gate.
+    doc["questions"] = delivery.questions;
     if (!delivery.capsule.isNull())
         doc["capsule"] = delivery.capsule;
     return doc;

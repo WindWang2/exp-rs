@@ -10,6 +10,10 @@ add_library(sicnu_agent SHARED
   lab_grader_kernels.h
   # D15 classification-change-studio: agent diagnosis seam
   tools/classification_tool.cpp
+  # R3 agent-ops live driver: production agent_loop seam adapter (verifier
+  # over harness::verifyArtifact; planner/executor seams stay caller-injected).
+  tools/agent_session_adapter.cpp
+  tools/agent_session_adapter.h
   tools/classification_tool.h
   data_platform_tools.cpp
   data_platform_tools.h

@@ -1,13 +1,94 @@
 // src/agent_ops/recovery_bridge.cpp
 #include "agent_ops/recovery_bridge.h"
 #include "agent_ops/autonomy_ops_gate.h"
+#include "repair_planner/repair_policy.h"
 #include "repair_planner/repair_schema.h"
 
+#include <algorithm>
+#include <map>
+
 namespace sicnu::agent_ops {
+namespace {
+
+/// Risk classes are fail-closed: only the three known classes pass through;
+/// anything unknown or missing resolves to the STRICTEST class. A projected
+/// plan may understate nothing — a wrong "shape_preserving" label here was
+/// the fail-open path that would let a science-changing rule look harmless
+/// to a downstream consumer of the plan document.
+std::string failClosedRiskClass(const std::string &candidate)
+{
+    if (candidate == sicnu::repair::repair_risk::kShapePreserving)
+        return candidate;
+    if (candidate == sicnu::repair::repair_risk::kRadiometric)
+        return candidate;
+    return sicnu::repair::repair_risk::kScienceChanging;
+}
+
+std::string severityForRiskClass(const std::string &riskClass)
+{
+    if (riskClass == sicnu::repair::repair_risk::kShapePreserving)
+        return "low";
+    if (riskClass == sicnu::repair::repair_risk::kRadiometric)
+        return "medium";
+    return "high";
+}
+
+/// Strictness rank for the ask gate: unknown counts as the strictest.
+int riskRank(const std::string &riskClass)
+{
+    if (riskClass == sicnu::repair::repair_risk::kShapePreserving)
+        return 0;
+    if (riskClass == sicnu::repair::repair_risk::kRadiometric)
+        return 1;
+    return 2; // science_changing AND anything unknown
+}
+
+/// The diagnostic's per-proposal evidence decides; the context's leading
+/// class is only consulted when no evidence exists. Unknown/empty evidence
+/// yields science_changing (fail-closed), never shape_preserving.
+std::string resolveLeadingRiskClass(const OpDiagnostic &diagnostic,
+                                    const std::string &fallback)
+{
+    int rank = -1;
+    for (const auto &detail : diagnostic.proposalDetails)
+    {
+        if (!detail.isObject() || !detail.isMember("rule_id"))
+            continue;
+        const std::string candidate =
+            detail.isMember("risk_class") && detail["risk_class"].isString()
+                ? detail["risk_class"].asString()
+                : std::string();
+        rank = std::max(rank, riskRank(failClosedRiskClass(candidate)));
+    }
+    if (rank >= 0)
+        return rank == 0 ? sicnu::repair::repair_risk::kShapePreserving
+                         : (rank == 1 ? sicnu::repair::repair_risk::kRadiometric
+                                      : sicnu::repair::repair_risk::kScienceChanging);
+    return failClosedRiskClass(fallback);
+}
+
+} // namespace
 
 Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
                                               const std::string &intent) const
 {
+    return projectRepairPlan(diagnostic, intent, PlanHints{});
+}
+
+Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
+                                              const std::string &intent,
+                                              const PlanHints &hints) const
+{
+    // Per-proposal risk evidence recorded by the diagnostic sources.
+    std::map<std::string, std::string> detailRisk;
+    for (const auto &detail : diagnostic.proposalDetails)
+    {
+        if (!detail.isObject() || !detail.isMember("rule_id") || !detail["rule_id"].isString())
+            continue;
+        if (detail.isMember("risk_class") && detail["risk_class"].isString())
+            detailRisk[detail["rule_id"].asString()] = detail["risk_class"].asString();
+    }
+
     sicnu::repair::RepairPlan plan;
     plan.intent = intent.empty() ? "ops_recovery" : intent;
     plan.subject = diagnostic.rootCauseCode;
@@ -16,6 +97,18 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
     plan.resolvesAllBlockers = !diagnostic.proposals.empty();
     plan.provenance["planner"] = sicnu::repair::kPlannerId;
     plan.provenance["source"] = "agent_ops.recovery_bridge";
+    // Planning-only context: the recorded approval and the teaching context
+    // ride along as AUDIT — evaluateRepairPolicy, not this projection,
+    // decides what a caller may do with each action.
+    plan.policy["science_change_approved"] = hints.scienceChangeApproved;
+    plan.policy["auto_executable"] = false;
+
+    sicnu::repair::RepairPolicyContext policyContext;
+    policyContext.domain = hints.domain;
+    policyContext.role = hints.role;
+    policyContext.scienceChangeApproved = hints.scienceChangeApproved;
+    policyContext.allowAutonomousExec = false; // ops projections never auto-execute
+
     int n = 0;
     for (const auto &ruleId : diagnostic.proposals)
     {
@@ -24,13 +117,32 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
         action.ruleId = ruleId;
         action.kind = sicnu::repair::action_kind::kCapabilityRef;
         action.operatorId = ruleId.find(':') != std::string::npos ? ruleId : ("rs:" + ruleId);
-        action.riskClass = sicnu::repair::repair_risk::kShapePreserving;
+        // No executable action key is known for an ops-projected rule id; ""
+        // keeps evaluateRepairPolicy from ever calling this auto-executable.
+        action.actionKey = "";
+        auto detail = detailRisk.find(ruleId);
+        const std::string riskClass =
+            failClosedRiskClass(detail != detailRisk.end()
+                                    ? detail->second
+                                    : hints.leadingRiskClass);
+        action.riskClass = riskClass;
         action.risk.riskClass = action.riskClass;
-        action.risk.severity = "low";
+        action.risk.severity = severityForRiskClass(action.riskClass);
         action.cost.rank = 2;
         action.cost.costClass = "light";
         action.sourceFinding["code"] = diagnostic.rootCauseCode;
         plan.selected.push_back(action);
+
+        // The policy authority's own verdict for this action, recorded in
+        // the plan (planning-only; a caller decides, nothing executes).
+        const auto decision = sicnu::repair::evaluateRepairPolicy(action, policyContext);
+        Json::Value entry(Json::objectValue);
+        entry["action_id"] = action.id;
+        entry["rule_id"] = action.ruleId;
+        entry["risk_class"] = action.riskClass;
+        entry["decision"] = decision.decision;
+        entry["reason_code"] = decision.reasonCode;
+        plan.policy["actions"].append(entry);
     }
     if (plan.selected.empty())
     {
@@ -116,9 +228,18 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
     {
         if (ctx.repairCount >= ctx.budgets.maxRepairs)
             return abortWith("MAX_REPAIRS");
-        out.repairPlan = projectRepairPlan(diagnostic, ctx.intent);
-        const bool scienceChanging =
-            ctx.leadingRiskClass == "radiometric" || ctx.leadingRiskClass == "science_changing";
+        // The diagnostic's per-proposal risk evidence is authoritative; the
+        // context's leading class is only a fallback. Anything unknown or
+        // empty counts as science-changing here — the ask gate must never
+        // rely on a caller having labeled the risk correctly.
+        const auto leading = resolveLeadingRiskClass(diagnostic, ctx.leadingRiskClass);
+        RecoveryBridge::PlanHints hints;
+        hints.leadingRiskClass = leading;
+        hints.scienceChangeApproved = ctx.humanApprovedRepair;
+        hints.domain = ctx.domain;
+        hints.role = ctx.role;
+        out.repairPlan = projectRepairPlan(diagnostic, ctx.intent, hints);
+        const bool scienceChanging = leading != sicnu::repair::repair_risk::kShapePreserving;
         if (scienceChanging && !ctx.humanApprovedRepair)
         {
             out.action = recovery_action::kAsk;
@@ -134,7 +255,7 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         req.role = ctx.role;
         req.intent = ctx.intent;
         req.actionKey = "ops:repair";
-        req.riskClass = ctx.leadingRiskClass;
+        req.riskClass = leading;
         const auto gate = gateMutatingOp(ctx.autonomyPolicy, req);
         out.autonomyAllowed = gate.allowed;
         out.autonomyReasonCode = gate.reasonCode;

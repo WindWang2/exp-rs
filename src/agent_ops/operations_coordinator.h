@@ -35,7 +35,10 @@ struct OpsRunRequest {
     std::string role;
     std::string journalDirectory; ///< empty = in-memory only
     bool approvePendingRepair = false;
-    std::string leadingRepairRiskClass = "shape_preserving";
+/// Fallback when a diagnostic carries no per-proposal risk evidence. Empty
+    /// (the default) means UNKNOWN, and unknown resolves to the STRICTEST
+    /// class downstream — never shape_preserving.
+    std::string leadingRepairRiskClass;
 };
 
 struct OpsRunResult {
@@ -48,6 +51,10 @@ struct OpsRunResult {
     std::optional<RecoveryDecision> lastRecovery;
     ReconcileResult reconcile;
     std::string error;
+    /// Non-empty when a mid-run journal checkpoint failed to persist (the
+    /// terminal persist is a separate write reported through `error`); the
+    /// session outcome itself stays authoritative.
+    std::string checkpointError;
     /// Non-empty when the live-trajectory benchmark persist failed; the
     /// session outcome itself stays authoritative.
     std::string benchmarkError;
@@ -63,6 +70,10 @@ class OperationsCoordinator {
     };
 
     OperationsCoordinator(Dependencies deps, LiveSessionRecorder::Options recorderOptions = {});
+
+    /// The injected seam bundle (read-only) — drivers use it to report
+    /// which production seams are missing BEFORE the loop is launched.
+    const Dependencies &dependencies() const { return mDeps; }
 
     void requestPause() { mPauseRequested.store(true); }
     void requestCancel() { mCancelRequested.store(true); }
@@ -105,7 +116,8 @@ class OperationsCoordinator {
   private:
     OpsRunResult finish(sicnu::agent_loop::SessionResult &&session, const OpsRunRequest &request,
                         const std::optional<OpDiagnostic> &diag,
-                        const std::optional<RecoveryDecision> &recovery);
+                        const std::optional<RecoveryDecision> &recovery,
+                        const std::string &checkpointError = {});
 
     Dependencies mDeps;
     LiveSessionRecorder mRecorder;

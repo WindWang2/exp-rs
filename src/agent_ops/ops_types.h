@@ -55,6 +55,10 @@ struct OpDiagnostic {
     Json::Value sources{Json::objectValue}; ///< verifier/preflight/runtime/debugger/...
     std::string summary;           ///< human-readable; not authoritative alone
     std::vector<std::string> proposals; ///< repair rule ids / action keys
+    /// Per-proposal risk evidence as recorded by the diagnostic sources:
+    /// [{rule_id, risk_class, operator_id}]. A proposal missing here is
+    /// treated as the STRICTEST class downstream — never shape_preserving.
+    Json::Value proposalDetails{Json::arrayValue};
 
     Json::Value toJson() const;
     static std::optional<OpDiagnostic> fromJson(const Json::Value &doc, std::string *error = nullptr);
