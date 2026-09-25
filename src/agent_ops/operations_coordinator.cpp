@@ -107,6 +107,7 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
                                            const OpsRunRequest &request,
                                            const std::optional<OpDiagnostic> &diag,
                                            const std::optional<RecoveryDecision> &recovery,
+                                           const std::string &checkpointError,
                                            const std::string &approvalError)
 {
     OpsRunResult out;
@@ -115,6 +116,7 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
     out.lastRecovery = recovery;
     out.ok = out.session.ok;
     out.approvalError = approvalError;
+    out.checkpointError = checkpointError;
 
     if (!request.journalDirectory.empty())
     {
@@ -188,6 +190,41 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
         extras.trace = out.trace;
     if (benchmarkPersisted)
         extras.benchmarkRefs.append(benchmarkRef);
+
+    // Approval/ask carrier: the loop's withhold_repair decisions are the
+    // evidence that a non-auto-approvable repair (radiometric /
+    // science-changing) was proposed and NOT applied. They surface here as
+    // typed questions on the delivery wire so every driver (CLI / MCP /
+    // panel) can route the human approval round-trip; a repair is never
+    // auto-executed, and the ask must not die inside the decision log.
+    for (const auto &dec : out.session.summary.decisions)
+    {
+        if (dec.selected.get("action", "").asString() != "withhold_repair")
+            continue;
+        Json::Value question(Json::objectValue);
+        question["kind"] = "repair_approval";
+        question["rule_id"] = dec.inputs.get("rule_id", "").asString();
+        question["risk_class"] = dec.inputs.get("risk_class", "").asString();
+        question["decision_id"] = dec.decisionId;
+        question["stage"] = dec.stage;
+        question["reason"] = dec.reason;
+        question["ask"] = "apply repair '" + question["rule_id"].asString() + "' (risk class '" +
+                          question["risk_class"].asString() +
+                          "')? It was withheld because the policy does not auto-approve it.";
+        extras.questions.append(question);
+    }
+    // The recovery bridge's ask (e.g. REPAIR_NEEDS_APPROVAL) rides along the
+    // same way — the human gate is on the wire, not only in the trace.
+    if (recovery && recovery->needsApproval)
+    {
+        Json::Value question(Json::objectValue);
+        question["kind"] = "recovery_ask";
+        question["action"] = recovery->action;
+        question["reason_code"] = recovery->reasonCode;
+        question["ask"] = "recovery requires a human decision (" + recovery->reasonCode + ")";
+        extras.questions.append(question);
+    }
+
     out.delivery = mDelivery.assemble(out.session, extras);
     out.projection = mProjector.projectResult(out.session, request.budgets);
     out.reconcile = mReconciler.reconcile(out.session.journal);
@@ -321,6 +358,26 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     sicnu::agent_loop::ScientificAgentSession session(policy, seams);
     if (mCancelRequested.load())
         session.requestCancel();
+    // Crash-evidence checkpointing: with a journal directory configured, the
+    // journal is flushed after EVERY append, so a hard kill at any stage
+    // (not only at terminal) leaves a loadable prefix on disk. The reconciler
+    // reads that prefix to refuse unsafe resumes (e.g. submitted runs that a
+    // blind restart would duplicate).
+    std::string checkpointErr;
+    if (!request.journalDirectory.empty())
+    {
+        // The directory is captured BY VALUE: the session (and its sink)
+        // outlives this scope, so a by-reference capture would dangle the
+        // moment run() left this block.
+        session.setCheckpointSink(
+            [this, dir = request.journalDirectory,
+             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
+            {
+                std::string err;
+                if (!mRecorder.persistJournal(journal, dir, &err))
+                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
+            });
+    }
     // The bridge cache is evidence about one diagnose invocation only; a
     // stale entry from a previous session must never be attributed here.
     mBridgedDiagnoser.resetLastDiagnostic();
@@ -424,7 +481,8 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     std::string finishApprovalError = approvalError;
     if (recovery && !recovery->approvalError.empty() && finishApprovalError.empty())
         finishApprovalError = recovery->approvalError;
-    return finish(std::move(result), request, diag, recovery, finishApprovalError);
+    return finish(std::move(result), request, diag, recovery, checkpointErr,
+                  finishApprovalError);
 }
 
 OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
@@ -439,6 +497,32 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         return out;
     }
 
+    // Autonomy gate BEFORE any journal is loaded or adopted: a resumed
+    // session can execute exactly like a fresh launch, so an execute-capable
+    // resume must pass the same gate as run(). Without it an L0/exam policy
+    // could be bypassed by parking a journal and resuming it.
+    if (request.policy.mode == sicnu::agent_loop::RunMode::ExecuteWithVerify)
+    {
+        OpsAutonomyRequest ar;
+        ar.mutateKind = ops_mutate::kExecute;
+        ar.domain = request.domain;
+        ar.role = request.role;
+        ar.intent = request.session.intent;
+        ar.actionKey = "ops:resume";
+        const auto gate = gateMutatingOp(mDeps.autonomyPolicy, ar);
+        if (!gate.allowed)
+        {
+            out.ok = false;
+            out.error = gate.reasonCode;
+            out.lastRecovery = RecoveryDecision{};
+            out.lastRecovery->action = recovery_action::kAbort;
+            out.lastRecovery->reasonCode = gate.reasonCode;
+            out.lastRecovery->autonomyAllowed = false;
+            out.lastRecovery->autonomyReasonCode = gate.reasonCode;
+            return out;
+        }
+    }
+
     std::string loadErr;
     out.reconcile = mReconciler.reconcileFile(journalDirectory, sessionId, &loadErr);
     if (!out.reconcile.ok || !out.reconcile.resumable)
@@ -447,9 +531,12 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         // Surface the reconciler's typed reason: the reconciler projects the
         // loop's resume contract, so its reason is the answer (a past-plan
         // journal reports RESUME_PAST_PLAN_SEAM, a delivered one
-        // ALREADY_TERMINAL / DUPLICATE_SUBMIT_REFUSED).
-        out.error = out.reconcile.duplicateSubmitRisk ? "DUPLICATE_SUBMIT_REFUSED"
-                                                       : out.reconcile.reasonCode;
+        // ALREADY_TERMINAL). DUPLICATE_SUBMIT_REFUSED stays reserved for the
+        // delivered case: a crashed mid-run journal is refused for the SAME
+        // past-plan reason, while reconcile.duplicateSubmitRisk +
+        // reconcile.submittedRunIds carry the restart hazard on the wire.
+        out.error = (out.reconcile.terminalState == "delivered") ? "DUPLICATE_SUBMIT_REFUSED"
+                                                                   : out.reconcile.reasonCode;
         return out;
     }
 
@@ -478,8 +565,13 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     if (seams.diagnoser)
         seams.diagnoser = &mBridgedDiagnoser;
 
+    // Budget parity with run(): a resumed session must run under the SAME
+    // bounds the caller asked for, not silently under policy defaults.
     sicnu::agent_loop::SessionPolicy policy = request.policy;
     policy.maxReplans = request.budgets.maxReplans;
+    policy.noProgressThreshold = request.budgets.noProgressThreshold;
+    if (request.budgets.resourceBudgetMb > 0)
+        policy.resourceBudgetMb = request.budgets.resourceBudgetMb;
     auto resumed = sicnu::agent_loop::ScientificAgentSession::resume(*journal, policy, seams);
     if (!resumed)
     {
@@ -491,10 +583,25 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         resumed->requestCancel();
     mBridgedDiagnoser.resetLastDiagnostic();
 
+    // Checkpoint the continued journal exactly like a fresh launch: a kill
+    // during the resumed leg must leave the same loadable evidence trail.
+    std::string checkpointErr;
+    if (!request.journalDirectory.empty())
+    {
+        resumed->setCheckpointSink(
+            [this, dir = journalDirectory,
+             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
+            {
+                std::string err;
+                if (!mRecorder.persistJournal(journal, dir, &err))
+                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
+            });
+    }
+
     // The loop restarts at the journal's final stage (pre-plan only) and
     // re-executes no journalled work; run() must restate the journalled goal.
     auto result = resumed->run(request.session);
-    return finish(std::move(result), request, std::nullopt, std::nullopt, std::string());
+    return finish(std::move(result), request, std::nullopt, std::nullopt, checkpointErr);
 }
 
 RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &diagnostic,

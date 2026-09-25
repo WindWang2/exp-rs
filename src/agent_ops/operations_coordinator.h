@@ -36,6 +36,11 @@ struct OpsRunRequest {
     std::string domain = "research";
     std::string role;
     std::string journalDirectory; ///< empty = in-memory only
+    bool approvePendingRepair = false;
+/// Fallback when a diagnostic carries no per-proposal risk evidence. Empty
+    /// (the default) means UNKNOWN, and unknown resolves to the STRICTEST
+    /// class downstream — never shape_preserving.
+    std::string leadingRepairRiskClass;
     /// Minted repair-approval token (optional). Verified against this
     /// coordinator, the last projected recovery plan and the launch clock;
     /// anything unverifiable fails closed (the gate stays shut and asks).
@@ -43,7 +48,6 @@ struct OpsRunRequest {
     /// Driver clock used to verify the approval at launch; <= 0 means no
     /// usable clock, which never proves an approval unexpired.
     long long approvalNowMs = 0;
-    std::string leadingRepairRiskClass = "shape_preserving";
 };
 
 struct OpsRunResult {
@@ -61,6 +65,10 @@ struct OpsRunResult {
     /// unaffected: the repair simply runs WITHOUT the approval, and the
     /// human gate asks again.
     std::string approvalError;
+    /// Non-empty when a mid-run journal checkpoint failed to persist (the
+    /// terminal persist is a separate write reported through `error`); the
+    /// session outcome itself stays authoritative.
+    std::string checkpointError;
     /// Non-empty when the live-trajectory benchmark persist failed; the
     /// session outcome itself stays authoritative.
     std::string benchmarkError;
@@ -84,6 +92,10 @@ class OperationsCoordinator {
     /// This coordinator's process-unique instance id — the value repair
     /// approval tokens bind to.
     long long instanceId() const { return mInstanceId; }
+
+    /// The injected seam bundle (read-only) — drivers use it to report
+    /// which production seams are missing BEFORE the loop is launched.
+    const Dependencies &dependencies() const { return mDeps; }
 
     void requestPause() { mPauseRequested.store(true); }
     void requestCancel() { mCancelRequested.store(true); }
@@ -144,7 +156,8 @@ class OperationsCoordinator {
     OpsRunResult finish(sicnu::agent_loop::SessionResult &&session, const OpsRunRequest &request,
                         const std::optional<OpDiagnostic> &diag,
                         const std::optional<RecoveryDecision> &recovery,
-                        const std::string &approvalError);
+                        const std::string &checkpointError = {},
+                        const std::string &approvalError = {});
 
     /// Verifies `tokenDoc` against this coordinator and the last projected
     /// repair science at clock `nowMs`. Empty string = ok, else typed code.

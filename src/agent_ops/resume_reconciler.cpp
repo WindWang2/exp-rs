@@ -92,6 +92,13 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
     r.ok = true;
     r.resumable = false;
     r.reasonCode = "RESUME_PAST_PLAN_SEAM";
+    // The restart hazard is distinct from the resume contract: this journal
+    // already SUBMITTED engine runs (recorded at submission, before any
+    // outcome), so restarting it as a new session would re-do that science.
+    // The loop still refuses to resume past the plan seam — the flag and the
+    // run-id list only make the hazard visible to the driver instead of
+    // leaving a blind restart as the only next step.
+    r.duplicateSubmitRisk = !r.submittedRunIds.empty();
     r.details["resume_constraint"] =
         "agent_loop resumes only goal_normalization/data_state_snapshot; "
         "restart as a new session";

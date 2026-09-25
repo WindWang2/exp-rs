@@ -113,6 +113,17 @@ class ScientificAgentSession {
     /// boundary and cancels any in-flight execution.
     void requestCancel() { mCancelRequested->store( true ); }
 
+    /// Opt-in crash-evidence sink: invoked after EVERY journal append with
+    /// the journal snapshot, so a host can flush the evidence trail to disk
+    /// at each boundary. The loop stays the only state machine — the sink
+    /// observes the journal, it never mutates machine state, and when unset
+    /// the loop behaves exactly as before. The sink must be cheap (it runs
+    /// mid-step) and must not re-enter the session.
+    void setCheckpointSink( std::function< void( const SessionJournal & ) > sink )
+    {
+        mCheckpointSink = std::move( sink );
+    }
+
     SessionResult run( const SessionRunRequest &request );
 
   private:
@@ -153,6 +164,7 @@ class ScientificAgentSession {
     SessionStageMachine mMachine;
     SessionJournal mJournal;
     std::function< long long() > mClock;
+    std::function< void( const SessionJournal & ) > mCheckpointSink;
     long long mClockValue = 0;
     std::shared_ptr< std::atomic< bool > > mCancelRequested{ std::make_shared< std::atomic< bool > >( false ) };
 

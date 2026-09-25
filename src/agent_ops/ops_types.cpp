@@ -33,6 +33,7 @@ Json::Value OpDiagnostic::toJson() const
     for (const auto &p : proposals)
         props.append(p);
     doc["proposals"] = props;
+    doc["proposal_details"] = proposalDetails;
     return doc;
 }
 
@@ -62,6 +63,15 @@ std::optional<OpDiagnostic> OpDiagnostic::fromJson(const Json::Value &doc, std::
         for (const auto &p : doc["proposals"])
             if (p.isString())
                 d.proposals.push_back(p.asString());
+    }
+    if (doc.isMember("proposal_details") && doc["proposal_details"].isArray())
+    {
+        for (const auto &p : doc["proposal_details"])
+        {
+            if (!p.isObject() || !p.isMember("rule_id") || !p["rule_id"].isString())
+                continue;
+            d.proposalDetails.append(p);
+        }
     }
     if (d.code.empty() || d.rootCauseCode.empty())
     {

@@ -30,7 +30,9 @@ struct RecoveryContext {
     std::string domain;
     std::string role;
     std::string intent;
-    std::string leadingRiskClass = "shape_preserving";
+    /// Fallback when the diagnostic carries no per-proposal risk evidence;
+    /// empty/unknown is treated as science-changing (fail-closed).
+    std::string leadingRiskClass;
     bool humanApprovedRepair = false;
     /// The findings digest a presented approval token was bound to. An
     /// approval only satisfies the human gate when it names EXACTLY the
@@ -62,6 +64,21 @@ class RecoveryBridge {
     /// counted cause when planning honestly is impossible.
     Json::Value projectRepairPlan(const OpDiagnostic &diagnostic,
                                   const RecoveryContext &ctx) const;
+
+    /// Hints for the planning-only repair plan projection. Everything here
+    /// is auditable context — nothing turns a science-changing candidate
+    /// auto (evaluateRepairPolicy keeps the ceiling).
+    struct PlanHints {
+        std::string leadingRiskClass;       ///< ctx.leadingRiskClass
+        bool scienceChangeApproved = false; ///< recorded human approval
+        std::string domain;                 ///< teaching-gate context ("lab")
+        std::string role;
+    };
+
+    Json::Value projectRepairPlan(const OpDiagnostic &diagnostic,
+                                  const std::string &intent) const;
+    Json::Value projectRepairPlan(const OpDiagnostic &diagnostic, const std::string &intent,
+                                  const PlanHints &hints) const;
 
   private:
     const sicnu::repair::RepairCapabilityProvider *mProvider = nullptr;

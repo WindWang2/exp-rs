@@ -563,6 +563,15 @@ void SelectionContext::setSarPredicate( SarPredicate predicate )
     scheduleRefresh();
 }
 
+void SelectionContext::notifyPipelineNodeSelection( const QString &nodeId )
+{
+    const QString trimmed = nodeId.trimmed();
+    if ( m_selectedPipelineNodeId == trimmed )
+        return; // idempotent re-announce (also covers clear-on-clear)
+    m_selectedPipelineNodeId = trimmed;
+    scheduleRefresh();
+}
+
 void SelectionContext::setInFlightTaskPredicate( InFlightPredicate predicate )
 {
     m_inFlightPredicate = std::move( predicate );
@@ -745,6 +754,8 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
     snap.selectedMissionTaskId = m_missionTaskId;
     snap.selectedMissionTaskStatus = m_missionTaskStatus;
     snap.hasMissionTaskSelection = !m_missionTaskId.isEmpty();
+    // RS14-15: the IR 2.0 canvas's selected node.
+    snap.selectedPipelineNodeId = m_selectedPipelineNodeId;
     return snap;
 }
 

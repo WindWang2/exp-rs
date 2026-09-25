@@ -2,10 +2,47 @@
 #include "agent_ops/recovery_bridge.h"
 #include "agent_ops/autonomy_ops_gate.h"
 #include "repair_planner/repair_planner.h"
+#include "repair_planner/repair_policy.h"
 #include "repair_planner/repair_schema.h"
+
+#include <algorithm>
+#include <map>
 
 namespace sicnu::agent_ops {
 namespace {
+
+/// Risk classes are fail-closed: only the three known classes pass through;
+/// anything unknown or missing resolves to the STRICTEST class. A projected
+/// plan may understate nothing — a wrong "shape_preserving" label here was
+/// the fail-open path that would let a science-changing rule look harmless
+/// to a downstream consumer of the plan document.
+std::string failClosedRiskClass(const std::string &candidate)
+{
+    if (candidate == sicnu::repair::repair_risk::kShapePreserving)
+        return candidate;
+    if (candidate == sicnu::repair::repair_risk::kRadiometric)
+        return candidate;
+    return sicnu::repair::repair_risk::kScienceChanging;
+}
+
+std::string severityForRiskClass(const std::string &riskClass)
+{
+    if (riskClass == sicnu::repair::repair_risk::kShapePreserving)
+        return "low";
+    if (riskClass == sicnu::repair::repair_risk::kRadiometric)
+        return "medium";
+    return "high";
+}
+
+/// Strictness rank for the ask gate: unknown counts as the strictest.
+int riskRank(const std::string &riskClass)
+{
+    if (riskClass == sicnu::repair::repair_risk::kShapePreserving)
+        return 0;
+    if (riskClass == sicnu::repair::repair_risk::kRadiometric)
+        return 1;
+    return 2; // science_changing AND anything unknown
+}
 
 /// Findings past this hard bound are dropped by the bridge BEFORE planning
 /// (the digest then covers the bounded set): a hostile diagnoser embedding
@@ -137,6 +174,91 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
     return planDoc;
 }
 
+Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
+                                              const std::string &intent) const
+{
+    return projectRepairPlan(diagnostic, intent, PlanHints{});
+}
+
+Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
+                                              const std::string &intent,
+                                              const PlanHints &hints) const
+{
+    // Per-proposal risk evidence recorded by the diagnostic sources.
+    std::map<std::string, std::string> detailRisk;
+    for (const auto &detail : diagnostic.proposalDetails)
+    {
+        if (!detail.isObject() || !detail.isMember("rule_id") || !detail["rule_id"].isString())
+            continue;
+        if (detail.isMember("risk_class") && detail["risk_class"].isString())
+            detailRisk[detail["rule_id"].asString()] = detail["risk_class"].asString();
+    }
+
+    sicnu::repair::RepairPlan plan;
+    plan.intent = intent.empty() ? "ops_recovery" : intent;
+    plan.subject = diagnostic.rootCauseCode;
+    plan.status = diagnostic.proposals.empty() ? sicnu::repair::plan_status::kNoSafeRepair
+                                               : sicnu::repair::plan_status::kPlanned;
+    plan.resolvesAllBlockers = !diagnostic.proposals.empty();
+    plan.provenance["planner"] = sicnu::repair::kPlannerId;
+    plan.provenance["source"] = "agent_ops.recovery_bridge";
+    // Planning-only context: the recorded approval and the teaching context
+    // ride along as AUDIT — evaluateRepairPolicy, not this projection,
+    // decides what a caller may do with each action.
+    plan.policy["science_change_approved"] = hints.scienceChangeApproved;
+    plan.policy["auto_executable"] = false;
+
+    sicnu::repair::RepairPolicyContext policyContext;
+    policyContext.domain = hints.domain;
+    policyContext.role = hints.role;
+    policyContext.scienceChangeApproved = hints.scienceChangeApproved;
+    policyContext.allowAutonomousExec = false; // ops projections never auto-execute
+
+    int n = 0;
+    for (const auto &ruleId : diagnostic.proposals)
+    {
+        sicnu::repair::RepairAction action;
+        action.id = "ra-ops-" + std::to_string(++n);
+        action.ruleId = ruleId;
+        action.kind = sicnu::repair::action_kind::kCapabilityRef;
+        action.operatorId = ruleId.find(':') != std::string::npos ? ruleId : ("rs:" + ruleId);
+        // No executable action key is known for an ops-projected rule id; ""
+        // keeps evaluateRepairPolicy from ever calling this auto-executable.
+        action.actionKey = "";
+        auto detail = detailRisk.find(ruleId);
+        const std::string riskClass =
+            failClosedRiskClass(detail != detailRisk.end()
+                                    ? detail->second
+                                    : hints.leadingRiskClass);
+        action.riskClass = riskClass;
+        action.risk.riskClass = action.riskClass;
+        action.risk.severity = severityForRiskClass(action.riskClass);
+        action.cost.rank = 2;
+        action.cost.costClass = "light";
+        action.sourceFinding["code"] = diagnostic.rootCauseCode;
+        plan.selected.push_back(action);
+
+        // The policy authority's own verdict for this action, recorded in
+        // the plan (planning-only; a caller decides, nothing executes).
+        const auto decision = sicnu::repair::evaluateRepairPolicy(action, policyContext);
+        Json::Value entry(Json::objectValue);
+        entry["action_id"] = action.id;
+        entry["rule_id"] = action.ruleId;
+        entry["risk_class"] = action.riskClass;
+        entry["decision"] = decision.decision;
+        entry["reason_code"] = decision.reasonCode;
+        plan.policy["actions"].append(entry);
+    }
+    if (plan.selected.empty())
+    {
+        plan.noSafeRepair = Json::objectValue;
+        plan.noSafeRepair["cause"] = "no_proposals";
+        plan.noSafeRepair["root_cause"] = diagnostic.rootCauseCode;
+    }
+    sicnu::repair::assignRepairPlanIdentity(plan);
+    return sicnu::repair::repairPlanToJson(plan);
+}
+
 RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
                                         const RecoveryContext &ctx) const
 {
@@ -221,15 +343,6 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
             out.repairPlan.isObject() && out.repairPlan["status"].isString()
                 ? out.repairPlan["status"].asString()
                 : std::string();
-        if (planStatus != sicnu::repair::plan_status::kPlanned)
-        {
-            out.action = recovery_action::kAsk;
-            out.reasonCode = "NO_SAFE_REPAIR_PLAN";
-            out.needsApproval = true;
-            out.autonomyAllowed = true;
-            out.autonomyReasonCode = sicnu::agent::autonomy::autonomy_reason_codes::kAllowed;
-            return out;
-        }
 
         // The risk class that gates the repair comes from the plan's own
         // candidate contract — the caller's leadingRiskClass claim cannot
@@ -238,6 +351,8 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         // candidates: a plan is executed whole, so one radiometric or
         // science-changing candidate makes the whole launch approval-gated,
         // and the autonomy gate always sees the strictest class present.
+        // Candidate labels are normalized fail-closed: an unknown class on a
+        // candidate is science-changing, never "harmless".
         std::string leadingRisk;
         bool anyRadiometricOrScience = false;
         const Json::Value &selected = out.repairPlan["selected"];
@@ -245,10 +360,10 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         {
             for (const Json::Value &candidate : selected)
             {
-                const std::string risk = candidate.isObject() &&
-                                                 candidate["risk_class"].isString()
-                                             ? candidate["risk_class"].asString()
-                                             : std::string();
+                const std::string risk = failClosedRiskClass(
+                    candidate.isObject() && candidate["risk_class"].isString()
+                        ? candidate["risk_class"].asString()
+                        : std::string());
                 if (risk == "radiometric" || risk == "science_changing")
                     anyRadiometricOrScience = true;
                 if (risk == "science_changing")
@@ -258,7 +373,28 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
             }
         }
         if (leadingRisk.empty())
-            leadingRisk = ctx.leadingRiskClass;
+            leadingRisk = failClosedRiskClass(ctx.leadingRiskClass);
+
+        // The diagnostic's per-proposal risk evidence is authoritative too:
+        // when the diagnoser recorded evidence, its strictest fail-closed
+        // class gates the ask exactly like the plan's own candidates — a
+        // permissive caller claim never wins over recorded evidence.
+        bool hasRiskEvidence = false;
+        std::string evidenceRisk = sicnu::repair::repair_risk::kShapePreserving;
+        for (const auto &detail : diagnostic.proposalDetails)
+        {
+            if (!detail.isObject() || !detail.isMember("rule_id"))
+                continue;
+            hasRiskEvidence = true;
+            const std::string risk = failClosedRiskClass(
+                detail.isMember("risk_class") && detail["risk_class"].isString()
+                    ? detail["risk_class"].asString()
+                    : std::string());
+            if (riskRank(risk) > riskRank(evidenceRisk))
+                evidenceRisk = risk;
+        }
+        const bool evidenceScienceChanging =
+            hasRiskEvidence && evidenceRisk != sicnu::repair::repair_risk::kShapePreserving;
 
         // An approval is bound to ONE repair science (the findings digest in
         // the plan's provenance). A token minted for a different finding set
@@ -275,10 +411,19 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         if (ctx.humanApprovedRepair && !approvedForThisPlan)
             out.approvalError = "APPROVAL_WRONG_PLAN";
 
-        if (anyRadiometricOrScience && !approvedForThisPlan)
+        if ((evidenceScienceChanging || anyRadiometricOrScience) && !approvedForThisPlan)
         {
             out.action = recovery_action::kAsk;
             out.reasonCode = "REPAIR_NEEDS_APPROVAL";
+            out.needsApproval = true;
+            out.autonomyAllowed = true;
+            out.autonomyReasonCode = sicnu::agent::autonomy::autonomy_reason_codes::kAllowed;
+            return out;
+        }
+        if (planStatus != sicnu::repair::plan_status::kPlanned)
+        {
+            out.action = recovery_action::kAsk;
+            out.reasonCode = "NO_SAFE_REPAIR_PLAN";
             out.needsApproval = true;
             out.autonomyAllowed = true;
             out.autonomyReasonCode = sicnu::agent::autonomy::autonomy_reason_codes::kAllowed;
@@ -290,7 +435,13 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
         req.role = ctx.role;
         req.intent = ctx.intent;
         req.actionKey = "ops:repair";
-        req.riskClass = leadingRisk;
+        // The gate sees the STRICTEST of the plan's own candidates and the
+        // diagnostic's recorded evidence — neither source can downgrade the
+        // other.
+        std::string gateRisk = leadingRisk;
+        if (riskRank(evidenceRisk) > riskRank(gateRisk))
+            gateRisk = evidenceRisk;
+        req.riskClass = gateRisk;
         const auto gate = gateMutatingOp(ctx.autonomyPolicy, req);
         out.autonomyAllowed = gate.allowed;
         out.autonomyReasonCode = gate.reasonCode;
