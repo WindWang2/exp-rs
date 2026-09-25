@@ -350,6 +350,11 @@ void QgisDesktopWindow::openProject()
                     updateEditingUI(nullptr);
                     updateWindowTitle();
                     refreshWorkspaceBrowser();
+                    // The session rolled back to the EMPTY project: the
+                    // previous project's recording context must go with it.
+                    // Keeping it would let the cockpit bind a fresh capsule
+                    // export to the CLOSED project's experiment store.
+                    setLabRecordingContext( QString(), QString(), QString() );
                     statusBar()->showMessage(
                         tr( "Open failed — session reset to an empty project" ), 4000 );
                 }

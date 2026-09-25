@@ -64,7 +64,10 @@ def check_autonomy_policy(path: Path, policy: object) -> list[str]:
     if max_level is not None and max_level not in AUTONOMY_LEVELS:
         problems.append(
             f"{path}: autonomy_policy.max_level {max_level!r} not in {sorted(AUTONOMY_LEVELS)}")
-    if level is not None and max_level is not None and level > max_level:
+    # Compare only when BOTH sides validated (a bogus "exceeds" error on top
+    # of the invalid-value error would just confuse authors; lexicographic
+    # order is sound inside the closed single-digit L0–L5 set).
+    if level in AUTONOMY_LEVELS and max_level in AUTONOMY_LEVELS and level > max_level:
         problems.append(
             f"{path}: autonomy_policy level {level} exceeds max_level {max_level}")
     source = policy.get("source")

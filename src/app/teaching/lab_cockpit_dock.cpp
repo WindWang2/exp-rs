@@ -442,9 +442,15 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
           srcRef = srcRef.substr( kDataPrefix.size() );
         const Json::Value sourceDoc = loadJsonFile( QDir( data ).filePath(
           QString::fromStdString( srcRef ) ) );
-        if ( sourceDoc.isObject() )
+        if ( sourceDoc.isObject() ) {
           timeline = sicnu::teaching::LabStepTimeline::fromLabDocument(
             sourceDoc, m_session.stepIndex );
+          // The projected steps belong to THIS course lab entry: keep the
+          // wrapper id so downstream labId matching (session, feedback,
+          // restore) never sees the source labspec's alias id.
+          if ( timeline.ok )
+            timeline.labId = labId.toStdString();
+        }
       }
     }
   }
@@ -473,14 +479,14 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
     if ( parsed.ok )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kCourse, parsed.policy } );
     else
-      policyIssues.push_back( "课程策略解析失败：已按 fail-closed 处理" );
+      policyIssues.push_back( "课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）" );
   }
   if ( labDoc.isObject() && labDoc.isMember( "autonomy" ) ) {
     auto parsed = sicnu::agent::autonomy::parseAutonomyPolicy( labDoc["autonomy"] );
     if ( parsed.ok )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kLabspec, parsed.policy } );
     else
-      policyIssues.push_back( "实验策略解析失败：已按 fail-closed 处理" );
+      policyIssues.push_back( "实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）" );
   }
   auto resolvedPolicy = sicnu::agent::autonomy::resolveEffectivePolicy( layers );
   auto autonomy = sicnu::teaching::AutonomyEffectiveDisplay::fromPolicyDoc(
@@ -511,13 +517,16 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   }
   m_session.autonomyPolicyRef = policyRef.toStdString();
 
-  QString why = tr( "（可解释工作流投影）\n" );
   if ( const auto *cur = timeline.current() ) {
+    QString why = tr( "（可解释工作流投影）\n" );
     why += QString::fromStdString( cur->whyHintZh );
     why += QLatin1Char( '\n' );
     why += tr( "\n来源徽章: 系统事实 | 编写指引 | 推断\n" );
+    m_workspace->setWhyMarkdown( why );
   }
-  m_workspace->setWhyMarkdown( why );
+  // A stepless/fail-closed timeline keeps the projection's refusal reasons
+  // in the why pane (written by the workspace) — the default banner must
+  // not overwrite them.
 
   // Restore the persisted feedback summary for THIS lab only; a summary from
   // another lab is never shown. The summary is re-materialized from the

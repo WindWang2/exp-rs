@@ -102,6 +102,17 @@ struct DockFixture
   ~DockFixture() { delete dock; }
 };
 
+/// RAII guard for tests that point SICNU_DATA_DIR elsewhere: a REQUIRE
+/// failure must not leak the alternate data root into later test cases.
+struct DataDirGuard
+{
+  ~DataDirGuard()
+  {
+    qputenv( "SICNU_DATA_DIR",
+             QString::fromStdString( sourceDir() + "/data" ).toUtf8() );
+  }
+};
+
 GuidedLabWorkspace *workspaceOf( LabCockpitDock *dock )
 {
   return dock->findChild<GuidedLabWorkspace *>();
@@ -433,23 +444,43 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
            "[teaching][smoke][buttons]" )
 {
   DockFixture fx( "buttons_empty" );
-  // lab8_temporal_analysis has no .lab.json in data/labs (registry marks it
-  // out of scope, owned by the temporal track) → the timeline is fail-closed
-  // with no steps. The workspace must not keep any button enabled.
-  fx.dock->openLab( QStringLiteral( "m08_temporal_phenology" ),
-                    QStringLiteral( "lab8_temporal_analysis" ) );
+  // Start on a lab WITH steps so the workspace has live affordances, then
+  // switch to lab8_temporal_analysis (no .lab.json in data/labs — the
+  // registry marks it out of scope, owned by the temporal track): the
+  // fail-closed timeline must retire every button the previous lab enabled.
+  fx.dock->openLab( QStringLiteral( "m01" ), QStringLiteral( "lab15_data_inspection" ) );
   auto *ws = workspaceOf( fx.dock );
   REQUIRE( ws != nullptr );
+  REQUIRE( !ws->timeline().steps.empty() );
+
+  auto runButtonOf = [ws]() -> QPushButton * {
+    for ( auto *btn : ws->findChildren<QPushButton *>() )
+      if ( btn->text().contains( QStringLiteral( "运行" ) ) ) return btn;
+    return nullptr;
+  };
+  QPushButton *runBefore = runButtonOf();
+  REQUIRE( runBefore != nullptr );
+  // The first lab15 step with an operator id enables Run.
+  bool anyOperatorStep = false;
+  for ( const auto &s : ws->timeline().steps )
+    if ( !s.operatorId.empty() ) anyOperatorStep = true;
+  REQUIRE( anyOperatorStep );
+  auto *stepListBefore = ws->findChild<QListWidget *>();
+  REQUIRE( stepListBefore != nullptr );
+  int operatorRow = -1;
+  for ( const auto &s : ws->timeline().steps )
+    if ( !s.operatorId.empty() && !s.humanRequired ) { operatorRow = s.index; break; }
+  if ( operatorRow >= 0 ) stepListBefore->setCurrentRow( operatorRow );
+  REQUIRE( runBefore->isEnabled() );
+
+  fx.dock->openLab( QStringLiteral( "m08_temporal_phenology" ),
+                    QStringLiteral( "lab8_temporal_analysis" ) );
   REQUIRE( ws->timeline().steps.empty() );
 
-  auto *stepList = ws->findChild<QListWidget *>();
-  REQUIRE( stepList != nullptr );
   const auto buttons = ws->findChildren<QPushButton *>();
   REQUIRE( buttons.size() >= 6 );
-  for ( const auto *btn : buttons )
-    INFO( "button: " << btn->text().toStdString() );
   // Run / prev / next / submit must all be OFF (fail-closed); no stale
-  // enablement from a previously opened lab may survive.
+  // enablement from the previously opened lab may survive.
   for ( const auto *btn : buttons ) {
     const bool navOrRun = btn->text().contains( QStringLiteral( "上一步" ) )
                           || btn->text().contains( QStringLiteral( "下一步" ) )
@@ -458,6 +489,14 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
     if ( navOrRun )
       REQUIRE_FALSE( btn->isEnabled() );
   }
+  // The fail-closed reason is on the surface, not hidden.
+  auto *why = ws->findChild<QTextEdit *>();
+  QTextEdit *whyView = nullptr;
+  const auto edits = ws->findChildren<QTextEdit *>();
+  REQUIRE( !edits.empty() );
+  for ( auto *edit : edits )
+    if ( edit->toPlainText().contains( QStringLiteral( "⚠" ) ) ) whyView = edit;
+  REQUIRE( whyView != nullptr );
 }
 
 TEST_CASE( "smoke: canonical wrapper labs project the registry-declared source",
@@ -473,6 +512,9 @@ TEST_CASE( "smoke: canonical wrapper labs project the registry-declared source",
   const auto tl = ws->timeline();
   REQUIRE( tl.ok );
   REQUIRE( tl.sourceKind == "labspec" );
+  // The projected steps belong to the course lab entry, not the source
+  // labspec's alias id — downstream labId matching must keep working.
+  REQUIRE( tl.labId == "lab12_sar_processing" );
   REQUIRE( !tl.steps.empty() );
   REQUIRE( tl.steps.front().operatorId == "rs:sar_calibrate" );
 }
@@ -521,6 +563,7 @@ TEST_CASE( "smoke: autonomy comes from the course authority, not a hardcode",
       out << Json::writeString( w, manifest );
     }
     DockFixture fx( "autonomy_nopoly" );
+    DataDirGuard envGuard;
     qputenv( "SICNU_DATA_DIR", QString::fromStdString( altData ).toUtf8() );
     LabCockpitDock dock( nullptr );
     dock.openLab( QStringLiteral( "m01" ), QStringLiteral( "lab15_data_inspection" ) );
@@ -532,7 +575,7 @@ TEST_CASE( "smoke: autonomy comes from the course authority, not a hardcode",
     for ( const auto &issue : autonomy.issuesZh )
       if ( issue.find( "fail-closed" ) != std::string::npos ) honestNote = true;
     REQUIRE( honestNote );
-    qputenv( "SICNU_DATA_DIR", QString::fromStdString( dataSrc ).toUtf8() );
+    // DataDirGuard restores the repo data root even on REQUIRE failure.
   }
 }
 
@@ -573,15 +616,20 @@ TEST_CASE( "smoke: lab operator params pass the runtime registry validator",
   const std::string data = sourceDir() + "/data";
   int checked = 0;
   for ( const auto &entry : fs::directory_iterator( data + "/labs" ) ) {
-    if ( !entry.is_regular_file()
-         || entry.path().extension() != ".json"
-         || entry.path().filename().string().find( ".lab.json" ) == std::string::npos )
+    if ( !entry.is_regular_file() || entry.path().extension() != ".json" )
       continue;
+    const std::string name = entry.path().filename().string();
+    const bool isLabDoc = name.ends_with( ".lab.json" );
+    const bool isLabspecDoc = name.ends_with( ".labspec.json" );
+    if ( !isLabDoc && !isLabspecDoc ) continue;
     std::ifstream in( entry.path() );
     Json::Value lab;
     Json::CharReaderBuilder b;
     std::string errs;
-    if ( !Json::parseFromStream( b, in, &lab, &errs ) ) continue;
+    // A lab document that stopped parsing must fail the gate LOUDLY, not
+    // silently drop out of coverage.
+    INFO( "parsing " << name );
+    REQUIRE( Json::parseFromStream( b, in, &lab, &errs ) );
     if ( !lab.isObject() || !lab.isMember( "steps" ) || !lab["steps"].isArray() ) continue;
     for ( const auto &s : lab["steps"] ) {
       if ( !s.isObject() || !s.isMember( "operator_id" ) || !s["operator_id"].isString() )
@@ -600,7 +648,10 @@ TEST_CASE( "smoke: lab operator params pass the runtime registry validator",
       ++checked;
     }
   }
-  REQUIRE( checked >= 15 ); // the shipped labs carry at least this many steps
+  // Exact shipped census (lab01..lab11, lab15, lab16 operator+params steps;
+  // the canonical labspec sources carry steps without params): a change in
+  // this number is a data change and must update this gate consciously.
+  REQUIRE( checked == 19 );
 }
 
 TEST_CASE( "smoke: hostile params are refused with typed reasons",
@@ -734,7 +785,6 @@ TEST_CASE( "smoke: run button hands the operator real, absolutized prefill",
   REQUIRE( stepList != nullptr );
   stepList->setCurrentRow( opRow );
 
-  auto *runBtn = ws->findChild<QPushButton *>();
   QPushButton *run = nullptr;
   const auto buttons = ws->findChildren<QPushButton *>();
   for ( auto *btn : buttons )

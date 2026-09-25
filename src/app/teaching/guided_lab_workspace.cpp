@@ -141,14 +141,19 @@ void GuidedLabWorkspace::setReadiness( const sicnu::teaching::LabReadiness &r )
 void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDisplay &a )
 {
   m_autonomy = a;
-  m_autonomyLabel->setText(
+  QString text =
     tr( "自主等级: %1（%2）" )
       .arg( QString::fromStdString( a.effectiveLevel ) )
       .arg( a.ladderLabelsZh.empty()
               ? QString()
               : QString::fromStdString(
                   a.ladderLabelsZh[static_cast<size_t>(
-                    std::clamp( a.effectiveOrdinal, 0, 5 ) )] ) ) );
+                    std::clamp( a.effectiveOrdinal, 0, 5 ) )] ) );
+  // Policy issues (parse failures, undeclared authority) surface on the
+  // label itself — a tooltip-only honesty note is too easy to miss.
+  if ( !a.issuesZh.empty() )
+    text += QStringLiteral( "  ⚠ %1" ).arg( a.issuesZh.front() );
+  m_autonomyLabel->setText( text );
   QString tip = tr( "阶梯:\n" );
   for ( const auto &l : a.ladderLabelsZh ) tip += QString::fromStdString( l ) + QLatin1Char( '\n' );
   for ( const auto &row : a.rows ) {
@@ -243,6 +248,14 @@ void GuidedLabWorkspace::showCurrent()
     m_submitHumanBtn->setEnabled( false );
     m_prevBtn->setEnabled( false );
     m_nextBtn->setEnabled( false );
+    // The projection's refusal reasons belong on the student surface — a
+    // bare "无步骤" without its reason is not honest feedback.
+    if ( !m_tl.issuesZh.empty() ) {
+      QString reasons;
+      for ( const auto &issue : m_tl.issuesZh )
+        reasons += QStringLiteral( "⚠ %1\n" ).arg( QString::fromStdString( issue ) );
+      m_whyView->setPlainText( reasons.trimmed() );
+    }
     return;
   }
   m_stepTitle->setText( QString::fromStdString( cur->titleZh.empty() ? cur->title : cur->titleZh ) );

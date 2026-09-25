@@ -100,7 +100,13 @@ Json::Value absolutizeLabInputPaths( const Json::Value &params, const QString &d
     if ( node.isString() ) {
       const std::string &value = node.asString();
       static constexpr std::string_view kDataPrefix = "data/";
-      if ( value.starts_with( kDataPrefix ) )
+      // Only rewrite values shaped like bare repo paths: anything with
+      // whitespace or expression punctuation (e.g. a future band-math
+      // expression that happens to start with "data/") is left untouched —
+      // a false path guess must not corrupt a non-path value.
+      const bool pathShaped = value.starts_with( kDataPrefix )
+                              && value.find_first_of( " \t()[]{}*+," ) == std::string::npos;
+      if ( pathShaped )
         return Json::Value( QDir( dataRoot )
                               .filePath( QString::fromStdString(
                                 value.substr( kDataPrefix.size() ) ) )
