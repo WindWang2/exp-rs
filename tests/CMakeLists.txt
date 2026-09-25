@@ -9745,6 +9745,19 @@ sicnu_link_jsoncpp(test_harness_evals)
 sicnu_add_test(test_harness_lab_evals)
 sicnu_link_jsoncpp(test_harness_lab_evals)
 
+# Teacher credential gate (SICNU_LAB_TEACHER_TOKEN): focused, minimal-link
+# regression test for the inverted constant-time comparison (#1202). Kept
+# tiny on purpose so it builds even when the heavy harness suites do not.
+add_executable(test_teacher_credential test_teacher_credential.cpp)
+target_link_libraries(test_teacher_credential PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+target_include_directories(test_teacher_credential PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_link_jsoncpp(test_teacher_credential)
+sicnu_discover_tests(test_teacher_credential)
+
 
 # Harness 7.0 capability-knowledge drift guard: entries vs the live operator
 # registry, operator x-rs-contract facts, and the closed intent vocabulary.
