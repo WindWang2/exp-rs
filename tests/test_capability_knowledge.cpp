@@ -34,11 +34,13 @@
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QString>
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <set>
 #include <string>
@@ -633,4 +635,85 @@ TEST_CASE( "D8 query API: bounded browsing over the closed families",
           listsAtmospheric = true;
     }
     CHECK( listsAtmospheric );
+}
+
+
+TEST_CASE( "D8 revision seam: content changes advance the generation, "
+           "same-content rescans do not",
+           "[capability][d8][revision]" )
+{
+    CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+
+    const std::string dir = ( QDir::tempPath() + QStringLiteral( "/cap_knowledge_rev_%1" )
+                                  .arg( QCoreApplication::applicationPid() ) )
+                                .toStdString();
+    QDir().mkpath( QString::fromStdString( dir ) );
+    const std::string path = dir + "/entry.json";
+    {
+        std::ofstream out( path, std::ios::trunc );
+        out << "{\"id\":\"test:rev\",\"family\":\"test_rev\","
+               "\"intents\":[\"classify\"]}";
+    }
+
+    knowledge.setDirectory( dir );
+    const std::uint64_t first = knowledge.revision();
+    REQUIRE( first > 0 );
+    CHECK_FALSE( knowledge.contentDigest().empty() );
+
+    // Same content rescan: no churn (caches keyed on revision() stay put).
+    CHECK( knowledge.reload() > 0 );
+    CHECK( knowledge.revision() == first );
+    const std::string digest = knowledge.contentDigest();
+
+    // Content change: exactly one generation step, digest follows.
+    {
+        std::ofstream out( path, std::ios::trunc );
+        out << "{\"id\":\"test:rev\",\"family\":\"test_rev\","
+               "\"intents\":[\"classify\",\"ndvi\"],"
+               "\"band_roles\":{\"red\":1,\"nir\":1}}";
+    }
+    knowledge.reload();
+    CHECK( knowledge.revision() == first + 1 );
+    CHECK( knowledge.contentDigest() != digest );
+
+    // factSetsForIntent serves the intent-bearing entry with merged facts.
+    const auto facts = knowledge.factSetsForIntent( "ndvi" );
+    bool servedEntry = false;
+    for ( const Json::Value &candidate : facts )
+    {
+        servedEntry =
+            servedEntry || ( candidate[ "id" ].asString() == "test:rev" &&
+                             candidate[ "band_roles" ][ "red" ].asInt() == 1 );
+    }
+    CHECK( servedEntry );
+
+    QFile::remove( QString::fromStdString( path ) );
+    QDir( QString::fromStdString( dir ) ).removeRecursively();
+}
+
+TEST_CASE( "D8 fact sets: variant-declared intents overlay the base entry",
+           "[capability][d8][revision]" )
+{
+    CapabilityKnowledge &knowledge = CapabilityKnowledge::instance();
+    knowledge.setDirectory( std::string( kSourceDir ) + "/data/agent/capabilities" );
+
+    const auto ndvi = knowledge.factSetsForIntent( "ndvi" );
+    REQUIRE( !ndvi.empty() );
+    for ( const Json::Value &candidate : ndvi )
+    {
+        CHECK( candidate.isObject() );
+        CHECK_FALSE( candidate[ "id" ].asString().empty() );
+    }
+
+    // Variant-scoped requirements survive: some candidate for the
+    // variant-declared intent carries red_edge in its overlay band_roles.
+    const auto variantServed = knowledge.factSetsForIntent( "ndre" );
+    bool redEdgeOverlay = false;
+    for ( const Json::Value &candidate : variantServed )
+    {
+        const Json::Value &roles = candidate[ "band_roles" ];
+        redEdgeOverlay = redEdgeOverlay ||
+                         ( roles.isObject() && roles.isMember( "red_edge" ) );
+    }
+    CHECK( redEdgeOverlay );
 }

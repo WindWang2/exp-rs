@@ -18,14 +18,50 @@ bool autonomyAllowsExec( const std::string &level )
     return level == "L5";
 }
 
-std::string assetDigestOf( const std::vector<AssetSummary> &assets,
-                           const std::vector<sicnu::state::RemoteSensingAssetState> &passports )
+std::uint64_t fnv1a64( const std::string &s )
 {
+    std::uint64_t h = 14695981039346656037ull;
+    for ( unsigned char c : s )
+    {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+std::string hex16( std::uint64_t v )
+{
+    static const char *kHex = "0123456789abcdef";
+    std::string out( 16, '0' );
+    for ( int i = 15; i >= 0; --i )
+    {
+        out[static_cast<std::size_t>( i )] = kHex[v & 0xf];
+        v >>= 4;
+    }
+    return out;
+}
+
+std::string assetDigestOf(
+    const std::vector<AssetSummary> &assets,
+    const std::vector<sicnu::state::RemoteSensingAssetState> &passports,
+    const std::vector<Json::Value> &observed )
+{
+    // Identity AND content: the same id/revision with mutated content (a
+    // re-imported file, an authority reinstall that keeps revisions) must
+    // land on a different cache key — the digest covers the passport
+    // projection the bundle is actually built from. @p observed carries the
+    // SAME projections the synthesize path uses (each built exactly once).
     std::ostringstream oss;
     for ( const auto &a : assets )
         oss << a.assetId << '@' << a.revision << ';';
-    for ( const auto &p : passports )
-        oss << p.assetId << '@' << p.revision << '#' << p.radiometric.unit << ';';
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    builder["emitUTF8"] = true;
+    for ( std::size_t i = 0; i < passports.size() && i < observed.size(); ++i )
+    {
+        oss << passports[i].assetId << '@' << passports[i].revision << '#'
+            << hex16( fnv1a64( Json::writeString( builder, observed[i] ) ) ) << ';';
+    }
     return oss.str();
 }
 
@@ -91,6 +127,7 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     bool anyMissing = false;
     bool anyLive = false;
     bool anyInline = false;
+    std::vector<std::string> resolveFailures;
     // Provenance of the planner-facts primary: it is states.front(), which is
     // an inline passport whenever the caller supplied one (passports are
     // appended first), otherwise the first live-resolved asset.
@@ -128,6 +165,12 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             summaries.push_back( missing );
             unknown = true;
             anyMissing = true;
+            // Typed reason survives into the bundle problem channel:
+            // gdal_open_failed ≠ asset_not_found ≠ resolver_unavailable.
+            std::string marker = "asset_resolve_failed:" + resolved.error;
+            if ( !resolved.errorDetail.empty() )
+                marker += ":" + resolved.errorDetail;
+            resolveFailures.push_back( std::move( marker ) );
         }
     }
 
@@ -139,26 +182,66 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
             unknown = true;
     }
 
-    if ( !states.empty() )
-        mergedObserved = observedStateFromPassport( states.front() );
-    // Multi-asset CRS/grid conflict detection (structural).
+    // One projection per passport, reused for the digest, the observed
+    // state, and the planner facts (never rebuilt on the cached path).
+    std::vector<Json::Value> observed;
+    observed.reserve( states.size() );
+    for ( const auto &s : states )
+        observed.push_back( observedStateFromPassport( s ) );
+    if ( !observed.empty() )
+        mergedObserved = observed.front();
+    // Multi-asset CRS/grid conflict detection (structural): pairwise across
+    // ALL assets — a conflict between assets 2 and 3 is as blocking as one
+    // between 1 and 2.
     if ( states.size() >= 2 )
     {
-        const auto &a = states[0].geometry;
-        const auto &b = states[1].geometry;
-        if ( a.hasCrs && b.hasCrs && !a.crsAuthid.empty() && !b.crsAuthid.empty() &&
-             a.crsAuthid != b.crsAuthid )
+        bool crsConflict = false;
+        bool gridConflict = false;
+        bool haveCrs = false;
+        bool havePixel = false;
+        std::string crsAuthid;
+        double pixelX = 0.0;
+        double pixelY = 0.0;
+        for ( const auto &s : states )
+        {
+            const auto &g = s.geometry;
+            if ( g.hasCrs && !g.crsAuthid.empty() )
+            {
+                if ( haveCrs && crsAuthid != g.crsAuthid )
+                    crsConflict = true;
+                if ( !haveCrs )
+                {
+                    crsAuthid = g.crsAuthid;
+                    haveCrs = true;
+                }
+            }
+            if ( g.hasPixelSize )
+            {
+                if ( havePixel && ( pixelX != g.pixelSizeX || pixelY != g.pixelSizeY ) )
+                    gridConflict = true;
+                if ( !havePixel )
+                {
+                    pixelX = g.pixelSizeX;
+                    pixelY = g.pixelSizeY;
+                    havePixel = true;
+                }
+            }
+        }
+        if ( crsConflict )
             mergedObserved["crs_conflicted"] = true;
-        if ( a.hasPixelSize && b.hasPixelSize &&
-             ( a.pixelSizeX != b.pixelSizeX || a.pixelSizeY != b.pixelSizeY ) )
+        if ( gridConflict )
             mergedObserved["grid_conflicted"] = true;
     }
 
     const CapabilityFactsLookup *capFacts = capabilityFacts();
     const bool haveCapProvider = capFacts && static_cast<bool>( capFacts->entriesForIntent );
+    // One revision read per synthesize: cache key and provenance must agree
+    // even if the authority reloads mid-flight.
+    const std::uint64_t capRevision =
+        haveCapProvider && capFacts->revision ? capFacts->revision() : 0;
 
     CacheKeyMaterial keyMat;
-    keyMat.assetDigest = assetDigestOf( summaries, states );
+    keyMat.assetDigest = assetDigestOf( summaries, states, observed );
     keyMat.catalogGeneration = mAssets.catalogGeneration();
     keyMat.registryRevision = mRecipes.registryRevision();
     keyMat.recipePackDigest = mRecipes.packDigest();
@@ -174,7 +257,7 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     keyMat.determinismRequired = constraints.determinismRequired;
     keyMat.capabilityAuthority =
         haveCapProvider ? capFacts->authority : std::string( "__builtin__" );
-    keyMat.capabilityRevision = haveCapProvider ? capFacts->revision : 0;
+    keyMat.capabilityRevision = capRevision;
     const std::string cacheKey = makeCacheKey( keyMat );
 
     if ( request.useCache )
@@ -218,6 +301,13 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     bundle.recipes = recipes.hits;
     bundle.constraints = constraints;
     bundle.openQuestions = caps.openQuestions;
+    // Typed resolve failures join the problem channel (deduped, order-stable).
+    for ( const auto &failure : resolveFailures )
+    {
+        if ( std::find( bundle.openQuestions.begin(), bundle.openQuestions.end(), failure ) ==
+             bundle.openQuestions.end() )
+            bundle.openQuestions.push_back( failure );
+    }
 
     // Section provenance — consumers must be able to tell live authority
     // data from caller input, broker fallbacks, or absence.
@@ -251,7 +341,7 @@ SynthesizeResult ScienceContextBroker::synthesize( const SynthesizeRequest &requ
     {
         capsSource.source = ContentSource::LiveAuthority;
         capsSource.authority = capFacts->authority;
-        capsSource.revision = capFacts->revision;
+        capsSource.revision = capRevision;
         capsSource.degraded = caps.presenceUnknown;
     }
     else if ( !caps.entries.empty() )
