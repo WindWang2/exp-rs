@@ -202,21 +202,22 @@ LabSessionStore::LabSessionStore( std::string rootDir )
 
 std::string LabSessionStore::defaultRoot()
 {
-#if !defined(_WIN32)
-  if ( const char *env = ::getenv( "SICNU_LAB_SESSION_DIR" ) )
+  // One portable implementation replaces the hand-copied POSIX/Win32 pair:
+  // the env read goes through the UTF-8 boundary (the ACP getenv/getcwd/
+  // GetCurrentDirectoryA trio returned code-page bytes that later corrupted
+  // every path built on this root for non-ASCII homes), and the working
+  // directory comes from std::filesystem rendered back to UTF-8. A
+  // set-but-empty SICNU_LAB_SESSION_DIR now falls through to the default
+  // root instead of yielding "" (which silently made every session path
+  // relative to the process CWD).
+  std::string env = sicnu::portable::envUtf8( "SICNU_LAB_SESSION_DIR" );
+  if ( !env.empty() )
     return env;
-  char buffer[ 4096 ];
-  if ( ::getcwd( buffer, sizeof( buffer ) ) )
-    return std::string( buffer ) + "/.sicnu/lab/sessions";
-  return std::string( ".sicnu/lab/sessions" );
-#else
-  if ( const char *env = std::getenv( "SICNU_LAB_SESSION_DIR" ) )
-    return env;
-  char buffer[ MAX_PATH ];
-  if ( GetCurrentDirectoryA( MAX_PATH, buffer ) )
-    return std::string( buffer ) + "\\.sicnu\\lab\\sessions";
-  return std::string( ".sicnu\\lab\\sessions" );
-#endif
+  std::error_code ec;
+  const std::filesystem::path cwd = std::filesystem::current_path( ec );
+  const std::string base =
+    ec ? std::string() : sicnu::portable::pathToUtf8( cwd );
+  return ( base.empty() ? std::string( "." ) : base ) + "/.sicnu/lab/sessions";
 }
 
 std::string LabSessionStore::sessionPath( const std::string &sessionId,

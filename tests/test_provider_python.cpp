@@ -172,6 +172,11 @@ TEST_CASE( "worker death maps to ProviderCrash", "[models][python]" )
     CHECK_THAT( e.what(),
                 Catch::Matchers::ContainsSubstring( "restart budget is exhausted" ) );
   }
+
+  // Track 13 crash recovery: the exhausted budget is the for-good death —
+  // the session must report itself permanently unavailable so the registry
+  // recycles the cached corpse instead of serving it forever.
+  CHECK( session->permanentlyUnavailable() );
 }
 
 TEST_CASE( "missing worker script fails the load loudly", "[models][python]" )

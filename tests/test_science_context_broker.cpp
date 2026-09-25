@@ -4,11 +4,16 @@
 #include "science_context/agent_adapter.h"
 #include "science_context/broker.h"
 #include "science_context/bundle.h"
+#include "science_context/capability_facts.h"
 #include "science_context/capability_router.h"
+#include "science_context/gdal_asset_source.h"
+#include "science_context/live_asset_resolver.h"
 #include "science_context/observed_state.h"
 #include "scientific_state/asset_state_types.h"
 #include "scientific_state/asset_state_json.h"
 
+#include <algorithm>
+#include <memory>
 #include <stdexcept>
 
 using namespace sicnu::science_context;
@@ -224,10 +229,10 @@ TEST_CASE( "registry and asset invalidation", "[science_context]" )
 {
     auto broker = makeBroker();
     auto state = makeOptical( "x", "surface_reflectance", { "red", "nir" } );
-    broker.assets().setResolver( [&]( const std::string &key ) -> std::optional<RemoteSensingAssetState> {
+    broker.assets().setResolver( [&]( const std::string &key ) -> PassportResolution {
         if ( key == state.assetId )
-            return state;
-        return std::nullopt;
+            return PassportResolution{ state, "", "" };
+        return PassportResolution{ std::nullopt, "asset_not_found", "" };
     } );
     SynthesizeRequest req;
     req.goal = "ndvi";
@@ -461,4 +466,407 @@ TEST_CASE( "tool errors on hostile args", "[science_context]" )
     Json::Value args( Json::objectValue );
     args["passport_json"] = "{not json";
     CHECK_THROWS_AS( agent_adapter::dataAssetPassport( args ), std::runtime_error );
+}
+
+// ---------------------------------------------------------------------------
+// R3 Track 03 — live authority / cache invalidation / budget oracles.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "inline passport content change must not hit stale bundle",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "mut", "surface_reflectance", { "red", "nir" } );
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = "ndvi";
+    req.passports = { state };
+    auto first = broker.synthesize( req );
+    REQUIRE( first.cacheHit == false );
+    REQUIRE( first.bundle.assets.size() == 1 );
+    CHECK( first.bundle.assets[0].crsAuthid == "EPSG:4326" );
+
+    // Same asset id, same revision, NEW content (re-imported file): the
+    // content-sensitive digest must miss, never serve the old projection.
+    state.geometry.crsAuthid = "EPSG:3857";
+    SynthesizeRequest req2 = req;
+    req2.passports = { state };
+    auto second = broker.synthesize( req2 );
+    CHECK( second.cacheHit == false );
+    REQUIRE( second.bundle.assets.size() == 1 );
+    CHECK( second.bundle.assets[0].crsAuthid == "EPSG:3857" );
+}
+
+TEST_CASE( "invalidateAsset forces re-resolution and serves new content",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "mut", "surface_reflectance", { "red", "nir" } );
+    int resolverCalls = 0;
+    broker.assets().setResolver(
+        [&]( const std::string &key ) -> PassportResolution {
+            if ( key != state.assetId )
+                return PassportResolution{ std::nullopt, "asset_not_found", "" };
+            ++resolverCalls;
+            return PassportResolution{ state, "", "" };
+        } );
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = "ndvi";
+    req.assetKeys = { "mut" };
+    auto first = broker.synthesize( req );
+    REQUIRE( first.cacheHit == false );
+
+    // Authority reinstall keeps id AND revision but the content changed; the
+    // documented invalidation hook must force the resolver to be consulted
+    // again and the new content to be served.
+    state.radiometric.unit = "digital_number";
+    broker.invalidateAsset( "mut" );
+    auto second = broker.synthesize( req );
+    CHECK( second.cacheHit == false );
+    CHECK( resolverCalls >= 2 );
+    REQUIRE( second.bundle.assets.size() == 1 );
+    CHECK( second.bundle.assets[0].radiometricUnit == "digital_number" );
+}
+
+TEST_CASE( "CRS conflict is detected across more than two assets", "[science_context][r3]" )
+{
+    auto a = makeOptical( "a", "surface_reflectance", { "red", "nir" } );
+    auto b = makeOptical( "b", "surface_reflectance", { "red", "nir" } );
+    auto c = makeOptical( "c", "surface_reflectance", { "red", "nir" } );
+    c.geometry.crsAuthid = "EPSG:3857"; // conflict is between b and c, not a vs b
+    auto broker = makeBroker();
+    SynthesizeRequest req;
+    req.goal = "compute NDVI";
+    req.intent = "ndvi";
+    req.passports = { a, b, c };
+    auto result = broker.synthesize( req );
+    REQUIRE( !result.bundle.capabilities.empty() );
+    CHECK( result.bundle.capabilities[0].status == "unavailable" );
+    REQUIRE( !result.bundle.capabilities[0].reasons.empty() );
+    CHECK( result.bundle.capabilities[0].reasons[0].find( "CRS_GRID" ) != std::string::npos );
+}
+
+TEST_CASE( "hostile long intent stays inside the byte budget", "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = std::string( 100000, 'x' ); // operator echo inflates open questions
+    req.budget.maxBytes = 8192;
+    auto result = broker.synthesize( req );
+    const int serialized = static_cast<int>( serializeBundle( result.bundle ).size() );
+    INFO( "serialized=" << serialized << " finalBytes=" << result.bundle.truncation.finalBytes );
+    CHECK( serialized <= req.budget.maxBytes );
+    CHECK( result.bundle.truncation.truncated == true );
+    // The planner projection must mirror the budgeted question set — dropped
+    // questions must not survive in a secondary section.
+    CHECK( static_cast<int>( result.bundle.planner.openQuestions.size() ) <=
+           static_cast<int>( result.bundle.openQuestions.size() ) );
+}
+
+TEST_CASE( "hostile long goal is bounded and explicitly marked", "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "sr", "surface_reflectance", { "red", "nir" } );
+    SynthesizeRequest req;
+    req.goal = std::string( 100000, 'y' );
+    req.intent = "ndvi";
+    req.passports = { state };
+    req.budget.maxBytes = 8192;
+    auto result = broker.synthesize( req );
+    const int serialized = static_cast<int>( serializeBundle( result.bundle ).size() );
+    INFO( "serialized=" << serialized << " truncated=" << result.bundle.truncation.truncated );
+    // The goal is the ONLY oversized field here, so the emitted bundle must
+    // fit the budget — not merely be flagged.
+    CHECK( serialized <= req.budget.maxBytes );
+    CHECK( result.bundle.truncation.truncated == true );
+    CHECK( std::find( result.bundle.truncation.sections.begin(),
+                      result.bundle.truncation.sections.end(),
+                      "goal" ) != result.bundle.truncation.sections.end() );
+}
+
+TEST_CASE( "asset A to B to A requests never cross cache contexts",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    const auto assetA = makeOptical( "assetA", "surface_reflectance", { "red", "nir" } );
+    const auto assetB = makeSar( "assetB" ); // different modality → different bundle
+    SynthesizeRequest a, b;
+    a.goal = "analyze";
+    a.intent = "ndvi";
+    a.passports = { assetA };
+    b.goal = "analyze";
+    b.intent = "sar_change";
+    b.passports = { assetB };
+
+    for ( int round = 0; round < 3; ++round )
+    {
+        const auto ra = broker.synthesize( a );
+        const auto rb = broker.synthesize( b );
+        REQUIRE( ra.bundle.assets.size() == 1 );
+        REQUIRE( rb.bundle.assets.size() == 1 );
+        CHECK( ra.bundle.assets[0].assetId == "assetA" );
+        CHECK( rb.bundle.assets[0].assetId == "assetB" );
+        CHECK( ra.bundle.assets[0].modality != rb.bundle.assets[0].modality );
+    }
+    // Steady state: both directions served from cache with the right content.
+    CHECK( broker.synthesize( a ).cacheHit == true );
+    CHECK( broker.synthesize( b ).cacheHit == true );
+    auto aAgain = broker.synthesize( a );
+    REQUIRE( aAgain.bundle.assets.size() == 1 );
+    CHECK( aAgain.bundle.assets[0].assetId == "assetA" );
+    CHECK( aAgain.bundle.assets[0].radiometricUnit == "surface_reflectance" );
+}
+
+TEST_CASE( "one byte of goal difference produces a different bundle",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "one", "surface_reflectance", { "red", "nir" } );
+    SynthesizeRequest req1;
+    req1.goal = "compute an ndvi mosaic";
+    req1.intent = "ndvi";
+    req1.passports = { state };
+    SynthesizeRequest req2 = req1;
+    req2.goal = "compute an ndvi mosaicX"; // exactly one byte more
+
+    const auto first = broker.synthesize( req1 );
+    const auto second = broker.synthesize( req2 );
+    CHECK( first.cacheHit == false );
+    CHECK( second.cacheHit == false ); // must not collide onto the first key
+    CHECK( first.bundle.goal != second.bundle.goal );
+    CHECK( first.bundle.bundleId != second.bundle.bundleId );
+    // Repeats of each still hit their own entry.
+    CHECK( broker.synthesize( req1 ).cacheHit == true );
+    CHECK( broker.synthesize( req2 ).cacheHit == true );
+}
+
+TEST_CASE( "duplicate request serves identical bytes from cache", "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "dup", "surface_reflectance", { "red", "nir" } );
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = "ndvi";
+    req.passports = { state };
+    auto a = broker.synthesize( req );
+    auto b = broker.synthesize( req );
+    CHECK( b.cacheHit == true );
+    CHECK( serializeBundle( a.bundle ) == serializeBundle( b.bundle ) );
+    CHECK( a.bundle.bundleId == b.bundle.bundleId );
+}
+
+TEST_CASE( "cache eviction is LRU, bounded, and counted", "[science_context][r3]" )
+{
+    ScienceContextBroker broker;
+    seedRecipes( broker.recipes() );
+    auto state = makeOptical( "lru", "surface_reflectance", { "red", "nir" } );
+    const int overflow = 6;
+    for ( int i = 0; i < ContextCache::kMaxEntries + overflow; ++i )
+    {
+        SynthesizeRequest req;
+        req.goal = "goal " + std::to_string( i );
+        req.intent = "ndvi";
+        req.passports = { state };
+        broker.synthesize( req );
+    }
+    CHECK( broker.cache().size() == ContextCache::kMaxEntries );
+    CHECK( broker.cache().evictions() == static_cast<std::uint64_t>( overflow ) );
+
+    // Deterministic victims: requests 0..(overflow-1) were evicted in order,
+    // request `overflow` and the LAST request are kept — regardless of
+    // unordered_map iteration order. Retention is probed FIRST: a miss
+    // re-inserts the entry and itself churns the cache.
+    auto request = [&]( int i ) {
+        SynthesizeRequest req;
+        req.goal = "goal " + std::to_string( i );
+        req.intent = "ndvi";
+        req.passports = { state };
+        return broker.synthesize( req );
+    };
+    CHECK( request( overflow ).cacheHit == true );
+    CHECK( request( ContextCache::kMaxEntries + overflow - 1 ).cacheHit == true );
+    CHECK( request( 0 ).cacheHit == false );
+    CHECK( request( overflow - 1 ).cacheHit == false );
+
+    // Hits/misses are counted for invalidation-cost probes.
+    CHECK( broker.cache().hits() >= 2 );
+    CHECK( broker.cache().misses() >= 2 );
+}
+
+TEST_CASE( "capability authority revision change invalidates cached bundles",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "cr", "surface_reflectance", { "red", "nir" } );
+    std::uint64_t authorityRevision = 1;
+    CapabilityFactsLookup lookup;
+    lookup.authority = "capability_knowledge.test";
+    lookup.entriesForIntent = []( const std::string &intent ) -> std::vector<Json::Value> {
+        if ( intent != "ndvi" )
+            return {};
+        Json::Value entry( Json::objectValue );
+        entry["id"] = "rs:ndvi";
+        Json::Value roles( Json::objectValue );
+        roles["red"] = 1;
+        roles["nir"] = 1;
+        entry["band_roles"] = roles;
+        return { entry };
+    };
+    lookup.revision = [&authorityRevision] { return authorityRevision; };
+    broker.setCapabilityFacts( lookup );
+
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = "ndvi";
+    req.passports = { state };
+    CHECK( broker.synthesize( req ).cacheHit == false );
+    CHECK( broker.synthesize( req ).cacheHit == true );
+
+    // Authority reinstall: same request, advanced authority revision ⇒ miss.
+    authorityRevision = 2;
+    SynthesizeRequest req2 = req;
+    req2.passports = { state };
+    auto after = broker.synthesize( req2 );
+    CHECK( after.cacheHit == false );
+    CHECK( after.bundle.sources.capabilities.revision == std::uint64_t{ 2 } );
+    CHECK( broker.synthesize( req2 ).cacheHit == true );
+}
+
+TEST_CASE( "GDAL open failure keeps its typed reason in the bundle",
+           "[science_context][r3]" )
+{
+    ScienceContextBroker broker;
+    AssetFactSources sources;
+    sources.dataset = gdalDatasetFactsCollector();
+    broker.assets().setResolver( makeFactsBasedResolver( sources ) );
+    SynthesizeRequest req;
+    req.goal = "inspect";
+    req.assetKeys = { "/definitely/not/here.tif" };
+    auto result = broker.synthesize( req );
+    REQUIRE( result.bundle.assets.size() == 1 );
+    CHECK( result.bundle.assets[0].evidence == EvidenceBucket::Unknown );
+    bool gdalTyped = false;
+    for ( const auto &q : result.bundle.openQuestions )
+        gdalTyped = gdalTyped ||
+                    q.rfind( "asset_resolve_failed:gdal_open_failed", 0 ) == 0;
+    CHECK( gdalTyped );
+    CHECK( result.bundle.sources.assets.source == ContentSource::Unavailable );
+}
+
+TEST_CASE( "resolver failures and missing assets stay typed and distinct",
+           "[science_context][r3]" )
+{
+    ScienceContextBroker broker;
+    broker.assets().setResolver(
+        []( const std::string &key ) -> PassportResolution {
+            if ( key == "gone" )
+                return PassportResolution{ std::nullopt, "asset_not_found", "" };
+            if ( key == "broken" )
+                return PassportResolution{ std::nullopt, "gdal_open_failed",
+                                           "not a raster (unit test)" };
+            return PassportResolution{ std::nullopt, "", "" };
+        } );
+    SynthesizeRequest req;
+    req.goal = "inspect";
+    req.assetKeys = { "gone", "broken" };
+    auto result = broker.synthesize( req );
+    bool sawMissing = false;
+    bool sawGdal = false;
+    for ( const auto &q : result.bundle.openQuestions )
+    {
+        sawMissing = sawMissing || q.rfind( "asset_resolve_failed:asset_not_found", 0 ) == 0;
+        sawGdal = sawGdal ||
+                  q.rfind( "asset_resolve_failed:gdal_open_failed:not a raster", 0 ) == 0;
+    }
+    CHECK( sawMissing );
+    CHECK( sawGdal );
+}
+
+namespace
+{
+
+/// Strict UTF-8 shape check: every lead byte announces a sequence length and
+/// every continuation byte completes one. A cut mid-sequence fails this.
+bool validUtf8( const std::string &s )
+{
+    int continuation = 0;
+    for ( const unsigned char c : s )
+    {
+        if ( continuation > 0 )
+        {
+            if ( ( c & 0xC0 ) != 0x80 )
+                return false;
+            --continuation;
+        }
+        else if ( ( c & 0x80 ) == 0 )
+            continue;
+        else if ( ( c & 0xE0 ) == 0xC0 )
+            continuation = 1;
+        else if ( ( c & 0xF0 ) == 0xE0 )
+            continuation = 2;
+        else if ( ( c & 0xF8 ) == 0xF0 )
+            continuation = 3;
+        else
+            return false;
+    }
+    return continuation == 0;
+}
+
+} // namespace
+
+TEST_CASE( "hostile multi-byte content stays valid UTF-8 under the budget",
+           "[science_context][r3]" )
+{
+    auto broker = makeBroker();
+    auto state = makeOptical( "utf", "surface_reflectance", { "red", "nir" } );
+    SynthesizeRequest req;
+    // Valid multi-byte input only: 40,000 U+6C34 (水, 3 bytes each) ≈ 120 KB.
+    req.goal = std::string( 40000, '\x0' );
+    req.goal.clear();
+    for ( int i = 0; i < 40000; ++i )
+        req.goal += "\xE6\xB0\xB4";
+    req.intent = "ndvi";
+    req.passports = { state };
+    req.budget.maxBytes = 8192;
+    auto result = broker.synthesize( req );
+    REQUIRE( result.bundle.truncation.truncated );
+    const std::string serialized = serializeBundle( result.bundle );
+
+    Json::Value json;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    REQUIRE( reader->parse( serialized.data(), serialized.data() + serialized.size(),
+                            &json, &errors ) );
+    // The budgeted goal must still be well-formed UTF-8: no orphaned
+    // continuation bytes at the cut, marker visible on the wire.
+    const Json::Value cutGoal = json["goal"];
+    REQUIRE( cutGoal.isString() );
+    const std::string emitted = cutGoal.asString();
+    CHECK( validUtf8( emitted ) );
+    CHECK( emitted.size() < req.goal.size() );
+    CHECK( emitted.rfind( "[~truncated]" ) != std::string::npos );
+    // Every string field in the bundle passes the same shape check.
+    for ( const auto &q : json["open_questions"] )
+        CHECK( validUtf8( q.asString() ) );
+    CHECK( validUtf8( json["intent"].asString() ) );
+}
+
+TEST_CASE( "asset trims are counted in truncation metadata", "[science_context][r3]" )
+{
+    ScienceContextBroker broker;
+    seedRecipes( broker.recipes() );
+    SynthesizeRequest req;
+    req.goal = "ndvi";
+    req.intent = "ndvi";
+    for ( int i = 0; i < 12; ++i )
+        req.passports.push_back( makeOptical( "asset" + std::to_string( i ),
+                                              "surface_reflectance", { "red", "nir" } ) );
+    req.budget.maxAssets = 3;
+    auto result = broker.synthesize( req );
+    CHECK( static_cast<int>( result.bundle.assets.size() ) <= 3 );
+    CHECK( result.bundle.truncation.droppedAssets >= 9 );
+    CHECK( result.bundle.truncation.truncated == true );
 }

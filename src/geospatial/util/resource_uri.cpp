@@ -13,6 +13,7 @@
 #include <cctype>
 #include <filesystem>
 #include <vector>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -92,7 +93,7 @@ bool fileExistsUtf8( const std::string &path )
   std::filesystem::path native;
   try
   {
-    native = std::filesystem::u8path( path );
+    native = sicnu::portable::pathFromUtf8( path );
   }
   catch ( ... )
   {
@@ -110,7 +111,7 @@ bool isDirectoryUtf8( const std::string &path )
   std::filesystem::path native;
   try
   {
-    native = std::filesystem::u8path( path );
+    native = sicnu::portable::pathFromUtf8( path );
   }
   catch ( ... )
   {

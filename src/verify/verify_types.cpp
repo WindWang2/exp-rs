@@ -3,6 +3,7 @@
 #include "verify_types.h"
 
 #include "verify_error_codes.h"
+#include "verify_locale.h"
 #include "verify_sha256.h"
 
 #include <algorithm>
@@ -656,6 +657,10 @@ std::string canonicalJsonText( const Json::Value &value )
     // discipline as the lab grade body and DAG provenance).
     builder["precision"] = 12;
     builder["precisionType"] = "significant";
+    // The classic-locale pin is what makes "digests are stable across
+    // hosts/locales" true: the writer below formats through snprintf %.*g,
+    // which follows the thread's LC_NUMERIC.
+    const ClassicNumericLocale pin;
     return Json::writeString( builder, normalized );
 }
 
@@ -764,6 +769,10 @@ bool parseSpec( const std::string &text, VerificationSpec &out, std::string &err
     try
     {
         const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+        // Same locale pin as the writer: canonical text re-parsed on a
+        // host with a comma-decimal LC_NUMERIC must read the same values
+        // back or the digest seal would diverge across machines.
+        const ClassicNumericLocale pin;
         if ( !reader->parse( text.data(), text.data() + text.size(), &root, &parseError ) )
         {
             error = "invalid JSON: " + parseError;

@@ -3,6 +3,8 @@
 
 #include "agent/harness/curriculum_progress.h"
 
+#include "platform/portable.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -114,8 +116,11 @@ Json::Value parseJsonFile( const std::filesystem::path &path, std::string *error
 
 std::filesystem::path envOrEmpty( const char *name )
 {
-    const char *value = std::getenv( name );
-    return ( value && value[0] ) ? std::filesystem::path( value ) : std::filesystem::path();
+    // Path-valued env vars read through the UTF-8 boundary: std::getenv
+    // hands back ANSI code page bytes on Windows, and the narrow
+    // std::filesystem::path constructor would re-decode them wrongly.
+    const std::string value = sicnu::portable::envUtf8( name );
+    return value.empty() ? std::filesystem::path() : sicnu::portable::pathFromUtf8( value );
 }
 
 std::filesystem::path sourceDirFallback()

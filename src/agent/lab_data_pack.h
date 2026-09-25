@@ -1,24 +1,15 @@
-// src/agent/lab_data_pack.h — `sicnu.lab-pack/1`: the lab data pack contract.
+// src/agent/lab_data_pack.h — Qt façade over the sicnu.lab-pack/1 contract.
+//
+// The parser/validator TRUTH lives in the Qt-free shared leaf
+// src/lab_pack (sicnu::labpack) — this header keeps the historical
+// sicnu::agent Qt API (QString/QVector payloads, consumers in src/cli) as a
+// thin delegating façade with zero parsing logic of its own, so the agent
+// and the teacher console can never drift into two pack semantics.
 //
 // A pack is ONE lab's machine-checkable data contract: which files the lab
 // needs, where they come from, and how far a classroom machine can trust
-// them. It answers the teacher's 23:00 question — "will lab 4 grade on this
-// machine?" — with typed evidence instead of a run-time surprise.
-//
-// Provenance tiers (verification strength follows the tier):
-//   committed-fixture  in-repo, deterministic (tests/fixtures/lab/...) —
-//                      sha256 REQUIRED; missing/corrupt input FAILS the pack.
-//   generated-samples  produced on the target by sicnu_generate_samples
-//                      (fixed seed) — presence checked; declared byte size is
-//                      informative (GDAL-version drift), a mismatch WARNS.
-//   generated-tmp      produced by scripts/gen_lab_fixtures.py for headless
-//                      pipeline verification — same policy as samples.
-//
-// The pack NEVER writes; verification is read-only, streams hashes in bounded
-// chunks (no whole-file loads), and tolerates Unicode paths (QString/QFile).
-// Sibling of the grading rules (sicnu.lab.rules/1) and the data-spec sheets
-// (sicnu.lab-data-spec.v1): rules grade artifacts, data-specs declare
-// requirements, packs verify deployment.
+// them. See src/lab_pack/lab_pack.h for the full contract (provenance tiers,
+// verification strength, bounded-memory hashing, Unicode-path policy).
 #pragma once
 
 #include <json/json.h>
@@ -58,7 +49,7 @@ struct LabPackInput
   Json::Value toJson() const;
 };
 
-/// One lab's parsed pack document.
+/// One lab's parsed pack document (Qt façade of sicnu::labpack::PackDocument).
 struct LabDataPack
 {
   QString labId;
@@ -119,7 +110,7 @@ struct LabPackVerification
   QString overall;
   QVector<Json::Value> issues;  ///< typed {code, path?, detail} objects, sorted
   qint64 verifiedBytes = 0;     ///< bytes confirmed on disk
-  Json::Value toJson() const;   ///< {overall, verified_bytes, input_count, issues[]}
+  Json::Value toJson() const;   ///< {overall, verified_bytes, issues[]}
 };
 
 class LabPackVerifier
@@ -132,9 +123,10 @@ class LabPackVerifier
     /// pack content problems — everything lands in the typed result.
     static LabPackVerification verify( const LabDataPack &pack, const QString &root );
 
-    /// Load every `*.pack.json` in @p dir (sorted by filename, same policy as
-    /// LabSpecCatalog). Returns packs that loaded; @p problems receives one
-    /// entry per unloadable file ("<file>: <code> <message>", load order).
+    /// Load every `*.pack.json` in @p dir (sorted by filename bytes — the
+    /// deterministic order, stable across locales/platforms). Returns packs
+    /// that loaded; @p problems receives one entry per unloadable file
+    /// ("<file>: <code> <message>", load order).
     static QVector<LabDataPack> loadPacksFromDir(
       const QString &dir, QVector<LabDataPackResult> *problems = nullptr );
 };

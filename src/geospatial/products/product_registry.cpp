@@ -23,6 +23,7 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -58,13 +59,13 @@ std::string joinPath( const std::string &base, const std::string &name )
 bool existsLocal( const std::string &path )
 {
   std::error_code ec;
-  return fs::exists( fs::u8path( path ), ec );
+  return fs::exists( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 bool isDirectoryLocal( const std::string &path )
 {
   std::error_code ec;
-  return fs::is_directory( fs::u8path( path ), ec );
+  return fs::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 /// Bounded single-level directory listing (product directories are small;
@@ -74,7 +75,7 @@ std::vector<std::string> listDirectory( const std::string &dir, int maxEntries =
 {
   std::vector<std::string> names;
   std::error_code ec;
-  fs::directory_iterator it( fs::u8path( dir ), ec );
+  fs::directory_iterator it( sicnu::portable::pathFromUtf8( dir ), ec );
   if ( ec )
     return names;
   for ( fs::directory_iterator end; it != end && static_cast<int>( names.size() ) < maxEntries; it.increment( ec ) )

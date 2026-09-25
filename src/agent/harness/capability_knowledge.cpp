@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 
 namespace sicnu::agent::harness {
 
@@ -216,6 +217,27 @@ int CapabilityKnowledge::reload()
   // Deterministic order: directory iteration order is filesystem-dependent,
   // and operatorsForIntent/candidates use mOrder as a tiebreak.
   std::sort( mOrder.begin(), mOrder.end() );
+
+  // Revision seam: advance only when the loaded content actually changed, so
+  // caches keyed on revision() never churn on a same-content rescan.
+  Json::StreamWriterBuilder digestBuilder;
+  digestBuilder[ "indentation" ] = "";
+  std::ostringstream digestSeed;
+  for ( const std::string &id : mOrder )
+  {
+    digestSeed << id << '\x1f' << Json::writeString( digestBuilder, mEntries[ id ] ) << '\x1e';
+  }
+  for ( const std::string &id : mFamilyDefaults.getMemberNames() )
+  {
+    digestSeed << id << '\x1f' << Json::writeString( digestBuilder, mFamilyDefaults[ id ] )
+               << '\x1e';
+  }
+  const std::string digest = digestSeed.str();
+  if ( digest != mContentDigest )
+  {
+    ++mRevision;
+    mContentDigest = digest;
+  }
   return static_cast<int>( mOrder.size() );
 }
 
@@ -235,6 +257,18 @@ void ensureLoaded( CapabilityKnowledge &knowledge )
 }
 
 } // namespace
+
+std::uint64_t CapabilityKnowledge::revision() const
+{
+  ensureLoaded( const_cast<CapabilityKnowledge &>( *this ) );
+  return mRevision;
+}
+
+std::string CapabilityKnowledge::contentDigest() const
+{
+  ensureLoaded( const_cast<CapabilityKnowledge &>( *this ) );
+  return mContentDigest;
+}
 
 Json::Value CapabilityKnowledge::mergedEntry( const Json::Value &raw,
                                               const Json::Value &variantParams ) const
@@ -369,6 +403,66 @@ std::vector<std::string> CapabilityKnowledge::operatorsForIntent( const std::str
       ids.push_back( id );
   }
   return ids;
+}
+
+std::vector<Json::Value> CapabilityKnowledge::factSetsForIntent( const std::string &intent ) const
+{
+  ensureLoaded( const_cast<CapabilityKnowledge &>( *this ) );
+  std::vector<Json::Value> candidates;
+  for ( const std::string &id : mOrder )
+  {
+    const Json::Value &raw = mEntries[ id ];
+    bool baseDeclares = false;
+    for ( const Json::Value &candidate : raw.get( "intents", Json::Value( Json::arrayValue ) ) )
+    {
+      if ( candidate.isString() && candidate.asString() == intent )
+      {
+        baseDeclares = true;
+        break;
+      }
+    }
+    if ( baseDeclares )
+    {
+      Json::Value merged = mergedEntry( raw, Json::Value() );
+      if ( merged.isObject() )
+        merged[ "id" ] = id; // mergedEntry intentionally strips ancestor ids
+      candidates.push_back( merged );
+    }
+    for ( const Json::Value &variant : raw.get( "variants", Json::Value( Json::arrayValue ) ) )
+    {
+      const Json::Value &when = variant.get( "when", Json::Value() );
+      if ( !when.isObject() )
+        continue;
+      bool variantDeclares = false;
+      for ( const Json::Value &candidate : variant.get( "intents", Json::Value( Json::arrayValue ) ) )
+      {
+        if ( candidate.isString() && candidate.asString() == intent )
+        {
+          variantDeclares = true;
+          break;
+        }
+      }
+      if ( !variantDeclares )
+        continue;
+      // Same overlay semantics as mergedEntry variants: variant keys win,
+      // everything undeclared still applies from the base; no params select
+      // variants here — the intent declaration itself scopes this fact-set.
+      Json::Value merged = mergedEntry( raw, Json::Value() );
+      for ( const std::string &key : variant.getMemberNames() )
+      {
+        if ( key == "when" || key == "intents" )
+          continue;
+        merged[ key ] = variant[ key ];
+      }
+      // Variant candidates carry the overlay only — the base's intent list
+      // is wiring bookkeeping a fact-set consumer must not re-read.
+      if ( merged.isMember( "intents" ) )
+        merged.removeMember( "intents" );
+      merged[ "id" ] = id;
+      candidates.push_back( merged );
+    }
+  }
+  return candidates;
 }
 
 Json::Value CapabilityKnowledge::familyDefault( const std::string &family ) const

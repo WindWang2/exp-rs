@@ -241,7 +241,10 @@ Json::Value dataAssetPassport( const Json::Value &argsIn )
         req.assetKey = assetKey;
         resolved = sharedBroker().assets().resolve( req );
         if ( !resolved.ok )
-            throw std::runtime_error( resolved.error );
+            throw std::runtime_error( resolved.error +
+                                      ( resolved.errorDetail.empty()
+                                            ? std::string()
+                                            : ":" + resolved.errorDetail ) );
     }
 
     Json::Value out( Json::objectValue );

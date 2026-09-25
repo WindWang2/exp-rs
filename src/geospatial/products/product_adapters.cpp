@@ -25,6 +25,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -54,7 +55,7 @@ namespace fs = std::filesystem;
 bool fileExistsLocal( const std::string &path )
 {
   std::error_code ec;
-  const fs::file_status status = fs::status( fs::u8path( path ), ec );
+  const fs::file_status status = fs::status( sicnu::portable::pathFromUtf8( path ), ec );
   return !ec && fs::exists( status );
 }
 
@@ -376,10 +377,10 @@ ProductMetadata readSentinel1( const std::string &path )
   // manifest.safe inside the .SAFE directory (or the manifest itself).
   std::string manifestPath = path;
   std::error_code ec;
-  const bool isDirectory = fs::is_directory( fs::u8path( path ), ec );
+  const bool isDirectory = fs::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
   if ( !ec && isDirectory )
   {
-    const fs::path manifest = fs::u8path( path ) / "manifest.safe";
+    const fs::path manifest = sicnu::portable::pathFromUtf8( path ) / "manifest.safe";
     if ( !fs::exists( manifest ) )
       throw GeoError( ErrorCode::OpenFailed, "Sentinel-1 manifest.safe not found in " + path );
     const std::u8string u8 = manifest.u8string();

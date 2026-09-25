@@ -16,6 +16,7 @@
 #include <fstream>
 #include <json/reader.h>
 #include <vector>
+#include "platform/portable.h"
 
 namespace fs = std::filesystem;
 
@@ -62,7 +63,7 @@ bool parseManifestDocument( const std::string &text, Json::Value &out, std::stri
 
 std::string datasetSha256Hex( const std::string &path )
 {
-  std::ifstream file( path, std::ios::binary );
+  std::ifstream file( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !file )
     throw GeoError( ErrorCode::IoError, "digest: cannot open " + path );
   Sha256 digest;
@@ -117,7 +118,8 @@ void writeFinalizeManifest( const std::string &mainPath, const Json::Value &mani
   builder["indentation"] = "  ";
   const std::string text = Json::writeString( builder, manifest );
   atomic_fs::writeFileAtomic( manifestPath, [ & ]( const std::string &stagedPath ) {
-    std::ofstream file( stagedPath, std::ios::binary | std::ios::trunc );
+    std::ofstream file( sicnu::portable::pathFromUtf8( stagedPath ),
+                        std::ios::binary | std::ios::trunc );
     if ( !file )
       throw GeoError( ErrorCode::IoError, "manifest: cannot create " + stagedPath );
     file.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -134,7 +136,7 @@ Json::Value readFinalizeManifest( const std::string &mainPath )
     throw GeoError( ErrorCode::NotFound, "finalize manifest missing for " + mainPath );
   if ( atomic_fs::fileSize( manifestPath ) > kMaxManifestBytes )
     throw GeoError( ErrorCode::InvalidMetadata, "finalize manifest exceeds the size cap; refusing to read" );
-  std::ifstream file( manifestPath, std::ios::binary );
+  std::ifstream file( sicnu::portable::pathFromUtf8( manifestPath ), std::ios::binary );
   if ( !file )
     throw GeoError( ErrorCode::IoError, "manifest: cannot open " + manifestPath );
   std::string text( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );

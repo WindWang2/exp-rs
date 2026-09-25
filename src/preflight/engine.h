@@ -33,6 +33,16 @@ namespace sicnu::preflight {
 /// The evaluated request: what should run, on which inputs, with which
 /// acknowledgements. Inputs keep request order (slot, assetRef); pairs are
 /// the slot name and the asset reference the facts authority resolves.
+/// One subject-scoped acknowledgement: the operator accepts this finding
+/// code for exactly this subject; the same code on other subjects stays
+/// loud. Code-only acknowledgements (the string list) keep clearing every
+/// subject for backward compatibility.
+struct AcknowledgedFinding
+{
+    std::string code;
+    std::string subject;
+};
+
 struct PreflightRequest
 {
     std::string operatorId;       ///< Capability entry id, e.g. "rs:ndvi"; empty = undeclared.
@@ -42,6 +52,7 @@ struct PreflightRequest
     std::string humanOperatorId;  ///< Report-level operator_id (who runs this).
     std::vector<std::pair<std::string, std::string>> inputs;
     std::vector<std::string> acknowledgements;  ///< Finding codes the operator accepts.
+    std::vector<AcknowledgedFinding> acknowledgedSubjects;  ///< Code+subject-scoped accepts.
     PreflightBudgets budgets;   ///< Per-run caps (max_inputs / max_findings).
 
     /// Canonical request document (sorted keys, deterministic) — the digest

@@ -1,5 +1,7 @@
 #include "suitability_goal.h"
 
+#include "suitability_time.h"
+
 #include "suitability_profiles.h"
 
 #include <QCryptographicHash>
@@ -25,6 +27,22 @@ sicnu::data::Diagnostic invalidGoal( const QString &message )
     return sicnu::data::Diagnostic{ QStringLiteral( "suitability.goal_invalid" ),
                                     message,
                                     sicnu::data::DiagnosticSeverity::Error };
+}
+
+/// Parses a floating goal field: the value must be a JSON number when
+/// present. A wrong type (e.g. "40" as a string) is a typed failure —
+/// silently reading it as "unset" would apply limits the operator never
+/// gave (or drop the ones they did).
+sicnu::data::Result<double> boundedDouble( const QJsonObject &json, const QString &key,
+                                           double defaultValue )
+{
+    const QJsonValue value = json.value( key );
+    if ( value.isUndefined() || value.isNull() )
+        return sicnu::data::Result<double>::success( defaultValue );
+    if ( !value.isDouble() )
+        return sicnu::data::Result<double>::failure(
+            invalidGoal( QStringLiteral( "field '%1' must be a number" ).arg( key ) ) );
+    return sicnu::data::Result<double>::success( value.toDouble() );
 }
 
 /// Parses an integral goal field from JSON without UB: the value must be a
@@ -211,10 +229,16 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
     if ( goal.hasAoi )
     {
         const QJsonObject aoiJson = json.value( QStringLiteral( "aoi" ) ).toObject();
-        goal.aoi.minimumX = aoiJson.value( QStringLiteral( "min_x" ) ).toDouble();
-        goal.aoi.minimumY = aoiJson.value( QStringLiteral( "min_y" ) ).toDouble();
-        goal.aoi.maximumX = aoiJson.value( QStringLiteral( "max_x" ) ).toDouble();
-        goal.aoi.maximumY = aoiJson.value( QStringLiteral( "max_y" ) ).toDouble();
+        const char *aoiKeys[] = { "min_x", "min_y", "max_x", "max_y" };
+        double *aoiTargets[] = { &goal.aoi.minimumX, &goal.aoi.minimumY, &goal.aoi.maximumX,
+                                 &goal.aoi.maximumY };
+        for ( int i = 0; i < 4; ++i )
+        {
+            const auto coordinate = boundedDouble( aoiJson, QLatin1String( aoiKeys[i] ), 0.0 );
+            if ( !coordinate.has_value() )
+                return sicnu::data::Result<SuitabilityGoal>::failure( coordinate.diagnostics() );
+            *aoiTargets[i] = coordinate.value();
+        }
         goal.aoi.valid = aoiJson.value( QStringLiteral( "valid" ) ).toBool( false );
         goal.aoiCrsWkt = json.value( QStringLiteral( "aoi_crs_wkt" ) ).toString();
     }
@@ -222,24 +246,35 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
     goal.hasTimeWindow = json.value( QStringLiteral( "has_time_window" ) ).toBool( false );
     if ( goal.hasTimeWindow )
     {
-        goal.windowStartUtc = QDateTime::fromString(
-            json.value( QStringLiteral( "window_start_utc" ) ).toString(), Qt::ISODate );
-        goal.windowEndUtc = QDateTime::fromString(
-            json.value( QStringLiteral( "window_end_utc" ) ).toString(), Qt::ISODate );
+        // Zoneless stamps read as UTC (keys say _utc); shared with the scene
+        // reader so goal and scenes never disagree on the absolute window.
+        goal.windowStartUtc =
+            parseIsoUtc( json.value( QStringLiteral( "window_start_utc" ) ).toString() );
+        goal.windowEndUtc =
+            parseIsoUtc( json.value( QStringLiteral( "window_end_utc" ) ).toString() );
     }
 
     const QJsonArray seasonsArray = json.value( QStringLiteral( "required_seasons" ) ).toArray();
     for ( const QJsonValue &season : seasonsArray )
         goal.requiredSeasons.append( season.toString() );
 
-    goal.minGsdM = json.value( QStringLiteral( "min_gsd_m" ) ).toDouble();
-    goal.maxGsdM = json.value( QStringLiteral( "max_gsd_m" ) ).toDouble();
+    const auto minGsd = boundedDouble( json, QStringLiteral( "min_gsd_m" ), 0.0 );
+    if ( !minGsd.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( minGsd.diagnostics() );
+    goal.minGsdM = minGsd.value();
+    const auto maxGsd = boundedDouble( json, QStringLiteral( "max_gsd_m" ), 0.0 );
+    if ( !maxGsd.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( maxGsd.diagnostics() );
+    goal.maxGsdM = maxGsd.value();
 
     const QJsonArray bandRolesArray = json.value( QStringLiteral( "required_band_roles" ) ).toArray();
     for ( const QJsonValue &role : bandRolesArray )
         goal.requiredBandRoles.append( role.toString() );
 
-    goal.maxCloudCoverPercent = json.value( QStringLiteral( "max_cloud_cover_percent" ) ).toDouble( -1.0 );
+    const auto maxCloud = boundedDouble( json, QStringLiteral( "max_cloud_cover_percent" ), -1.0 );
+    if ( !maxCloud.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( maxCloud.diagnostics() );
+    goal.maxCloudCoverPercent = maxCloud.value();
     const auto minSamples = boundedIntegral( json, QStringLiteral( "min_samples" ), 0 );
     if ( !minSamples.has_value() )
         return sicnu::data::Result<SuitabilityGoal>::failure( minSamples.diagnostics() );
@@ -257,12 +292,24 @@ sicnu::data::Result<SuitabilityGoal> SuitabilityGoal::fromJson( const QJsonObjec
             json.value( QStringLiteral( "model_required_band_roles" ) ).toArray();
         for ( const QJsonValue &role : modelRolesArray )
             goal.modelRequiredBandRoles.append( role.toString() );
-        goal.modelMinGsdM = json.value( QStringLiteral( "model_min_gsd_m" ) ).toDouble();
-        goal.modelMaxGsdM = json.value( QStringLiteral( "model_max_gsd_m" ) ).toDouble();
+        const auto modelMinGsd =
+            boundedDouble( json, QStringLiteral( "model_min_gsd_m" ), 0.0 );
+        const auto modelMaxGsd =
+            boundedDouble( json, QStringLiteral( "model_max_gsd_m" ), 0.0 );
+        if ( !modelMinGsd.has_value() )
+            return sicnu::data::Result<SuitabilityGoal>::failure( modelMinGsd.diagnostics() );
+        if ( !modelMaxGsd.has_value() )
+            return sicnu::data::Result<SuitabilityGoal>::failure( modelMaxGsd.diagnostics() );
+        goal.modelMinGsdM = modelMinGsd.value();
+        goal.modelMaxGsdM = modelMaxGsd.value();
         goal.modelModality = json.value( QStringLiteral( "model_modality" ) ).toString();
     }
 
-    goal.minCoverageFraction = json.value( QStringLiteral( "min_coverage_fraction" ) ).toDouble();
+    const auto minCoverage =
+        boundedDouble( json, QStringLiteral( "min_coverage_fraction" ), 0.0 );
+    if ( !minCoverage.has_value() )
+        return sicnu::data::Result<SuitabilityGoal>::failure( minCoverage.diagnostics() );
+    goal.minCoverageFraction = minCoverage.value();
     const auto minScenes = boundedIntegral( json, QStringLiteral( "min_scenes_in_window" ), 0 );
     if ( !minScenes.has_value() )
         return sicnu::data::Result<SuitabilityGoal>::failure( minScenes.diagnostics() );

@@ -18,6 +18,7 @@
 #include "operators/runtime/model_ensemble.h"
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
+#include "runtime/observability/fault_registry.h"
 #include "synthetic_raster_builder.h"
 
 #include <gdal_priv.h>
@@ -912,4 +913,98 @@ TEST_CASE( "single-model scene classification refuses non-finite scores (hardeni
   REQUIRE_THROWS_AS( sicnu::operators::runtime::runModelInference( request, context ),
                      RSOperatorError );
   CHECK_FALSE( QFile::exists( output ) );
+}
+
+// ---------------------------------------------------------------------------
+// R3 Track 13: the scene artifact lane sits on the same ProductPublishGuard
+// contract (the artifact IS the provenance document — no separate sidecar);
+// its park/swap stages are injectable and crash orphans are adopted.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "scene publish swap fault restores the previous artifact",
+           "[models][ensemble][scene][publish][crash]" )
+{
+  RegistryReset reset;
+  const SceneProviderGuard guardA( "scfw-a", { 2.0, 1.0 } );
+  const SceneProviderGuard guardB( "scfw-b", { 0.5, 2.5 } );
+  QTemporaryDir dir;
+  registerManifest( sceneMemberManifest( "scene-park-a", "scfw-a", { "water", "land" }, "logit" ),
+                    dir.filePath( QStringLiteral( "scene-park-a/model.json" ) ).toStdString() );
+  registerManifest( sceneMemberManifest( "scene-park-b", "scfw-b", { "water", "land" }, "logit" ),
+                    dir.filePath( QStringLiteral( "scene-park-b/model.json" ) ).toStdString() );
+  Json::Value ensemble( Json::objectValue );
+  ensemble["name"] = "scene-park-ens";
+  ensemble["task"] = "classification";
+  ensemble["framework"] = "onnx";
+  Json::Value members( Json::arrayValue );
+  Json::Value a( Json::objectValue );
+  a["model"] = "scene-park-a";
+  a["weight"] = 1.0;
+  members.append( a );
+  Json::Value b( Json::objectValue );
+  b["model"] = "scene-park-b";
+  b["weight"] = 1.0;
+  members.append( b );
+  ensemble["ensemble"]["members"] = members;
+  registerManifest( ensemble,
+                    dir.filePath( QStringLiteral( "scene-park-ens/model.json" ) ).toStdString() );
+
+  const QString input = writeConstantRaster( dir, "scene_park_input.tif", 16, 2, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "scene-park.json" ) );
+  RSOperatorContext context;
+  const auto runScene = [ & ]() {
+    ModelExecutionRequest request;
+    request.inputPath = input.toStdString();
+    request.outputPath = output.toStdString();
+    request.modelReference = "scene-park-ens";
+    request.asSceneClassification = true;
+    return sicnu::operators::runtime::runModelInference( request, context );
+  };
+
+  REQUIRE_NOTHROW( runScene() );
+  REQUIRE( QFile::exists( output ) );
+  std::ifstream stream( output.toStdString() );
+  std::string published( ( std::istreambuf_iterator<char>( stream ) ),
+                         std::istreambuf_iterator<char>() );
+  stream.close();
+
+  // Swap fault: the previous artifact is parked, the new one cannot land —
+  // the parked artifact is restored byte-identically and no residue leaks.
+  {
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "scene.publish_swap", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( runScene() );
+    std::ifstream restoredStream( output.toStdString() );
+    std::string restored( ( std::istreambuf_iterator<char>( restoredStream ) ),
+                          std::istreambuf_iterator<char>() );
+    restoredStream.close();
+    CHECK( restored == published );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".stage~" ) ) );
+  }
+
+  // Crash-orphan adoption: the parked artifact sits at the backup path, the
+  // final path is ABSENT. The next run adopts the parked artifact back at
+  // guard construction — proven with a run that then FAILS at the swap: the
+  // adopted bytes must be back at the final path (a delete-and-republish
+  // pass cannot produce the OLD bytes).
+  const auto artifactBytes = [ & ]() {
+    QFile f( output );
+    REQUIRE( f.open( QIODevice::ReadOnly ) );
+    return f.readAll();
+  };
+  const QByteArray preOrphan = artifactBytes();
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".prev~" ) ) );
+  REQUIRE_FALSE( QFile::exists( output ) );
+  {
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "scene.publish_swap", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( runScene() );
+    CHECK( artifactBytes() == preOrphan );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+  }
+  // Recovered: a normal run republishes and leaves no residue.
+  REQUIRE_NOTHROW( runScene() );
+  CHECK( QFile::exists( output ) );
+  CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
 }

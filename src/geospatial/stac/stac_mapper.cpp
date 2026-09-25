@@ -17,6 +17,7 @@
 #include <sstream>
 
 #include <system_error>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -217,14 +218,15 @@ StacItem StacItem::parseFromFile( const std::string &path )
 {
   if ( path.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "StacItem::parseFromFile: empty path" );
-  std::ifstream in( path, std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in )
     throw GeoError( ErrorCode::OpenFailed, "StacItem::parseFromFile: cannot open " + path );
   std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
   StacItem item = parseText( text );
   std::error_code ec;
-  std::filesystem::path absolute = std::filesystem::weakly_canonical( std::filesystem::u8path( path ), ec );
-  item.sourceHref = ec ? path : absolute.string();
+  std::filesystem::path absolute = std::filesystem::weakly_canonical( sicnu::portable::pathFromUtf8( path ), ec );
+  // UTF-8 out: path::string() re-encodes through the Windows ANSI code page.
+  item.sourceHref = ec ? path : sicnu::portable::pathToUtf8( absolute );
   return item;
 }
 

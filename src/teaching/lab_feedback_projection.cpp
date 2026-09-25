@@ -54,6 +54,56 @@ std::string aggregate( const std::vector<std::string> &statuses )
   return "pass";
 }
 
+/// Wire status words of the unified verifier report
+/// ("sicnu.verification.report/1" — statusToWire). Same fail-closed fold as
+/// normalizeStatus; listed here because this projection consumes the report
+/// as a JSON contract, it does not link the verifier.
+bool isUnifiedVerifierReport( const Json::Value &doc )
+{
+  return doc.isObject() && doc.isMember( "schema" ) && doc["schema"].isString()
+         && doc["schema"].asString() == "sicnu.verification.report/1";
+}
+
+void projectUnifiedVerifierRows( LabFeedbackProjection &p, std::vector<std::string> &agg,
+                                 const Json::Value &report )
+{
+  // sicnu.verification.report/1: overall is the engine's fail-closed lattice
+  // (pass/fail/indeterminate — indeterminate is "could not verify", never
+  // pass), checks carry checkId/status/code/message. Projected verbatim into
+  // the teaching lens; a flip here would un-fail what the engine failed.
+  std::string overall = strOf( report, "overall" );
+  overall = normalizeStatus( overall );
+  FeedbackCheckRow row;
+  row.id = "verifier.overall";
+  row.layer = "verifier";
+  row.status = overall;
+  row.statusZh = statusZh( overall );
+  row.reasonZh = strOf( report, "specId" );
+  row.countsAsPass = countsAsPass( overall );
+  p.rows.push_back( row );
+  agg.push_back( overall );
+  p.techValidationSummaryZh = std::string( "技术验证: " ) + row.statusZh
+                              + ( row.reasonZh.empty() ? "" : ( " — " + row.reasonZh ) );
+
+  const auto &checks = report["checks"];
+  if ( checks.isArray() ) {
+    int i = 0;
+    for ( const auto &c : checks ) {
+      FeedbackCheckRow cr;
+      cr.id = strOf( c, "checkId" );
+      if ( cr.id.empty() ) cr.id = "verifier.check." + std::to_string( i );
+      cr.layer = "verifier";
+      cr.status = normalizeStatus( strOf( c, "status" ) );
+      cr.statusZh = statusZh( cr.status );
+      cr.reasonZh = strOf( c, "message" );
+      cr.countsAsPass = countsAsPass( cr.status );
+      p.rows.push_back( cr );
+      agg.push_back( cr.status );
+      ++i;
+    }
+  }
+}
+
 } // namespace
 
 LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &labId,
@@ -66,7 +116,9 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
   p.capsuleExportRef = capsuleRef;
   std::vector<std::string> agg;
 
-  if ( verifierReport.isObject() ) {
+  if ( isUnifiedVerifierReport( verifierReport ) ) {
+    projectUnifiedVerifierRows( p, agg, verifierReport );
+  } else if ( verifierReport.isObject() ) {
     std::string overall = strOf( verifierReport, "status" );
     if ( overall.empty() ) overall = strOf( verifierReport, "overall" );
     if ( overall.empty() && verifierReport.isMember( "verdict" ) )

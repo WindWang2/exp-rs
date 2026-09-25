@@ -407,9 +407,9 @@ TEST_CASE( "live GDAL facts flow through the real resolver into the bundle",
     // The FSM default is only Assumed: at claim level the radiometric is
     // assumed, while the Known band roles dominate the summary bucket.
     auto rawUndeclared = resolver( undeclared );
-    REQUIRE( rawUndeclared );
+    REQUIRE( rawUndeclared.state );
     bool assumedRadiometric = false;
-    for ( const auto &claim : rawUndeclared->claims )
+    for ( const auto &claim : rawUndeclared.state->claims )
         assumedRadiometric = assumedRadiometric ||
                              ( claim.path == "radiometric.unit" &&
                                claim.kind == ClaimKind::Assumed );
@@ -454,21 +454,20 @@ TEST_CASE( "conflicted radiometric survives the live chain un-downgraded",
     conflicting.bands = { red, nir };
 
     AssetFactSources sources;
-    sources.dataset = [&conflicting]( const std::string &key )
-        -> std::optional<sicnu::state::DatasetFacts> {
+    sources.dataset = [&conflicting]( const std::string &key ) -> DatasetFactsLookup {
         if ( key != conflicting.sourcePath )
-            return std::nullopt;
-        return conflicting;
+            return DatasetFactsLookup{ std::nullopt, "", "" };
+        return DatasetFactsLookup{ conflicting, "", "" };
     };
     auto resolver = makeFactsBasedResolver( sources );
     auto state = resolver( conflicting.sourcePath );
-    REQUIRE( state );
+    REQUIRE( state.state );
     bool conflictedClaim = false;
-    for ( const auto &claim : state->claims )
+    for ( const auto &claim : state.state->claims )
         conflictedClaim = conflictedClaim || claim.kind == ClaimKind::Conflicted;
     CHECK( conflictedClaim );
 
-    auto summary = AssetStateProvider::summarize( *state );
+    auto summary = AssetStateProvider::summarize( *state.state );
     CHECK( summary.evidence == EvidenceBucket::Conflicted );
     CHECK( summary.radiometricUnit.empty() );
 

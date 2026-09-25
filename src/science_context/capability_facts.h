@@ -50,7 +50,10 @@ struct CapabilityFactsLookup
 
     /// Authority id for bundle provenance (e.g. "harness.capability_knowledge").
     std::string authority;
-    std::uint64_t revision = 0;
+    /// LIVE authority revision, read on every synthesize: a reload/reinstall
+    /// that changes loaded entries advances it and thereby invalidates cached
+    /// bundles (cache-key material). Empty = unknown (0).
+    std::function<std::uint64_t()> revision;
 };
 
 } // namespace sicnu::science_context
