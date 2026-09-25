@@ -7,6 +7,12 @@
 namespace sicnu::agent_ops {
 namespace {
 
+/// Findings past this hard bound are dropped by the bridge BEFORE planning
+/// (the digest then covers the bounded set): a hostile diagnoser embedding
+/// 10^5+ issues must not drive synthesis cost, and the planner's own
+/// requirement budget still reports the visible truncation on top.
+constexpr std::size_t kMaxBridgeFindings = 1024;
+
 /// The typed finding documents the repair planner consumes, derived from the
 /// diagnostic's structured evidence. The preflight report embedded in
 /// `sources` is the typed producer in the ops path: its issues already carry
@@ -15,6 +21,12 @@ namespace {
 /// into findings — they are another layer's output, not evidence. The live
 /// run() path embeds the bridged diagnostic under sources["bridge"], so its
 /// preflight report is consulted there too (same producer, one indirection).
+///
+/// Polarity: issues that are not objects or carry no usable code are
+/// SKIPPED (they cannot even name a finding); an issue WITH a code but an
+/// unusable severity is KEPT and fails synthesis — evidence that names
+/// itself is never silently dropped, and the typed no_safe_repair/ask puts
+/// the human back in charge.
 std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagnostic)
 {
     std::vector<Json::Value> findings;
@@ -44,6 +56,8 @@ std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagno
             evidence["message"] = issue["message"];
         finding["evidence"] = evidence;
         findings.push_back(finding);
+        if (findings.size() >= kMaxBridgeFindings)
+            break;
     }
     return findings;
 }
@@ -69,7 +83,9 @@ Json::Value noSafeRepairPlan(const std::string &intent, const std::string &cause
     plan.unresolved.push_back(entry);
     plan.noSafeRepair = entry;
     sicnu::repair::assignRepairPlanIdentity(plan);
-    return sicnu::repair::repairPlanToJson(plan);
+    Json::Value planDoc = sicnu::repair::repairPlanToJson(plan);
+    planDoc["planning_only"] = true;
+    return planDoc;
 }
 
 } // namespace
@@ -215,17 +231,44 @@ RecoveryDecision RecoveryBridge::decide(const OpDiagnostic &diagnostic,
 
         // The risk class that gates the repair comes from the plan's own
         // candidate contract — the caller's leadingRiskClass claim cannot
-        // downgrade a radiometric or science-changing repair into an
-        // auto path.
+        // downgrade a radiometric or science-changing repair into an auto
+        // path. The gate reads the MAXIMUM risk over ALL selected
+        // candidates: a plan is executed whole, so one radiometric or
+        // science-changing candidate makes the whole launch approval-gated.
         std::string leadingRisk = ctx.leadingRiskClass;
+        bool anyRadiometricOrScience = false;
         const Json::Value &selected = out.repairPlan["selected"];
-        if (selected.isArray() && !selected.empty() && selected[0].isObject() &&
-            selected[0]["risk_class"].isString() && !selected[0]["risk_class"].asString().empty())
-            leadingRisk = selected[0]["risk_class"].asString();
+        if (selected.isArray())
+        {
+            for (const Json::Value &candidate : selected)
+            {
+                const std::string risk = candidate.isObject() &&
+                                                 candidate["risk_class"].isString()
+                                             ? candidate["risk_class"].asString()
+                                             : std::string();
+                if (risk == "radiometric" || risk == "science_changing")
+                    anyRadiometricOrScience = true;
+                if (leadingRisk.empty() || leadingRisk == "shape_preserving")
+                    leadingRisk = risk.empty() ? leadingRisk : risk;
+            }
+        }
 
-        const bool scienceChanging =
-            leadingRisk == "radiometric" || leadingRisk == "science_changing";
-        if (scienceChanging && !ctx.humanApprovedRepair)
+        // An approval is bound to ONE repair science (the findings digest in
+        // the plan's provenance). A token minted for a different finding set
+        // never satisfies this plan's human gate; a deterministic
+        // re-projection of the same findings is the same binding target.
+        const std::string planDigest =
+            out.repairPlan["provenance"].isObject() &&
+                    out.repairPlan["provenance"]["findings_digest"].isString()
+                ? out.repairPlan["provenance"]["findings_digest"].asString()
+                : std::string();
+        bool approvedForThisPlan = ctx.humanApprovedRepair &&
+                                   !ctx.approvedFindingsDigest.empty() &&
+                                   ctx.approvedFindingsDigest == planDigest;
+        if (ctx.humanApprovedRepair && !approvedForThisPlan)
+            out.approvalError = "APPROVAL_WRONG_PLAN";
+
+        if (anyRadiometricOrScience && !approvedForThisPlan)
         {
             out.action = recovery_action::kAsk;
             out.reasonCode = "REPAIR_NEEDS_APPROVAL";

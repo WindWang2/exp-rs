@@ -3,7 +3,7 @@
 ## 变更面（文件 → 意图）
 
 **新增**
-- `src/agent_ops/repair_approval.{h,cpp}` — 审批 token：绑定 (plan_id, coordinator 实例 id, [issued,expires]) + sha256/16 完整性 digest；`mintRepairApprovalToken`（参数不可用→null，绝不铸造裸批准）、`verifyRepairApprovalToken`（malformed/tampered/wrong_plan/wrong_coordinator/expired 五类 typed 拒绝；无可用时钟 = 过期，fail-closed）。coordinator 实例 id 为进程内单调计数（运行期身份，不入科学文档）。
+- `src/agent_ops/repair_approval.{h,cpp}` — 审批 token：绑定 (findings digest, coordinator 实例 id, [issued,expires]) + sha256/16 完整性 digest。绑定 findings digest 而非 plan_id：plan 指纹含 `science_change_approved` 注记，批准后重投影会变 id；findings digest 是同一修复科学的稳定身份，重投影同证据即同一批准目标，不同证据集永不通过；`mintRepairApprovalToken`（参数不可用→null，绝不铸造裸批准）、`verifyRepairApprovalToken`（malformed/tampered/wrong_plan/wrong_coordinator/expired 五类 typed 拒绝；无可用时钟 = 过期，fail-closed）。coordinator 实例 id 为进程内单调计数（运行期身份，不入科学文档）。
 - `src/agent/harness/repair_capability_source.{h,cpp}` — **live capability adapter**：只读 `CapabilityKnowledge::instance()`（family default 合并后的 entry）→ `JsonRepairCapabilityProvider::buildFromCapabilityEntries`。不携带任何 operator id，删除/改价的条目自然消失——无第二 operator 表。编译进 `sicnu_agent`（knowledge 所在库），并令 `sicnu_agent` PUBLIC 链接 Qt-free 叶子 `sicnu_repair_planner`。
 
 **修改**

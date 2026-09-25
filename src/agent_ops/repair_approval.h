@@ -6,7 +6,10 @@
 // bound, single-use artifact, never a bare UI flag.
 //
 // A token binds four facts:
-//   - the plan it approves (`plan_id`, content-addressed "srp-<fingerprint>");
+//   - the repair science it approves (`findings_digest` — the planner's
+//     sha256/16 over the canonical findings; stable across re-planning of
+//     the same evidence, so a re-projection of the SAME findings is the
+//     same approval target while a different finding set never is);
 //   - the coordinator instance that minted it (a process-unique id, so a
 //     token captured from one coordinator cannot arm another);
 //   - a driver-supplied clock window ([issued_at_ms, expires_at_ms]; the
@@ -45,18 +48,19 @@ inline constexpr const char *kExpired = "expired";
 /// identity only — never part of a science document's content).
 long long nextRepairApprovalInstanceId();
 
-/// Mints a token binding `planId` + coordinator instance + the clock window
-/// [nowMs, nowMs + ttlMs]. Returns a null document when the arguments are
-/// unusable (empty plan id, non-positive ttl or clock) — minting never
+/// Mints a token binding `findingsDigest` + coordinator instance + the clock
+/// window [nowMs, nowMs + ttlMs]. Returns a null document when the arguments
+/// are unusable (empty digest, non-positive ttl or clock) — minting never
 /// invents an approval.
-Json::Value mintRepairApprovalToken(const std::string &planId, long long coordinatorId,
-                                    long long nowMs, long long ttlMs);
+Json::Value mintRepairApprovalToken(const std::string &findingsDigest,
+                                    long long coordinatorId, long long nowMs,
+                                    long long ttlMs);
 
 /// Re-derives and checks one token against the expected binding and clock.
 /// Pure: no state; replay is detected through the holder's consumption
 /// record, surfaced as the holder's typed error.
 const char *verifyRepairApprovalToken(const Json::Value &tokenDoc,
-                                      const std::string &planId, long long coordinatorId,
-                                      long long nowMs);
+                                      const std::string &findingsDigest,
+                                      long long coordinatorId, long long nowMs);
 
 } // namespace sicnu::agent_ops

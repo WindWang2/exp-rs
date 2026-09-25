@@ -119,18 +119,23 @@ class OperationsCoordinator {
     OpsRunResult resume(const std::string &journalDirectory, const std::string &sessionId,
                         const OpsRunRequest &request);
 
-    /// Standalone closed-loop helper for tests: after a failed SessionResult,
-    /// diagnose → recovery decide (does not mutate loop; used for assertions).
-    /// The projected repair plan (when the decision carries one) is remembered
-    /// as this coordinator's last projected plan — the binding target for
+    /// The driver's recovery flow: diagnose → recovery decide over THIS
+    /// coordinator's provider and armed approval state. When an approval is
+    /// armed, it is verified (this coordinator, the projected plan, the
+    /// clock in ctx.approvalNowMs) and CONSUMED here: on success
+    /// ctx.humanApprovedRepair / ctx.approvedFindingsDigest are derived from
+    /// the token — a bare ctx bool is never trusted. A refused token leaves
+    /// the gate shut and sets decision.approvalError. The projected repair
+    /// plan (when the decision carries one) is remembered as this
+    /// coordinator's last projected plan — the binding target for
     /// armRepairApproval.
-    RecoveryDecision evaluateRecovery(const OpDiagnostic &diagnostic,
-                                      const RecoveryContext &ctx) const;
+    RecoveryDecision evaluateRecovery(const OpDiagnostic &diagnostic, RecoveryContext &ctx);
 
-    /// The plan id of the last projected repair plan: the one remembered
-    /// from evaluateRecovery(), else the last run()'s recovery decision.
-    /// Empty when this coordinator never projected one.
-    std::string lastProjectedRepairPlanId() const;
+    /// The findings digest of the last projected repair plan: the one
+    /// remembered from evaluateRecovery(), else the last run()'s recovery
+    /// decision. Empty when this coordinator never projected one. This is
+    /// the binding target approvals mint and verify against.
+    std::string lastProjectedFindingsDigest() const;
 
     OpsProjection timeline(const sicnu::agent_loop::SessionJournal &journal,
                            const OpsBudget &budgets = {}) const;
@@ -162,15 +167,17 @@ class OperationsCoordinator {
     const long long mInstanceId;
     struct ArmedApproval {
         Json::Value token;
-        std::string planId;
+        std::string findingsDigest;
     };
     std::optional<ArmedApproval> mPendingRepairApproval;
-    /// The last projected repair plan id (bookkeeping of the most recent
-    /// projection; mutable because evaluateRecovery is a const query on the
-    /// loop, only this note about what it last projected changes).
-    mutable std::string mLastProjectedRepairPlanId;
+    /// The findings digest of the last projected repair plan (bookkeeping of
+    /// the most recent projection; evaluateRecovery is deliberately
+    /// non-const because it consumes approval state and refreshes this).
+    std::string mLastProjectedFindingsDigest;
     /// Digests of tokens already consumed by a launch: re-presenting one is
-    /// a replay, refused even though the token itself is still intact.
+    /// a replay, refused even though the token itself is still intact. The
+    /// ring is bounded (oldest forgotten after kMaxConsumedDigests); a
+    /// forgotten token is still refused by its expiry at re-arm time.
     std::vector<std::string> mConsumedApprovalDigests;
     static constexpr std::size_t kMaxConsumedDigests = 16;
     std::optional<OpsRunResult> mLastResult;

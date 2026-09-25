@@ -87,6 +87,7 @@ Json::Value RecoveryDecision::toJson() const
     doc["repair_count"] = repairCount;
     doc["retry_count"] = retryCount;
     doc["requires_reverification"] = requiresReverification;
+    doc["approval_error"] = approvalError;
     doc["repair_plan"] = repairPlan;
     doc["diagnostic"] = diagnostic;
     doc["budgets"] = budgets;

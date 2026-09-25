@@ -32,6 +32,14 @@ struct RecoveryContext {
     std::string intent;
     std::string leadingRiskClass = "shape_preserving";
     bool humanApprovedRepair = false;
+    /// The findings digest a presented approval token was bound to. An
+    /// approval only satisfies the human gate when it names EXACTLY the
+    /// repair science this decision plans (the plan's provenance
+    /// findings_digest) — an approval for a different finding set never
+    /// does, while a deterministic re-projection of the same evidence does.
+    std::string approvedFindingsDigest;
+    /// Driver clock for verifying the approval (<= 0 fails closed).
+    long long approvalNowMs = 0;
     sicnu::agent::autonomy::AutonomyPolicy autonomyPolicy{
         sicnu::agent::autonomy::AutonomyPolicyHolder::researchDefaultPolicy()};
 };

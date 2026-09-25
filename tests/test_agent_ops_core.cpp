@@ -1132,9 +1132,19 @@ TEST_CASE("the plan's own risk class drives the science-changing gate, not the c
     REQUIRE(ask.needsApproval);
     REQUIRE(ask.repairPlan["selected"][0]["risk_class"].asString() == "radiometric");
 
-    // With a recorded approval the repair proceeds — still radiometric —
-    // and still demands re-verification afterwards.
+    // With an approval bound to THIS repair science the repair proceeds —
+    // still radiometric — and still demands re-verification afterwards.
+    const std::string plannedDigest =
+        ask.repairPlan["provenance"]["findings_digest"].asString();
+    REQUIRE_FALSE(plannedDigest.empty());
     ctx.humanApprovedRepair = true;
+    // A bare bool (or an approval for a different finding set) never
+    // satisfies the gate.
+    auto wrongBinding = bridge.decide(diag, ctx);
+    REQUIRE(wrongBinding.action == recovery_action::kAsk);
+    REQUIRE(wrongBinding.reasonCode == "REPAIR_NEEDS_APPROVAL");
+    REQUIRE(wrongBinding.approvalError == "APPROVAL_WRONG_PLAN");
+    ctx.approvedFindingsDigest = plannedDigest;
     auto proceed = bridge.decide(diag, ctx);
     REQUIRE(proceed.action == recovery_action::kRepair);
     REQUIRE(proceed.repairPlan["selected"][0]["risk_class"].asString() == "radiometric");
@@ -1181,43 +1191,42 @@ TEST_CASE("a removed capability cannot revive through the recovery projection",
 // UI flag.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("repair approval tokens bind plan, coordinator and clock window",
+TEST_CASE("repair approval tokens bind findings, coordinator and clock window",
           "[agent_ops][approval]")
 {
-    const Json::Value token = mintRepairApprovalToken("srp-aaaabbbbccccdddd", 7, 1000, 5000);
+    const std::string findings = "aaaabbbbccccdddd";
+    const Json::Value token = mintRepairApprovalToken(findings, 7, 1000, 5000);
     REQUIRE(token.isObject());
     REQUIRE(token["kind"].asString() == std::string(kRepairApprovalKind));
-    const auto verify = [](const Json::Value &doc, const std::string &plan,
+    REQUIRE(token["findings_digest"].asString() == findings);
+    const auto verify = [](const Json::Value &doc, const std::string &digest,
                            long long coordinator, long long now) {
-        return std::string(verifyRepairApprovalToken(doc, plan, coordinator, now));
+        return std::string(verifyRepairApprovalToken(doc, digest, coordinator, now));
     };
-    REQUIRE(verify(token, "srp-aaaabbbbccccdddd", 7, 1000) == approval_check::kOk);
-    REQUIRE(verify(token, "srp-aaaabbbbccccdddd", 7, 6000) == approval_check::kOk);
+    REQUIRE(verify(token, findings, 7, 1000) == approval_check::kOk);
+    REQUIRE(verify(token, findings, 7, 6000) == approval_check::kOk);
 
     // Expiry: past the window (and with no usable clock) the approval is
     // dead — fail closed, never "still valid".
-    REQUIRE(verify(token, "srp-aaaabbbbccccdddd", 7, 6001) == approval_check::kExpired);
-    REQUIRE(verify(token, "srp-aaaabbbbccccdddd", 7, 0) == approval_check::kExpired);
+    REQUIRE(verify(token, findings, 7, 6001) == approval_check::kExpired);
+    REQUIRE(verify(token, findings, 7, 0) == approval_check::kExpired);
 
     // Cross-plan / cross-coordinator / tamper / malformed are typed, not
     // lumped into one bool.
-    REQUIRE(verify(token, "srp-ffffffffffffffff", 7, 2000) == approval_check::kWrongPlan);
-    REQUIRE(verify(token, "srp-aaaabbbbccccdddd", 8, 2000) ==
-            approval_check::kWrongCoordinator);
+    REQUIRE(verify(token, "ffffffffffffffff", 7, 2000) == approval_check::kWrongPlan);
+    REQUIRE(verify(token, findings, 8, 2000) == approval_check::kWrongCoordinator);
     Json::Value tampered = token;
     tampered["expires_at_ms"] = Json::Int64(999999);
-    REQUIRE(verify(tampered, "srp-aaaabbbbccccdddd", 7, 2000) == approval_check::kTampered);
+    REQUIRE(verify(tampered, findings, 7, 2000) == approval_check::kTampered);
     Json::Value digestFlip = token;
     digestFlip["digest"] = "0000000000000000";
-    REQUIRE(verify(digestFlip, "srp-aaaabbbbccccdddd", 7, 2000) ==
-            approval_check::kTampered);
-    REQUIRE(verify(Json::Value(), "srp-aaaabbbbccccdddd", 7, 2000) ==
-            approval_check::kMalformed);
+    REQUIRE(verify(digestFlip, findings, 7, 2000) == approval_check::kTampered);
+    REQUIRE(verify(Json::Value(), findings, 7, 2000) == approval_check::kMalformed);
 
     // Minting never invents an approval: unusable arguments produce nothing.
     CHECK(mintRepairApprovalToken("", 7, 1000, 5000).isNull());
-    CHECK(mintRepairApprovalToken("srp-aaaabbbbccccdddd", 0, 1000, 5000).isNull());
-    CHECK(mintRepairApprovalToken("srp-aaaabbbbccccdddd", 7, 1000, 0).isNull());
+    CHECK(mintRepairApprovalToken(findings, 0, 1000, 5000).isNull());
+    CHECK(mintRepairApprovalToken(findings, 7, 1000, 0).isNull());
 }
 
 TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
@@ -1230,12 +1239,12 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     OperationsCoordinator coord(deps);
 
     // No plan projected yet: there is nothing an approval could bind to.
-    Json::Value premature = mintRepairApprovalToken("srp-aaaabbbbccccdddd",
+    Json::Value premature = mintRepairApprovalToken("aaaabbbbccccdddd",
                                                     coord.instanceId(), 1000, 5000);
     REQUIRE(coord.armRepairApproval(premature, 1000) == "NO_PENDING_REPAIR_PLAN");
 
     // Driver flow: evaluateRecovery projects a plan; the surface binds the
-    // approval to exactly that plan.
+    // approval to exactly that repair science (findings digest).
     FakeCapabilityProvider provider;
     provider.add("grid_align", capabilityOf("rs:resample", "preprocess", "light"));
     OperationsCoordinator::Dependencies wiredDeps;
@@ -1254,13 +1263,14 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     RecoveryContext ctx;
     auto decision = wired.evaluateRecovery(preflightFixableDiagnostic(), ctx);
     REQUIRE(decision.repairPlan["status"].asString() == "planned");
-    const std::string planId = decision.repairPlan["plan_id"].asString();
-    REQUIRE(wired.lastProjectedRepairPlanId() == planId);
+    const std::string planDigest =
+        decision.repairPlan["provenance"]["findings_digest"].asString();
+    REQUIRE(wired.lastProjectedFindingsDigest() == planDigest);
 
-    // Wrong plan id is refused before anything arms.
-    Json::Value token = mintRepairApprovalToken(planId, wired.instanceId(), 1000, 5000);
+    // A token naming a different finding set is refused before anything
+    // arms.
     REQUIRE(wired.armRepairApproval(
-                mintRepairApprovalToken("srp-0000000000000000", wired.instanceId(), 1000,
+                mintRepairApprovalToken("ffffffffffffffff", wired.instanceId(), 1000,
                                         5000),
                 1000) == "APPROVAL_WRONG_PLAN");
     REQUIRE_FALSE(wired.hasPendingRepairApproval());
@@ -1270,11 +1280,12 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
     FakeSeams otherSeams(scenario);
     otherDeps.seams = makeDeps(otherSeams);
     OperationsCoordinator otherCoord(otherDeps);
-    Json::Value foreign = mintRepairApprovalToken(planId, otherCoord.instanceId(), 1000,
-                                                  5000);
+    Json::Value foreign = mintRepairApprovalToken(planDigest, otherCoord.instanceId(),
+                                                  1000, 5000);
     REQUIRE(wired.armRepairApproval(foreign, 1000) == "APPROVAL_WRONG_COORDINATOR");
 
     // Expiry at arm time is refused.
+    Json::Value token = mintRepairApprovalToken(planDigest, wired.instanceId(), 1000, 5000);
     REQUIRE(wired.armRepairApproval(token, 1000 + 5001) == "APPROVAL_EXPIRED");
 
     // Arming ok, then the next launch consumes it — whatever the outcome.
@@ -1292,18 +1303,88 @@ TEST_CASE("coordinator repair approval: arm, consume once, replay refused",
 
     // An armed token that expires before the launch fails closed at
     // consumption: the run happens WITHOUT the approval and the refusal is
-    // surfaced.
-    Json::Value shortToken = mintRepairApprovalToken(planId, wired.instanceId(), 5000,
-                                                     100);
-    REQUIRE(wired.armRepairApproval(shortToken, 5000).empty());
+    // surfaced (and projected on the session-surface wire). A fresh
+    // projection restores the binding target first — after a run whose
+    // decision carried no plan, arming against the stale digest is refused.
+    // A genuinely NEW token (different clock window -> different digest)
+    // for the stale digest is refused on the binding, not on replay.
+    Json::Value staleDigestToken = mintRepairApprovalToken(planDigest,
+                                                           wired.instanceId(), 4500,
+                                                           5000);
+    REQUIRE(wired.armRepairApproval(staleDigestToken, 5000) ==
+            "NO_PENDING_REPAIR_PLAN");
+    RecoveryContext refreshCtx;
+    auto refreshed =
+        wired.evaluateRecovery(preflightFixableDiagnostic(), refreshCtx);
+    REQUIRE(wired.lastProjectedFindingsDigest() == planDigest);
+    Json::Value shortToken2 = mintRepairApprovalToken(planDigest, wired.instanceId(),
+                                                      5000, 100);
+    REQUIRE(wired.armRepairApproval(shortToken2, 5000).empty());
     OpsRunRequest expiredReq;
     expiredReq.session = ndviRequest();
     expiredReq.approvalNowMs = 99999;
     auto expiredRun = wired.run(expiredReq);
     REQUIRE(expiredRun.approvalError == "APPROVAL_EXPIRED");
     REQUIRE_FALSE(wired.hasPendingRepairApproval());
-}
 
+    // The evaluateRecovery flow consumes the armed token itself: the second
+    // evaluation derives the approval from the token (never from a bare
+    // ctx bool), and the deterministic re-projection of the SAME findings
+    // is the same binding target.
+    OperationsCoordinator::Dependencies flowDeps;
+    FakeSeams flowSeams(scenario);
+    flowDeps.seams = makeDeps(flowSeams);
+    FakeCapabilityProvider flowProvider;
+    flowProvider.add("radiometric_state",
+                     capabilityOf("rs:radiometric_calibration", "preprocess", "medium"));
+    flowDeps.repairCapabilityProvider = &flowProvider;
+    OperationsCoordinator flow(flowDeps);
+    RecoveryContext firstCtx;
+    auto firstDecision =
+        flow.evaluateRecovery(preflightFixableDiagnostic("INVALID_RADIOMETRY"), firstCtx);
+    REQUIRE(firstDecision.action == recovery_action::kAsk);
+    REQUIRE(firstDecision.reasonCode == "REPAIR_NEEDS_APPROVAL");
+    const std::string radiometricDigest =
+        firstDecision.repairPlan["provenance"]["findings_digest"].asString();
+    Json::Value flowToken =
+        mintRepairApprovalToken(radiometricDigest, flow.instanceId(), 1000, 50000);
+    REQUIRE(flow.armRepairApproval(flowToken, 1000).empty());
+    RecoveryContext secondCtx;
+    secondCtx.humanApprovedRepair = false; // bare bool never trusted
+    secondCtx.approvalNowMs = 2000;
+    auto secondDecision = flow.evaluateRecovery(
+        preflightFixableDiagnostic("INVALID_RADIOMETRY"), secondCtx);
+    REQUIRE(secondDecision.action == recovery_action::kRepair);
+    REQUIRE(secondCtx.approvedFindingsDigest == radiometricDigest);
+    REQUIRE_FALSE(flow.hasPendingRepairApproval());
+
+    // An approval minted for one finding set cannot arm the repair of
+    // another: the binding is the findings digest, enforced at the gate.
+    OperationsCoordinator::Dependencies crossDeps;
+    FakeSeams crossSeams(scenario);
+    crossDeps.seams = makeDeps(crossSeams);
+    FakeCapabilityProvider crossProvider; // both families plannable
+    crossProvider.add("grid_align", capabilityOf("rs:resample", "preprocess", "light"));
+    crossProvider.add("radiometric_state",
+                      capabilityOf("rs:radiometric_calibration", "preprocess", "medium"));
+    crossDeps.repairCapabilityProvider = &crossProvider;
+    OperationsCoordinator cross(crossDeps);
+    RecoveryContext gridCtx;
+    auto gridDecision =
+        cross.evaluateRecovery(preflightFixableDiagnostic("GRID_MISMATCH"), gridCtx);
+    const std::string gridDigest =
+        gridDecision.repairPlan["provenance"]["findings_digest"].asString();
+    Json::Value gridToken =
+        mintRepairApprovalToken(gridDigest, cross.instanceId(), 1000, 50000);
+    REQUIRE(cross.armRepairApproval(gridToken, 1000).empty());
+    RecoveryContext radioCtx;
+    radioCtx.approvalNowMs = 2000;
+    auto radioDecision = cross.evaluateRecovery(
+        preflightFixableDiagnostic("INVALID_RADIOMETRY"), radioCtx);
+    REQUIRE(radioDecision.action == recovery_action::kAsk);
+    REQUIRE(radioDecision.reasonCode == "REPAIR_NEEDS_APPROVAL");
+    REQUIRE(radioDecision.approvalError == "APPROVAL_WRONG_PLAN");
+}
 TEST_CASE("the surface approve_repair action mints and arms a bound token",
           "[agent_ops][approval][surface]")
 {
@@ -1326,29 +1407,127 @@ TEST_CASE("the surface approve_repair action mints and arms a bound token",
     auto decision = coord.evaluateRecovery(preflightFixableDiagnostic(), ctx);
     REQUIRE(decision.repairPlan["status"].asString() == "planned");
 
-    // A driver claiming a plan id the coordinator never projected is
+    // A driver claiming a finding set the coordinator never projected is
     // refused before minting.
     Json::Value wrongPlanArgs(Json::objectValue);
-    wrongPlanArgs["plan_id"] = "srp-0000000000000000";
+    wrongPlanArgs["findings_digest"] = "ffffffffffffffff";
     wrongPlanArgs["now_ms"] = Json::Int64(1000);
     wrongPlanArgs["ttl_ms"] = Json::Int64(5000);
     auto wrong = sessionSurfaceApply(coord, "approve_repair", wrongPlanArgs);
     REQUIRE_FALSE(wrong["ok"].asBool());
     REQUIRE(wrong["error"].asString() == "APPROVAL_WRONG_PLAN");
 
-    // The honest flow: no plan_id argument (approve what you last saw),
-    // clock window from the driver, token bound to the projected plan.
+    // The honest flow: no digest argument (approve what you last saw),
+    // clock window from the driver, token bound to the projected science.
     Json::Value args(Json::objectValue);
     args["now_ms"] = Json::Int64(1000);
     args["ttl_ms"] = Json::Int64(5000);
     auto approved = sessionSurfaceApply(coord, "approve_repair", args);
     REQUIRE(approved["ok"].asBool());
-    REQUIRE(approved["plan_id"].asString() ==
-            coord.lastProjectedRepairPlanId());
+    REQUIRE(approved["findings_digest"].asString() ==
+            coord.lastProjectedFindingsDigest());
     REQUIRE(approved["repair_approval"].isObject());
     REQUIRE(coord.hasPendingRepairApproval());
     REQUIRE(std::string(verifyRepairApprovalToken(approved["repair_approval"],
-                                                  coord.lastProjectedRepairPlanId(),
+                                                  coord.lastProjectedFindingsDigest(),
                                                   coord.instanceId(), 6000)) ==
             approval_check::kOk);
+}
+
+TEST_CASE("a mixed-risk plan is approval-gated as a whole (max risk over all candidates)",
+          "[agent_ops][recovery][repair]")
+{
+    // A plan is executed whole: one radiometric candidate among
+    // shape-preserving ones makes the WHOLE launch approval-gated — the
+    // gate reads the maximum risk over every selected candidate, not just
+    // the first.
+    FakeCapabilityProvider provider;
+    provider.add("crs_align", capabilityOf("gdal:reproject", "grid", "medium"));
+    provider.add("radiometric_state",
+                 capabilityOf("rs:radiometric_calibration", "preprocess", "medium"));
+    RecoveryBridge bridge(&provider);
+
+    auto diag = preflightFixableDiagnostic("CRS_MISMATCH");
+    Json::Value &issues = diag.sources["preflight"]["issues"];
+    Json::Value second(Json::objectValue);
+    second["code"] = "INVALID_RADIOMETRY";
+    second["severity"] = "error";
+    second["message"] = "mixed radiometric domains";
+    issues.append(second);
+
+    RecoveryContext ctx;
+    auto decision = bridge.decide(diag, ctx);
+    REQUIRE(decision.repairPlan["status"].asString() == "planned");
+    REQUIRE(decision.repairPlan["selected"].size() == 2);
+    REQUIRE(decision.repairPlan["selected"][0]["risk_class"].asString() ==
+            "shape_preserving");
+    REQUIRE(decision.repairPlan["selected"][1]["risk_class"].asString() == "radiometric");
+    REQUIRE(decision.action == recovery_action::kAsk);
+    REQUIRE(decision.reasonCode == "REPAIR_NEEDS_APPROVAL");
+    REQUIRE(decision.needsApproval);
+
+    // With the approval bound to this plan's findings, the whole plan —
+    // both candidates — may proceed.
+    ctx.humanApprovedRepair = true;
+    ctx.approvedFindingsDigest =
+        decision.repairPlan["provenance"]["findings_digest"].asString();
+    auto proceed = bridge.decide(diag, ctx);
+    REQUIRE(proceed.action == recovery_action::kRepair);
+    REQUIRE(proceed.toJson()["requires_reverification"].asBool());
+}
+
+TEST_CASE("a code-bearing issue without usable severity refuses to plan (never dropped)",
+          "[agent_ops][recovery][repair]")
+{
+    FakeCapabilityProvider provider;
+    provider.add("grid_align", capabilityOf("rs:resample", "preprocess", "light"));
+    RecoveryBridge bridge(&provider);
+
+    // The severity-less issue cannot be classified: evidence that names
+    // itself is never silently dropped, and the plannable sibling does not
+    // excuse it — the typed no_safe_repair puts the human back in charge.
+    auto diag = preflightFixableDiagnostic("GRID_MISMATCH");
+    Json::Value &issues = diag.sources["preflight"]["issues"];
+    issues[0].removeMember("severity");
+    Json::Value second(Json::objectValue);
+    second["code"] = "CRS_MISMATCH";
+    second["severity"] = "error";
+    second["message"] = "plannable sibling";
+    issues.append(second);
+
+    RecoveryContext ctx;
+    auto decision = bridge.decide(diag, ctx);
+    REQUIRE(decision.action == recovery_action::kAsk);
+    REQUIRE(decision.repairPlan["status"].asString() == "no_safe_repair");
+    REQUIRE(decision.repairPlan["no_safe_repair"]["cause"].asString() ==
+            "invalid_findings");
+}
+
+TEST_CASE("a hostile findings flood stays bounded and deterministic",
+          "[agent_ops][recovery][repair]")
+{
+    FakeCapabilityProvider provider;
+    provider.add("grid_align", capabilityOf("rs:resample", "preprocess", "light"));
+    RecoveryBridge bridge(&provider);
+
+    auto diag = preflightFixableDiagnostic("GRID_MISMATCH");
+    Json::Value &issues = diag.sources["preflight"]["issues"];
+    for (int i = 0; i < 4000; ++i)
+    {
+        Json::Value flood(Json::objectValue);
+        flood["code"] = "GRID_MISMATCH";
+        flood["severity"] = "warning";
+        flood["message"] = "flood";
+        issues.append(flood);
+    }
+
+    RecoveryContext ctx;
+    auto decision = bridge.decide(diag, ctx);
+    // The bridge bounds its input before planning; the plan is still
+    // produced deterministically and reports the visible truncation.
+    REQUIRE(decision.repairPlan["status"].asString() == "planned");
+    REQUIRE(decision.repairPlan["bounds"]["requirements_truncated"].asBool());
+    auto again = bridge.decide(diag, ctx);
+    REQUIRE(sicnu::repair::jsonToString(again.repairPlan) ==
+            sicnu::repair::jsonToString(decision.repairPlan));
 }

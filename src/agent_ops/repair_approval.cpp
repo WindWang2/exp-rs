@@ -20,8 +20,9 @@ std::string intToString(long long value)
 std::string approvalDigest(const Json::Value &tokenDoc)
 {
     std::string hex = sicnu::repair::sha256Hex(
-        tokenDoc["plan_id"].asString() + "|" + intToString(tokenDoc["coordinator_id"].asInt64()) +
-        "|" + intToString(tokenDoc["issued_at_ms"].asInt64()) + "|" +
+        tokenDoc["findings_digest"].asString() + "|" +
+        intToString(tokenDoc["coordinator_id"].asInt64()) + "|" +
+        intToString(tokenDoc["issued_at_ms"].asInt64()) + "|" +
         intToString(tokenDoc["expires_at_ms"].asInt64()));
     hex.resize(16);
     return hex;
@@ -47,17 +48,18 @@ long long nextRepairApprovalInstanceId()
     return gInstanceCounter.fetch_add(1) + 1;
 }
 
-Json::Value mintRepairApprovalToken(const std::string &planId, long long coordinatorId,
-                                    long long nowMs, long long ttlMs)
+Json::Value mintRepairApprovalToken(const std::string &findingsDigest,
+                                    long long coordinatorId, long long nowMs,
+                                    long long ttlMs)
 {
     // Fail closed: an unusable argument mints nothing, never a bare
     // "approved" marker without binding or expiry.
-    if (planId.empty() || coordinatorId <= 0 || nowMs <= 0 || ttlMs <= 0)
+    if (findingsDigest.empty() || coordinatorId <= 0 || nowMs <= 0 || ttlMs <= 0)
         return Json::Value();
     Json::Value doc(Json::objectValue);
     doc["kind"] = kRepairApprovalKind;
     doc["schema_version"] = kRepairApprovalSchema;
-    doc["plan_id"] = planId;
+    doc["findings_digest"] = findingsDigest;
     doc["coordinator_id"] = static_cast<Json::Int64>(coordinatorId);
     doc["issued_at_ms"] = static_cast<Json::Int64>(nowMs);
     doc["expires_at_ms"] = static_cast<Json::Int64>(nowMs + ttlMs);
@@ -66,14 +68,14 @@ Json::Value mintRepairApprovalToken(const std::string &planId, long long coordin
 }
 
 const char *verifyRepairApprovalToken(const Json::Value &tokenDoc,
-                                      const std::string &planId, long long coordinatorId,
-                                      long long nowMs)
+                                      const std::string &findingsDigest,
+                                      long long coordinatorId, long long nowMs)
 {
     if (!tokenDoc.isObject() || !tokenDoc["kind"].isString() ||
         tokenDoc["kind"].asString() != kRepairApprovalKind ||
         !tokenDoc["schema_version"].isString() ||
         tokenDoc["schema_version"].asString() != kRepairApprovalSchema ||
-        !tokenDoc["plan_id"].isString() || !tokenDoc["coordinator_id"].isInt64() ||
+        !tokenDoc["findings_digest"].isString() || !tokenDoc["coordinator_id"].isInt64() ||
         !tokenDoc["issued_at_ms"].isInt64() || !tokenDoc["expires_at_ms"].isInt64() ||
         !tokenDoc["digest"].isString() || !isHex16(tokenDoc["digest"].asString()))
         return approval_check::kMalformed;
@@ -81,7 +83,7 @@ const char *verifyRepairApprovalToken(const Json::Value &tokenDoc,
     if (tokenDoc["digest"].asString() != approvalDigest(tokenDoc))
         return approval_check::kTampered;
 
-    if (tokenDoc["plan_id"].asString() != planId)
+    if (tokenDoc["findings_digest"].asString() != findingsDigest)
         return approval_check::kWrongPlan;
 
     if (tokenDoc["coordinator_id"].asInt64() != coordinatorId)

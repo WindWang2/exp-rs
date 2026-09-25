@@ -51,24 +51,26 @@ OperationsCoordinator::OperationsCoordinator(Dependencies deps,
 {
 }
 
-std::string OperationsCoordinator::lastProjectedRepairPlanId() const
+std::string OperationsCoordinator::lastProjectedFindingsDigest() const
 {
-    if (!mLastProjectedRepairPlanId.empty())
-        return mLastProjectedRepairPlanId;
+    if (!mLastProjectedFindingsDigest.empty())
+        return mLastProjectedFindingsDigest;
     const auto &last = mLastResult;
     if (last && last->lastRecovery && last->lastRecovery->repairPlan.isObject() &&
-        last->lastRecovery->repairPlan["plan_id"].isString())
-        return last->lastRecovery->repairPlan["plan_id"].asString();
+        last->lastRecovery->repairPlan["provenance"].isObject() &&
+        last->lastRecovery->repairPlan["provenance"]["findings_digest"].isString())
+        return last->lastRecovery->repairPlan["provenance"]["findings_digest"].asString();
     return {};
 }
 
 std::string OperationsCoordinator::verifyApprovalAgainstLastPlan(const Json::Value &tokenDoc,
                                                                  long long nowMs) const
 {
-    const std::string planId = lastProjectedRepairPlanId();
-    if (planId.empty())
+    const std::string targetDigest = lastProjectedFindingsDigest();
+    if (targetDigest.empty())
         return "NO_PENDING_REPAIR_PLAN";
-    const char *check = verifyRepairApprovalToken(tokenDoc, planId, mInstanceId, nowMs);
+    const char *check =
+        verifyRepairApprovalToken(tokenDoc, targetDigest, mInstanceId, nowMs);
     if (std::string(check) == approval_check::kOk)
         return {};
     return approvalCheckToError(check);
@@ -77,21 +79,22 @@ std::string OperationsCoordinator::verifyApprovalAgainstLastPlan(const Json::Val
 std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc,
                                                      long long nowMs)
 {
+    // Replay first: a token this coordinator already consumed by a launch
+    // cannot arm again, whatever the current projection is — one approval
+    // authorizes exactly one repair launch.
+    const std::string tokenDigest = tokenDoc["digest"].asString();
+    for (const std::string &consumed : mConsumedApprovalDigests)
+    {
+        if (consumed == tokenDigest)
+            return "APPROVAL_REPLAYED";
+    }
+
     const std::string error = verifyApprovalAgainstLastPlan(tokenDoc, nowMs);
     if (!error.empty())
         return error;
 
-    // Replay: a token this coordinator already consumed by a launch cannot
-    // arm again, even though its digest is still intact — one approval
-    // authorizes exactly one repair launch.
-    const std::string digest = tokenDoc["digest"].asString();
-    for (const std::string &consumed : mConsumedApprovalDigests)
-    {
-        if (consumed == digest)
-            return "APPROVAL_REPLAYED";
-    }
-
-    mPendingRepairApproval = ArmedApproval{tokenDoc, tokenDoc["plan_id"].asString()};
+    mPendingRepairApproval =
+        ArmedApproval{tokenDoc, tokenDoc["findings_digest"].asString()};
     return {};
 }
 
@@ -189,6 +192,18 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
     out.projection = mProjector.projectResult(out.session, request.budgets);
     out.reconcile = mReconciler.reconcile(out.session.journal);
 
+    // The binding target for approvals is always THIS coordinator's most
+    // recent projection: a fresh run replaces (or clears) what an earlier
+    // evaluateRecovery remembered, so a stale plan can never silently
+    // outlive its run.
+    if (recovery && recovery->repairPlan.isObject() &&
+        recovery->repairPlan["provenance"].isObject() &&
+        recovery->repairPlan["provenance"]["findings_digest"].isString())
+        mLastProjectedFindingsDigest =
+            recovery->repairPlan["provenance"]["findings_digest"].asString();
+    else
+        mLastProjectedFindingsDigest.clear();
+
     mLastResult = out;
     return out;
 }
@@ -248,19 +263,24 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         const std::string directError = verifyApprovalAgainstLastPlan(
             request.repairApproval, request.approvalNowMs);
         if (directError.empty())
-            mPendingRepairApproval = ArmedApproval{
-                request.repairApproval, request.repairApproval["plan_id"].asString()};
+            mPendingRepairApproval =
+                ArmedApproval{request.repairApproval,
+                              request.repairApproval["findings_digest"].asString()};
         else if (approvalError.empty())
             approvalError = directError;
     }
     bool pendingApproval = false;
+    std::string approvedPlanId;
     if (mPendingRepairApproval)
     {
         const char *check = verifyRepairApprovalToken(
-            mPendingRepairApproval->token, mPendingRepairApproval->planId, mInstanceId,
-            request.approvalNowMs);
+            mPendingRepairApproval->token, mPendingRepairApproval->findingsDigest,
+            mInstanceId, request.approvalNowMs);
         if (std::string(check) == approval_check::kOk)
+        {
             pendingApproval = true;
+            approvedPlanId = mPendingRepairApproval->findingsDigest;
+        }
         else if (approvalError.empty())
             approvalError = approvalCheckToError(check);
         // Record the consumed token BEFORE clearing: replay of the same
@@ -363,6 +383,8 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         ctx.cancelRequested = mCancelRequested.load();
         ctx.leadingRiskClass = request.leadingRepairRiskClass;
         ctx.humanApprovedRepair = pendingApproval;
+        ctx.approvedFindingsDigest = approvedPlanId;
+        ctx.approvalNowMs = request.approvalNowMs;
         ctx.autonomyPolicy = mDeps.autonomyPolicy;
         ctx.replanCount = 0;
         for (const auto &s : result.summary.stages)
@@ -378,7 +400,10 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         recovery = mRecovery.decide(*diag, ctx);
     }
 
-    return finish(std::move(result), request, diag, recovery, approvalError);
+    std::string finishApprovalError = approvalError;
+    if (recovery && !recovery->approvalError.empty() && finishApprovalError.empty())
+        finishApprovalError = recovery->approvalError;
+    return finish(std::move(result), request, diag, recovery, finishApprovalError);
 }
 
 OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
@@ -452,13 +477,45 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
 }
 
 RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &diagnostic,
-                                                         const RecoveryContext &ctx) const
+                                                         RecoveryContext &ctx)
 {
+    // The human gate is the armed token, never the caller's bool: verify
+    // and consume it here, then derive what the bridge may trust.
+    std::string tokenErrorOut;
+    if (mPendingRepairApproval)
+    {
+        const std::string targetDigest = lastProjectedFindingsDigest();
+        const char *check = verifyRepairApprovalToken(
+            mPendingRepairApproval->token, targetDigest, mInstanceId, ctx.approvalNowMs);
+        std::string tokenError;
+        if (std::string(check) == approval_check::kOk)
+        {
+            ctx.humanApprovedRepair = true;
+            ctx.approvedFindingsDigest = targetDigest;
+        }
+        else
+        {
+            ctx.humanApprovedRepair = false;
+            ctx.approvedFindingsDigest.clear();
+            tokenError = approvalCheckToError(check);
+        }
+        if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
+            mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
+        mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        mPendingRepairApproval.reset();
+        tokenErrorOut = tokenError;
+    }
     RecoveryDecision decision = mRecovery.decide(diagnostic, ctx);
+    // The refusal must be visible even when the decision itself is safe —
+    // a driver cannot otherwise tell an applied approval from a refused one.
+    if (!tokenErrorOut.empty() && decision.approvalError.empty())
+        decision.approvalError = tokenErrorOut;
     // Remember what this coordinator projected last: the surface's
-    // approve_repair binds its token to exactly this plan.
-    if (decision.repairPlan.isObject() && decision.repairPlan["plan_id"].isString())
-        mLastProjectedRepairPlanId = decision.repairPlan["plan_id"].asString();
+    // approve_repair binds its token to exactly this repair science.
+    if (decision.repairPlan.isObject() && decision.repairPlan["provenance"].isObject() &&
+        decision.repairPlan["provenance"]["findings_digest"].isString())
+        mLastProjectedFindingsDigest =
+            decision.repairPlan["provenance"]["findings_digest"].asString();
     return decision;
 }
 

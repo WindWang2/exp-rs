@@ -17,6 +17,8 @@ Json::Value sessionSurfaceStatus(const OpsRunResult &result)
     doc["stop_reason"] = result.delivery.stopReason;
     doc["projection"] = result.projection.toJson();
     doc["delivery"] = result.delivery.toJson();
+    if (!result.approvalError.empty())
+        doc["approval_error"] = result.approvalError;
     if (result.lastDiagnostic)
         doc["diagnostic"] = result.lastDiagnostic->toJson();
     if (result.lastRecovery)
@@ -69,11 +71,20 @@ std::string readApprovalArgs(const std::string &action, const Json::Value &args,
 {
     if (args.isObject() && args.isMember("approve_pending_repair"))
         return "APPROVAL_TOKEN_REQUIRED";
-    if (args.isObject() && args["repair_approval"].isObject())
+    if (!args.isObject())
+        return {};
+    // A malformed token document is a typed refusal, never a silent drop.
+    if (args.isMember("repair_approval") && !args["repair_approval"].isNull() &&
+        !args["repair_approval"].isObject())
+        return "APPROVAL_MALFORMED";
+    // resume() never evaluates the recovery bridge, so an approval could
+    // not be consumed honestly there — refuse instead of ignoring.
+    if (action == "resume" && args.isMember("repair_approval"))
+        return "APPROVAL_TOKEN_REQUIRED";
+    if (args["repair_approval"].isObject())
         request.repairApproval = args["repair_approval"];
-    if (args.isObject() && args["approval_now_ms"].isInt64())
+    if (args["approval_now_ms"].isInt64())
         request.approvalNowMs = args["approval_now_ms"].asInt64();
-    (void)action;
     return {};
 }
 
@@ -156,14 +167,16 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     }
     if (action == "approve_repair")
     {
-        // The human gate mints a token bound to the plan the driver last
-        // saw: (this coordinator, plan_id, expiry window, digest). An
-        // approval that binds nothing is refused — never a bare flag.
-        const std::string planId = coordinator.lastProjectedRepairPlanId();
-        if (planId.empty())
+        // The human gate mints a token bound to the repair science the
+        // driver last saw: (this coordinator, findings digest, expiry
+        // window, integrity digest). An approval that binds nothing is
+        // refused — never a bare flag.
+        const std::string findingsDigest = coordinator.lastProjectedFindingsDigest();
+        if (findingsDigest.empty())
             return errorDoc(action, "NO_PENDING_REPAIR_PLAN");
-        if (args.isObject() && args.isMember("plan_id") &&
-            (!args["plan_id"].isString() || args["plan_id"].asString() != planId))
+        if (args.isObject() && args.isMember("findings_digest") &&
+            (!args["findings_digest"].isString() ||
+             args["findings_digest"].asString() != findingsDigest))
             return errorDoc(action, "APPROVAL_WRONG_PLAN");
         const Json::Int64 nowMs = args.isObject() && args["now_ms"].isInt64()
                                       ? args["now_ms"].asInt64()
@@ -171,15 +184,15 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
         const Json::Int64 ttlMs = args.isObject() && args["ttl_ms"].isInt64()
                                       ? args["ttl_ms"].asInt64()
                                       : 0;
-        Json::Value token = mintRepairApprovalToken(planId, coordinator.instanceId(), nowMs,
-                                                    ttlMs);
+        Json::Value token = mintRepairApprovalToken(findingsDigest,
+                                                    coordinator.instanceId(), nowMs, ttlMs);
         if (token.isNull())
             return errorDoc(action, "APPROVAL_MINTING_FAILED");
         const std::string armError = coordinator.armRepairApproval(token, nowMs);
         if (!armError.empty())
             return errorDoc(action, armError);
         doc["ok"] = true;
-        doc["plan_id"] = planId;
+        doc["findings_digest"] = findingsDigest;
         doc["repair_approval"] = token;
         doc["expires_at_ms"] = token["expires_at_ms"];
         doc["pending_repair_approval"] = coordinator.hasPendingRepairApproval();
