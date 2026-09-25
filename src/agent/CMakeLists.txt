@@ -270,6 +270,9 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters
+  # sicnu.lab-pack/1: lab_data_pack is a Qt façade over the Qt-free shared
+  # leaf — the ONE parser/validator shared with sicnu::teaching_admin.
+  sicnu_lab_pack
   ${JSONCPP_LIBRARIES}
 )
 
