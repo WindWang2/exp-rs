@@ -12876,6 +12876,7 @@ add_executable(test_teaching_cockpit_smoke
   ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.cpp
   ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
   ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_operator_launch.cpp
   ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_validate_service.cpp
 )
 target_link_libraries(test_teaching_cockpit_smoke PRIVATE
