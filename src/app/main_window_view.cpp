@@ -27,6 +27,7 @@
 #include "pipeline/ir2_pipeline_designer_dock.h"
 #include "workbench/object_identity.h"
 #include "workbench/selection_context.h"
+#include "workbench/step_explanation_section.h"
 
 #include <QMainWindow>
 #include <QVBoxLayout>
@@ -627,6 +628,21 @@ void QgisDesktopWindow::showIr2PipelineDesigner()
         connect( m_ir2PipelineDock, &sicnu::app::pipeline::Ir2PipelineDesignerDock::workflowIdentityChanged,
                  this, [this]( const sicnu::app::ActiveWorkflowRef &ref ) {
                      sicnu::app::setMissionActiveWorkflow( m_mission, ref );
+                     // RS14-15 R3: the section gates on the identity KEY
+                     // itself — the dock re-announces identity on every
+                     // canvas interaction, and only a REAL change (New /
+                     // LabSpec lift / content edit) may wipe the previous
+                     // run's evidence and the node selection.
+                     if ( auto *stepSection =
+                              m_inspectorHost ? m_inspectorHost->findChild<sicnu::app::StepExplanationSection *>()
+                                              : nullptr )
+                     {
+                         if ( stepSection->noteWorkflowIdentity( ref.workflowId, ref.fingerprint ) )
+                         {
+                             if ( m_selectionContext )
+                                 m_selectionContext->notifyPipelineNodeSelection( QString() );
+                         }
+                     }
                      statusBar()->showMessage(
                          tr( "Mission workflow identity: %1 (fp %2…)" )
                              .arg( ref.workflowId )
@@ -662,6 +678,36 @@ void QgisDesktopWindow::showIr2PipelineDesigner()
                              .arg( success ? tr( "success" ) : tr( "failed" ), summary ),
                          6000 );
                  } );
+        // Explainable Workflow (RS14-15 R3): feed the why-this-step section
+        // from the same authoritative seams — canvas node selection into the
+        // unified selection context, run lifecycle into the section's
+        // run-scoped evidence (loaded once from the finished run's
+        // provenance record; a new run clears the previous run's evidence).
+        if ( m_selectionContext )
+        {
+            connect( m_ir2PipelineDock->canvas(),
+                     &sicnu::app::pipeline::PipelineCanvasWidget::nodeSelected, m_selectionContext,
+                     &sicnu::app::SelectionContext::notifyPipelineNodeSelection );
+        }
+        if ( m_inspectorHost )
+        {
+            auto *stepSection = m_inspectorHost->findChild<sicnu::app::StepExplanationSection *>();
+            if ( stepSection )
+            {
+                connect( m_ir2PipelineDock,
+                         &sicnu::app::pipeline::Ir2PipelineDesignerDock::pipelineRunStarted,
+                         stepSection, [stepSection]( const QString & ) {
+                             stepSection->clearRunEvidence();
+                         } );
+                connect( m_ir2PipelineDock,
+                         &sicnu::app::pipeline::Ir2PipelineDesignerDock::pipelineRunFinished,
+                         stepSection, [this, stepSection]( bool, const QString &, const QString & ) {
+                             stepSection->attachRunProvenance(
+                                 m_ir2PipelineDock ? m_ir2PipelineDock->runCoordinator()->provenancePath()
+                                                   : QString() );
+                         } );
+            }
+        }
         // Seed mission with the empty document identity immediately.
         sicnu::app::setMissionActiveWorkflow( m_mission, m_ir2PipelineDock->activeWorkflowRef() );
     }

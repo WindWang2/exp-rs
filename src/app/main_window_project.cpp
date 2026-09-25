@@ -17,6 +17,8 @@
 #include "workbench/mission_timeline_panel.h"
 #include "workbench/mission_context_store.h"
 #include "workbench/project_session_boundary.h"
+#include "workbench/selection_context.h"
+#include "workbench/step_explanation_section.h"
 
 #include <QCoreApplication>
 #include <QBuffer>
@@ -63,6 +65,20 @@ constexpr const char *kLabAutoRecordKey = "lab/autoRecordExperimentRuns";
 constexpr const char *kLabStudentKey = "lab/studentName";
 constexpr const char *kLabSessionKey = "lab/sessionName";
 constexpr int kMaxReportThumbnails = 8;
+
+// RS14-15 R3: a project switch is a story boundary for the why-this-step
+// surface too. The D17 designer dock (and the last run's provenance evidence
+// attached to the section) survives the switch, so the session boundary must
+// drop both the evidence and the stale pipeline-node selection.
+void resetStepExplanationSession( QgisDesktopWindow *win )
+{
+    if ( !win )
+        return;
+    if ( auto *section = win->findChild<sicnu::app::StepExplanationSection *>() )
+        section->clearRunEvidence();
+    if ( auto *context = win->findChild<sicnu::app::SelectionContext *>() )
+        context->notifyPipelineNodeSelection( QString() );
+}
 
 /// Auto-recording per ADR 0143 / goal D5: every lab execution of the opened
 /// project registers an experiment run. Opt-out (never opt-in) via
@@ -221,6 +237,8 @@ void QgisDesktopWindow::resetSessionStoryState()
     // Story boundary: the empty session owns no mission either.
     resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
                               m_missionSidecarWatcher );
+    // …and no why-this-step scope from the previous project's runs (RS14-15 R3).
+    resetStepExplanationSession( this );
 }
 
 void QgisDesktopWindow::newProject()

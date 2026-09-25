@@ -52,6 +52,26 @@ bool readFileCapped( const std::filesystem::path &path, QByteArray &out, std::st
 
 } // namespace
 
+std::optional<std::string> ProvenanceFileEvidence::runIdFromFileName(
+  const std::string &fileName )
+{
+  if ( fileName.rfind( "provenance_", 0 ) != 0 )
+    return std::nullopt;
+  constexpr size_t kPrefix = 11; // "provenance_"
+  constexpr size_t kSuffix = 5;  // ".json"
+  if ( fileName.size() <= kPrefix + kSuffix
+       || fileName.compare( fileName.size() - kSuffix, kSuffix, ".json" ) != 0 )
+    return std::nullopt;
+  std::string runId = fileName.substr( kPrefix, fileName.size() - kPrefix - kSuffix );
+  // The evidence-link grammar (provenance:<runId>#node:<nodeId>) admits no
+  // whitespace and exactly one '#': a record whose run id cannot produce a
+  // valid link is refused here instead of failing closed much later.
+  if ( runId.empty() || runId.find( '#' ) != std::string::npos
+       || containsWhitespace( runId ) )
+    return std::nullopt;
+  return runId;
+}
+
 std::unique_ptr<ProvenanceFileEvidence> ProvenanceFileEvidence::loadFromDirectory(
   const std::string &directory, std::vector<EvidenceLoadProblem> &problems )
 {
@@ -72,11 +92,9 @@ std::unique_ptr<ProvenanceFileEvidence> ProvenanceFileEvidence::loadFromDirector
   {
     if ( ec )
       break;
-    const std::string name = entry.path().filename().string();
     if ( entry.is_regular_file()
-         && name.rfind( "provenance_", 0 ) == 0
-         && name.size() > 5
-         && name.compare( name.size() - 5, 5, ".json" ) == 0 )
+         && ProvenanceFileEvidence::runIdFromFileName( entry.path().filename().string() )
+              .has_value() )
       files.push_back( entry.path() );
   }
   std::sort( files.begin(), files.end() );
@@ -84,18 +102,8 @@ std::unique_ptr<ProvenanceFileEvidence> ProvenanceFileEvidence::loadFromDirector
   for ( const std::filesystem::path &file : files )
   {
     const std::string fileName = file.filename().string();
-    const std::string runId = fileName.substr( 11, fileName.size() - 11 - 5 ); // strip prefix/suffix
-
-    // The evidence-link grammar (provenance:<runId>#node:<nodeId>) admits no
-    // whitespace and exactly one '#': a record whose run id cannot produce a
-    // valid link is refused here instead of failing closed much later.
-    if ( runId.empty() || runId.find( '#' ) != std::string::npos
-         || containsWhitespace( runId ) )
-    {
-      adapter->problems_.push_back( { fileName, "malformed_name",
-                                      "file name does not carry a usable run id" } );
-      continue;
-    }
+    const std::string runId =
+      ProvenanceFileEvidence::runIdFromFileName( fileName ).value();
 
     if ( adapter->runs_.size() >= kMaxRuns )
     {
@@ -148,6 +156,59 @@ std::unique_ptr<ProvenanceFileEvidence> ProvenanceFileEvidence::loadFromDirector
   }
 
   problems = adapter->problems_;
+  return adapter;
+}
+
+std::unique_ptr<ProvenanceFileEvidence> ProvenanceFileEvidence::loadFromFile(
+  const std::string &filePath, std::vector<EvidenceLoadProblem> &problems )
+{
+  auto adapter = std::unique_ptr<ProvenanceFileEvidence>( new ProvenanceFileEvidence() );
+
+  const std::filesystem::path file( filePath );
+  const std::string fileName = file.filename().string();
+  const std::optional<std::string> runId = runIdFromFileName( fileName );
+  if ( !runId.has_value() )
+  {
+    problems.push_back( { fileName, "malformed_name",
+                          "file name does not carry a usable run id" } );
+    adapter->problems_ = problems;
+    return adapter;
+  }
+
+  QByteArray bytes;
+  std::string error;
+  if ( !readFileCapped( file, bytes, error ) )
+  {
+    problems.push_back(
+      { fileName, error.find( "exceeds" ) != std::string::npos ? "file_too_large"
+                                                               : "file_unreadable",
+        error } );
+    adapter->problems_ = problems;
+    return adapter;
+  }
+
+  QJsonParseError parseError{};
+  const QJsonDocument document = QJsonDocument::fromJson( bytes, &parseError );
+  if ( parseError.error != QJsonParseError::NoError || !document.isObject() )
+  {
+    problems.push_back(
+      { fileName, "parse_failed", parseError.errorString().toStdString() } );
+    adapter->problems_ = problems;
+    return adapter;
+  }
+
+  const sicnu::workflow::Result<sicnu::workflow::ProvenanceGraph> parsed =
+    sicnu::workflow::ProvenanceGraph::fromJson( document.object() );
+  if ( !parsed.isSuccess() )
+  {
+    problems.push_back( { fileName, "envelope_refused", parsed.error().toStdString() } );
+    adapter->problems_ = problems;
+    return adapter;
+  }
+
+  adapter->runs_.push_back( RunRecord{
+    *runId,
+    std::make_shared<const sicnu::workflow::ProvenanceGraph>( parsed.value() ) } );
   return adapter;
 }
 
