@@ -23,6 +23,13 @@ include("@SICNU_CATCH_ADD_TESTS_UPSTREAM@")
 # `_<name>`, so after the include above `_catch_discover_tests_impl` is the
 # stock Catch2 implementation (re-including this file per test binary keeps
 # that invariant: upstream is re-defined first, then this wrapper).
+# CMP0174 NEW: an empty keyword value (Catch2 passes many, e.g.
+# `TEST_SUFFIX [==[]==]`) is an empty string, not a dev warning per binary.
+# Policies are recorded when the function is defined.
+cmake_policy(PUSH)
+if(POLICY CMP0174)
+  cmake_policy(SET CMP0174 NEW)
+endif()
 function(catch_discover_tests_impl)
   # PARSE_ARGV keeps empty values (e.g. `TEST_SUFFIX [==[]==]`) so they
   # cannot swallow the next keyword; the keyword list mirrors Catch2 v3.
@@ -103,3 +110,4 @@ function(catch_discover_tests_impl)
 
   _catch_discover_tests_impl(${ARGV})
 endfunction()
+cmake_policy(POP)
