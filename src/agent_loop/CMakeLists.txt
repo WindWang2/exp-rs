@@ -20,6 +20,8 @@ target_include_directories( sicnu_agent_loop PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_agent_loop PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # Embedded into the SHARED sicnu_agent (agent_session_adapter).
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: the canonical target when the

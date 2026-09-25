@@ -2617,6 +2617,18 @@ target_include_directories(surface_mcp_host PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
+# Every target that compiles src/agent/mcp_server.cpp in-process needs the
+# agent_ops closure: the scientific:agent_session tool calls
+# sicnu::agent_ops::OpsDriver::apply (review P0-3 — "OpsDriver::apply
+# undefined"). test_mcp_server already lists it.
+foreach(_mcp_embed test_interaction_tools test_raster_display_tools
+        test_surface_parity test_capability_surface_parity test_algorithm_search
+        test_surface_protocol surface_mcp_host)
+  if(TARGET ${_mcp_embed})
+    target_link_libraries(${_mcp_embed} PRIVATE Sicnu::agent_ops)
+  endif()
+endforeach()
+
 add_executable(test_surface_e2e test_surface_e2e.cpp)
 target_link_libraries(test_surface_e2e PRIVATE
   Catch2::Catch2WithMain
