@@ -15,6 +15,7 @@
 #include "panels/data_manager_panel.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workbench/mission_timeline_panel.h"
+#include "workbench/mission_context_store.h"
 #include "workbench/project_session_boundary.h"
 
 #include <QCoreApplication>
@@ -209,6 +210,19 @@ QVector<sicnu::experiment::LabReportThumbnail> collectThumbnails( const QString 
 
 } // namespace
 
+void QgisDesktopWindow::resetSessionStoryState()
+{
+    // The cleared project has no lab: stop recording so later runs cannot
+    // land in the previous project's experiment store, and clear the
+    // recording context so no consumer (lab cockpit, cockpit capsule export)
+    // keeps presenting the dead project's experiment db.
+    stopLabRecording();
+    setLabRecordingContext( QString(), QString(), QString() );
+    // Story boundary: the empty session owns no mission either.
+    resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
+                              m_missionSidecarWatcher );
+}
+
 void QgisDesktopWindow::newProject()
 {
     if (!confirmWorkbenchShutdown(tr("New Project")))
@@ -241,22 +255,29 @@ void QgisDesktopWindow::newProject()
         return;
     }
 
-    // The cleared project has no lab: stop recording so later runs cannot
-    // land in the previous project's experiment store.
-    stopLabRecording();
-    setLabRecordingContext( QString(), QString(), QString() );
-    // Story boundary: the empty session owns no mission either.
-    resetMissionSessionState( m_mission, m_missionRuntime, m_missionPanel,
-                              m_missionSidecarWatcher );
+    resetSessionStoryState();
 
-    m_mapCanvas->setLayers({});
-    m_mapCanvas->refresh();
+    renderEmptySessionShell();
+    statusBar()->showMessage(tr("New project created"), 3000);
+}
+
+void QgisDesktopWindow::renderEmptySessionShell()
+{
+    if ( m_mapCanvas )
+    {
+        // The wiped session owns no edit context either: the editing
+        // actions are disabled below, so an edit tool left active would
+        // keep the canvas dispatching clicks into a project that no
+        // longer exists (stale tool vs. dead actions).
+        m_mapCanvas->setMapTool( m_panTool );
+        m_mapCanvas->setLayers({});
+        m_mapCanvas->refresh();
+    }
     updateCanvasEmptyState();
     updateLayersEmptyState();
     updateEditingUI(nullptr);
     updateWindowTitle();
     refreshWorkspaceBrowser();
-    statusBar()->showMessage(tr("New project created"), 3000);
 }
 
 void QgisDesktopWindow::newLayout()
@@ -272,6 +293,87 @@ void QgisDesktopWindow::newLayout()
     designer->window()->show();
 }
 
+bool QgisDesktopWindow::openProjectFrom(const QString &filePath)
+{
+    if ( !m_projectContext )
+    {
+        QMessageBox::warning(
+            this, tr( "Open Project" ),
+            tr( "The project Data Context is unavailable." ) );
+        return false;
+    }
+
+    if ( m_mapCanvas )
+        m_mapCanvas->stopRenderingAndSettle();
+
+    // One open transaction (probe → clear → story boundary → store →
+    // read, with the failure rollback) lives in
+    // workbench/project_session_boundary — the window only renders the
+    // typed outcome.
+    const auto outcome = openProjectSession(
+        *m_projectContext, *QgsProject::instance(), filePath,
+        [this] {
+            // Session is empty now: the previous project's story (lab
+            // recording, mission authority) must not leak into whatever
+            // the read below brings — or fails to bring.
+            resetSessionStoryState();
+        } );
+
+    switch ( outcome.stage )
+    {
+        case sicnu::app::ProjectSessionOpenResult::Stage::ProbeFailed:
+        case sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed:
+        {
+            QMessageBox::warning(
+                this, tr( "Open Project" ),
+                tr( "Failed to open project:\n%1" ).arg( filePath ) );
+            if ( outcome.stage ==
+                 sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed )
+            {
+                // The session is now the consistent EMPTY state (the
+                // transaction rolled the phantom fileName/store back):
+                // mirror newProject's empty-session rendering so the
+                // canvas, empty-state overlays and the title cannot
+                // keep presenting the failed target.
+                renderEmptySessionShell();
+                statusBar()->showMessage(
+                    tr( "Open failed — session reset to an empty project" ), 4000 );
+            }
+            // Lab already stopped and its context cleared (ReadFailed) or
+            // never touched (ProbeFailed): nothing about the failed target
+            // advanced, and a later save still targets the session's real
+            // (previous) file — never the failed one.
+            return false;
+        }
+        case sicnu::app::ProjectSessionOpenResult::Stage::ClearFailed:
+        {
+            QMessageBox::warning(
+                this, tr( "Open Project" ),
+                tr( "Failed to release the current project data:\n%1" )
+                    .arg( outcome.diagnostics.join( '\n' ) ) );
+            return false;
+        }
+        case sicnu::app::ProjectSessionOpenResult::Stage::Succeeded:
+            break;
+    }
+
+    if ( !outcome.governanceStoreOpened )
+        statusBar()->showMessage( tr( "Governance store unavailable: workspace state runs in memory-only mode" ), 5000 );
+
+    refreshCanvasLayers();
+    updateCanvasEmptyState();
+    updateLayersEmptyState();
+    updateCrsDisplay();
+    updateEditingUI(currentVectorLayer());
+    updateWindowTitle();
+    refreshWorkspaceBrowser();
+    // D5: this project's lab executions now register as experiment runs
+    // (opt-out via QSettings lab/autoRecordExperimentRuns).
+    ensureLabRecordingForProject( this, filePath );
+    statusBar()->showMessage(tr("Opened project: %1").arg(filePath), 3000);
+    return true;
+}
+
 void QgisDesktopWindow::openProject()
 {
     if (!confirmWorkbenchShutdown(tr("Open Project")))
@@ -283,97 +385,8 @@ void QgisDesktopWindow::openProject()
         this, tr("Open Project"), "",
         tr("QGIS Project Files (*.qgs *.qgz);;All Files (*)")
     );
-    if (!filePath.isEmpty()) {
-        if ( !m_projectContext )
-        {
-            QMessageBox::warning(
-                this, tr( "Open Project" ),
-                tr( "The project Data Context is unavailable." ) );
-            return;
-        }
-
-        if ( m_mapCanvas )
-            m_mapCanvas->stopRenderingAndSettle();
-
-        // One open transaction (probe → clear → story boundary → store →
-        // read, with the failure rollback) lives in
-        // workbench/project_session_boundary — the window only renders the
-        // typed outcome.
-        const auto outcome = openProjectSession(
-            *m_projectContext, *QgsProject::instance(), filePath,
-            [this] {
-                // Session is empty now: stop lab recording so runs cannot
-                // land in the previous project's experiments.db while we
-                // finish (or fail) the load.
-                stopLabRecording();
-                // Story boundary for the mission authority too: whether the
-                // read below succeeds or fails, the previous project's
-                // mission must not leak into this session.
-                resetMissionSessionState( m_mission, m_missionRuntime,
-                                          m_missionPanel,
-                                          m_missionSidecarWatcher );
-            } );
-
-        switch ( outcome.stage )
-        {
-            case sicnu::app::ProjectSessionOpenResult::Stage::ProbeFailed:
-            case sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed:
-            {
-                QMessageBox::warning(
-                    this, tr( "Open Project" ),
-                    tr( "Failed to open project:\n%1" ).arg( filePath ) );
-                if ( outcome.stage ==
-                     sicnu::app::ProjectSessionOpenResult::Stage::ReadFailed )
-                {
-                    // The session is now the consistent EMPTY state (the
-                    // transaction rolled the phantom fileName/store back):
-                    // mirror newProject's empty-session rendering so the
-                    // canvas, empty-state overlays and the title cannot
-                    // keep presenting the failed target.
-                    if ( m_mapCanvas )
-                    {
-                        m_mapCanvas->setLayers( {} );
-                        m_mapCanvas->refresh();
-                    }
-                    updateCanvasEmptyState();
-                    updateLayersEmptyState();
-                    updateEditingUI(nullptr);
-                    updateWindowTitle();
-                    refreshWorkspaceBrowser();
-                    statusBar()->showMessage(
-                        tr( "Open failed — session reset to an empty project" ), 4000 );
-                }
-                // Lab already stopped (ReadFailed) or never touched
-                // (ProbeFailed); nothing about the failed target advanced.
-                return;
-            }
-            case sicnu::app::ProjectSessionOpenResult::Stage::ClearFailed:
-            {
-                QMessageBox::warning(
-                    this, tr( "Open Project" ),
-                    tr( "Failed to release the current project data:\n%1" )
-                        .arg( outcome.diagnostics.join( '\n' ) ) );
-                return;
-            }
-            case sicnu::app::ProjectSessionOpenResult::Stage::Succeeded:
-                break;
-        }
-
-        if ( !outcome.governanceStoreOpened )
-            statusBar()->showMessage( tr( "Governance store unavailable: workspace state runs in memory-only mode" ), 5000 );
-
-        refreshCanvasLayers();
-        updateCanvasEmptyState();
-        updateLayersEmptyState();
-        updateCrsDisplay();
-        updateEditingUI(currentVectorLayer());
-        updateWindowTitle();
-        refreshWorkspaceBrowser();
-        // D5: this project's lab executions now register as experiment runs
-        // (opt-out via QSettings lab/autoRecordExperimentRuns).
-        ensureLabRecordingForProject( this, filePath );
-        statusBar()->showMessage(tr("Opened project: %1").arg(filePath), 3000);
-    }
+    if (!filePath.isEmpty())
+        openProjectFrom(filePath);
 }
 
 void QgisDesktopWindow::saveProject()
@@ -393,39 +406,89 @@ void QgisDesktopWindow::saveProject()
     }
 }
 
+bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
+{
+    // A directory target cannot become a project file: refuse before the
+    // transaction mutates anything. (QgsProject::write emits writeProject
+    // before any target I/O, so a doomed write would still publish the
+    // mission sidecar beside the target.)
+    if ( QFileInfo( filePath ).isDir() )
+    {
+        QMessageBox::warning(
+            this, tr("Save Project"),
+            tr("Cannot save to:\n%1\n(the path is a directory)").arg(filePath) );
+        return false;
+    }
+
+    // #1097: QgsProject::write(filename) sets mFile BEFORE the write. Hold
+    // prior identity/governance until the write succeeds so a failure does
+    // not leave title/store pointing at a file that was never saved.
+    const QString previousPath = QgsProject::instance()->fileName();
+    // The mission authority follows this session: re-home its recorded
+    // project ref BEFORE the write, so the sidecar published beside the new
+    // file already carries the new identity. A stale ref is not cosmetic —
+    // mission reconciliation refuses to run while context.projectRef differs
+    // from the open file, so a moved project would silently lose it. A
+    // failed write rolls the refs back together with the file identity.
+    const QString previousMissionRef = m_mission.projectRef;
+    const QString previousTimelineRef = m_missionRuntime.timeline.projectRef();
+    if ( m_mission.projectRef != filePath )
+        m_mission.projectRef = filePath;
+    if ( m_missionRuntime.timeline.projectRef() != filePath )
+        m_missionRuntime.timeline.setProjectRef( filePath );
+    // onProjectWrite publishes the mission sidecar beside the TARGET during
+    // the write — before the project file I/O can fail. A sidecar that did
+    // not exist before this transaction is this transaction's orphan on
+    // failure and is removed with the rollback; a pre-existing sidecar (a
+    // real authority of the target) is left untouched.
+    const QString targetSidecar =
+        sicnu::app::missionSidecarPathForProject( filePath );
+    const bool sidecarExisted = QFileInfo::exists( targetSidecar );
+
+    if ( QgsProject::instance()->write(filePath) )
+    {
+        if ( m_projectContext )
+            m_projectContext->reopenWorkspaceStore( filePath );
+        // The mission sidecar now lives next to the NEW project file (the
+        // save itself wrote it): re-arm the out-of-process watcher on the
+        // new path, or agent commits land next to the new file without
+        // the GUI ever noticing while the old path kept triggering.
+        armMissionSidecarWatcher();
+        updateWindowTitle();
+        refreshWorkspaceBrowser();
+        statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
+        return true;
+    }
+
+    if ( m_mission.projectRef != previousMissionRef )
+        m_mission.projectRef = previousMissionRef;
+    if ( m_missionRuntime.timeline.projectRef() != previousTimelineRef )
+        m_missionRuntime.timeline.setProjectRef( previousTimelineRef );
+    // onProjectWrite mirrored the re-homed m_mission into the live runtime
+    // context during the doomed write — the rollback must cover it, or the
+    // session keeps a context.projectRef naming the failed target and
+    // mission reconciliation stays silently disabled.
+    m_missionRuntime.context.projectRef = m_mission.projectRef;
+    if ( !sidecarExisted )
+    {
+        QFile::remove( targetSidecar );
+    }
+    QgsProject::instance()->setFileName( previousPath );
+    updateWindowTitle();
+    QMessageBox::warning(
+        this, tr("Save Project"),
+        tr("Failed to save project to:\n%1").arg(filePath) );
+    return false;
+}
+
 void QgisDesktopWindow::saveProjectAs()
 {
     QString filePath = QFileDialog::getSaveFileName(
         this, tr("Save Project"), "",
         tr("QGIS Project Files (*.qgs);;All Files (*)")
     );
-    if (!filePath.isEmpty()) {
-        // #1097: QgsProject::write(filename) sets mFile BEFORE the write. Hold
-        // prior identity/governance until the write succeeds so a failure does
-        // not leave title/store pointing at a file that was never saved.
-        const QString previousPath = QgsProject::instance()->fileName();
-        if ( QgsProject::instance()->write(filePath) )
-        {
-            if ( m_projectContext )
-                m_projectContext->reopenWorkspaceStore( filePath );
-            // The mission sidecar now lives next to the NEW project file (the
-            // save itself wrote it): re-arm the out-of-process watcher on the
-            // new path, or agent commits land next to the new file without
-            // the GUI ever noticing while the old path kept triggering.
-            armMissionSidecarWatcher();
-            updateWindowTitle();
-            refreshWorkspaceBrowser();
-            statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
-        }
-        else
-        {
-            QgsProject::instance()->setFileName( previousPath );
-            updateWindowTitle();
-            QMessageBox::warning(
-                this, tr("Save Project"),
-                tr("Failed to save project to:\n%1").arg(filePath) );
-        }
-    }
+    if (!filePath.isEmpty())
+        saveProjectAsTo(filePath);
 }
 
 void QgisDesktopWindow::importLayer()
