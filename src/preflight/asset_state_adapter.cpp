@@ -1,5 +1,7 @@
 #include "preflight/asset_state_adapter.h"
 
+#include <algorithm>
+
 namespace sicnu::preflight {
 
 SlotFacts projectAssetState( const sicnu::state::RemoteSensingAssetState &state )
@@ -20,6 +22,11 @@ SlotFacts projectAssetState( const sicnu::state::RemoteSensingAssetState &state 
     f.hasSize = state.geometry.hasSize;
     f.width = state.geometry.width;
     f.height = state.geometry.height;
+    f.hasExtent = state.geometry.hasExtent;
+    f.extentMinX = state.geometry.minX;
+    f.extentMinY = state.geometry.minY;
+    f.extentMaxX = state.geometry.maxX;
+    f.extentMaxY = state.geometry.maxY;
 
     // Radiometric state (normalized unit vocabulary owned by the resolver).
     f.radiometricUnit = state.radiometric.unit;
@@ -47,9 +54,16 @@ SlotFacts projectAssetState( const sicnu::state::RemoteSensingAssetState &state 
     f.acquisitionTimeIso = state.acquisition.timeIso;
 
     // Temporal references are pointers to collections; counts/dates are not
-    // passport facts and stay unset (typed unknown downstream).
+    // passport facts. The refs themselves ARE facts and stay projected (sorted
+    // by collection id) so a temporal provider can resolve them into scene
+    // counts/dates — or typed unknowns — without re-reading the passport.
     f.temporalSceneCount = 0;
     f.temporalTruncated = false;
+    f.temporalInvalidTimeCount = 0;
+    for ( const auto &ref : state.temporalRefs )
+        if ( !ref.collectionId.empty() )
+            f.temporalCollectionRefs.push_back( ref.collectionId );
+    std::sort( f.temporalCollectionRefs.begin(), f.temporalCollectionRefs.end() );
 
     // Leakage-relevant derivation identity.
     if ( state.provenance.isDerived )
