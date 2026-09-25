@@ -1589,6 +1589,44 @@ TEST_CASE( "snapshot sweep keeps the legacy last-good liveness rule unchanged (c
     fs::remove_all( root, ec );
 }
 
+TEST_CASE( "the legacy temp-root sweep never touches the pid-attributed layout (R3 track 13)",
+           "[plugin][snapshot][completion13][r3]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root =
+        ( fs::temp_directory_path() / "exprs_test_sweep_legacy_layout" ).generic_string();
+    std::error_code ec;
+    fs::remove_all( root, ec );
+    const std::string snapRoot = pluginSnapshotRoot( root );
+    fs::create_directories( snapRoot, ec );
+    const long ownPid = snapshotOwnerPid();
+
+    const auto seedDir = []( const std::string &path ) {
+        std::error_code err;
+        fs::create_directories( path, err );
+        std::ofstream( path + "/x" ) << "x";
+    };
+    // Legacy 12.0 residue directly in the temp root, SAME plugin id as the
+    // new-layout snapshot below.
+    seedDir( root + "/plugin-last-good-org.migrated" );
+    // The new owner's pid-attributed last-good under the snapshot root (this
+    // process is its live owner).
+    seedDir( snapRoot + "/last-good-org.migrated-" + std::to_string( ownPid ) );
+    // And a legacy dir whose id is LIVE to the sweeping registry.
+    seedDir( root + "/plugin-last-good-org.legacy.live2" );
+
+    const int removed = sweepPluginSnapshots( root, { "org.legacy.live2" } );
+    ( void ) removed;
+    // The legacy orphan is reclaimed…
+    REQUIRE_FALSE( fs::exists( root + "/plugin-last-good-org.migrated", ec ) );
+    // …the live legacy dir is kept…
+    REQUIRE( fs::exists( root + "/plugin-last-good-org.legacy.live2", ec ) );
+    // …and the new owner's snapshot is untouched — the legacy rule reconciles
+    // its own layout only, never the pid-attributed rollback source.
+    REQUIRE( fs::exists( snapRoot + "/last-good-org.migrated-" + std::to_string( ownPid ), ec ) );
+    fs::remove_all( root, ec );
+}
+
 TEST_CASE( "snapshot sweep keeps a dead-owner last-good while the plugin id is live "
            "(completion 13/15)",
            "[plugin][snapshot][completion13]" )

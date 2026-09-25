@@ -16,6 +16,7 @@
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/provenance_verify.h"
+#include "runtime/observability/fault_registry.h"
 #include "operators/runtime/tile_inference_engine.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "synthetic_raster_builder.h"
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -964,4 +966,230 @@ TEST_CASE( "a detection republish leaves no backup residue and recovers a crash-
   CHECK( fileExists( sidecar ) );
   CHECK( residueCount( dir ) == 0 );
   ModelCatalog::instance().unregister( "det-sidecar-model" );
+}
+
+// ---------------------------------------------------------------------------
+// R3 Track 13: the single-model raster publication family (product +
+// provenance sidecar) adopts the crash-orphan states a killed run leaves
+// behind — the same contract the detection lanes already honor through
+// DetectionPublishGuard — and the park/swap stages are fault-injectable
+// like the sidecar publish, so every failure branch is deterministically
+// exercisable.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Registers a planefw segmentation model through the catalog and returns a
+/// lambda running rs:segment onto @p output (the p15 harness, generalized).
+std::function<Json::Value()> segmentRunner( const QTemporaryDir &dir, const QString &input,
+                                            const QString &output, const std::string &modelName )
+{
+  const QString weights = dir.filePath( QString::fromStdString( modelName ) + ".onnx" );
+  {
+    QFile f( weights );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( weights.toUtf8() + "-weights" ) );
+  }
+  std::string regError;
+  REQUIRE( ModelCatalog::instance().registerManifestJson(
+    R"({"name": ")" + modelName + R"(", "task": "segmentation", "framework": "planefw",
+        "artifact": {"path": ")" + weights.toStdString() + R"("}})",
+    "session", &regError ) );
+  return [ input, output, modelName ]() {
+    const auto op = RSOperatorRegistry::instance().create( "rs:segment" );
+    REQUIRE( op );
+    Json::Value params( Json::objectValue );
+    params["input"] = input.toStdString();
+    params["model"] = modelName;
+    params["output"] = output.toStdString();
+    RSOperatorContext context;
+    return op->run( params, context );
+  };
+}
+
+} // namespace
+
+TEST_CASE( "a raster republish adopts a crash-orphaned product+sidecar pair",
+           "[models][seam][publish][crash]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = writeRaster( dir, QStringLiteral( "crash-a-in.tif" ), 16, 16 );
+  const QString output = dir.filePath( QStringLiteral( "crash-a-out.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  const auto run = segmentRunner( dir, input, output, "crash-a-model" );
+
+  REQUIRE_NOTHROW( run() );
+  REQUIRE( fileExists( output ) );
+  REQUIRE( fileExists( sidecar ) );
+  const QByteArray productBytes = readFileBytes( output );
+  const QByteArray sidecarBytes = readFileBytes( sidecar );
+
+  // Kill -9 residue, park window: the previous pair is at the backup paths,
+  // the final path is ABSENT. The next run must adopt the parked pair —
+  // proven with a run that fails at the sidecar publish (a hostile stage
+  // directory): the adopted pair must be back at the final paths, byte
+  // identical. A delete-and-republish pass cannot produce this — a fresh
+  // run never publishes the OLD bytes.
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".prev~" ) ) );
+  REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".prev~.prov.json" ) ) );
+  REQUIRE_FALSE( fileExists( output ) );
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    REQUIRE_THROWS( run() );
+    CHECK( fileExists( output ) );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+    QDir().rmdir( hostileStage );
+  }
+  // Recovered: the lane republishes normally and leaves no residue.
+  REQUIRE_NOTHROW( run() );
+  CHECK( fileExists( sidecar ) );
+  CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+  ModelCatalog::instance().unregister( "crash-a-model" );
+}
+
+TEST_CASE( "a swapped-but-unpublished raster file is replaced by the parked pair",
+           "[models][seam][publish][crash]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = writeRaster( dir, QStringLiteral( "crash-b-in.tif" ), 16, 16 );
+  const QString output = dir.filePath( QStringLiteral( "crash-b-out.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  const auto run = segmentRunner( dir, input, output, "crash-b-model" );
+
+  REQUIRE_NOTHROW( run() );
+  const QByteArray productBytes = readFileBytes( output );
+  const QByteArray sidecarBytes = readFileBytes( sidecar );
+
+  // Kill -9 residue, swap window: the new product landed on the final path
+  // but its sidecar never did — the file there never completed publication.
+  // The parked pair is the last PUBLISHED product and must be adopted back,
+  // replacing the unpublished file.
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".prev~" ) ) );
+  REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".prev~.prov.json" ) ) );
+  {
+    QFile unpublished( output );
+    REQUIRE( unpublished.open( QIODevice::WriteOnly ) );
+    unpublished.write( QByteArray( "unpublished-swap-orphan" ) );
+  }
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    REQUIRE_THROWS( run() );
+    // The parked pair came back; the unpublished file is gone.
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    QDir().rmdir( hostileStage );
+  }
+  REQUIRE_NOTHROW( run() );
+  CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+  ModelCatalog::instance().unregister( "crash-b-model" );
+}
+
+TEST_CASE( "raster publish faults route through the real failure branches",
+           "[models][seam][publish][fault]" )
+{
+  using sicnu::runtime::observability::fault::ArmedFault;
+  using sicnu::runtime::observability::fault::Mode;
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = writeRaster( dir, QStringLiteral( "fault-in.tif" ), 16, 16 );
+  const QString output = dir.filePath( QStringLiteral( "fault-out.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  const auto run = segmentRunner( dir, input, output, "fault-model" );
+
+  REQUIRE_NOTHROW( run() );
+  const QByteArray productBytes = readFileBytes( output );
+  const QByteArray sidecarBytes = readFileBytes( sidecar );
+
+  // Park fault: the previous product cannot be parked — nothing was touched,
+  // the old pair stays in place untouched.
+  {
+    ArmedFault fault( { "raster.publish_park", Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( run() );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+  }
+  // Swap fault: the previous pair is parked, the new product cannot land —
+  // the parked pair is restored whole.
+  {
+    ArmedFault fault( { "raster.publish_swap", Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( run() );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".tmp~" ) ) );
+  }
+  // Sidecar fault (was previously untestable on this lane — nullptr): the
+  // new product is removed and the previous pair comes back with its own
+  // sidecar, never downgraded to MissingSidecar.
+  {
+    ArmedFault fault( { "raster.publish_sidecar", Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( run() );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    CHECK_FALSE( QFileInfo::exists( output + QStringLiteral( ".prev~" ) ) );
+  }
+  // Disarmed: the run succeeds.
+  REQUIRE_NOTHROW( run() );
+  ModelCatalog::instance().unregister( "fault-model" );
+}
+
+// ---------------------------------------------------------------------------
+// R3 Track 13: provenance parity — the single-model raster sidecar carries
+// the model.task intent exactly like the detection sidecar and the scene
+// artifact (truthful absence: nothing is fabricated when undeclared).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "a raster provenance sidecar names the model task like the other lanes",
+           "[models][seam][publish][provenance]" )
+{
+  ProviderGuard guard;
+  QTemporaryDir dir;
+  const QString input = writeRaster( dir, QStringLiteral( "parity-in.tif" ), 16, 16 );
+  const QString output = dir.filePath( QStringLiteral( "parity-out.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  const QString weights = dir.filePath( QStringLiteral( "parity-model.onnx" ) );
+  {
+    QFile f( weights );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( QByteArray( "parity-weights" ) );
+  }
+  // package.aux_files declares a shipped package: the whole-package digest
+  // becomes part of the model identity (Platform 9.0 M7).
+  std::string regError;
+  REQUIRE( ModelCatalog::instance().registerManifestJson(
+    R"({"name": "parity-model", "task": "segmentation", "framework": "planefw",
+        "artifact": {"path": ")" + weights.toStdString() + R"("},
+        "package": {"aux_files": [{"path": ")" + weights.toStdString()
+      + R"(", "role": "weights-copy"}]}})",
+    "session", &regError ) );
+  const auto op = RSOperatorRegistry::instance().create( "rs:segment" );
+  REQUIRE( op );
+  Json::Value params( Json::objectValue );
+  params["input"] = input.toStdString();
+  params["model"] = "parity-model";
+  params["output"] = output.toStdString();
+  RSOperatorContext context;
+  REQUIRE( op->run( params, context ) );
+
+  REQUIRE( fileExists( sidecar ) );
+  // Through the consumer-side verifier: the sidecar parses, matches the
+  // product, and carries the parity fields.
+  const auto verdict = sicnu::operators::runtime::verifyProductAgainstModel(
+    output.toStdString(), "parity-model" );
+  REQUIRE( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
+  const Json::Value prov = verdict.provenance;
+  CHECK( prov["schema"].asString() == "exp-rs-prov/1" );
+  // Task intent parity with the detection sidecar / scene artifact.
+  CHECK( prov["model"]["task"].asString() == "segmentation" );
+  // Whole-package identity parity.
+  CHECK( prov["model"].isMember( "package_digest" ) );
+  CHECK( !prov["model"]["package_digest"].asString().empty() );
+  ModelCatalog::instance().unregister( "parity-model" );
 }
