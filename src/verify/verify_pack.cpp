@@ -3,6 +3,7 @@
 #include "verify_pack.h"
 
 #include "verify_error_codes.h"
+#include "verify_locale.h"
 #include "verify_sha256.h"
 
 #include <algorithm>
@@ -138,6 +139,7 @@ bool parsePack( const std::string &text, VerifierPack &out, std::string &error,
     try
     {
         const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+        const ClassicNumericLocale pin; // same locale discipline as parseSpec
         if ( !reader->parse( text.data(), text.data() + text.size(), &root, &parseError ) )
         {
             error = "invalid JSON: " + parseError;

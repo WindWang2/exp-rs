@@ -9842,6 +9842,29 @@ target_link_libraries(test_verifier_adversarial PRIVATE
 )
 sicnu_discover_tests(test_verifier_adversarial TEST_PREFIX "test_verifier_adversarial::")
 
+# ADR 0172 real provider adapters (R3 track): filesystem/provenance/
+# checkpoint adapters driving the REAL engine over real records, the
+# cross-projection no-verdict-flip seam (harness / lab evidence / teaching)
+# and the canonical-text locale-invariant contract. Qt/GDAL-free.
+add_executable(test_verify_adapters test_verify_adapters.cpp)
+target_link_libraries(test_verify_adapters PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+  sicnu_verify_adapters
+  sicnu_teaching
+)
+sicnu_discover_tests(test_verify_adapters TEST_PREFIX "test_verify_adapters::")
+
+# The GDAL grid probe over real GTiff/VRT fixtures written through the
+# driver itself: size/bands/CRS/NoData/NaN fractions, open failure,
+# tamper-evidence and CRS-less mismatches through the real engine.
+add_executable(test_verify_adapters_grid test_verify_adapters_grid.cpp)
+target_link_libraries(test_verify_adapters_grid PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verify_adapters_gdal
+)
+sicnu_discover_tests(test_verify_adapters_grid TEST_PREFIX "test_verify_adapters_grid::")
+
 # RS14-02 Scientific Preflight Engine: typed findings + versioned, deterministic
 # PreflightReport schema (pure C++; no Qt/GDAL link).
 add_executable(test_preflight_report_schema test_preflight_report_schema.cpp)
