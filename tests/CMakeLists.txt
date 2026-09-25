@@ -13386,3 +13386,35 @@ target_link_libraries(test_preflight_golden PRIVATE
   sicnu_preflight
 )
 sicnu_discover_tests(test_preflight_golden TEST_PREFIX "test_preflight_golden::")
+
+# Track 04 preflight live integration: the Qt-free runtime adapter oracle —
+# real passports (canonical scientific_state reader), an injected capability
+# authority, and the temporal collection provider driving ONE engine run.
+add_executable(test_preflight_runtime_adapter test_preflight_runtime_adapter.cpp)
+target_link_libraries(test_preflight_runtime_adapter PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+)
+sicnu_discover_tests(test_preflight_runtime_adapter TEST_PREFIX "test_preflight_runtime_adapter::")
+
+# Track 04 preflight live integration: the preflight:check data-platform
+# tool dispatched through handleDataPlatformTool with the live harness
+# CapabilityKnowledge (variant/extends parity) and the workspace temporal
+# catalog (series facts).
+add_executable(test_preflight_check_tool test_preflight_check_tool.cpp)
+target_link_libraries(test_preflight_check_tool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  Sicnu::data
+  sicnu_processing
+  sicnu_agent
+  sicnu_preflight_state_adapter
+)
+target_include_directories(test_preflight_check_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_preflight_check_tool)
+sicnu_discover_tests(test_preflight_check_tool TEST_PREFIX "test_preflight_check_tool::")
