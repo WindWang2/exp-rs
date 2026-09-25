@@ -233,6 +233,16 @@ void GuidedLabWorkspace::showCurrent()
   const auto *cur = m_tl.current();
   if ( !cur ) {
     m_stepTitle->setText( tr( "无步骤" ) );
+    m_kindLabel->clear();
+    m_paramsView->clear();
+    m_humanInput->setEnabled( false );
+    // Fail-closed buttons: a stepless/fail-closed timeline (e.g. a canonical
+    // lab whose doc failed to load) must never keep the previous lab's
+    // navigation or run affordances alive.
+    m_runBtn->setEnabled( false );
+    m_submitHumanBtn->setEnabled( false );
+    m_prevBtn->setEnabled( false );
+    m_nextBtn->setEnabled( false );
     return;
   }
   m_stepTitle->setText( QString::fromStdString( cur->titleZh.empty() ? cur->title : cur->titleZh ) );

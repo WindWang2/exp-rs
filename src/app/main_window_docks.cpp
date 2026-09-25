@@ -24,6 +24,8 @@
 #include "widgets/spectral_workbench_panel.h"
 #include "widgets/guided_workflow_widget.h"
 #include "teaching/lab_cockpit_dock.h"
+#include "teaching/lab_operator_launch.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "teaching_admin/teaching_admin_dock.h"
 #include "widgets/histogram_stretch_widget.h"
 #include "widgets/rs_toolbar_flow_host.h"
@@ -314,7 +316,26 @@ void QgisDesktopWindow::setupDockWidgets()
     // Undergraduate Lab Cockpit (Course Home + Guided Lab Workspace)
     {
         auto *cockpit = new sicnu::app::teaching::LabCockpitDock( this );
-        cockpit->setOperatorLauncher( [this]( const QString &algorithmId ) {
+        cockpit->setOperatorLauncher( [this]( const QString &algorithmId,
+                                              const QString &paramsJson ) {
+            // Registered rs:/opencv: operators open in the EXISTING workbench
+            // task panel (real registry schema form, TaskCenter run seam);
+            // everything else keeps the QGIS Processing seam. paramsJson was
+            // already validated by the cockpit and is PREFILL ONLY — the
+            // form is filled, the student still presses Run.
+            if ( sicnu::operators::RSOperatorRegistry::instance().hasOperator(
+                   algorithmId.toStdString() )
+                 && m_sessionController )
+            {
+                m_sessionController->openBareOperator( algorithmId );
+                if ( m_taskPanel && !paramsJson.trimmed().isEmpty() ) {
+                    const auto params =
+                        sicnu::app::teaching::parseLabPrefillParams( paramsJson );
+                    if ( params.isObject() && !params.empty() )
+                        m_taskPanel->setFormValues( params );
+                }
+                return;
+            }
             openProcessingAlgorithm( algorithmId ); // existing Processing seam
         } );
         cockpit->setCapsuleSourceProvider( [this]() -> sicnu::app::teaching::LabCapsuleSource {
