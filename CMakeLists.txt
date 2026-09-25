@@ -913,6 +913,12 @@ endif()
 # lane; see tools/CMakeLists.txt.
 add_subdirectory(tools)
 
+# Shared-library link guard (review P0-3): make a sicnu_* SHARED library
+# with an unresolved symbol fail at its own link step on Linux instead of
+# breaking every downstream executable. See cmake/SicnuSharedLinkGuard.cmake.
+include(SicnuSharedLinkGuard)
+sicnu_apply_shared_link_guard()
+
 # SICNU_GEO_RS: Unit tests (Catch2)
 if(ENABLE_TESTS)
     enable_testing()

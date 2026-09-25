@@ -120,7 +120,15 @@ TEST_CASE( "GPU plane evicts stale model identities", "[gpu_plane]" )
     REQUIRE( stale.outcome == AcquireOutcome::Acquired );
     pool.releaseSession( stale.session->sessionId );
 
-    // The model file changed: signature differs ⇒ old session recycled.
+    // #1094 (d3ec14dd): a released session that a caller still holds is NOT
+    // recycled — its VRAM may back a live inference.
+    pool.evictStale( "detector", "sig-2" );
+    REQUIRE( pool.liveSessionCount() == 1 );
+    REQUIRE( pool.usedVramMb( 0 ) == 1024 );
+
+    // Once the last external holder drops it, the model file change
+    // (signature differs) recycles the old session.
+    stale.session.reset();
     pool.evictStale( "detector", "sig-2" );
     REQUIRE( pool.liveSessionCount() == 0 );
     REQUIRE( pool.usedVramMb( 0 ) == 0 );

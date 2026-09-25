@@ -471,6 +471,10 @@ target_link_libraries(sicnu_geo_rs_shell PRIVATE
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # agent-ops driver: mcp_server.cpp (compiled into this library) calls
+    # OpsDriver::apply for `scientific:agent_session` — same as the
+    # executable's list below; the full-shell test failed to link without it.
+    Sicnu::agent_ops
   # unified-trace bootstrap in main.cpp (Verification 7.0)
     sicnu_runtime
     jsoncpp

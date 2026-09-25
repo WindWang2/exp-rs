@@ -1,6 +1,23 @@
 # SICNU GEO RS — Unit Tests (Catch2)
 include(Catch)
 
+# Fault-tolerant PRE_TEST discovery (review P0-4): a test binary that crashes
+# while listing its tests registers one `<exe>_DISCOVERY_FAILED` test instead
+# of aborting the entire CTest run (previously a single segfaulting binary
+# made even `ctest -N` fail). See cmake/SicnuCatchAddTests.cmake.
+option(SICNU_TOLERANT_TEST_DISCOVERY
+  "Turn a crashing Catch2 test discovery into one failing test instead of a CTest abort" ON)
+if(SICNU_TOLERANT_TEST_DISCOVERY)
+  set(SICNU_CATCH_ADD_TESTS_UPSTREAM "$CACHE{_CATCH_DISCOVER_TESTS_SCRIPT}")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake"
+    "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake"
+    @ONLY)
+  # Directory-scoped normal variable shadows Catch2's INTERNAL cache entry,
+  # which catch_discover_tests() reads when generating each include file.
+  set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake")
+endif()
+
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
   # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
@@ -1032,6 +1049,8 @@ sicnu_link_jsoncpp(test_explain_step_panel)
 set_target_properties(test_explain_step_panel PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
+  # embedded inspector_host.cpp declares a Q_OBJECT (drift gate rule 13).
+  AUTOMOC ON
 )
 sicnu_discover_tests(test_explain_step_panel TEST_PREFIX "test_explain_step_panel::")
 
@@ -1232,6 +1251,8 @@ target_link_libraries(test_adversarial_m5 PRIVATE
   sicnu_operators
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_adversarial_m5 PRIVATE sicnu_runtime)
 target_include_directories(test_adversarial_m5 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -2615,6 +2636,18 @@ target_include_directories(surface_mcp_host PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
+# Every target that compiles src/agent/mcp_server.cpp in-process needs the
+# agent_ops closure: the scientific:agent_session tool calls
+# sicnu::agent_ops::OpsDriver::apply (review P0-3 — "OpsDriver::apply
+# undefined"). test_mcp_server already lists it.
+foreach(_mcp_embed test_interaction_tools test_raster_display_tools
+        test_surface_parity test_capability_surface_parity test_algorithm_search
+        test_surface_protocol surface_mcp_host)
+  if(TARGET ${_mcp_embed})
+    target_link_libraries(${_mcp_embed} PRIVATE Sicnu::agent_ops)
+  endif()
+endforeach()
+
 add_executable(test_surface_e2e test_surface_e2e.cpp)
 target_link_libraries(test_surface_e2e PRIVATE
   Catch2::Catch2WithMain
@@ -3843,6 +3876,8 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_spectral_profile_widget PRIVATE sicnu_runtime)
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3866,6 +3901,8 @@ target_link_libraries(test_roi_statistics_widget PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_roi_statistics_widget PRIVATE sicnu_runtime)
 target_include_directories(test_roi_statistics_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -3893,6 +3930,8 @@ target_link_libraries(test_comparison_widget PRIVATE
   sicnu_data
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_comparison_widget PRIVATE sicnu_runtime)
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8245,6 +8284,8 @@ target_link_libraries(test_band_role_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_band_role_combo PRIVATE sicnu_runtime)
 target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8268,6 +8309,8 @@ target_link_libraries(test_raster_layer_combo PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+# gdal_dataset_wrapper.cpp calls SICNU_FAULT_POINT (sicnu_runtime, SHARED).
+target_link_libraries(test_raster_layer_combo PRIVATE sicnu_runtime)
 target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
@@ -8603,6 +8646,8 @@ add_executable(test_workbench_enum_provider
   ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  # schema_form_builder.cpp schedules async checks on RsScanPool::instance().
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
@@ -8612,6 +8657,11 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   sicnu_operators
   GDAL::GDAL
   Sicnu::help
+  # crs_selector.cpp (embedded by fce8703e) is a QWidget over
+  # QgsProjectionSelectionDialog: needs the QGIS GUI/core closure.
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
 )
 target_include_directories(test_workbench_enum_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -9732,6 +9782,19 @@ sicnu_link_jsoncpp(test_harness_evals)
 # cases, diagnostic brain, step anchoring, budgets.
 sicnu_add_test(test_harness_lab_evals)
 sicnu_link_jsoncpp(test_harness_lab_evals)
+
+# Teacher credential gate (SICNU_LAB_TEACHER_TOKEN): focused, minimal-link
+# regression test for the inverted constant-time comparison (#1202). Kept
+# tiny on purpose so it builds even when the heavy harness suites do not.
+add_executable(test_teacher_credential test_teacher_credential.cpp)
+target_link_libraries(test_teacher_credential PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+target_include_directories(test_teacher_credential PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_link_jsoncpp(test_teacher_credential)
+sicnu_discover_tests(test_teacher_credential)
 
 
 # Harness 7.0 capability-knowledge drift guard: entries vs the live operator
@@ -11688,6 +11751,8 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_BINARY_DIR}
   )
+  # classification_studio_widget → object_identity.h → <json/json.h>
+  sicnu_link_jsoncpp(${_d15_g_test})
   set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
 endforeach()
