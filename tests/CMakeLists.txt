@@ -1,6 +1,23 @@
 # SICNU GEO RS — Unit Tests (Catch2)
 include(Catch)
 
+# Fault-tolerant PRE_TEST discovery (review P0-4): a test binary that crashes
+# while listing its tests registers one `<exe>_DISCOVERY_FAILED` test instead
+# of aborting the entire CTest run (previously a single segfaulting binary
+# made even `ctest -N` fail). See cmake/SicnuCatchAddTests.cmake.
+option(SICNU_TOLERANT_TEST_DISCOVERY
+  "Turn a crashing Catch2 test discovery into one failing test instead of a CTest abort" ON)
+if(SICNU_TOLERANT_TEST_DISCOVERY)
+  set(SICNU_CATCH_ADD_TESTS_UPSTREAM "$CACHE{_CATCH_DISCOVER_TESTS_SCRIPT}")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake"
+    "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake"
+    @ONLY)
+  # Directory-scoped normal variable shadows Catch2's INTERNAL cache entry,
+  # which catch_discover_tests() reads when generating each include file.
+  set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_BINARY_DIR}/cmake/SicnuCatchAddTests.cmake")
+endif()
+
 if(WIN32 AND TARGET Catch2WithMain)
   set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
   # sicnu_test_main wires the unified-trace env bootstrap (Verification 7.0),
