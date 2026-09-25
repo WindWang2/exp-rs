@@ -918,10 +918,29 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   const auto cached = m_cache.find( key );
   if ( cached != m_cache.end() )
   {
-    cached->second.lastUsed = ++m_useCounter;
-    cached->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
-    ++m_cacheHits;
-    return cached->second.session;
+    // Track 13 crash recovery: a session that reports itself permanently
+    // unavailable (its external worker died with the restart budget
+    // exhausted) is a corpse — every forward it would run throws, forever.
+    // Recycle instead of serving: drop the entry exactly like the LRU
+    // eviction does (eager reservation release — the dead session's own
+    // #1160 deleter later releases the same holder id, which the ledger
+    // ignores), then fall through to the normal miss path so this very
+    // request reloads a fresh session. The ledger holder string is
+    // re-reserved below through the same replace-on-reserve idiom every
+    // acquire path uses.
+    if ( cached->second.session && cached->second.session->permanentlyUnavailable() )
+    {
+      dropReservationLocked( cached->second );
+      m_cache.erase( cached );
+      ++m_evictions;
+    }
+    else
+    {
+      cached->second.lastUsed = ++m_useCounter;
+      cached->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+      ++m_cacheHits;
+      return cached->second.session;
+    }
   }
   ++m_cacheMisses;
   lock.unlock();

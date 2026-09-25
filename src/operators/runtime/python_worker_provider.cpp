@@ -177,6 +177,11 @@ class PythonWorkerSession final : public IModelRuntime
         {
           if ( m_restartsLeft <= 0 )
           {
+            // Mark the session dead-for-good: stopWorker() clears m_loaded,
+            // so permanentlyUnavailable() reads true and the registry
+            // recycles the cached session on the next acquire instead of
+            // handing out a corpse whose every forward throws.
+            stopWorker();
             recordFailure( "worker crashed and the session restart budget is exhausted" );
             throw std::runtime_error( "provider crashed: python worker crashed and the "
                                       "session restart budget is exhausted" );
@@ -320,6 +325,16 @@ class PythonWorkerSession final : public IModelRuntime
       std::lock_guard<std::mutex> lock( m_healthMutex );
       health.lastError = m_lastError;
       return health;
+    }
+
+    // Track 13 crash recovery: a session whose worker died with the restart
+    // budget exhausted (or whose restart failed to hand-shake) is finished.
+    // m_loaded flips false on stopWorker(); m_restartsLeft is atomic so the
+    // registry can probe without holding m_inferMutex.
+    bool permanentlyUnavailable() const override
+    {
+      return !m_loaded.load( std::memory_order_acquire )
+             && m_restartsLeft.load( std::memory_order_acquire ) <= 0;
     }
 
     SessionMemoryEstimate memoryEstimate() const override
@@ -476,7 +491,11 @@ class PythonWorkerSession final : public IModelRuntime
     std::string m_lastError;
     QJsonObject m_negotiated; // WP-F: capabilities declared in the ready handshake
                               // (guarded by m_stateMutex)
-    int m_restartsLeft = 1;   // WP-F: ONE bounded restart for the session lifetime
+    // WP-F: ONE bounded restart for the session lifetime. Atomic so the
+    // registry's permanentlyUnavailable() probe can read it on a foreign
+    // thread (all mutations happen under m_inferMutex; relaxed is enough —
+    // the flag is advisory, the next forward re-checks under the lock).
+    std::atomic<int> m_restartsLeft{ 1 };
 };
 
 ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,

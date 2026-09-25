@@ -1137,59 +1137,88 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
     // budget-bounded, so a wait that expires means something is genuinely
     // stuck, in which case the honest answer is "no usable snapshot").
     waitForSnapshotJob( pluginId, snapshotWaitMs() );
-    const std::string snapshotDir = lastGoodSnapshotPath( pluginId );
     bool haveSnapshot = false;
-    std::error_code snapshotDirError;
-    if ( !std::filesystem::exists( snapshotDir, snapshotDirError )
-         || snapshotDirError )
-    {
-        addDiagnostic( PluginDiagnosticCode::ResourceMissing, PluginDiagnosticSeverity::Warning,
-                       "hot reload has no last-known-good snapshot; a failed reload "
-                           "will leave the plugin unloaded instead of rolled back" );
-    }
-    else
-    {
+    std::string snapshotDir;
+
+    // Track 13 (R3): the dev snapshot exists in TWO layouts — the current
+    // pid-attributed one and the pre-attribution "last-good-<id>" written
+    // by older builds. Resolution is strictly preferential: a usable
+    // attributed snapshot always wins, and the legacy dir is only ever a
+    // fallback SOURCE — capture never writes into it. A restore consumes
+    // its source (restorePluginSnapshot's contract), so a legacy-layout
+    // rollback ends the migration by itself: the post-rollback load
+    // captures a fresh pid-attributed snapshot.
+    const std::string attributedDir = lastGoodSnapshotPath( pluginId );
+    const std::string legacyDir = snapshotRoot() + "/last-good-" + pluginId;
+    const auto usableSnapshot = [ & ]( const std::string &candidate,
+                                       std::string *whyNot ) {
+        std::error_code existsError;
+        if ( !std::filesystem::exists( candidate, existsError ) || existsError )
+        {
+            *whyNot = "absent";
+            return false;
+        }
         // Trust a snapshot only when it is COMPLETE and verified: the
         // marker is written last during capture, and a bounded re-walk
         // must reproduce its declared file/byte counts. A partial copy
         // (killed mid-write, disk full, tampered payload) fails closed —
         // restoring it would destroy the working bytes it protects.
         std::string verifyError;
-        if ( !verifyPluginSnapshot( snapshotDir, pluginId, verifyError ) )
+        if ( !verifyPluginSnapshot( candidate, pluginId, verifyError ) )
         {
+            *whyNot = "unusable snapshot (" + verifyError + ")";
+            return false;
+        }
+        // Track 13.0: the capture runs ASYNC against the live plugin
+        // dir, so a dev edit that landed while the worker was still
+        // walking would be packaged as a COMPLETE, marker-valid
+        // snapshot — of the WRONG bytes. Identity gate: the snapshot's
+        // manifest must still be the one this registry loaded; a
+        // mismatch means a torn capture, never last-known-good.
+        // (A non-manifest file edited mid-capture can still slip
+        // through — the restore's own load() re-validates it.)
+        PluginManifest snapManifest;
+        PluginDiagnostic snapParse;
+        if ( !loadManifestFromFile( candidate + "/plugin.json", snapManifest,
+                                    snapParse )
+             || snapManifest.id != loadedManifest.id
+             || snapManifest.version != loadedManifest.version
+             || snapManifest.entrypoint != loadedManifest.entrypoint )
+        {
+            *whyNot =
+                "snapshot does not match the loaded version (captured during an edit?)";
+            return false;
+        }
+        return true;
+    };
+
+    std::string attributedWhy;
+    if ( usableSnapshot( attributedDir, &attributedWhy ) )
+    {
+        snapshotDir = attributedDir;
+        haveSnapshot = true;
+    }
+    else
+    {
+        std::string legacyWhy;
+        if ( usableSnapshot( legacyDir, &legacyWhy ) )
+        {
+            snapshotDir = legacyDir;
+            haveSnapshot = true;
             addDiagnostic( PluginDiagnosticCode::ResourceMissing,
                            PluginDiagnosticSeverity::Warning,
-                           "hot reload found an unusable last-known-good snapshot ("
-                               + verifyError + "); no rollback is possible" );
+                           "hot reload is rolling back from the pre-attribution legacy "
+                               "last-known-good snapshot (the attributed one is "
+                               + attributedWhy + "); the legacy dir is read-only" );
         }
         else
         {
-            // Track 13.0: the capture runs ASYNC against the live plugin
-            // dir, so a dev edit that landed while the worker was still
-            // walking would be packaged as a COMPLETE, marker-valid
-            // snapshot — of the WRONG bytes. Identity gate: the snapshot's
-            // manifest must still be the one this registry loaded; a
-            // mismatch means a torn capture, never last-known-good.
-            // (A non-manifest file edited mid-capture can still slip
-            // through — the restore's own load() re-validates it.)
-            PluginManifest snapManifest;
-            PluginDiagnostic snapParse;
-            if ( !loadManifestFromFile( snapshotDir + "/plugin.json", snapManifest,
-                                        snapParse )
-                 || snapManifest.id != loadedManifest.id
-                 || snapManifest.version != loadedManifest.version
-                 || snapManifest.entrypoint != loadedManifest.entrypoint )
-            {
-                addDiagnostic( PluginDiagnosticCode::ResourceMissing,
-                               PluginDiagnosticSeverity::Warning,
-                               "hot reload's last-known-good snapshot does not match "
-                                   "the loaded version (captured during an edit?); "
-                                   "no rollback is possible" );
-            }
-            else
-            {
-                haveSnapshot = true;
-            }
+            addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                           PluginDiagnosticSeverity::Warning,
+                           "hot reload has no usable last-known-good snapshot (attributed: "
+                               + attributedWhy + "; legacy: " + legacyWhy
+                               + "); a failed reload will leave the plugin unloaded "
+                                 "instead of rolled back" );
         }
     }
 
@@ -1283,6 +1312,15 @@ bool PluginRegistry::reload( const std::string &pluginId, const ReloadOptions &o
                                + restoreError );
         }
     }
+    // Emitted here — AFTER the last refresh that clears the diagnostic log —
+    // so the reason survives in diagnostics(): no snapshot in EITHER layout
+    // could back the rollback (the Step-2 copy of this warning is cleared by
+    // the intermediate refreshes by design).
+    if ( !haveSnapshot )
+        addDiagnostic( PluginDiagnosticCode::ResourceMissing,
+                       PluginDiagnosticSeverity::Error,
+                       "hot reload had no usable last-known-good snapshot in either layout "
+                           "(attributed or legacy); nothing could be restored" );
     addDiagnostic( PluginDiagnosticCode::InitializationFailed, PluginDiagnosticSeverity::Error,
                    "hot reload failed and the rollback did not restore a working version; "
                        "the plugin stays failed until it is fixed" );
