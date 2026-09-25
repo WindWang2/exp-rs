@@ -17,6 +17,7 @@ add_library( sicnu_preflight STATIC
     rules.cpp
     render.cpp
     capability_mirror.cpp
+    runtime_adapter.cpp
 )
 
 # Slice B: the facts adapter consumes the scientific_state passport types and
