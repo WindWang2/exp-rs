@@ -2031,3 +2031,167 @@ TEST_CASE( "configure sweeps orphaned last-good snapshots and refuses symlinks",
         std::filesystem::path( fixture.snapshotRoot ) / "last-good-org.forged" ) );
 #endif
 }
+
+namespace {
+
+/// Waits for the async dev-mode capture to publish its completion marker.
+void waitForSnapshotMarker( const std::string &snapshotDir )
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+    while ( !std::filesystem::exists( snapshotDir + "/snapshot.marker.json" )
+            && std::chrono::steady_clock::now() < deadline )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    REQUIRE( std::filesystem::exists( snapshotDir + "/snapshot.marker.json" ) );
+}
+
+/// Rebuilds a legacy snapshot's completion marker after its payload was
+/// edited (the marker declares TOTAL file/byte counts over the payload).
+void rewriteSnapshotMarker( const std::string &snapshotDir, const std::string &pluginId )
+{
+    uint64_t files = 0;
+    uint64_t bytes = 0;
+    std::error_code ec;
+    const std::filesystem::path root( snapshotDir );
+    for ( std::filesystem::recursive_directory_iterator it( root,
+              std::filesystem::directory_options::skip_permission_denied, ec ),
+          end;
+          !ec && it != std::filesystem::end( it ); it.increment( ec ) )
+    {
+        if ( it->path().filename() == "snapshot.marker.json"
+             && it->path().parent_path().lexically_normal() == root.lexically_normal() )
+            continue;
+        if ( !std::filesystem::is_regular_file( it->path(), ec ) || ec )
+            continue;
+        bytes += static_cast< uint64_t >( std::filesystem::file_size( it->path(), ec ) );
+        ++files;
+    }
+    REQUIRE_FALSE( ec );
+    Json::Value marker( Json::objectValue );
+    marker[ "pluginId" ] = pluginId;
+    marker[ "files" ] = static_cast< Json::UInt64 >( files );
+    marker[ "bytes" ] = static_cast< Json::UInt64 >( bytes );
+    std::ofstream out( snapshotDir + "/snapshot.marker.json", std::ios::trunc );
+    out << Json::writeString( Json::StreamWriterBuilder(), marker );
+}
+
+/// Installs a broken "next version" over the fixture's working bytes (a
+/// manifest that validates but whose payload cannot load).
+void installBrokenNextVersion( const std::string &pluginDir )
+{
+    std::ofstream bogus( pluginDir + "/libnotreally.so", std::ios::binary );
+    bogus << "this is not a shared library";
+    bogus.close();
+    std::ofstream manifest( pluginDir + "/plugin.json", std::ios::trunc );
+    manifest << R"({
+        "manifest_version": 1,
+        "id": "org.exprs.test.hello-plugin",
+        "name": "Hello Fixture broken",
+        "version": "2.0.0",
+        "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+        "abi_version": )" << pluginAbiVersion() << R"(,
+        "entrypoint": "libnotreally.so",
+        "entrypoint_kind": "native",
+        "capabilities": ["operator"]
+    })";
+}
+
+} // namespace
+
+
+TEST_CASE( "hot reload falls back to a legacy pre-attribution last-good snapshot",
+           "[plugin][reload][legacy-snapshot]" )
+{
+    ReloadFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+
+    const std::string temp = std::filesystem::temp_directory_path().generic_string();
+    const std::string attributed = temp + "/sicnu-plugin-snapshots/last-good-"
+                                     + fixture.id + "-" + std::to_string( snapshotOwnerPid() );
+    const std::string legacy = temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id;
+    waitForSnapshotMarker( attributed );
+
+    // Simulate a pre-attribution build: the ONLY snapshot is the legacy
+    // layout (identical bytes, so the identity gate passes).
+    std::error_code ec;
+    std::filesystem::rename( attributed, legacy, ec );
+    REQUIRE_FALSE( ec );
+
+    installBrokenNextVersion( fixture.pluginDir );
+    REQUIRE_FALSE( registry.reload( fixture.id, fixture.devOptions() ) );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::PluginReloadRolledBack ) );
+
+    PluginDiagnosticLog log;
+    PluginRecord record = PluginDiscovery::inspectDirectory( fixture.pluginDir, log );
+    REQUIRE( record.manifest.version == "1.0.0" );
+    REQUIRE( registry.isLoaded( fixture.id ) );
+
+    // A restore CONSUMES its source (restorePluginSnapshot's contract) —
+    // and that is the legacy migration completing itself: the rollback's
+    // successful load starts a fresh pid-attributed capture, so the next
+    // snapshot is the new layout.
+    REQUIRE_FALSE( std::filesystem::exists( legacy ) );
+    waitForSnapshotMarker( attributed );
+    REQUIRE( std::filesystem::exists( attributed + "/plugin.json" ) );
+}
+
+TEST_CASE( "a legacy last-good snapshot never shadows the attributed one",
+           "[plugin][reload][legacy-snapshot]" )
+{
+    ReloadFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+
+    const std::string temp = std::filesystem::temp_directory_path().generic_string();
+    const std::string attributed = temp + "/sicnu-plugin-snapshots/last-good-"
+                                     + fixture.id + "-" + std::to_string( snapshotOwnerPid() );
+    const std::string legacy = temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id;
+    waitForSnapshotMarker( attributed );
+
+    // A fully VALID legacy snapshot (marker rebuilt) that carries one extra
+    // file: if the resolver ever preferred or merged the legacy layout, the
+    // restored plugin directory would contain that file.
+    std::error_code ec;
+    std::filesystem::copy( attributed, legacy,
+                           std::filesystem::copy_options::recursive, ec );
+    REQUIRE_FALSE( ec );
+    {
+        std::ofstream legacyOnly( legacy + "/legacy-only-marker.txt", std::ios::binary );
+        legacyOnly << "legacy layout";
+    }
+    rewriteSnapshotMarker( legacy, fixture.id );
+
+    installBrokenNextVersion( fixture.pluginDir );
+    REQUIRE_FALSE( registry.reload( fixture.id, fixture.devOptions() ) );
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::PluginReloadRolledBack ) );
+
+    PluginDiagnosticLog log;
+    PluginRecord record = PluginDiscovery::inspectDirectory( fixture.pluginDir, log );
+    REQUIRE( record.manifest.version == "1.0.0" );
+    // The ATTRIBUTED snapshot supplied the rollback — the legacy payload's
+    // extra file must not have leaked into the restored plugin directory.
+    REQUIRE_FALSE( std::filesystem::exists( fixture.pluginDir + "/legacy-only-marker.txt", ec ) );
+    // The restore consumed the ATTRIBUTED source; the legacy dir was never
+    // touched and remains exactly as planted.
+    REQUIRE_FALSE( std::filesystem::exists( attributed + "/plugin.json", ec ) );
+    REQUIRE( std::filesystem::exists( legacy + "/legacy-only-marker.txt", ec ) );
+}
+
+TEST_CASE( "with neither snapshot usable, a failed reload reports honest absence",
+           "[plugin][reload][legacy-snapshot]" )
+{
+    ReloadFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+
+    const std::string temp = std::filesystem::temp_directory_path().generic_string();
+    waitForSnapshotMarker( temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id
+                           + "-" + std::to_string( snapshotOwnerPid() ) );
+    std::error_code ec;
+    std::filesystem::remove_all( temp + "/sicnu-plugin-snapshots", ec );
+    REQUIRE_FALSE( ec );
+
+    installBrokenNextVersion( fixture.pluginDir );
+    REQUIRE_FALSE( registry.reload( fixture.id, fixture.devOptions() ) );
+    // No snapshot in either layout: no rollback, the plugin stays unloaded —
+    // the honest outcome, reported as a typed missing resource.
+    REQUIRE( fixture.sawCode( PluginDiagnosticCode::ResourceMissing ) );
+    REQUIRE_FALSE( registry.isLoaded( fixture.id ) );
+}

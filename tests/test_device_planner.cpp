@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -35,6 +36,44 @@ class FakeSession final : public IModelRuntime
     cv::Mat infer( const cv::Mat &blob ) override { return blob.clone(); }
     std::string m_device;
     std::string m_path;
+};
+
+/// Scripted crash-recovery session: after @p forwardsUntilDeath forwards it
+/// dies for good — the model of an external worker whose restart budget is
+/// exhausted (Track 13). permanentlyUnavailable() is what the registry
+/// consults to recycle the cached corpse instead of serving it forever.
+class ZombieSession final : public IModelRuntime
+{
+  public:
+    ZombieSession( std::string device, int forwardsUntilDeath,
+                   std::shared_ptr<std::atomic<int>> constructions )
+        : m_device( std::move( device ) ),
+          m_limit( forwardsUntilDeath ),
+          m_constructions( std::move( constructions ) )
+    {
+      m_constructions->fetch_add( 1 );
+    }
+    std::string framework() const override { return "planner7"; }
+    std::string backendName() const override { return "zombie-fake"; }
+    std::string deviceName() const override { return m_device; }
+    std::string artifactPath() const override { return m_path; }
+    cv::Mat infer( const cv::Mat &blob ) override
+    {
+      if ( m_dead.load() )
+        throw std::runtime_error( "provider crashed: restart budget is exhausted" );
+      cv::Mat out = blob.clone(); // the last forward COMPLETES, then the worker dies
+      if ( m_forwards.fetch_add( 1 ) + 1 >= m_limit )
+        m_dead.store( true );
+      return out;
+    }
+    bool permanentlyUnavailable() const override { return m_dead.load(); }
+
+    std::string m_device;
+    std::string m_path;
+    int m_limit = 1;
+    std::atomic<int> m_forwards{ 0 };
+    std::atomic<bool> m_dead{ false };
+    std::shared_ptr<std::atomic<int>> m_constructions;
 };
 
 /// Builds a GPU model contract with its own artifact file (digest identity).
@@ -422,4 +461,93 @@ TEST_CASE( "a throwing factory leaves no residual reservation", "[models][planne
   const auto session = registry.acquire( boom, RequestedDevice::autoDetect(), &error );
   REQUIRE( session );
   CHECK( registry.vramLedger().reservedMb( 0 ) == 60 );
+}
+
+TEST_CASE( "a permanently dead session is recycled by the next acquire and the "
+           "ledger never double-books the replacement",
+           "[models][planner][crash-recovery]" )
+{
+  QTemporaryDir dir;
+  RegistryGuard guard;
+  auto &registry = ModelRuntimeRegistry::instance();
+  ModelHardwareCapabilities hw;
+  hw.cudaAvailable = true;
+  hw.cudaDeviceCount = 1;
+  hw.vramBudgetMb = 100;
+  registry.setHardwareForTest( hw );
+  registry.vramLedger().setCapacity( 0, 100 );
+
+  auto constructions = std::make_shared<std::atomic<int>>( 0 );
+  // Every constructed session dies for good after its FIRST forward — the
+  // "worker crashed, restart budget exhausted" model.
+  registry.registerProvider(
+    "planner7",
+    [ constructions ]( const ModelInfo &, const ModelHardwareCapabilities &,
+                       std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<ZombieSession>( "cuda", 1, constructions );
+    },
+    ProviderTraits{ /*maxAddressableCudaIndex*/ 1 } );
+
+  const ModelInfo model = makeModel( dir, "zombie-model", 32 );
+
+  std::string error;
+  auto first = registry.acquire( model, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( first );
+  CHECK( constructions->load() == 1 );
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
+  REQUIRE_NOTHROW( static_cast<void>( first->infer( cv::Mat() ) ) );
+
+  // The forward killed it: every use of the cached session now throws —
+  // the pre-recycling registry kept handing this corpse out forever.
+  REQUIRE_THROWS_AS( first->infer( cv::Mat() ), std::runtime_error );
+
+  // Drop the caller's reference FIRST (the production shape: the request
+  // that killed the worker already released its session). The recycling
+  // acquire must re-book the ledger for the replacement — a recycle that
+  // lets the corpse's #1160 release erase the replacement's holder entry
+  // leaves reservedMb at 0 while the fresh session is physically resident
+  // (an over-admission hole), which this ordering catches.
+  first.reset();
+  CHECK( registry.cachedSessionCount() == 1 ); // the corpse is still cached
+
+  auto second = registry.acquire( model, RequestedDevice::cuda( 0 ), &error );
+  REQUIRE( second );
+  INFO( "error: " << error );
+  CHECK( constructions->load() == 2 ); // the recycle rebuilt the session
+  CHECK( second != first );
+  REQUIRE_NOTHROW( static_cast<void>( second->infer( cv::Mat() ) ) );
+
+  // The replacement stays booked exactly once while it lives.
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
+  CHECK( registry.cachedSessionCount() == 1 );
+
+  second.reset();
+  registry.releaseAll();
+  CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
+}
+
+TEST_CASE( "healthy cached sessions are never recycled by the crash-recovery path",
+           "[models][planner][crash-recovery]" )
+{
+  QTemporaryDir dir;
+  RegistryGuard guard;
+  auto &registry = ModelRuntimeRegistry::instance();
+  auto constructions = std::make_shared<std::atomic<int>>( 0 );
+  registry.registerProvider(
+    "planner7",
+    [ constructions ]( const ModelInfo &, const ModelHardwareCapabilities &,
+                       std::string * ) -> ModelRuntimePtr {
+      return std::make_shared<ZombieSession>( "cpu", /*forwardsUntilDeath*/ 1000,
+                                              constructions );
+    },
+    ProviderTraits{} );
+
+  const ModelInfo model = makeModel( dir, "healthy-model", 0 );
+  std::string error;
+  auto a = registry.acquire( model, RequestedDevice::cpu(), &error );
+  REQUIRE( a );
+  auto b = registry.acquire( model, RequestedDevice::cpu(), &error );
+  REQUIRE( b );
+  CHECK( constructions->load() == 1 ); // one cache hit, no rebuild
+  CHECK( b == a );
 }
