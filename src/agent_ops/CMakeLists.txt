@@ -11,6 +11,7 @@ add_library(sicnu_agent_ops STATIC
   live_session_recorder.cpp
   diagnostic_bridge.cpp
   autonomy_ops_gate.cpp
+  repair_approval.cpp
   recovery_bridge.cpp
   delivery_assembler.cpp
   benchmark_adapter.cpp
