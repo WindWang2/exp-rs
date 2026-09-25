@@ -76,6 +76,65 @@ different vocabularies; forcing a bridge would create a second truth source.
 `preflight:check` returns the formal `sicnu.preflight.report/1` artifact
 (digested, fail-closed reader) which any future consumer can adopt verbatim.
 
+## Independent adversarial review (fixed in this branch)
+
+Fresh-context reviewer over the full diff; findings and dispositions:
+
+* P1 (fixed): a present-but-wrong-typed inline `passport` was silently
+  ignored — the tool could judge a DIFFERENT authority's facts than the
+  caller supplied. Now every present-but-unusable passport key fails closed
+  (`data_platform_tools.cpp`), matching `data:asset_passport`'s
+  passport_invalid posture; duplicate refs with contradicting documents fail
+  too.
+* P1 (fixed): a non-object `operator_params` silently degraded to the base
+  entry — a forged pass that drops variant-scoped blockers. Now a typed
+  check_error; same class applied to non-string mode / intent /
+  human_operator_id / acknowledgement entries.
+* P2 (fixed): `loadProblems` was captured before the knowledge layer's lazy
+  first load — a broken install looked typed Unknown on first use. The shell
+  now force-loads before capturing problems (Unavailable from the first
+  check), with a Qt-free oracle pinning both branches
+  (`SPF_CAPABILITY_MIRROR_UNAVAILABLE` vs `SPF_OPERATOR_UNKNOWN`).
+* P2 (fixed): truncation swallowed the invalid-time count (both partialities
+  on one slot). The truncation finding now carries `invalid_time_scenes`;
+  combined-scenario oracle added.
+* P2 (fixed): the Qt test left the global workspace catalog dangling on
+  assertion failure — replaced with an RAII guard.
+* P2 (fixed): the `AuthorityCapabilityProvider` loadProblems→Unavailable
+  branch had no test (mutant-survivable) — oracle added.
+* P3 (noted, unchanged): first-resolvable-ref policy buries a corrupt second
+  collection (deterministic, documented, never a silent pass); 512-cap lives
+  in three headers by convention (no double truncation today — verified);
+  uneven wrong-type coercions tightened only where a silent pass was
+  possible.
+
+Reviewer probes that came back clean: determinism paths, engine-seam
+authority (no second evaluator), rules_revision bump (no literal digest
+pins), taxonomy array size and vocabulary, CMake link closure, oracle
+strength (variant-edit and ack mutants killed), concurrency/lifetime of the
+injected lookups.
+
+## Runtime-authority discovery (live-surface verification)
+
+`TemporalCollection::fromJson` normalizes scene order at parse time
+(`sortScenes()`), so the workspace catalog ALWAYS presents dates ascending:
+an unsorted declared series is unobservable through the live temporal
+authority. The `SPF_TEMPORAL_ORDER_INVALID` oracle therefore stays on the
+Qt-free `TemporalFactsProvider` path (where raw declared lists reach the
+engine verbatim); the live-surface oracles are the oversized-gap
+(`SPF_TEMPORAL_GAP_EXCEEDED`, 59 days vs 40, observed) and untimeable-scene
+(`SPF_TEMPORAL_TIME_INCOMPLETE`, counted) series. The first live test draft
+wrongly assumed out-of-order registration would survive the authority; the
+instrumented probe (provider emitted 3 valid dates, rule passed) found the
+normalization before the test was falsified into a wrong-product oracle.
+
+Building the shell exposed that `sicnu_preflight` /
+`sicnu_preflight_state_adapter` are linked into the SHARED `sicnu_agent`
+library: both static libs now carry `POSITION_INDEPENDENT_CODE` (repo
+precedent 39cd3f862). Local note: Qt-linked tests on this host need
+`LD_LIBRARY_PATH=/home/kevin/pwb-sdks/root/usr/lib` (SDK sonames, incl.
+pre-existing suites).
+
 ## Verification evidence
 
 * Baseline: 56 preflight leaf tests green before changes.
