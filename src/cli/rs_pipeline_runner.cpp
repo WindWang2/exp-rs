@@ -47,6 +47,9 @@
 #include <unordered_set>
 
 #include "jobs/job_engine.h"
+// Shared workspace containment policy (header-only, Qt Core): the CLI and
+// the MCP gate enforce the SAME rule (review P1-4).
+#include "agent/tool_catalog/workspace_containment.h"
 
 namespace sicnu::cli {
 
@@ -131,69 +134,65 @@ constexpr int kMaxPipelineSteps = 100;
 constexpr auto kPipelinePollInterval = std::chrono::milliseconds( 10 );
 constexpr auto kPipelineTimeout = std::chrono::minutes( 30 );
 
+/// Workspace containment for CLI pipelines. There is deliberately NO local
+/// copy of the policy here any more (review P1-4): the drifted duplicate had
+/// no URL-scheme handling, so "https://host/x.tif" was treated as a relative
+/// path, joined into the workspace, classified "inside" and handed to GDAL —
+/// bypassing the SICNU_MCP_ALLOW_REMOTE default-deny. The shared
+/// workspace_containment.h policy is the single source of truth.
+///
+/// @p workspaceRoot empty (SICNU_PIPELINE_WORKSPACE unset) still applies the
+/// URL-scheme policy: remote http(s)/vsicurl references are rejected unless
+/// SICNU_MCP_ALLOW_REMOTE=1, and unsupported schemes / /vsi* prefixes fail.
 bool absolutePathOutsideWorkspace( const std::string &pathValue,
                                    const QString &workspaceRoot,
                                    std::string *detail )
 {
-  if ( pathValue.empty() )
-    return false;
+  QString why;
+  const bool outside = sicnu::agent::tool_catalog::containment::pathOutsideWorkspace(
+    QString::fromStdString( pathValue ), workspaceRoot, &why,
+    QStringLiteral( "SICNU_PIPELINE_WORKSPACE" ) );
+  if ( outside && detail )
+    *detail = why.toStdString();
+  return outside;
+}
 
-  QString path = QString::fromStdString( pathValue );
-  if ( path.startsWith( QLatin1Char( '~' ) ) )
-    path = QDir::homePath() + path.mid( 1 );
-
-  QString workspaceCanon = QDir( workspaceRoot ).canonicalPath();
-  if ( workspaceCanon.isEmpty() )
-    workspaceCanon = QFileInfo( workspaceRoot ).absoluteFilePath();
-  if ( workspaceCanon.isEmpty() )
-    return false;
-
-  const QFileInfo fi( path );
-  QString resolved;
-  if ( fi.isAbsolute() )
+/// Review P1-2: relative pipeline paths are VALIDATED against
+/// SICNU_PIPELINE_WORKSPACE, so they must also be OPENED against it. The
+/// operators open the raw strings relative to the process CWD, so the run
+/// executes with the workspace as working directory (restored afterwards).
+class ScopedWorkspaceCwd
+{
+public:
+  explicit ScopedWorkspaceCwd( const QString &workspaceRoot )
   {
-    if ( fi.exists() )
-    {
-      resolved = fi.canonicalFilePath();
-    }
-    else
-    {
-      QDir parent = fi.dir();
-      QString parentCanon = parent.canonicalPath();
-      if ( parentCanon.isEmpty() )
-        parentCanon = parent.absolutePath();
-      resolved = QDir( parentCanon ).filePath( fi.fileName() );
-    }
+    if ( workspaceRoot.trimmed().isEmpty() )
+      return;
+    const QString canonical =
+      sicnu::agent::tool_catalog::containment::canonicalWorkspaceRoot( workspaceRoot );
+    if ( canonical.isEmpty() || !QFileInfo( canonical ).isDir() )
+      return; // containment fails closed for an unresolvable root anyway
+    const QString current = QDir::currentPath();
+    if ( QDir( current ).canonicalPath() == canonical )
+      return;
+    if ( QDir::setCurrent( canonical ) )
+      m_previous = current;
   }
-  else
+  ~ScopedWorkspaceCwd()
   {
-    const QString joined = QDir( workspaceCanon ).filePath( path );
-    const QFileInfo fiJoined( joined );
-    if ( fiJoined.exists() )
-    {
-      resolved = fiJoined.canonicalFilePath();
-    }
-    else
-    {
-      QDir parent = fiJoined.dir();
-      QString parentCanon = parent.canonicalPath();
-      if ( parentCanon.isEmpty() )
-        parentCanon = parent.absolutePath();
-      resolved = QDir( parentCanon ).filePath( fiJoined.fileName() );
-    }
+    if ( !m_previous.isEmpty() )
+      QDir::setCurrent( m_previous );
   }
+  ScopedWorkspaceCwd( const ScopedWorkspaceCwd & ) = delete;
+  ScopedWorkspaceCwd &operator=( const ScopedWorkspaceCwd & ) = delete;
 
-  const QString normResolved = QDir::cleanPath( resolved );
-  const QString normWorkspace = QDir::cleanPath( workspaceCanon );
+private:
+  QString m_previous;
+};
 
-  if ( normResolved == normWorkspace )
-    return false;
-  if ( normResolved.startsWith( normWorkspace + QLatin1Char( '/' ) ) )
-    return false;
-
-  if ( detail )
-    *detail = "Path outside SICNU_PIPELINE_WORKSPACE: " + pathValue;
-  return true;
+QString pipelineWorkspaceRoot()
+{
+  return QProcessEnvironment::systemEnvironment().value( QStringLiteral( "SICNU_PIPELINE_WORKSPACE" ) );
 }
 
 bool jsonValueOutsideWorkspace( const Json::Value &value,
@@ -321,9 +320,10 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
       }
     }
 
-    const QString workspace = QProcessEnvironment::systemEnvironment().value(
-      QStringLiteral( "SICNU_PIPELINE_WORKSPACE" ) );
-    if ( !workspace.isEmpty() && stepDef.params.isObject() )
+    // Always evaluated (review P1-4): with SICNU_PIPELINE_WORKSPACE unset
+    // only the URL-scheme policy applies (remote references default-deny).
+    const QString workspace = pipelineWorkspaceRoot();
+    if ( stepDef.params.isObject() )
     {
       std::string detail;
       if ( jsonValueOutsideWorkspace( stepDef.params, workspace, &detail ) )
@@ -524,6 +524,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
     result.errorMessage = "Failed to initialize Python plugins";
     return result;
   }
+
+  // Validate AND execute with relative paths anchored at the workspace
+  // (review P1-2); a no-op when SICNU_PIPELINE_WORKSPACE is unset.
+  const ScopedWorkspaceCwd workspaceCwd( pipelineWorkspaceRoot() );
 
   std::string validationError;
   if ( !validatePipelineJson( pipelineJson, &validationError ) )
@@ -997,6 +1001,8 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
     result.errorMessage = "Failed to initialize the headless plugin stack";
     return result;
   }
+  // Same relative-path base as the original run (review P1-2).
+  const ScopedWorkspaceCwd workspaceCwd( pipelineWorkspaceRoot() );
 
   auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
 
