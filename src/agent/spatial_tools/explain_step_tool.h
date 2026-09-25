@@ -23,6 +23,10 @@
 
 #include "spatial_tool.h"
 
+#include "explain/guidance_store.h"
+
+#include <memory>
+
 namespace sicnu::agent::spatial_tools {
 
 /// The explain:step tool instance (also used by the registry registration in
@@ -37,5 +41,13 @@ void setExplainGuidanceDirectory( const std::string &directory );
 /// Where the guidance corpus was last loaded from plus any load problems
 /// (diagnostic honesty for the tool response).
 std::string explainGuidanceLoadReport();
+
+/// The same cached guidance store the tool answers from (default directory
+/// resolution or the setExplainGuidanceDirectory override). UI explain
+/// surfaces share this instance instead of re-resolving the corpus
+/// directory, so agent and panel can never disagree about authored text.
+/// Thread-safe; the returned raw pointer stays valid for the synchronous
+/// render that borrows it (the shared_ptr cache keeps the store alive).
+std::shared_ptr<const sicnu::explain::GuidanceStore> sharedExplainGuidanceStore();
 
 } // namespace sicnu::agent::spatial_tools

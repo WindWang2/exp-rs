@@ -1,6 +1,8 @@
 // src/agent_ops/operations_coordinator.cpp
 #include "agent_ops/operations_coordinator.h"
 
+#include "agent_ops/repair_approval.h"
+
 #include <chrono>
 
 namespace sicnu::agent_ops {
@@ -24,25 +26,97 @@ std::string journalledGoal(const sicnu::agent_loop::SessionJournal &journal)
     return goal;
 }
 
+std::string approvalCheckToError(const char *check)
+{
+    if (check == nullptr)
+        return "APPROVAL_MALFORMED";
+    if (std::string(check) == approval_check::kExpired)
+        return "APPROVAL_EXPIRED";
+    if (std::string(check) == approval_check::kTampered)
+        return "APPROVAL_TAMPERED";
+    if (std::string(check) == approval_check::kWrongPlan)
+        return "APPROVAL_WRONG_PLAN";
+    if (std::string(check) == approval_check::kWrongCoordinator)
+        return "APPROVAL_WRONG_COORDINATOR";
+    return "APPROVAL_MALFORMED";
+}
+
 } // namespace
 
 OperationsCoordinator::OperationsCoordinator(Dependencies deps,
                                              LiveSessionRecorder::Options recorderOptions)
     : mDeps(std::move(deps)), mRecorder(std::move(recorderOptions)),
-      mBridgedDiagnoser(mDeps.seams.diagnoser)
+      mRecovery(mDeps.repairCapabilityProvider), mBridgedDiagnoser(mDeps.seams.diagnoser),
+      mInstanceId(nextRepairApprovalInstanceId())
 {
+}
+
+std::string OperationsCoordinator::lastProjectedFindingsDigest() const
+{
+    if (!mLastProjectedFindingsDigest.empty())
+        return mLastProjectedFindingsDigest;
+    const auto &last = mLastResult;
+    if (last && last->lastRecovery && last->lastRecovery->repairPlan.isObject() &&
+        last->lastRecovery->repairPlan["provenance"].isObject() &&
+        last->lastRecovery->repairPlan["provenance"]["findings_digest"].isString())
+        return last->lastRecovery->repairPlan["provenance"]["findings_digest"].asString();
+    return {};
+}
+
+std::string OperationsCoordinator::verifyApprovalAgainstLastProjection(
+    const Json::Value &tokenDoc, long long nowMs) const
+{
+    const std::string targetDigest = lastProjectedFindingsDigest();
+    if (targetDigest.empty())
+        return "NO_PENDING_REPAIR_PLAN";
+    const char *check =
+        verifyRepairApprovalToken(tokenDoc, targetDigest, mInstanceId, nowMs);
+    if (std::string(check) == approval_check::kOk)
+        return {};
+    return approvalCheckToError(check);
+}
+
+std::string OperationsCoordinator::armRepairApproval(const Json::Value &tokenDoc,
+                                                     long long nowMs)
+{
+    // Replay first: a token this coordinator already consumed by a launch
+    // cannot arm again, whatever the current projection is — one approval
+    // authorizes exactly one repair launch.
+    const std::string tokenDigest = tokenDoc["digest"].asString();
+    for (const std::string &consumed : mConsumedApprovalDigests)
+    {
+        if (consumed == tokenDigest)
+            return "APPROVAL_REPLAYED";
+    }
+
+    const std::string error = verifyApprovalAgainstLastProjection(tokenDoc, nowMs);
+    if (!error.empty())
+        return error;
+
+    mPendingRepairApproval =
+        ArmedApproval{tokenDoc, tokenDoc["findings_digest"].asString()};
+    return {};
+}
+
+bool OperationsCoordinator::hasPendingRepairApproval() const
+{
+    return mPendingRepairApproval.has_value();
 }
 
 OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&session,
                                            const OpsRunRequest &request,
                                            const std::optional<OpDiagnostic> &diag,
-                                           const std::optional<RecoveryDecision> &recovery)
+                                           const std::optional<RecoveryDecision> &recovery,
+                                           const std::string &checkpointError,
+                                           const std::string &approvalError)
 {
     OpsRunResult out;
     out.session = std::move(session);
     out.lastDiagnostic = diag;
     out.lastRecovery = recovery;
     out.ok = out.session.ok;
+    out.approvalError = approvalError;
+    out.checkpointError = checkpointError;
 
     if (!request.journalDirectory.empty())
     {
@@ -116,9 +190,56 @@ OpsRunResult OperationsCoordinator::finish(sicnu::agent_loop::SessionResult &&se
         extras.trace = out.trace;
     if (benchmarkPersisted)
         extras.benchmarkRefs.append(benchmarkRef);
+
+    // Approval/ask carrier: the loop's withhold_repair decisions are the
+    // evidence that a non-auto-approvable repair (radiometric /
+    // science-changing) was proposed and NOT applied. They surface here as
+    // typed questions on the delivery wire so every driver (CLI / MCP /
+    // panel) can route the human approval round-trip; a repair is never
+    // auto-executed, and the ask must not die inside the decision log.
+    for (const auto &dec : out.session.summary.decisions)
+    {
+        if (dec.selected.get("action", "").asString() != "withhold_repair")
+            continue;
+        Json::Value question(Json::objectValue);
+        question["kind"] = "repair_approval";
+        question["rule_id"] = dec.inputs.get("rule_id", "").asString();
+        question["risk_class"] = dec.inputs.get("risk_class", "").asString();
+        question["decision_id"] = dec.decisionId;
+        question["stage"] = dec.stage;
+        question["reason"] = dec.reason;
+        question["ask"] = "apply repair '" + question["rule_id"].asString() + "' (risk class '" +
+                          question["risk_class"].asString() +
+                          "')? It was withheld because the policy does not auto-approve it.";
+        extras.questions.append(question);
+    }
+    // The recovery bridge's ask (e.g. REPAIR_NEEDS_APPROVAL) rides along the
+    // same way — the human gate is on the wire, not only in the trace.
+    if (recovery && recovery->needsApproval)
+    {
+        Json::Value question(Json::objectValue);
+        question["kind"] = "recovery_ask";
+        question["action"] = recovery->action;
+        question["reason_code"] = recovery->reasonCode;
+        question["ask"] = "recovery requires a human decision (" + recovery->reasonCode + ")";
+        extras.questions.append(question);
+    }
+
     out.delivery = mDelivery.assemble(out.session, extras);
     out.projection = mProjector.projectResult(out.session, request.budgets);
     out.reconcile = mReconciler.reconcile(out.session.journal);
+
+    // The binding target for approvals is always THIS coordinator's most
+    // recent projection: a fresh run replaces (or clears) what an earlier
+    // evaluateRecovery remembered, so a stale plan can never silently
+    // outlive its run.
+    if (recovery && recovery->repairPlan.isObject() &&
+        recovery->repairPlan["provenance"].isObject() &&
+        recovery->repairPlan["provenance"]["findings_digest"].isString())
+        mLastProjectedFindingsDigest =
+            recovery->repairPlan["provenance"]["findings_digest"].asString();
+    else
+        mLastProjectedFindingsDigest.clear();
 
     mLastResult = out;
     return out;
@@ -165,12 +286,68 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     if (seams.diagnoser)
         seams.diagnoser = &mBridgedDiagnoser;
 
-    // One-shot: the surface-recorded repair approval is consumed by this
-    // launch whatever the outcome — the human gate must re-arm explicitly,
-    // otherwise a single approval would silence the science-changing repair
-    // gate for every later session.
-    const bool pendingApproval = mPendingRepairApproval;
-    mPendingRepairApproval = false;
+    // Repair approval consumption — one-shot, verified at launch. A token
+    // may arrive with the request (driver-held) or already be armed via
+    // armRepairApproval (surface flow); both go through the same gate: this
+    // coordinator, the last projected recovery plan, digest, expiry at the
+    // launch clock. Anything unverifiable fails closed: the run proceeds
+    // WITHOUT the approval, the refusal is surfaced, and the gate asks
+    // again. The armed entry is consumed either way, and the consumed
+    // digest refuses later replays.
+    std::string approvalError;
+    if (request.repairApproval.isObject() && !request.repairApproval.isNull())
+    {
+        // Single-use is symmetric: a driver-held token goes through the
+        // SAME consumed ring as an armed one — a consumed token presented
+        // with the request is a replay, never a second authorization.
+        const std::string tokenDigest = request.repairApproval["digest"].asString();
+        bool replayed = false;
+        for (const std::string &consumed : mConsumedApprovalDigests)
+        {
+            if (consumed == tokenDigest)
+            {
+                replayed = true;
+                break;
+            }
+        }
+        if (replayed)
+        {
+            if (approvalError.empty())
+                approvalError = "APPROVAL_REPLAYED";
+        }
+        else
+        {
+            const std::string directError = verifyApprovalAgainstLastProjection(
+                request.repairApproval, request.approvalNowMs);
+            if (directError.empty())
+                mPendingRepairApproval =
+                    ArmedApproval{request.repairApproval,
+                                  request.repairApproval["findings_digest"].asString()};
+            else if (approvalError.empty())
+                approvalError = directError;
+        }
+    }
+    bool pendingApproval = false;
+    std::string approvedPlanId;
+    if (mPendingRepairApproval)
+    {
+        const char *check = verifyRepairApprovalToken(
+            mPendingRepairApproval->token, mPendingRepairApproval->findingsDigest,
+            mInstanceId, request.approvalNowMs);
+        if (std::string(check) == approval_check::kOk)
+        {
+            pendingApproval = true;
+            approvedPlanId = mPendingRepairApproval->findingsDigest;
+        }
+        else if (approvalError.empty())
+            approvalError = approvalCheckToError(check);
+        // Record the consumed token BEFORE clearing: replay of the same
+        // approval must not arm a later launch.
+        if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
+            mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
+        mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        mPendingRepairApproval.reset();
+    }
 
     sicnu::agent_loop::SessionPolicy policy = request.policy;
     policy.maxReplans = request.budgets.maxReplans;
@@ -181,6 +358,26 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
     sicnu::agent_loop::ScientificAgentSession session(policy, seams);
     if (mCancelRequested.load())
         session.requestCancel();
+    // Crash-evidence checkpointing: with a journal directory configured, the
+    // journal is flushed after EVERY append, so a hard kill at any stage
+    // (not only at terminal) leaves a loadable prefix on disk. The reconciler
+    // reads that prefix to refuse unsafe resumes (e.g. submitted runs that a
+    // blind restart would duplicate).
+    std::string checkpointErr;
+    if (!request.journalDirectory.empty())
+    {
+        // The directory is captured BY VALUE: the session (and its sink)
+        // outlives this scope, so a by-reference capture would dangle the
+        // moment run() left this block.
+        session.setCheckpointSink(
+            [this, dir = request.journalDirectory,
+             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
+            {
+                std::string err;
+                if (!mRecorder.persistJournal(journal, dir, &err))
+                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
+            });
+    }
     // The bridge cache is evidence about one diagnose invocation only; a
     // stale entry from a previous session must never be attributed here.
     mBridgedDiagnoser.resetLastDiagnostic();
@@ -263,7 +460,9 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         ctx.intent = request.session.intent;
         ctx.cancelRequested = mCancelRequested.load();
         ctx.leadingRiskClass = request.leadingRepairRiskClass;
-        ctx.humanApprovedRepair = request.approvePendingRepair || pendingApproval;
+        ctx.humanApprovedRepair = pendingApproval;
+        ctx.approvedFindingsDigest = approvedPlanId;
+        ctx.approvalNowMs = request.approvalNowMs;
         ctx.autonomyPolicy = mDeps.autonomyPolicy;
         ctx.replanCount = 0;
         for (const auto &s : result.summary.stages)
@@ -279,7 +478,11 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         recovery = mRecovery.decide(*diag, ctx);
     }
 
-    return finish(std::move(result), request, diag, recovery);
+    std::string finishApprovalError = approvalError;
+    if (recovery && !recovery->approvalError.empty() && finishApprovalError.empty())
+        finishApprovalError = recovery->approvalError;
+    return finish(std::move(result), request, diag, recovery, checkpointErr,
+                  finishApprovalError);
 }
 
 OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
@@ -294,6 +497,32 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         return out;
     }
 
+    // Autonomy gate BEFORE any journal is loaded or adopted: a resumed
+    // session can execute exactly like a fresh launch, so an execute-capable
+    // resume must pass the same gate as run(). Without it an L0/exam policy
+    // could be bypassed by parking a journal and resuming it.
+    if (request.policy.mode == sicnu::agent_loop::RunMode::ExecuteWithVerify)
+    {
+        OpsAutonomyRequest ar;
+        ar.mutateKind = ops_mutate::kExecute;
+        ar.domain = request.domain;
+        ar.role = request.role;
+        ar.intent = request.session.intent;
+        ar.actionKey = "ops:resume";
+        const auto gate = gateMutatingOp(mDeps.autonomyPolicy, ar);
+        if (!gate.allowed)
+        {
+            out.ok = false;
+            out.error = gate.reasonCode;
+            out.lastRecovery = RecoveryDecision{};
+            out.lastRecovery->action = recovery_action::kAbort;
+            out.lastRecovery->reasonCode = gate.reasonCode;
+            out.lastRecovery->autonomyAllowed = false;
+            out.lastRecovery->autonomyReasonCode = gate.reasonCode;
+            return out;
+        }
+    }
+
     std::string loadErr;
     out.reconcile = mReconciler.reconcileFile(journalDirectory, sessionId, &loadErr);
     if (!out.reconcile.ok || !out.reconcile.resumable)
@@ -302,9 +531,12 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         // Surface the reconciler's typed reason: the reconciler projects the
         // loop's resume contract, so its reason is the answer (a past-plan
         // journal reports RESUME_PAST_PLAN_SEAM, a delivered one
-        // ALREADY_TERMINAL / DUPLICATE_SUBMIT_REFUSED).
-        out.error = out.reconcile.duplicateSubmitRisk ? "DUPLICATE_SUBMIT_REFUSED"
-                                                       : out.reconcile.reasonCode;
+        // ALREADY_TERMINAL). DUPLICATE_SUBMIT_REFUSED stays reserved for the
+        // delivered case: a crashed mid-run journal is refused for the SAME
+        // past-plan reason, while reconcile.duplicateSubmitRisk +
+        // reconcile.submittedRunIds carry the restart hazard on the wire.
+        out.error = (out.reconcile.terminalState == "delivered") ? "DUPLICATE_SUBMIT_REFUSED"
+                                                                   : out.reconcile.reasonCode;
         return out;
     }
 
@@ -333,8 +565,13 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
     if (seams.diagnoser)
         seams.diagnoser = &mBridgedDiagnoser;
 
+    // Budget parity with run(): a resumed session must run under the SAME
+    // bounds the caller asked for, not silently under policy defaults.
     sicnu::agent_loop::SessionPolicy policy = request.policy;
     policy.maxReplans = request.budgets.maxReplans;
+    policy.noProgressThreshold = request.budgets.noProgressThreshold;
+    if (request.budgets.resourceBudgetMb > 0)
+        policy.resourceBudgetMb = request.budgets.resourceBudgetMb;
     auto resumed = sicnu::agent_loop::ScientificAgentSession::resume(*journal, policy, seams);
     if (!resumed)
     {
@@ -346,16 +583,79 @@ OpsRunResult OperationsCoordinator::resume(const std::string &journalDirectory,
         resumed->requestCancel();
     mBridgedDiagnoser.resetLastDiagnostic();
 
+    // Checkpoint the continued journal exactly like a fresh launch: a kill
+    // during the resumed leg must leave the same loadable evidence trail.
+    std::string checkpointErr;
+    if (!request.journalDirectory.empty())
+    {
+        resumed->setCheckpointSink(
+            [this, dir = journalDirectory,
+             &checkpointErr](const sicnu::agent_loop::SessionJournal &journal)
+            {
+                std::string err;
+                if (!mRecorder.persistJournal(journal, dir, &err))
+                    checkpointErr = err.empty() ? "JOURNAL_CHECKPOINT_FAILED" : err;
+            });
+    }
+
     // The loop restarts at the journal's final stage (pre-plan only) and
     // re-executes no journalled work; run() must restate the journalled goal.
     auto result = resumed->run(request.session);
-    return finish(std::move(result), request, std::nullopt, std::nullopt);
+    return finish(std::move(result), request, std::nullopt, std::nullopt, checkpointErr);
 }
 
 RecoveryDecision OperationsCoordinator::evaluateRecovery(const OpDiagnostic &diagnostic,
-                                                         const RecoveryContext &ctx) const
+                                                         RecoveryContext &ctx)
 {
-    return mRecovery.decide(diagnostic, ctx);
+    // The human gate is the armed token, never the caller's bool: verify
+    // and consume it here, then derive what the bridge may trust. With
+    // nothing armed the caller's assertion is cleared — a forged ctx
+    // (the findings digest is public wire content) must not arm the gate.
+    std::string tokenErrorOut;
+    if (!mPendingRepairApproval)
+    {
+        if (ctx.humanApprovedRepair || !ctx.approvedFindingsDigest.empty())
+        {
+            ctx.humanApprovedRepair = false;
+            ctx.approvedFindingsDigest.clear();
+            tokenErrorOut = "APPROVAL_REQUIRED";
+        }
+    }
+    else
+    {
+        const std::string targetDigest = lastProjectedFindingsDigest();
+        const char *check = verifyRepairApprovalToken(
+            mPendingRepairApproval->token, targetDigest, mInstanceId, ctx.approvalNowMs);
+        std::string tokenError;
+        if (std::string(check) == approval_check::kOk)
+        {
+            ctx.humanApprovedRepair = true;
+            ctx.approvedFindingsDigest = targetDigest;
+        }
+        else
+        {
+            ctx.humanApprovedRepair = false;
+            ctx.approvedFindingsDigest.clear();
+            tokenError = approvalCheckToError(check);
+        }
+        if (mConsumedApprovalDigests.size() >= kMaxConsumedDigests)
+            mConsumedApprovalDigests.erase(mConsumedApprovalDigests.begin());
+        mConsumedApprovalDigests.push_back(mPendingRepairApproval->token["digest"].asString());
+        mPendingRepairApproval.reset();
+        tokenErrorOut = tokenError;
+    }
+    RecoveryDecision decision = mRecovery.decide(diagnostic, ctx);
+    // The refusal must be visible even when the decision itself is safe —
+    // a driver cannot otherwise tell an applied approval from a refused one.
+    if (!tokenErrorOut.empty() && decision.approvalError.empty())
+        decision.approvalError = tokenErrorOut;
+    // Remember what this coordinator projected last: the surface's
+    // approve_repair binds its token to exactly this repair science.
+    if (decision.repairPlan.isObject() && decision.repairPlan["provenance"].isObject() &&
+        decision.repairPlan["provenance"]["findings_digest"].isString())
+        mLastProjectedFindingsDigest =
+            decision.repairPlan["provenance"]["findings_digest"].asString();
+    return decision;
 }
 
 OpsProjection OperationsCoordinator::timeline(const sicnu::agent_loop::SessionJournal &journal,

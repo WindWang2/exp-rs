@@ -33,6 +33,7 @@ Json::Value OpDiagnostic::toJson() const
     for (const auto &p : proposals)
         props.append(p);
     doc["proposals"] = props;
+    doc["proposal_details"] = proposalDetails;
     return doc;
 }
 
@@ -63,6 +64,15 @@ std::optional<OpDiagnostic> OpDiagnostic::fromJson(const Json::Value &doc, std::
             if (p.isString())
                 d.proposals.push_back(p.asString());
     }
+    if (doc.isMember("proposal_details") && doc["proposal_details"].isArray())
+    {
+        for (const auto &p : doc["proposal_details"])
+        {
+            if (!p.isObject() || !p.isMember("rule_id") || !p["rule_id"].isString())
+                continue;
+            d.proposalDetails.append(p);
+        }
+    }
     if (d.code.empty() || d.rootCauseCode.empty())
     {
         if (error)
@@ -86,6 +96,8 @@ Json::Value RecoveryDecision::toJson() const
     doc["replan_count"] = replanCount;
     doc["repair_count"] = repairCount;
     doc["retry_count"] = retryCount;
+    doc["requires_reverification"] = requiresReverification;
+    doc["approval_error"] = approvalError;
     doc["repair_plan"] = repairPlan;
     doc["diagnostic"] = diagnostic;
     doc["budgets"] = budgets;

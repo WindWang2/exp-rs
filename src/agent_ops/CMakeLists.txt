@@ -11,6 +11,7 @@ add_library(sicnu_agent_ops STATIC
   live_session_recorder.cpp
   diagnostic_bridge.cpp
   autonomy_ops_gate.cpp
+  repair_approval.cpp
   recovery_bridge.cpp
   delivery_assembler.cpp
   benchmark_adapter.cpp
@@ -18,6 +19,7 @@ add_library(sicnu_agent_ops STATIC
   resume_reconciler.cpp
   operations_coordinator.cpp
   session_surface.cpp
+  ops_driver.cpp
 )
 
 add_library(Sicnu::agent_ops ALIAS sicnu_agent_ops)

@@ -6,6 +6,7 @@
 #include "help/help_id.h"
 #include "help/help_registry.h"
 
+#include "agent_ops/ops_driver.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "experiment/bridge/workflow_experiment_adapter.h"
 #include "core/sicnu_logging.h"
@@ -659,7 +660,34 @@ void McpServer::handleRequest(const QVariantMap &request)
         try
         {
             QVariantMap resultData;
-            if (sicnu::agent::isDataPlatformTool(toolName))
+            // Specific-over-family: `scientific:` is a data-platform prefix,
+            // but THIS tool is the agent-ops session surface — it must be
+            // matched before the isDataPlatformTool family check below.
+            if (toolName == QStringLiteral("scientific:agent_session"))
+            {
+                // journal_directory (and refs) are caller-controlled paths:
+                // they get the same SICNU_MCP_WORKSPACE containment as every
+                // other path-consuming tool (#1033). Only real path slots
+                // are scanned — the gate must not reject prose arguments
+                // (goal/intent) that merely LOOK like paths.
+                QVariantMap pathArgs;
+                if (arguments.contains(QStringLiteral("journal_directory")))
+                    pathArgs[QStringLiteral("journal_directory")] =
+                        arguments.value(QStringLiteral("journal_directory"));
+                if (arguments.contains(QStringLiteral("refs")))
+                    pathArgs[QStringLiteral("refs")] =
+                        arguments.value(QStringLiteral("refs"));
+                QString denyReason;
+                if (!pathArgs.isEmpty() && !validateWorkspacePaths(pathArgs, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
+                resultData = handleAgentSession(arguments);
+            }
+            else if (sicnu::agent::isDataPlatformTool(toolName))
             {
                 // Data-platform tools take caller-controlled dataset_db/
                 // experiment_db/out/bundle paths and open them READWRITE|CREATE
@@ -2654,6 +2682,32 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
         steps.append(step);
     }
     result[QStringLiteral("steps")] = steps;
+    return result;
+}
+
+QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
+{
+    // One MCP tool over the SAME session surface the CLI `session` command
+    // and the workbench panel drive (single wire contract). The tool itself
+    // holds no session state: everything below the envelope is OpsDriver →
+    // OperationsCoordinator → agent_loop (the only state machine).
+    if (!m_agentOpsDriver)
+    {
+        throw McpToolError(QStringLiteral("scientific:agent_session: no OpsDriver injected "
+                                          "in this host (fail closed; no fake sessions)"),
+                           QStringLiteral("AGENT_OPS_UNAVAILABLE"),
+                           QStringLiteral("availability"));
+    }
+    const std::string action = arguments.value(QStringLiteral("action")).toString().toStdString();
+    if (action.empty())
+    {
+        throw McpToolError(QStringLiteral("scientific:agent_session: 'action' is required"),
+                           QStringLiteral("INVALID_PARAMETER"),
+                           QStringLiteral("validation"));
+    }
+    const Json::Value args = sicnu::processing::variantToJsonValue(arguments);
+    const Json::Value doc = m_agentOpsDriver->apply(action, args);
+    QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();
     return result;
 }
 

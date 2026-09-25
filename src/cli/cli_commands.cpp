@@ -36,6 +36,7 @@
 #include "cli_project_ops.h"
 #include "cli_dataset_commands.h"
 #include "cli_lab_commands.h"
+#include "cli_agent_ops_commands.h"
 
 #include <chrono>
 #include <future>
@@ -2629,7 +2630,10 @@ bool isCliCommand( const QString &firstArg )
                                            // Surface-11: union discovery + batch manifests.
                                            "tools", "batch",
                                            // RS14-01: read-only scientific asset passport.
-                                           "passport" };
+                                           "passport",
+                                           // Agent ops driver (run/resume/cancel/status/
+                                           // export over OperationsCoordinator).
+                                           "session" };
     return kCommands.contains( firstArg );
 }
 
@@ -2675,6 +2679,9 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return sicnu::cli::commandPassport( std::move( args ), io );
     if ( command == "batch" )
         return commandBatch( std::move( args ), io );
+    if ( command == "session" )
+        return sicnu::cli::commandAgentSession( std::move( args ), io,
+                                                sicnu::cli::defaultCliAgentOpsDriver() );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.

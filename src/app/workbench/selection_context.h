@@ -71,6 +71,10 @@ struct SelectionContextSnapshot
     QString selectedMissionTaskId;
     MissionTaskStatus selectedMissionTaskStatus = MissionTaskStatus::Pending;
     bool hasMissionTaskSelection = false;
+    /// Explainable Workflow (RS14-15): the IR 2.0 designer canvas's selected
+    /// node (id only — the canvas pushes it; the pure layer never owns
+    /// pipeline state).
+    QString selectedPipelineNodeId;
 
     bool hasLayerSelection() const { return activeLayer || !selectedLayers.isEmpty(); }
     bool hasGovernanceSelection() const
@@ -86,6 +90,8 @@ struct SelectionContextSnapshot
     }
     /// True when the mission timeline has a selected task.
     bool hasMissionTask() const { return hasMissionTaskSelection; }
+    /// RS14-15: true when the IR 2.0 canvas has a selected node.
+    bool hasPipelineNodeSelection() const { return !selectedPipelineNodeId.isEmpty(); }
     /// The first selected vector layer, for edit-oriented commands.
     QgsVectorLayer *firstVectorLayer() const;
     /// The first selected raster layer, for band/style oriented commands.
@@ -216,6 +222,8 @@ class SelectionContext : public QObject
     /// Mission Runtime 13.0: the mission panel's task selection push (id and
     /// status only). An empty id clears the selection.
     void notifyMissionTaskSelection( const QString &taskId, MissionTaskStatus status );
+    /// RS14-15: the IR 2.0 canvas's node selection push. An empty id clears.
+    void notifyPipelineNodeSelection( const QString &nodeId );
 
     /// Override the conservative SAR heuristic (product-token match).
     using SarPredicate = std::function<bool( QgsMapLayer * )>;
@@ -278,6 +286,8 @@ class SelectionContext : public QObject
     /// Mission Runtime 13.0: the mission panel's selected task (id + status).
     QString m_missionTaskId;
     MissionTaskStatus m_missionTaskStatus = MissionTaskStatus::Pending;
+    /// RS14-15: the IR 2.0 canvas's selected node id (empty = none).
+    QString m_selectedPipelineNodeId;
 };
 
 } // namespace sicnu::app

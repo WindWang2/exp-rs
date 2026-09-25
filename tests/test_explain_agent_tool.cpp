@@ -18,11 +18,20 @@
 #include "agent/spatial_tools/explain_step_tool.h"
 #include "explain/step_explanation.h"
 #include "operators/rs/rs_operators_init.h"
+#include "workflow/pipeline_run_coordinator.h"
+#include "workflow/workflow_ir_v2.h"
+#include "workflow/workflow_provenance.h"
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <json/json.h>
 
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #ifdef _WIN32
@@ -305,4 +314,297 @@ TEST_CASE( "an oversized problem set trips the budget: markdown dropped, facts k
   // The authoritative explanation document is never cut mid-fact.
   CHECK( result.output["explanation"]["schemaVersion"].asString()
          == sicnu::explain::StepExplanationSchemaV1 );
+}
+
+// ── Run-scoped evidence (RS14-15 R3) ─────────────────────────────────────
+// runId + provenanceDirectory attach the step's REAL execution facts from a
+// PipelineRunCoordinator provenance record. The plan-only response shape is
+// untouched; the run-scoped path adds execution facts plus verbatim load
+// problems (a tampered record renders as unknown, never as a status).
+
+namespace
+{
+
+struct EvidenceDir
+{
+  std::filesystem::path path;
+  EvidenceDir()
+  {
+    path = std::filesystem::temp_directory_path()
+           / ( "explain_agent_tool_evidence_" + std::to_string( SICNU_TEST_GETPID() ) );
+    std::filesystem::create_directories( path );
+  }
+  ~EvidenceDir() { std::filesystem::remove_all( path ); }
+  void write( const std::string &name, const std::string &content )
+  {
+    std::ofstream out( path / name, std::ios::binary );
+    out << content;
+  }
+};
+
+// Writes a real provenance_<runId>.json through the real writer (the same
+// chain PipelineRunCoordinator uses) and returns the containing directory.
+EvidenceDir writeProvenanceRun( const QString &runId, const QString &nodeId,
+                                sicnu::workflow::ExecutionState state,
+                                const QString &errorMessage, const QString &digest,
+                                qint64 elapsedMs )
+{
+  QJsonObject port;
+  port["portName"] = "input";
+  port["dataType"] = "Raster";
+  port["crs"] = "EPSG:32649";
+  port["radiometricState"] = "DN";
+  port["resolutionX"] = 30.0;
+  port["resolutionY"] = 30.0;
+  port["bandCount"] = 6;
+  port["isRequired"] = true;
+
+  QJsonObject node;
+  node["nodeId"] = nodeId;
+  node["operatorId"] = "rs:radiometric_calibration";
+  node["displayName"] = "Calibrate";
+  node["parameters"] = QJsonObject { { "unit", "radiance" } };
+  node["inputPorts"] = QJsonArray { port };
+  QJsonObject outPort = port;
+  outPort["portName"] = "output";
+  outPort["radiometricState"] = "Radiance";
+  node["outputPorts"] = QJsonArray { outPort };
+  node["canvasPosition"] = QJsonObject { { "x", 0.0 }, { "y", 0.0 } };
+
+  QJsonObject document;
+  document["version"] = "2.1";
+  document["workflowId"] = "wf-tool-run";
+  document["name"] = "Tool run document";
+  document["metadata"] = QJsonObject();
+  document["nodes"] = QJsonArray { node };
+  document["edges"] = QJsonArray();
+
+  const QJsonDocument parsed = QJsonDocument( document );
+  const auto parsedDoc =
+    sicnu::workflow::WorkflowIR::fromJson( parsed.object() );
+  REQUIRE( parsedDoc.isSuccess() );
+
+  QHash<QString, sicnu::workflow::NodeStatusSnapshot> statuses;
+  sicnu::workflow::NodeStatusSnapshot snapshot;
+  snapshot.nodeId = nodeId;
+  snapshot.state = state;
+  snapshot.elapsedMs = elapsedMs;
+  snapshot.errorMessage = errorMessage;
+  if ( !digest.isEmpty() )
+  {
+    snapshot.outputArtifactPath = "/tmp/out/calibrated.tif";
+    snapshot.artifactFingerprint = digest;
+  }
+  statuses.insert( nodeId, snapshot );
+
+  const sicnu::workflow::ProvenanceGraph graph = sicnu::workflow::ProvenanceGraph::fromRunState(
+    runId, parsedDoc.value(), statuses, QStringLiteral( "sig" ) );
+
+  EvidenceDir dir;
+  dir.write( "provenance_" + runId.toStdString() + ".json",
+             QJsonDocument( graph.toJson() ).toJson( QJsonDocument::Compact ).toStdString() );
+  return dir;
+}
+
+bool hasEvidenceProblem( const Json::Value &response, const std::string &code )
+{
+  for ( const Json::Value &problem : response["evidenceProblems"] )
+    if ( problem["code"].asString() == code )
+      return true;
+  return false;
+}
+
+} // namespace
+
+TEST_CASE( "run-scoped mode attaches real execution facts from the provenance record",
+           "[explain][agent_tool][evidence]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance; // empty corpus: execution facts need no authored text
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  const EvidenceDir evidenceDir =
+    writeProvenanceRun( QStringLiteral( "run-42" ), QStringLiteral( "n1" ),
+                        sicnu::workflow::ExecutionState::Succeeded, QString(),
+                        QStringLiteral( "sha256full:abc123" ), 4321 );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value input;
+  input["mode"] = "workflow_document";
+  input["document"] = documentJson();
+  input["nodeId"] = "n1";
+  input["runId"] = "run-42";
+  input["provenanceDirectory"] = evidenceDir.path.string();
+
+  const SpatialToolResult result = tool->execute( input );
+  REQUIRE( result.success );
+  REQUIRE( result.output.isMember( "evidenceProblems" ) );
+  CHECK( result.output["evidenceProblems"].empty() );
+  const Json::Value &execution = result.output["explanation"]["execution"];
+  REQUIRE( execution.isObject() );
+  CHECK( execution["status"].asString() == "Succeeded" );
+  CHECK( execution["elapsedMs"].asInt64() == 4321 );
+  CHECK( execution["artifactDigest"].asString() == "sha256full:abc123" );
+  REQUIRE( execution["evidence"].isArray() );
+  REQUIRE( execution["evidence"].size() >= 1 );
+  CHECK( execution["evidence"][0]["target"].asString() == "provenance:run-42#node:n1" );
+  // The markdown rendering carries the machine-status line too.
+  CHECK( result.output["markdown"].asString().find( "状态: Succeeded" ) != std::string::npos );
+  CHECK( result.output["valid"].asBool() );
+}
+
+TEST_CASE( "run-scoped mode renders a failed step's typed error",
+           "[explain][agent_tool][evidence]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance;
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  const EvidenceDir evidenceDir =
+    writeProvenanceRun( QStringLiteral( "run-7" ), QStringLiteral( "n1" ),
+                        sicnu::workflow::ExecutionState::Failed,
+                        QStringLiteral( "gdal translate failed" ), QString(), 12 );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value input;
+  input["mode"] = "workflow_document";
+  input["document"] = documentJson();
+  input["nodeId"] = "n1";
+  input["runId"] = "run-7";
+  input["provenanceDirectory"] = evidenceDir.path.string();
+
+  const SpatialToolResult result = tool->execute( input );
+  REQUIRE( result.success );
+  CHECK( result.output["explanation"]["execution"]["status"].asString() == "Failed" );
+  CHECK( result.output["explanation"]["execution"]["errorMessage"].asString()
+         == "gdal translate failed" );
+}
+
+TEST_CASE( "an unknown run stays honestly unknown (no execution, no refusal)",
+           "[explain][agent_tool][evidence]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance;
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  const EvidenceDir evidenceDir =
+    writeProvenanceRun( QStringLiteral( "run-42" ), QStringLiteral( "n1" ),
+                        sicnu::workflow::ExecutionState::Succeeded, QString(),
+                        QStringLiteral( "sha256full:abc123" ), 100 );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value input;
+  input["mode"] = "workflow_document";
+  input["document"] = documentJson();
+  input["nodeId"] = "n1";
+  input["runId"] = "run-missing";
+  input["provenanceDirectory"] = evidenceDir.path.string();
+
+  const SpatialToolResult result = tool->execute( input );
+  REQUIRE( result.success );
+  CHECK_FALSE( result.output["explanation"].isMember( "execution" ) );
+  CHECK( result.output["evidenceProblems"].empty() );
+}
+
+TEST_CASE( "a tampered provenance record surfaces typed load problems, never a status",
+           "[explain][agent_tool][evidence][hostile]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance;
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  EvidenceDir evidenceDir;
+  evidenceDir.write( "provenance_run-9.json", std::string( "{ not json " ) );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value input;
+  input["mode"] = "workflow_document";
+  input["document"] = documentJson();
+  input["nodeId"] = "n1";
+  input["runId"] = "run-9";
+  input["provenanceDirectory"] = evidenceDir.path.string();
+
+  const SpatialToolResult result = tool->execute( input );
+  REQUIRE( result.success );
+  CHECK( hasEvidenceProblem( result.output, "parse_failed" ) );
+  CHECK_FALSE( result.output["explanation"].isMember( "execution" ) );
+}
+
+TEST_CASE( "a lone runId or provenanceDirectory is refused instead of partially interpreted",
+           "[explain][agent_tool][evidence]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance;
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  const EvidenceDir evidenceDir =
+    writeProvenanceRun( QStringLiteral( "run-42" ), QStringLiteral( "n1" ),
+                        sicnu::workflow::ExecutionState::Succeeded, QString(),
+                        QStringLiteral( "sha256full:abc123" ), 100 );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value base;
+  base["mode"] = "workflow_document";
+  base["document"] = documentJson();
+  base["nodeId"] = "n1";
+
+  Json::Value loneRunId = base;
+  loneRunId["runId"] = "run-42";
+  const SpatialToolResult noDir = tool->execute( loneRunId );
+  CHECK( !noDir.success );
+  CHECK( noDir.errorCode == "INVALID_PARAMETER" );
+
+  Json::Value loneDirectory = base;
+  loneDirectory["provenanceDirectory"] = evidenceDir.path.string();
+  const SpatialToolResult noRun = tool->execute( loneDirectory );
+  CHECK( !noRun.success );
+  CHECK( noRun.errorCode == "INVALID_PARAMETER" );
+
+  // An EMPTY runId is not "run-scope with an empty id" — it is refused like
+  // a missing parameter, so a plan-only answer can never wear run scope.
+  Json::Value emptyRunId = base;
+  emptyRunId["runId"] = "";
+  emptyRunId["provenanceDirectory"] = evidenceDir.path.string();
+  const SpatialToolResult emptyRun = tool->execute( emptyRunId );
+  CHECK( !emptyRun.success );
+  CHECK( emptyRun.errorCode == "INVALID_PARAMETER" );
+
+  // Wrong-typed runId (a number) is refused, not coerced.
+  Json::Value numericRunId = base;
+  numericRunId["runId"] = 42;
+  numericRunId["provenanceDirectory"] = evidenceDir.path.string();
+  const SpatialToolResult numericRun = tool->execute( numericRunId );
+  CHECK( !numericRun.success );
+  CHECK( numericRun.errorCode == "INVALID_PARAMETER" );
+}
+
+TEST_CASE( "plan-only responses keep their exact shape (no evidenceProblems member)",
+           "[explain][agent_tool][evidence]" )
+{
+  sicnu::operators::rs::initBuiltinRsOperators();
+  TempDir guidance;
+  setExplainGuidanceDirectory( guidance.path.string() );
+
+  const SpatialToolPtr tool = createExplainStepTool();
+  Json::Value input;
+  input["mode"] = "workflow_document";
+  input["document"] = documentJson();
+  input["nodeId"] = "n1";
+
+  const SpatialToolResult result = tool->execute( input );
+  REQUIRE( result.success );
+  CHECK_FALSE( result.output.isMember( "evidenceProblems" ) );
+  CHECK_FALSE( result.output["explanation"].isMember( "execution" ) );
+  CHECK( result.output["budget"]["truncated"].asBool() == false );
+  // The markdown contract holds on the plan-only path.
+  CHECK( result.output.isMember( "markdown" ) );
+  // The plan-only response shape is pinned EXACTLY: any added/renamed top
+  // level member is a silent contract change and must fail here.
+  std::vector<std::string> keys;
+  for ( const auto &key : result.output.getMemberNames() )
+    keys.push_back( key );
+  std::sort( keys.begin(), keys.end() );
+  const std::vector<std::string> expected = { "budget", "explanation", "guidanceSource",
+                                              "markdown", "problems", "valid", "validation" };
+  CHECK( keys == expected );
 }

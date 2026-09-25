@@ -7,6 +7,7 @@
 // Registration happens in spatial_tool.cpp next to the other built-ins.
 #include "explain_step_tool.h"
 
+#include "explain/adapters/provenance_file_evidence.h"
 #include "explain/adapters/registry_operator_knowledge.h"
 #include "explain/adapters/workflow_projection.h"
 #include "explain/explanation_builder.h"
@@ -165,6 +166,10 @@ public:
            "mode=operator explains a single operator call against the live operator "
            "registry plus the authored teaching-guidance corpus; "
            "mode=workflow_document explains one node of a Workflow IR 2.0 document. "
+           "With runId + provenanceDirectory (a PipelineRunCoordinator run directory "
+           "containing provenance_<runId>.json), the step's real execution evidence is "
+           "attached from the record; a missing/unreadable record renders as an honest "
+           "unknown, never a synthesized status. "
            "Returns the canonical exp.step_explanation.v1 document (provenance-tagged: "
            "system_fact | authored_guidance | inferred), a deterministic markdown "
            "rendering, and the validator's hallucination report. Unknown operators and "
@@ -210,6 +215,12 @@ public:
     schema["properties"]["workflowId"] =
       stringField( "operator mode: workflow/plan id (default: adhoc)" );
     schema["properties"]["stepId"] = stringField( "operator mode: step id (default: operatorId)" );
+    schema["properties"]["runId"] =
+      stringField( "optional: explain a real run — the runId inside "
+                   "provenance_<runId>.json (requires provenanceDirectory)" );
+    schema["properties"]["provenanceDirectory"] =
+      stringField( "optional: directory holding provenance_<runId>.json records "
+                   "(PipelineRunCoordinator run directory); requires runId" );
     Json::Value required( Json::arrayValue );
     required.append( "mode" );
     schema["required"] = required;
@@ -305,21 +316,68 @@ public:
                                          "validation" );
     }
 
+    // Run-scoped evidence (RS14-15 R3): with runId + provenanceDirectory the
+    // builder attaches the step's REAL execution facts from the run's
+    // provenance record through the existing adapter. The two parameters are
+    // a pair — a lone one is refused instead of partially interpreted.
+    // Without them the request stays plan-only and the response shape is
+    // byte-identical to the plan-only contract.
+    std::shared_ptr<sicnu::explain::adapters::ProvenanceFileEvidence> evidence;
+    Json::Value evidenceProblems( Json::arrayValue );
+    bool runScoped = false;
+    const bool hasRunId = input.isMember( "runId" );
+    const bool hasProvenanceDirectory = input.isMember( "provenanceDirectory" );
+    if ( hasRunId != hasProvenanceDirectory )
+      return SpatialToolResult::failure(
+        "runId and provenanceDirectory must be provided together", "INVALID_PARAMETER",
+        "validation" );
+    if ( hasRunId )
+    {
+      if ( !input["runId"].isString() || input["runId"].asString().empty() )
+        return SpatialToolResult::failure( "runId must be a non-empty string", "INVALID_PARAMETER",
+                                           "validation" );
+      if ( !input["provenanceDirectory"].isString()
+           || input["provenanceDirectory"].asString().empty() )
+        return SpatialToolResult::failure( "provenanceDirectory must be a non-empty string",
+                                           "INVALID_PARAMETER", "validation" );
+      if ( serializedBytes( input["provenanceDirectory"] ) > kMaxOutputBytes )
+        return SpatialToolResult::failure(
+          "provenanceDirectory exceeds the serialized-bytes budget", "INVALID_PARAMETER",
+          "validation" );
+      runScoped = true;
+      std::vector<sicnu::explain::adapters::EvidenceLoadProblem> loadProblems;
+      evidence = sicnu::explain::adapters::ProvenanceFileEvidence::loadFromDirectory(
+        input["provenanceDirectory"].asString(), loadProblems );
+      // Load refusals are surfaced verbatim — a tampered/unreadable record
+      // must look like unknown evidence, never like an absent parameter.
+      for ( const auto &problem : loadProblems )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["code"] = problem.code;
+        entry["file"] = problem.file;
+        entry["message"] = problem.message;
+        evidenceProblems.append( entry );
+      }
+      request.runId = input["runId"].asString();
+    }
+
     const BuildOutcome outcome =
-      sicnu::explain::StepExplanationBuilder( knowledge, *store, nullptr ).build( request );
+      sicnu::explain::StepExplanationBuilder( knowledge, *store, runScoped ? evidence.get() : nullptr )
+        .build( request );
     if ( outcome.failed() )
       return SpatialToolResult::failure( outcome.failureMessage, outcome.failureCode, "runtime" );
 
     const sicnu::explain::ValidationReport report =
       sicnu::explain::ExplanationValidator( knowledge, store.get() ).validate( outcome.explanation );
 
-    return respond( outcome, report.issues );
+    return respond( outcome, report.issues, runScoped ? &evidenceProblems : nullptr );
   }
 
 private:
   static SpatialToolResult respond(
     const BuildOutcome &outcome,
-    const std::vector<ValidationIssue> &validationIssues )
+    const std::vector<ValidationIssue> &validationIssues,
+    const Json::Value *evidenceProblems = nullptr )
   {
     const StepExplanationViewModel model =
       StepExplanationViewModel::fromExplanation( outcome.explanation );
@@ -360,6 +418,10 @@ private:
     response["validation"] = validation;
     response["valid"] = validation.empty();
     response["guidanceSource"] = explainGuidanceLoadReport();
+    // Only present on the run-scoped path: plan-only responses keep their
+    // exact historical shape (and byte budget).
+    if ( evidenceProblems )
+      response["evidenceProblems"] = *evidenceProblems;
 
     // Budget: measured against the FULL response (explanation, problems,
     // validation and diagnostics included). The explanation document is
@@ -396,6 +458,11 @@ std::string explainGuidanceLoadReport()
 {
   std::lock_guard<std::mutex> lock( guidanceMutex() );
   return guidanceLoadReport();
+}
+
+std::shared_ptr<const sicnu::explain::GuidanceStore> sharedExplainGuidanceStore()
+{
+  return guidanceStore();
 }
 
 void setExplainGuidanceDirectory( const std::string &directory )
