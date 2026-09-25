@@ -138,6 +138,20 @@ leaking is not. **File paths are NOT redacted** — they are the business data
 of this product; exposure is governed by the `SICNU_MCP_WORKSPACE` sandbox,
 which `artifact_read` enforces like every other path-taking tool.
 
+The sandbox is **default-deny**: when `SICNU_MCP_WORKSPACE` is unset the MCP
+server sandboxes to its working directory (the project root for the Pi
+bridge), or to `~/.exp-rs/workspace` when launched from `/` or `$HOME`. The
+server publishes the effective root back into `SICNU_MCP_WORKSPACE` and makes
+it the process working directory, so a relative path is opened exactly where
+it was validated. Paths are weakly canonicalized (symlinks on the existing
+prefix resolved, `..` after a missing component rejected, dangling symlinks
+rejected). Remote `http(s)://` / `/vsicurl/` references need
+`SICNU_MCP_ALLOW_REMOTE=1`; other URL schemes and `/vsi*` prefixes are
+rejected. To widen the sandbox deliberately set `SICNU_MCP_WORKSPACE=/`.
+The CLI pipeline runner uses the same policy
+(`src/agent/tool_catalog/workspace_containment.h`): it applies the URL-scheme
+rule always and the filesystem rule when `SICNU_PIPELINE_WORKSPACE` is set.
+
 ## 7. Pi surface
 
 `pi/exp-rs-spatial.ts` consumes `tools/list {includeSchemas:true}` — it owns

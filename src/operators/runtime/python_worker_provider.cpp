@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QThread>
 
@@ -516,12 +517,24 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
 {
   const std::string interpreter =
     model.runtime.provider.interpreter.empty() ? "python3" : model.runtime.provider.interpreter;
-  // The worker script resolves against the manifest directory (the same
-  // relative-path rule as artifact paths).
-  QString script = QString::fromStdString( model.runtime.provider.workerScript );
-  if ( !model.sourceManifest.empty() && QFileInfo( script ).isRelative() )
-    script = QFileInfo( QString::fromStdString( model.sourceManifest ) ).absoluteDir()
-               .filePath( script );
+  // Review P1-6: the manifest may not choose an arbitrary program, and the
+  // worker script must live inside the manifest directory.
+  std::string policyError;
+  if ( !modelInterpreterAllowed( interpreter, &policyError ) )
+  {
+    if ( errorMessage )
+      *errorMessage = policyError;
+    return nullptr;
+  }
+  std::string resolvedScript;
+  if ( !resolveModelWorkerScript( model.runtime.provider.workerScript, model.sourceManifest,
+                                  &resolvedScript, &policyError ) )
+  {
+    if ( errorMessage )
+      *errorMessage = policyError;
+    return nullptr;
+  }
+  const QString script = QString::fromStdString( resolvedScript );
   auto session = std::make_shared<PythonWorkerSession>(
     interpreter, script.toStdString(),
     QFileInfo( script ).absolutePath().toStdString(), model.resolvedArtifactPath,
@@ -534,6 +547,81 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
 }
 
 } // namespace
+
+bool modelInterpreterAllowed( const std::string &interpreter, std::string *reason )
+{
+  const QString value = QString::fromStdString( interpreter ).trimmed();
+  if ( value.isEmpty() )
+    return true; // default "python3"
+
+  const bool hasSeparator = value.contains( QLatin1Char( '/' ) ) || value.contains( QLatin1Char( '\\' ) );
+  if ( !hasSeparator )
+  {
+    static const QRegularExpression kLauncher(
+      QStringLiteral( "^(python|python3|python3\\.[0-9]{1,2}|pythonw|py)(\\.exe)?$" ),
+      QRegularExpression::CaseInsensitiveOption );
+    if ( kLauncher.match( value ).hasMatch() )
+      return true;
+    if ( reason )
+      *reason = "model interpreter '" + interpreter
+                + "' is not allowed: manifests may only name a Python launcher "
+                  "(python, python3, python3.N, pythonw, py) or an interpreter configured "
+                  "via SICNU_PYTHON_EXECUTABLE / SICNU_MODEL_INTERPRETERS";
+    return false;
+  }
+
+  const QString canonical = QFileInfo( value ).canonicalFilePath();
+  if ( !canonical.isEmpty() )
+  {
+    QStringList configured;
+    const QString pythonExec = qEnvironmentVariable( "SICNU_PYTHON_EXECUTABLE" ).trimmed();
+    if ( !pythonExec.isEmpty() )
+      configured << pythonExec;
+    configured << qEnvironmentVariable( "SICNU_MODEL_INTERPRETERS" )
+                    .split( QDir::listSeparator(), Qt::SkipEmptyParts );
+    for ( const QString &entry : std::as_const( configured ) )
+    {
+      const QString entryCanonical = QFileInfo( entry.trimmed() ).canonicalFilePath();
+      if ( !entryCanonical.isEmpty() && entryCanonical == canonical )
+        return true;
+    }
+  }
+  if ( reason )
+    *reason = "model interpreter path '" + interpreter
+              + "' is not allowed: add it to SICNU_MODEL_INTERPRETERS (or set "
+                "SICNU_PYTHON_EXECUTABLE) to trust it";
+  return false;
+}
+
+bool resolveModelWorkerScript( const std::string &workerScript, const std::string &manifestPath,
+                               std::string *resolved, std::string *reason )
+{
+  const QString script = QString::fromStdString( workerScript );
+  if ( manifestPath.empty() )
+  {
+    if ( resolved )
+      *resolved = workerScript;
+    return true;
+  }
+  const QDir manifestDir = QFileInfo( QString::fromStdString( manifestPath ) ).absoluteDir();
+  const QString joined = QFileInfo( script ).isRelative() ? manifestDir.filePath( script ) : script;
+  const QString dirCanonical = manifestDir.canonicalPath();
+  const QString scriptCanonical = QFileInfo( joined ).canonicalFilePath();
+  const bool inside = !dirCanonical.isEmpty() && !scriptCanonical.isEmpty()
+                      && scriptCanonical.startsWith( dirCanonical + QLatin1Char( '/' ) );
+  if ( !inside )
+  {
+    if ( reason )
+      *reason = scriptCanonical.isEmpty()
+                  ? "python worker script not found: " + joined.toStdString()
+                  : "model worker_script '" + workerScript
+                      + "' resolves outside the manifest directory";
+    return false;
+  }
+  if ( resolved )
+    *resolved = scriptCanonical.toStdString();
+  return true;
+}
 
 void registerPythonWorkerProvider( ModelRuntimeRegistry &registry )
 {

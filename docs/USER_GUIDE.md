@@ -936,6 +936,10 @@ RS Studio 深度集成了业界领先的遥感 AI Agent Copilot 系统（`AgentC
 4. **连通性测试 (Test Connection)**：
    - 点击「测试连接」按钮，系统内置探针将发送心跳请求，毫秒级反馈网络延迟与模型就绪状态。
 
+**API Key 的存储位置**：API Key 保存在操作系统钥匙串中（Windows 凭据管理器 / macOS 钥匙串 / Linux 上的 Secret Service 或 KWallet，经 QtKeychain），所有 profile 的 Key 合并为服务 `exp-rs`、条目 `llm-api-keys` 的一项。旧版本写在 QSettings 里的明文 Key 会在首次启动时自动迁移进钥匙串，迁移成功后删除明文副本。
+
+以下情况无法使用钥匙串，Key 会回退到仅当前用户可读（0600）的 QSettings 配置文件中，并在日志里给出警告：未编译 QtKeychain 的平台；Linux 下没有 D-Bus 会话总线（SSH、无头 CI、容器）；钥匙串在 `SICNU_LLM_KEYCHAIN_TIMEOUT_MS`（默认 5000 毫秒）内没有响应；或显式设置了 `SICNU_LLM_KEYCHAIN=0`。
+
 ---
 
 ## 8.3 工作区感知与 Workspace Snapshot 元数据快照

@@ -7,6 +7,8 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 
 #include <QCoreApplication>
+#include <QFile>
+#include <QSettings>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -258,4 +260,170 @@ TEST_CASE( "LlmStreamingClient::buildChatRequest honours SICNU_LLM_TRANSFER_TIME
   qunsetenv( "SICNU_LLM_TRANSFER_TIMEOUT_MS" );
   payload = LlmStreamingClient::buildChatRequest( profile, QJsonArray() );
   REQUIRE( payload.request.transferTimeout() == 120000 );
+}
+
+// ---------------------------------------------------------------------------
+// Review P1-7: API keys move from plaintext QSettings to the secure store,
+// with one-shot migration of legacy plaintext values.
+// ---------------------------------------------------------------------------
+namespace
+{
+class FakeSecretStore final : public LlmSecretStore
+{
+  public:
+    QMap<QString, QString> keys;
+    bool usable = true;
+    int writes = 0;
+    QString backendName() const override { return QStringLiteral( "fake-keychain" ); }
+    bool readKeys( QMap<QString, QString> *out, QString *error ) override
+    {
+      if ( !usable )
+      {
+        *error = QStringLiteral( "backend offline" );
+        return false;
+      }
+      *out = keys;
+      return true;
+    }
+    bool writeKeys( const QMap<QString, QString> &in, QString *error ) override
+    {
+      if ( !usable )
+      {
+        *error = QStringLiteral( "backend offline" );
+        return false;
+      }
+      keys = in;
+      ++writes;
+      return true;
+    }
+};
+
+/// Points QSettings() at a throw-away organization so the test never
+/// touches (or depends on) the developer's real settings.
+struct IsolatedSettings
+{
+    QString savedOrg = QCoreApplication::organizationName();
+    QString savedApp = QCoreApplication::applicationName();
+    IsolatedSettings()
+    {
+      QCoreApplication::setOrganizationName(
+        QStringLiteral( "exp-rs-test-keychain-%1" ).arg( QCoreApplication::applicationPid() ) );
+      QCoreApplication::setApplicationName( QStringLiteral( "llm-keys" ) );
+      QSettings().clear();
+    }
+    ~IsolatedSettings()
+    {
+      QSettings settings;
+      settings.clear();
+      settings.sync();
+      QFile::remove( settings.fileName() );
+      QCoreApplication::setOrganizationName( savedOrg );
+      QCoreApplication::setApplicationName( savedApp );
+    }
+};
+
+void seedLegacyPlaintextProfile( const QString &id, const QString &apiKey )
+{
+  QSettings settings;
+  settings.beginGroup( QStringLiteral( "AI_AgentProfiles" ) );
+  settings.beginWriteArray( QStringLiteral( "profiles" ), 1 );
+  settings.setArrayIndex( 0 );
+  settings.setValue( QStringLiteral( "id" ), id );
+  settings.setValue( QStringLiteral( "name" ), QStringLiteral( "Legacy" ) );
+  settings.setValue( QStringLiteral( "baseUrl" ), QStringLiteral( "https://api.example.invalid/v1" ) );
+  settings.setValue( QStringLiteral( "apiKey" ), apiKey );
+  settings.setValue( QStringLiteral( "modelName" ), QStringLiteral( "m" ) );
+  settings.endArray();
+  settings.endGroup();
+  settings.sync();
+}
+
+bool settingsHoldPlaintextKey()
+{
+  QSettings settings;
+  settings.beginGroup( QStringLiteral( "AI_AgentProfiles" ) );
+  const int n = settings.beginReadArray( QStringLiteral( "profiles" ) );
+  bool found = false;
+  for ( int i = 0; i < n; ++i )
+  {
+    settings.setArrayIndex( i );
+    found = found || settings.contains( QStringLiteral( "apiKey" ) );
+  }
+  settings.endArray();
+  settings.endGroup();
+  return found;
+}
+} // namespace
+
+TEST_CASE( "LlmConfigManager migrates plaintext API keys into the secure store", "[agent][config][security]" )
+{
+  ensureQtApp();
+  const IsolatedSettings isolated;
+  seedLegacyPlaintextProfile( QStringLiteral( "legacy" ), QStringLiteral( "sk-legacy-plaintext" ) );
+  REQUIRE( settingsHoldPlaintextKey() );
+
+  auto store = std::make_shared<FakeSecretStore>();
+  LlmConfigManager manager;
+  manager.setSecretStore( store );
+
+  const auto profiles = manager.getProfiles();
+  REQUIRE( profiles.size() == 1 );
+  CHECK( profiles.first().apiKey == QStringLiteral( "sk-legacy-plaintext" ) );
+  CHECK( store->keys.value( QStringLiteral( "legacy" ) ) == QStringLiteral( "sk-legacy-plaintext" ) );
+  CHECK( manager.apiKeyStorage() == QStringLiteral( "fake-keychain" ) );
+  // The plaintext copy is gone after migration.
+  CHECK_FALSE( settingsHoldPlaintextKey() );
+
+  SECTION( "saving keeps keys out of QSettings" )
+  {
+    auto edited = profiles;
+    edited.first().apiKey = QStringLiteral( "sk-rotated" );
+    manager.updateProfiles( edited );
+    CHECK( store->keys.value( QStringLiteral( "legacy" ) ) == QStringLiteral( "sk-rotated" ) );
+    CHECK_FALSE( settingsHoldPlaintextKey() );
+
+    // A fresh manager reads the key back from the store only.
+    LlmConfigManager reloaded;
+    reloaded.setSecretStore( store );
+    REQUIRE( reloaded.getProfiles().size() == 1 );
+    CHECK( reloaded.getProfiles().first().apiKey == QStringLiteral( "sk-rotated" ) );
+  }
+}
+
+TEST_CASE( "LlmConfigManager prefers stored keys over stale plaintext", "[agent][config][security]" )
+{
+  ensureQtApp();
+  const IsolatedSettings isolated;
+  seedLegacyPlaintextProfile( QStringLiteral( "p" ), QStringLiteral( "sk-stale" ) );
+  auto store = std::make_shared<FakeSecretStore>();
+  store->keys.insert( QStringLiteral( "p" ), QStringLiteral( "sk-current" ) );
+
+  LlmConfigManager manager;
+  manager.setSecretStore( store );
+  REQUIRE( manager.getProfiles().size() == 1 );
+  CHECK( manager.getProfiles().first().apiKey == QStringLiteral( "sk-current" ) );
+  CHECK_FALSE( settingsHoldPlaintextKey() );
+}
+
+TEST_CASE( "LlmConfigManager falls back to QSettings when the secure store is unavailable", "[agent][config][security]" )
+{
+  ensureQtApp();
+  const IsolatedSettings isolated;
+  seedLegacyPlaintextProfile( QStringLiteral( "p" ), QStringLiteral( "sk-fallback" ) );
+  auto store = std::make_shared<FakeSecretStore>();
+  store->usable = false;
+
+  LlmConfigManager manager;
+  manager.setSecretStore( store );
+  REQUIRE( manager.getProfiles().size() == 1 );
+  CHECK( manager.getProfiles().first().apiKey == QStringLiteral( "sk-fallback" ) );
+  CHECK( manager.apiKeyStorage() == QStringLiteral( "settings" ) );
+  // Nothing was lost: the plaintext copy stays until a store can take it.
+  CHECK( settingsHoldPlaintextKey() );
+
+  auto edited = manager.getProfiles();
+  edited.first().apiKey = QStringLiteral( "sk-new" );
+  manager.updateProfiles( edited );
+  CHECK( settingsHoldPlaintextKey() );
+  CHECK( store->writes == 0 );
 }

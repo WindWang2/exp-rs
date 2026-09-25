@@ -1896,10 +1896,11 @@ std::string ModelCatalog::defaultModelsDirectory()
   if ( !envDir.isEmpty() )
     return envDir.toStdString();
 
-  const QDir cwdModels( QDir::current().filePath( QStringLiteral( "models" ) ) );
-  if ( cwdModels.exists() )
-    return cwdModels.absolutePath().toStdString();
-
+  // Review P1-6: the process working directory is NOT a model search root.
+  // Manifests select the worker process a model runs in, so a "models/"
+  // folder in an untrusted launch directory (shared drive, course pack,
+  // student folder) must never outrank — or silently replace — the bundled
+  // catalog. Use SICNU_MODELS_DIR to point at a project-local catalog.
   if ( QCoreApplication::instance() )
   {
     const QDir appModels( QCoreApplication::applicationDirPath()
@@ -1917,7 +1918,12 @@ std::string ModelCatalog::defaultModelsDirectory()
   }
 #endif
 
-  return QDir::current().filePath( QStringLiteral( "models" ) ).toStdString();
+  // Nothing exists yet: name the bundled location (never the CWD, and never
+  // an empty string — QDir("") would scan the working directory).
+  if ( QCoreApplication::instance() )
+    return QDir( QCoreApplication::applicationDirPath() + QStringLiteral( "/../models" ) )
+      .absolutePath().toStdString();
+  return QDir::home().filePath( QStringLiteral( ".exp-rs/models" ) ).toStdString();
 }
 
 void ModelCatalog::setDirectory( const std::string &dir )

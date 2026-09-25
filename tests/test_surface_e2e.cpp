@@ -31,13 +31,16 @@ struct Wire
     std::string buffer;
     int nextId = 1;
 
-    void start()
+    void start(const QString &workingDirectory)
     {
         // Hermetic environment: a globally exported SICNU_MCP_WORKSPACE would
-        // reject the artifact leg of the scenario.
+        // reject the artifact leg of the scenario. With it unset the server
+        // sandboxes to its working directory (review P1-1 default-deny) —
+        // exactly how the Pi bridge launches it from the project root.
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove(QStringLiteral("SICNU_MCP_WORKSPACE"));
         process.setProcessEnvironment(env);
+        process.setWorkingDirectory(workingDirectory);
         process.start(QString::fromUtf8(SICNU_TEST_SURFACE_HOST), QStringList{});
         REQUIRE(process.waitForStarted(10000));
     }
@@ -136,7 +139,7 @@ void runScenario(int pass)
     }
 
     Wire wire;
-    wire.start();
+    wire.start(workspace.path());
 
     // -- initialize ----------------------------------------------------------
     QJsonObject init;
@@ -396,6 +399,32 @@ void runScenario(int pass)
                 .contains(QStringLiteral("surface e2e artifact")));
     REQUIRE(artifactResult.value(QStringLiteral("truncated")).toBool() == false);
     REQUIRE(artifactResult.value(QStringLiteral("size_bytes")).toVariant().toLongLong() > 0);
+
+    // -- default-deny sandbox (review P1-1): outside the working directory ---
+    {
+        QTemporaryDir outside;
+        REQUIRE(outside.isValid());
+        const QString secret = outside.path() + QStringLiteral("/secret.txt");
+        {
+            QFile file(secret);
+            REQUIRE(file.open(QIODevice::WriteOnly));
+            file.write("top secret\n");
+        }
+        QJsonObject escape;
+        escape[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        escape[QStringLiteral("id")] = wire.nextId++;
+        escape[QStringLiteral("method")] = QStringLiteral("tools/call");
+        escape[QStringLiteral("params")] = QJsonObject{
+            { QStringLiteral("name"), QStringLiteral("artifact_read") },
+            { QStringLiteral("arguments"), QJsonObject{ { QStringLiteral("path"), secret } } } };
+        wire.sendJson(escape);
+        const QJsonObject escapeResult =
+            wire.readResponse(escape.value(QStringLiteral("id")).toInt(), notifications)
+                .value(QStringLiteral("result")).toObject();
+        REQUIRE(escapeResult.value(QStringLiteral("isError")).toBool());
+        REQUIRE_FALSE(escapeResult.value(QStringLiteral("content")).toArray().at(0).toObject()
+                          .value(QStringLiteral("text")).toString().contains(QStringLiteral("top secret")));
+    }
 
     // -- malformed traffic negatives -----------------------------------------
     wire.sendLine(std::string(5 * 1024 * 1024, 'x')); // oversized line → parse error

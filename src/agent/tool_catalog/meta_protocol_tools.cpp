@@ -173,8 +173,9 @@ const std::vector<MetaToolDef> &table()
           "CSV, log) produced by a tool execution. Returns the slice plus the "
           "whole-file sha256 and a nextOffset cursor for continuation — never "
           "inline large payloads in tool results; page through them here. "
-          "Paths follow the server's workspace rule (absolute paths must stay "
-          "inside SICNU_MCP_WORKSPACE when that variable is set).",
+          "Paths follow the server's workspace rule (paths must stay inside "
+          "the server workspace: SICNU_MCP_WORKSPACE, default the server's "
+          "working directory).",
           { { "path", "string", "Path of the artifact file to read.", true },
             { "offset", "integer", "Byte offset to start reading from (default 0).", false },
             { "length", "integer", "Max bytes to read; clamped to 262144 (256 KiB). Default: the cap.", false },

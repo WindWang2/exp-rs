@@ -25,4 +25,22 @@ class ModelRuntimeRegistry;
 /// instance() would re-enter the static initializer.
 void registerPythonWorkerProvider( ModelRuntimeRegistry &registry );
 
+/// Interpreter policy for manifest-declared workers (review P1-6). A model
+/// manifest is data, so it must not pick an arbitrary program to execute:
+///   * empty -> the default "python3";
+///   * a bare command name must be a Python launcher
+///     (python, python3, python3.N, pythonw, py — optional ".exe");
+///   * a path is accepted only when it canonicalizes to an interpreter the
+///     USER configured: SICNU_PYTHON_EXECUTABLE or an entry of
+///     SICNU_MODEL_INTERPRETERS (QDir::listSeparator()-separated).
+/// Returns false with @p reason on rejection.
+bool modelInterpreterAllowed( const std::string &interpreter, std::string *reason = nullptr );
+
+/// Resolves a manifest worker_script against the manifest directory and
+/// requires the result to stay inside it (no absolute paths elsewhere, no
+/// "../" escapes, symlinks resolved). An empty @p manifestPath (models built
+/// programmatically, not loaded from disk) skips the containment rule.
+bool resolveModelWorkerScript( const std::string &workerScript, const std::string &manifestPath,
+                               std::string *resolved, std::string *reason = nullptr );
+
 } // namespace sicnu::operators::runtime
