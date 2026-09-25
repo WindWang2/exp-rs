@@ -42,7 +42,6 @@
 #include <proj.h>
 
 #include <QDir>
-#include <QTemporaryDir>
 #include <QString>
 
 #include <cstdlib>

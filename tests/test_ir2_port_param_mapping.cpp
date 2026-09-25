@@ -19,8 +19,10 @@
 
 #include <json/json.h>
 
+#include <filesystem>
 #include <memory>
 #include <QJsonObject>
+#include <system_error>
 
 using namespace sicnu::workflow;
 
@@ -604,3 +606,74 @@ TEST_CASE( "Registry executor refuses a nodeId that forks an NTFS alternate data
 
     registry.unregisterOperator( "test:ir2_writes_artifact" );
 }
+
+#if !defined( _WIN32 )
+// A symlinked component inside the run directory must not turn the run
+// directory into a traversal hatch: the declared-output confinement resolves
+// the artifact path BEFORE the operator runs, so an in-run-root symlink can
+// never carry a write outside the run directory (lexical cleanPath cannot see
+// the link; only resolving the path can).
+TEST_CASE( "Registry executor confinement resolves symlinks inside the run directory",
+           "[d18][ir2][executor][1032][symlink]" )
+{
+    ensureApp();
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_writes_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_writes_artifact", [] { return std::make_unique<WritingOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir anchor;
+    REQUIRE( anchor.isValid() );
+    const QString outsideDir = anchor.filePath( QStringLiteral( "elsewhere" ) );
+    REQUIRE( QDir().mkpath( outsideDir ) );
+
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+    std::error_code linkEc;
+    std::filesystem::create_symlink( std::filesystem::path( outsideDir.toStdString() ),
+                                     std::filesystem::path( ( runDir.filePath(
+                                       QStringLiteral( "sub" ) ) ).toStdString() ),
+                                     linkEc );
+    if ( linkEc )
+        return; // unprivileged symlink host: nothing to pin here
+
+    const QString smuggled = QDir( outsideDir ).filePath( QStringLiteral( "evil.out.tif" ) );
+    QFile::remove( smuggled );
+
+    NodeFact escape = makeNode( QStringLiteral( "escape" ), {} );
+    escape.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+    escape.parameters = QJsonObject{ { QStringLiteral( "output" ),
+                                      QStringLiteral( "sub/evil.out.tif" ) } };
+    const NodeExecutionResult result = executor( escape, {}, runDir.path(), nullptr );
+
+    // Refused, and refused BEFORE the operator ran: nothing may exist at the
+    // link target (pre-fix the operator wrote through the link and only the
+    // post-hoc publication check noticed).
+    REQUIRE_FALSE( result.success );
+    REQUIRE( result.errorMessage.contains( QStringLiteral( "escapes the run directory" ) ) );
+    INFO( "smuggled path: " << smuggled.toStdString() );
+    REQUIRE_FALSE( QFile::exists( smuggled ) );
+
+    // And a run-root path that itself reaches the node through a symlink is
+    // still a legitimate publish (canonical containment on both sides).
+    const QString realRun = anchor.filePath( QStringLiteral( "real-run" ) );
+    REQUIRE( QDir().mkpath( realRun ) );
+    const QString linkRun = anchor.filePath( QStringLiteral( "link-run" ) );
+    std::error_code runLinkEc;
+    std::filesystem::create_symlink( std::filesystem::path( realRun.toStdString() ),
+                                     std::filesystem::path( linkRun.toStdString() ),
+                                     runLinkEc );
+    if ( !runLinkEc )
+    {
+        QFile::remove( QDir( realRun ).filePath( QStringLiteral( "symrun.out.tif" ) ) );
+        NodeFact sym = makeNode( QStringLiteral( "symrun" ), {} );
+        sym.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+        const NodeExecutionResult ok = executor( sym, {}, linkRun, nullptr );
+        REQUIRE( ok.success );
+        REQUIRE( QFile::exists( QDir( realRun ).filePath( QStringLiteral( "symrun.out.tif" ) ) ) );
+    }
+
+    registry.unregisterOperator( "test:ir2_writes_artifact" );
+}
+#endif

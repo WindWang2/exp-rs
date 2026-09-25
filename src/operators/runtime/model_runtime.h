@@ -366,6 +366,15 @@ class IModelRuntime
     /// Statistics/liveness probe. Never throws.
     virtual SessionHealth health() const { return SessionHealth{}; }
 
+    /// Crash-recovery probe (Track 13): true ONLY when the session knows it
+    /// can never run again — e.g. an external worker died with its restart
+    /// budget exhausted. The registry recycles such a cached session instead
+    /// of handing the corpse out forever. Honest default: false —
+    /// implementations that cannot know say nothing (health()'s blanket
+    /// default is pessimistic, and most subclasses never override it, so it
+    /// must not drive recycling). Never throws.
+    virtual bool permanentlyUnavailable() const { return false; }
+
     /// Memory estimate (0 = unknown). Never throws.
     virtual SessionMemoryEstimate memoryEstimate() const { return {}; }
 

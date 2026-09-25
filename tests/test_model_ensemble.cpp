@@ -927,3 +927,151 @@ TEST_CASE( "all-zero-weight ensembles refuse before any member forward (hardenin
   CHECK_FALSE( QFile::exists( output ) );
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
 }
+
+namespace {
+
+/// Registers an ordered two-member ensemble with EXPLICIT weights — the
+/// declaration order is the semantic position: weight i pairs with member i.
+void registerOrderedEnsemble( const QTemporaryDir &dir, const std::string &ensembleName,
+                              const std::string &firstModel, const std::string &firstFramework,
+                              double firstWeight, const std::string &secondModel,
+                              const std::string &secondFramework, double secondWeight,
+                              int maxConcurrentMembers = 0 )
+{
+  Json::Value json( Json::objectValue );
+  json[ "name" ] = ensembleName;
+  json[ "task" ] = "segmentation";
+  json[ "framework" ] = "onnx";
+  Json::Value &ensemble = json[ "ensemble" ] = Json::Value( Json::objectValue );
+  Json::Value members( Json::arrayValue );
+  Json::Value a( Json::objectValue );
+  a[ "model" ] = firstModel;
+  a[ "weight" ] = firstWeight;
+  members.append( a );
+  Json::Value b( Json::objectValue );
+  b[ "model" ] = secondModel;
+  b[ "weight" ] = secondWeight;
+  members.append( b );
+  ensemble[ "members" ] = members;
+  ensemble[ "uncertainty" ] = "none";
+  if ( maxConcurrentMembers > 0 )
+    ensemble[ "max_concurrent_members" ] = maxConcurrentMembers;
+
+  std::string error;
+  const bool ok = ModelCatalog::instance().registerManifestJson(
+    Json::writeString( Json::StreamWriterBuilder(), json ),
+    dir.filePath( QString::fromStdString( ensembleName ) + QStringLiteral( "/model.json" ) )
+      .toStdString(),
+    &error );
+  if ( !ok )
+    FAIL( "ensemble '" + ensembleName + "' rejected: " + error );
+}
+
+} // namespace
+
+// Track 13: the member list is an ORDERED contract — weight i pairs with
+// member i, combination accumulates in declaration order, and the
+// provenance member array records the declared order (never the concurrent
+// completion order). A mutation that sorts members, pairs weights by model
+// id, or records completion order changes the product semantics and must
+// be caught here.
+TEST_CASE( "ensemble member order is semantic: declaration order pairs weights "
+           "and drives the provenance member array",
+           "[models][ensemble][order][reproducibility]" )
+{
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "ensfw-a", 2.0 ); // member-a: 10 → 20
+  const ScaleProviderGuard guardB( "ensfw-b", 0.5 ); // member-b: 10 → 5
+  QTemporaryDir dir;
+  registerMember( "member-a", "ensfw-a", dir );
+  registerMember( "member-b", "ensfw-b", dir );
+
+  const QString input = writeConstantRaster( dir, "input.tif", 16, 2, 10.0f );
+  RSOperatorContext context;
+
+  // Order A-first with weights 3:1 → (20×3 + 5×1) / 4 = 16.25.
+  registerOrderedEnsemble( dir, "ens-ordered-ab", "member-a", "ensfw-a", 3.0,
+                           "member-b", "ensfw-b", 1.0 );
+  const QString outputAB = dir.filePath( QStringLiteral( "ab.tif" ) );
+  ModelExecutionRequest requestAB =
+    rasterRequest( input.toStdString(), outputAB.toStdString(), "ens-ordered-ab" );
+  ModelExecutionResult resultAB;
+  REQUIRE_NOTHROW( resultAB = sicnu::operators::runtime::runModelInference( requestAB, context ) );
+  bool ok = false;
+  const float vAB = readPixel( outputAB, 1, 3, 3, &ok );
+  REQUIRE( ok );
+  CHECK( vAB == Catch::Approx( 16.25f ).margin( 1e-4f ) );
+
+  // The SAME members and weights, declared REVERSED: weights pair with the
+  // other member → (5×3 + 20×1) / 4 = 8.75. The product is a different
+  // product — order is part of the ensemble identity.
+  registerOrderedEnsemble( dir, "ens-ordered-ba", "member-b", "ensfw-b", 3.0,
+                           "member-a", "ensfw-a", 1.0 );
+  const QString outputBA = dir.filePath( QStringLiteral( "ba.tif" ) );
+  ModelExecutionRequest requestBA =
+    rasterRequest( input.toStdString(), outputBA.toStdString(), "ens-ordered-ba" );
+  ModelExecutionResult resultBA;
+  REQUIRE_NOTHROW( resultBA = sicnu::operators::runtime::runModelInference( requestBA, context ) );
+  const float vBA = readPixel( outputBA, 1, 3, 3, &ok );
+  REQUIRE( ok );
+  CHECK( vBA == Catch::Approx( 8.75f ).margin( 1e-4f ) );
+  CHECK( vBA != Catch::Approx( vAB ).margin( 1e-4f ) );
+
+  // Provenance member arrays follow the DECLARED order, positionally
+  // paired with the declared weights.
+  const auto verdictAB = verifyProductAgainstModel( outputAB.toStdString(), "ens-ordered-ab" );
+  REQUIRE( verdictAB.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
+  const Json::Value &membersAB = verdictAB.provenance[ "ensemble" ][ "members" ];
+  REQUIRE( membersAB.size() == 2 );
+  CHECK( membersAB[ 0 ][ "identity_tag" ].asString().find( "member-a" ) == 0 );
+  CHECK( membersAB[ 1 ][ "identity_tag" ].asString().find( "member-b" ) == 0 );
+  CHECK( membersAB[ 0 ][ "weight" ].asDouble() == Catch::Approx( 3.0 ) );
+  CHECK( membersAB[ 1 ][ "weight" ].asDouble() == Catch::Approx( 1.0 ) );
+
+  const auto verdictBA = verifyProductAgainstModel( outputBA.toStdString(), "ens-ordered-ba" );
+  REQUIRE( verdictBA.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
+  const Json::Value &membersBA = verdictBA.provenance[ "ensemble" ][ "members" ];
+  REQUIRE( membersBA.size() == 2 );
+  CHECK( membersBA[ 0 ][ "identity_tag" ].asString().find( "member-b" ) == 0 );
+  CHECK( membersBA[ 1 ][ "identity_tag" ].asString().find( "member-a" ) == 0 );
+}
+
+// Same contract under MEMBER CONCURRENCY: with a wider-than-member-count
+// execution budget the completion order can scramble, but the provenance
+// member array must still read in declaration order — a verifier diffing
+// two runs of the same manifest sees identical sidecars.
+TEST_CASE( "ensemble provenance member order is the declared order even when "
+           "members execute concurrently",
+           "[models][ensemble][order][reproducibility]" )
+{
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "ensfw-a", 2.0 );
+  const ScaleProviderGuard guardB( "ensfw-b", 0.5 );
+  QTemporaryDir dir;
+  registerMember( "member-a", "ensfw-a", dir );
+  registerMember( "member-b", "ensfw-b", dir );
+  registerOrderedEnsemble( dir, "ens-parallel", "member-a", "ensfw-a", 3.0,
+                           "member-b", "ensfw-b", 1.0,
+                           /*maxConcurrentMembers*/ 2 );
+
+  const QString input = writeConstantRaster( dir, "input.tif", 16, 2, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "parallel.tif" ) );
+  ModelExecutionRequest request =
+    rasterRequest( input.toStdString(), output.toStdString(), "ens-parallel" );
+  RSOperatorContext context;
+  ModelExecutionResult result;
+  REQUIRE_NOTHROW( result = sicnu::operators::runtime::runModelInference( request, context ) );
+
+  bool ok = false;
+  const float v = readPixel( output, 1, 3, 3, &ok );
+  REQUIRE( ok );
+  CHECK( v == Catch::Approx( 16.25f ).margin( 1e-4f ) );
+
+  const auto verdict = verifyProductAgainstModel( output.toStdString(), "ens-parallel" );
+  REQUIRE( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
+  const Json::Value &members = verdict.provenance[ "ensemble" ][ "members" ];
+  REQUIRE( members.size() == 2 );
+  CHECK( members[ 0 ][ "identity_tag" ].asString().find( "member-a" ) == 0 );
+  CHECK( members[ 1 ][ "identity_tag" ].asString().find( "member-b" ) == 0 );
+  CHECK( verdict.provenance[ "ensemble" ][ "member_concurrency" ].asInt() == 2 );
+}

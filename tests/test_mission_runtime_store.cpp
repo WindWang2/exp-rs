@@ -16,6 +16,8 @@
 #include <QDomDocument>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 using namespace sicnu::app;
@@ -133,4 +135,211 @@ TEST_CASE( "A corrupt authority refuses the save until the state is recovered",
     CHECK( error == QStringLiteral( "poisoned_authority" ) );
     // Refusal must not have written anything.
     CHECK_FALSE( QFile::exists( sidecarPath( project ) ) );
+}
+
+namespace {
+
+void writeSidecarBytes( const QString &projectPath, const QByteArray &bytes )
+{
+    QFile side( sidecarPath( projectPath ) );
+    REQUIRE( side.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    REQUIRE( side.write( bytes ) == bytes.size() );
+}
+
+MissionRuntimeState stateWithOneTask( const QString &projectPath )
+{
+    MissionRuntimeState state;
+    state.context.projectRef = projectPath;
+    MissionTask task;
+    task.id = QStringLiteral( "task-1" );
+    task.stage = MissionStage::Import;
+    task.title = QStringLiteral( "正射纠正" );
+    REQUIRE( state.timeline.addTask( task ).applied );
+    return state;
+}
+
+} // namespace
+
+TEST_CASE( "a corrupt sidecar with no last-good refuses the load and poisons the session",
+           "[mission][runtime_store][corrupt]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( QStringLiteral( "corrupt.qgs" ) );
+
+    MissionRuntimeState state = stateWithOneTask( project );
+    QDomDocument doc;
+    QString error;
+    REQUIRE( saveMissionRuntime( project, doc, state, &error ) );
+    // Drop the snapshot: only the corrupt artifact remains.
+    REQUIRE( QFile::remove( missionRuntimeLastGoodPathForProject( project ) ) );
+    writeSidecarBytes( project, QStringLiteral( "{\"kind\": \"mission_cont" ).toUtf8() );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE_FALSE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityCorrupt );
+    CHECK_FALSE( loaded.authorityLoaded );
+    // Fail closed means NOT an empty legitimate mission.
+    CHECK( loaded.timeline.tasks().isEmpty() );
+    CHECK_FALSE( loaded.problems.isEmpty() );
+
+    // The poisoned session can never publish over the artifact.
+    MissionRuntimeState poisoned = loaded;
+    QString saveErr;
+    REQUIRE_FALSE( saveMissionRuntime( project, freshDoc, poisoned, &saveErr ) );
+    CHECK( saveErr == QStringLiteral( "poisoned_authority" ) );
+}
+
+TEST_CASE( "a corrupt sidecar recovers from the last-good snapshot",
+           "[mission][runtime_store][recovery]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( QStringLiteral( "recover.qgs" ) );
+
+    MissionRuntimeState state = stateWithOneTask( project );
+    QDomDocument doc;
+    QString error;
+    REQUIRE( saveMissionRuntime( project, doc, state, &error ) );
+    const QString missionId = state.context.missionId;
+    writeSidecarBytes( project, "not json at all" );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityLoaded );
+    CHECK( loaded.recoveredFromLastGood );
+    CHECK( loaded.context.missionId == missionId );
+    REQUIRE( loaded.timeline.tasks().size() == 1 );
+    CHECK( loaded.timeline.tasks().first().id == QStringLiteral( "task-1" ) );
+    CHECK( loaded.notices.contains( QStringLiteral( "authority_recovered_from_last_good" ) ) );
+}
+
+TEST_CASE( "an absent sidecar with a last-good still recovers the authority",
+           "[mission][runtime_store][recovery]" )
+{
+    // #1169: the removal paths (failed-sidecar-write cleanup, .qgz-only
+    // projects) leave a good snapshot beside an ABSENT sidecar; keying
+    // recovery on sidecar presence made the next save publish an empty
+    // mission.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( QStringLiteral( "absent.qgs" ) );
+
+    MissionRuntimeState state = stateWithOneTask( project );
+    QDomDocument doc;
+    QString error;
+    REQUIRE( saveMissionRuntime( project, doc, state, &error ) );
+    REQUIRE( QFile::remove( sidecarPath( project ) ) );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityLoaded );
+    CHECK( loaded.recoveredFromLastGood );
+    CHECK( loaded.timeline.tasks().size() == 1 );
+
+    // And the recovered authority republishes a real sidecar again.
+    MissionRuntimeState republished = loaded;
+    REQUIRE( saveMissionRuntime( project, freshDoc, republished, &error ) );
+    CHECK( QFile::exists( sidecarPath( project ) ) );
+}
+
+TEST_CASE( "an embedded timeline with an unknown future schema refuses the load",
+           "[mission][runtime_store][future]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( QStringLiteral( "future.qgs" ) );
+
+    // A well-formed context whose embedded timeline claims schema 9.9 — a
+    // document written by a FUTURE version. Decoding it as 1.0 would silently
+    // downgrade or drop the task space, so the load must refuse.
+    MissionContext ctx;
+    ctx.projectRef = project;
+    MissionTimeline timeline;
+    MissionTask task;
+    task.id = QStringLiteral( "task-9" );
+    REQUIRE( timeline.addTask( task ).applied );
+    embedMissionTimeline( ctx, timeline );
+
+    QJsonObject doc = missionContextToJson( ctx );
+    QJsonObject metadata = doc.value( QStringLiteral( "metadata" ) ).toObject();
+    QJsonObject embedded = metadata.value( QLatin1String( kMissionTimelineMetadataKey ) )
+                               .toObject();
+    embedded.insert( QStringLiteral( "schema_version" ), QStringLiteral( "9.9" ) );
+    metadata.insert( QLatin1String( kMissionTimelineMetadataKey ), embedded );
+    doc.insert( QStringLiteral( "metadata" ), metadata );
+
+    QJsonDocument futureDoc( doc );
+    writeSidecarBytes( project, futureDoc.toJson( QJsonDocument::Compact ) );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE_FALSE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityCorrupt );
+    CHECK( loadErr == QStringLiteral( "unsupported_schema_version" ) );
+    CHECK_FALSE( loaded.problems.isEmpty() );
+
+    MissionRuntimeState poisoned = loaded;
+    QString saveErr;
+    REQUIRE_FALSE( saveMissionRuntime( project, freshDoc, poisoned, &saveErr ) );
+    CHECK( saveErr == QStringLiteral( "poisoned_authority" ) );
+}
+
+TEST_CASE( "a truncated sidecar is never silently an empty mission",
+           "[mission][runtime_store][corrupt]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project = dir.filePath( QStringLiteral( "truncated.qgs" ) );
+
+    MissionContext ctx;
+    ctx.projectRef = project;
+    MissionTimeline timeline;
+    MissionTask task;
+    task.id = QStringLiteral( "task-1" );
+    REQUIRE( timeline.addTask( task ).applied );
+    embedMissionTimeline( ctx, timeline );
+    const QByteArray bytes =
+        QJsonDocument( missionContextToJson( ctx ) ).toJson( QJsonDocument::Compact );
+    REQUIRE( bytes.size() > 16 );
+    // A crash mid-write residue: half a document, no last-good anywhere.
+    writeSidecarBytes( project, bytes.left( bytes.size() / 2 ) );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE_FALSE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityCorrupt );
+}
+
+TEST_CASE( "the authority round-trips through a Unicode project path",
+           "[mission][runtime_store][unicode]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString project =
+        dir.filePath( QStringLiteral( "项目-热度图-Ω.qgz" ) );
+
+    MissionRuntimeState state = stateWithOneTask( project );
+    QDomDocument doc;
+    QString error;
+    REQUIRE( saveMissionRuntime( project, doc, state, &error ) );
+    CHECK( QFile::exists( sidecarPath( project ) ) );
+
+    MissionRuntimeState loaded;
+    QDomDocument freshDoc;
+    QString loadErr;
+    REQUIRE( loadMissionRuntime( project, freshDoc, loaded, &loadErr ) );
+    CHECK( loaded.authorityLoaded );
+    CHECK( loaded.context.missionId == state.context.missionId );
+    REQUIRE( loaded.timeline.tasks().size() == 1 );
+    CHECK( loaded.timeline.tasks().first().title == QStringLiteral( "正射纠正" ) );
+    CHECK( loaded.timeline.missionId() == state.timeline.missionId() );
 }

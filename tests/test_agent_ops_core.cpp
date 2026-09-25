@@ -949,3 +949,74 @@ TEST_CASE("agent_ops capsule export emits portable refs (no absolute paths)",
     REQUIRE(capsule["outputs"][1]["portable_ref"].asString() ==
             capsule["outputs"][1]["portable_ref"].asString());
 }
+
+TEST_CASE("agent_ops unified verifier report gates delivery claims fail-closed",
+          "[agent_ops][delivery][verify]")
+{
+    DeliveryAssembler assembler;
+    sicnu::agent_loop::SessionResult result;
+    result.sessionId = "sess-unified";
+    result.summary.outcome = "delivered";
+    result.summary.verificationVerdict = "PASS";
+
+    // A unified report whose overall is the engine's fail-closed lattice.
+    Json::Value unifiedReport(Json::objectValue);
+    unifiedReport["schema"] = "sicnu.verification.report/1";
+    unifiedReport["specId"] = "spec.product";
+    unifiedReport["overall"] = "indeterminate";
+    Json::Value counts(Json::objectValue);
+    counts["pass"] = 1;
+    counts["fail"] = 0;
+    counts["indeterminate"] = 1;
+    unifiedReport["counts"] = counts;
+
+    DeliveryExtras extras;
+    extras.verificationReport = unifiedReport;
+
+    // "indeterminate" can NEVER read as a success: the claim loses its
+    // high confidence and names the non-passing evidence, while the
+    // projection keeps the engine's own words.
+    auto delivery = assembler.assemble(result, extras);
+    REQUIRE(delivery.verifier["unified"]["overall"].asString() == "indeterminate");
+    REQUIRE(delivery.verifier["unified"]["verdict"].asString() == "FAIL");
+    REQUIRE(delivery.verifier["unified"]["spec_id"].asString() == "spec.product");
+    REQUIRE(delivery.claims.size() == 1);
+    REQUIRE(delivery.claims[0]["confidence"].asDouble() == 0.0);
+    REQUIRE(delivery.claims[0]["evidence_missing"][0].asString() == "passing_verifier_verdict");
+
+    // A passing unified report keeps the high-confidence claim.
+    unifiedReport["overall"] = "pass";
+    extras.verificationReport = unifiedReport;
+    auto passed = assembler.assemble(result, extras);
+    REQUIRE(passed.verifier["unified"]["verdict"].asString() == "PASS");
+    REQUIRE(passed.claims[0]["confidence"].asDouble() == 0.9);
+
+    // Without a unified report the legacy gate is untouched.
+    auto legacy = assembler.assemble(result, {});
+    REQUIRE(legacy.claims[0]["confidence"].asDouble() == 0.9);
+    REQUIRE(legacy.verifier.isMember("unified") == false);
+
+    // The assembled document round-trips with the unified record intact.
+    auto round = FinalDelivery::fromJson(delivery.toJson());
+    REQUIRE(round);
+    REQUIRE(round->verifier["unified"]["overall"].asString() == "indeterminate");
+}
+
+TEST_CASE("agent_ops hostile unified report never crashes assembly", "[agent_ops][delivery][verify]")
+{
+    DeliveryAssembler assembler;
+    sicnu::agent_loop::SessionResult result;
+    result.sessionId = "sess-hostile";
+    result.summary.outcome = "delivered";
+    result.summary.verificationVerdict = "PASS";
+
+    // A malformed unified report (overall is an object): assembly records a
+    // non-pass instead of throwing or upgrading.
+    DeliveryExtras extras;
+    extras.verificationReport["schema"] = "sicnu.verification.report/1";
+    extras.verificationReport["overall"]["bogus"] = true;
+
+    auto delivery = assembler.assemble(result, extras);
+    REQUIRE(delivery.verifier["unified"]["verdict"].asString() == "FAIL");
+    REQUIRE(delivery.claims[0]["confidence"].asDouble() == 0.0);
+}

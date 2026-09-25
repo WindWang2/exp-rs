@@ -47,9 +47,10 @@ SlotFacts projectAssetState( const sicnu::state::RemoteSensingAssetState &state 
     f.acquisitionTimeIso = state.acquisition.timeIso;
 
     // Temporal references are pointers to collections; counts/dates are not
-    // passport facts and stay unset (typed unknown downstream).
+    // passport facts and stay unset (typed unknown downstream). The
+    // passport's own truncation flag is kept honestly.
     f.temporalSceneCount = 0;
-    f.temporalTruncated = false;
+    f.temporalTruncated = state.temporalRefsTruncated;
 
     // Leakage-relevant derivation identity.
     if ( state.provenance.isDerived )
@@ -85,6 +86,27 @@ SlotFactsResult StateAssetFactsProvider::slotFacts( const std::string &assetRef 
     {
         result.status = FactStatus::Unknown;
         result.detail = "no passport resolved for reference";
+        return result;
+    }
+    // A passport that cannot name its asset kind is an unresolved fact, not
+    // an exotic input kind: the raster rules skip kinds outside their closed
+    // vocabulary, so projecting AssetKind::Unknown as Available would turn
+    // every strategy check off and end in a placeholder ok.
+    if ( state->kind == sicnu::state::AssetKind::Unknown )
+    {
+        result.status = FactStatus::Unknown;
+        result.detail = "passport does not resolve an asset kind";
+        return result;
+    }
+    // A passport whose lifecycle is not "ready" does not vouch for its own
+    // facts: missing/stale/error passports must not be judged as observed
+    // values, or preflight contradicts the passport's own claim.
+    if ( state->lifecycle != sicnu::state::AssetLifecycle::Ready )
+    {
+        result.status = FactStatus::Unknown;
+        result.detail = "passport lifecycle is " +
+                        sicnu::state::assetLifecycleToString( state->lifecycle ) +
+                        "; facts may not describe usable data";
         return result;
     }
     result.status = FactStatus::Available;

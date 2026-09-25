@@ -1523,3 +1523,40 @@ TEST_CASE( "fault lab: runner reports fault refusals without touching the source
     CHECK( result.value.sourceUnchanged );
     CHECK( result.value.sandboxRemoved );
 }
+
+TEST_CASE( "fault lab: scenario loader rejects out-of-width seeds instead of truncating",
+           "[faultlab][seed-width]" )
+{
+    // The scenario seed is uint32 by contract. A seed above UINT32_MAX used
+    // to be SILENTLY TRUNCATED (static_cast<uint32_t>) — a lab would replay
+    // with a different noise stream than authored while claiming the
+    // scenario's identity. Width violations are field errors, fail-closed.
+    SECTION( "fault seed above 32 bits" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["fault"]["seed"] = Json::Value::Int64( 4294967296LL ); // 2^32
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "base fixture seed above 32 bits" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["base_fixture"]["seed"] = Json::Value::Int64( 4294967297LL ); // 2^32 + 1
+        const auto result = loadFaultScenario( doc );
+        CHECK_FALSE( result.ok );
+        REQUIRE( !result.diagnostics.empty() );
+        CHECK( result.diagnostics.front().code == "faultlab.scenario_field" );
+    }
+    SECTION( "boundary values stay legal" )
+    {
+        Json::Value doc = validScenarioDoc();
+        doc["fault"]["seed"] = Json::Value::UInt64( 4294967295ULL ); // UINT32_MAX
+        doc["base_fixture"]["seed"] = Json::Value::UInt64( 0ULL );
+        const auto result = loadFaultScenario( doc );
+        CHECK( result.ok );
+        CHECK( result.value.fault.seed == 4294967295u );
+        CHECK( result.value.fixtureSeed == 0u );
+    }
+}

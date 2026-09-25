@@ -25,8 +25,26 @@ namespace sicnu::state
 /// Hard cap on metadata items collected per scope (dataset or band).
 inline constexpr std::size_t kMaxCollectedMetadataItems = 512;
 
+/// Typed facts-collection failure: a machine-readable code (surfaced through
+/// passports/bundles so "GDAL could not open" never collapses into "asset
+/// missing"), the requested path, and bounded human detail from CPL.
+/// Codes: "gdal_open_failed" | "gdal_facts_failed".
+struct GdalFactsError
+{
+    std::string code;
+    std::string path;
+    std::string detail;
+
+    bool empty() const { return code.empty(); }
+};
+
 /// Opens @p path read-only and collects dataset facts. Returns nullopt with
-/// @p error set when the file cannot be opened as a raster dataset.
+/// the typed @p error set when the file cannot be opened as a raster dataset.
+std::optional<DatasetFacts> collectDatasetFacts( const std::string &path,
+                                                 GdalFactsError *error );
+
+/// String-error overload (same outcome; @p error carries
+/// "<code>: <detail> (<path>)").
 std::optional<DatasetFacts> collectDatasetFacts( const std::string &path,
                                                  std::string &error );
 

@@ -23,6 +23,7 @@
 #include <gdal_priv.h>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 
@@ -244,6 +245,13 @@ void registerEnsemble( const QTemporaryDir &dir, const std::string &ensembleName
     dir.filePath( QString::fromStdString( ensembleName ) + "/model.json" ).toStdString(), &error );
   if ( !ok )
     FAIL( "ensemble '" + ensembleName + "' rejected: " + error );
+}
+
+QByteArray readFileBytes( const QString &path )
+{
+  QFile f( path );
+  REQUIRE( f.open( QIODevice::ReadOnly ) );
+  return f.readAll();
 }
 
 QString writeConstantRaster( const QTemporaryDir &dir, const QString &name, int size,
@@ -762,4 +770,95 @@ TEST_CASE( "a sidecar failure restores the previous product instead of destroyin
   third.modelReference = "ens-roll-a";
   REQUIRE_NOTHROW( sicnu::operators::runtime::runModelInference( third, context ) );
   CHECK( QFile::exists( output + QStringLiteral( ".prov.json" ) ) );
+}
+
+// ---------------------------------------------------------------------------
+// R3 Track 13: the ensemble raster lane sits on the same ProductPublishGuard
+// contract as the single-model lanes — the park/swap stages are injectable,
+// and a killed run's parked pair is ADOPTED by the next publish instead of
+// being destroyed by the backup pre-clean.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "ensemble publish swap fault restores the parked pair and orphans are adopted",
+           "[models][ensemble][parallel][publish][crash]" )
+{
+  RegistryReset reset;
+  const ScaleProviderGuard guardA( "rollfw-a", 2.0, false );
+  const ScaleProviderGuard guardB( "rollfw-b", 0.5, false );
+  QTemporaryDir dir;
+  registerMember( "member-a", "rollfw-a", dir );
+  registerMember( "member-b", "rollfw-b", dir );
+  registerEnsemble( dir, "ens-crash", 2, 2, "none", { 1.0, 1.0 } );
+
+  const QString input = writeConstantRaster( dir, "input.tif", 16, 1, 10.0f );
+  const QString output = dir.filePath( QStringLiteral( "crash.tif" ) );
+  const QString sidecar = output + QStringLiteral( ".prov.json" );
+  RSOperatorContext context;
+
+  const auto runEnsemble = [ & ]() {
+    ModelExecutionRequest request;
+    request.inputPath = input.toStdString();
+    request.outputPath = output.toStdString();
+    request.modelReference = "ens-crash";
+    return sicnu::operators::runtime::runModelInference( request, context );
+  };
+
+  REQUIRE_NOTHROW( runEnsemble() );
+  REQUIRE( QFile::exists( output ) );
+  REQUIRE( QFile::exists( sidecar ) );
+  const QByteArray productBytes = readFileBytes( output );
+  const QByteArray sidecarBytes = readFileBytes( sidecar );
+  // Provenance parity: the ensemble sidecar names the task intent of the
+  // ensemble AND of every member (the single-model sidecars already do).
+  {
+    Json::Value prov;
+    Json::Reader reader;
+    REQUIRE( reader.parse( std::string( sidecarBytes ), prov ) );
+    CHECK( prov["model"]["task"].asString() == "segmentation" );
+    const Json::Value &members = prov["ensemble"]["members"];
+    REQUIRE( members.isArray() );
+    REQUIRE( members.size() == 2 );
+    // Member order IS the manifest order (deterministic result assembly —
+    // the per-member arrays downstream of it are index-aligned to this).
+    CHECK( members[0]["identity_tag"].asString() == "member-a@0" );
+    CHECK( members[1]["identity_tag"].asString() == "member-b@0" );
+    for ( const Json::Value &member : members )
+    {
+      CHECK( member["task"].asString() == "segmentation" );
+      CHECK( member.isMember( "weight" ) );
+    }
+  }
+
+  // Swap fault: the previous pair is parked, the new product cannot land —
+  // the parked pair is restored whole.
+  {
+    sicnu::runtime::observability::fault::ArmedFault fault(
+      { "ensemble.publish_swap", sicnu::runtime::observability::fault::Mode::NextN, 1, "" } );
+    REQUIRE_THROWS( runEnsemble() );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
+    CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
+  }
+
+  // Crash-orphan adoption: the parked pair sits at the backup paths, the
+  // final path is ABSENT. A run that then fails at the sidecar publish must
+  // still bring the parked pair back byte-identical (adoption happened at
+  // guard construction, before the failed publish).
+  REQUIRE( QFile::rename( output, output + QStringLiteral( ".prev~" ) ) );
+  REQUIRE( QFile::rename( sidecar, output + QStringLiteral( ".prev~.prov.json" ) ) );
+  REQUIRE_FALSE( QFile::exists( output ) );
+  {
+    const QString hostileStage = sidecar + QStringLiteral( ".stage~" );
+    REQUIRE( QDir().mkpath( hostileStage ) );
+    REQUIRE_THROWS( runEnsemble() );
+    CHECK( readFileBytes( output ) == productBytes );
+    CHECK( readFileBytes( sidecar ) == sidecarBytes );
+    QDir().rmdir( hostileStage );
+  }
+
+  // Recovered: a normal run republishes and leaves no residue.
+  REQUIRE_NOTHROW( runEnsemble() );
+  CHECK( QFile::exists( sidecar ) );
+  CHECK_FALSE( QFile::exists( output + QStringLiteral( ".prev~" ) ) );
 }

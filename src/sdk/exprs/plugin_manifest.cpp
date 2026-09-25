@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "exprs/plugin_manifest.h"
 
+#include "platform/portable.h"
+
 #include <fstream>
 #include <sstream>
 
@@ -842,7 +844,7 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
 {
     error = PluginDiagnostic{};
     error.file = manifestPath;
-    std::ifstream input( manifestPath );
+    std::ifstream input( sicnu::portable::pathFromUtf8( manifestPath ) );
     if ( !input )
     {
         error.code = PluginDiagnosticCode::ManifestUnreadable;

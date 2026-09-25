@@ -378,3 +378,78 @@ TEST_CASE( "experiment_studio csv export neutralizes formula cells",
     CHECK( !csv.contains( QStringLiteral( ",@" ) ) );
     CHECK( csv.contains( QStringLiteral( "'=cmd" ) ) );
 }
+
+TEST_CASE( "synthetic provenance survives export round-trip; live VMs never carry the marker",
+           "[experiment_studio][provenance]" )
+{
+    // Demo scaffold: the report is derived from NO recorded run. Its synthetic
+    // marker must survive the export write→read cycle, so an offline reload
+    // can never mistake the scaffold for recorded analysis.
+    StudioExportBundle bundle;
+    bundle.studyId = QStringLiteral( "s1" );
+    QJsonObject report = syntheticReport( 3 ).toJson();
+    report.insert( QStringLiteral( "synthetic" ), true );
+    report.insert( QStringLiteral( "synthetic_note" ),
+                   QStringLiteral( "studio demonstration document, not derived from"
+                                   " recorded runs" ) );
+    bundle.studyReport = report;
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( QStringLiteral( "studio-export.json" ) );
+    REQUIRE( writeStudioExportJson( bundle, path ).has_value() );
+    const auto reloaded = readStudioExportJson( path );
+    REQUIRE( reloaded.has_value() );
+    CHECK( reloaded.value().studyReport.value( QStringLiteral( "synthetic" ) ).toBool() );
+    CHECK( reloaded.value().studyReport.value( QStringLiteral( "synthetic_note" ) )
+               .toString()
+               .contains( QStringLiteral( "not derived from recorded runs" ) ) );
+
+    // Live analyzer output over recorded runs carries the analyzer's own
+    // verdict and evidence — the projection must never stamp it synthetic
+    // (that mislabeling is exactly how a live export loses its provenance).
+    QJsonObject analyzerReport;
+    analyzerReport.insert( QStringLiteral( "reference_run_id" ), QStringLiteral( "run-a" ) );
+    analyzerReport.insert( QStringLiteral( "student_run_id" ), QStringLiteral( "run-b" ) );
+    analyzerReport.insert( QStringLiteral( "verdict" ), QStringLiteral( "incomplete" ) );
+    analyzerReport.insert( QStringLiteral( "evidence_gaps" ),
+                           QJsonArray{ QStringLiteral( "checkpoint" ) } );
+    const QJsonObject vmJson = projectFirstDivergence( analyzerReport ).toJson();
+    CHECK( !vmJson.contains( QStringLiteral( "synthetic" ) ) );
+    CHECK( !vmJson.contains( QStringLiteral( "synthetic_note" ) ) );
+    CHECK( vmJson.value( QStringLiteral( "verdict" ) ).toString()
+           == QStringLiteral( "incomplete" ) );
+}
+
+TEST_CASE( "csv run table keeps exact 64-bit seeds", "[experiment_studio][csv][seed]" )
+{
+    QJsonObject report = syntheticReport( 2 ).toJson();
+    QJsonArray table = report.value( QStringLiteral( "run_table" ) ).toArray();
+    REQUIRE( table.size() == 2 );
+    QJsonObject row = table.at( 0 ).toObject();
+    // What toJson() writes for a full-width seed: the lossy legacy double plus
+    // the exact decimal string the reader prefers.
+    row.insert( QStringLiteral( "seed" ), 1.8446744073709552e19 ); // 2^64 rounded
+    row.insert( QStringLiteral( "seed_u64" ), QStringLiteral( "18446744073709551615" ) );
+    table[0] = row;
+    report.insert( QStringLiteral( "run_table" ), table );
+
+    const QString csv = studyRunTableToCsv( report );
+    CHECK( csv.contains( QStringLiteral( "18446744073709551615" ) ) );
+    // The double→qint64 cast of the rounded value is -1 (sign flip) — the
+    // old form corrupted exactly this cell.
+    CHECK( !csv.contains( QStringLiteral( "\n-1," ) ) );
+    CHECK( !csv.contains( QStringLiteral( ",-1," ) ) );
+
+    // Legacy documents without seed_u64 keep the lossless small-seed form.
+    QJsonObject legacy = syntheticReport( 1 ).toJson();
+    QJsonArray legacyTable = legacy.value( QStringLiteral( "run_table" ) ).toArray();
+    QJsonObject legacyRow = legacyTable.at( 0 ).toObject();
+    legacyRow.insert( QStringLiteral( "seed" ), 42.0 );
+    // A genuinely legacy document carries ONLY the double form.
+    legacyRow.remove( QStringLiteral( "seed_u64" ) );
+    legacyTable[0] = legacyRow;
+    legacy.insert( QStringLiteral( "run_table" ), legacyTable );
+    const QString legacyCsv = studyRunTableToCsv( legacy );
+    CHECK( legacyCsv.contains( QStringLiteral( ",42," ) ) );
+}

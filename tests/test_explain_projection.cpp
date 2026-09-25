@@ -21,6 +21,7 @@
 #include "workflow/workflow_provenance.h"
 #include "workflow/workflow_types.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -30,15 +31,13 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "platform/portable.h"
 
-#ifdef _WIN32
-#include <process.h>
-#define SICNU_TEST_GETPID ::_getpid
-#else
-#include <unistd.h>
-#include <QJsonArray>
-#define SICNU_TEST_GETPID ::getpid
-#endif
+#define SICNU_TEST_GETPID sicnu_pid_shim
+namespace
+{
+inline int sicnu_pid_shim() { return static_cast<int>( sicnu::portable::pid() ); }
+} // namespace
 
 using namespace sicnu::explain;
 using namespace sicnu::explain::adapters;

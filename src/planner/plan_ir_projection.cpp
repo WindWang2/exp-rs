@@ -130,6 +130,10 @@ Json::Value projectPlanToIr( const ScientificPlan &plan, std::vector<std::string
     doc["intent"] = intentForGoalKind( plan.goalKind, &localWarnings );
 
     // ---- document input slots (one per referenced asset) ----------------
+    // Slot key discipline: readWorkflowIr (the final conformance authority)
+    // requires string 'name' and 'ref'; the projection emits exactly that.
+    // (It previously emitted "reference", a key no reader accepts — the
+    // projected document could never actually enter the lowering chain.)
     Json::Value inputs( Json::arrayValue );
     std::map<std::string, std::string> slotForAsset; // assetRef → slot name
     for ( const auto &step : plan.steps )
@@ -141,7 +145,7 @@ Json::Value projectPlanToIr( const ScientificPlan &plan, std::vector<std::string
             Json::Value slot( Json::objectValue );
             const std::string slotName = "in-" + input.assetRef;
             slot["name"] = slotName;
-            slot["reference"] = input.assetRef;
+            slot["ref"] = input.assetRef;
             inputs.append( slot );
             slotForAsset[input.assetRef] = slotName;
         }

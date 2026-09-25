@@ -153,17 +153,22 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
         return result;
     }
 
-    auto resolved = mResolver( request.assetKey );
+    const PassportResolution resolved = mResolver( request.assetKey );
     if ( !resolved )
     {
-        result.error = "asset_not_found";
+        // Typed failure: keep the resolver's reason (gdal_open_failed vs
+        // asset_not_found vs ...). Failures are never cached — the next
+        // resolve re-consults the authority.
+        result.error = resolved.errorCode.empty() ? "asset_not_found" : resolved.errorCode;
+        result.errorDetail = resolved.errorDetail;
         return result;
     }
 
+    sicnu::state::RemoteSensingAssetState resolvedState = *resolved.state;
     // Strip assumed claims when caller disallows them.
     if ( !request.allowAssumed )
     {
-        auto &claims = resolved->claims;
+        auto &claims = resolvedState.claims;
         claims.erase( std::remove_if( claims.begin(), claims.end(),
                                       []( const sicnu::state::ClaimRecord &c ) {
                                           return c.kind == ClaimKind::Assumed;
@@ -171,9 +176,9 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
                       claims.end() );
     }
 
-    mCache[request.assetKey] = *resolved;
+    mCache[request.assetKey] = resolvedState;
     result.ok = true;
-    result.state = *resolved;
+    result.state = resolvedState;
     result.summary = summarize( result.state );
     return result;
 }

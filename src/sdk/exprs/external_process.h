@@ -72,6 +72,17 @@ struct ExternalProcessResult
     long durationMs = 0;
 };
 
+/// Pure PATH-walk used by ExternalProcess::validateArgv (POSIX side):
+/// splits @p searchPath on @p separator and reports whether @p program
+/// resolves to an executable in any entry, asking @p isExecutable for every
+/// candidate "<entry>/<program>". An EMPTY entry means the current directory
+/// (the POSIX exec convention — ":/bin" must find ./program, not /program).
+/// The probe is injected so tests can mock it and drive entries far beyond
+/// MAX_PATH without touching the filesystem.
+bool programInSearchPath( const std::string &program, const std::string &searchPath,
+                          char separator,
+                          const std::function<bool( const std::string & )> &isExecutable );
+
 class ExternalProcess
 {
 public:

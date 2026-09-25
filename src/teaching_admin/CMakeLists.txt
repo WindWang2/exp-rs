@@ -42,6 +42,9 @@ target_include_directories(sicnu_teaching_admin
 target_link_libraries(sicnu_teaching_admin
   PUBLIC
     Qt6::Core
+    # sicnu.lab-pack/1: pack validation delegates to the Qt-free shared leaf
+    # (ONE parser/validator shared with sicnu::agent) — no second pack truth.
+    sicnu_lab_pack
 )
 
 foreach(SICNU_TA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network Sicnu::app)

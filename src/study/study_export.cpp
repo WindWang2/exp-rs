@@ -76,6 +76,10 @@ QJsonObject StudyRunRow::toJson() const
         assignmentsJson.insert( it.key(), it.value() );
     json.insert( QStringLiteral( "parameter_assignments" ), assignmentsJson );
     json.insert( QStringLiteral( "seed" ), static_cast<double>( seed ) );
+    // Exact seed: a JSON double silently corrupts quint64 widths above 2^53
+    // (and flips sign above 2^63). The decimal string is authoritative; the
+    // legacy "seed" member stays lossless-compatible for small seeds.
+    json.insert( QStringLiteral( "seed_u64" ), QString::number( seed ) );
     json.insert( QStringLiteral( "metrics" ), metrics );
     json.insert( QStringLiteral( "error_summary" ), errorSummary );
     json.insert( QStringLiteral( "output_asset_path" ), outputAssetPath );
@@ -92,7 +96,23 @@ Result<StudyRunRow> StudyRunRow::fromJson( const QJsonObject &json )
     const QJsonObject assignments = json.value( QStringLiteral( "parameter_assignments" ) ).toObject();
     for ( auto it = assignments.constBegin(); it != assignments.constEnd(); ++it )
         row.parameterAssignments.insert( it.key(), it.value().toString() );
-    row.seed = static_cast<quint64>( json.value( QStringLiteral( "seed" ) ).toDouble() );
+    if ( json.contains( QStringLiteral( "seed_u64" ) ) )
+    {
+        bool seedOk = false;
+        row.seed = json.value( QStringLiteral( "seed_u64" ) )
+                       .toString()
+                       .toULongLong( &seedOk );
+        if ( !seedOk )
+            return Result<StudyRunRow>::failure( exportError(
+                QStringLiteral( "study.report_invalid_row" ),
+                QStringLiteral( "report row seed_u64 must be an unsigned 64-bit"
+                                " decimal string" ) ) );
+    }
+    else
+    {
+        // Legacy documents: the double form (lossless below 2^53).
+        row.seed = static_cast<quint64>( json.value( QStringLiteral( "seed" ) ).toDouble() );
+    }
     row.metrics = json.value( QStringLiteral( "metrics" ) ).toObject();
     row.errorSummary = json.value( QStringLiteral( "error_summary" ) ).toString();
     row.outputAssetPath = json.value( QStringLiteral( "output_asset_path" ) ).toString();
@@ -364,6 +384,18 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
         }
     }
 
+    // pointId → sampled point (replicate index, output path). Indexed once:
+    // the per-aggregate std::find_if this replaces rescanned the FULL point
+    // list for every run-table row — quadratic in the sweep-cap bound, with
+    // the whole cost paid inside the Studio's live worker thread.
+    QHash<QString, const StudyPoint *> pointsById;
+    pointsById.reserve( points.size() );
+    for ( const StudyPoint &point : points )
+    {
+        if ( !pointsById.contains( point.pointId ) ) // first match wins, as find_if did
+            pointsById.insert( point.pointId, &point );
+    }
+
     // Run table: one row per sampled point, sample order, no drops.
     for ( const PointAggregate &aggregate : analysis.points )
     {
@@ -374,11 +406,10 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
         row.parameterAssignments.remove( QStringLiteral( "seed" ) );
         if ( !aggregate.runIds.isEmpty() )
             row.runId = aggregate.runIds.first();
-        const auto point = std::find_if( points.cbegin(), points.cend(),
-                                         [&]( const StudyPoint &p ) {
-                                             return p.pointId == aggregate.pointId;
-                                         } );
-        if ( point != points.cend() )
+        const auto pointIt = pointsById.constFind( aggregate.pointId );
+        const StudyPoint *point =
+            pointIt != pointsById.constEnd() ? pointIt.value() : nullptr;
+        if ( point )
         {
             row.replicateIndex = point->replicateIndex;
             row.seed = point->seed;
@@ -406,7 +437,7 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
             row.errorSummary = errorEvidence.value( row.runId );
         // Output path from the run's recorded parameter ("output") — the
         // runner-assigned stable location.
-        if ( point != points.cend() )
+        if ( point )
         {
             row.outputAssetPath = point->parameters.value( QStringLiteral( "output" ) )
                                       .toString();

@@ -167,7 +167,7 @@ void evictUnderCap( DiskState &state, std::uint64_t &bytesOnDiskOut )
   std::vector<std::pair<std::uint64_t, fs::path>> entries; // (mtime ticks, path)
   std::uint64_t total = 0;
   std::size_t scanned = 0;
-  for ( const fs::directory_entry &entry : fs::directory_iterator( fs::u8path( state.directory ), ec ) )
+  for ( const fs::directory_entry &entry : fs::directory_iterator( sicnu::portable::pathFromUtf8( state.directory ), ec ) )
   {
     if ( ec )
       break;
@@ -238,21 +238,21 @@ void RangeDiskBlockStore::configure( const std::string &directory, std::uint64_t
   if ( state.enabled )
   {
     std::error_code ec;
-    fs::create_directories( fs::u8path( directory ), ec );
+    fs::create_directories( sicnu::portable::pathFromUtf8( directory ), ec );
     // An unusable directory disables the layer (an optimization, never a
     // correctness gate): reads/writes become honest no-op misses.
-    state.enabled = !ec || fs::is_directory( fs::u8path( directory ) );
+    state.enabled = !ec || fs::is_directory( sicnu::portable::pathFromUtf8( directory ) );
     if ( state.enabled )
     {
       // Recount existing .blk files so approxBytes matches the directory we
       // just attached (a prior configure/put cycle must not drift forever).
       std::uint64_t bytesOnDisk = 0;
       for ( const fs::directory_entry &entry :
-            fs::directory_iterator( fs::u8path( directory ), ec ) )
+            fs::directory_iterator( sicnu::portable::pathFromUtf8( directory ), ec ) )
       {
         if ( ec )
           break;
-        const std::string name = entry.path().filename().string();
+        const std::string name = sicnu::portable::pathToUtf8( entry.path().filename() );
         if ( name.size() >= 4 && name.substr( name.size() - 4 ) == ".blk" )
         {
           std::error_code sizeEc;
@@ -281,7 +281,7 @@ void RangeDiskBlockStore::clear()
   if ( !state.enabled )
     return;
   std::error_code ec;
-  for ( const fs::directory_entry &entry : fs::directory_iterator( fs::u8path( state.directory ), ec ) )
+  for ( const fs::directory_entry &entry : fs::directory_iterator( sicnu::portable::pathFromUtf8( state.directory ), ec ) )
   {
     if ( ec )
       break;
@@ -342,11 +342,16 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
     directory = state.directory; // configure() may reassign it concurrently
   }
   const std::string basisHash = sha256Hex( basis );
-  const std::string path = ( fs::u8path( directory ) / blockFileName( basisHash, blockIndex ) ).string();
+  // Path values stay UTF-8 bytes by repo convention: pathToUtf8 (never
+  // fs::path::string(), which re-encodes into the Windows ANSI code page),
+  // and the C file API goes through fileOpenUtf8 so the open widens back to
+  // the same file on Windows.
+  const std::string path = sicnu::portable::pathToUtf8(
+    sicnu::portable::pathFromUtf8( directory ) / blockFileName( basisHash, blockIndex ) );
 
   // Read OUTSIDE every lock: open/read is the slow part and the file layout
   // is immutable once published under its final name.
-  std::FILE *file = std::fopen( path.c_str(), "rb" );
+  std::FILE *file = sicnu::portable::fileOpenUtf8( path, "rb" );
   if ( !file )
     return false;
   std::vector<unsigned char> raw;
@@ -367,7 +372,7 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
     std::lock_guard<std::mutex> lock( state.mutex );
     state.stats.corrupt += 1;
     std::error_code ec;
-    fs::remove( fs::u8path( path ), ec );
+    fs::remove( sicnu::portable::pathFromUtf8( path ), ec );
     return false;
   }
   if ( parsed.blockIndex != blockIndex )
@@ -381,7 +386,7 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
   // hit would otherwise look as cold as its publish time forever).
   {
     std::error_code touchEc;
-    fs::last_write_time( fs::u8path( path ), fs::file_time_type::clock::now(), touchEc );
+    fs::last_write_time( sicnu::portable::pathFromUtf8( path ), fs::file_time_type::clock::now(), touchEc );
   }
   {
     std::lock_guard<std::mutex> lock( state.mutex );
@@ -409,17 +414,19 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
       return;
     const std::string basisHash = sha256Hex( basis );
     const std::string finalName = blockFileName( basisHash, blockIndex );
-    const fs::path directory = fs::u8path( state.directory );
+    const fs::path directory = sicnu::portable::pathFromUtf8( state.directory );
     const std::string unique = std::to_string( currentProcessId() ) + "." +
                                std::to_string( state.tempCounter.fetch_add( 1 ) );
-    tempPath = ( directory / ( finalName + "." + unique + ".tmp" ) ).string();
-    finalPath = ( directory / finalName ).string();
+    // UTF-8 bytes out (never .string()'s ACP re-encode), UTF-8 bytes back in
+    // at the fopen below — the same file on every platform.
+    tempPath = sicnu::portable::pathToUtf8( directory / sicnu::portable::pathFromUtf8( finalName + "." + unique + ".tmp" ) );
+    finalPath = sicnu::portable::pathToUtf8( directory / sicnu::portable::pathFromUtf8( finalName ) );
   }
 
   const std::string basisHash = sha256Hex( basis ); // recomputed: cheap vs. shared state
   const std::vector<unsigned char> serialized = serializeBlock( basisHash, blockIndex, data, size );
 
-  std::FILE *file = std::fopen( tempPath.c_str(), "wb" );
+  std::FILE *file = sicnu::portable::fileOpenUtf8( tempPath, "wb" );
   if ( !file )
     return; // optimization layer: unusable disk degrades to misses
   const std::size_t written = std::fwrite( serialized.data(), 1, serialized.size(), file );
@@ -427,27 +434,27 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
   if ( written != serialized.size() )
   {
     std::error_code ec;
-    fs::remove( fs::u8path( tempPath ), ec );
+    fs::remove( sicnu::portable::pathFromUtf8( tempPath ), ec );
     return;
   }
-  fsyncPath( fs::u8path( tempPath ) );
+  fsyncPath( sicnu::portable::pathFromUtf8( tempPath ) );
   // Re-put of the same block index replaces the file: subtract the old size
   // before adding the new one so approxBytes cannot drift upward forever.
   std::uint64_t replacedBytes = 0;
   {
     std::error_code sizeEc;
-    if ( fs::exists( fs::u8path( finalPath ), sizeEc ) && !sizeEc )
+    if ( fs::exists( sicnu::portable::pathFromUtf8( finalPath ), sizeEc ) && !sizeEc )
     {
-      const auto oldSize = fs::file_size( fs::u8path( finalPath ), sizeEc );
+      const auto oldSize = fs::file_size( sicnu::portable::pathFromUtf8( finalPath ), sizeEc );
       if ( !sizeEc )
         replacedBytes = static_cast<std::uint64_t>( oldSize );
     }
   }
   std::error_code ec;
-  fs::rename( fs::u8path( tempPath ), fs::u8path( finalPath ), ec );
+  fs::rename( sicnu::portable::pathFromUtf8( tempPath ), sicnu::portable::pathFromUtf8( finalPath ), ec );
   if ( ec )
   {
-    fs::remove( fs::u8path( tempPath ), ec );
+    fs::remove( sicnu::portable::pathFromUtf8( tempPath ), ec );
     return;
   }
 
