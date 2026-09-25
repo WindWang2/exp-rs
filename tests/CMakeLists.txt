@@ -8644,6 +8644,8 @@ add_executable(test_workbench_enum_provider
   ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  # schema_form_builder.cpp schedules async checks on RsScanPool::instance().
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
@@ -8653,6 +8655,11 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   sicnu_operators
   GDAL::GDAL
   Sicnu::help
+  # crs_selector.cpp (embedded by fce8703e) is a QWidget over
+  # QgsProjectionSelectionDialog: needs the QGIS GUI/core closure.
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
 )
 target_include_directories(test_workbench_enum_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
