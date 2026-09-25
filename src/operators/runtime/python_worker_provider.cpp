@@ -159,6 +159,14 @@ class PythonWorkerSession final : public IModelRuntime
       // protocol is strictly request/response per process — serialize the
       // whole exchange like the ORT provider serializes Run.
       std::lock_guard<std::mutex> lock( m_inferMutex );
+      // The for-good death is checked BEFORE the loaded guard: a stopped
+      // worker leaves !m_process, and without this the exhaustion would
+      // surface as the misleading "runtime session is not loaded"
+      // (NotLoaded) instead of the typed ProviderCrash the taxonomy
+      // demands — external-provider death beats session-state checks.
+      if ( m_permanentlyDead.load( std::memory_order_acquire ) )
+        throw std::runtime_error( "provider crashed: python worker crashed and the "
+                                  "session restart budget is exhausted" );
       if ( !m_loaded.load( std::memory_order_acquire ) || !m_process )
         throw std::runtime_error( "runtime session is not loaded" );
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
@@ -177,10 +185,10 @@ class PythonWorkerSession final : public IModelRuntime
         {
           if ( m_restartsLeft <= 0 )
           {
-            // Mark the session dead-for-good: stopWorker() clears m_loaded,
-            // so permanentlyUnavailable() reads true and the registry
-            // recycles the cached session on the next acquire instead of
-            // handing out a corpse whose every forward throws.
+            // Mark the session dead-for-good: the registry recycles the
+            // cached session on the next acquire instead of handing out a
+            // corpse whose every forward throws.
+            m_permanentlyDead.store( true, std::memory_order_release );
             stopWorker();
             recordFailure( "worker crashed and the session restart budget is exhausted" );
             throw std::runtime_error( "provider crashed: python worker crashed and the "
@@ -191,6 +199,7 @@ class PythonWorkerSession final : public IModelRuntime
           std::string restartError;
           if ( !startWorker( &restartError ) )
           {
+            m_permanentlyDead.store( true, std::memory_order_release );
             recordFailure( "worker crashed and the restart failed: " + restartError );
             throw std::runtime_error( "provider crashed: python worker crashed and the "
                                       "restart failed: " + restartError );
@@ -224,6 +233,7 @@ class PythonWorkerSession final : public IModelRuntime
             // the next request.
             recordFailure( "python worker response exceeds the runtime.provider.max_body_mb "
                            "guard (output invalid); stderr: " + drainStderr() );
+            m_permanentlyDead.store( true, std::memory_order_release );
             stopWorker();
             throw std::runtime_error( "python worker response exceeds the "
                                       "runtime.provider.max_body_mb guard (output invalid)" );
@@ -327,14 +337,16 @@ class PythonWorkerSession final : public IModelRuntime
       return health;
     }
 
-    // Track 13 crash recovery: a session whose worker died with the restart
-    // budget exhausted (or whose restart failed to hand-shake) is finished.
-    // m_loaded flips false on stopWorker(); m_restartsLeft is atomic so the
-    // registry can probe without holding m_inferMutex.
+    // Track 13 crash recovery: true only on the FOR-GOOD death paths (the
+    // restart budget exhausted, a restart that failed to hand-shake, and the
+    // oversized-response stop — none of which anything can ever come back
+    // from). A deliberately explicit flag, never derived from
+    // m_loaded/restartsLeft: during a LEGAL restart the worker is
+    // transiently stopped, and the registry must not recycle a session that
+    // is about to become healthy again.
     bool permanentlyUnavailable() const override
     {
-      return !m_loaded.load( std::memory_order_acquire )
-             && m_restartsLeft.load( std::memory_order_acquire ) <= 0;
+      return m_permanentlyDead.load( std::memory_order_acquire );
     }
 
     SessionMemoryEstimate memoryEstimate() const override
@@ -491,11 +503,11 @@ class PythonWorkerSession final : public IModelRuntime
     std::string m_lastError;
     QJsonObject m_negotiated; // WP-F: capabilities declared in the ready handshake
                               // (guarded by m_stateMutex)
-    // WP-F: ONE bounded restart for the session lifetime. Atomic so the
-    // registry's permanentlyUnavailable() probe can read it on a foreign
-    // thread (all mutations happen under m_inferMutex; relaxed is enough —
-    // the flag is advisory, the next forward re-checks under the lock).
+    // WP-F: ONE bounded restart for the session lifetime.
     std::atomic<int> m_restartsLeft{ 1 };
+    /// Track 13: set only on the for-good death paths (see
+    /// permanentlyUnavailable()); read by the registry on foreign threads.
+    std::atomic<bool> m_permanentlyDead{ false };
 };
 
 ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,

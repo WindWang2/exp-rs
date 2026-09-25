@@ -921,18 +921,36 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // Track 13 crash recovery: a session that reports itself permanently
     // unavailable (its external worker died with the restart budget
     // exhausted) is a corpse — every forward it would run throws, forever.
-    // Recycle instead of serving: drop the entry exactly like the LRU
-    // eviction does (eager reservation release — the dead session's own
-    // #1160 deleter later releases the same holder id, which the ledger
-    // ignores), then fall through to the normal miss path so this very
-    // request reloads a fresh session. The ledger holder string is
-    // re-reserved below through the same replace-on-reserve idiom every
-    // acquire path uses.
+    // Recycle instead of serving, and do it BEFORE the admission reserve
+    // above could matter: the corpse is destroyed OUTSIDE the lock first,
+    // so its #1160 deleter releases the holder entry, and the fall-through
+    // below re-books the replacement through the normal admission path.
+    // (Releasing after re-booking would let the corpse's release erase the
+    // REPLACEMENT's reservation — the ledger would read 0 for a
+    // physically-occupied device and admit past capacity.)
     if ( cached->second.session && cached->second.session->permanentlyUnavailable() )
     {
-      dropReservationLocked( cached->second );
+      ModelRuntimePtr corpse = cached->second.session;
       m_cache.erase( cached );
       ++m_evictions;
+      lock.unlock();
+      corpse.reset(); // destroy the model, then release its holder entry
+      lock.lock();
+      if ( device.gpu && estimateMb > 0 )
+      {
+        std::string admitWhy;
+        if ( !m_ledger->tryReserve( device.cudaIndex, estimateMb, identityComponent, &admitWhy ) )
+        {
+          lock.unlock();
+          if ( errorMessage )
+            *errorMessage = "cannot honor device request '" + request.toString()
+                              + "' for model '" + model.name + "': device unavailable — "
+                              + admitWhy;
+          return nullptr;
+        }
+      }
+      ++m_cacheMisses;
+      lock.unlock();
     }
     else
     {
@@ -942,8 +960,11 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       return cached->second.session;
     }
   }
-  ++m_cacheMisses;
-  lock.unlock();
+  else
+  {
+    ++m_cacheMisses;
+    lock.unlock();
+  }
 
   // Load outside the registry lock: weight parsing is slow and must not
   // block concurrent acquires of other models. The factory sees the RESOLVED
@@ -991,7 +1012,10 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   lock.lock();
   // Re-run idle eviction: time passed while the weights were loading.
   // Another thread may have loaded the same key meanwhile; prefer theirs and
-  // let ours be released, keeping the cache size invariant simple.
+  // let ours be released, keeping the cache size invariant simple. Known
+  // bound: if the raced entry died while we were loading, it is served once
+  // more (one failed forward) and recycled by the NEXT acquire — reaping it
+  // here would race its #1160 ledger release against our own reservation.
   const auto raced = m_cache.find( key );
   if ( raced != m_cache.end() )
   {

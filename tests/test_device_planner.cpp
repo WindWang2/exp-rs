@@ -501,8 +501,15 @@ TEST_CASE( "a permanently dead session is recycled by the next acquire and the "
   // the pre-recycling registry kept handing this corpse out forever.
   REQUIRE_THROWS_AS( first->infer( cv::Mat() ), std::runtime_error );
 
-  // The next acquire must recycle the corpse and load a FRESH session (a
-  // new worker, a fresh restart budget) — not return the dead one.
+  // Drop the caller's reference FIRST (the production shape: the request
+  // that killed the worker already released its session). The recycling
+  // acquire must re-book the ledger for the replacement — a recycle that
+  // lets the corpse's #1160 release erase the replacement's holder entry
+  // leaves reservedMb at 0 while the fresh session is physically resident
+  // (an over-admission hole), which this ordering catches.
+  first.reset();
+  CHECK( registry.cachedSessionCount() == 1 ); // the corpse is still cached
+
   auto second = registry.acquire( model, RequestedDevice::cuda( 0 ), &error );
   REQUIRE( second );
   INFO( "error: " << error );
@@ -510,13 +517,11 @@ TEST_CASE( "a permanently dead session is recycled by the next acquire and the "
   CHECK( second != first );
   REQUIRE_NOTHROW( static_cast<void>( second->infer( cv::Mat() ) ) );
 
-  // The replacement is booked exactly once: the recycled corpse's release
-  // must not erase the live reservation, and the total stays one estimate.
+  // The replacement stays booked exactly once while it lives.
   CHECK( registry.vramLedger().reservedMb( 0 ) == 32 );
   CHECK( registry.cachedSessionCount() == 1 );
 
   second.reset();
-  first.reset();
   registry.releaseAll();
   CHECK( registry.vramLedger().reservedMb( 0 ) == 0 );
 }
