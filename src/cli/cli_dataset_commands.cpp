@@ -199,6 +199,17 @@ std::string versionIdStdString( const QString &text )
 int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): the verb is validated first — the unknown-subcommand
+    // rejection doubles as the machine-readable subcommand vocabulary, and a
+    // bogus verb must be rejected regardless of any other flags.
+    if ( sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+         sub != QLatin1String( "validate" ) && sub != QLatin1String( "diff" ) &&
+         sub != QLatin1String( "stats" ) && sub != QLatin1String( "list" ) &&
+         sub != QLatin1String( "version" ) && sub != QLatin1String( "label-schema" ) &&
+         sub != QLatin1String( "split" ) && sub != QLatin1String( "leakage" ) )
+        return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kDatasetSubcommands, .actual = sub.toStdString() } );
     if ( options.datasetDb.isEmpty() )
         return fail( io, "dataset", "--dataset-db <path> is required", kInvalidInput,
                      { .expected = "--dataset-db <path>",
@@ -572,6 +583,13 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): verb validated first (see dataset side).
+    if ( sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+         sub != QLatin1String( "compare" ) && sub != QLatin1String( "list" ) &&
+         sub != QLatin1String( "run" ) )
+        return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kExperimentSubcommands, .actual = sub.toStdString() } );
     if ( options.experimentDb.isEmpty() )
         return fail( io, "experiment", "--experiment-db <path> is required", kInvalidInput,
                      { .expected = "--experiment-db <path>",
@@ -711,6 +729,12 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
 int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): verb validated first (see dataset side).
+    if ( sub != QLatin1String( "export" ) && sub != QLatin1String( "validate" ) &&
+         sub != QLatin1String( "inspect" ) )
+        return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );
     if ( options.experimentDb.isEmpty() || options.datasetDb.isEmpty() )
         return fail( io, "reproduce", "--experiment-db and --dataset-db are required",
                      kInvalidInput,
@@ -801,6 +825,8 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
                           impossible ? kValidationFailure : 0 );
     }
 
+    // Unreachable (the head guard restricts the verb set above) — kept so
+    // every path through the dispatcher returns.
     return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
                  kInvalidInput,
                  { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );

@@ -65,7 +65,7 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
                           "usage: session <action> [flags] (run|resume|reconcile|status|"
                           "timeline|export|pause|cancel|clear-pause|clear-cancel|"
-                          "approve-repair|actions)" );
+                          "approve-repair|clear_pause|clear_cancel|actions)" );
 
     const QString action = arguments.takeFirst();
     if ( !isKnownAction( action ) )
