@@ -13870,3 +13870,10 @@ target_compile_definitions(test_plugin_lifecycle_halffail_r4 PRIVATE
 )
 # #1186 rule: target-scoped builds must build runtime-loaded fixtures first.
 add_dependencies(test_plugin_lifecycle_halffail_r4 broken_plugin)
+
+sicnu_add_sdk_test(test_plugin_lifecycle_unload_order_r4)
+target_link_libraries(test_plugin_lifecycle_unload_order_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_lifecycle_unload_order_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+)
+add_dependencies(test_plugin_lifecycle_unload_order_r4 hello_plugin)
