@@ -44,6 +44,13 @@ class ErrorCodeScanner
     /// Extracts `inline constexpr const char *kVar = "CODE";` pairs.
     void scanHarnessCodes( std::string_view headerSrc,
                            ErrorCodeReport &out ) const;
+
+    /// Extracts the allErrorCodes runtime-table entries
+    /// `{ "CODE", { "family", RetryClass::X } }` from the implementation —
+    /// codes that ride the wire without a header constant (SAR/InSAR
+    /// families) still have to exist as graph targets.
+    void scanHarnessErrorTable( std::string_view src,
+                                ErrorCodeReport &out ) const;
 };
 
 } // namespace sicnu::contracts

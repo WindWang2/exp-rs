@@ -70,4 +70,29 @@ void ErrorCodeScanner::scanHarnessCodes( std::string_view headerSrc,
         out.harnessCodes[( *it )[1].str()] = ( *it )[2].str();
 }
 
+void ErrorCodeScanner::scanHarnessErrorTable( std::string_view src,
+                                              ErrorCodeReport &out ) const
+{
+    static const std::regex re(
+        R"re(\{\s*"([A-Z][A-Z_0-9]+)"\s*,\s*\{\s*"[a-z_]+")re" );
+    const std::string text( src );
+    for ( auto it = std::sregex_iterator( text.begin(), text.end(), re );
+          it != std::sregex_iterator(); ++it )
+    {
+        // Dedupe by the WIRE CODE value: a code that already exists through a
+        // header constant must not produce a second identical node under the
+        // table's (different) variable name.
+        const std::string code = ( *it )[1].str();
+        bool present = false;
+        for ( const auto &existing : out.harnessCodes )
+            if ( existing.second == code )
+            {
+                present = true;
+                break;
+            }
+        if ( !present )
+            out.harnessCodes[code] = code;
+    }
+}
+
 } // namespace sicnu::contracts
