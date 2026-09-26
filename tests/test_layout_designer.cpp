@@ -37,23 +37,15 @@
 
 namespace
 {
-// Full QGIS teardown at process exit is a destruction-order minefield: the
-// atexit exitQgis() variant ran after the Q_GLOBAL_STATIC cache guards were
-// already torn down (null-lock SEGV), and with the caches guarded it hung
-// instead (exitQgis waits on the global thread pool). Mirror the
-// FastExitListener pattern from test_classification_window: report results,
-// then leave via _Exit before any static destructor runs.
-class FastExitListener : public Catch::EventListenerBase
-{
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testRunEnded( const Catch::TestRunStats &stats ) override
-    {
-      std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-    }
-};
+// Retirement note (Track 2 R4): the old std::_Exit workaround here replaced
+// two failed exit-time strategies — an atexit-registered exitQgis() that
+// SEGV'd on already-torn-down Q_GLOBAL_STATIC cache guards (the null-lock
+// hazard recorded at src/core/proj/qgscoordinatetransform.cpp:1318), and a
+// guard-safe variant that hung in exitQgis()'s global-threadpool wait. The
+// shared TeardownListener (support/qt_lifecycle.h) runs the ordered teardown
+// INSIDE the run, while every guard is still alive, before main returns.
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 }
-CATCH_REGISTER_LISTENER( FastExitListener )
 
 namespace
 {
