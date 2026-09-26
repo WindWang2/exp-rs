@@ -13912,3 +13912,16 @@ target_include_directories(test_maptool_teardown_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
 set_target_properties(test_maptool_teardown_r4 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_maptool_teardown_r4)
+
+add_executable(test_exit_path_contracts_r4 test_exit_path_contracts_r4.cpp)
+target_link_libraries(test_exit_path_contracts_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+  sicnu_task_center sicnu_jobs
+)
+target_include_directories(test_exit_path_contracts_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_exit_path_contracts_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_exit_path_contracts_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_exit_path_contracts_r4)
