@@ -473,6 +473,9 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
     {
       try
       {
+        // Durability gate (atomic_fs.h contract): flush the staged warp
+        // output before the rename.
+        sicnu::geo::atomic_fs::fsyncFile( tmpOutput.toStdString() );
         sicnu::geo::atomic_fs::publishStagedFile( tmpOutput.toStdString(), output.toStdString() );
       }
       catch ( const sicnu::geo::GeoError &ex )

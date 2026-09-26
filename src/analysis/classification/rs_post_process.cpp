@@ -609,6 +609,22 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
 
   GDALClose( ds );
 
+  // Durability gate (atomic_fs.h contract): flush the staged bytes before
+  // either rename mechanism commits the directory entry.
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( tmpPath.toStdString() );
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    // Same cleanup discipline as the publish-failure path below: a failed
+    // gate must not strand the staged raster next to the output.
+    drv->Delete( tmpPath.toUtf8().constData() );
+    setErr( err, QStringLiteral( "Failed to flush the staged output: %1 (%2)" )
+                   .arg( path, QString::fromUtf8( ex.what() ) ) );
+    return false;
+  }
+
   // Rename the fully written temp file over the target. GTiff/HFA/GPKG all
   // support GDALDriver::Rename (POSIX rename when driverCreateCopyFileSet is
   // unset); fall back to atomic_fs publish (ReplaceFileW / MoveFileExW) so a
@@ -622,6 +638,9 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   }
   catch ( const sicnu::geo::GeoError &ex )
   {
+    // Same cleanup discipline as the group publish below: a failed publish
+    // must not strand the staged raster.
+    drv->Delete( tmpPath.toUtf8().constData() );
     setErr( err, QStringLiteral( "Failed to move output into place: %1 (%2)" )
                    .arg( path, QString::fromUtf8( ex.what() ) ) );
     return false;

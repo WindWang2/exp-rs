@@ -10519,6 +10519,27 @@ target_include_directories(test_contract_fuzz_agent PRIVATE
 # (Catch2 + Sicnu::Geospatial only).
 sicnu_add_io_test(test_portability_contract)
 
+# core-foundations-r4 (Track 5): atomic_fs caller contract lane — runtime
+# contract cases over atomic_fs itself + source pins for the caller-side
+# fsync gate / staged-cleanup unification. Light lane (Catch2 +
+# Sicnu::Geospatial only).
+sicnu_add_io_test(test_atomic_fs_caller_contract)
+
+# core-foundations-r4 (Track 5): controlled error-path failure injection
+# (RO-DIR / MISSING / AS-DIR / CORRUPT / INTERRUPT devices) through public
+# geospatial seams. POSIX-only: the injection devices are chmod-based (the
+# same lane precedent as test_fault_injection).
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_failure_injection_r4)
+endif()
+
+# core-foundations-r4 (Track 5): hot publish-path concurrency stress with
+# pre-declared criteria (16-thread staging uniqueness; 8-thread same-target
+# atomic publish storm with a torn-state monitor). Light lane.
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_concurrency_stress_r4)
+endif()
+
 # Header self-containment probes (task A, failure class F1 / PR #833): every
 # nominated first-party leaf header must compile as the FIRST include of a
 # cold translation unit. OBJECT libraries = compile-only (nothing to link,
