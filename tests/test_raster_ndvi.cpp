@@ -216,11 +216,15 @@ TEST_CASE("RasterMergeBandsAlgorithm merges mixed-type bands with per-band buffe
         QVariant::fromValue(static_cast<QgsMapLayer *>(byteLayer.get()))
     };
 
-    // Order A: Byte first ⇒ output GDT_Byte. Band 2 (a FLOAT32 block) must be
-    // converted into the byte band (1.2→1, 2.7→3, 3.1→3, 4.9→5). The
-    // historical bug passed blocks[0]'s GDT_Byte as the buffer type for the
-    // float block: GDAL then read one byte per pixel out of a 4-byte-per-pixel
-    // buffer (out-of-bounds read).
+    // Order A: Byte first. The output band type is the GDALDataTypeUnion of
+    // every input band type (1d241e599, #1035): Byte+Float32 ⇒ GDT_Float32,
+    // so no input band is silently truncated — byte values survive exactly
+    // and float values survive exactly. The historical bug passed blocks[0]'s
+    // GDT_Byte as the buffer type for the float block: GDAL then read one
+    // byte per pixel out of a 4-byte-per-pixel buffer (out-of-bounds read);
+    // per-band buffer types fixed the read, and the union contract fixed the
+    // silent precision loss. The dedicated suite for this contract is
+    // test_raster_merge_bands.cpp.
     const QString outA = dir.path() + QStringLiteral("/merged_a.tif");
     {
         RasterMergeBandsAlgorithm alg;
@@ -238,13 +242,16 @@ TEST_CASE("RasterMergeBandsAlgorithm merges mixed-type bands with per-band buffe
         GDALDatasetH ds = GDALOpen(outA.toUtf8().constData(), GA_ReadOnly);
         REQUIRE(ds != nullptr);
         CHECK(GDALGetRasterCount(ds) == 2);
-        CHECK(GDALGetRasterDataType(GDALGetRasterBand(ds, 1)) == GDT_Byte);
-        std::vector<GByte> band1(4), band2(4);
-        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Read, 0, 0, 2, 2, band1.data(), 2, 2, GDT_Byte, 0, 0) == CE_None);
-        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Read, 0, 0, 2, 2, band2.data(), 2, 2, GDT_Byte, 0, 0) == CE_None);
+        CHECK(GDALGetRasterDataType(GDALGetRasterBand(ds, 1)) == GDT_Float32);
+        std::vector<float> band1(4), band2(4);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Read, 0, 0, 2, 2, band1.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+        CHECK(GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Read, 0, 0, 2, 2, band2.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
         GDALClose(ds);
-        CHECK(band1[0] == 10); CHECK(band1[1] == 20); CHECK(band1[2] == 30); CHECK(band1[3] == 40);
-        CHECK(band2[0] == 1); CHECK(band2[1] == 3); CHECK(band2[2] == 3); CHECK(band2[3] == 5);
+        for (int i = 0; i < 4; ++i)
+        {
+            CHECK_THAT(band1[i], Catch::Matchers::WithinAbs(static_cast<float>(byteData[i]), 1e-4));
+            CHECK_THAT(band2[i], Catch::Matchers::WithinAbs(floatData[i], 1e-4));
+        }
     }
 
     // Order B: Float32 first ⇒ output GDT_Float32. Band 2 (a BYTE block) must
