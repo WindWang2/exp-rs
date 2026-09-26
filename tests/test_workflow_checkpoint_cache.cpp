@@ -31,6 +31,8 @@
 #include "workflow/workflow_dag_analyzer.h"
 
 #include "runtime/observability/fault_registry.h"
+#include <QJsonObject>
+#include <QJsonValue>
 
 using namespace sicnu::workflow;
 

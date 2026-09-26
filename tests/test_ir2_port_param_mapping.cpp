@@ -21,6 +21,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <QJsonObject>
 #include <system_error>
 
 using namespace sicnu::workflow;

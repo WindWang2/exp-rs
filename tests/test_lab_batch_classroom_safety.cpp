@@ -32,6 +32,8 @@
 
 #include <string>
 #include <vector>
+#include <QJsonArray>
+#include <QJsonValue>
 
 namespace
 {

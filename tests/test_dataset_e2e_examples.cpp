@@ -21,6 +21,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <QJsonObject>
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;

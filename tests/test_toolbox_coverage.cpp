@@ -14,6 +14,7 @@
 
 #include "app/app_paths.h"
 #include "processing/framework/algorithm_engine.h"
+#include <QJsonValue>
 
 static void ensureProvidersRegistered()
 {

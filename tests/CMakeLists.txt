@@ -7004,6 +7004,7 @@ target_link_libraries(test_guided_workflow_widget PRIVATE
   qgis_gui
   sicnu_task_center
   jsoncpp
+  sicnu_agent
 )
 target_include_directories(test_guided_workflow_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -8086,6 +8087,7 @@ add_executable(test_product_import_dialog
   # (lines ~1739/2844/3267) already compile it; this target was missing it,
   # which left the dialog import test unlinked (_NOT_BUILT in ctest).
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/operators/rs/rs_product_import_plan.cpp
 )
 target_link_libraries(test_product_import_dialog PRIVATE
   Catch2::Catch2WithMain
@@ -8599,6 +8601,8 @@ sicnu_discover_tests(test_catalog_pagination)
 add_executable(test_workbench_enum_provider
   test_workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
 target_link_libraries(test_workbench_enum_provider PRIVATE
   Catch2::Catch2WithMain
@@ -8607,6 +8611,7 @@ target_link_libraries(test_workbench_enum_provider PRIVATE
   sicnu_data
   sicnu_operators
   GDAL::GDAL
+  Sicnu::help
 )
 target_include_directories(test_workbench_enum_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -10862,6 +10867,10 @@ add_executable(test_mission_context
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost (same pairing as
+  # test_object_identity / test_mission_runtime_store).
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
 )
 target_link_libraries(test_mission_context PRIVATE
   Catch2::Catch2WithMain
@@ -10927,6 +10936,10 @@ add_executable(test_mission_e2e_scaffolding
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  # selection_context.cpp references WorkbenchHost (same pairing as
+  # test_object_identity / test_mission_runtime_store).
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
 )
 target_link_libraries(test_mission_e2e_scaffolding PRIVATE
   Catch2::Catch2WithMain
@@ -12201,6 +12214,7 @@ target_link_libraries(test_editing_e2e PRIVATE
   Qt6::Test
   qgis_analysis
   GDAL::GDAL
+  sicnu_agent
 )
 sicnu_link_jsoncpp(test_editing_e2e)
 target_include_directories(test_editing_e2e PRIVATE
@@ -13483,6 +13497,8 @@ target_link_libraries(test_explain_agent_tool PRIVATE
   Catch2::Catch2WithMain
   Sicnu::explain_adapters
   Qt6::Core
+  sicnu_agent
+  sicnu_operators_core
 )
 sicnu_link_jsoncpp(test_explain_agent_tool)
 target_include_directories(test_explain_agent_tool PRIVATE
@@ -13716,3 +13732,112 @@ target_include_directories(test_preflight_check_tool PRIVATE
 )
 sicnu_link_jsoncpp(test_preflight_check_tool)
 sicnu_discover_tests(test_preflight_check_tool TEST_PREFIX "test_preflight_check_tool::")
+# ── AUTOMOC for embed targets whose production TUs touch a Q_OBJECT metaobject ──
+# (build_wiring_drift rule 13: the moc definitions must exist in the target that
+# compiles the emitting code; borrowing from a linked AUTOMOC-on target is fine,
+# silence is not).
+if(TARGET surface_mcp_host)
+  set_target_properties(surface_mcp_host PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_accuracy_panel_wiring)
+  set_target_properties(test_accuracy_panel_wiring PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_adversarial_m4)
+  set_target_properties(test_adversarial_m4 PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_algorithm_search)
+  set_target_properties(test_algorithm_search PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_async_algorithm_runner)
+  set_target_properties(test_async_algorithm_runner PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_capability_surface_parity)
+  set_target_properties(test_capability_surface_parity PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_command_palette)
+  set_target_properties(test_command_palette PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_command_registry)
+  set_target_properties(test_command_registry PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_comparison_widget)
+  set_target_properties(test_comparison_widget PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_crs_selector)
+  set_target_properties(test_crs_selector PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_gui_job_adapter)
+  set_target_properties(test_gui_job_adapter PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_inspector_host)
+  set_target_properties(test_inspector_host PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_interaction_tools)
+  set_target_properties(test_interaction_tools PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_layer_sync_contract)
+  set_target_properties(test_layer_sync_contract PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_mcp_server)
+  set_target_properties(test_mcp_server PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_measure_tool)
+  set_target_properties(test_measure_tool PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_pipeline_runner)
+  set_target_properties(test_pipeline_runner PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_processing_history_model)
+  set_target_properties(test_processing_history_model PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_progress_dialog)
+  set_target_properties(test_progress_dialog PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_provenance_section)
+  set_target_properties(test_provenance_section PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_raster_display_tools)
+  set_target_properties(test_raster_display_tools PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_raster_layer_combo)
+  set_target_properties(test_raster_layer_combo PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_selection_context)
+  set_target_properties(test_selection_context PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_shortcut_hosting)
+  set_target_properties(test_shortcut_hosting PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_spectral_profile_widget)
+  set_target_properties(test_spectral_profile_widget PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_spectral_workbench_panel)
+  set_target_properties(test_spectral_workbench_panel PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_surface_parity)
+  set_target_properties(test_surface_parity PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_surface_protocol)
+  set_target_properties(test_surface_protocol PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_swipe_map_tool)
+  set_target_properties(test_swipe_map_tool PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_temporal_scene_model)
+  set_target_properties(test_temporal_scene_model PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_ui_scale_benchmark)
+  set_target_properties(test_ui_scale_benchmark PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_ui_task_center_contract)
+  set_target_properties(test_ui_task_center_contract PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_workbench_host)
+  set_target_properties(test_workbench_host PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_workbench_shutdown_policy)
+  set_target_properties(test_workbench_shutdown_policy PROPERTIES AUTOMOC ON)
+endif()
+if(TARGET test_workflow_resume_provenance)
+  set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
+endif()

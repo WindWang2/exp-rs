@@ -21,6 +21,7 @@
 #include "workflow/workflow_provenance.h"
 #include "workflow/workflow_types.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
