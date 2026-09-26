@@ -54,6 +54,15 @@ endfunction()
 # Helper function to add a test executable. Extra args (TIMEOUT n,
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
 # properties — previously they were accepted and silently dropped.
+# GNU/ELF-only whole-archive fragment for the sicnu_agent_loop stopgap (see
+# the sicnu_add_test comment). Empty on non-GNU platforms: MSVC/PE executables
+# do not export symbols to DLLs and Mach-O dylibs link their undefined symbols
+# at library time, so there is nothing this fragment could fix there.
+if(UNIX AND NOT APPLE)
+  set(SICNU_TEST_AGENT_LOOP_LINK
+      "-Wl,--whole-archive" sicnu_agent_loop "-Wl,--no-whole-archive")
+endif()
+
 function(sicnu_add_test NAME)
   cmake_parse_arguments(SAT "" "TEST_PREFIX" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
@@ -69,16 +78,17 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
-    # sicnu_agent.so references agent_loop symbols (e.g.
-    # VerificationReport::aggregate via tools/agent_session_adapter.cpp) but
-    # src/agent/CMakeLists.txt does not link sicnu_agent_loop — the library-
-    # level edge is in-flight PR #1335 (P0-3). Linking the archive plainly is
-    # NOT enough on GNU ld: it never extracts archive members to satisfy a
-    # SHARED library's undefined symbols, so the whole archive must be forced
-    # in; the definitions then live in the executable and are exported to
-    # libsicnu_agent.so at runtime. Drop this line together with the
-    # mapspec-specific one once #1335 merges.
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+    # GNU/ELF stopgap for sicnu_agent.so referencing agent_loop symbols
+    # (e.g. VerificationReport::aggregate via tools/agent_session_adapter.cpp)
+    # while src/agent/CMakeLists.txt lacks the sicnu_agent_loop link edge —
+    # the library-level fix is in-flight PR #1335 (P0-3); GNU ld never
+    # extracts archive members to satisfy a SHARED library's undefined
+    # symbols, so the archive is force-included here and the executable
+    # exports the definitions back to libsicnu_agent.so at runtime.
+    # Spelling note: classic -Wl flags, not $<LINK_LIBRARY:WHOLE_ARCHIVE>,
+    # because that genex needs CMake >= 3.24 while this project declares
+    # cmake_minimum_required 3.20. Both edges drop once #1335 merges.
+    ${SICNU_TEST_AGENT_LOOP_LINK}
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -811,10 +821,7 @@ target_link_libraries(test_mapspec PRIVATE
   qgis_gui
   sicnu_data
   sicnu_agent
-  # See the sicnu_add_test note: whole-archive agent_loop until #1335 lands
-  # the library-level edge (plain archive links do not satisfy a shared
-  # library's undefined symbols on GNU ld).
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
+  ${SICNU_TEST_AGENT_LOOP_LINK}
   sicnu_operators
   sicnu_workflow
   sicnu_processing
