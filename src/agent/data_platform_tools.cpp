@@ -36,6 +36,16 @@
 #include "science_context/live_asset_resolver.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "operators/framework/rs_operator_registry.h"
+// Track 04 preflight live integration: preflight:check is a THIN shell over
+// the Qt-free engine adapter — facts via the passport projection, capability
+// via the harness knowledge, temporal via the workspace catalog.
+#include "preflight/runtime_adapter.h"
+#include "preflight/asset_state_adapter.h"
+#include "processing/algorithms/temporal/temporal_workspace.h"
+#include "processing/algorithms/temporal/temporal_collection.h"
+#include "data/data_manager.h"
+#include "data/collection_types.h"
+#include "scientific_state/asset_state_json.h"
 #include <json/json.h>
 #include <memory>
 #include <optional>
@@ -1530,6 +1540,208 @@ Json::Value variantArgsToJson( const QVariantMap &arguments )
         throw std::runtime_error( "invalid tool arguments JSON" );
     return root;
 }
+
+// ---- preflight:check — thin adapter over the Scientific Preflight Engine ----
+// This shell only resolves authorities and forwards JSON:
+//   * facts   — per-input inline passports (same inline semantics as
+//               data:asset_passport) or the shared broker's live passport
+//               authority;
+//   * temporal— the workspace catalog's temporal collections (scene counts
+//               and declared dates; scenes without a parseable time are
+//               COUNTED, never dropped silently);
+//   * capability — the harness CapabilityKnowledge (the single capability
+//               store); its merged entries flow into the engine verbatim.
+// The PreflightEngine (sicnu_preflight) stays the ONLY evaluator; no policy,
+// no repair decisions and no second capability merge live here.
+Json::Value parseInlineJson( const Json::Value &value )
+{
+    if ( value.isObject() )
+        return value;
+    if ( !value.isString() )
+        return Json::Value();
+    const std::string raw = value.asString();
+    Json::Value parsed;
+    Json::CharReaderBuilder rb;
+    std::unique_ptr<Json::CharReader> reader( rb.newCharReader() );
+    std::string errs;
+    if ( !reader->parse( raw.data(), raw.data() + raw.size(), &parsed, &errs ) )
+        return Json::Value();
+    return parsed;
+}
+
+std::map<std::string, sicnu::state::RemoteSensingAssetState>
+inlinePassportsFromArgs( const Json::Value &args )
+{
+    std::map<std::string, sicnu::state::RemoteSensingAssetState> inlinePassports;
+    if ( !args.isMember( "inputs" ) || !args["inputs"].isArray() )
+        return inlinePassports;
+    for ( const auto &input : args["inputs"] )
+    {
+        if ( !input.isObject() || !input["ref"].isString() )
+            continue;
+        // Fail closed on any PRESENT-but-unusable inline passport: silently
+        // falling through to the broker would swap the caller's authority
+        // for a different one without a trace. Same posture as
+        // data:asset_passport's passport_invalid.
+        const bool hasPassportKey = input.isMember( "passport" ) && !input["passport"].isNull();
+        const bool hasPassportJsonKey =
+            input.isMember( "passport_json" ) && !input["passport_json"].isNull();
+        if ( !hasPassportKey && !hasPassportJsonKey )
+            continue;
+        if ( hasPassportKey && hasPassportJsonKey )
+            fail( QStringLiteral( "preflight:check input '" ) +
+                  QString::fromStdString( input["ref"].asString() ) +
+                  QStringLiteral( "' declares both 'passport' and 'passport_json'" ) );
+        if ( hasPassportKey && !input["passport"].isObject() )
+            fail( QStringLiteral( "preflight:check input '" ) +
+                  QString::fromStdString( input["ref"].asString() ) +
+                  QStringLiteral( "' has a non-object 'passport' (use passport_json for "
+                                  "JSON text)" ) );
+        if ( hasPassportJsonKey &&
+             ( !input["passport_json"].isString() || input["passport_json"].asString().empty() ) )
+            fail( QStringLiteral( "preflight:check input '" ) +
+                  QString::fromStdString( input["ref"].asString() ) +
+                  QStringLiteral( "' has a non-string or empty 'passport_json'" ) );
+        const Json::Value document = parseInlineJson(
+            hasPassportKey ? input["passport"] : input["passport_json"] );
+        if ( !document.isObject() )
+            fail( QStringLiteral( "preflight:check inline passport does not parse for ref '" ) +
+                  QString::fromStdString( input["ref"].asString() ) + QStringLiteral( "'" ) );
+        sicnu::state::RemoteSensingAssetState state;
+        sicnu::state::AssetStateError error;
+        if ( !sicnu::state::assetStateFromJson( document, state, error ) )
+            fail( QStringLiteral( "preflight:check inline passport is not a valid "
+                                  "sicnu.asset_state.v1 document for ref '" ) +
+                  QString::fromStdString( input["ref"].asString() ) + QStringLiteral( "': " ) +
+                  QString::fromStdString( error.message ) );
+        const std::string ref = input["ref"].asString();
+        const auto existing = inlinePassports.find( ref );
+        if ( existing != inlinePassports.end() )
+        {
+            if ( !( existing->second == state ) )
+                fail( QStringLiteral( "preflight:check input '" ) +
+                      QString::fromStdString( ref ) +
+                      QStringLiteral( "' declares two different inline passports" ) );
+            continue;
+        }
+        inlinePassports.emplace( ref, std::move( state ) );
+    }
+    return inlinePassports;
+}
+
+QVariantMap preflightCheck( const QVariantMap &arguments )
+{
+    const Json::Value args = variantArgsToJson( arguments );
+
+    const std::map<std::string, sicnu::state::RemoteSensingAssetState> inlinePassports =
+        inlinePassportsFromArgs( args );
+    sicnu::preflight::StateAssetFactsProvider facts(
+        [ &inlinePassports ]( const std::string &ref )
+            -> std::optional<sicnu::state::RemoteSensingAssetState> {
+            const auto it = inlinePassports.find( ref );
+            if ( it != inlinePassports.end() )
+                return it->second;
+            auto &assets = sicnu::science_context::agent_adapter::sharedBroker().assets();
+            if ( !assets.hasResolver() )
+                return std::nullopt;
+            sicnu::science_context::AssetResolveRequest request;
+            request.assetKey = ref;
+            request.allowAssumed = false;
+            const sicnu::science_context::AssetResolveResult resolved = assets.resolve( request );
+            if ( !resolved.ok )
+                return std::nullopt;
+            return resolved.state;
+        } );
+
+    auto &knowledge = sicnu::agent::harness::CapabilityKnowledge::instance();
+    // entryForOperator lazy-loads on first query; force that load BEFORE
+    // capturing loadProblems so a broken install is typed Unavailable
+    // (SPF_CAPABILITY_MIRROR_UNAVAILABLE) from the very first check, not a
+    // misleading Unknown.
+    if ( !knowledge.loaded() )
+        knowledge.reload();
+    sicnu::preflight::AuthorityCapabilityProvider capability(
+        [ &knowledge ]( const std::string &operatorId, const Json::Value &params ) {
+            return knowledge.entryForOperator( operatorId, params );
+        },
+        knowledge.loadProblems() );
+
+    // Temporal collections resolve only when a workspace catalog is wired;
+    // otherwise the temporal facts stay the typed unknowns the engine reports.
+    sicnu::preflight::TemporalFactsLookup temporal;
+    if ( sicnu::temporal::workspaceCatalog() != nullptr )
+    {
+        temporal = []( const std::string &collectionIdText ) {
+            sicnu::preflight::TemporalCollectionFacts out;
+            sicnu::data::DataManager *dm = sicnu::temporal::workspaceCatalog();
+            if ( dm == nullptr )
+            {
+                out.status = sicnu::preflight::FactStatus::Unavailable;
+                out.detail = "no workspace catalog wired";
+                return out;
+            }
+            const std::optional<sicnu::data::CollectionId> id =
+                sicnu::data::CollectionId::fromString(
+                    QString::fromStdString( collectionIdText ) );
+            if ( !id )
+            {
+                out.status = sicnu::preflight::FactStatus::Unknown;
+                out.detail = "invalid temporal collection id";
+                return out;
+            }
+            const std::optional<sicnu::data::TemporalCollectionRecord> record =
+                dm->temporalCollection( *id );
+            if ( !record )
+            {
+                out.status = sicnu::preflight::FactStatus::Unknown;
+                out.detail = "temporal collection is not registered in the workspace";
+                return out;
+            }
+            sicnu::temporal::TemporalCollection collection;
+            QString parseError;
+            if ( !sicnu::temporal::collectionFromDescriptorText( record->descriptor, &collection,
+                                                                 &parseError ) )
+            {
+                out.status = sicnu::preflight::FactStatus::Unavailable;
+                out.detail = "stored temporal descriptor does not parse: " +
+                             parseError.toStdString();
+                return out;
+            }
+            out.status = sicnu::preflight::FactStatus::Available;
+            out.sceneCount = collection.sceneCount();
+            // Dates in COLLECTION order — the preflight rule judges ordering,
+            // so this provider never sorts. Scenes without a parseable time
+            // are counted (typed SPF_TEMPORAL_TIME_INCOMPLETE downstream);
+            // the retained-date cap is loud (temporalTruncated).
+            constexpr int kMaxDates = 512;
+            for ( const auto &scene : collection.scenes() )
+            {
+                if ( !scene.time.valid )
+                {
+                    ++out.invalidTimeScenes;
+                    continue;
+                }
+                if ( static_cast<int>( out.datesIso.size() ) >= kMaxDates )
+                {
+                    out.truncated = true;
+                    continue;
+                }
+                out.datesIso.push_back( scene.time.dateString().toStdString() );
+            }
+            return out;
+        };
+    }
+    const sicnu::preflight::TemporalFactsLookup *temporalPtr =
+        temporal ? &temporal : nullptr;
+
+    const Json::Value check =
+        sicnu::preflight::preflightCheckJson( args, facts, capability, temporalPtr );
+    if ( check["kind"].asString() == "sicnu.preflight.check_error/1" )
+        fail( QStringLiteral( "preflight:check rejected the arguments (" ) +
+              QString::fromStdString( check["code"].asString() ) + QStringLiteral( "): " ) +
+              QString::fromStdString( check["detail"].asString() ) );
+    return scienceContextJsonToVariant( check );
+}
 } // namespace
 
 const QList<DataPlatformToolDef> &dataPlatformToolDefs()
@@ -1702,6 +1914,18 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
             { "passport_json", "string", "Optional passport for modality filter", false },
             { "limit", "integer", "Top-K (default 5)", false },
             { "refresh_recipes", "boolean", "Re-scan the scientific recipe pack before answering", false } } },
+        { "preflight:check",
+          "Scientific preflight gate: judge operator/inputs against live facts and capability "
+          "knowledge BEFORE running. Returns the deterministic report plus teaching/agent "
+          "projections; a blocked verdict is a veto — never repair, execute or override here.",
+          { { "operator", "string", "Capability entry id, e.g. rs:ndvi", true },
+            { "inputs", "array", "Inputs: [{slot?, ref, passport?|passport_json?}]", true },
+            { "operator_params", "object", "Variant selector, e.g. {\"index\": \"NDVI\"}", false },
+            { "intent", "string", "Free intent tag (digested, not interpreted)", false },
+            { "mode", "string", "teaching | agent (default agent)", false },
+            { "human_operator_id", "string", "Who runs this (report operator_id)", false },
+            { "acknowledgements", "array", "Finding codes the operator accepts", false },
+            { "budgets", "object", "{max_rules, max_inputs, max_findings}", false } } },
     };
     return defs;
 }
@@ -1715,7 +1939,8 @@ bool isDataPlatformTool( const QString &toolId )
            toolId.startsWith( QLatin1String( "suitability:" ) ) ||
            toolId.startsWith( QLatin1String( "scientific:" ) ) ||
            toolId.startsWith( QLatin1String( "recipe:" ) ) ||
-           toolId == QLatin1String( "data:asset_passport" );
+           toolId == QLatin1String( "data:asset_passport" ) ||
+           toolId == QLatin1String( "preflight:check" );
 }
 
 QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &arguments )
@@ -1787,6 +2012,8 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
         return scienceContextJsonToVariant(
             sicnu::science_context::agent_adapter::dataAssetPassport( variantArgsToJson( arguments ) ) );
     }
+    if ( toolId == QLatin1String( "preflight:check" ) )
+        return preflightCheck( arguments );
     if ( toolId == QLatin1String( "recipe:search" ) )
     {
         ensureScienceContextAuthorities();

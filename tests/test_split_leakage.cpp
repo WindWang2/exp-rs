@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <QJsonObject>
 
 using namespace sicnu::dataset;
 

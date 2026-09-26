@@ -35,6 +35,8 @@ public:
   void setArtifactPath( const QString &path );
 
   sicnu::teaching::LabStepTimeline timeline() const { return m_tl; }
+  sicnu::teaching::AutonomyEffectiveDisplay autonomy() const { return m_autonomy; }
+  sicnu::teaching::LabReadiness readiness() const { return m_readiness; }
 
 signals:
   void runOperatorRequested( const QString &operatorId, const QString &paramsJson );

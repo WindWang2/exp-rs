@@ -278,6 +278,11 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters
+  # Track 04 preflight live integration: the preflight:check data-platform
+  # tool resolves facts through the passport adapter (which transitively
+  # links sicnu_preflight + sicnu_scientific_state) and capabilities through
+  # the harness CapabilityKnowledge — the engine stays the only evaluator.
+  sicnu_preflight_state_adapter
   # repair_capability_source adapts the live knowledge to the repair
   # planner's provider seam (Qt-free leaf).
   sicnu_repair_planner

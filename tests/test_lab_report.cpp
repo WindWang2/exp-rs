@@ -36,6 +36,7 @@
 
 #include <chrono>
 #include <thread>
+#include <QJsonValue>
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;

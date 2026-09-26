@@ -30,6 +30,7 @@
 #include "processing/framework/task_center.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
+#include <QJsonObject>
 
 using namespace sicnu::workflow;
 using namespace sicnu::experiment;

@@ -57,6 +57,13 @@ struct SlotFacts
   bool hasSize = false;
   int width = 0;
   int height = 0;
+  // Declared extent in the CRS of the asset (authority-projected; rules only
+  // compare it when both sides are present — never an implicit mismatch).
+  bool hasExtent = false;
+  double extentMinX = 0.0;
+  double extentMinY = 0.0;
+  double extentMaxX = 0.0;
+  double extentMaxY = 0.0;
 
   // Radiometric state (normalized unit vocabulary of the passport).
   std::string radiometricUnit;
@@ -76,6 +83,15 @@ struct SlotFacts
   int temporalSceneCount = 0;      ///< Declared collection scene count; 0 = none.
   std::vector<std::string> temporalDates;  ///< ISO dates, ascending or not — rules judge.
   bool temporalTruncated = false;  ///< Provider dropped dates beyond its cap.
+  /// Scenes in the declared collection whose acquisition time is missing or
+  /// unparseable. 0 = every declared scene resolved. A provider that drops
+  /// such scenes from temporalDates must count them here — silently narrowing
+  /// the series to the parseable scenes would fake confidence.
+  int temporalInvalidTimeCount = 0;
+  /// Temporal collection identities the authority attached to this asset
+  /// (passport temporalRefs, sorted by collection id). Facts, not policies:
+  /// a temporal provider resolves them into counts/dates or typed unknowns.
+  std::vector<std::string> temporalCollectionRefs;
 
   // Leakage-relevant identity: assets this one was derived from.
   std::vector<std::string> derivedFromAssetIds;

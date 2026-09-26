@@ -8,6 +8,9 @@
 
 #include <QCoreApplication>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QNetworkRequest>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;

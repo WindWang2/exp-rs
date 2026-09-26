@@ -15,6 +15,7 @@
 
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QJsonObject>
 
 #include <algorithm>
 

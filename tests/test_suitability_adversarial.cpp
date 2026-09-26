@@ -49,6 +49,7 @@
 #include <functional>
 #include <limits>
 #include <vector>
+#include <QJsonValue>
 
 using sicnu::data::AssetState;
 using sicnu::data::SpatialExtent;

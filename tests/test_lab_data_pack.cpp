@@ -18,6 +18,7 @@
 #include <json/json.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <QJsonValue>
 
 #include <algorithm>
 #include <cstdlib>

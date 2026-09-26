@@ -12,6 +12,7 @@
 #include <QDir>
 
 #include "workflow/workflow_ir_v2.h"
+#include <QJsonObject>
 
 using sicnu::workflow::EdgeFact;
 using sicnu::workflow::NodeFact;

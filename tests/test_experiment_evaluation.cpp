@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <QJsonValue>
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;

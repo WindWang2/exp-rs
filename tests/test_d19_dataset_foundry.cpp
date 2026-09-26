@@ -16,6 +16,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
+#include <QJsonObject>
+#include <QJsonValue>
 
 using namespace sicnu::dataset;
 

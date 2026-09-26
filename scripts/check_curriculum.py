@@ -32,9 +32,61 @@ MODULE_KEYS = {
     "prerequisite_modules", "estimated_effort_minutes", "optional", "labs",
 }
 TOP_KEYS = {"schema", "id", "title", "title_zh", "audience_zh", "note_zh",
-            "modules", "forward_references"}
+            "modules", "forward_references", "autonomy_policy"}
 FORWARD_KEYS = {"capability", "reason_zh", "wiring"}
 ROLES = {"core", "optional", "external"}
+
+# Course-level autonomy policy (sicnu.autonomy-policy/1, precedence layer
+# "course"). The gate mirrors the wire contract the autonomy engine parses in
+# code (src/agent/autonomy/autonomy_policy.cpp) so a typo'd block fails this
+# check instead of silently losing the course layer at cockpit resolution.
+AUTONOMY_LEVELS = {"L0", "L1", "L2", "L3", "L4", "L5"}
+AUTONOMY_MODES = {"exam", "practice", "instructor", "agent"}
+AUTONOMY_POLICY_KEYS = {"schema", "level", "mode", "max_level",
+                        "capability_overrides", "source"}
+
+
+def check_autonomy_policy(path: Path, policy: object) -> list[str]:
+    if not isinstance(policy, dict):
+        return [f"{path}: autonomy_policy must be an object"]
+    problems: list[str] = []
+    if policy.get("schema") != "sicnu.autonomy-policy/1":
+        problems.append(
+            f"{path}: autonomy_policy.schema must be 'sicnu.autonomy-policy/1', "
+            f"got {policy.get('schema')!r}")
+    level = policy.get("level")
+    if level is not None and level not in AUTONOMY_LEVELS:
+        problems.append(f"{path}: autonomy_policy.level {level!r} not in {sorted(AUTONOMY_LEVELS)}")
+    mode = policy.get("mode")
+    if mode is not None and mode not in AUTONOMY_MODES:
+        problems.append(f"{path}: autonomy_policy.mode {mode!r} not in {sorted(AUTONOMY_MODES)}")
+    max_level = policy.get("max_level")
+    if max_level is not None and max_level not in AUTONOMY_LEVELS:
+        problems.append(
+            f"{path}: autonomy_policy.max_level {max_level!r} not in {sorted(AUTONOMY_LEVELS)}")
+    # Compare only when BOTH sides validated (a bogus "exceeds" error on top
+    # of the invalid-value error would just confuse authors; lexicographic
+    # order is sound inside the closed single-digit L0–L5 set).
+    if level in AUTONOMY_LEVELS and max_level in AUTONOMY_LEVELS and level > max_level:
+        problems.append(
+            f"{path}: autonomy_policy level {level} exceeds max_level {max_level}")
+    source = policy.get("source")
+    if source is not None and source not in {"course", "labspec", "teacher", "session"}:
+        problems.append(f"{path}: autonomy_policy.source {source!r} is not a policy source")
+    overrides = policy.get("capability_overrides")
+    if overrides is not None:
+        if not isinstance(overrides, dict):
+            problems.append(f"{path}: autonomy_policy.capability_overrides must be an object")
+        else:
+            for capability, override in overrides.items():
+                if not isinstance(override, dict) or override.get("decision") not in {"allow", "deny"}:
+                    problems.append(
+                        f"{path}: autonomy_policy override {capability!r} needs "
+                        "decision allow|deny")
+    for key in policy:
+        if key not in AUTONOMY_POLICY_KEYS:
+            problems.append(f"{path}: unknown autonomy_policy key {key!r}")
+    return problems
 
 
 def fail(message: str) -> list[str]:
@@ -55,6 +107,9 @@ def check_manifest(path: Path) -> list[str]:
     for key in manifest:
         if key not in TOP_KEYS:
             problems.append(f"{path}: unknown top-level key {key!r}")
+
+    if "autonomy_policy" in manifest:
+        problems.extend(check_autonomy_policy(path, manifest["autonomy_policy"]))
 
     labs_dir = REPO / "data" / "labs"
     packs_dir = labs_dir / "packs"
