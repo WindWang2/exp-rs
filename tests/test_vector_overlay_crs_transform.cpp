@@ -262,7 +262,11 @@ TEST_CASE("VectorMergeAlgorithm refuses unwritable features instead of dropping 
 
     bool ok = true;
     try {
-        (void)alg->run(params, context, &feedback, &ok);
+        // catchExceptions=false: run() swallows QgsProcessingException by
+        // default (logging it and setting *ok=false); the #1043 contract is
+        // that the algorithm REFUSES unwritable features with the typed
+        // exception, so this test observes it through the documented knob.
+        (void)alg->run(params, context, &feedback, &ok, QVariantMap(), false);
         FAIL("expected QgsProcessingException for features the sink cannot store");
     } catch (const QgsProcessingException &e) {
         const QString message = e.what();
