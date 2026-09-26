@@ -2459,6 +2459,7 @@ target_link_libraries(test_surface_parity PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+    Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -2477,6 +2478,113 @@ target_compile_definitions(test_surface_parity PRIVATE
   SICNU_TEST_SURFACE_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
 sicnu_discover_tests(test_surface_parity)
+
+# Track 9 (mcp-surface-r4): three-surface parity LOCK. The snapshot
+# tests/surface_diff_snapshot.json is the shared contract consumed by BOTH
+# ends: test_surface_snapshot (C++: registry vs projection vs tools/list
+# wire) and pi/test/surface_snapshot.test.mjs (pi: name mapping, category
+# curation, schema round-trip). When a LEGITIMATE surface change turns the
+# snapshot gate red, regenerate with:
+#   ninja -C build-r4 surface_snapshot_regen
+# and commit the refreshed snapshot in the SAME commit as the surface
+# change. Never hand-edit the snapshot: the generator is the only writer.
+add_executable(surface_snapshot_gen surface_snapshot_main.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(surface_snapshot_gen PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(surface_snapshot_gen PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(surface_snapshot_gen PRIVATE jsoncpp)
+endif()
+target_include_directories(surface_snapshot_gen PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+add_custom_target(surface_snapshot_regen
+  COMMAND surface_snapshot_gen --output "${CMAKE_SOURCE_DIR}/tests/surface_diff_snapshot.json"
+  DEPENDS surface_snapshot_gen
+  COMMENT "Regenerating tests/surface_diff_snapshot.json from the in-process union projection"
+)
+
+add_executable(test_surface_snapshot test_surface_snapshot.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_snapshot PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_snapshot PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_snapshot PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_snapshot PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_surface_snapshot PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_surface_snapshot)
+
+# Track 9 (mcp-surface-r4) WP-C: protocol robustness (malformed frames,
+# -32002 gate, #644 id contract, #634 cancellation bookkeeping, surface
+# filter). Separate file from test_surface_protocol.cpp so in-flight #1334
+# hardening of that file never conflicts with these cases.
+add_executable(test_surface_protocol_r4 test_surface_protocol_r4.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_protocol_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+    Sicnu::agent_ops
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_protocol_r4 PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_protocol_r4 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_protocol_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_surface_protocol_r4)
 
 # Track D1 (ds41-capability-help-sync): capability surface parity gate.
 # registry descriptors <-> sidecar A <-> sidecar B <-> help operator topics
@@ -2575,6 +2683,7 @@ target_link_libraries(test_surface_protocol PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+    Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
