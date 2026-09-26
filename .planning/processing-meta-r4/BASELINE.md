@@ -18,6 +18,8 @@
 | `Rs*Operator` 类声明 | 151 | **151** ✓ | `rg -o 'class Rs\w+Operator' -g '*.h'` 去重计数 |
 | 顶层 sparse sidecar | 57 | **57** ✓ | `ls data/processing/algorithm_meta/*.json` |
 | `capability/` 侧车 | — | **157 个 rs-*.json + capability_relations.json = 158** | `ls data/processing/algorithm_meta/capability/` |
+
+> 口径互引：sparse 57 = 56 个 rs:* 声明者 + 1 个 gdal:polygonize（注册口径计 56/157），见 DECISIONS #1，两处数字非矛盾。
 | `data/help/commands.json` | 76 | **76** ✓（JSON list） | python json.load |
 | 快照文件 | data/contracts/ | **✓** `determinism_census.snap.json` + `contract_graph.snap.json`（另有 `contract_exemptions.json`） | ls |
 | contract_inventory 用法 | —out/--check + census | **✓ 且实测单工具双快照**：`--out/--check`（契约图，需注册表初始化）、`--census-out/--census-check`（census，纯源扫描）；`--check` 退出 0 的条件是**字节一致且 findings 为空** | 通读 src/contracts/tool/contract_inventory_main.cpp（189 行） |
@@ -61,6 +63,12 @@ P5. **sparse taskFamily 100 算子缺口**：按 P1 属产品级 opt-in 声明�
 - 基线红绿分布：待全新构建完成后执行 `ctest -R "capabilit|contract|meta|registry|snapshot" -j1`，结果回填 §7。
 
 ## 6. 42 个无 authored enrichment 的算子（enrichment --strict 实测输出）
+
+> 修正注记（独立评审 P2）：本节是 capability_enrichment.py --strict 的**账本口径**输出，其中 13 条为假阳性
+> （rs:sar_interferogram、rs:sar_unwrap、rs:library_select、rs:mnf_inverse、rs:sar_coregister、rs:sar_displacement、
+> rs:sar_phase_filter、rs:sar_polsar_decompose、rs:sar_temporal_events、rs:spectral_band_select、rs:terrain_solar、
+> rs:terrain_landform、rs:terrain_viewshed——master 上四键已非空），系该脚本账本分母过期（115）所致。
+> **交付口径以 §3 P4 的四键实测（18/22/56/80，与最终 diff 完全吻合）为准**；本清单仅作"迁移工具账本过期"的证据保留。
 
 rs:brdf_normalization, rs:cem_detection, rs:change, rs:classify, rs:endmember_analysis, rs:library_select, rs:local_rx_anomaly, rs:mnf_inverse, rs:osp_detection, rs:quality_mosaic, rs:radiometric_qa, rs:register_images, rs:regress, rs:sar_coregister, rs:sar_coregister_local, rs:sar_displacement, rs:sar_interferogram, rs:sar_network_inversion, rs:sar_pair_network, rs:sar_phase_filter, rs:sar_polsar_decompose, rs:sar_remove_topographic_phase, rs:sar_temporal_events, rs:sar_unwrap, rs:solar_geometry, rs:sparse_unmixing, rs:spectral_band_select, rs:spectral_similarity, rs:spectral_spatial_fuse, rs:stack_register, rs:tcimf_detection, rs:temporal_extract_regions, rs:temporal_harmonic_breaks, rs:temporal_model_select, rs:temporal_phenology_multi, rs:temporal_region_features, rs:temporal_regularize, rs:temporal_sar_fusion, rs:temporal_seasonal_breaks, rs:terrain_landform, rs:terrain_solar, rs:terrain_viewshed
 
