@@ -20170,4 +20170,175 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
         <translation>%1 — %2</translation>
     </message>
 </context>
+<context>
+    <name>RsOperatorCatalogPanel</name>
+    <message>
+        <source>Remote Sensing Operator Catalog</source>
+        <translation>遥感算子目录</translation>
+    </message>
+    <message>
+        <source>Search operators</source>
+        <translation>搜索算子</translation>
+    </message>
+    <message>
+        <source>Search operators (name/description)…</source>
+        <translation>搜索算子（名称/描述）…</translation>
+    </message>
+    <message>
+        <source>Input modality:</source>
+        <translation>输入模态：</translation>
+    </message>
+    <message>
+        <source>Input modality filter</source>
+        <translation>输入模态过滤</translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <source>Operator list</source>
+        <translation>算子列表</translation>
+    </message>
+    <message>
+        <source>Open in task panel</source>
+        <translation>在任务面板中打开</translation>
+    </message>
+    <message>
+        <source>Unfavorite</source>
+        <translation>取消收藏</translation>
+    </message>
+    <message>
+        <source>Favorite</source>
+        <translation>收藏</translation>
+    </message>
+</context>
+<context>
+    <name>StepExplanationPanel</name>
+    <message>
+        <source>No step selected to explain.</source>
+        <translation>未选择需要解释的步骤。</translation>
+    </message>
+    <message>
+        <source>Explanation knowledge sources unavailable (operator registry or authoring guidance library not ready); cannot explain this step.</source>
+        <translation>解释知识源不可用（算子注册表或编写指引库未就绪），无法解释此步骤。</translation>
+    </message>
+    <message>
+        <source>Cannot explain this step</source>
+        <translation>无法解释此步骤</translation>
+    </message>
+    <message>
+        <source>Problems</source>
+        <translation>问题（Problems）</translation>
+    </message>
+    <message>
+        <source>Operator:</source>
+        <translation>算子:</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (evidence record rejected; see evidence record issues below).</source>
+        <translation>执行情况未知（证据记录被拒绝；见下方“证据记录问题”）。</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (plan mode: no run evidence for this step yet).</source>
+        <translation>执行情况未知（计划模式：尚无此步骤的运行证据）。</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (run %1 has no execution evidence for this step).</source>
+        <translation>执行情况未知（运行 %1 中没有此步骤的执行证据）。</translation>
+    </message>
+    <message>
+        <source>Execution</source>
+        <translation>执行情况（Execution）</translation>
+    </message>
+    <message>
+        <source>Evidence record issues (record rejected; entries below unavailable):</source>
+        <translation>证据记录问题（记录被拒绝，以下条目不可用）:</translation>
+    </message>
+    <message>
+        <source>Trust notes</source>
+        <translation>注意（Trust notes）</translation>
+    </message>
+</context>
+<context>
+    <name>LabCockpitDock</name>
+    <message>
+        <source>Project/record context switched: previous project artifacts, runs and capsule references cleared (no cross-project inheritance)</source>
+        <translation>项目/记录上下文已切换：已清除上一项目的产物、运行与胶囊引用（不做跨项目继承）</translation>
+    </message>
+    <message>
+        <source>Jump to Processing Toolbox</source>
+        <translation>跳转到处理工具箱</translation>
+    </message>
+    <message>
+        <source>Please run operator %1 in the existing Processing Toolbox / Guided Workflow (open the toolbox to run directly; Guided Workflow supports step-by-step execution).</source>
+        <translation>请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。（处理工具箱打开后可直接运行；Guided Workflow 支持分步执行 UI）</translation>
+    </message>
+    <message>
+        <source>Export failed: %1</source>
+        <translation>导出失败: %1</translation>
+    </message>
+    <message>
+        <source>Experiment record store not open: no run records to submit (no fabricated references)</source>
+        <translation>未打开实验记录库：没有可提交的运行记录（不做假引用）</translation>
+    </message>
+    <message>
+        <source>Failed to open the experiment record store: %1</source>
+        <translation>实验记录库打开失败: %1</translation>
+    </message>
+    <message>
+        <source>Cannot determine the owning experiment: no lab project open (no cross-experiment guessing)</source>
+        <translation>无法确定所属实验：未打开 lab 项目（不做跨实验猜测绑定）</translation>
+    </message>
+    <message>
+        <source>Failed to read the run record: %1</source>
+        <translation>无法读取运行记录: %1</translation>
+    </message>
+    <message>
+        <source>The experiment has no recorded runs yet (finish and save a run in the Processing Toolbox first)</source>
+        <translation>实验还没有已记录的运行（先在处理工具箱完成运行并保存）</translation>
+    </message>
+    <message>
+        <source>Failed to read the latest run record</source>
+        <translation>无法读取最新运行记录</translation>
+    </message>
+    <message>
+        <source>Bound to the latest recorded run: %1</source>
+        <translation>已绑定最新记录的运行: %1</translation>
+    </message>
+    <message>
+        <source>Dataset store unavailable (%1): dataset versions will be treated as unresolved records</source>
+        <translation>数据集库不可用（%1）：数据集版本将按未解析记录</translation>
+    </message>
+    <message>
+        <source>Recorded run %1 no longer exists; the next export will rebind to the latest run</source>
+        <translation>已记录的运行 %1 已不存在，下次导出将重新绑定最新运行</translation>
+    </message>
+    <message>
+        <source>Capsule build failed (%1): %2</source>
+        <translation>胶囊构建失败（%1）: %2</translation>
+    </message>
+    <message>
+        <source>Capsule write failed: %1</source>
+        <translation>胶囊写入失败: %1</translation>
+    </message>
+    <message>
+        <source>Capsule exported: %1 (%2 bytes)</source>
+        <translation>胶囊已导出: %1（%2 字节）</translation>
+    </message>
+    <message>
+        <source>(explainable workflow projection)
+</source>
+        <translation>（可解释工作流投影）
+</translation>
+    </message>
+    <message>
+        <source>
+Provenance badges: system fact | authoring guidance | inferred
+</source>
+        <translation>
+来源徽章: 系统事实 | 编写指引 | 推断
+</translation>
+    </message>
+</context>
 </TS>

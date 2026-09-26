@@ -34,7 +34,7 @@ RsOperatorCatalogPanel::RsOperatorCatalogPanel( QWidget *parent )
     : QgsDockWidget( parent )
 {
     setObjectName( QStringLiteral( "rsOperatorCatalogDock" ) );
-    setWindowTitle( tr( "遥感算子目录" ) );
+    setWindowTitle( tr( "Remote Sensing Operator Catalog" ) );
 
     auto *central = new QWidget( this );
     auto *layout = new QVBoxLayout( central );
@@ -42,32 +42,32 @@ RsOperatorCatalogPanel::RsOperatorCatalogPanel( QWidget *parent )
 
     m_search = new QLineEdit( central );
     m_search->setObjectName( QStringLiteral( "rsOperatorCatalogSearch" ) );
-    m_search->setAccessibleName( tr( "搜索算子" ) );
-    m_search->setPlaceholderText( tr( "搜索算子（名称/描述）…" ) );
+    m_search->setAccessibleName( tr( "Search operators" ) );
+    m_search->setPlaceholderText( tr( "Search operators (name/description)…" ) );
     m_search->setClearButtonEnabled( true );
     layout->addWidget( m_search );
 
     auto *filterRow = new QHBoxLayout;
-    filterRow->addWidget( new QLabel( tr( "输入模态：" ), central ) );
+    filterRow->addWidget( new QLabel( tr( "Input modality:" ), central ) );
     m_modalityFilter = new QComboBox( central );
     m_modalityFilter->setObjectName( QStringLiteral( "rsOperatorCatalogModality" ) );
-    m_modalityFilter->setAccessibleName( tr( "输入模态过滤" ) );
-    m_modalityFilter->addItem( tr( "全部" ), QString() );
+    m_modalityFilter->setAccessibleName( tr( "Input modality filter" ) );
+    m_modalityFilter->addItem( tr( "All" ), QString() );
     filterRow->addWidget( m_modalityFilter, 1 );
     filterRow->addStretch( 1 );
     layout->addLayout( filterRow );
 
     m_list = new QListWidget( central );
     m_list->setObjectName( QStringLiteral( "rsOperatorCatalogList" ) );
-    m_list->setAccessibleName( tr( "算子列表" ) );
+    m_list->setAccessibleName( tr( "Operator list" ) );
     m_list->setUniformItemSizes( true );
     m_list->setContextMenuPolicy( Qt::CustomContextMenu );
     m_list->setSelectionMode( QAbstractItemView::SingleSelection );
     layout->addWidget( m_list, 1 );
 
-    m_openBtn = new QPushButton( tr( "在任务面板中打开" ), central );
+    m_openBtn = new QPushButton( tr( "Open in task panel" ), central );
     m_openBtn->setObjectName( QStringLiteral( "rsOperatorCatalogOpen" ) );
-    m_openBtn->setAccessibleName( tr( "在任务面板中打开" ) );
+    m_openBtn->setAccessibleName( tr( "Open in task panel" ) );
     m_openBtn->setEnabled( false );
     layout->addWidget( m_openBtn );
 
@@ -258,7 +258,7 @@ void RsOperatorCatalogPanel::onContextRequested( const QPoint &pos )
     const QString id = item->data( Qt::UserRole ).toString();
     QMenu menu( this );
     QAction *favoriteAction =
-        menu.addAction( m_favorites.contains( id ) ? tr( "取消收藏" ) : tr( "收藏" ) );
+        menu.addAction( m_favorites.contains( id ) ? tr( "Unfavorite" ) : tr( "Favorite" ) );
     QAction *chosen = menu.exec( m_list->mapToGlobal( pos ) );
     if ( chosen == favoriteAction )
         toggleFavorite( id );
