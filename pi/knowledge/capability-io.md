@@ -13,6 +13,7 @@
 - 输出：bandCount（integer）、completeness（string）、output（raster）、productId（string）、sensorKey（string）
 - 参数：apply_calibration（boolean）、bands（string）、input（string）、output（string）
 - 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)；离线可用：仅解析产品自带文件；传感器画像来自 data/products/sensor_profiles。
+- 局限：离线导入：需要产品目录内含 CRESDA sidecar XML 与 TIFF；可识别家族以自动识别列表为准（GF-1/2/6/7、ZY-3、ZY-1 02C、HJ-1/2 CCD），未识别家族按导入计划失败路径处理。
 - 适用地物：任意地物
 - 适用场景：不确定产品家族时的统一入口、Agent 自动化数据准备
 - 失败模式：
@@ -32,6 +33,7 @@
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：apply_calibration（boolean）、bands（string）、input（string）、output（string）
 - 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)；离线可用：仅解析产品自带文件；大部分批次需另查发布定标表做 TOA 转换。
+- 局限：离线导入：需要产品目录内含 CRESDA sidecar XML 与 TIFF；覆盖 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD 的 L1A 产品包。；定标为可选步骤：apply_calibration=true 且 sidecar 声明系数时才执行 DN→辐亮度；否则仅标记 SICNU_* 定标/太阳几何元数据。
 - 适用地物：任意地物
 - 适用场景：高分系列数据处理入口、国内教学数据标准化导入
 - 失败模式：
@@ -50,6 +52,7 @@
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：apply_calibration（boolean）、bands（string）、input（string）、output（string）
 - 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
+- 局限：覆盖 HJ-1A/1B CCD 与 HJ-2A/B CCD 的 L1A 产品；波段角色固定映射 B1–B4，非 CCD 传感器不在本算子范围。
 - 适用地物：植被、水体、灾区
 - 适用场景：环境减灾数据处理入口、灾区快速 NDVI/水体提取
 - 失败模式：
@@ -68,6 +71,7 @@ Landsat 数据导入：读取 Landsat 系列（5/7/8/9）产品包，自动解�
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：bands（string）、input（string）、output（string）
 - 前置条件：Scene directory with *_MTL.txt and band GeoTIFFs
+- 局限：覆盖 Landsat 5/7/8/9 产品包：自动解析元数据完成定标、角度与 QA 波段组织；非 Landsat 系列不在本算子范围。；导入后角色化堆栈（如 B2–B5）可直接接 rs:spectral_index；定标系数与角度以产品元数据声明为准。
 - 适用地物：任意地物
 - 适用场景：Landsat 存档数据处理入口、长时序生产的标准化输入
 - 失败模式：
@@ -86,6 +90,7 @@ MODIS 地理参考处理：把 Sinusoidal/Integerized 网格的 MODIS 数据重�
 - 输出：dstCrs（string）、output（raster）、tileH（integer）、tileV（integer）
 - 参数：dstCrs（string）、input（string）、output（string）、resampling（enum）、tileH（integer）、tileV（integer）
 - 前置条件：Filename containing hXXvYY, or explicit tileH/tileV parameters
+- 局限：仅处理 Sinusoidal / Integerized 网格的 MODIS 产品：输出对齐到用户目标网格，几何对齐质量受源分辨率与目标网格匹配度限制。
 - 适用地物：任意地物（MODIS）
 - 适用场景：MODIS 本地网格对齐、时序生产的网格统一
 - 失败模式：
@@ -103,6 +108,7 @@ MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影�
 - 输出：bandCount（integer）、output（raster）、productId（string）、tileH（integer）、tileV（integer）
 - 参数：bands（string）、input（string）、output（string）
 - 前置条件：GDAL with HDF4 and/or HDF5 for NASA .hdf; GeoTIFF exports always work
+- 局限：读取 MODIS HDF 产品（MOD13Q1 等）：完成重投影与 scale/offset 定标缩放，输出为缩放后的物理值栅格；未覆盖的产品族按导入失败路径处理。
 - 适用地物：植被、地表温度、积雪
 - 适用场景：大区域低分辨率时序生产、全球产品本地化
 - 失败模式：
@@ -121,11 +127,18 @@ MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影�
 - 输出：ce90Px（numeric）、coverageRatio（numeric）、inlierCount（integer）、inlierRmsePx（numeric）、output（raster）、reason（string）、rmsePx（numeric）、status（string）
 - 参数：maxDim（integer）、metric（enum）、output（string）、reference（string）、reportPath（string）、resampling（enum）、source（string）
 - 前置条件：Source and reference rasters readable by GDAL
+- 局限：拒配时 fail-closed 不写输出：宁缺毋滥；低置信配准结果会标记待审，不声称达到标称精度。；配准精度报告（CE90/残差场）基于匹配点拟合，不等于全图逐像元几何精度。
+- 适用地物：光学-SAR 跨模态叠合区
+- 适用场景：跨模态影像配准、变化检测前的几何统一
+- 适用性备注：输出配准结果与 CE90/残差场质量报告；低置信结果标记待审。
 - 失败模式：
   - `COREGISTRATION_FAILED` — 跨模态匹配被拒（too_few_matches、flat_region、low_peak_snr 等），或共识内点少于 3 个、仿射拟合失败。处置：更换 metric（如 mutual_information）、检查两景重叠与辐射差异后重试
   - `DATASET_NOT_FOUND` — source 或 reference 栅格无法用 GDAL 打开，或读取其 band 1 失败。处置：确认两幅影像路径正确且可被 GDAL 读取
   - `INVALID_PARAMETER` — 缺少必需参数 source、reference 或 output。处置：补齐三个必需参数
   - `EXECUTION_FAILED` — 仿射求解后的重采样 warp 失败，或输出 GeoTIFF 创建/写入失败。处置：检查输出路径可写、磁盘空间与 GDAL 驱动可用性
+- 教学概念：影像配准、特征匹配、CE90 精度评定、残差场、重采样
+- 适用课程：摄影测量与遥感、微波遥感
+- 典型练习：对光学与 SAR 影像执行跨模态配准，读取 CE90 与残差场报告，并验证拒配（fail-closed）路径不产出结果文件。
 
 ## rs:sentinel2_import
 
@@ -136,6 +149,7 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：bands（string）、input（string）、output（string）、resolution（enum）
 - 前置条件：Unzipped .SAFE tree with GRANULE/IMG_DATA rasters
+- 局限：解析 SAFE/JP2 结构的 Sentinel-2 产品包：输出保留 10/20/60 m 多分辨率组织并附 SCL 掩膜；非 SAFE/JP2 结构按导入失败路径处理。
 - 适用地物：任意地物
 - 适用场景：Sentinel-2 处理入口、红边/SWIR 应用数据准备
 - 失败模式：
@@ -154,10 +168,17 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 输出：disconnectedScenes（integer）、maxEdgeResidualPx（numeric）、reference（string）、rmsEdgeResidualPx（numeric）、status（string）
 - 参数：observations（string）、reference（string）、reportPath（string）、scenes（string）
 - 前置条件：Pairwise translations measured by rs:register_images (or the agent tool)
+- 局限：仅估计全局平移：旋转、缩放与局部形变需上游处理；断开景被显式报告而非静默丢弃，闭合漂移超阈值时应人工复核。
+- 适用地物：多时相堆栈生产区
+- 适用场景：时序堆栈构建前的平移配准
+- 适用性备注：仅处理成对平移观测（无旋转/缩放）。
 - 失败模式：
   - `COREGISTRATION_FAILED` — 成对观测约束不足，平差解算被拒（观测为空、控制几何退化或超出场景上限）。处置：用 rs:register_images 补齐成对 tx/ty 观测，或拆分场景集后重试
   - `INVALID_PARAMETER` — 缺少必需参数 scenes 或 observations。处置：传入场景 id 数组与成对观测数组
   - `EXECUTION_FAILED` — 解算报告 sidecar（reportPath）原子写入失败。处置：检查报告路径可写后重试
+- 教学概念：全局平移平差、最小二乘、回路闭合漂移、边残差
+- 适用课程：遥感数字图像处理
+- 典型练习：对多景影像执行堆栈配准，解读回路闭合漂移指标（最大/RMS 边残差）并定位被报告的断开景。
 
 ## rs:zy3_import
 
@@ -168,6 +189,7 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：apply_calibration（boolean）、bands（string）、input（string）、output（string）
 - 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
+- 局限：读取 ZY-3 TLC/NAD/FWD/BWD 的 L1A 产品：全色/多光谱按声明波段清单自动区分并映射角色；非 ZY-3 产品不在本算子范围。
 - 适用地物：任意地物
 - 适用场景：资源三号立体测绘数据处理、教学立体观察数据准备
 - 失败模式：

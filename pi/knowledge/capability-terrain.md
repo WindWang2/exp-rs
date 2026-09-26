@@ -14,6 +14,7 @@
 - 输出：height（integer）、output（raster）、product（string）、width（integer）
 - 参数：cellSize（numeric）、nodata（numeric）、output（string）、product（enum）、sunAzimuth（numeric）、sunElevation（numeric）、zFactor（numeric）
 - 前置条件：建议使用投影坐标系（米制）的 DEM。
+- 局限：地形因子精度由 DEM 分辨率与质量决定：平坦区坡度/坡向对 DEM 噪声敏感；山体阴影是可视化产品，不用于定量辐射校正。
 - 适用地物：山地、丘陵、河谷
 - 适用场景：地形因子制图、滑坡/水土流失分析的基础图层
 - 失败模式：
