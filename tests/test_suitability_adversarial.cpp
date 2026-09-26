@@ -30,6 +30,7 @@
 #include "suitability/dataset_facts.h"
 #include "suitability/scene_candidate.h"
 #include "suitability/suitability_assessor.h"
+#include "suitability/suitability_provider.h"
 #include "suitability/suitability_goal.h"
 #include "suitability/suitability_profiles.h"
 #include "suitability/suitability_report.h"
@@ -63,6 +64,7 @@ using sicnu::dataset::SampleKind;
 using sicnu::dataset::SampleRecord;
 using sicnu::suitability::DatasetFacts;
 using sicnu::suitability::FactsLimits;
+using sicnu::suitability::InMemoryDataProvider;
 using sicnu::suitability::kMaxGridPairs;
 using sicnu::suitability::ResolvedRequirements;
 using sicnu::suitability::SceneCandidate;
@@ -1397,4 +1399,87 @@ TEST_CASE( "unrepresentable integral facts fields from json fail typed like goal
     REQUIRE( extentOk.has_value() );
     REQUIRE( extentOk.value().minX == 10.0 );
     REQUIRE( extentOk.value().maxY == 40.0 );
+}
+
+// ---------------------------------------------------------------------------
+// Track 16 WP-F: the provider seam boundary — a named dataset is never
+// silently assessed without its facts.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Spy provider: records every consultation.
+class SpyProvider final : public sicnu::suitability::SuitabilityDataProvider
+{
+    public:
+        mutable int consultations = 0;
+        sicnu::data::Result<sicnu::suitability::DatasetFacts> datasetFacts(
+            const QString &, const sicnu::suitability::FactsLimits & ) const override
+        {
+            ++consultations;
+            return sicnu::data::Result<sicnu::suitability::DatasetFacts>::success(
+                sicnu::suitability::DatasetFacts{} );
+        }
+};
+
+} // namespace
+
+TEST_CASE( "a failing provider fails the named dataset typed — never silently "
+           "assessed",
+           "[suitability][track16][provider]" )
+{
+    SuitabilityAssessor::Inputs inputs;
+    inputs.goal = perfectGoal();
+    inputs.datasetVersionId = QStringLiteral( "dv-track16" );
+    static const sicnu::data::Diagnostic failure{
+        QStringLiteral( "suitability.store_read_failed" ),
+        QStringLiteral( "injected track-16 failure" ) };
+    const InMemoryDataProvider provider( failure );
+    inputs.provider = &provider;
+
+    const auto result = SuitabilityAssessor::assess( inputs );
+    REQUIRE_FALSE( result.has_value() );
+    REQUIRE( result.diagnostics().size() == 1 );
+    CHECK( result.diagnostics().first().code == QStringLiteral( "suitability.store_read_failed" ) );
+}
+
+TEST_CASE( "explicit facts take precedence; the provider channel is not "
+           "consulted",
+           "[suitability][track16][provider]" )
+{
+    SuitabilityAssessor::Inputs inputs = perfectInputs();
+    inputs.datasetVersionId = QStringLiteral( "dv-track16" );
+    SpyProvider spy;
+    inputs.provider = &spy;
+
+    const auto result = SuitabilityAssessor::assess( inputs );
+    REQUIRE( result.has_value() );
+    CHECK( spy.consultations == 0 );
+}
+
+TEST_CASE( "the provider is consulted only when facts are absent and a dataset "
+           "version names the subject",
+           "[suitability][track16][provider]" )
+{
+    // Scenes alone, no facts, no version id: the provider must stay quiet.
+    {
+        SuitabilityAssessor::Inputs inputs;
+        inputs.goal = perfectGoal();
+        inputs.scenes = perfectScenes();
+        SpyProvider spy;
+        inputs.provider = &spy;
+        const auto result = SuitabilityAssessor::assess( inputs );
+        REQUIRE( result.has_value() );
+        CHECK( spy.consultations == 0 );
+    }
+    // Facts absent + version id present: the provider channel serves.
+    {
+        SuitabilityAssessor::Inputs inputs;
+        inputs.goal = perfectGoal();
+        inputs.datasetVersionId = QStringLiteral( "dv-track16" );
+        const InMemoryDataProvider provider( perfectFacts() );
+        inputs.provider = &provider;
+        const auto result = SuitabilityAssessor::assess( inputs );
+        REQUIRE( result.has_value() );
+    }
 }
