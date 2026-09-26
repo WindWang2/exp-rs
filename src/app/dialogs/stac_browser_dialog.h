@@ -19,6 +19,9 @@ class StacBrowserDialog : public QDialog
 public:
     explicit StacBrowserDialog(QgsMapCanvas *canvas, QWidget *parent = nullptr);
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void searchCatalog();
     void onSearchCompleted(const QVariantList &features, const QString &error,

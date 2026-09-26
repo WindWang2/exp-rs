@@ -15,6 +15,12 @@ class StacClient : public QObject
 signals:
     void searchCompleted(const QVariantList &features, const QString &error = QString(),
                          const QUrl &nextPage = QUrl());
+    /// F-02 (ui-backend-state-parity-r4): a finished reply whose query
+    /// generation was superseded (a newer search started, the host dialog
+    /// closed, or the query timed out after its successor succeeded). The
+    /// payload is the drop reason — the observable trace for late-arrival
+    /// drops, so a silent swallow is impossible (parity landing policy).
+    void searchDropped(const QString &reason);
 
 public:
     explicit StacClient(QObject *parent = nullptr) : QObject(parent) {}
@@ -51,6 +57,11 @@ public:
     /// No-op when no next page exists.
     void searchNext();
 
+    /// F-04: invalidate every in-flight search (host dialog closed). Late
+    /// replies are dropped with a searchDropped trace instead of mutating
+    /// hidden state.
+    void cancelInFlight() { ++m_searchGeneration; }
+
     void search(const QString &endpoint, const QString &collection,
                 const QString &datetime, const QStringList &bbox,
                 int limit = 50);
@@ -60,6 +71,10 @@ private:
 
 private:
     QUrl m_nextPage;
+    /// Monotonic query generation (same shape as RsScanPool's generation
+    /// token, DECISIONS D-1): every user-initiated search supersedes every
+    /// older one; superseded replies are dropped with a trace.
+    int m_searchGeneration = 0;
 
     void runSearch(const QUrl &url);
 };

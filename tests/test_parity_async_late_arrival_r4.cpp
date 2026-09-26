@@ -354,6 +354,8 @@ TEST_CASE( "AS-2: superseded query's timeout error never reaches the completion 
   StacClient client;
   QSignalSpy done( &client, &StacClient::searchCompleted );
   REQUIRE( done.isValid() );
+  QSignalSpy dropped( &client, &StacClient::searchDropped );
+  REQUIRE( dropped.isValid() );
 
   client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
   client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
@@ -377,6 +379,9 @@ TEST_CASE( "AS-2: superseded query's timeout error never reaches the completion 
 
   INFO( "completion deliveries: " << done.count() );
   CHECK( done.count() == 1 );
+  // The drop must be traceable, never silent (landing-policy contract).
+  INFO( "drop traces: " << dropped.count() );
+  CHECK( dropped.count() == 1 );
 }
 
 // ===========================================================================
@@ -393,6 +398,8 @@ TEST_CASE( "AS-3: results arriving after the dialog closed do not mutate the hid
   QPointer<StacBrowserDialog> dialog( new StacBrowserDialog( nullptr ) );
   dialog->show();
   QTest::qWaitForWindowExposed( dialog );
+  QSignalSpy dropped( dialog->findChild<StacClient *>(), &StacClient::searchDropped );
+  REQUIRE( dropped.isValid() );
 
   triggerDialogSearch( *dialog, stub.endpoint() );
   for ( int i = 0; i < 50 && stub.parkedCount() < 1; ++i )
@@ -416,6 +423,9 @@ TEST_CASE( "AS-3: results arriving after the dialog closed do not mutate the hid
 
   INFO( "hidden dialog rows after late delivery: " << table->rowCount() );
   CHECK( table->rowCount() == 0 );
+  // The host-close invalidation must be traceable too (AS-3 drop contract).
+  INFO( "drop traces: " << dropped.count() );
+  CHECK( dropped.count() == 1 );
   dialog->deleteLater();
 }
 

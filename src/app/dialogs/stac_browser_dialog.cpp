@@ -38,6 +38,16 @@ StacBrowserDialog::StacBrowserDialog( QgsMapCanvas *canvas, QWidget *parent )
            this, &StacBrowserDialog::onSearchCompleted );
 }
 
+void StacBrowserDialog::closeEvent( QCloseEvent *event )
+{
+  // F-04 (ui-backend-state-parity-r4): closing the dialog ends its queries
+  // logically. Replies landing afterwards are dropped by the client's
+  // generation check (searchDropped trace) instead of mutating the hidden
+  // dialog's result state behind the user's back.
+  m_stacClient->cancelInFlight();
+  QDialog::closeEvent( event );
+}
+
 void StacBrowserDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
