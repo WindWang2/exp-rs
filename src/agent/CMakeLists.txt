@@ -286,6 +286,13 @@ target_link_libraries(sicnu_agent PUBLIC
   # repair_capability_source adapts the live knowledge to the repair
   # planner's provider seam (Qt-free leaf).
   sicnu_repair_planner
+  # agent_session_adapter (tools/) implements the agent_loop seams and calls
+  # VerificationReport::aggregate (session_seams.cpp); its public header
+  # exposes agent_loop types, hence PUBLIC. Missing before: every consumer
+  # of libsicnu_agent.so failed to link on the undefined symbol
+  # (same master build break open PR #1335 repairs; carried locally so the
+  # heavy test lane links on this branch).
+  sicnu_agent_loop
   # sicnu.lab-pack/1: lab_data_pack is a Qt façade over the Qt-free shared
   # leaf — the ONE parser/validator shared with sicnu::teaching_admin.
   sicnu_lab_pack

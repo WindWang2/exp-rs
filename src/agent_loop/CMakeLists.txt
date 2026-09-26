@@ -20,6 +20,10 @@ target_include_directories( sicnu_agent_loop PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_agent_loop PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # Consumed by the SHARED libsicnu_agent (same pattern as sicnu_agent_ops);
+    # without PIC the static archive cannot link into the .so on non-PIE
+    # toolchains (carried with the sicnu_agent link-line fix, open PR #1335).
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_contracts: the canonical target when the
