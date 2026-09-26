@@ -33,33 +33,9 @@
 #include "jobs/job_engine.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "support/qt_lifecycle.h"
 
-// QgsProject::read/write (the store-open path touches the project DOM via
-// the serializer? no — but ProjectContext construction paths have the same
-// glibc atexit precedent as the other suites exercising QgsProjContext).
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-        std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                      ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                      static_cast<unsigned>( stats.totals.assertions.passed ),
-                      static_cast<unsigned>( stats.totals.assertions.passed
-                                             + stats.totals.assertions.failed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed
-                                             + stats.totals.testCases.failed ) );
-        std::fflush( stderr );
-        std::_Exit( ok ? 0 : 1 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -71,8 +47,7 @@ QCoreApplication *ensureApp()
 {
   if ( !QCoreApplication::instance() )
   {
-    static QCoreApplication app( fake_argc, fake_argv );
-    return &app;
+    return sicnu::test::qtlifecycle::heapQCoreApplication( fake_argc, fake_argv );
   }
   return static_cast<QCoreApplication *>( QCoreApplication::instance() );
 }
