@@ -1,8 +1,8 @@
 # ROLLBACK_CONTRACT — exprs plugin registry transactions (Track R4)
 
-Status: DRAFT (state machine transcribed from `src/sdk/exprs/plugin_registry.cpp`
-@ master `15e5c66b5`; the doc↔test cross-reference table is finalized in WP-G
-after the full suite runs twice).
+Status: ACTIVE (state machine transcribed from `src/sdk/exprs/plugin_registry.cpp`
+@ master `15e5c66b5`; cross-reference table finalized against the WP-F double
+green run — see §6).
 
 This document is the normative transaction contract the r4 test suite pins.
 Every rule cites the implementation seam it is enforced by and (once WP-G
@@ -84,7 +84,31 @@ retry idempotent, `unloadAll()` clean, registry reusable.
 Both channels: typed code (never `None`), non-empty message, attributed to the
 declared plugin id. Pins: `tests/test_plugin_channel_parity_r4.cpp`.
 
-## 6. Doc ↔ test cross-reference (WP-G final table)
+## 6. Doc ↔ test cross-reference (WP-G final table — every link verified green)
 
-To be completed after the double green run — every contract row above must
-cite at least one green TEST_CASE name; dead links fail the WP-G gate.
+| contract row | green test evidence (suite → TEST_CASE) |
+|---|---|
+| §1 S1 stage-validate | test_exprs_plugin_loader → "installOrUpgrade refuses a bad manifest before touching the install"; test_plugin_lifecycle_halffail_r4 → "an invalid dependency spec refuses validation before any load" |
+| §1 S2 policy gate | test_exprs_plugin_loader → "installOrUpgrade refuses a policy-gated manifest before draining v1" |
+| §1 S3 ownership fence | test_exprs_plugin_loader → "concurrent installOrUpgrade on the same id refuses the second"; "installOrUpgrade refuses a plugin shadowed by an earlier root" |
+| §1 S4 snapshot refused | test_exprs_plugin_loader family (quota/unsafe snapshot refusals); test_plugin_lifecycle_halffail_r4 → all mid-fail cases pin "snapshot root empty" |
+| §1 S5 migration abort | test_exprs_plugin_loader → "installOrUpgrade aborts on a failed state migration with v1 untouched" |
+| §1 S6 drain refusal | test_exprs_plugin_loader → "installOrUpgrade refuses the drain when the plugin is busy"; test_plugin_lifecycle_unload_order_r4 → "a busy plugin refuses the unload and stays fully usable" |
+| §1 R1 swap-failed rollback | test_exprs_plugin_loader → "installOrUpgrade rolls back when the package fails checksum verification" |
+| §1 R2 publish-failed rollback | test_exprs_plugin_loader → "installOrUpgrade rolls back when the new version cannot load" (host-process runtime absent) |
+| §1 I1 exact-restore | test_exprs_plugin_loader → :1226 case (version/permissions/capabilities compared to v1's) |
+| §1 I2 snapshot consumed | test_exprs_plugin_loader → :1138 case ("snapshot root is EMPTY") + :1226 (no upgrade- residue) |
+| §1 I4 evidence survives refresh | test_exprs_plugin_loader → reload/upgrade rollback cases (typed codes asserted after refresh) |
+| §2 R0 dev gate | test_exprs_plugin_loader → "hot reload is refused unless BOTH the caller and host policy allow dev mode" |
+| §2 R2 stage-validate | test_exprs_plugin_loader → "hot reload swaps in a valid new manifest and refuses a broken one" (Windows-only failure NOT reproduced on Linux, EVIDENCE.md §1) |
+| §2 R3 last-known-good | test_exprs_plugin_loader → "hot reload rolls back to the snapshot when the new code cannot load" |
+| §2 R4 migration | test_exprs_plugin_loader → "hot reload aborts on a failed state migration with the old version loaded" |
+| §3 unload order | test_plugin_lifecycle_unload_order_r4 → "unload drains first, revokes while mapped, then tears down" (strict begin<wait<revoke order, bounded budget, reload-after) |
+| §3 busy refusal | test_plugin_lifecycle_unload_order_r4 → "a busy plugin refuses the unload..."; drain boundedness → "the drain wait is bounded..." |
+| §3 snapshot race | test_plugin_lifecycle_unload_order_r4 → "unloading while the last-good capture is in flight..."; sibling: test_exprs_plugin_loader → "registry teardown joins an in-flight snapshot capture" |
+| §4 half-init contract | test_plugin_lifecycle_halffail_r4 → all 9 cases (dlopen / nullptr / throw / id mismatch / initfail / initthrow / dependency spec / retry idempotent / unloadAll clean) |
+| §5 dual-channel mapping | test_plugin_channel_parity_r4 → 3 cases; drift pinned per DECISIONS.md D-6 |
+| pollution gate (WP-F) | test_plugin_pollution_gate_r4 → 3 cases (invisible+typed / trust gate / first-root-wins impersonation) |
+
+Suite status at finalization: all 20 plugin/exprs suites green twice
+consecutively (WP-F gate, EVIDENCE.md §2).
