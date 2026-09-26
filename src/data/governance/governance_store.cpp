@@ -2,6 +2,7 @@
 #include "governance_store.h"
 
 #include "data/query_cursor.h"
+#include "runtime/observability/fault_point.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -212,7 +213,7 @@ struct GovernanceStore::Impl
     // rolls back and reports failure.
     bool commit() const
     {
-        if ( exec( "COMMIT" ) )
+        if ( !SICNU_FAULT_POINT( "governance_store.commit" ) && exec( "COMMIT" ) )
             return true;
         exec( "ROLLBACK" );
         return false;

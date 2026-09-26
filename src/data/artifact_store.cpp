@@ -2,6 +2,8 @@
 // bookkeeping. See artifact_store.h for the contract.
 #include "artifact_store.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
@@ -333,7 +335,7 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
     // The mutex is recursive: a caller may already hold an open transaction
     // (nested register). A failed BEGIN here means we must not run the INSERT
     // (it would join the caller's transaction) nor COMMIT it away.
-    if ( !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+    if ( SICNU_FAULT_POINT( "artifact_store.begin" ) || !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
         return Result<ArtifactRecord>::failure(
             diag( QStringLiteral( "artifact.transaction" ), lastError( m_impl->db ) ) );
     {
@@ -363,14 +365,14 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
         s.bind( 12, QStringLiteral( "live" ) );
         s.bind( 13, ts );
         s.bind( 14, ts );
-        if ( !s.step() )
+        if ( SICNU_FAULT_POINT( "artifact_store.step" ) || !s.step() )
         {
             const QString err = lastError( m_impl->db );
             m_impl->exec( "ROLLBACK", nullptr );
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), err ) );
         }
     }
-    if ( !m_impl->exec( "COMMIT", nullptr ) )
+    if ( SICNU_FAULT_POINT( "artifact_store.commit" ) || !m_impl->exec( "COMMIT", nullptr ) )
     {
         // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
         // roll back so the connection never leaks its write lock.
