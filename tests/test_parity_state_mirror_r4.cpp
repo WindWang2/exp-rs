@@ -163,7 +163,7 @@ QgsRasterLayer *addRasterToProject( const QString &path, const QString &name )
 // GW-1: the workflow list mirrors the loader result row-for-row.
 // ===========================================================================
 TEST_CASE( "GW-1: guided workflow list mirrors the LabSpec loader result",
-           "[parity][mirror][guided_workflow]" )
+           "[parity][mirror][guided_workflow][parity-gw1]" )
 {
   ensureApp();
   QTemporaryDir dataDir;
@@ -193,7 +193,7 @@ TEST_CASE( "GW-1: guided workflow list mirrors the LabSpec loader result",
 // error page and disarms the session state.
 // ===========================================================================
 TEST_CASE( "GW-2: error entry selects a typed error page and disarms the session",
-           "[parity][mirror][guided_workflow]" )
+           "[parity][mirror][guided_workflow][parity-gw2]" )
 {
   ensureApp();
   QTemporaryDir dataDir;
@@ -221,7 +221,7 @@ TEST_CASE( "GW-2: error entry selects a typed error page and disarms the session
 // GW-3: start-enable equals walkability (steps non-empty).
 // ===========================================================================
 TEST_CASE( "GW-3: start button enabled exactly when the workflow has steps",
-           "[parity][mirror][guided_workflow]" )
+           "[parity][mirror][guided_workflow][parity-gw3]" )
 {
   ensureApp();
   QTemporaryDir dataDir;
@@ -278,7 +278,7 @@ TEST_CASE( "GW-3: start button enabled exactly when the workflow has steps",
 // step list, and Run on a manual step does not emit a job.
 // ===========================================================================
 TEST_CASE( "GW-5: step cursor never passes the workflow's step list",
-           "[parity][mirror][guided_workflow]" )
+           "[parity][mirror][guided_workflow][parity-gw5]" )
 {
   ensureApp();
   QTemporaryDir dataDir;
@@ -329,7 +329,7 @@ TEST_CASE( "GW-5: step cursor never passes the workflow's step list",
 // SW-1: a valid spectral table load renders count + provenance identity.
 // ===========================================================================
 TEST_CASE( "SW-1: spectral panel renders the loaded table identity",
-           "[parity][mirror][spectral_workbench]" )
+           "[parity][mirror][spectral_workbench][parity-sw1]" )
 {
   ensureApp();
   QTemporaryDir tmp;
@@ -359,7 +359,7 @@ TEST_CASE( "SW-1: spectral panel renders the loaded table identity",
 // SW-2: an unloadable/invalid table fails typed with zero spectra retained.
 // ===========================================================================
 TEST_CASE( "SW-2: spectral panel refuses an invalid table fail-safe",
-           "[parity][mirror][spectral_workbench]" )
+           "[parity][mirror][spectral_workbench][parity-sw2]" )
 {
   ensureApp();
   SpectralWorkbenchPanel panel;
@@ -374,7 +374,7 @@ TEST_CASE( "SW-2: spectral panel refuses an invalid table fail-safe",
 // (id, index) pair the linkage seam documents.
 // ===========================================================================
 TEST_CASE( "SW-3: spectrum selection projects id and index",
-           "[parity][mirror][spectral_workbench]" )
+           "[parity][mirror][spectral_workbench][parity-sw3]" )
 {
   ensureApp();
   QTemporaryDir tmp;
@@ -405,7 +405,7 @@ TEST_CASE( "SW-3: spectrum selection projects id and index",
 // artifact double-click contract.
 // ===========================================================================
 TEST_CASE( "RS-1: result summary renders the payload's identity and metrics",
-           "[parity][mirror][result_summary]" )
+           "[parity][mirror][result_summary][parity-rs1]" )
 {
   ensureApp();
   RsResultSummary summary;
@@ -426,7 +426,7 @@ TEST_CASE( "RS-1: result summary renders the payload's identity and metrics",
 }
 
 TEST_CASE( "RS-2: clearing the summary empties every rendered block",
-           "[parity][mirror][result_summary]" )
+           "[parity][mirror][result_summary][parity-rs2]" )
 {
   ensureApp();
   RsResultSummary summary;
@@ -443,7 +443,7 @@ TEST_CASE( "RS-2: clearing the summary empties every rendered block",
 }
 
 TEST_CASE( "RS-3: double-clicking an artifact requests exactly its path",
-           "[parity][mirror][result_summary]" )
+           "[parity][mirror][result_summary][parity-rs3]" )
 {
   ensureApp();
   RsResultSummary summary;
@@ -473,7 +473,7 @@ TEST_CASE( "RS-3: double-clicking an artifact requests exactly its path",
 // must not mark owner B's still-current generation stale.
 // ===========================================================================
 TEST_CASE( "SP-1: generation supersede respects owner scoping",
-           "[parity][mirror][scan_pool]" )
+           "[parity][mirror][scan_pool][parity-sp1]" )
 {
   ensureApp();
   auto &pool = RsScanPool::instance();
@@ -496,7 +496,7 @@ TEST_CASE( "SP-1: generation supersede respects owner scoping",
 // provided — no programmatic path can commit an out-of-range index.
 // ===========================================================================
 TEST_CASE( "TS-1: scrubber index stays within the source timeline bounds",
-           "[parity][mirror][timeline]" )
+           "[parity][mirror][timeline][parity-ts1]" )
 {
   ensureApp();
   sicnu::gui::TimelineScrubberWidget scrubber;
@@ -524,7 +524,7 @@ TEST_CASE( "TS-1: scrubber index stays within the source timeline bounds",
 // last slice emits playbackFinished exactly once.
 // ===========================================================================
 TEST_CASE( "TS-2: playback finishes at the last slice and pauses",
-           "[parity][mirror][timeline]" )
+           "[parity][mirror][timeline][parity-ts2]" )
 {
   ensureApp();
   sicnu::gui::TimelineScrubberWidget scrubber;
@@ -548,7 +548,7 @@ TEST_CASE( "TS-2: playback finishes at the last slice and pauses",
 // CW-1/CW-2: comparison widget signal contract + mode branches.
 // ===========================================================================
 TEST_CASE( "CW-1: mode and flicker changes emit their contracts exactly",
-           "[parity][mirror][comparison]" )
+           "[parity][mirror][comparison][parity-cw1]" )
 {
   ensureApp();
   ComparisonWidget widget;
@@ -570,7 +570,7 @@ TEST_CASE( "CW-1: mode and flicker changes emit their contracts exactly",
 }
 
 TEST_CASE( "CW-2: images set through the source are reported as held",
-           "[parity][mirror][comparison]" )
+           "[parity][mirror][comparison][parity-cw2]" )
 {
   ensureApp();
   ComparisonWidget widget;
@@ -591,7 +591,7 @@ TEST_CASE( "CW-2: images set through the source are reported as held",
 // actionClicked emissions.
 // ===========================================================================
 TEST_CASE( "ES-0: empty state CTA honours visibility gating",
-           "[parity][mirror][empty_state]" )
+           "[parity][mirror][empty_state][parity-es0]" )
 {
   ensureApp();
   sicnu::RsEmptyStateWidget widget( QStringLiteral( "layers" ),
@@ -615,7 +615,7 @@ TEST_CASE( "ES-0: empty state CTA honours visibility gating",
 // RL-1: the combo's items equal the project's valid raster layer set.
 // ===========================================================================
 TEST_CASE( "RL-1: raster combo mirrors the project's valid raster set",
-           "[parity][mirror][raster_combo]" )
+           "[parity][mirror][raster_combo][parity-rl1]" )
 {
   ensureApp();
   QgsProject::instance()->clear();
@@ -645,7 +645,7 @@ TEST_CASE( "RL-1: raster combo mirrors the project's valid raster set",
 // reflected — the project layer set is the source of truth, not a snapshot.
 // ===========================================================================
 TEST_CASE( "RL-2: raster combo tracks project layer changes while alive",
-           "[parity][mirror][raster_combo]" )
+           "[parity][mirror][raster_combo][parity-rl2]" )
 {
   ensureApp();
   QgsProject::instance()->clear();

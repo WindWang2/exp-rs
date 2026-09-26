@@ -296,7 +296,7 @@ bool deliverAutoLoadRequest( const QString &path )
 // overwrite the newer search's results.
 // ===========================================================================
 TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer search",
-           "[parity][async][stac]" )
+           "[parity][async][stac][parity-as1]" )
 {
   ensureApp();
   StacHttpStub stub;
@@ -345,7 +345,7 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
 // a fresh error box for an already-superseded search.
 // ===========================================================================
 TEST_CASE( "AS-2: superseded query's late failure does not disturb the newer session",
-           "[parity][async][stac][timeout][slow]" )
+           "[parity][async][stac][timeout][slow][parity-as2]" )
 {
   ensureApp();
   StacHttpStub stub;
@@ -387,7 +387,7 @@ TEST_CASE( "AS-2: superseded query's late failure does not disturb the newer ses
 // search — the hidden dialog must not mutate.
 // ===========================================================================
 TEST_CASE( "AS-3: results arriving after the dialog closed do not mutate the hidden state",
-           "[parity][async][stac]" )
+           "[parity][async][stac][parity-as3]" )
 {
   ensureApp();
   StacHttpStub stub;
@@ -425,7 +425,7 @@ TEST_CASE( "AS-3: results arriving after the dialog closed do not mutate the hid
 // after the shell moved to project B.
 // ===========================================================================
 TEST_CASE( "AS-4: layer auto-load from a superseded session does not land in the new project",
-           "[parity][async][autoload][slow]" )
+           "[parity][async][autoload][slow][parity-as4]" )
 {
   ensureApp();
   ShellFixture fx;
@@ -465,7 +465,7 @@ TEST_CASE( "AS-4: layer auto-load from a superseded session does not land in the
 // adopt the pre-SaveAs output.
 // ===========================================================================
 TEST_CASE( "AS-5: layer auto-load announced before Save As does not land after it",
-           "[parity][async][autoload][slow]" )
+           "[parity][async][autoload][slow][parity-as5]" )
 {
   ensureApp();
   ShellFixture fx;
@@ -490,7 +490,7 @@ TEST_CASE( "AS-5: layer auto-load announced before Save As does not land after i
 // on a late max progress — cancel wins, always.
 // ===========================================================================
 TEST_CASE( "PD-2: cancelled progress dialog ignores a late max progress update",
-           "[parity][async][progress]" )
+           "[parity][async][progress][parity-pd2]" )
 {
   ensureApp();
   ProgressDialog dialog;
@@ -518,7 +518,7 @@ TEST_CASE( "PD-2: cancelled progress dialog ignores a late max progress update",
 // must stay stale even when unrelated cancellations overflow the set.
 // ===========================================================================
 TEST_CASE( "SP-2: cancelled generation remains stale across cancel-set overflow",
-           "[parity][async][scanpool]" )
+           "[parity][async][scanpool][parity-sp2]" )
 {
   ensureApp();
   auto &pool = RsScanPool::instance();

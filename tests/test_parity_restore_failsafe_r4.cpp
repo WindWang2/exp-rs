@@ -127,7 +127,7 @@ int failingPrefixLength( const QByteArray &blob, QMainWindow &probe )
 // shell must come up usable and the poison must not survive the launch.
 // ===========================================================================
 TEST_CASE( "RE-2: truncated layout blob is dropped and the shell stays usable",
-           "[parity][restore][failsafe]" )
+           "[parity][restore][failsafe][parity-re2]" )
 {
   ensureApp();
   QByteArray realBlob;
@@ -175,7 +175,7 @@ TEST_CASE( "RE-2: truncated layout blob is dropped and the shell stays usable",
 // must clamp back into the legal band, not poison the chrome layout.
 // ===========================================================================
 TEST_CASE( "RE-4: corrupt toolbar flow settings clamp to legal defaults",
-           "[parity][restore][failsafe][toolbar_flow]" )
+           "[parity][restore][failsafe][toolbar_flow][parity-re4]" )
 {
   ensureApp();
   {
@@ -234,7 +234,7 @@ TEST_CASE( "RE-4: corrupt toolbar flow settings clamp to legal defaults",
 // toggles (the host's documented single-direction contract).
 // ===========================================================================
 TEST_CASE( "TB-1: toolbar flow host mirrors visibility without touching actions",
-           "[parity][restore][toolbar_flow]" )
+           "[parity][restore][toolbar_flow][parity-tb1]" )
 {
   ensureApp();
   RsToolbarFlowHost host;
@@ -266,7 +266,7 @@ TEST_CASE( "TB-1: toolbar flow host mirrors visibility without touching actions"
 // project dirty truth together.
 // ===========================================================================
 TEST_CASE( "HS-1: a UI-applied stretch marks the project dirty",
-           "[parity][restore][stretch_dirty]" )
+           "[parity][restore][stretch_dirty][parity-hs1]" )
 {
   ensureApp();
   QgsProject::instance()->clear();

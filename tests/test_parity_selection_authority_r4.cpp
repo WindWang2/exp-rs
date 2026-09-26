@@ -142,7 +142,7 @@ void settle( SelectionContext &context, int ms = 400 )
 // projection every consumer must agree with.
 // ===========================================================================
 TEST_CASE( "SC-1: canvas current layer is the authority's activeLayer projection",
-           "[parity][selection][authority]" )
+           "[parity][selection][authority][parity-sc1]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc1" ) );
@@ -166,7 +166,7 @@ TEST_CASE( "SC-1: canvas current layer is the authority's activeLayer projection
 // SC-2: layer-tree selection → authority absorption.
 // ===========================================================================
 TEST_CASE( "SC-2: layer tree selection is the authority's selectedLayers projection",
-           "[parity][selection][authority]" )
+           "[parity][selection][authority][parity-sc2]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc2" ) );
@@ -205,7 +205,7 @@ TEST_CASE( "SC-2: layer tree selection is the authority's selectedLayers project
 // empty-push clear contract (UI→authority direction of the matrix).
 // ===========================================================================
 TEST_CASE( "SC-3: every notify push is absorbed and every empty push clears",
-           "[parity][selection][authority][matrix]" )
+           "[parity][selection][authority][matrix][parity-sc3]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc3" ) );
@@ -267,7 +267,7 @@ TEST_CASE( "SC-3: every notify push is absorbed and every empty push clears",
 // no delivery window where the two projections disagree.
 // ===========================================================================
 TEST_CASE( "SC-4: changed broadcast payload equals the snapshot consumers read",
-           "[parity][selection][authority][broadcast]" )
+           "[parity][selection][authority][broadcast][parity-sc4]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc4" ) );
@@ -295,7 +295,7 @@ TEST_CASE( "SC-4: changed broadcast payload equals the snapshot consumers read",
 // duplicate write in active_view_host is the convergence candidate).
 // ===========================================================================
 TEST_CASE( "SC-5: removing the current layer clears the canvas through the authority",
-           "[parity][selection][authority][lifecycle]" )
+           "[parity][selection][authority][lifecycle][parity-sc5]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc5" ) );
@@ -319,7 +319,7 @@ TEST_CASE( "SC-5: removing the current layer clears the canvas through the autho
 // every absorbed change (the 150 ms window is a coalescer, not a dropper).
 // ===========================================================================
 TEST_CASE( "SC-6: interleaved pushes converge into one broadcast with all changes",
-           "[parity][selection][authority][debounce]" )
+           "[parity][selection][authority][debounce][parity-sc6]" )
 {
   ensureApp();
   AuthorityFixture fx( QStringLiteral( "sc6" ) );

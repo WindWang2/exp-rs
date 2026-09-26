@@ -13972,3 +13972,44 @@ target_compile_definitions(test_parity_restore_failsafe_r4 PRIVATE
 )
 sicnu_link_jsoncpp(test_parity_restore_failsafe_r4)
 sicnu_discover_tests(test_parity_restore_failsafe_r4 TIMEOUT 300)
+
+add_executable(test_parity_stress_r4
+  test_parity_stress_r4.cpp
+)
+target_link_libraries(test_parity_stress_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+)
+target_include_directories(test_parity_stress_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_stress_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_stress_r4)
+sicnu_discover_tests(test_parity_stress_r4 TIMEOUT 300)
+
+# Living-documentation gate: PARITY_MAP.md rows must resolve to real oracle
+# tags in the parity suites (WP-G). No Qt needed.
+add_executable(test_parity_map_gate_r4
+  test_parity_map_gate_r4.cpp
+)
+target_link_libraries(test_parity_map_gate_r4 PRIVATE
+  Catch2::Catch2WithMain
+)
+target_compile_definitions(test_parity_map_gate_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_parity_map_gate_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_parity_map_gate_r4)
