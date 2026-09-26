@@ -570,6 +570,12 @@ TEST_CASE( "CW-1: mode and flicker changes emit their contracts exactly",
   widget.setFlickerInterval( 250 );
   CHECK( widget.flickerInterval() == 250 );
   CHECK( flickerSpy.count() == 1 );
+
+  // F-13: setting the same value again must not re-emit (the mode setter
+  // deduplicates; the interval setter used to disagree).
+  widget.setFlickerInterval( 250 );
+  CHECK( widget.flickerInterval() == 250 );
+  CHECK( flickerSpy.count() == 1 );
 }
 
 TEST_CASE( "CW-2: images set through the source are reported as held",
