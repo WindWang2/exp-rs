@@ -690,6 +690,33 @@ RuleResult temporalEvaluate( const PreflightRequest &request, const RuleFacts &f
                 "complete date list", "truncated date list" );
             finding.affectedInputs = { slot->assetRef };
             finding.evidence["declared_scenes"] = f.temporalSceneCount;
+            // Partialities must never swallow each other: a truncated series
+            // with untimeable scenes still reports how many scenes carry no
+            // parseable time.
+            if ( f.temporalInvalidTimeCount > 0 )
+                finding.evidence["invalid_time_scenes"] = f.temporalInvalidTimeCount;
+            result.findings.push_back( std::move( finding ) );
+            continue; // order/gap judgment would be made on partial facts
+        }
+
+        // Scenes the authority could not time are counted, never dropped
+        // silently: the declared series is incomplete, so the same partiality
+        // discipline as truncation applies — report it and skip the order/gap
+        // judgment that only the complete series could support.
+        if ( f.temporalInvalidTimeCount > 0 )
+        {
+            auto finding = makeFinding(
+                "SPF_TEMPORAL_TIME_INCOMPLETE", PreflightSeverity::RequireAck, "temporal",
+                slot->slot, "observed",
+                std::to_string( f.temporalInvalidTimeCount ) + " of " +
+                    std::to_string( sceneCount ) + " declared scenes for " + slot->slot +
+                    " have no parseable acquisition time; the series checks are partial.",
+                "every declared scene carries a parseable acquisition time",
+                "scenes without a parseable time: " +
+                    std::to_string( f.temporalInvalidTimeCount ) );
+            finding.affectedInputs = { slot->assetRef };
+            finding.evidence["invalid_time_scenes"] = f.temporalInvalidTimeCount;
+            finding.evidence["declared_scenes"] = sceneCount;
             result.findings.push_back( std::move( finding ) );
             continue; // order/gap judgment would be made on partial facts
         }
@@ -1010,7 +1037,8 @@ PreflightRulePtr makeQualityMaskRule()
 
 PreflightRulePtr makeTemporalRule()
 {
-    return std::make_unique<Rule>( rule_id::Temporal, 1, &temporalEvaluate );
+    // Revision 2: consumes temporalInvalidTimeCount (SPF_TEMPORAL_TIME_INCOMPLETE).
+    return std::make_unique<Rule>( rule_id::Temporal, 2, &temporalEvaluate );
 }
 
 PreflightRulePtr makeLeakageRule()
