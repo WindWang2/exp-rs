@@ -470,6 +470,18 @@ void McpServer::handleRequest(const QVariantMap &request)
         return;
     }
 
+    // JSON-RPC 2.0: "method" is REQUIRED. A frame without one is not a
+    // valid request, so it answers -32600 Invalid Request — routing it into
+    // the unknown-method branch would report -32601, implying an empty
+    // method name exists to be not found (Track 9 protocol hardening).
+    // Notifications stay silent (nothing to answer to).
+    if ( method.isEmpty() )
+    {
+        if ( !isNotification )
+            sendError( id, -32600, QStringLiteral( "Invalid Request: missing method" ) );
+        return;
+    }
+
     // #1186: never echo client-controlled method/id verbatim — CRLF/ANSI can
     // forge subsequent log lines. Keep a printable single-line scrub.
     const auto scrub = []( QString text ) {
