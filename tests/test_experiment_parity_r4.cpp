@@ -286,3 +286,34 @@ TEST_CASE( "metric parity: projected values equal persisted metric records",
         CHECK( !record.has_value() ); // recordMetrics was never called here
     }
 }
+
+// P2-3 (review): a STOPPED report must keep its refusal visible through the
+// projection — issues carry the stopped reason, never a clean empty matrix.
+TEST_CASE( "stopped report surfaces its refusal in the view model (r4)",
+           "[experiment][parity][r4]" )
+{
+    Fixture fix;
+    const auto spec = makeSpec();
+    const auto points = sampleStudyPoints( spec ).value();
+
+    // Poison the second point's ledger page past the budget so the analysis
+    // refuses (typed) while the first point recorded normally.
+    fix.recordRun( spec, points.first(), QJsonObject{} );
+    for ( int i = 0; i < 1001; ++i )
+        REQUIRE( fix.ledger
+                     .link( points.at( 1 ).pointId,
+                            QStringLiteral( "overflow-%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) )
+                     .has_value() );
+
+    const auto report = buildStudyReport( fix.store, fix.ledger, spec, points, {}, nullptr );
+    CHECK( !report.stoppedReason.isEmpty() );
+    CHECK( report.stoppedReason.contains(
+        QLatin1String( "experiment.matrix_cell_runs_overflow" ) ) );
+
+    const auto viewModel = es::projectRunMatrix( report );
+    CHECK( !viewModel.issues.isEmpty() );
+    CHECK( viewModel.issues.first().contains(
+        QLatin1String( "experiment.matrix_cell_runs_overflow" ) ) );
+    CHECK( viewModel.recordedCount == 0 );
+}
+

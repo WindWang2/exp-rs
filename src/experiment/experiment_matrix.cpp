@@ -312,10 +312,12 @@ Result<QStringList> MatrixLedger::runsForCell( const QString &cellId, qint64 lim
         return Result<QStringList>::failure( matrixError(
             QStringLiteral( "experiment.matrix_invalid" ),
             QStringLiteral( "ledger lookup requires a cell id" ) ) );
-    if ( limit < 1 )
+    if ( limit < 1 || limit >= 10000 )
         return Result<QStringList>::failure( matrixError(
             QStringLiteral( "experiment.matrix_invalid" ),
-            QStringLiteral( "ledger page limit must be positive" ) ) );
+            QStringLiteral( "ledger page limit must be positive and below the"
+                            " store's 10000-row page clamp, so overflow stays"
+                            " detectable" ) ) );
     const auto edges =
         m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit + 1,
                                QStringLiteral( "recorded" ), QStringLiteral( "run" ) );

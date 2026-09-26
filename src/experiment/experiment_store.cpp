@@ -2027,6 +2027,8 @@ ExperimentStore::LineageEdgePage ExperimentStore::lineageEdgePage( qint64 limit 
         Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM experiment_lineage" ) );
         if ( count.stepRow() )
             page.total = count.i64( 0 );
+        else
+            page.truncated = true; // count unreadable: report conservatively (P3-1)
     }
     Stmt stmt( m_impl->db, QStringLiteral(
         "SELECT from_kind, from_id, edge_kind, to_kind, to_id"

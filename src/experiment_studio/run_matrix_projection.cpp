@@ -47,6 +47,10 @@ RunMatrixViewModel projectRunMatrix( const sicnu::study::StudyReport &report,
     vm.cancelledCount = report.cancelledCount;
     vm.missingCount = report.missingCount;
     vm.totalPoints = report.runTable.size();
+    // A STOPPED report (refused analysis — #1333 item 4 propagation) must
+    // surface its reason, not project as a clean empty matrix.
+    if ( !report.stoppedReason.isEmpty() )
+        vm.issues.append( report.stoppedReason );
 
     for ( const auto &row : report.runTable )
     {

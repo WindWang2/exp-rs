@@ -197,6 +197,8 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
 
     if ( twins.isEmpty() )
     {
+        QStringList byRef;
+        int unreadableByRef = 0;
         // No identity twin. A platform execution that ALREADY recorded runs
         // under other pins is the dangerous case: same ref, different
         // experiment.
@@ -205,12 +207,25 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
             const auto byRefLookup = m_store->runIdsByExecutionRef( executionRef, 10 );
             if ( !byRefLookup )
                 return Result<Verdict>::failure( byRefLookup.diagnostics() );
-            const QStringList byRef = byRefLookup.value();
+            byRef = byRefLookup.value();
+            // The byRef scan reads through the typed reader too: a corrupted
+            // ref-matched row is Deviation evidence being destroyed — the
+            // same all-unreadable refusal as the twin scan, never a
+            // confident "New" (#1333 item 11).
+            int unreadableByRef = 0;
             for ( const QString &runId : byRef )
             {
-                const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+                const auto recorded = m_store->runRecordById( runId );
                 if ( !recorded )
+                {
+                    const auto &refDiagnostics = recorded.diagnostics();
+                    const bool refCorrupt = !refDiagnostics.isEmpty() &&
+                                            refDiagnostics.constFirst().code ==
+                                                QLatin1String( "experiment.run_corrupt" );
+                    if ( refCorrupt )
+                        ++unreadableByRef;
                     continue;
+                }
                 ExperimentRun repeatStub;
                 repeatStub.setAlgorithmId( identity.algorithmId );
                 repeatStub.setAlgorithmVersion( identity.algorithmVersion );
@@ -235,6 +250,18 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
         }
         if ( verdict.classification != C::Deviated )
         {
+            if ( !byRef.isEmpty() && unreadableByRef == byRef.size() )
+            {
+                // Every ref match is unreadable: the deviation question
+                // cannot be answered on destroyed evidence.
+                return Result<Verdict>::failure( Diagnostic{
+                    QStringLiteral( "experiment.repeat_unreadable_twin" ),
+                    QStringLiteral( "%1 execution-ref match(es) exist but none of their"
+                                    " records parse; refusing to classify on unreadable"
+                                    " evidence" )
+                        .arg( byRef.size() ),
+                    DiagnosticSeverity::Error } );
+            }
             verdict.classification = C::New;
             verdict.reasons.append( QStringLiteral( "no recorded run shares the identity" ) );
         }

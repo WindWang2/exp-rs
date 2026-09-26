@@ -149,9 +149,21 @@ sicnu::data::Result<StudyAnalysis> analyzeStudy( experiment::ExperimentStore &st
         bool anyInFlight = false;
         for ( const QString &runId : linkedRuns )
         {
-            const auto run = store.runById( runId );
+            const auto run = store.runRecordById( runId );
             if ( !run )
+            {
+                // Corrupt rows refuse the analysis (#1333 item 11
+                // propagation): statistics computed past unreadable evidence
+                // are fabricated; dangling edges keep the no-evidence
+                // semantics.
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return sicnu::data::Result<StudyAnalysis>::failure( diagnostics );
                 continue; // dangling edge — counts as no evidence, never as success
+            }
             aggregate.runIds.append( runId );
             const dataset::RunStatus status = run.value().status();
             if ( status == dataset::RunStatus::Completed )

@@ -377,6 +377,14 @@ Result<StepEvidence> stepEvidenceFromBridgeWorkflowMetrics( const QJsonObject &w
             kCodeMalformedEvidence,
             QStringLiteral( "bridge step evidence was truncated by the recorder — the snapshot covers only the reported prefix" ),
             DiagnosticSeverity::Warning );
+    // Missing vs empty are TWO states (#1333 item 1/WP-D partition
+    // completeness): an empty steps array is a legal empty partition, but a
+    // document without the steps partition at all is torn evidence and is
+    // refused instead of silently reading as "no steps".
+    if ( !workflow.contains( QLatin1String( "steps" ) ) )
+        return Result<StepEvidence>::failure( typedFailure(
+            kCodeMalformedEvidence,
+            QStringLiteral( "bridge workflow document carries no steps partition" ) ) );
     const QJsonArray steps = workflow.value( QLatin1String( "steps" ) ).toArray();
     QSet<QString> seenStepIds; // the runtime keys steps by id; a repeat is corrupt
     for ( const QJsonValue &value : steps )

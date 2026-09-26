@@ -90,10 +90,21 @@ TEST_CASE( "runsForCell filters edge kind before the page limit",
     for ( const QString &runId : recorded )
         REQUIRE( ledger.link( QStringLiteral( "c1" ), runId ).operator bool() );
 
-    // Truth source: the persisted lineage rows themselves.
-    const auto allEdges = store.outgoingEdges( QStringLiteral( "matrix" ),
-                                               QStringLiteral( "c1" ), /*limit=*/16 );
-    REQUIRE( allEdges.size() == 6 );
+    // Truth source: the persisted lineage rows, counted through a raw
+    // sqlite connection independent of the code under test.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( qUtf8Printable( dir.filePath( QStringLiteral( "experiments.db" ) ) ),
+                                  &raw, SQLITE_OPEN_READONLY, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "SELECT COUNT(*) FROM experiment_lineage WHERE"
+                                          " from_kind='matrix' AND from_id='c1'", -1,
+                                     &stmt, nullptr ) == SQLITE_OK );
+        REQUIRE( sqlite3_step( stmt ) == SQLITE_ROW );
+        CHECK( sqlite3_column_int( stmt, 0 ) == 6 );
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+    }
 
     const auto runsPage = ledger.runsForCell( QStringLiteral( "c1" ), /*limit=*/3 );
     REQUIRE( runsPage.has_value() );
@@ -591,6 +602,119 @@ TEST_CASE( "lineage edge page reports truncation instead of hiding it",
     CHECK( !result.experimentSourceTruncated );
     CHECK( result.toJson().value( QStringLiteral( "experiment_source_truncated" ) ).toBool()
            == false );
+}
+
+
+// WP-D oracle (bundle determinism): exporting the SAME recorded run twice
+// into two different directories must produce byte-identical bundle files —
+// path separators, EOL and locale number formatting are normalized at the
+// export layer, so the digest set is stable across processes and platforms.
+// A consumer re-forging or verifying checksums.txt on another machine sees
+// the same bytes.
+TEST_CASE( "reproduction bundle double export is byte-stable",
+           "[experiment][bundle][r4][determinism]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r4-digest" ) );
+    experiment.setName( QStringLiteral( "digest" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-digest" ), QStringLiteral( "exp-r4-digest" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    const auto exportOnce = [&]( const QString &outDir ) {
+        ReproductionBundleExporter exporter( experiments, datasets );
+        ReproductionBundleOptions options;
+        options.outputDir = outDir;
+        options.currentSoftwareRevision = QStringLiteral( "r4-digest-pin" );
+        const auto report = exporter.exportRun( QStringLiteral( "run-digest" ), options );
+        REQUIRE( report.ok );
+        return report.bundlePath;
+    };
+    const QString bundleA = exportOnce( dir.filePath( QStringLiteral( "bundle-a" ) ) );
+    const QString bundleB = exportOnce( dir.filePath( QStringLiteral( "bundle-b" ) ) );
+    REQUIRE( bundleA != bundleB );
+
+    const QStringList files{
+        QStringLiteral( "manifest.json" ),   QStringLiteral( "dataset_refs.json" ),
+        QStringLiteral( "run_config.json" ), QStringLiteral( "environment.json" ),
+        QStringLiteral( "software.json" ),   QStringLiteral( "model_refs.json" ),
+        QStringLiteral( "metrics.json" ),    QStringLiteral( "provenance.json" ),
+        QStringLiteral( "split.json" ),      QStringLiteral( "checksums.txt" )
+    };
+    for ( const QString &name : files )
+    {
+        QFile a( QDir( bundleA ).filePath( name ) );
+        QFile b( QDir( bundleB ).filePath( name ) );
+        if ( !a.exists() && !b.exists() )
+            continue; // optional file for a run without that evidence
+        REQUIRE( a.open( QIODevice::ReadOnly ) );
+        REQUIRE( b.open( QIODevice::ReadOnly ) );
+        CHECK( a.readAll() == b.readAll() );
+    }
+}
+
+
+// P2-2 (review): the typed promotion reader distinguishes corrupt from
+// not-found — both legs pinned so the API cannot silently collapse states.
+TEST_CASE( "promotionRecordById separates corrupt from not-found",
+           "[experiment][promotion][r4]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    // Not found: typed absence.
+    const auto absent = store.promotionRecordById( QStringLiteral( "promo-none" ) );
+    REQUIRE( !absent.has_value() );
+    CHECK( absent.diagnostics().constFirst().code ==
+           QLatin1String( "experiment.promotion_not_found" ) );
+
+    // Corrupt: the row exists but no longer parses.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( qUtf8Printable( dir.filePath( QStringLiteral( "experiments.db" ) ) ),
+                                  &raw, SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        char *error = nullptr;
+        REQUIRE( sqlite3_exec( raw,
+                               "INSERT INTO model_promotions(promotion_id, run_id, verdict,"
+                               " created_ms, json) VALUES('promo-corrupt', 'run-x', 'pending',"
+                               " 1, '{ torn')",
+                               nullptr, nullptr, &error ) == SQLITE_OK );
+        sqlite3_free( error );
+        sqlite3_close( raw );
+    }
+    const auto corrupt = store.promotionRecordById( QStringLiteral( "promo-corrupt" ) );
+    REQUIRE( !corrupt.has_value() );
+    CHECK( corrupt.diagnostics().constFirst().code ==
+           QLatin1String( "experiment.promotion_corrupt" ) );
 }
 
 } // namespace

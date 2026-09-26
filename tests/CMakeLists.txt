@@ -3444,6 +3444,7 @@ target_link_libraries(test_experiment_bridge_r4 PRIVATE
   Qt6::Core
   Sicnu::experiment
   Sicnu::experiment_bridge
+  Sicnu::experiment_debugger
   SQLite::SQLite3
 )
 target_include_directories(test_experiment_bridge_r4 PRIVATE

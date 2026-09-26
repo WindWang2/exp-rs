@@ -20,6 +20,36 @@ Diagnostic invalidSchema( const QString &what )
                        sicnu::dataset::DiagnosticSeverity::Error };
 }
 
+QString compactJson( const QJsonValue &value );
+
+/// Renders a JSON value as a fenced json code block whose fence is one
+/// longer than the longest backtick run inside the payload (CommonMark
+/// rule, minimum the report-standard four). A payload that itself contains
+/// a backtick fence can no longer close ours early and inject prose
+/// (#1333 item 3); payload bytes are never altered, so digests and
+/// byte-stable outputs are untouched for every payload without such runs.
+QString jsonCodeFence( const QJsonValue &value )
+{
+    const QString payload = compactJson( value );
+    int longest = 0;
+    int run = 0;
+    for ( const QChar &ch : payload )
+    {
+        if ( ch == QLatin1Char( '`' ) )
+        {
+            ++run;
+            longest = qMax( longest, run );
+        }
+        else
+        {
+            run = 0;
+        }
+    }
+    const int fenceLength = qMax( 4, longest + 1 );
+    const QString fence( fenceLength, QLatin1Char( '`' ) );
+    return QStringLiteral( "%1json\n%2\n%1\n\n" ).arg( fence, payload );
+}
+
 /// Compact single-line JSON for embedding a value inside prose tables.
 QString compactJson( const QJsonValue &value )
 {
@@ -197,11 +227,10 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
         md += QStringLiteral( "<details><summary>step %1 — %2</summary>\n\n" )
                   .arg( QString::number( step.value( "index" ).toInt() ),
                         mdEscape( step.value( "operator" ).toString() ) );
-        md += QStringLiteral( "````json\n%1\n````\n\n" )
-                  .arg( compactJson( step.value( QStringLiteral( "params" ) ) ) );
+        md += jsonCodeFence( step.value( QStringLiteral( "params" ) ) );
         const QJsonValue result = step.value( QStringLiteral( "result" ) );
         if ( !result.isNull() && result.type() != QJsonValue::Undefined )
-            md += QStringLiteral( "````json\n%1\n````\n\n" ).arg( compactJson( result ) );
+            md += jsonCodeFence( result );
         md += QStringLiteral( "</details>\n\n" );
     }
 
@@ -210,7 +239,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
     if ( statistics.isEmpty() )
         md += QStringLiteral( "_none_\n\n" );
     for ( const QJsonValue &value : statistics )
-        md += QStringLiteral( "````json\n%1\n````\n\n" ).arg( compactJson( value ) );
+        md += jsonCodeFence( value );
 
     md += QStringLiteral( "## 成绩 (grade)\n\n" );
     const QJsonObject grade = document.value( QStringLiteral( "grade" ) ).toObject();
@@ -218,8 +247,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
     {
         md += QStringLiteral( "recorded — ref `%1`\n\n" )
                   .arg( mdEscape( grade.value( "gradingRef" ).toString() ) );
-        md += QStringLiteral( "````json\n%1\n````\n\n" )
-                  .arg( compactJson( grade.value( QStringLiteral( "inline" ) ) ) );
+        md += jsonCodeFence( grade.value( QStringLiteral( "inline" ) ) );
     }
     else
     {
@@ -262,8 +290,7 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
 
     md += QStringLiteral( "## 环境 (environment)\n\n" );
     const QJsonObject environment = document.value( QStringLiteral( "environment" ) ).toObject();
-    md += QStringLiteral( "````json\n%1\n````\n\n" )
-              .arg( compactJson( environment.value( QStringLiteral( "fields" ) ) ) );
+    md += jsonCodeFence( environment.value( QStringLiteral( "fields" ) ) );
 
     md += QStringLiteral( "## 缩略图 (thumbnails)\n\n" );
     for ( const QJsonValue &value :
