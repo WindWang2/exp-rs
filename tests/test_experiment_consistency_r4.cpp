@@ -9,8 +9,11 @@
 #include "experiment/experiment_matrix.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "experiment/comparison_ext.h"
 #include "experiment/repeat_execution.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 using namespace sicnu::dataset;
@@ -130,6 +133,61 @@ TEST_CASE( "runsForCell refuses a cell whose recorded runs overflow the page",
     const auto ok = ledger.runsForCell( QStringLiteral( "c-ok" ), budget );
     REQUIRE( ok.has_value() );
     CHECK( ok.value() == QStringList{ QStringLiteral( "rx" ) } );
+}
+
+// ① (item 1): a logical metric present on BOTH sides but in different shapes
+// (scalar leaf vs per-class document) produces no paired delta — it used to
+// vanish with no trace in the summary. Array-valued metrics are likewise
+// shape-excluded. The invariant: every such path is NAMED in a typed note;
+// a summary whose delta table is partial says where.
+TEST_CASE( "paired comparison names structural asymmetries instead of dropping them",
+           "[experiment][comparison][r4]" )
+{
+    MetricRecord a;
+    MetricRecord b;
+
+    // Same family, different shapes: side A records a per-class document
+    // under "scores", side B records scalar leaves under "scores::".
+    a.metrics = QJsonObject{ { QStringLiteral( "scores" ),
+                               QJsonObject{ { QStringLiteral( "water" ),
+                                              QJsonObject{ { QStringLiteral( "iou" ), 0.8 } } } } } };
+    b.metrics = QJsonObject{ { QStringLiteral( "scores" ),
+                               QJsonObject{ { QStringLiteral( "iou" ), 0.7 } } } };
+
+    const auto mismatchSummary = pairedRunComparison( a, b );
+    bool mismatchNamed = false;
+    for ( const QString &note : mismatchSummary.notes )
+        if ( note.startsWith( QLatin1String( "structure_mismatch:scores" ) ) )
+            mismatchNamed = true;
+    CHECK( mismatchNamed );
+
+    // Array-valued metrics: recorded on both sides, never paired — the
+    // summary must say so instead of dropping them silently.
+    a.metrics.insert( QStringLiteral( "cm" ),
+                      QJsonArray{ QJsonArray{ 1, 2 }, QJsonArray{ 3, 4 } } );
+    b.metrics.insert( QStringLiteral( "cm" ),
+                      QJsonArray{ QJsonArray{ 1, 2 }, QJsonArray{ 3, 4 } } );
+    const auto arraySummary = pairedRunComparison( a, b );
+    bool arrayNamed = false;
+    for ( const QString &note : arraySummary.notes )
+        if ( note.startsWith( QLatin1String( "array_excluded:cm" ) ) )
+            arrayNamed = true;
+    CHECK( arrayNamed );
+
+    // Symmetric shapes stay note-free: a clean scalar pair produces no
+    // structure notes (no crying wolf).
+    MetricRecord cleanA;
+    cleanA.metrics = QJsonObject{ { QStringLiteral( "f1" ), 0.9 } };
+    MetricRecord cleanB;
+    cleanB.metrics = QJsonObject{ { QStringLiteral( "f1" ), 0.8 } };
+    const auto cleanSummary = pairedRunComparison( cleanA, cleanB );
+    bool cleanStructureNotes = false;
+    for ( const QString &note : cleanSummary.notes )
+        if ( note.startsWith( QLatin1String( "structure_mismatch:" ) ) ||
+             note.startsWith( QLatin1String( "array_excluded:" ) ) )
+            cleanStructureNotes = true;
+    CHECK( !cleanStructureNotes );
+    CHECK( cleanSummary.deltas.size() == 1 );
 }
 } // namespace
 // ⑥ (item 6): the identity-twin scan is bounded (50 by contract); hitting

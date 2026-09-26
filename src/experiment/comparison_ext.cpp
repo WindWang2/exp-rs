@@ -175,7 +175,8 @@ namespace
 void flattenMetrics( const QJsonObject &object, const QString &prefix,
                      QHash<QString, double> &scalars,
                      QHash<QString, QHash<QPair<QString, QString>, double>> &perClass,
-                     QHash<QString, QHash<QString, qint64>> &perClassSupport )
+                     QHash<QString, QHash<QString, qint64>> &perClassSupport,
+                     QStringList *arrayPaths )
 {
     for ( auto it = object.constBegin(); it != object.constEnd(); ++it )
     {
@@ -184,6 +185,14 @@ void flattenMetrics( const QJsonObject &object, const QString &prefix,
         if ( value.isDouble() )
         {
             scalars.insert( key, value.toDouble() );
+        }
+        else if ( value.isArray() )
+        {
+            // Recorded but shape-excluded from paired deltas (#1333 item 1):
+            // the caller receives the path list so the summary can name what
+            // it could not pair.
+            if ( arrayPaths )
+                arrayPaths->append( key );
         }
         else if ( value.isObject() )
         {
@@ -218,7 +227,8 @@ void flattenMetrics( const QJsonObject &object, const QString &prefix,
             }
             else
             {
-                flattenMetrics( child, key, scalars, perClass, perClassSupport );
+                flattenMetrics( child, key, scalars, perClass, perClassSupport,
+                                arrayPaths );
             }
         }
     }
@@ -247,8 +257,10 @@ PairedRunSummary pairedRunComparison( const MetricRecord &a, const MetricRecord 
     QHash<QString, QHash<QPair<QString, QString>, double>> perClassB;
     QHash<QString, QHash<QString, qint64>> supportA;
     QHash<QString, QHash<QString, qint64>> supportB;
-    flattenMetrics( a.metrics, QString(), scalarsA, perClassA, supportA );
-    flattenMetrics( b.metrics, QString(), scalarsB, perClassB, supportB );
+    QStringList arrayPathsA;
+    QStringList arrayPathsB;
+    flattenMetrics( a.metrics, QString(), scalarsA, perClassA, supportA, &arrayPathsA );
+    flattenMetrics( b.metrics, QString(), scalarsB, perClassB, supportB, &arrayPathsB );
 
     // Scalar leaves present in both documents.
     QStringList scalarNames;
@@ -305,6 +317,63 @@ PairedRunSummary pairedRunComparison( const MetricRecord &a, const MetricRecord 
                 delta.insufficientSupport = true;
             summary.deltas.append( delta );
         }
+    }
+
+    // Structural asymmetry made explicit (#1333 item 1): a logical metric
+    // that exists on BOTH sides but lands in different shapes (scalar leaf
+    // vs per-class document, or an array neither side could pair) produces
+    // no delta — it used to vanish with no trace. Each affected path is
+    // named in a typed note; the delta tables stay honest about being
+    // partial. Bounded so a hostile document cannot flood the notes.
+    QStringList mismatches;
+    const auto scalarUnderFamily = []( const QHash<QString, double> &scalars,
+                                       const QString &family ) {
+        const QString prefix = family + QLatin1String( "::" );
+        for ( auto it = scalars.constBegin(); it != scalars.constEnd(); ++it )
+            if ( it.key().startsWith( prefix ) )
+                return true;
+        return false;
+    };
+    for ( auto it = scalarsA.constBegin(); it != scalarsA.constEnd(); ++it )
+        if ( !scalarsB.contains( it.key() ) &&
+             perClassB.contains( it.key().section( QLatin1String( "::" ), 0, 0 ) ) )
+            mismatches.append( it.key() );
+    for ( auto it = scalarsB.constBegin(); it != scalarsB.constEnd(); ++it )
+        if ( !scalarsA.contains( it.key() ) &&
+             perClassA.contains( it.key().section( QLatin1String( "::" ), 0, 0 ) ) )
+            mismatches.append( it.key() );
+    for ( auto it = perClassA.constBegin(); it != perClassA.constEnd(); ++it )
+        if ( !perClassB.contains( it.key() ) && scalarUnderFamily( scalarsB, it.key() ) )
+            mismatches.append( it.key() );
+    for ( auto it = perClassB.constBegin(); it != perClassB.constEnd(); ++it )
+        if ( !perClassA.contains( it.key() ) && scalarUnderFamily( scalarsA, it.key() ) &&
+             !mismatches.contains( it.key() ) )
+            mismatches.append( it.key() );
+    mismatches.sort();
+    mismatches.erase( std::unique( mismatches.begin(), mismatches.end() ),
+                      mismatches.end() );
+    constexpr int kMaxMismatchNotes = 16;
+    for ( int i = 0; i < mismatches.size() && i < kMaxMismatchNotes; ++i )
+    {
+        summary.notes.append(
+            QStringLiteral( "structure_mismatch:%1 (scalar leaf on one side, per-class"
+                            " document on the other — no paired delta exists)" )
+                .arg( mismatches.at( i ) ) );
+    }
+    if ( mismatches.size() > kMaxMismatchNotes )
+        summary.notes.append( QStringLiteral( "structure_mismatch_count:%1" )
+                                  .arg( mismatches.size() ) );
+
+    QStringList arrayPaths = arrayPathsA + arrayPathsB;
+    arrayPaths.sort();
+    arrayPaths.erase( std::unique( arrayPaths.begin(), arrayPaths.end() ),
+                      arrayPaths.end() );
+    for ( int i = 0; i < arrayPaths.size() && i < kMaxMismatchNotes; ++i )
+    {
+        summary.notes.append(
+            QStringLiteral( "array_excluded:%1 (array-valued metrics are recorded but"
+                            " never paired)" )
+                .arg( arrayPaths.at( i ) ) );
     }
 
     if ( !summary.protocolsCompatible || !summary.schemasCompatible )
