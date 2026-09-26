@@ -70,7 +70,11 @@ TEST_CASE( "digest: spectral indices are byte-stable across runs", "[r4][digest]
     p["red"] = 2;
     requireRasterDigestStable( "rs:ndvi", p, dir.filePath( "ndvi1.tif" ),
                                dir.filePath( "ndvi2.tif" ), dir.path() );
-    requireRasterDigestStable( "rs:mndwi", p, dir.filePath( "mndwi1.tif" ),
+    Json::Value pm;
+    pm["input"] = input.toStdString();
+    pm["green"] = 1;
+    pm["swir"] = 2;
+    requireRasterDigestStable( "rs:mndwi", pm, dir.filePath( "mndwi1.tif" ),
                                dir.filePath( "mndwi2.tif" ), dir.path() );
 }
 
