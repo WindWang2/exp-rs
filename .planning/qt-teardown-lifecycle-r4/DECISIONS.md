@@ -92,3 +92,8 @@ This build resolves `qgsprojutils.h:296-304` to the `QThreadStorage` branch (`US
 so the context dies inside `~QCoreApplication`'s thread-data cleanup — before that, `~QgsApplication`
 (and our listener) run `invalidateCaches()` while guards are alive, which is the safe documented path.
 Full trace in EVIDENCE.md §2. Retirement = production exit ordering (main.cpp:622-635) inside the run.
+
+## 7. WP-D final verdicts (deep-check complete)
+- `qgscredentialdialog.cpp:102` — context nullptr but lambda value-captures `realm` and touches only the function-local static cache + mutex: **safe** (no member deref after dialog death).
+- `qgsoptionsdialoghighlightwidget.cpp:156` — singleShot line sits in the `#else` of a `#if 1` block: **dead code**, never compiled into the running path.
+- Net WP-D defect count in whitelisted dirs: **0 fixes required**; audit table §5 stands (19 context-safe, main.cpp pair safe-by-lifetime with QPointer guard, dualview raw-canvas capture documented as residual hazard covered by fixture).
