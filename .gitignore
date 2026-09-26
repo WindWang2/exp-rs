@@ -483,3 +483,6 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+!.planning/verify-chain-r4/
+.planning/verify-chain-r4/*
+!.planning/verify-chain-r4/*.md
