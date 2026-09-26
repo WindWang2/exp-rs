@@ -63,3 +63,19 @@ Layer 1 canvas/window family (retire root-cause adjacency): dual viewport, twinc
 Layer 2 data-holding widgets (src/app/widgets, 22 pairs): guided_workflow_widget, spectral_workbench_panel, comparison_widget + GDAL-holder widgets enumerated next pass.
 Layer 3 host objects: JobEngine/TaskCenter shutdown mirroring (main.cpp:628-630), QgisDesktopWindow partial teardown invariants (main_window.cpp:333 ordering), NAM-holder cleanup.
 Fixture skeleton per brief: construct (explicit parent chain) → use (touch background/network/data path) → destroy → assert no-crash + thread joined (`isRunning()==false` AFTER dtor returns) + `QPointer` null.
+
+## 5. A-8 (context note, src/core read-only) and WP-D audit table v1
+
+**A-8**: `src/core/proj/qgscoordinatetransform.cpp:1318 invalidateCache()` uses `sCacheLock` without the null-guarded accessor pattern that `qgscoordinatereferencesystem.cpp:3326` and `qgsellipsoidutils.cpp:348` already received — a latent crash *only* in the "invalidate after guards destroyed" path. Our listener invalidates while guards are alive (safe), so this is a read-only observation for the red-zone owners, not a change.
+
+**QTimer::singleShot audit (whitelisted src/app+src/gui+src/ui; 22 sites)**:
+| site | form | verdict |
+|---|---|---|
+| 19 sites (va_cursor_probe:67, progress_dialog:56, qgsdatasourcemanagerdialog:128/181, main_window_menus:836, workbench_state:103, qgsnewvectortabledialog:54, processing_history_panel:166, qgsstacsourceselect:403, qgsdualview:622/624/627, qgsoptionsdialogbase:728/742, qgsvaluerelationwidgetwrapper:587, qgsmodelgraphicsview:97/107/113) | context = `this` | Qt auto-disconnect contract; safe by construction. qgsdualview additionally captures raw `canvas` beyond `this` → residual hazard only if canvas dies while view lives; covered by fixture case (dual viewport / map tool) |
+| main.cpp:403, 600 | no context; lambda captures QPointer-guarded window + raw app | fires inside running exec(); app outlives loop; safe-by-lifetime, QPointer guards the window |
+| qgscredentialdialog.cpp:102 | context nullptr; captures local `realm` copy | value-captured; no member deref → safe; deep-check in execution pass |
+| qgsoptionsdialoghighlightwidget.cpp:156 | context `this`; captureless lambda (statics) | safe; static members outlive widgets |
+
+**QNetworkReply audit (whitelist; 11 files)**: stac_client.cpp (191-199) and qgscodeeditorwidget.cpp (596-608) show the repo-standard pattern — `connect(reply, …, this, …)` + `reply->deleteLater()` on finished. Remaining 9 files touch replies via wrappers/indirect members; per-file confirmation during execution pass (WP-D budget), each recorded here.
+
+**先亡宿主 representative test** (WP-D deliverable): dual-viewport fixture case "controller dies before canvases" already asserts the no-post-mortem-delivery contract for the sync path; the canvas/CRS churn cases cover the PROJ-cache side. Network-path 先亡宿主 rides on stac_client execution-pass verification.
