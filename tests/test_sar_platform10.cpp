@@ -460,10 +460,22 @@ TEST_CASE( "InSAR refusals — grid, complex domain, provider, wavelength",
 
     SECTION( "unknown unwrap provider refused (never substituted)" )
     {
+        // D-004 external-provider contract: providerArgs are validated first
+        // (FAILED without them), then the binary lookup — a provider with no
+        // installed binary is the typed UNAVAILABLE refusal, never a builtin
+        // substitution. providerBin points somewhere nonexistent so the
+        // refusal is deterministic even on hosts that ship a real snaphu.
         Json::Value p;
-        p["input"] = tmp.filePath( "filtered.tif" ).toStdString();
+        p["input"] = master.toStdString();
         p["output"] = tmp.filePath( "u.tif" ).toStdString();
         p["provider"] = "snaphu";
+        Json::Value args( Json::arrayValue );
+        args.append( "{input}" );
+        args.append( "{output}" );
+        args.append( "{width}" );
+        args.append( "{height}" );
+        p["providerArgs"] = args;
+        p["providerBin"] = "Z:/definitely/not/here/snaphu";
         expectError( "rs:sar_unwrap", p, "UNWRAP_PROVIDER_UNAVAILABLE" );
     }
 

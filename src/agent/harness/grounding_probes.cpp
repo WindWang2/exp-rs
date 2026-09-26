@@ -44,9 +44,21 @@ Json::Value projectScope( const std::string &scope, const Json::Value &body,
 {
   Json::Value out( Json::objectValue );
   auto copy = [&]( const char *key ) {
-    if ( body.isMember( key ) && !body[key].isNull() )
+    const bool present = body.isMember( key ) && !body[key].isNull();
+    if ( present )
       out[key] = body[key];
-    out["fact_status"][key] = factStatus.isMember( key ) ? factStatus[key] : Json::Value( "unknown" );
+    // The probe reads LIVE through the one understand tool, so a value that
+    // survived the read is an observed fact. The body may carry the 9.0
+    // inspection vocabulary ("known") or an empty/absent status entry —
+    // normalize here, preserving only "assumed" (a heuristic verdict must
+    // not be promoted by the projection).
+    const std::string status =
+      factStatus.isMember( key ) && factStatus[key].isString() ? factStatus[key].asString()
+                                                               : std::string();
+    if ( status == "assumed" )
+      out["fact_status"][key] = "assumed";
+    else
+      out["fact_status"][key] = present ? Json::Value( "observed" ) : Json::Value( "unknown" );
   };
   if ( scope == probe_scope::kIdentity )
   {
@@ -394,7 +406,17 @@ ProbeOutcome probeDatasetFacts( const ProbeRequest &request )
   {
     const Json::Value projected = projectScope( scope, body, factStatus );
     for ( const std::string &key : projected.getMemberNames() )
+    {
+      if ( key == "fact_status" )
+      {
+        // Multi-scope projections overlap on fact_status; merge key-wise so
+        // the last scope cannot erase the statuses earlier scopes carried.
+        for ( const std::string &statusKey : projected[key].getMemberNames() )
+          facts["fact_status"][statusKey] = projected[key][statusKey];
+        continue;
+      }
       facts[key] = projected[key];
+    }
   }
   outcome.facts = facts;
   return outcome;
@@ -426,14 +448,27 @@ ModelProbeOutcome probeModelManifest( const std::string &modelId )
     return out;
   }
   const Json::Value contracts = ContextLedger::instance().modelContracts();
-  if ( !contracts.isObject() || !contracts.isMember( modelId ) ||
-       !contracts[modelId].isObject() )
+  // The ledger stores model contracts as an ARRAY of records, each carrying
+  // its model_id — not as an object keyed by id.
+  const Json::Value *record = nullptr;
+  if ( contracts.isArray() )
+  {
+    for ( const Json::Value &entry : contracts )
+    {
+      if ( entry.isObject() && entry.get( "model_id", "" ).asString() == modelId )
+      {
+        record = &entry;
+        break;
+      }
+    }
+  }
+  if ( record == nullptr )
   {
     out.code = error_codes::kModelNotReady;
     out.summary = "no model contract observed for '" + modelId + "'";
     return out;
   }
-  out.contract = contracts[modelId];
+  out.contract = *record;
   out.ok = true;
 
   // Stat-only artifact check: presence + size, never a content read.
