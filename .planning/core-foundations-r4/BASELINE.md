@@ -55,10 +55,17 @@ portable 面(4):claimExclusiveUtf8、fileOpenUtf8、syncFileUtf8、envUtf8。
 调用方承载 publish/durability 语义的高频类(≥10,按调用方普查选定):session_journal、scientific_contract、stage_ledger、fabric/mirror、finalize_manifest、workflow_checkpoint、artifact_gc、workflow_run_coordinator、output_committer、cli_commands(+ io_fabric_operators、detection_tile_engine 视进度)。
 **终版 20+ 类清单随 WP-C 首提交固化进测试文件头部注释与 BASELINE 附录。**
 
-## 6. 基线红绿分布(实测)
+## 6. 基线红绿分布(实测,2026-09-27 回填)
 
-- 构建进行中(build-r4 全新目录)。基线 ctest `-R "core|atomic|portab|utf8"` 于轻量目标闭包构建完成后立即实测并回填本节(存量红测试区分"本来就红" vs "本轨道引入")。
-- 已知事实:正则命中的现役轻量目标 = `test_io_atomic_failures`、`test_portability_*`(注册行 tests/CMakeLists.txt:374 与 portability 组),重型 `sicnu_add_test` 目标(全 Qt/QGIS 链接)构建成本高,基线以轻量闭包为准并如实记录该口径。
+轻量闭包(与本轨道改动无闭包交集的 `test_io_atomic_failures` 只链 Catch2+Sicnu::Geospatial,且合同面文件本轨 defer 未动):
+
+| 目标 | 结果 | 备注 |
+|---|---|---|
+| test_io_atomic_failures | **8/12 绿,4 红(预存)** | 4 红全部 = `VectorWriter::create: dataset creation failed`(ESRI Shapefile);根因 = `stagedPathFor` O_EXCL 预创建 0 字节 staged 文件,GDAL Shapefile Create 拒绝已存在目标(GPKG 因 SQLite 视 0 字节为合法空库而通过)。**该缺陷即 PR #1338 diff 中自述的 Cluster A ~28**,修复(`reservedStagedPathFor`)在 #1338 分支,根因文件全在本轨避让清单 → 记预存红、defer-#1338,与本轨道改动无因果(CPL_DEBUG/源码级定位证据见 EVIDENCE.md §1) |
+| test_platform_portability / test_portability_source_contract / test_portability_contract | 全绿 | — |
+| 其余正则命中重型 7 目标 | 构建完成后双跑回填 EVIDENCE.md | — |
+
+本轨道新增测试(合同/注入/压力/UTF-8/portability pin)首跑即全绿,无基线红。
 
 ## 7. 本轨道边界声明
 
