@@ -527,6 +527,29 @@ TEST_CASE( "PD-2: cancelled progress dialog ignores a late max progress update",
 }
 
 // ===========================================================================
+// PD-3: a reset() inside the auto-close window cancels the pending accept —
+// the restarted operation must not be closed as if it had succeeded.
+// ===========================================================================
+TEST_CASE( "PD-3: reset inside the auto-close window cancels the pending accept",
+           "[parity][async][progress][parity-pd3]" )
+{
+  ensureApp();
+  ProgressDialog dialog;
+  dialog.setAutoClose( true );
+  dialog.show();
+  QTest::qWaitForWindowExposed( &dialog );
+
+  dialog.setValue( dialog.maximum() ); // schedules the 500 ms accept
+  dialog.reset();                      // restarts the operation inside the window
+  QTest::qWait( 900 );
+  QApplication::processEvents();
+
+  INFO( "dialog result after reset inside auto-close window: " << dialog.result() );
+  CHECK( dialog.result() != QDialog::Accepted );
+  CHECK( dialog.value() == 0 );
+}
+
+// ===========================================================================
 // SP-2 (race class 5, pool leg): cancel(g) of a still-current generation
 // must stay stale even when unrelated cancellations overflow the set.
 // ===========================================================================
