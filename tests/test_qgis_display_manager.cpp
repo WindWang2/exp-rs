@@ -1024,6 +1024,12 @@ TEST_CASE( "QgisDisplayManager: 10. multi-layer batch update coalesces setCanvas
 #include <QObject>
 #include <QTimer>
 #include <qgsrectangle.h>
+#include "support/qt_lifecycle.h"
+
+// Track 2 R4 (PR #1335 exit-crash cluster, group 2): ordered teardown via the
+// shared listener — drains deferred deletes, runs exitQgis()/invalidateCaches
+// while guards are alive, deletes the app before glibc exit().
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 TEST_CASE("Removing a Display Layer during an active canvas render settles first (#779)",
           "[qgis_display_manager][ux6]") {
