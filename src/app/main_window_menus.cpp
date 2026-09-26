@@ -153,7 +153,7 @@ void QgisDesktopWindow::setupMenu()
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "Import Sentinel-2 Product..." ),
                                  this, [this]() { openProductImportDialog( QStringLiteral( "sentinel2" ) ); } ),
          tr( "Import a Sentinel-2 SAFE product (a .SAFE directory containing MTD_MSI*.xml)." ) );
-    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入国产卫星产品..." ),
+    tip( projectMenu->addAction( ic( "i_ort" ), tr( "Import Domestic Satellite Product..." ),
                                  this, [this]() { openProductImportDialog( QStringLiteral( "cn" ) ); } ),
          tr( "Import a Chinese satellite L1A product (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD): band roles, sun geometry, declared calibration and sidecar generation detected from the CRESDA sidecar." ) );
     tip( addCmd( projectMenu, "project.stacBrowse" ),
@@ -657,7 +657,7 @@ void QgisDesktopWindow::setupMenu()
     tip( helpMenu->addAction( ic( "workflow" ), tr( "Guided Workflow" ),
                               this, &QgisDesktopWindow::showGuidedWorkflows ),
          tr( "Step-by-step guided experiment workflow." ) );
-    tip( helpMenu->addAction( ic( "workflow" ), tr( "遥感实验学习工作台" ),
+    tip( helpMenu->addAction( ic( "workflow" ), tr( "Undergraduate Lab Teaching Workbench" ),
                               this, &QgisDesktopWindow::showLabCockpit ),
          tr( "Undergraduate Lab Cockpit: course home, readiness, guided steps, feedback." ) );
     helpMenu->addSeparator();
