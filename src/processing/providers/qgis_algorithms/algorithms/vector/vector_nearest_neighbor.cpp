@@ -167,7 +167,7 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
                 break;
 
             QgsFeature outputFeat;
-            outputFeat.setFields( outputFields );
+            outputFeat.setFields( outputFields, /*initAttributes=*/true );
             outputFeat.setGeometry( refGeometries[nd.id] );
             outputFeat.setAttribute( QStringLiteral( "distance" ), nd.distance );
             outputFeat.setAttribute( QStringLiteral( "neighbor_id" ), static_cast<qlonglong>( nd.id ) );

@@ -81,7 +81,11 @@ QVariantMap VectorDissolveAlgorithm::processAlgorithm( const QVariantMap &parame
             merged = QgsGeometry::collectGeometry( it2.value() );
         }
         QgsFeature outputFeat;
-        outputFeat.setFields( source->fields() );
+        // initAttributes: the vendored setFields defaults to NOT initializing
+        // the attribute storage — without this, setAttribute() below is a
+        // silent out-of-range no-op and the dissolved output carries a NULL
+        // group field on every feature (#1056 follow-up).
+        outputFeat.setFields( source->fields(), /*initAttributes=*/true );
         outputFeat.setAttribute( fieldIdx, it2.key() );
         outputFeat.setGeometry( merged );
         if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
