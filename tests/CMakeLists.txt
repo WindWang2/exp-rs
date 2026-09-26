@@ -13848,3 +13848,13 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# ---------------------------------------------------------------------------
+# Track 7 R4 (rs-operator-oracles): NoData/mask semantics, tolerance chains,
+# determinism digests, preflight refusals, known-answer gap-filling.
+# ---------------------------------------------------------------------------
+sicnu_add_test(test_operator_nodata_semantics TIMEOUT 300)
+sicnu_add_test(test_operator_chain_tolerance TIMEOUT 300)
+sicnu_add_test(test_operator_determinism_digest TIMEOUT 600)
+sicnu_add_test(test_operator_preflight_refusals TIMEOUT 300)
+sicnu_add_test(test_known_answer_corpus_r4 TIMEOUT 300)
