@@ -13882,3 +13882,20 @@ if(Python_EXECUTABLE)
             "--selftest")
   set_tests_properties(test_i18n_string_audit PROPERTIES TIMEOUT 300)
 endif()
+
+# Track 17 R4 (WP-F guard): the WP-B zh_CN backfill entries live under moc
+# short-name contexts, which today's lupdate attributes to namespace-qualified
+# names — a sicnu_i18n_update run would -no-obsolete them away silently.
+# Pin a representative (context, source, translation) sample. Light target.
+add_executable(test_i18n_migrated_translations test_i18n_migrated_translations.cpp)
+target_link_libraries(test_i18n_migrated_translations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_compile_definitions(test_i18n_migrated_translations PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_i18n_migrated_translations PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_i18n_migrated_translations)
