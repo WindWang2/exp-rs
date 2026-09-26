@@ -13867,3 +13867,43 @@ sicnu_add_teaching_admin_test(test_teaching_authoring_failures_r4)
 # session-family failure paths (restore byte-stability, order invariance,
 # partial-failure integrity, concurrency == sequential replay).
 sicnu_add_teaching_test(test_teaching_parity_r4)
+
+# hardening/r4-teaching-lab (Track 12) WP-E: cockpit authority under
+# registry drift — compiles the app-side launcher TU (the
+# test_teaching_cockpit_smoke pattern); heavy deps arrive via sicnu_agent.
+add_executable(test_teaching_cockpit_authority_r4
+  test_teaching_cockpit_authority_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_operator_launch.cpp
+)
+target_link_libraries(test_teaching_cockpit_authority_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  Sicnu::teaching_admin
+  sicnu_agent
+)
+target_include_directories(test_teaching_cockpit_authority_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(test_teaching_cockpit_authority_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_cockpit_authority_r4)
+
+# hardening/r4-teaching-lab (Track 12) WP-D: teacher-credential fail-closed
+# CONSISTENCY across the three harness seams (lab_ask / autonomy_status /
+# lab_reference) — Catch2 + sicnu_agent + jsoncpp, the pattern of the
+# token-credential suites.
+add_executable(test_teaching_credential_paths_r4 test_teaching_credential_paths_r4.cpp)
+target_link_libraries(test_teaching_credential_paths_r4 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_teaching_credential_paths_r4)
+target_include_directories(test_teaching_credential_paths_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(test_teaching_credential_paths_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_credential_paths_r4)
