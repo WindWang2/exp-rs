@@ -68,7 +68,11 @@
 - 并行度：全程 `CMAKE_BUILD_PARALLEL_LEVEL=2` / `-j2`；无 -j1 降级事件（62Gi 机器，构建期峰值 ~50%）。
 - subagents：2 个只读普查代理（Phase 0）+ 1 个评审代理（Phase 5，见 REVIEW_LOG）= 3 封顶。
 - CI：未等待线上 CI。master 仓库只读；全部改动在独立 worktree 分支 `hardening/r4-ui-state-parity`。
-- 与在途 PR 重叠：tests/CMakeLists.txt 为纯追加块；src/app/main_window.cpp 未触碰（#1334 领地）。
+- 与在途 PR 重叠：tests/CMakeLists.txt 为纯追加块 + full-shell 套件显式链接补丁（#1335 同方向）；
+  src/app/main_window.cpp 未触碰（#1334 领地）。
+- 局限披露：F-04 的生产调用点（main_window_project.cpp stac 对话框为模态 exec）在"隐藏但存活"窗口上的
+  实际暴露面有限——hideEvent 失效面按防御纵深实现，AS-3 的隐藏态改写场景在当前生产接线中不可达，
+  oracle 的价值在于钉住失效面合同本身。
 - 环境注记：#1335（未合并）修复的预存链接缺陷（sicnu_agent→agent_loop/OpsDriver 未定义）在 parity
   测试目标上以显式链接 `sicnu_agent_loop`+`Sicnu::agent_ops` 承接（tests/CMakeLists.txt 注释），#1335
   合并后可移除。

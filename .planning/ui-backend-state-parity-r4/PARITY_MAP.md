@@ -135,7 +135,7 @@
 
 ## 覆盖统计
 
-- 映射对总数：**50**（GW6+SW3+RS3+SP3+TB3+TS2+CW2+PD2+ES5+RL2+HS2+SC6+AS6+RE4+ST4=52 行，其中 RE-1/RE-3 为已收引用行、ES-3 为待核行）
+- 映射对总数：**53 行**（含 1 行已核无漂移 ES-3、2 行已收引用 RE-1/RE-3）（GW6+SW3+RS3+SP3+TB3+TS2+CW2+PD2+ES5+RL2+HS2+SC6+AS6+RE4+ST4=52 行，其中 RE-1/RE-3 为已收引用行、ES-3 为待核行）
 - oracle 用例（[parity-*] tag 可 grep）：**38** 个新增 + gate 1 = 39；另有 7 行以"既有 suite"或"无独立 oracle（理由）"诚实标注
 - 九代表面板各 ≥1 对：GW✓ SW✓ RS✓ SP✓ TB✓ TS✓ CW✓ PD✓ ES✓
-- 漂移修复登记（F-xx）：F-01 RL-2、F-02 AS-1、F-03 AS-2、F-04 AS-3、F-05 AS-4、F-06 AS-5、F-07 SP-2、F-08 HS-1、F-09 SC-5、F-10 ES-3、PD-2（=F-11，与 AS-6 同根）+ WP-E/压测新增待登记 → 目标 ≥12
+- 漂移修复登记（F-xx，落地 12 项；F-10 于 S-1 核验撤销）：F-01 RL-2、F-02 AS-1、F-03 AS-2、F-04 AS-3、F-05 AS-4、F-06 AS-5、F-07 SP-2、F-08 HS-1、F-09 SC-5、F-11 PD-2（=AS-6 同根）、F-12 PD-3、F-13 CW-1；评审追加：search 代际自增完成环、taskId 配对、hideEvent 失效面
