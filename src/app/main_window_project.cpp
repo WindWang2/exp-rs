@@ -17,6 +17,7 @@
 #include "workbench/mission_timeline_panel.h"
 #include "workbench/mission_context_store.h"
 #include "workbench/project_session_boundary.h"
+#include "teaching/lab_cockpit_dock.h"
 #include "workbench/selection_context.h"
 #include "workbench/step_explanation_section.h"
 
@@ -51,6 +52,15 @@ void QgisDesktopWindow::setLabRecordingContext( const QString &dbPath,
     m_labExperimentDbPath = dbPath;
     m_labExperimentId = experimentId;
     m_labWorkspaceRoot = workspaceRoot;
+    // Project boundary: the cockpit must drop artifact/run/capsule refs and
+    // validation summaries recorded under the PREVIOUS context — a stale
+    // runId otherwise binds the next capsule export to another project's
+    // experiment store. Also fires on the opt-out path (empty context).
+    if ( m_labCockpitDock ) {
+        if ( auto *cockpit = qobject_cast<sicnu::app::teaching::LabCockpitDock *>(
+                 m_labCockpitDock->widget() ) )
+            cockpit->onRecordingContextChanged();
+    }
 }
 
 namespace

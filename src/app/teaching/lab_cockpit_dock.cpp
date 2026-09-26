@@ -3,6 +3,7 @@
 #include <memory>
 #include "course_home_page.h"
 #include "guided_lab_workspace.h"
+#include "lab_operator_launch.h"
 #include "lab_validate_service.h"
 
 #include "agent/harness/curriculum_availability.h"
@@ -31,6 +32,8 @@
 
 #include <fstream>
 #include <sstream>
+#include <string_view>
+#include <vector>
 #include "platform/portable.h"
 
 // Forward-declare main window slots we may call without pulling the full header
@@ -138,21 +141,62 @@ void LabCockpitDock::wireSignals()
   } );
   connect( m_workspace, &GuidedLabWorkspace::runOperatorRequested, this,
            [this]( const QString &operatorId, const QString &paramsJson ) {
-             Q_UNUSED( paramsJson ); // the Processing dialog owns parameter widgets
-             launchOperator( operatorId );
+             // Registry-checked prefill: the step's params pass the ONE
+             // parameter validator before the operator surface may see them.
+             // A refusal is surfaced as a feedback note — never silently
+             // dropped, never auto-run.
+             const auto plan = sicnu::app::teaching::prepareLabOperatorLaunch(
+               operatorId, paramsJson );
+             if ( !plan.ok ) {
+               for ( const auto &issue : plan.issuesZh )
+                 m_workspace->appendFeedbackNote(
+                   QStringLiteral( "参数预填被拒绝: %1" ).arg(
+                     QString::fromStdString( issue ) ) );
+               return;
+             }
+             QString prefill;
+             if ( plan.params.isObject() && !plan.params.empty() ) {
+               Json::StreamWriterBuilder b;
+               b["indentation"] = "";
+               prefill = QString::fromStdString( Json::writeString(
+                 b, sicnu::app::teaching::absolutizeLabInputPaths(
+                      plan.params, repoDataRoot() ) ) );
+             }
+             launchOperator( operatorId, prefill );
            } );
   connect( m_workspace, &GuidedLabWorkspace::jumpWorkbenchRequested, this,
-           [this]( const QString &operatorId ) { launchOperator( operatorId ); } );
+           [this]( const QString &operatorId ) { launchOperator( operatorId, QString() ); } );
   connect( m_workspace, &GuidedLabWorkspace::exportCapsuleRequested, this,
            [this]() { exportCapsule(); } );
 }
 
-void LabCockpitDock::launchOperator( const QString &operatorId )
+void LabCockpitDock::onRecordingContextChanged()
 {
-  // Hand off to the EXISTING Processing surface (openProcessingAlgorithm);
-  // we never clone the operator UI and never report a fake launch.
+  if ( !m_session.ok ) return;
+  // The shell re-bound the recording context (project open/switch/close).
+  // Artifact/run/capsule refs and validation summaries from the previous
+  // workspace must not survive: a stale runId would bind the next export to
+  // another project's experiment store once the ids collide, and a stale
+  // summary shows a verdict for an artifact this workspace never produced.
+  // Navigation progress (step index, evidence, mode) is course-scoped and kept.
+  m_session.artifactPath.clear();
+  m_session.runId.clear();
+  m_session.capsuleExportRef.clear();
+  m_session.lastValidationSummary = Json::Value();
+  m_workspace->setArtifactPath( QString() );
+  m_workspace->clearFeedback();
+  appendExportNote( tr( "项目/记录上下文已切换：已清除上一项目的产物、运行与胶囊引用（不做跨项目继承）" ) );
+  saveSession();
+}
+
+void LabCockpitDock::launchOperator( const QString &operatorId, const QString &paramsJson )
+{
+  // Hand off to the EXISTING Processing surface (rs-operator task panel /
+  // openProcessingAlgorithm); we never clone the operator UI and never
+  // report a fake launch. paramsJson is prefill-only: the shell may fill the
+  // operator's own parameter form with it, never auto-run.
   if ( m_launchOperator ) {
-    m_launchOperator( operatorId );
+    m_launchOperator( operatorId, paramsJson );
     return;
   }
   QMessageBox::information(
@@ -378,7 +422,42 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
     QDir( data ).filePath( QStringLiteral( "labs/%1.lab.json" ).arg( labId ) );
   Json::Value labDoc = loadJsonFile( labPath );
   m_labDoc = labDoc;
+
+  // Timeline doc: the lab document when it projects steps. Some shipped lab
+  // documents are registry wrappers (spec_version but no steps — e.g. the
+  // canonical lab12/13/14 entries); when the projection yields no steps the
+  // lab-registry.json canonical source labspec is projected instead. The
+  // registry is the authority on what may be opened: ids it marks
+  // out-of-scope (lab8_temporal_analysis, temporal track) have no canonical
+  // entry and stay fail-closed with no steps.
   auto timeline = sicnu::teaching::LabStepTimeline::fromLabDocument( labDoc, m_session.stepIndex );
+  if ( timeline.steps.empty() ) {
+    const Json::Value registry =
+      loadJsonFile( QDir( data ).filePath( QStringLiteral( "labs/lab-registry.json" ) ) );
+    const Json::Value &canonical = registry["canonical"];
+    if ( canonical.isObject() && canonical.isMember( labId.toStdString() ) ) {
+      const Json::Value &entry = canonical[labId.toStdString()];
+      if ( entry.isObject() && entry.isMember( "source" ) && entry["source"].isString() ) {
+        // Registry source paths are repo-relative ("data/labs/..."): resolve
+        // under the data root exactly like grading rule refs do.
+        std::string srcRef = entry["source"].asString();
+        static constexpr std::string_view kDataPrefix = "data/";
+        if ( srcRef.starts_with( kDataPrefix ) )
+          srcRef = srcRef.substr( kDataPrefix.size() );
+        const Json::Value sourceDoc = loadJsonFile( QDir( data ).filePath(
+          QString::fromStdString( srcRef ) ) );
+        if ( sourceDoc.isObject() ) {
+          timeline = sicnu::teaching::LabStepTimeline::fromLabDocument(
+            sourceDoc, m_session.stepIndex );
+          // The projected steps belong to THIS course lab entry: keep the
+          // wrapper id so downstream labId matching (session, feedback,
+          // restore) never sees the source labspec's alias id.
+          if ( timeline.ok )
+            timeline.labId = labId.toStdString();
+        }
+      }
+    }
+  }
   m_workspace->setTimeline( timeline );
 
   // Honest readiness: passport / inspector / scientific facts are NOT
@@ -389,20 +468,69 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
     labId.toStdString(), slice, Json::Value(), Json::Value(), Json::Value(), m_offline );
   m_workspace->setReadiness( readiness );
 
-  Json::Value policy( Json::objectValue );
-  policy["schema"] = "sicnu.autonomy-policy/1";
-  policy["level"] = "L2";
-  policy["mode"] = "practice";
-  auto autonomy = sicnu::teaching::AutonomyEffectiveDisplay::fromPolicyDoc( policy, "student", "lab" );
+  // Autonomy is resolved from the real authorities with the platform's one
+  // precedence rule (course < labspec): the course manifest may declare
+  // sicnu.autonomy-policy/1 as autonomy_policy, and the lab document may
+  // declare it as autonomy. Nothing is invented here — when no authority
+  // declares a policy the projection falls back to the policy engine's own
+  // fail-closed L0 and says so. Restored sessions carry a REF only; they can
+  // never re-introduce a policy the authorities do not declare (no student
+  // escalation path).
+  std::vector<sicnu::agent::autonomy::AutonomyPolicyLayer> layers;
+  std::vector<std::string> policyIssues;
+  if ( m_manifest.isObject() && m_manifest.isMember( "autonomy_policy" ) ) {
+    auto parsed = sicnu::agent::autonomy::parseAutonomyPolicy( m_manifest["autonomy_policy"] );
+    if ( parsed.ok )
+      layers.push_back( { sicnu::agent::autonomy::policy_sources::kCourse, parsed.policy } );
+    else
+      policyIssues.push_back( "课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）" );
+  }
+  if ( labDoc.isObject() && labDoc.isMember( "autonomy" ) ) {
+    auto parsed = sicnu::agent::autonomy::parseAutonomyPolicy( labDoc["autonomy"] );
+    if ( parsed.ok )
+      layers.push_back( { sicnu::agent::autonomy::policy_sources::kLabspec, parsed.policy } );
+    else
+      policyIssues.push_back( "实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）" );
+  }
+  auto resolvedPolicy = sicnu::agent::autonomy::resolveEffectivePolicy( layers );
+  auto autonomy = sicnu::teaching::AutonomyEffectiveDisplay::fromPolicyDoc(
+    resolvedPolicy.toJson(), "student", "lab" );
+  for ( const auto &issue : policyIssues ) autonomy.issuesZh.push_back( issue );
+  if ( !resolvedPolicy.hasLevel && resolvedPolicy.mode.empty() )
+    autonomy.issuesZh.push_back(
+      "课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）" );
   m_workspace->setAutonomy( autonomy );
 
-  QString why = tr( "（可解释工作流投影）\n" );
+  // The ref records which authorities were consulted, not a policy value:
+  // restoring it must never be able to raise the student's autonomy.
+  QString policyRef;
+  if ( resolvedPolicy.hasLevel || !resolvedPolicy.mode.empty() ) {
+    QStringList declared;
+    for ( const auto &layer : layers ) {
+      const QString tag = layer.source == std::string( sicnu::agent::autonomy::policy_sources::kLabspec )
+                            ? QStringLiteral( "labspec:%1" ).arg( labId )
+                            : QStringLiteral( "course:%1" ).arg(
+                                m_manifest.isObject() && m_manifest.isMember( "id" )
+                                  ? QString::fromStdString( m_manifest["id"].asString() )
+                                  : QStringLiteral( "undergraduate_rs" ) );
+      if ( !declared.contains( tag ) ) declared << tag;
+    }
+    policyRef = declared.join( QStringLiteral( "+" ) );
+  } else {
+    policyRef = QStringLiteral( "fail-closed:L0" );
+  }
+  m_session.autonomyPolicyRef = policyRef.toStdString();
+
   if ( const auto *cur = timeline.current() ) {
+    QString why = tr( "（可解释工作流投影）\n" );
     why += QString::fromStdString( cur->whyHintZh );
     why += QLatin1Char( '\n' );
     why += tr( "\n来源徽章: 系统事实 | 编写指引 | 推断\n" );
+    m_workspace->setWhyMarkdown( why );
   }
-  m_workspace->setWhyMarkdown( why );
+  // A stepless/fail-closed timeline keeps the projection's refusal reasons
+  // in the why pane (written by the workspace) — the default banner must
+  // not overwrite them.
 
   // Restore the persisted feedback summary for THIS lab only; a summary from
   // another lab is never shown. The summary is re-materialized from the
@@ -418,7 +546,6 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
       m_workspace->setFeedback( fb );
     }
   }
-  m_session.autonomyPolicyRef = "inline:practice/L2";
   saveSession();
 
   m_stack->setCurrentWidget( m_workspace );

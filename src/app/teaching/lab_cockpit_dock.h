@@ -28,9 +28,12 @@ struct LabCapsuleSource
 };
 
 /// Hands an operator id to the EXISTING Processing surface (production wires
-/// QgisDesktopWindow::openProcessingAlgorithm). The dock never clones the
-/// operator UI; without a shell it degrades to an honest message.
-using OperatorLauncher = std::function<void( const QString &operatorId )>;
+/// the shell's rs-operator task panel / QgisDesktopWindow::openProcessing-
+/// Algorithm). The dock never clones the operator UI; without a shell it
+/// degrades to an honest message. @p paramsJson is the lab step's registry-
+/// validated parameter document ("" when the step carries none); it may be
+/// used only to PREFILL the operator's own parameter form — never to auto-run.
+using OperatorLauncher = std::function<void( const QString &operatorId, const QString &paramsJson )>;
 using CapsuleSourceProvider = std::function<LabCapsuleSource()>;
 
 /// Top-level Undergraduate Lab Cockpit page host.
@@ -46,6 +49,14 @@ public:
   void setOperatorLauncher( OperatorLauncher launcher );
   void setCapsuleSourceProvider( CapsuleSourceProvider provider );
 
+  /// The shell re-bound the lab recording context (project opened/switched/
+  /// closed). Run/capsule/artifact refs recorded under the PREVIOUS context
+  /// would silently bind exports to another project's experiment store, so
+  /// they are dropped here; navigation progress (steps, evidence, mode) is
+  /// kept. Validation summaries are dropped too: their artifact belongs to
+  /// the previous workspace.
+  void onRecordingContextChanged();
+
   void loadCourseFromRepo();
   void restoreSession();
   bool saveSession();
@@ -58,7 +69,7 @@ public slots:
 
 private:
   void wireSignals();
-  void launchOperator( const QString &operatorId );
+  void launchOperator( const QString &operatorId, const QString &paramsJson );
   void exportCapsule();
   void appendExportNote( const QString &noteZh );
   Json::Value loadJsonFile( const QString &path ) const;

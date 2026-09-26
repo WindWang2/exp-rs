@@ -1,5 +1,10 @@
 {
   "schema": "sicnu.curriculum/1",
+  "autonomy_policy": {
+    "schema": "sicnu.autonomy-policy/1",
+    "level": "L2",
+    "mode": "practice"
+  },
   "id": "undergraduate_rs",
   "title": "Remote Sensing Undergraduate Course Pack",
   "title_zh": "遥感科学与技术本科实验课程",

@@ -21,9 +21,35 @@
     "forward_references": {
       "type": "array",
       "items": { "$ref": "#/definitions/forwardReference" }
-    }
+    },
+    "autonomy_policy": { "$ref": "#/definitions/courseAutonomyPolicy" }
   },
   "definitions": {
+    "courseAutonomyPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "RS14-12 teaching autonomy ladder: optional course-level policy layer (sicnu.autonomy-policy/1). Precedence course < labspec < teacher < session. Absent = inherit; a malformed block never grants anything.",
+      "required": ["schema"],
+      "properties": {
+        "schema": { "const": "sicnu.autonomy-policy/1" },
+        "level": { "type": "string", "enum": ["L0", "L1", "L2", "L3", "L4", "L5"] },
+        "mode": { "type": "string", "enum": ["exam", "practice", "instructor", "agent"] },
+        "max_level": { "type": "string", "enum": ["L0", "L1", "L2", "L3", "L4", "L5"] },
+        "capability_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["decision"],
+            "properties": {
+              "decision": { "type": "string", "enum": ["allow", "deny"] },
+              "reason_code": { "type": "string" }
+            }
+          }
+        },
+        "source": { "type": "string", "enum": ["course", "labspec", "teacher", "session"] }
+      }
+    },
     "module": {
       "type": "object",
       "additionalProperties": false,

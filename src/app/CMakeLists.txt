@@ -493,6 +493,8 @@ target_sources(sicnu_geo_rs_shell PRIVATE
     teaching/guided_lab_workspace.h
     teaching/lab_cockpit_dock.cpp
     teaching/lab_cockpit_dock.h
+    teaching/lab_operator_launch.cpp
+    teaching/lab_operator_launch.h
     teaching/lab_validate_service.cpp
     teaching/lab_validate_service.h
     teaching/status_badge.h
