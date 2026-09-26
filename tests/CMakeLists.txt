@@ -2550,7 +2550,7 @@ target_include_directories(test_surface_snapshot PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 target_compile_definitions(test_surface_snapshot PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-sicnu_discover_tests(test_surface_snapshot)
+sicnu_discover_tests(test_surface_snapshot TEST_PREFIX "test_surface_snapshot::")
 
 # Track 9 (mcp-surface-r4) WP-C: protocol robustness (malformed frames,
 # -32002 gate, #644 id contract, #634 cancellation bookkeeping, surface
@@ -2584,7 +2584,7 @@ target_include_directories(test_surface_protocol_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_surface_protocol_r4)
+sicnu_discover_tests(test_surface_protocol_r4 TEST_PREFIX "test_surface_protocol_r4::")
 
 # Track D1 (ds41-capability-help-sync): capability surface parity gate.
 # registry descriptors <-> sidecar A <-> sidecar B <-> help operator topics
@@ -2716,6 +2716,7 @@ target_link_libraries(surface_mcp_host PRIVATE
   sicnu_agent
   Sicnu::experiment
   Sicnu::experiment_bridge
+  Sicnu::agent_ops
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
