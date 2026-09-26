@@ -5435,7 +5435,40 @@ Revision: %2</source>
         <source>Undergraduate Lab Teaching Workbench</source>
         <translation>遥感实验学习工作台</translation>
     </message>
-</context>
+
+    <message>
+        <source>(no description)</source>
+        <translation>（无描述）</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;&lt;b&gt;Parameters&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%1&lt;/p&gt;</source>
+<translation>&lt;p&gt;&lt;b&gt;参数&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%1&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source># Could not build a command from the current parameters (check required inputs)</source>
+        <translation># 无法根据当前参数生成命令（请检查必填项）</translation>
+    </message>
+    <message>
+        <source># Command preview failed: %1</source>
+        <translation># 命令预览失败: %1</translation>
+    </message>
+    <message>
+        <source># Command preview failed (incomplete or invalid parameters)</source>
+        <translation># 命令预览失败（参数不完整或无效）</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;CLI / application: &lt;code&gt;%1&lt;/code&gt;&lt;/p&gt;</source>
+<translation>&lt;p&gt;CLI / 应用: &lt;code&gt;%1&lt;/code&gt;&lt;/p&gt;</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;Tags: %1&lt;/p&gt;</source>
+<translation>&lt;p&gt;标签: %1&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;Hover in the toolbox for a summary; the full description appears on the right/help area after opening the dialog.</source>
+        <translation>&lt;p&gt;在工具箱中悬停可查看简介；打开对话框后右侧/帮助区显示完整说明。</translation>
+    </message>
+    </context>
 <context>
     <name>QaMaskDialog</name>
     <message>
@@ -17759,7 +17792,12 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Run succeeded: %1</source>
         <translation>运行成功：%1</translation>
     </message>
-</context>
+
+    <message>
+        <source>Node selected: %1</source>
+        <translation>已选择节点：%1</translation>
+    </message>
+    </context>
 <context>
     <name>sicnu::app::CommandPalette</name>
     <message>
@@ -20108,6 +20146,28 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
     <message>
         <source>Load failed: %1</source>
         <translation>加载失败：%1</translation>
+    </message>
+</context>
+<context>
+    <name>StepExplanationSection</name>
+    <message>
+        <source>Pipeline documentation unavailable; cannot explain this node.</source>
+        <translation>管线文档不可用，无法解释此节点。</translation>
+    </message>
+    <message>
+        <source>Node %1 is not in the current document; cannot explain.</source>
+        <translation>当前文档中没有节点 %1，无法解释。</translation>
+    </message>
+</context>
+<context>
+    <name>DatasetExperimentPanel</name>
+    <message>
+        <source>%1 (%2)</source>
+        <translation>%1 (%2)</translation>
+    </message>
+    <message>
+        <source>%1 — %2</source>
+        <translation>%1 — %2</translation>
     </message>
 </context>
 </TS>
