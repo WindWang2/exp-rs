@@ -456,3 +456,64 @@ TEST_CASE( "matrix ledger surfaces every linked run, not the first 100",
     REQUIRE( runs.has_value() );
     REQUIRE( runs.value().size() == 150 );
 }
+
+// --- Track 11 R4 (WP-F): study spine boundaries. -----------------------------
+// The spine's honest edges: an EMPTY study projects to an empty-but-true
+// analysis, and a point whose ledger page overflows refuses the whole
+// analysis (typed) instead of silently analyzing a prefix.
+
+TEST_CASE( "empty study projects to an honest empty analysis (r4)",
+           "[study][analysis][r4]" )
+{
+    Fixture fix;
+    fix.ensureExperiment( QStringLiteral( "exp-analysis" ) );
+    const auto spec = oatSpec();
+    const auto page = analyzeStudy( fix.store, fix.ledger, spec, {} );
+    REQUIRE( page.has_value() );
+    CHECK( page.value().points.isEmpty() );
+    CHECK( page.value().paretoPointIds.isEmpty() );
+    CHECK( page.value().declaredBestPointId.isEmpty() );
+    // Curves/envelopes exist only as declared-dimension SCAFFOLDING: no
+    // measured points, and the trend label stays the factual
+    // "insufficient-data" — never a fabricated aggregate (zero runs must
+    // not read as a measured result).
+    for ( const auto &curve : page.value().curves )
+    {
+        CHECK( curve.points.isEmpty() );
+        CHECK( curve.trend == QLatin1String( "insufficient-data" ) );
+    }
+    for ( const auto &envelope : page.value().envelopes )
+        CHECK( envelope.bands.isEmpty() );
+}
+
+TEST_CASE( "analyzeStudy refuses typed when a point's ledger page overflows (r4)",
+           "[study][analysis][r4]" )
+{
+    Fixture fix;
+    fix.ensureExperiment( QStringLiteral( "exp-analysis" ) );
+    const auto spec = oatSpec();
+    auto points = sampleStudyPoints( spec );
+    REQUIRE( points.has_value() );
+    REQUIRE( points.value().size() >= 2 );
+
+    // First point records normally.
+    REQUIRE( fix.ledger.link( points.value().first().pointId,
+                              QStringLiteral( "run-under-budget" ) )
+                 .has_value() );
+
+    // Second point overflows the kMaxMatrixCells run budget: 1001 links.
+    const QString overflowingCell = points.value().at( 1 ).pointId;
+    for ( int i = 0; i < 1001; ++i )
+        REQUIRE( fix.ledger
+                     .link( overflowingCell,
+                            QStringLiteral( "overflow-run-%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) )
+                     .has_value() );
+
+    const auto page = analyzeStudy( fix.store, fix.ledger, spec, points.value() );
+    REQUIRE( !page.has_value() );
+    bool overflowTyped = false;
+    for ( const auto &diagnostic : page.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "experiment.matrix_cell_runs_overflow" ) )
+            overflowTyped = true;
+    CHECK( overflowTyped );
+}
