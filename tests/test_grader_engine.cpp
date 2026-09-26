@@ -1315,6 +1315,10 @@ TEST_CASE( "rounding and verdict boundaries behave deterministically",
 
 // ---------------------------------------------------------------------------
 // Track 16 WP-E: process-aware boundaries — ungradeable is never a score.
+// Division of labor with the existing SECTIONs: those pin the indeterminate
+// reason chains per criterion family; the cases below pin the REPORT-level
+// distinction (Blocked vs Fail, Indeterminate-vs-NotEarned reason contrast,
+// partial-coverage verdicts) that those SECTIONs do not.
 // ---------------------------------------------------------------------------
 
 namespace {

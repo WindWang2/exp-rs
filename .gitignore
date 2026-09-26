@@ -486,3 +486,4 @@ data/labs/_tmp/
 !.planning/verify-chain-r4/
 .planning/verify-chain-r4/*
 !.planning/verify-chain-r4/*.md
+!.planning/verify-chain-r4/*.sh

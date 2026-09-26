@@ -71,7 +71,16 @@ bool tryLocale( const char *localeName )
 /// compile de_DE.UTF-8 once into a temp LOCPATH (glibc localedef ships in
 /// the base toolchain; no root needed) and re-point the lookup. Returns the
 /// locale name, or "" when even that is impossible (then rows say so).
+/// The (potentially expensive) provisioning runs once per process.
+std::string provisionCommaLocaleUncached();
+
 std::string provisionCommaLocale()
+{
+    static const std::string cached = provisionCommaLocaleUncached();
+    return cached;
+}
+
+std::string provisionCommaLocaleUncached()
 {
     if ( tryLocale( "de_DE.UTF-8" ) )
         return "de_DE.UTF-8";
@@ -79,9 +88,16 @@ std::string provisionCommaLocale()
         return "de_DE.utf8";
 
     std::error_code ec;
-    const std::filesystem::path dir =
-        std::filesystem::temp_directory_path( ec ) / "sicnu-track16-locpath";
+    std::filesystem::path dir = std::filesystem::temp_directory_path( ec );
     if ( ec )
+        return {};
+    // P2-4: the path goes into a single-quoted shell command; refuse to
+    // build the command when the host handed us a path that could break
+    // out of the quoting (a single quote is the only escape that matters
+    // inside '...').
+    dir /= "sicnu-track16-locpath";
+    const std::string dirText = dir.generic_string();
+    if ( dirText.find( '\'' ) != std::string::npos )
         return {};
     std::filesystem::create_directories( dir, ec );
     if ( ec )
@@ -93,7 +109,7 @@ std::string provisionCommaLocale()
         if ( std::system( cmd.c_str() ) != 0 )
             return {};
     }
-    setenv( "LOCPATH", dir.string().c_str(), 1 );
+    setenv( "LOCPATH", dirText.c_str(), 1 );
     return tryLocale( "de_DE.UTF-8" ) ? std::string( "de_DE.UTF-8" ) : std::string();
 }
 
@@ -131,6 +147,7 @@ bool requireCommaLocaleEvidence()
               "rows run against the installed sweep only" );
         return false;
     }
+    REQUIRE( tryLocale( comma.c_str() ) );
     REQUIRE( commaLocaleBites() );
     return true;
 }
@@ -304,32 +321,25 @@ TEST_CASE( "chain digest production points are numeric-locale invariants",
         }
     }
 
-    SECTION( "V5 canonical text round-trips under every locale" )
+    SECTION( "V5 spec JSON round-trips through parseSpec under every locale" )
     {
-        // The parse side (strtod-family in the JSON reader) is the other
-        // half of the digest contract: canonical text produced under "C"
+        // The parse side is the other half of the digest contract (the
+        // parse-entry pin, BASELINE P3): a spec document produced under "C"
         // must re-parse and re-digest identically under a comma-decimal
-        // thread locale.
-        const std::string canonical = canonicalJsonText( fractionalBody() );
-        REQUIRE_FALSE( canonical.empty() );
+        // thread locale — the sealed text goes through the real parseSpec
+        // entry, not an in-memory copy.
+        const std::string document = canonicalJsonText( specToJson( fractionalSpec( "spec.roundtrip" ) ) );
+        REQUIRE_FALSE( document.empty() );
         const std::string referenceDigest = specDigest( fractionalSpec( "spec.roundtrip" ) );
         for ( const std::string &locale : locales )
         {
             INFO( "locale " << locale );
             REQUIRE( tryLocale( locale.c_str() ) );
-            const VerificationSpec parsed = fractionalSpec( "spec.roundtrip" );
+            VerificationSpec parsed;
+            std::string parseError;
+            std::vector<std::string> validationErrors;
+            REQUIRE( parseSpec( document, parsed, parseError, validationErrors ) );
             CHECK( specDigest( parsed ) == referenceDigest );
-            // The fractional values themselves survive a text round-trip.
-            Json::Value back;
-            Json::CharReaderBuilder builder;
-            std::string errors;
-            std::istringstream stream( canonical );
-            REQUIRE( Json::parseFromStream( builder, stream, &back, &errors ) );
-            // The canonical form carries 12 significant digits: the literal
-            // 0.30000000000000004 sealed as "0.3" and must read back as the
-            // same double the writer meant — under every locale.
-            CHECK( back["ratio"].asDouble() == 0.3 );
-            CHECK( back["threshold"].asDouble() == 0.35 );
         }
     }
 

@@ -99,8 +99,6 @@ struct SharedAuthority
 {
     std::map<std::string, sicnu::state::RemoteSensingAssetState> passports;
 
-    sicnu::state::RemoteSensingAssetState *find( const std::string &key ) { return passports.count( key ) ? &passports[key] : nullptr; }
-
     /// The broker-side resolver (typed failure channel).
     PassportResolution brokerResolver( const std::string &assetKey ) const
     {
@@ -293,7 +291,7 @@ TEST_CASE( "invalidateAsset: re-imported radiometric unit reaches preflight and 
     const SynthesizeResult primed = L.synthesize();
     REQUIRE_FALSE( primed.cacheHit );
     const PreflightReport before = L.evaluate();
-    REQUIRE( trace( *(&before), "preflight.radiometric_state_policy" ) != nullptr );
+    REQUIRE( trace( before, "preflight.radiometric_state_policy" ) != nullptr );
 
     // Re-import: same identity, mutated content.
     L.authority.passports["scene-a"] =
@@ -752,9 +750,12 @@ TEST_CASE( "budget truncation stays loud across an invalidation that swaps "
     CHECK( before.verdict == "blocked" );
 
     // Invalidate into a DIFFERENT bad state (same finding volume, different
-    // content): truncation stays loud across the seam.
+    // content: re-imported onto another CRS with the threshold-grade unit):
+    // truncation stays loud across the seam.
     L.authority.passports["scene-a"] =
-        passportFromJson( blanked, L.ok );
+        passportFromJson( scenePassportJson( "scene-a", "EPSG:32610", 10.0,
+                                             "toa_radiance" ),
+                          L.ok );
     REQUIRE( L.ok );
     L.broker.invalidateAsset( "scene-a" );
     const PreflightReport after = L.engine.evaluate( req, L.facts, L.capability );

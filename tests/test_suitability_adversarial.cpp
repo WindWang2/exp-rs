@@ -1472,14 +1472,16 @@ TEST_CASE( "the provider is consulted only when facts are absent and a dataset "
         REQUIRE( result.has_value() );
         CHECK( spy.consultations == 0 );
     }
-    // Facts absent + version id present: the provider channel serves.
+    // Facts absent + version id present: the provider channel serves,
+    // witnessed by exactly one consultation.
     {
         SuitabilityAssessor::Inputs inputs;
         inputs.goal = perfectGoal();
         inputs.datasetVersionId = QStringLiteral( "dv-track16" );
-        const InMemoryDataProvider provider( perfectFacts() );
-        inputs.provider = &provider;
+        SpyProvider spy;
+        inputs.provider = &spy;
         const auto result = SuitabilityAssessor::assess( inputs );
         REQUIRE( result.has_value() );
+        CHECK( spy.consultations == 1 );
     }
 }
