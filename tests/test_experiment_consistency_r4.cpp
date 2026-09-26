@@ -10,11 +10,25 @@
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 #include "experiment/comparison_ext.h"
+#include "experiment/lineage.h"
+#include "experiment/promotion.h"
+#include "experiment/reproduction_bundle.h"
+#include "experiment/reproduction_bundle_import.h"
+#include "dataset/dataset_types.h"
+#include "dataset/split.h"
 #include "experiment/repeat_execution.h"
 
+#include <QCryptographicHash>
+#include <QDebug>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+
+#include <sqlite3.h>
 
 using namespace sicnu::dataset;
 using namespace sicnu::experiment;
@@ -189,6 +203,396 @@ TEST_CASE( "paired comparison names structural asymmetries instead of dropping t
     CHECK( !cleanStructureNotes );
     CHECK( cleanSummary.deltas.size() == 1 );
 }
+
+namespace
+{
+
+// Re-forges the bundle checksums after editing run_config.json — the same
+// wholesale-tamper power a forger has. Truth source: the importer's own
+// checksum gate must pass so the seed decision is the ONLY thing on trial.
+bool reForgeChecksums( const QString &bundleDir )
+{
+    const QString runConfigPath = QDir( bundleDir ).filePath( QStringLiteral( "run_config.json" ) );
+    QFile runConfigFile( runConfigPath );
+    if ( !runConfigFile.open( QIODevice::ReadOnly ) )
+        return false;
+    const QByteArray content = runConfigFile.readAll();
+    runConfigFile.close();
+    const QString digest = QString::fromLatin1(
+        QCryptographicHash::hash( content, QCryptographicHash::Sha256 ).toHex() );
+    const QString checksumsPath = QDir( bundleDir ).filePath( QStringLiteral( "checksums.txt" ) );
+    QFile checksumsFile( checksumsPath );
+    if ( !checksumsFile.open( QIODevice::ReadOnly ) )
+        return false;
+    QStringList lines = QString::fromUtf8( checksumsFile.readAll() )
+                            .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+    checksumsFile.close();
+    for ( QString &line : lines )
+        if ( line.endsWith( QStringLiteral( "  run_config.json" ) ) )
+            line = digest + QStringLiteral( "  run_config.json" );
+    const QByteArray rewritten = lines.join( QLatin1Char( '\n' ) ).toUtf8() + "\n";
+    if ( !QFile::remove( checksumsPath ) )
+        return false;
+    QFile out( checksumsPath );
+    if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        return false;
+    return out.write( rewritten ) == rewritten.size();
+}
+
+bool rewriteRunConfig( const QString &bundleDir, const QJsonObject &runConfig )
+{
+    const QString runConfigPath = QDir( bundleDir ).filePath( QStringLiteral( "run_config.json" ) );
+    const QByteArray content = QJsonDocument( runConfig ).toJson( QJsonDocument::Indented );
+    if ( !QFile::remove( runConfigPath ) )
+        return false;
+    QFile out( runConfigPath );
+    if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        return false;
+    return out.write( content ) == content.size();
+}
+
+} // namespace
+
+// ⑧ (item 8): legacy decimal seeds (bundles written before the seed_hex pin)
+// survive a double round-trip only as integers in [0, 2^53). Pre-fix, the
+// importer cast whatever the JSON number parsed to straight into a quint64 —
+// huge seeds wrapped, negative JSON numbers became implementation-defined.
+// The invariant: the legacy path imports losslessly restorable seeds and
+// REFUSES the rest (the bundle proves re-export would restore the truth).
+TEST_CASE( "legacy decimal seeds outside the lossless domain are refused",
+           "[experiment][bundle][r4]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    ExperimentStore experiments;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    REQUIRE( experiments.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r4-seed" ) );
+    experiment.setName( QStringLiteral( "seed domain" ) );
+    REQUIRE( experiments.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-seed" ), QStringLiteral( "exp-r4-seed" ) );
+    run.setDatasetVersionId( committed->versionId() );
+    run.setDatasetFingerprint( committed->fingerprint() );
+    run.setSeed( 42 );
+    run.setStatus( RunStatus::Created );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( experiments.upsertRun( run ).has_value() );
+
+    ReproductionBundleExporter exporter( experiments, datasets );
+    ReproductionBundleOptions exportOptions;
+    exportOptions.outputDir = dir.filePath( QStringLiteral( "bundle" ) );
+    exportOptions.currentSoftwareRevision = QStringLiteral( "test" );
+    const auto exportReport = exporter.exportRun( QStringLiteral( "run-seed" ), exportOptions );
+    REQUIRE( exportReport.ok );
+    QString bundleDir = exportReport.bundlePath;
+    const auto exportFreshBundle = [&]( const QString &suffix ) {
+        ReproductionBundleOptions options = exportOptions;
+        options.outputDir = dir.filePath( QStringLiteral( "bundle-%1" ).arg( suffix ) );
+        const auto fresh = exporter.exportRun( QStringLiteral( "run-seed" ), options );
+        REQUIRE( fresh.ok );
+        bundleDir = fresh.bundlePath;
+    };
+
+    // The strip helper: legacy-bundle emulation — drop seed_hex, keep the
+    // decimal key carrying whatever the forger wants.
+    const auto stripHexPin = [&]( const QJsonValue &seedHolder ) {
+        QFile file( QDir( bundleDir ).filePath( QStringLiteral( "run_config.json" ) ) );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        QJsonObject runConfig = QJsonDocument::fromJson( file.readAll() ).object();
+        file.close();
+        runConfig.remove( QStringLiteral( "seed_hex" ) );
+        runConfig.insert( QStringLiteral( "seed" ), seedHolder );
+        REQUIRE( rewriteRunConfig( bundleDir, runConfig ) );
+        REQUIRE( reForgeChecksums( bundleDir ) );
+    };
+
+    const auto importWith = [&]( ExperimentStore &target ) {
+        Experiment home;
+        home.setExperimentId( QStringLiteral( "exp-r4-seed-dst" ) );
+        home.setName( QStringLiteral( "seed destination" ) );
+        REQUIRE( target.upsertExperiment( home ).has_value() );
+        ReproductionBundleImporter importer( target );
+        ReproductionBundleImportOptions options;
+        options.bundleDir = bundleDir;
+        options.targetExperimentId = QStringLiteral( "exp-r4-seed-dst" );
+        return importer.importRun( options );
+    };
+
+    // A huge legacy decimal (>= 2^53): not losslessly restorable → refused.
+    {
+        ExperimentStore targetA;
+        REQUIRE( targetA.open( dir.filePath( QStringLiteral( "target-a.db" ) ) ) );
+        exportFreshBundle( QStringLiteral( "huge" ) );
+        stripHexPin( QJsonValue( 1e19 ) );
+        const auto report = importWith( targetA );
+        CHECK( !report.ok );
+        bool seedNamed = false;
+        for ( const QString &warning : report.warnings )
+            if ( warning.contains( QLatin1String( "seed" ) ) )
+                seedNamed = true;
+        CHECK( seedNamed );
+    }
+
+    // A negative legacy decimal: same refusal.
+    {
+        ExperimentStore targetB;
+        REQUIRE( targetB.open( dir.filePath( QStringLiteral( "target-b.db" ) ) ) );
+        exportFreshBundle( QStringLiteral( "negative" ) );
+        stripHexPin( QJsonValue( -5 ) );
+        const auto report = importWith( targetB );
+        CHECK( !report.ok );
+    }
+
+    // An in-range legacy decimal stays importable and lands exactly.
+    {
+        ExperimentStore targetC;
+        REQUIRE( targetC.open( dir.filePath( QStringLiteral( "target-c.db" ) ) ) );
+        exportFreshBundle( QStringLiteral( "legacy42" ) );
+        stripHexPin( QJsonValue( 42 ) );
+        const auto report = importWith( targetC );
+        REQUIRE( report.ok );
+        const auto installed = targetC.runById( report.runId );
+        REQUIRE( installed.has_value() );
+        CHECK( installed->seed() == 42 );
+    }
+}
+
+
+// ⑩ (item 10, whitelist-bounded minimal fix): splitManifestsForVersion can
+// only return a list, so a row that no longer parses used to shrink the
+// version's split evidence silently. The fix stays inside the one file this
+// track owns and makes the skip LOUD instead: the returned subset is
+// accompanied by a stable, countable warning.
+TEST_CASE( "skipped corrupt split manifest rows are named, not silent",
+           "[dataset][splits][r4]" )
+{
+    QTemporaryDir dir;
+    DatasetStore datasets;
+    const QString dbPath = dir.filePath( QStringLiteral( "datasets.db" ) );
+    REQUIRE( datasets.open( dbPath ) );
+
+    const DatasetId datasetId = DatasetId::generate();
+    REQUIRE( datasets.createDataset( datasetId, QStringLiteral( "lc" ) ).has_value() );
+    DatasetManifest manifest;
+    manifest.setDatasetId( datasetId.toString() );
+    manifest.setVersionId( DatasetVersionId::generate().toString() );
+    const auto draft = datasets.createDraftVersion( manifest );
+    REQUIRE( draft.has_value() );
+    const DatasetVersionId versionId =
+        DatasetVersionId::fromString( draft->versionId() ).value_or( DatasetVersionId{} );
+    REQUIRE( datasets.stageVersion( versionId ).has_value() );
+    const auto committed = datasets.commitVersion( versionId );
+    REQUIRE( committed.has_value() );
+
+    // One healthy split manifest for the committed version (a valid config
+    // plus one assignment — a default manifest would fail fromJson and
+    // degrade into exactly the corrupt row this test is about).
+    SplitManifest healthy;
+    healthy.setManifestId( QStringLiteral( "split-healthy" ) );
+    healthy.setDatasetVersionId( committed->versionId() );
+    SplitConfig healthyConfig;
+    healthyConfig.method = SplitMethod::Random;
+    healthyConfig.seed = 7;
+    healthy.setConfig( healthyConfig );
+    SplitAssignment healthyAssignment;
+    healthyAssignment.sampleId = QStringLiteral( "sample-1" );
+    healthyAssignment.role = SplitRole::Train;
+    healthy.assignments().append( healthyAssignment );
+    REQUIRE( datasets.saveSplitManifest( healthy ).has_value() );
+    {
+        const auto roundTrip = datasets.splitManifestById( QStringLiteral( "split-healthy" ) );
+        REQUIRE( roundTrip.has_value() ); // the healthy row really parses
+    }
+
+    // A second row that no longer parses — injected the way a torn write or
+    // a forger would leave it.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( qUtf8Printable( dbPath ), &raw, SQLITE_OPEN_READWRITE,
+                                  nullptr )
+                 == SQLITE_OK );
+        const QString insert = QStringLiteral(
+                                   "INSERT INTO split_manifests(manifest_id,"
+                                   " dataset_version_id, fingerprint, json, created_ms)"
+                                   " VALUES('split-corrupt', '%1', '', '{not json', 1)" )
+                                   .arg( committed->versionId() );
+        char *error = nullptr;
+        REQUIRE( sqlite3_exec( raw, qUtf8Printable( insert ), nullptr, nullptr, &error )
+                 == SQLITE_OK );
+        sqlite3_free( error );
+        sqlite3_close( raw );
+    }
+
+    // Capture the category-stable warning the skip must emit. The handler
+    // must be a function pointer, so the capture rides in file-static state.
+    static QStringList warnings;
+    warnings.clear();
+    QtMessageHandler previous = qInstallMessageHandler(
+        []( QtMsgType type, const QMessageLogContext &, const QString &message ) {
+            if ( type == QtWarningMsg )
+                warnings.append( message );
+        } );
+    const DatasetVersionId committedId =
+        DatasetVersionId::fromString( committed->versionId() ).value_or( DatasetVersionId{} );
+    const QVector<SplitManifest> manifests = datasets.splitManifestsForVersion( committedId );
+    qInstallMessageHandler( previous );
+
+    // The healthy row still reads; the corrupt one did not crash the read.
+    REQUIRE( manifests.size() == 1 );
+    CHECK( manifests.first().manifestId() == QStringLiteral( "split-healthy" ) );
+
+    // And the skip is on the record, countable, with the stable token.
+    bool skipNamed = false;
+    for ( const QString &warning : warnings )
+        if ( warning.contains( QLatin1String( "dataset.split_manifest_corrupt_skipped" ) ) &&
+             warning.contains( QLatin1String( "1" ) ) )
+            skipNamed = true;
+    CHECK( skipNamed );
+}
+
+
+// ⑪ (item 11): corruption must never read as absence on decision paths. A
+// run row that no longer parses is tamper-or-torn-write evidence: the
+// promotion gate refuses on it (typed failure), the typed reader
+// distinguishes it from not-found, and the plain optional reader keeps its
+// documented display-seam contract (corrupt reads as absent).
+TEST_CASE( "a corrupt run row is refused by the promotion gate, not read as absent",
+           "[experiment][promotion][r4]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r4-corrupt" ) );
+    experiment.setName( QStringLiteral( "corrupt row gate" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-corrupt" ), QStringLiteral( "exp-r4-corrupt" ) );
+    run.setStatus( RunStatus::Completed );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertRun( run ).has_value() );
+
+    // Corrupt the stored row the way a torn write would.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( qUtf8Printable( dir.filePath( QStringLiteral( "experiments.db" ) ) ),
+                                  &raw, SQLITE_OPEN_READWRITE, nullptr )
+                 == SQLITE_OK );
+        char *error = nullptr;
+        REQUIRE( sqlite3_exec( raw, "UPDATE experiment_runs SET json='{' WHERE run_id='run-corrupt'",
+                               nullptr, nullptr, &error )
+                 == SQLITE_OK );
+        sqlite3_free( error );
+        sqlite3_close( raw );
+    }
+
+    // Truth source: the row IS there, and the typed reader says corrupt.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( qUtf8Printable( dir.filePath( QStringLiteral( "experiments.db" ) ) ),
+                                  &raw, SQLITE_OPEN_READONLY, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *stmt = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "SELECT COUNT(*) FROM experiment_runs WHERE"
+                                          " run_id='run-corrupt'", -1, &stmt, nullptr )
+                 == SQLITE_OK );
+        REQUIRE( sqlite3_step( stmt ) == SQLITE_ROW );
+        CHECK( sqlite3_column_int( stmt, 0 ) == 1 );
+        sqlite3_finalize( stmt );
+        sqlite3_close( raw );
+    }
+    const auto record = store.runRecordById( QStringLiteral( "run-corrupt" ) );
+    REQUIRE( !record.has_value() );
+    bool corruptTyped = false;
+    for ( const auto &diagnostic : record.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "experiment.run_corrupt" ) )
+            corruptTyped = true;
+    CHECK( corruptTyped );
+
+    // The promotion gate REFUSES on the corrupt evidence instead of scoring
+    // the run as merely "missing" and answering a decision from a gap.
+    PromotionRequest request;
+    request.runId = QStringLiteral( "run-corrupt" );
+    request.modelId = QStringLiteral( "model-a" );
+    const auto evaluation = PromotionEvaluator( store ).evaluate( request );
+    REQUIRE( !evaluation.has_value() );
+    bool gateTypedCorrupt = false;
+    for ( const auto &diagnostic : evaluation.diagnostics() )
+        if ( diagnostic.code == QLatin1String( "experiment.run_corrupt" ) )
+            gateTypedCorrupt = true;
+    CHECK( gateTypedCorrupt );
+
+    // Control: a genuinely ABSENT run keeps the historical contract
+    // (success with missingEvidence naming "run").
+    PromotionRequest absentRequest;
+    absentRequest.runId = QStringLiteral( "run-never-recorded" );
+    absentRequest.modelId = QStringLiteral( "model-a" );
+    const auto absent = PromotionEvaluator( store ).evaluate( absentRequest );
+    REQUIRE( absent.has_value() );
+    CHECK( absent.value().missingEvidence.contains( QStringLiteral( "run" ) ) );
+}
+
+// ⑨ (item 9): the whole-table lineage scan carries its truncation in the
+// return value — page API names total/truncated, the graph stamps it onto
+// every query answer, and the serialization discloses it.
+TEST_CASE( "lineage edge page reports truncation instead of hiding it",
+           "[experiment][lineage][r4]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    for ( int i = 0; i < 7; ++i )
+        REQUIRE( store
+                     .addLineageEdge( QStringLiteral( "run" ), QStringLiteral( "r%1" ).arg( i ),
+                                      QStringLiteral( "derived_from" ), QStringLiteral( "run" ),
+                                      QStringLiteral( "r%1" ).arg( i + 1 ) )
+                     .operator bool() );
+
+    // Truth source: the table really holds 7 edges.
+    const auto page = store.lineageEdgePage( /*limit=*/5 );
+    CHECK( page.total == 7 );
+    REQUIRE( page.edges.size() == 5 );
+    CHECK( page.truncated );
+
+    const auto full = store.lineageEdgePage( /*limit=*/16 );
+    CHECK( full.total == 7 );
+    CHECK( full.edges.size() == 7 );
+    CHECK( !full.truncated );
+
+    // Graph assembly over an untruncated feed stamps a clean flag (and the
+    // JSON discloses it either way).
+    DatasetStore datasets;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    LineageGraph graph( datasets, store );
+    CHECK( !graph.experimentSourceTruncated() );
+    const auto result =
+        graph.ancestors( LineageNodeId{ QStringLiteral( "run" ), QStringLiteral( "r7" ) } );
+    CHECK( !result.experimentSourceTruncated );
+    CHECK( result.toJson().value( QStringLiteral( "experiment_source_truncated" ) ).toBool()
+           == false );
+}
+
 } // namespace
 // ⑥ (item 6): the identity-twin scan is bounded (50 by contract); hitting
 // the bound used to be invisible. The invariant: a verdict decided against
