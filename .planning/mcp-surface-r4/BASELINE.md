@@ -52,6 +52,7 @@
 - `test_mcp_server.cpp` 已含：-32601 未知 method；未知工具 -32602；cancel_execution 终态语义。
 
 **实测缺口**（本轨道工作清单）：
+0. **【Phase 0 实测新发现】master 的 pi 测试基线红**：`node --test pi/test/` = 19 测试 / 14 过 / **5 红**。5 个全是结构断言落后于 mcp_bridge.ts 单实现重构（failDesyncedStream 爬梯）的陈旧测试：bridge_parity 3 个"both bridges"测试仍期望 exp-rs-spatial.ts 持有传输结构（与 no_drift 的"单实现"守卫自相矛盾）；no_drift 2 个（溢出分支正则期望旧 `this.exited = true` 内联形状 + 行为测试未等 exit 事件即断言 alive===false 的竞态）。**行为本身正确**（mcp_bridge.test.mjs 全过，含轮询版 desync 测试）。修复属本轨道领地（pi/test/），是 Oracle"pi 全绿双跑"的前提 → 记 D-9。
 1. **快照锁死机制不存在**：无 `tests/surface_diff_snapshot.json`，无 pi 侧逐工具 parity（pi 测试从不读 wire dump；类目检查只在 C++ 侧单向）。
 2. pi 侧映射规则（`piToolName` ":"→"_"、"exprs_" 前缀、类目过滤、wait/status 工具名冲突）**零测试**。
 3. 协议健壮性缺口（C++）：-32700 非 JSON 行 / 行超长哨兵、-32600 非对象帧、**缺 method 的请求返回 -32601（JSON-RPC 2.0 规范应为 -32600 Invalid Request——真实缺陷）**、-32002 未初始化门未见测试、notifications/cancelled→任务取消映射（#634）未见测试、显式 null id 应答合同（#644）未见测试、tools/call arguments 非对象 -32602 未见测试、spatial 工具缺必填参/类型错位的结构化 error 未见测试、tools/list 前缀过滤合同未见直接测试。
