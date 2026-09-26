@@ -628,12 +628,12 @@ void QgisDesktopWindow::exportLabReport()
     QSettings settings;
     bool ok = false;
     const QString student = QInputDialog::getText(
-        this, tr( "Export Lab Report" ), tr( "学生姓名：" ), QLineEdit::Normal,
+        this, tr( "Export Lab Report" ), tr( "Student name:" ), QLineEdit::Normal,
         settings.value( QLatin1String( kLabStudentKey ) ).toString(), &ok );
     if ( !ok )
         return;
     const QString session = QInputDialog::getText(
-        this, tr( "Export Lab Report" ), tr( "实验 session（班级/批次）：" ), QLineEdit::Normal,
+        this, tr( "Export Lab Report" ), tr( "Lab session (class/cohort):" ), QLineEdit::Normal,
         settings.value( QLatin1String( kLabSessionKey ) ).toString(), &ok );
     if ( !ok )
         return;
@@ -663,7 +663,7 @@ void QgisDesktopWindow::exportLabReport()
 
     QString filePath = QFileDialog::getSaveFileName(
         this, tr( "Export Lab Report" ), QStringLiteral( "lab-report" ),
-        tr( "可打印 HTML 报告 (*.html);;JSON (*.json);;Markdown (*.md)" ) );
+        tr( "Printable HTML report (*.html);;JSON (*.json);;Markdown (*.md)" ) );
     if ( filePath.isEmpty() )
         return;
 
