@@ -2067,7 +2067,10 @@ int commandData( QStringList args, const CliIO &io )
     extractGlobalFlags( args );
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
-        return usageError( io, "data", "usage: data inspect|doctor|probe|capabilities|product describe|plan|stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]" );
+        return usageError( io, "data",
+                          "usage: data inspect|doctor|probe|capabilities|product describe|plan|"
+                          "stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]|"
+                          "cube plan|window <spec.json> [-o out.tif]|mirror materialize|stats" );
     // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
     // single-argument form — `status`/`clear` must be the first token after
     // `cache` and the only one. Any other shape (a URL, or `status <url>`)
