@@ -8,6 +8,15 @@
 RasterLayerCombo::RasterLayerCombo( QWidget *parent )
   : QComboBox( parent )
 {
+  // F-01 (ui-backend-state-parity-r4): the combo used to be a one-shot
+  // snapshot — layers added/removed while the host dialog stayed open (a
+  // background task's auto-load, an import) left a stale picker behind. The
+  // project layer set is the source of truth; track it.
+  connect( QgsProject::instance(),
+           qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersAdded ),
+           this, [this]( const QList<QgsMapLayer *> & ) { refreshFromProject(); } );
+  connect( QgsProject::instance(), &QgsProject::layersRemoved,
+           this, [this]( const QStringList & ) { refreshFromProject(); } );
 }
 
 void RasterLayerCombo::populate()
@@ -20,6 +29,14 @@ void RasterLayerCombo::populate()
     if ( rasterLayer && rasterLayer->isValid() )
       addItem( rasterLayer->name(), rasterLayer->id() );
   }
+}
+
+void RasterLayerCombo::refreshFromProject()
+{
+  const QString selectedId = currentLayerId();
+  populate();
+  if ( !selectedId.isEmpty() )
+    selectLayer( selectedId );
 }
 
 QString RasterLayerCombo::currentLayerId() const
