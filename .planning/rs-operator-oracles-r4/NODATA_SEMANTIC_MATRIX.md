@@ -50,7 +50,7 @@ Legend: ND = declared nodata sentinel; NaN = non-finite.
 | 21 | rs:band_ratio | band_tools.cpp:27-32 | ratio: masked to NaN (image_enhancement_streaming.cpp:781-785), declared :68; **IHS mode: NaN holes, NO declaration** (:126-131) | 置NoData(输出未声明) | 声明修复 (WP-B) |
 | 22 | rs:extract_bands | band_tools.cpp:222 | verbatim tile copy; sentinel re-declared per band (:218-224) | 置NoData | 正确 |
 | 23 | rs:contrast_stretch | band_tools.cpp:277 | stats exclude sentinel (:879,:906,:963) **but output holes rewritten with input sentinel, never declared** (:1013-1016) | 排除统计(输出未声明) | 声明修复 (WP-B) |
-| 24 | rs:image_enhancement | :214-220 | stretch ok; **ratio path: sentinel pair → ratio 1.0 (counted as data)** (:293 → 3-arg kernel :765-769); IHS ok; **no output declaration anywhere** | 参与统计(ratio)/未声明 | 修复 + 声明修复 (WP-B) |; review P2-4: filter/speckle windowed kernels still ingest sentinels as data (their new NaN declaration writes no holes for sentinel-only inputs) — same defect class as ratio, masked-in-window repair → **backlog (D4)**
+| 24 | rs:image_enhancement | :214-220 | stretch ok; **ratio path: sentinel pair → ratio 1.0 (counted as data)** (:293 → 3-arg kernel :765-769); IHS ok; **no output declaration anywhere** | 参与统计(ratio)/未声明 | 修复 + 声明修复 (WP-B); review P2-4: filter/speckle windowed kernels still ingest sentinels as data (their new NaN declaration writes no holes for sentinel-only inputs) — same defect class as ratio, masked-in-window repair → **backlog (D4)**
 | 25 | rs:continuum_removal | :102 | whole-spectrum rejected if any band sentinel/NaN (spectral_classification.cpp:294-301) → ND written all bands; output declares | 报错(逐像素)+置NoData | 固化 (WP-F) |
 | 26 | rs:spectral_resample | :226 | sentinel neighbor → NaN out (#445 :286-294); outputs NaN | 置NoData | 固化 (WP-F) |
 | 27 | rs:atmospheric_correction | seam AT (atmospheric_correction.cpp:623-624) | sentinel→NaN pre-transform (:653-654,:693-694); outputs NaN | 置NoData | 固化 (chain WP-C) |
@@ -156,7 +156,7 @@ Legend: ND = declared nodata sentinel; NaN = non-finite.
 | 102 | rs:cem_detection | seam C-DETECT | as #100 | 排除统计 + 置NoData | 正确 |
 | 103 | rs:tcimf_detection | seam C-DETECT | as #100 | 排除统计 + 置NoData | 正确 |
 | 104 | rs:osp_detection | seam C-DETECT | as #100 | 排除统计 + 置NoData | 正确 |
-| 105 | rs:spectral_similarity | **hardcoded −9999** (:176, kernel constant) | declared sentinel ignored; only exact −9999/NaN excluded | 参与统计(契约错位) | 修复 (WP-A) |; review P3-9: kernel carries a single sentinel — inputs with differing per-band sentinels get the first declared one applied to all bands (documented in metadata); per-band sentinel interface → **backlog**
+| 105 | rs:spectral_similarity | **hardcoded −9999** (:176, kernel constant) | declared sentinel ignored; only exact −9999/NaN excluded | 参与统计(契约错位) | 修复 (WP-A); review P3-9: kernel carries a single sentinel — inputs with differing per-band sentinels get the first declared one applied to all bands (documented in metadata); per-band sentinel interface → **backlog** |review P3-9: kernel carries a single sentinel — inputs with differing per-band sentinels get the first declared one applied to all bands (documented in metadata); per-band sentinel interface → **backlog**
 | 106 | rs:endmember_analysis | n/a (table) | kernel uses hardcoded kNoDataSentinel in comparisons | 不适用 | 正确 |
 | 107 | rs:endmember_extraction | :201-205 | isPixelValid gates PPI passes | 排除统计 | 正确 |
 | 108 | rs:spectral_spatial_fuse | band-1 :180-187 | invalid never fused, never in stats | 排除统计 + 置NoData | 正确 |

@@ -82,7 +82,7 @@ these rows: `.planning/rs-operator-oracles-r4/NODATA_SEMANTIC_MATRIX.md`
 
 | Family | Invariant under test | Derivation | Test |
 |---|---|---|---|
-| digest (12 operators) | same input, two in-process runs: ndvi, mndwi, stretch, ratio, focal 300×300, change_difference, change_cva, terrain slope 300×300, zonal CSV (sha256), threshold, spectral derivative, PCA, sar_speckle, mosaic → products byte-identical | ADR 0124 serial regression anchor; 300×300 grids cross 256-tile boundaries (halo paths) | digest ✓ |
+| digest (12 cases / 15 operator products) | same input, two in-process runs: ndvi, mndwi, stretch, ratio, focal 300×300, change_difference, change_cva, terrain slope 300×300, zonal CSV (sha256), threshold, spectral derivative, PCA, sar_speckle, mosaic, spectral_similarity → products byte-identical | ADR 0124 serial regression anchor; 300×300 grids cross 256-tile boundaries (halo paths) | digest ✓ |
 
 ### test_known_answer_corpus_r4.cpp — operator-level known answers
 

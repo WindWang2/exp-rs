@@ -33,3 +33,13 @@ consecutive passes** (15.56 s / 13.18 s; per-suite counts in EVIDENCE.md
 §4). Reviewer re-verification: pass 2 requested on the disposition diff
 (REVIEW_LOG/DECISIONS/matrix updates + 3 test additions + buffer hoist);
 findings appended below if any.
+
+**Pass 2 verdict: SHIP-WITH-FIXES (residuals all P3, dispositioned in the
+close-out commit; reviewer: "merge after that one commit — no further
+review round needed").** Pass 2 independently re-executed all 35 cases
+green and verified every pass-1 disposition landed. Residuals R1–R7:
+stale digest row in the tracked matrix doc (R1), untracked PR_BODY.md
+(R2), severity-split misstatement 7/4→6/5 (R3), ledger row-5 count slip
+(R4), malformed markdown in matrix rows 24/105 (R5), under-asserted
+qa_mask refusal (R6 — now pins InvalidParameter + "QA band" message),
+D10 dtype-framing overstatement (R7).

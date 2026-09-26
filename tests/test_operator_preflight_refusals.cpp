@@ -325,9 +325,9 @@ TEST_CASE( "mask-grid CRS mismatch and missing QA band roles are typed refusals"
     }
     catch ( const RSOperatorError &e )
     {
-        threw = true;
+        threw = e.code() == ErrorCode::InvalidParameter;
         INFO( "message: " << e.message() );
-        REQUIRE( !e.message().empty() );
+        REQUIRE( e.message().find( "QA band" ) != std::string::npos );
     }
     REQUIRE( threw );
 }
