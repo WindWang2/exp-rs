@@ -65,7 +65,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateCurriculum );
         row->addWidget( btn );
         lay->addLayout( row );
-        m_tabs->addTab( page, tr( "A 课程" ) );
+        m_tabs->addTab( page, tr( "A Courses" ) );
     }
 
     // --- B Lab Authoring ---
@@ -86,7 +86,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateLabSpec );
         row->addWidget( btn );
         lay->addLayout( row );
-        m_tabs->addTab( page, tr( "B 实验" ) );
+        m_tabs->addTab( page, tr( "B Experiments" ) );
     }
 
     // --- C Rubric ---
@@ -101,7 +101,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         auto *btn = new QPushButton( tr( "Validate Rubric" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateRubric );
         lay->addWidget( btn );
-        m_tabs->addTab( page, tr( "C 量规" ) );
+        m_tabs->addTab( page, tr( "C Rubrics" ) );
     }
 
     // --- D Packs ---
@@ -122,7 +122,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( driftBtn, &QPushButton::clicked, this, &TeachingAdminDock::onCheckPackDrift );
         lay->addWidget( driftBtn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "D 数据包" ) );
+        m_tabs->addTab( page, tr( "D Data packs" ) );
     }
 
     // --- E Preflight ---
@@ -136,7 +136,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunPreflight );
         lay->addWidget( btn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "E 预检" ) );
+        m_tabs->addTab( page, tr( "E Preflight" ) );
     }
 
     // --- F Offline ---
@@ -152,7 +152,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         lay->addWidget( new QLabel(
             tr( "Build uses scripts/build_offline_bundle.sh via structured adapter (not reimplemented)." ) ) );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "F 离线包" ) );
+        m_tabs->addTab( page, tr( "F Offline packs" ) );
     }
 
     // --- G Batch ---
@@ -188,7 +188,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         lay->addRow( m_batchProgressLabel );
         // Progress is push-based (worker → queued UI update); the timer
         // member stays for future pull-based diagnostics.
-        m_tabs->addTab( page, tr( "G 批量评分" ) );
+        m_tabs->addTab( page, tr( "G Batch grading" ) );
     }
 
     // --- H/I Feedback + Summary ---
@@ -199,7 +199,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onBuildFeedbackAndSummary );
         lay->addWidget( btn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "H/I 反馈与统计" ) );
+        m_tabs->addTab( page, tr( "H/I Feedback & stats" ) );
     }
 
     m_log = new QPlainTextEdit;

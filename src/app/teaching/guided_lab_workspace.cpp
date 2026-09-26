@@ -37,14 +37,14 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   m_kindLabel = new QLabel( this );
   m_whyView = new QTextEdit( this );
   m_whyView->setReadOnly( true );
-  m_whyView->setPlaceholderText( tr( "Why-this-step / 可解释工作流说明" ) );
+  m_whyView->setPlaceholderText( tr( "Why-this-step / explainable workflow notes" ) );
   m_paramsView = new QTextEdit( this );
   m_paramsView->setReadOnly( true );
   m_humanInput = new QPlainTextEdit( this );
-  m_humanInput->setPlaceholderText( tr( "人工/反思步骤：在此填写结构化证据（不会泄露标准答案）" ) );
+  m_humanInput->setPlaceholderText( tr( "Manual / reflection step: enter structured evidence here (the answer key is never leaked)" ) );
   m_artifactEdit = new QLineEdit( this );
   m_artifactEdit->setPlaceholderText(
-    tr( "产物路径（处理工具箱输出的文件，用于验证与评分）" ) );
+    tr( "Artifact paths (files produced by the Processing Toolbox, used for validation and grading)" ) );
   m_artifactEdit->setClearButtonEnabled( true );
   m_artifactEdit->setObjectName( QStringLiteral( "labWorkspaceArtifactEdit" ) );
   m_feedbackView = new QTextEdit( this );
@@ -52,12 +52,12 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   m_feedbackView->setObjectName( QStringLiteral( "labWorkspaceFeedbackView" ) );
 
   auto *nav = new QHBoxLayout;
-  m_prevBtn = new QPushButton( tr( "上一步" ), this );
-  m_nextBtn = new QPushButton( tr( "下一步" ), this );
-  m_runBtn = new QPushButton( tr( "运行/跳转算子" ), this );
-  m_submitHumanBtn = new QPushButton( tr( "提交人工证据" ), this );
-  m_validateBtn = new QPushButton( tr( "验证与评分" ), this );
-  m_exportBtn = new QPushButton( tr( "导出胶囊/报告" ), this );
+  m_prevBtn = new QPushButton( tr( "Previous" ), this );
+  m_nextBtn = new QPushButton( tr( "Next" ), this );
+  m_runBtn = new QPushButton( tr( "Run / jump to operator" ), this );
+  m_submitHumanBtn = new QPushButton( tr( "Submit manual evidence" ), this );
+  m_validateBtn = new QPushButton( tr( "Validate & grade" ), this );
+  m_exportBtn = new QPushButton( tr( "Export capsule / report" ), this );
   nav->addWidget( m_prevBtn );
   nav->addWidget( m_nextBtn );
   nav->addWidget( m_runBtn );
@@ -105,13 +105,13 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   root->addWidget( m_kindLabel );
   root->addWidget( new QLabel( tr( "Why-this-step" ), this ) );
   root->addWidget( m_whyView, 1 );
-  root->addWidget( new QLabel( tr( "参数（教学掩码后）" ), this ) );
+  root->addWidget( new QLabel( tr( "Parameters (teaching-masked)" ), this ) );
   root->addWidget( m_paramsView );
   root->addWidget( m_humanInput );
-  root->addWidget( new QLabel( tr( "待验证产物" ), this ) );
+  root->addWidget( new QLabel( tr( "Artifacts to validate" ), this ) );
   root->addWidget( m_artifactEdit );
   root->addLayout( nav );
-  root->addWidget( new QLabel( tr( "验证 / 评分反馈" ), this ) );
+  root->addWidget( new QLabel( tr( "Validation / grading feedback" ), this ) );
   root->addWidget( m_feedbackView, 1 );
 }
 
@@ -126,7 +126,7 @@ void GuidedLabWorkspace::setReadiness( const sicnu::teaching::LabReadiness &r )
 {
   m_readiness = r;
   m_readinessLabel->setText(
-    tr( "就绪: %1" ).arg( QString::fromUtf8( sicnu::teaching::readinessLevelLabelZh( r.level ) ) ) );
+    tr( "Readiness: %1" ).arg( QString::fromUtf8( sicnu::teaching::readinessLevelLabelZh( r.level ) ) ) );
   QString tip;
   for ( const auto &it : r.items ) {
     tip += QStringLiteral( "[%1/%2] %3 (%4)\n" )
@@ -142,7 +142,7 @@ void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDi
 {
   m_autonomy = a;
   QString text =
-    tr( "自主等级: %1（%2）" )
+    tr( "Autonomy level: %1 (%2)" )
       .arg( QString::fromStdString( a.effectiveLevel ) )
       .arg( a.ladderLabelsZh.empty()
               ? QString()
@@ -154,7 +154,7 @@ void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDi
   if ( !a.issuesZh.empty() )
     text += QStringLiteral( "  ⚠ %1" ).arg( a.issuesZh.front() );
   m_autonomyLabel->setText( text );
-  QString tip = tr( "阶梯:\n" );
+  QString tip = tr( "Ladder:\n" );
   for ( const auto &l : a.ladderLabelsZh ) tip += QString::fromStdString( l ) + QLatin1Char( '\n' );
   for ( const auto &row : a.rows ) {
     tip += QStringLiteral( "%1 → %2 (%3)\n" )
@@ -168,9 +168,9 @@ void GuidedLabWorkspace::setAutonomy( const sicnu::teaching::AutonomyEffectiveDi
 void GuidedLabWorkspace::setFeedback( const sicnu::teaching::LabFeedbackProjection &f )
 {
   m_feedback = f;
-  QString text = tr( "总评: %1（计为通过=%2）\n%3\n%4\n" )
+  QString text = tr( "Overall: %1 (counted as pass=%2)\n%3\n%4\n" )
                    .arg( QString::fromStdString( f.overallStatusZh ) )
-                   .arg( f.overallCountsAsPass ? tr( "是" ) : tr( "否" ) )
+                   .arg( f.overallCountsAsPass ? tr( "Yes" ) : tr( "No" ) )
                    .arg( QString::fromStdString( f.techValidationSummaryZh ) )
                    .arg( QString::fromStdString( f.scienceValidationSummaryZh ) );
   for ( const auto &row : f.rows ) {
@@ -181,7 +181,7 @@ void GuidedLabWorkspace::setFeedback( const sicnu::teaching::LabFeedbackProjecti
                     QString::fromStdString( row.reasonZh ) );
   }
   if ( !f.capsuleExportRef.empty() )
-    text += tr( "\n胶囊引用: %1" ).arg( QString::fromStdString( f.capsuleExportRef ) );
+    text += tr( "\nCapsule reference: %1" ).arg( QString::fromStdString( f.capsuleExportRef ) );
   // Honest "why": engine refusals, skipped lenses and other issues are part
   // of the student surface — an indeterminate verdict without its reason is
   // not honest feedback.
@@ -226,7 +226,7 @@ void GuidedLabWorkspace::rebuildSteps()
         .arg( s.index + 1 )
         .arg( QString::fromStdString( s.titleZh.empty() ? s.title : s.titleZh ) )
         .arg( QString::fromStdString( s.kind ) )
-        .arg( s.humanRequired ? tr( " 需要人工" ) : QString() ) );
+        .arg( s.humanRequired ? tr( " Manual step required" ) : QString() ) );
   }
   if ( !m_tl.steps.empty() )
     m_stepList->setCurrentRow( std::clamp( m_tl.currentIndex, 0,
@@ -237,7 +237,7 @@ void GuidedLabWorkspace::showCurrent()
 {
   const auto *cur = m_tl.current();
   if ( !cur ) {
-    m_stepTitle->setText( tr( "无步骤" ) );
+    m_stepTitle->setText( tr( "No steps" ) );
     m_kindLabel->clear();
     m_paramsView->clear();
     m_humanInput->setEnabled( false );
@@ -260,11 +260,11 @@ void GuidedLabWorkspace::showCurrent()
   }
   m_stepTitle->setText( QString::fromStdString( cur->titleZh.empty() ? cur->title : cur->titleZh ) );
   m_kindLabel->setText(
-    tr( "类型=%1  算子=%2  人工=%3  AI允许=%4" )
+    tr( "type=%1  operator=%2  manual=%3  AI allowed=%4" )
       .arg( QString::fromStdString( cur->kind ),
             QString::fromStdString( cur->operatorId ),
-            cur->humanRequired ? tr( "是" ) : tr( "否" ),
-            cur->aiAllowed ? tr( "是" ) : tr( "否" ) ) );
+            cur->humanRequired ? tr( "Yes" ) : tr( "No" ),
+            cur->aiAllowed ? tr( "Yes" ) : tr( "No" ) ) );
   if ( !cur->whyHintZh.empty() && m_whyView->toPlainText().isEmpty() )
     m_whyView->setPlainText( QString::fromStdString( cur->whyHintZh ) );
   Json::StreamWriterBuilder b;

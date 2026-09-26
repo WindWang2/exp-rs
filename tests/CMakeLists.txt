@@ -13848,3 +13848,61 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
+# Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
+# stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
+add_executable(test_help_commands_schema test_help_commands_schema.cpp)
+target_link_libraries(test_help_commands_schema PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_help_commands_schema PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_commands_schema PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_help_commands_schema PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+# Static registration: 3 fast cases, no need for per-case discovery.
+add_test(NAME test_help_commands_schema
+  COMMAND test_help_commands_schema
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Track 17 R4 (WP-F): extraction/no-regression gate. Runs the single-source
+# string audit scanner over the frozen Phase 0 file list and asserts the
+# frozen baseline (tests/fixtures/i18n_string_baseline.json — the time anchor;
+# do not recompute at close): hard classes at 0 steady state, non-UI Chinese
+# ceiling, tr()-extraction floor. Selftest-gated scanner (constructive pos/neg).
+if(Python_EXECUTABLE)
+  add_test(NAME test_i18n_string_audit
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/audit_i18n_strings.py"
+            "--files" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_audit_files.txt"
+            "--gate" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_string_baseline.json"
+            "--selftest")
+  set_tests_properties(test_i18n_string_audit PROPERTIES
+    TIMEOUT 300
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+
+# Track 17 R4 (WP-F guard): the WP-B zh_CN backfill entries live under moc
+# short-name contexts, which today's lupdate attributes to namespace-qualified
+# names — a sicnu_i18n_update run would -no-obsolete them away silently.
+# Pin a representative (context, source, translation) sample. Light target.
+add_executable(test_i18n_migrated_translations test_i18n_migrated_translations.cpp)
+target_link_libraries(test_i18n_migrated_translations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_compile_definitions(test_i18n_migrated_translations PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_i18n_migrated_translations PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+add_test(NAME test_i18n_migrated_translations
+  COMMAND test_i18n_migrated_translations
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

@@ -185,7 +185,7 @@ void LabCockpitDock::onRecordingContextChanged()
   m_session.lastValidationSummary = Json::Value();
   m_workspace->setArtifactPath( QString() );
   m_workspace->clearFeedback();
-  appendExportNote( tr( "项目/记录上下文已切换：已清除上一项目的产物、运行与胶囊引用（不做跨项目继承）" ) );
+  appendExportNote( tr( "Project/record context switched: previous project artifacts, runs and capsule references cleared (no cross-project inheritance)" ) );
   saveSession();
 }
 
@@ -200,9 +200,8 @@ void LabCockpitDock::launchOperator( const QString &operatorId, const QString &p
     return;
   }
   QMessageBox::information(
-    this, tr( "跳转到处理工具箱" ),
-    tr( "请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。"
-        "实验工作台只投影，不复制算子 UI。" )
+    this, tr( "Jump to Processing Toolbox" ),
+    tr( "Please run operator %1 in the existing Processing Toolbox / Guided Workflow. The experiment workbench only projects; it does not duplicate operator UI." )
       .arg( operatorId ) );
 }
 
@@ -218,7 +217,7 @@ void LabCockpitDock::exportCapsule()
   auto fail = [this]( const QString &reasonZh ) {
     // Never leave or fabricate a capsule ref after a failed export.
     m_session.capsuleExportRef.clear();
-    appendExportNote( tr( "导出失败: %1" ).arg( reasonZh ) );
+    appendExportNote( tr( "Export failed: %1" ).arg( reasonZh ) );
     saveSession();
   };
   auto diagText = []( const auto &result ) -> QString {
@@ -227,13 +226,13 @@ void LabCockpitDock::exportCapsule()
   };
 
   if ( src.experimentDbPath.isEmpty() ) {
-    fail( tr( "未打开实验记录库：没有可提交的运行记录（不做假引用）" ) );
+    fail( tr( "Experiment record store not open: no run records to submit (no fabricated references)" ) );
     return;
   }
   sicnu::experiment::ExperimentStore store;
   QString err;
   if ( !store.open( src.experimentDbPath, &err ) ) {
-    fail( tr( "实验记录库打开失败: %1" ).arg( err ) );
+    fail( tr( "Failed to open the experiment record store: %1" ).arg( err ) );
     return;
   }
 
@@ -244,26 +243,26 @@ void LabCockpitDock::exportCapsule()
                             ? src.experimentId
                             : QString::fromStdString( m_session.experimentId );
     if ( expId.isEmpty() ) {
-      fail( tr( "无法确定所属实验：未打开 lab 项目（不做跨实验猜测绑定）" ) );
+      fail( tr( "Cannot determine the owning experiment: no lab project open (no cross-experiment guessing)" ) );
       return;
     }
     auto totalRes = store.listRuns( expId, QString(), QString(), 0, 1 );
     if ( !totalRes ) {
-      fail( tr( "无法读取运行记录: %1" ).arg( diagText( totalRes ) ) );
+      fail( tr( "Failed to read the run record: %1" ).arg( diagText( totalRes ) ) );
       return;
     }
     const qint64 total = totalRes.value().first;
     if ( total <= 0 ) {
-      fail( tr( "实验还没有已记录的运行（先在处理工具箱完成运行并保存）" ) );
+      fail( tr( "The experiment has no recorded runs yet (finish and save a run in the Processing Toolbox first)" ) );
       return;
     }
     auto lastRes = store.listRuns( expId, QString(), QString(), total - 1, 1 );
     if ( !lastRes || lastRes.value().second.isEmpty() ) {
-      fail( tr( "无法读取最新运行记录" ) );
+      fail( tr( "Failed to read the latest run record" ) );
       return;
     }
     m_session.runId = lastRes.value().second.first().runId().toStdString();
-    appendExportNote( tr( "已绑定最新记录的运行: %1" )
+    appendExportNote( tr( "Bound to the latest recorded run: %1" )
                         .arg( QString::fromStdString( m_session.runId ) ) );
   }
 
@@ -271,7 +270,7 @@ void LabCockpitDock::exportCapsule()
   if ( !src.datasetDbPath.isEmpty() ) {
     QString dsErr;
     if ( !datasets.open( src.datasetDbPath, &dsErr ) )
-      appendExportNote( tr( "数据集库不可用（%1）：数据集版本将按未解析记录" ).arg( dsErr ) );
+      appendExportNote( tr( "Dataset store unavailable (%1): dataset versions will be treated as unresolved records" ).arg( dsErr ) );
   }
 
   caps::CapsuleBuilder builder( store, datasets );
@@ -290,9 +289,9 @@ void LabCockpitDock::exportCapsule()
                                  == QStringLiteral( "capsule.run-missing" );
     if ( runMissing ) {
       m_session.runId.clear();
-      appendExportNote( tr( "已记录的运行 %1 已不存在，下次导出将重新绑定最新运行" ).arg( runId ) );
+      appendExportNote( tr( "Recorded run %1 no longer exists; the next export will rebind to the latest run" ).arg( runId ) );
     }
-    fail( tr( "胶囊构建失败（%1）: %2" )
+    fail( tr( "Capsule build failed (%1): %2" )
             .arg( runId, diagText( built ) ) );
     return;
   }
@@ -304,12 +303,12 @@ void LabCockpitDock::exportCapsule()
   const QString path = exportDir + QStringLiteral( "/%1.capsule.json" ).arg( runId );
   auto exported = caps::CapsuleIO::exportCapsule( built.value(), path );
   if ( !exported ) {
-    fail( tr( "胶囊写入失败: %1" ).arg( diagText( exported ) ) );
+    fail( tr( "Capsule write failed: %1" ).arg( diagText( exported ) ) );
     return;
   }
   m_session.capsuleExportRef =
     ( QStringLiteral( "file:" ) + exported.value().path ).toStdString();
-  appendExportNote( tr( "胶囊已导出: %1（%2 字节）" )
+  appendExportNote( tr( "Capsule exported: %1 (%2 bytes)" )
                       .arg( exported.value().path )
                       .arg( exported.value().bytes ) );
   saveSession();
@@ -522,10 +521,10 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   m_session.autonomyPolicyRef = policyRef.toStdString();
 
   if ( const auto *cur = timeline.current() ) {
-    QString why = tr( "（可解释工作流投影）\n" );
+    QString why = tr( "(explainable workflow projection)\n" );
     why += QString::fromStdString( cur->whyHintZh );
     why += QLatin1Char( '\n' );
-    why += tr( "\n来源徽章: 系统事实 | 编写指引 | 推断\n" );
+    why += tr( "\nProvenance badges: system fact | authoring guidance | inferred\n" );
     m_workspace->setWhyMarkdown( why );
   }
   // A stepless/fail-closed timeline keeps the projection's refusal reasons

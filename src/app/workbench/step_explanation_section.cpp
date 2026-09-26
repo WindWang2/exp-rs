@@ -48,7 +48,7 @@ void StepExplanationSection::populate( const SelectionContextSnapshot &snapshot 
         m_document ? m_document() : std::nullopt;
     if ( !document.has_value() )
     {
-        m_panel->showNote( tr( "管线文档不可用，无法解释此节点。" ) );
+        m_panel->showNote( tr( "Pipeline documentation unavailable; cannot explain this node." ) );
         return;
     }
 
@@ -59,7 +59,7 @@ void StepExplanationSection::populate( const SelectionContextSnapshot &snapshot 
                                                            projectionProblems );
     if ( !request.has_value() )
     {
-        m_panel->showNote( tr( "当前文档中没有节点 %1，无法解释。" )
+        m_panel->showNote( tr( "Node %1 is not in the current document; cannot explain." )
                                .arg( snapshot.selectedPipelineNodeId ) );
         return;
     }

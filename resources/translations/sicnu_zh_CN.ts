@@ -1461,7 +1461,7 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
     </message>
     <message>
         <source>&lt;b&gt;Step %1/%2: %3&lt;/b&gt;</source>
-        <translation>&lt;b&gt;第 %1/%2 步：%3&lt;/b&gt;</translation>
+        <translation>&lt;b&gt;步骤 %1/%2：%3&lt;/b&gt;</translation>
     </message>
     <message>
         <source>Spectral Analysis</source>
@@ -1935,7 +1935,96 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
         <source>Class map produced; accuracy reviewed; result available on main map.</source>
         <translation>已生成分类图；查看精度；结果可在主地图中查看。</translation>
     </message>
-</context>
+
+    <message>
+        <source>⚠ Experiment spec load failures (%1)</source>
+        <translation>⚠ 实验规格加载失败（%1 项）</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Experiment spec load failures&lt;/b&gt;</source>
+        <translation>&lt;b&gt;实验规格加载失败&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;The following LabSpec files failed to load. Fix them and restart or reopen this panel:&lt;/p&gt;&lt;ul&gt;</source>
+        <translation>&lt;p&gt;以下 LabSpec 文件无法加载，请修复后重启或重新打开本面板：&lt;/p&gt;&lt;ul&gt;</translation>
+    </message>
+    <message>
+        <source>Click &lt;b&gt;Start experiment&lt;/b&gt; to begin.</source>
+        <translation>点击 &lt;b&gt;开始实验&lt;/b&gt; 以开始。</translation>
+    </message>
+    <message>
+        <source>This experiment is a LabSpec 2/3 document: the operation sequence is defined by a pipeline; no step-by-step guidance yet.</source>
+        <translation>此实验为 LabSpec 2/3 文档：操作序列由流水线定义，暂无分步引导。</translation>
+    </message>
+    <message>
+        <source>Step</source>
+        <translation>步骤</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Experiment complete!&lt;/b&gt;</source>
+        <translation>&lt;b&gt;实验完成！&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;Congratulations! You completed the &lt;b&gt;%1&lt;/b&gt; experiment.&lt;/p&gt;&lt;p&gt;You can try other experiments or adjust parameters for further exploration.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;恭喜！你已完成 &lt;b&gt;%1&lt;/b&gt; 实验。&lt;/p&gt;&lt;p&gt;可以继续尝试其他实验，或调整参数进行更多探索。&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>Action "%1" does not exist on the main window; the experiment spec may be outdated.</source>
+        <translation>主窗口上不存在操作 “%1”，实验规格可能已过期。</translation>
+    </message>
+    <message>
+        <source>A task is already running; wait for it to finish before the next step.</source>
+        <translation>已有任务正在运行，请等待其完成后再执行下一步。</translation>
+    </message>
+    <message>
+        <source>Cannot create the output directory: %1</source>
+        <translation>无法创建输出目录：%1</translation>
+    </message>
+    <message>
+        <source>Running…</source>
+        <translation>运行中…</translation>
+    </message>
+    <message>
+        <source>Run this step</source>
+        <translation>执行此步</translation>
+    </message>
+    <message>
+        <source>"%1" finished. Output: %2</source>
+        <translation>“%1” 完成。输出：%2</translation>
+    </message>
+    <message>
+        <source>"%1" cancelled.</source>
+        <translation>“%1” 已取消。</translation>
+    </message>
+    <message>
+        <source>"%1" failed: %2</source>
+        <translation>“%1” 失败：%2</translation>
+    </message>
+    <message>
+        <source>Task submission was rejected; try again later.</source>
+        <translation>任务提交被拒绝，请稍后重试。</translation>
+    </message>
+    <message>
+        <source>Bound operator:</source>
+        <translation>绑定算子：</translation>
+    </message>
+    <message>
+        <source>UI action:</source>
+        <translation>界面操作：</translation>
+    </message>
+    <message>
+        <source>Rationale:</source>
+        <translation>原理：</translation>
+    </message>
+    <message>
+        <source>Completion sign:</source>
+        <translation>完成标志：</translation>
+    </message>
+    <message>
+        <source>Task:</source>
+        <translation>任务：</translation>
+    </message>
+    </context>
 <context>
     <name>HelpCenterDialog</name>
     <message>
@@ -5409,7 +5498,66 @@ Revision: %2</source>
         <source>Label</source>
         <translation>标签</translation>
     </message>
-</context>
+    <message>
+        <source>Map title</source>
+        <translation>地图标题</translation>
+    </message>
+    <message>
+        <source>Legend</source>
+        <translation>图例</translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation>文本</translation>
+    </message>
+    <message>
+        <source>Data source:</source>
+        <translation>数据来源：</translation>
+    </message>
+    <message>
+        <source>%1
+⚠ %2</source>
+        <translation>%1
+⚠ %2</translation>
+    </message>
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
+
+    <message>
+        <source>(no description)</source>
+        <translation>（无描述）</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;&lt;b&gt;Parameters&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%1&lt;/p&gt;</source>
+<translation>&lt;p&gt;&lt;b&gt;参数&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%1&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source># Could not build a command from the current parameters (check required inputs)</source>
+        <translation># 无法根据当前参数生成命令（请检查必填项）</translation>
+    </message>
+    <message>
+        <source># Command preview failed: %1</source>
+        <translation># 命令预览失败: %1</translation>
+    </message>
+    <message>
+        <source># Command preview failed (incomplete or invalid parameters)</source>
+        <translation># 命令预览失败（参数不完整或无效）</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;CLI / application: &lt;code&gt;%1&lt;/code&gt;&lt;/p&gt;</source>
+<translation>&lt;p&gt;CLI / 应用: &lt;code&gt;%1&lt;/code&gt;&lt;/p&gt;</translation>
+    </message>
+    <message>
+<source>&lt;p&gt;Tags: %1&lt;/p&gt;</source>
+<translation>&lt;p&gt;标签: %1&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;Hover in the toolbox for a summary; the full description appears on the right/help area after opening the dialog.</source>
+        <translation>&lt;p&gt;在工具箱中悬停可查看简介；打开对话框后右侧/帮助区显示完整说明。</translation>
+    </message>
+    </context>
 <context>
     <name>QaMaskDialog</name>
     <message>
@@ -7671,7 +7819,32 @@ Cancel these tasks and continue?</source>
         <source>Stay on Current Operation</source>
         <translation>留在当前操作</translation>
     </message>
-</context>
+
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
+    <message>
+        <source>Teacher Authoring &amp; Assessment Console</source>
+        <translation>教学作者与评测控制台</translation>
+    </message>
+    <message>
+        <source>Import Domestic Satellite Product...</source>
+        <translation>导入国产卫星产品...</translation>
+    </message>
+    <message>
+        <source>Student name:</source>
+        <translation>学生姓名：</translation>
+    </message>
+    <message>
+        <source>Lab session (class/cohort):</source>
+        <translation>实验 session（班级/批次）：</translation>
+    </message>
+    <message>
+        <source>Printable HTML report (*.html);;JSON (*.json);;Markdown (*.md)</source>
+        <translation>可打印 HTML 报告 (*.html);;JSON (*.json);;Markdown (*.md)</translation>
+    </message>
+    </context>
 <context>
     <name>QgsAngleMagnetWidget</name>
     <message>
@@ -12748,6 +12921,10 @@ Beware that this option will be applied on all vertices of the edited geometries
         <source>Expand Ribbon (Ctrl+F1)</source>
         <translation>展开功能区 (Ctrl+F1)</translation>
     </message>
+    <message>
+        <source>%1%2</source>
+        <translation>%1%2</translation>
+    </message>
 </context>
 <context>
     <name>RoiStatisticsWidget</name>
@@ -17704,7 +17881,12 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Run succeeded: %1</source>
         <translation>运行成功：%1</translation>
     </message>
-</context>
+
+    <message>
+        <source>Node selected: %1</source>
+        <translation>已选择节点：%1</translation>
+    </message>
+    </context>
 <context>
     <name>sicnu::app::CommandPalette</name>
     <message>
@@ -20020,6 +20202,979 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
     <message>
         <source>Design map frames, legends and scale bars, and export map products.</source>
         <translation>设计图框、图例、比例尺与导出地图产品。</translation>
+    </message>
+</context>
+<context>
+    <name>DataManagerPanel</name>
+    <message>
+        <source>%1 · %2</source>
+        <translation>%1 · %2</translation>
+    </message>
+</context>
+<context>
+    <name>VaCursorProbe</name>
+    <message>
+        <source>Cursor coordinates could not be transformed to the layer CRS.</source>
+        <translation>光标坐标无法变换到图层 CRS。</translation>
+    </message>
+</context>
+<context>
+    <name>VaChartWidget</name>
+    <message>
+        <source>Visualization chart</source>
+        <translation>可视化图表</translation>
+    </message>
+    <message>
+        <source>Loading…</source>
+        <translation>加载中…</translation>
+    </message>
+    <message>
+        <source>No data yet</source>
+        <translation>暂无数据</translation>
+    </message>
+    <message>
+        <source>Load failed: %1</source>
+        <translation>加载失败：%1</translation>
+    </message>
+</context>
+<context>
+    <name>StepExplanationSection</name>
+    <message>
+        <source>Pipeline documentation unavailable; cannot explain this node.</source>
+        <translation>管线文档不可用，无法解释此节点。</translation>
+    </message>
+    <message>
+        <source>Node %1 is not in the current document; cannot explain.</source>
+        <translation>当前文档中没有节点 %1，无法解释。</translation>
+    </message>
+</context>
+<context>
+    <name>DatasetExperimentPanel</name>
+    <message>
+        <source>%1 (%2)</source>
+        <translation>%1 (%2)</translation>
+    </message>
+    <message>
+        <source>%1 — %2</source>
+        <translation>%1 — %2</translation>
+    </message>
+</context>
+<context>
+    <name>RsOperatorCatalogPanel</name>
+    <message>
+        <source>Remote Sensing Operator Catalog</source>
+        <translation>遥感算子目录</translation>
+    </message>
+    <message>
+        <source>Search operators</source>
+        <translation>搜索算子</translation>
+    </message>
+    <message>
+        <source>Search operators (name/description)…</source>
+        <translation>搜索算子（名称/描述）…</translation>
+    </message>
+    <message>
+        <source>Input modality:</source>
+        <translation>输入模态：</translation>
+    </message>
+    <message>
+        <source>Input modality filter</source>
+        <translation>输入模态过滤</translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <source>Operator list</source>
+        <translation>算子列表</translation>
+    </message>
+    <message>
+        <source>Open in task panel</source>
+        <translation>在任务面板中打开</translation>
+    </message>
+    <message>
+        <source>Unfavorite</source>
+        <translation>取消收藏</translation>
+    </message>
+    <message>
+        <source>Favorite</source>
+        <translation>收藏</translation>
+    </message>
+</context>
+<context>
+    <name>StepExplanationPanel</name>
+    <message>
+        <source>No step selected to explain.</source>
+        <translation>未选择需要解释的步骤。</translation>
+    </message>
+    <message>
+        <source>Explanation knowledge sources unavailable (operator registry or authoring guidance library not ready); cannot explain this step.</source>
+        <translation>解释知识源不可用（算子注册表或编写指引库未就绪），无法解释此步骤。</translation>
+    </message>
+    <message>
+        <source>Cannot explain this step</source>
+        <translation>无法解释此步骤</translation>
+    </message>
+    <message>
+        <source>Problems</source>
+        <translation>问题（Problems）</translation>
+    </message>
+    <message>
+        <source>Operator:</source>
+        <translation>算子:</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (evidence record rejected; see evidence record issues below).</source>
+        <translation>执行情况未知（证据记录被拒绝；见下方“证据记录问题”）。</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (plan mode: no run evidence for this step yet).</source>
+        <translation>执行情况未知（计划模式：尚无此步骤的运行证据）。</translation>
+    </message>
+    <message>
+        <source>Execution status unknown (run %1 has no execution evidence for this step).</source>
+        <translation>执行情况未知（运行 %1 中没有此步骤的执行证据）。</translation>
+    </message>
+    <message>
+        <source>Execution</source>
+        <translation>执行情况（Execution）</translation>
+    </message>
+    <message>
+        <source>Evidence record issues (record rejected; entries below unavailable):</source>
+        <translation>证据记录问题（记录被拒绝，以下条目不可用）:</translation>
+    </message>
+    <message>
+        <source>Trust notes</source>
+        <translation>注意（Trust notes）</translation>
+    </message>
+</context>
+<context>
+    <name>LabCockpitDock</name>
+    <message>
+        <source>Project/record context switched: previous project artifacts, runs and capsule references cleared (no cross-project inheritance)</source>
+        <translation>项目/记录上下文已切换：已清除上一项目的产物、运行与胶囊引用（不做跨项目继承）</translation>
+    </message>
+    <message>
+        <source>Jump to Processing Toolbox</source>
+        <translation>跳转到处理工具箱</translation>
+    </message>
+    <message>
+        <source>Please run operator %1 in the existing Processing Toolbox / Guided Workflow. The experiment workbench only projects; it does not duplicate operator UI.</source>
+        <translation>请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。实验工作台只投影，不复制算子 UI。</translation>
+    </message>
+    <message>
+        <source>Export failed: %1</source>
+        <translation>导出失败: %1</translation>
+    </message>
+    <message>
+        <source>Experiment record store not open: no run records to submit (no fabricated references)</source>
+        <translation>未打开实验记录库：没有可提交的运行记录（不做假引用）</translation>
+    </message>
+    <message>
+        <source>Failed to open the experiment record store: %1</source>
+        <translation>实验记录库打开失败: %1</translation>
+    </message>
+    <message>
+        <source>Cannot determine the owning experiment: no lab project open (no cross-experiment guessing)</source>
+        <translation>无法确定所属实验：未打开 lab 项目（不做跨实验猜测绑定）</translation>
+    </message>
+    <message>
+        <source>Failed to read the run record: %1</source>
+        <translation>无法读取运行记录: %1</translation>
+    </message>
+    <message>
+        <source>The experiment has no recorded runs yet (finish and save a run in the Processing Toolbox first)</source>
+        <translation>实验还没有已记录的运行（先在处理工具箱完成运行并保存）</translation>
+    </message>
+    <message>
+        <source>Failed to read the latest run record</source>
+        <translation>无法读取最新运行记录</translation>
+    </message>
+    <message>
+        <source>Bound to the latest recorded run: %1</source>
+        <translation>已绑定最新记录的运行: %1</translation>
+    </message>
+    <message>
+        <source>Dataset store unavailable (%1): dataset versions will be treated as unresolved records</source>
+        <translation>数据集库不可用（%1）：数据集版本将按未解析记录</translation>
+    </message>
+    <message>
+        <source>Recorded run %1 no longer exists; the next export will rebind to the latest run</source>
+        <translation>已记录的运行 %1 已不存在，下次导出将重新绑定最新运行</translation>
+    </message>
+    <message>
+        <source>Capsule build failed (%1): %2</source>
+        <translation>胶囊构建失败（%1）: %2</translation>
+    </message>
+    <message>
+        <source>Capsule write failed: %1</source>
+        <translation>胶囊写入失败: %1</translation>
+    </message>
+    <message>
+        <source>Capsule exported: %1 (%2 bytes)</source>
+        <translation>胶囊已导出: %1（%2 字节）</translation>
+    </message>
+    <message>
+        <source>(explainable workflow projection)
+</source>
+        <translation>（可解释工作流投影）
+</translation>
+    </message>
+    <message>
+        <source>
+Provenance badges: system fact | authoring guidance | inferred
+</source>
+        <translation>
+来源徽章: 系统事实 | 编写指引 | 推断
+</translation>
+    </message>
+</context>
+<context>
+    <name>LlmSettingsDialog</name>
+    <message>
+        <source>AI Copilot Model &amp; Service Settings</source>
+        <translation>AI Copilot 模型与服务设置</translation>
+    </message>
+    <message>
+        <source>Pick a preset or custom LLM service provider</source>
+        <translation>选择预设或自定义大模型服务提供商</translation>
+    </message>
+    <message>
+        <source>LLM API endpoint root path</source>
+        <translation>大模型 API 服务端点根路径</translation>
+    </message>
+    <message>
+        <source>Enter the API key (leave empty for local models)</source>
+        <translation>输入 API 密钥 (本地模型可留空)</translation>
+    </message>
+    <message>
+        <source>Authentication token</source>
+        <translation>身份鉴权令牌</translation>
+    </message>
+    <message>
+        <source>Model name to request</source>
+        <translation>请求调用的模型名称</translation>
+    </message>
+    <message>
+        <source>Sampling temperature (0.0-1.0)</source>
+        <translation>采样温度 (0.0~1.0)</translation>
+    </message>
+    <message>
+        <source>Provider:</source>
+        <translation>服务提供商：</translation>
+    </message>
+    <message>
+        <source>Base URL:</source>
+        <translation>接口地址 (Base URL)：</translation>
+    </message>
+    <message>
+        <source>API key:</source>
+        <translation>API 密钥 (API Key)：</translation>
+    </message>
+    <message>
+        <source>Model name:</source>
+        <translation>模型名称 (Model)：</translation>
+    </message>
+    <message>
+        <source>Temperature:</source>
+        <translation>采样温度 (Temperature)：</translation>
+    </message>
+    <message>
+        <source>Test connectivity</source>
+        <translation>测试网络连通性</translation>
+    </message>
+    <message>
+        <source>Test connectivity to the LLM service</source>
+        <translation>测试与大模型服务的连通性</translation>
+    </message>
+    <message>
+        <source>Testing connection...</source>
+        <translation>正在测试连接...</translation>
+    </message>
+    <message>
+        <source>Connection successful!</source>
+        <translation>连接成功！</translation>
+    </message>
+    <message>
+        <source>Connection failed: %1</source>
+        <translation>连接失败：%1</translation>
+    </message>
+    <message>
+        <source>Testing</source>
+        <translation>正在测试</translation>
+    </message>
+    <message>
+        <source>Connection successful, but no content returned</source>
+        <translation>连接成功，但无内容返回</translation>
+    </message>
+
+    <message>
+        <source>gpt-4o, qwen-plus, etc.</source>
+        <translation>gpt-4o, qwen-plus, etc.</translation>
+    </message>
+    </context>
+<context>
+    <name>GuidedLabWorkspace</name>
+    <message>
+        <source>Why-this-step / explainable workflow notes</source>
+        <translation>Why-this-step / 可解释工作流说明</translation>
+    </message>
+    <message>
+        <source>Manual / reflection step: enter structured evidence here (the answer key is never leaked)</source>
+        <translation>人工/反思步骤：在此填写结构化证据（不会泄露标准答案）</translation>
+    </message>
+    <message>
+        <source>Artifact paths (files produced by the Processing Toolbox, used for validation and grading)</source>
+        <translation>产物路径（处理工具箱输出的文件，用于验证与评分）</translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation>上一步</translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation>下一步</translation>
+    </message>
+    <message>
+        <source>Run / jump to operator</source>
+        <translation>运行/跳转算子</translation>
+    </message>
+    <message>
+        <source>Submit manual evidence</source>
+        <translation>提交人工证据</translation>
+    </message>
+    <message>
+        <source>Validate &amp; grade</source>
+        <translation>验证与评分</translation>
+    </message>
+    <message>
+        <source>Export capsule / report</source>
+        <translation>导出胶囊/报告</translation>
+    </message>
+    <message>
+        <source>Parameters (teaching-masked)</source>
+        <translation>参数（教学掩码后）</translation>
+    </message>
+    <message>
+        <source>Artifacts to validate</source>
+        <translation>待验证产物</translation>
+    </message>
+    <message>
+        <source>Validation / grading feedback</source>
+        <translation>验证 / 评分反馈</translation>
+    </message>
+    <message>
+        <source>Readiness: %1</source>
+        <translation>就绪: %1</translation>
+    </message>
+    <message>
+        <source>Autonomy level: %1 (%2)</source>
+        <translation>自主等级: %1（%2）</translation>
+    </message>
+    <message>
+        <source>Ladder:
+</source>
+        <translation>阶梯:
+</translation>
+    </message>
+    <message>
+        <source>Overall: %1 (counted as pass=%2)
+%3
+%4
+</source>
+        <translation>总评: %1（计为通过=%2）
+%3
+%4
+</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>是</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>否</translation>
+    </message>
+    <message>
+        <source>
+Capsule reference: %1</source>
+        <translation>
+胶囊引用: %1</translation>
+    </message>
+    <message>
+        <source> Manual step required</source>
+        <translation> 需要人工</translation>
+    </message>
+    <message>
+        <source>No steps</source>
+        <translation>无步骤</translation>
+    </message>
+    <message>
+        <source>type=%1  operator=%2  manual=%3  AI allowed=%4</source>
+        <translation>类型=%1  算子=%2  人工=%3  AI允许=%4</translation>
+    </message>
+</context>
+<context>
+    <name>VaWorkbenchPanel</name>
+    <message>
+        <source>Visual Analytics</source>
+        <translation>可视化分析</translation>
+    </message>
+    <message>
+        <source>Band A</source>
+        <translation>波段 A</translation>
+    </message>
+    <message>
+        <source>Band B</source>
+        <translation>波段 B</translation>
+    </message>
+    <message>
+        <source>Refresh charts</source>
+        <translation>刷新图表</translation>
+    </message>
+    <message>
+        <source>Band A:</source>
+        <translation>波段 A：</translation>
+    </message>
+    <message>
+        <source>Band B:</source>
+        <translation>波段 B：</translation>
+    </message>
+    <message>
+        <source>Select a raster layer, then refresh.</source>
+        <translation>选择一个栅格图层后刷新。</translation>
+    </message>
+    <message>
+        <source>Cursor: —</source>
+        <translation>光标：—</translation>
+    </message>
+    <message>
+        <source>Linked: band %1 selected.</source>
+        <translation>联动：选中波段 %1。</translation>
+    </message>
+    <message>
+        <source>Cursor sample: band %1 = %2</source>
+        <translation>光标采样：波段 %1 = %2</translation>
+    </message>
+    <message>
+        <source>Cursor sample: NoData (%1)</source>
+        <translation>光标采样：NoData（%1）</translation>
+    </message>
+    <message>
+        <source>Cursor sampling unavailable: %1</source>
+        <translation>光标采样不可用：%1</translation>
+    </message>
+    <message>
+        <source>Band histogram (sampled estimate)</source>
+        <translation>波段直方图（抽样估计）</translation>
+    </message>
+    <message>
+        <source>Linked (%1): class %2 selected.</source>
+        <translation>联动（%1）：选中类别 %2。</translation>
+    </message>
+    <message>
+        <source>Linked pixel: row %1, col %2</source>
+        <translation>联动像素：row %1, col %2</translation>
+    </message>
+    <message>
+        <source>Link filter: scatter limited to histogram range [%1, %2], %3 points.</source>
+        <translation>联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。</translation>
+    </message>
+    <message>
+        <source>Cursor: %1, %2</source>
+        <translation>光标：%1, %2</translation>
+    </message>
+    <message>
+        <source>The current selection has no raster layer.</source>
+        <translation>当前选择没有栅格图层。</translation>
+    </message>
+    <message>
+        <source>Sampling from %1 (bounded and cancellable).</source>
+        <translation>正在从 %1 抽样计算（有界、可取消）。</translation>
+    </message>
+    <message>
+        <source>Per-band means (sampled estimate %1×%2)</source>
+        <translation>各波段均值（抽样估计 %1×%2）</translation>
+    </message>
+    <message>
+        <source>Band</source>
+        <translation>波段</translation>
+    </message>
+    <message>
+        <source>Mean (estimated)</source>
+        <translation>均值（估计）</translation>
+    </message>
+    <message>
+        <source>Band %1</source>
+        <translation>波段 %1</translation>
+    </message>
+</context>
+<context>
+    <name>CourseHomePage</name>
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
+    <message>
+        <source>Mode:</source>
+        <translation>体验模式:</translation>
+    </message>
+    <message>
+        <source>Guided mode (beginner)</source>
+        <translation>实验模式（初学者）</translation>
+    </message>
+    <message>
+        <source>Expert mode</source>
+        <translation>专家模式</translation>
+    </message>
+    <message>
+        <source>Continue learning</source>
+        <translation>继续学习</translation>
+    </message>
+    <message>
+        <source>Overall progress: %1%</source>
+        <translation>总进度: %1%</translation>
+    </message>
+</context>
+<context>
+    <name>TeachingAdminDock</name>
+    <message>
+        <source>A Courses</source>
+        <translation>A 课程</translation>
+    </message>
+    <message>
+        <source>B Experiments</source>
+        <translation>B 实验</translation>
+    </message>
+    <message>
+        <source>C Rubrics</source>
+        <translation>C 量规</translation>
+    </message>
+    <message>
+        <source>D Data packs</source>
+        <translation>D 数据包</translation>
+    </message>
+    <message>
+        <source>E Preflight</source>
+        <translation>E 预检</translation>
+    </message>
+    <message>
+        <source>F Offline packs</source>
+        <translation>F 离线包</translation>
+    </message>
+    <message>
+        <source>G Batch grading</source>
+        <translation>G 批量评分</translation>
+    </message>
+    <message>
+        <source>H/I Feedback &amp; stats</source>
+        <translation>H/I 反馈与统计</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineEditorDock</name>
+    <message>
+        <source>Check workflow structure (loops / unknown operators / missing parameters / output conflicts); errors map to node badges</source>
+        <translation>检查工作流结构（循环/未知算子/缺失参数/输出冲突），错误映射到节点徽标</translation>
+    </message>
+    <message>
+        <source>Check</source>
+        <translation>检查</translation>
+    </message>
+    <message>
+        <source>The workflow:preflight tool is not registered.</source>
+        <translation>workflow:preflight 工具未注册。</translation>
+    </message>
+    <message>
+        <source>(fixable)</source>
+        <translation>（可修复）</translation>
+    </message>
+    <message>
+        <source>No structural issues found (verdict: %1).</source>
+        <translation>未发现结构问题（verdict: %1）。</translation>
+    </message>
+    <message>
+        <source>Check found %1 issue(s)</source>
+        <translation>检查发现 %1 个问题</translation>
+    </message>
+</context>
+<context>
+    <name>AgentCopilotDockWidget</name>
+    <message>
+        <source>AI Copilot Assistant</source>
+        <translation>AI Copilot 智能助手</translation>
+    </message>
+    <message>
+        <source>Select AI model service profile</source>
+        <translation>选择 AI 模型服务配置</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>设置</translation>
+    </message>
+    <message>
+        <source>Open AI Copilot model and connection settings</source>
+        <translation>打开 AI Copilot 模型与连接设置</translation>
+    </message>
+    <message>
+        <source>Clear conversation</source>
+        <translation>清空对话</translation>
+    </message>
+    <message>
+        <source>Clear conversation history</source>
+        <translation>清空对话历史</translation>
+    </message>
+    <message>
+        <source>Model:</source>
+        <translation>模型:</translation>
+    </message>
+    <message>
+        <source>Enter an RS instruction (e.g. compute NDVI on the current Landsat image)...</source>
+        <translation>输入遥感指令 (例: 对当前 Landsat 图像计算 NDVI)...</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>发送</translation>
+    </message>
+    <message>
+        <source>Send RS instruction (Ctrl+Enter)</source>
+        <translation>发送遥感指令 (Ctrl+Enter)</translation>
+    </message>
+    <message>
+        <source>Run monitor</source>
+        <translation>运行监测器</translation>
+    </message>
+    <message>
+        <source>Collapse</source>
+        <translation>折叠</translation>
+    </message>
+    <message>
+        <source>Expand</source>
+        <translation>展开</translation>
+    </message>
+    <message>
+        <source>Phase: -</source>
+        <translation>阶段: -</translation>
+    </message>
+    <message>
+        <source>Task: -</source>
+        <translation>任务: -</translation>
+    </message>
+    <message>
+        <source>Calls: 0</source>
+        <translation>调用: 0</translation>
+    </message>
+    <message>
+        <source>Errors: 0</source>
+        <translation>错误: 0</translation>
+    </message>
+    <message>
+        <source>Elapsed: 0s</source>
+        <translation>耗时: 0s</translation>
+    </message>
+    <message>
+        <source>Run monitor — %1</source>
+        <translation>运行监测器 — %1</translation>
+    </message>
+    <message>
+        <source>Phase: %1</source>
+        <translation>阶段: %1</translation>
+    </message>
+    <message>
+        <source>Task: %1 (ID %2)</source>
+        <translation>任务: %1 (ID %2)</translation>
+    </message>
+    <message>
+        <source>Calls: %1</source>
+        <translation>调用: %1</translation>
+    </message>
+    <message>
+        <source>Errors: %1%2</source>
+        <translation>错误: %1%2</translation>
+    </message>
+    <message>
+        <source>Elapsed: %1s</source>
+        <translation>耗时: %1s</translation>
+    </message>
+    <message>
+        <source>Succeeded</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <source>Preparing to run tool: &lt;b&gt;%1&lt;/b&gt;</source>
+        <translation>准备执行工具: &lt;b&gt;%1&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>Status: submitted</source>
+        <translation>状态: 已提交</translation>
+    </message>
+    <message>
+        <source>AI Copilot proposed an RS processing workflow plan with &lt;b&gt;%1 steps&lt;/b&gt;</source>
+        <translation>AI Copilot 提出了 &lt;b&gt;%1 个步骤&lt;/b&gt; 的遥感处理工作流计划</translation>
+    </message>
+    <message>
+        <source>Preview on canvas</source>
+        <translation>在画布中预览</translation>
+    </message>
+    <message>
+        <source>Confirm &amp; run</source>
+        <translation>确认并执行</translation>
+    </message>
+    <message>
+        <source>Stop ⏹</source>
+        <translation>停止 ⏹</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Reasoning:&lt;/b&gt;&lt;br/&gt;%1</source>
+        <translation>&lt;b&gt;思考过程:&lt;/b&gt;&lt;br/&gt;%1</translation>
+    </message>
+    <message>
+        <source>Running…</source>
+        <translation>执行中…</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>重试执行</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>已完成</translation>
+    </message>
+    <message>
+        <source>Send ▶</source>
+        <translation>发送 ▶</translation>
+    </message>
+    <message>
+        <source>&lt;font color='red'&gt;Error: %1&lt;/font&gt;</source>
+        <translation>&lt;font color='red'&gt;错误: %1&lt;/font&gt;</translation>
+    </message>
+</context>
+<context>
+    <name>CartographyDock</name>
+    <message>
+        <source>Cartography Workbench</source>
+        <translation>制图工作台</translation>
+    </message>
+    <message>
+        <source>Map template</source>
+        <translation>地图模板</translation>
+    </message>
+    <message>
+        <source>Templates come from the cartography component catalog (same source as the agent tools).</source>
+        <translation>模板来自制图组件目录（与 agent 工具同源）。</translation>
+    </message>
+    <message>
+        <source>Template:</source>
+        <translation>模板：</translation>
+    </message>
+    <message>
+        <source>Layout name</source>
+        <translation>布局名称</translation>
+    </message>
+    <message>
+        <source>Map title</source>
+        <translation>地图标题</translation>
+    </message>
+    <message>
+        <source>Data source note</source>
+        <translation>数据来源说明</translation>
+    </message>
+    <message>
+        <source>Data source note (optional)</source>
+        <translation>数据来源说明（可选）</translation>
+    </message>
+    <message>
+        <source>Compose</source>
+        <translation>排版生成</translation>
+    </message>
+    <message>
+        <source>Fix</source>
+        <translation>修复</translation>
+    </message>
+    <message>
+        <source>Export format</source>
+        <translation>导出格式</translation>
+    </message>
+    <message>
+        <source>Export DPI</source>
+        <translation>导出 DPI</translation>
+    </message>
+    <message>
+        <source>Export directory</source>
+        <translation>导出目录</translation>
+    </message>
+    <message>
+        <source>…choose directory</source>
+        <translation>…选择目录</translation>
+    </message>
+    <message>
+        <source>Choose export directory</source>
+        <translation>选择导出目录</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>导出</translation>
+    </message>
+    <message>
+        <source>Production export</source>
+        <translation>生产导出</translation>
+    </message>
+    <message>
+        <source>Production export (compose → fix → export → manifest)</source>
+        <translation>生产导出（排版→修复→导出→清单）</translation>
+    </message>
+    <message>
+        <source>One pass: compose → bounded fix → export (with atlas) → manifest sidecar; atomic publish.</source>
+        <translation>一次完成：排版 → 有界修复 → 导出（含图集）→ 清单 sidecar；原子发布。</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <source>Stop the current cartography task</source>
+        <translation>停止当前制图任务</translation>
+    </message>
+    <message>
+        <source>Compose preview</source>
+        <translation>排版预览</translation>
+    </message>
+    <message>
+        <source>No preview yet — pick a template and click Compose.</source>
+        <translation>暂无预览 —— 选择模板并点击「排版生成」。</translation>
+    </message>
+    <message>
+        <source>Quality report</source>
+        <translation>质量报告</translation>
+    </message>
+    <message>
+        <source>Check / fix / export reports appear here.</source>
+        <translation>检查/修复/导出报告显示在这里。</translation>
+    </message>
+    <message>
+        <source>No templates available: check the data/cartography/templates directory.</source>
+        <translation>没有可用模板：请检查 data/cartography/templates 目录。</translation>
+    </message>
+    <message>
+        <source>No map layers available: add data to the canvas before composing.</source>
+        <translation>当前没有可用的地图图层：先在画布中加入数据，再生成排版。</translation>
+    </message>
+    <message>
+        <source>Template instantiation failed: %1</source>
+        <translation>模板实例化失败：%1</translation>
+    </message>
+    <message>
+        <source>A cartography task is already running (click Stop to cancel).</source>
+        <translation>已有一个制图任务在执行（可点「停止」取消）。</translation>
+    </message>
+    <message>
+        <source>Operator not registered: %1 (the cartography operator family should register at startup)</source>
+        <translation>算子未注册：%1（应用启动时应完成 cartography 算子族注册）</translation>
+    </message>
+    <message>
+        <source>Failed to submit %1 to the TaskCenter.</source>
+        <translation>%1 提交 TaskCenter 失败。</translation>
+    </message>
+    <message>
+        <source>Cartography task in progress: %1%</source>
+        <translation>制图任务进行中：%1%</translation>
+    </message>
+    <message>
+        <source>%1 task terminated abnormally.</source>
+        <translation>%1 任务异常终止。</translation>
+    </message>
+    <message>
+        <source>%1 structured errors</source>
+        <translation>%1 结构化错误</translation>
+    </message>
+    <message>
+        <source>%1 submitted as background task (#%2).</source>
+        <translation>%1 已提交后台任务（#%2）。</translation>
+    </message>
+    <message>
+        <source>Compose finished (structured summary)</source>
+        <translation>排版完成（结构化摘要）</translation>
+    </message>
+    <message>
+        <source>Compose did not pass</source>
+        <translation>排版未通过</translation>
+    </message>
+    <message>
+        <source>Compose finished: layout %1 generated.</source>
+        <translation>排版完成：布局 %1 已生成。</translation>
+    </message>
+    <message>
+        <source>Compose failed: see the quality report.</source>
+        <translation>排版失败：见质量报告。</translation>
+    </message>
+    <message>
+        <source>Compose task submitted.</source>
+        <translation>排版任务已提交。</translation>
+    </message>
+    <message>
+        <source>Check report</source>
+        <translation>检查报告</translation>
+    </message>
+    <message>
+        <source>Check finished: see the quality report.</source>
+        <translation>检查完成：见质量报告。</translation>
+    </message>
+    <message>
+        <source>Fix ledger (applied / still_reported)</source>
+        <translation>修复台账（applied / still_reported）</translation>
+    </message>
+    <message>
+        <source>Fix finished: %1 applied (%2 rounds).</source>
+        <translation>修复完成：%1 项已应用（%2 轮）。</translation>
+    </message>
+    <message>
+        <source>No composed layout yet: run Compose first.</source>
+        <translation>还没有已排版的布局：先执行「排版生成」。</translation>
+    </message>
+    <message>
+        <source>Choose an export directory first.</source>
+        <translation>请选择导出目录。</translation>
+    </message>
+    <message>
+        <source>Export evidence (atomic write + sha256)</source>
+        <translation>导出证据（原子写入 + sha256）</translation>
+    </message>
+    <message>
+        <source>Export result is missing a path (see report).</source>
+        <translation>导出返回缺少路径（见报告）。</translation>
+    </message>
+    <message>
+        <source>Export finished: %1</source>
+        <translation>导出完成：%1</translation>
+    </message>
+    <message>
+        <source>Production delivery (atomic publish + manifest)</source>
+        <translation>生产交付（原子发布 + 清单）</translation>
+    </message>
+    <message>
+        <source>Production finished: %1 (%2 pages)</source>
+        <translation>生产完成：%1（%2 页）</translation>
+    </message>
+    <message>
+        <source>Cancellation requested for task #%1.</source>
+        <translation>已请求取消任务 #%1。</translation>
+    </message>
+    <message>
+        <source>Task #%1 cannot be cancelled (it may have finished).</source>
+        <translation>任务 #%1 无法取消（可能已结束）。</translation>
+    </message>
+    <message>
+        <source>Layout %1 is unavailable (it may have been removed).</source>
+        <translation>布局 %1 不可用（可能已被移除）。</translation>
+    </message>
+    <message>
+        <source>Preview rendering failed (the layout can still be exported).</source>
+        <translation>预览渲染失败（布局仍可导出）。</translation>
     </message>
 </context>
 </TS>

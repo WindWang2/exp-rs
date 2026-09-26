@@ -101,7 +101,7 @@ void VaCursorProbe::startPending()
         {
             // Fail closed: an untransformable cursor is not sampled.
             emit sampled( false, 0.0, pending.band, false,
-                          tr( "光标坐标无法变换到图层 CRS。" ) );
+                          tr( "Cursor coordinates could not be transformed to the layer CRS." ) );
             return;
         }
     }

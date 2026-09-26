@@ -185,7 +185,7 @@ void WorkflowSessionController::selectStep( const QString &stepId )
   if ( currentParams.isObject() && !currentParams.empty() )
     m_panel->setFormValues( currentParams );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
-  emit statusMessage( tr( "已选择节点：%1" ).arg( title ) );
+  emit statusMessage( tr( "Node selected: %1" ).arg( title ) );
 }
 
 void WorkflowSessionController::setDataManager( sicnu::data::DataManager *dataManager )
@@ -308,7 +308,7 @@ QString WorkflowSessionController::openBareOperator( const QString &operatorId )
   auto op = RSOperatorRegistry::instance().create( operatorId.toStdString() );
   if ( !op )
   {
-    emit statusMessage( tr( "算子未注册：%1" ).arg( operatorId ) );
+    emit statusMessage( tr( "Operator not registered: %1" ).arg( operatorId ) );
     return {};
   }
   sicnu::workflow::WorkflowDefinition def;

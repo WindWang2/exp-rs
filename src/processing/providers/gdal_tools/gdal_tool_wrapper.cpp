@@ -168,16 +168,16 @@ QString GdalToolWrapper::commandLinePreview( const QVariantMap &parameters,
         QgsProcessingFeedback feedback;
         const QStringList args = buildArgs( resolved, context, &feedback );
         if ( args.isEmpty() )
-            return QObject::tr( "# 无法根据当前参数生成命令（请检查必填项）" );
+            return QObject::tr( "# Could not build a command from the current parameters (check required inputs)" );
         return joinCommandLine( program, args );
     }
     catch ( const QgsProcessingException &e )
     {
-        return QObject::tr( "# 命令预览失败: %1" ).arg( e.what() );
+        return QObject::tr( "# Command preview failed: %1" ).arg( e.what() );
     }
     catch ( ... )
     {
-        return QObject::tr( "# 命令预览失败（参数不完整或无效）" );
+        return QObject::tr( "# Command preview failed (incomplete or invalid parameters)" );
     }
 }
 

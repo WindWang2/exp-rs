@@ -362,7 +362,7 @@ QSlider *RibbonController::addSlider( GroupHost &group,
 
   auto updateValue = [valueLbl, suffix]( int v ) {
     valueLbl->setText( suffix.isEmpty() ? QString::number( v )
-                                        : QStringLiteral( "%1%2" ).arg( v ).arg( suffix ) );
+                                        : tr( "%1%2" ).arg( v ).arg( suffix ) );
   };
   updateValue( value );
   connect( slider, &QSlider::valueChanged, box, updateValue );

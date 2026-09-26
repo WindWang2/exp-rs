@@ -347,7 +347,7 @@ void QgisDesktopWindow::setupDockWidgets()
         } );
         m_labCockpitDock = new QgsDockWidget( this );
         m_labCockpitDock->setObjectName( QStringLiteral( "labCockpitDock" ) );
-        m_labCockpitDock->setWindowTitle( tr( "遥感实验学习工作台" ) );
+        m_labCockpitDock->setWindowTitle( tr( "Undergraduate Lab Teaching Workbench" ) );
         m_labCockpitDock->setWidget( cockpit );
         addDockWidget( Qt::RightDockWidgetArea, m_labCockpitDock );
         tabifyDockWidget( m_workflowDock, m_labCockpitDock );
@@ -359,7 +359,7 @@ void QgisDesktopWindow::setupDockWidgets()
         auto *admin = new sicnu::app::teaching_admin::TeachingAdminDock( this );
         m_teachingAdminDock = new QgsDockWidget( this );
         m_teachingAdminDock->setObjectName( QStringLiteral( "teachingAdminDock" ) );
-        m_teachingAdminDock->setWindowTitle( tr( "教学作者与评测控制台" ) );
+        m_teachingAdminDock->setWindowTitle( tr( "Teacher Authoring & Assessment Console" ) );
         m_teachingAdminDock->setWidget( admin );
         addDockWidget( Qt::RightDockWidgetArea, m_teachingAdminDock );
         tabifyDockWidget( m_workflowDock, m_teachingAdminDock );

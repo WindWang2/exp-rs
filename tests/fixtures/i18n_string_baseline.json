@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "WP-F extraction gate anchor \u2014 FROZEN at Phase 0 (2026-09-27, worktree @ 15e5c66b5).",
+    "Do NOT recompute this file at close: it is the time anchor the gate asserts against.",
+    "totals = Phase 0 scan of the 92 Chinese-containing cpp files (pre-migration);",
+    "hard-class counters have since been driven to 0 by the WP-B migrations,so the gate enforces both <=-baseline and the 0 steady state."
+  ],
+  "phase0_totals": {
+    "tr_wrapped_en": 2295,
+    "tr_zh_source": 292,
+    "hard_zh": 15,
+    "hard_en": 9,
+    "fmt_concat": 1,
+    "nonui_zh": 1059,
+    "log_zh": 0,
+    "comment_zh": 96
+  },
+  "must_be_zero": [
+    "hard_zh",
+    "hard_en",
+    "fmt_concat",
+    "tr_zh_source"
+  ],
+  "ceilings": {
+    "nonui_zh": 1059
+  },
+  "floors": {
+    "tr_wrapped_en": 2295
+  }
+}

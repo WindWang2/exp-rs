@@ -1147,5 +1147,64 @@
       "出图",
       "export"
     ]
+  },
+  {
+    "id": "command.mission.timeline.show",
+    "purpose": "打开任务时间线停靠面板，查看任务执行时间轴。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "任务时间线",
+      "时间轴",
+      "mission timeline"
+    ]
+  },
+  {
+    "id": "command.mission.task.retry",
+    "purpose": "重试选定的失败或已取消任务。",
+    "prerequisites": [
+      "存在失败或已取消的任务"
+    ],
+    "related": [],
+    "keywords": [
+      "重试任务",
+      "任务重试",
+      "retry task"
+    ]
+  },
+  {
+    "id": "command.mission.task.resume",
+    "purpose": "在重新绑定引用后，恢复选定的过期或已取消任务。",
+    "prerequisites": [
+      "存在可恢复的任务"
+    ],
+    "related": [],
+    "keywords": [
+      "恢复任务",
+      "续跑任务",
+      "resume task"
+    ]
+  },
+  {
+    "id": "command.teaching.labCockpit.show",
+    "purpose": "打开遥感实验学习工作台：课程主页、就绪度与引导步骤。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "遥感实验学习工作台",
+      "课程主页",
+      "lab cockpit"
+    ]
+  },
+  {
+    "id": "command.workbench.experimentExplorationStudio",
+    "purpose": "打开实验探索工作台：参数敏感性、空间对比、故障教学与首次分歧分析。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "实验探索工作台",
+      "参数敏感性",
+      "experiment exploration studio"
+    ]
   }
 ]
