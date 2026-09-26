@@ -505,7 +505,7 @@ TEST_CASE( "Host panel empty state transitions and interactions", "[m3][panels][
 
         auto *emptyWidget = logPanel.findChild<sicnu::RsEmptyStateWidget *>();
         REQUIRE( emptyWidget != nullptr );
-        REQUIRE( emptyWidget->title() == QStringLiteral( "暂无系统日志" ) );
+        REQUIRE( emptyWidget->title() == QStringLiteral( "No system log yet" ) );
     }
 
 }

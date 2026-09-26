@@ -1147,5 +1147,77 @@
       "出图",
       "export"
     ]
+  },
+  {
+    "id": "command.mission.timeline.show",
+    "purpose": "打开任务时间线面板，按时间顺序回看任务的执行过程与状态变化。",
+    "suggestedNextAction": "在时间线中选择一个任务后重试或续跑",
+    "related": [
+      "command.mission.task.retry",
+      "command.mission.task.resume"
+    ],
+    "keywords": [
+      "任务时间线",
+      "时间线",
+      "mission timeline"
+    ]
+  },
+  {
+    "id": "command.mission.task.retry",
+    "purpose": "重试选中的失败或已取消任务，从头重新执行。",
+    "prerequisites": [
+      "已选中一个失败或已取消的任务"
+    ],
+    "suggestedNextAction": "若重试仍失败，查看诊断信息定位原因",
+    "related": [
+      "command.mission.task.resume",
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "重试任务",
+      "重新执行",
+      "mission retry"
+    ]
+  },
+  {
+    "id": "command.mission.task.resume",
+    "purpose": "在重新绑定输入引用之后，继续选中的过期或已取消任务。",
+    "prerequisites": [
+      "已选中一个可恢复的过期或已取消任务",
+      "任务的输入引用已重新绑定"
+    ],
+    "suggestedNextAction": "用任务时间线确认续跑后的状态",
+    "related": [
+      "command.mission.task.retry",
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "恢复任务",
+      "续跑",
+      "mission resume"
+    ]
+  },
+  {
+    "id": "command.teaching.labCockpit.show",
+    "purpose": "打开遥感实验学习工作台：课程首页、就绪度检查与分步引导。",
+    "suggestedNextAction": "按工作台给出的就绪度提示补齐环境后开始实验",
+    "keywords": [
+      "实验工作台",
+      "教学",
+      "课程首页",
+      "lab cockpit"
+    ]
+  },
+  {
+    "id": "command.workbench.experimentExplorationStudio",
+    "purpose": "打开实验探索工作台，做参数敏感性、空间对比、故障教学与首次分歧定位。",
+    "suggestedNextAction": "先做参数敏感性扫描，再用空间对比定位分歧区域",
+    "keywords": [
+      "实验探索",
+      "参数敏感性",
+      "空间对比",
+      "首次分歧",
+      "experiment studio"
+    ]
   }
 ]

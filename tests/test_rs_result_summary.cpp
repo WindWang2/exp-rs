@@ -49,7 +49,7 @@ TEST_CASE( "RsResultSummary renders output, metrics and context",
     REQUIRE( status->isVisibleTo( &summary ) );
     REQUIRE( status->text().contains( QStringLiteral( "rs:image_fusion" ) ) );
     REQUIRE( status->text().contains( QStringLiteral( "15.2" ) ) ); // elapsed
-    REQUIRE( status->text().contains( QStringLiteral( "缓存命中" ) ) );
+    REQUIRE( status->text().contains( QStringLiteral( "Cache Hit" ) ) );
 
     QLabel *metrics = summary.findChild<QLabel *>( QStringLiteral( "rsResultMetrics" ) );
     REQUIRE( metrics != nullptr );
