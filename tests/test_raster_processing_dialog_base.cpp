@@ -267,10 +267,10 @@ TEST_CASE("RasterProcessingDialogBase UI components and button box", "[dialog][b
         CHECK(dialog.buttonBox()->buttonRole(dialog.resetButton()) == QDialogButtonBox::ResetRole);
         CHECK(dialog.buttonBox()->buttonRole(dialog.helpButton()) == QDialogButtonBox::HelpRole);
 
-        CHECK(dialog.runButton()->text() == QStringLiteral("运行"));
-        CHECK(dialog.cancelButton()->text() == QStringLiteral("取消"));
-        CHECK(dialog.resetButton()->text() == QStringLiteral("重置"));
-        CHECK(dialog.helpButton()->text() == QStringLiteral("帮助"));
+        CHECK(dialog.runButton()->text() == QStringLiteral("Run"));
+        CHECK(dialog.cancelButton()->text() == QStringLiteral("Cancel"));
+        CHECK(dialog.resetButton()->text() == QStringLiteral("Reset"));
+        CHECK(dialog.helpButton()->text() == QStringLiteral("Help"));
     }
 
     SECTION("minimumSizeHint and sizeHint dynamic dimensions")
@@ -358,13 +358,13 @@ TEST_CASE("RasterProcessingDialogBase group builders and custom hooks", "[dialog
         CHECK(dialog.inputGroup->title() == QStringLiteral("自定义输入"));
 
         REQUIRE(dialog.paramGroup != nullptr);
-        CHECK(dialog.paramGroup->title() == QStringLiteral("算法参数"));
+        CHECK(dialog.paramGroup->title() == QStringLiteral("Algorithm Parameters"));
 
         REQUIRE(dialog.advGroup != nullptr);
-        CHECK(dialog.advGroup->title() == QStringLiteral("高级选项"));
+        CHECK(dialog.advGroup->title() == QStringLiteral("Advanced Options"));
 
         REQUIRE(dialog.outGroup != nullptr);
-        CHECK(dialog.outGroup->title() == QStringLiteral("输出配置"));
+        CHECK(dialog.outGroup->title() == QStringLiteral("Output Settings"));
     }
 
     SECTION("Reset button clears output edit and invokes onResetClicked hook")

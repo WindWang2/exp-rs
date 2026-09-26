@@ -115,5 +115,5 @@ TEST_CASE( "TemporalSceneModel renders QA and unknown values truthfully",
   CHECK( cloud0.toString() == QStringLiteral( "12%" ) );
   const QVariant cloudNone =
     model.data( model.index( 2, sicnu::app::TemporalSceneModel::Cloud ), Qt::DisplayRole );
-  CHECK( cloudNone.toString() == QStringLiteral( "未报告" ) );
+  CHECK( cloudNone.toString() == QStringLiteral( "Not reported" ) );
 }
