@@ -8,6 +8,8 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+
 #include "app/georeferencer/rs_georeferencing_session.h"
 #include "app/georeferencer/qgsgeoreftransform.h"
 #include "operators/framework/rs_operator_context.h"
@@ -17,26 +19,11 @@
 #include <QCoreApplication>
 #include <QTemporaryDir>
 
-#include <cstdlib>
 #include <cmath>
 
 using Catch::Approx;
 
-// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup (same
-// issue as the georef window tests). Bypass with std::_Exit after Catch reports.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -158,8 +145,7 @@ QCoreApplication *ensureApp()
     static int argc = 1;
     static char name[] = "test_georeferencing_session";
     static char *argv[] = { name, nullptr };
-    static QCoreApplication app( argc, argv );
-    return &app;
+    return sicnu::test::qtlifecycle::heapQCoreApplication( argc, argv );
   }
   return QCoreApplication::instance();
 }

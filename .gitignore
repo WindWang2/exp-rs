@@ -483,3 +483,8 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+
+# hardening/r4-qt-teardown (Track 2, R4 Deep): teardown-lifecycle planning notes (markdown only; logs stay local).
+!.planning/qt-teardown-lifecycle-r4/
+.planning/qt-teardown-lifecycle-r4/*
+!.planning/qt-teardown-lifecycle-r4/*.md

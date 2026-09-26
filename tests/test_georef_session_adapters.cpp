@@ -8,27 +8,18 @@
 #include "rs_georeferencing_session.h"
 
 #include <QApplication>
+#include "support/qt_lifecycle.h"
 
 namespace
 {
-class FastExitListener : public Catch::EventListenerBase
-{
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testRunEnded( const Catch::TestRunStats &stats ) override
-    {
-      std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-    }
-};
 } // namespace
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 static int argc = 1;
 static char arg0[] = "test_georef_session_adapters";
 static char *argv[] = { arg0, nullptr };
 static QApplication *app = []() {
-  static QApplication a( argc, argv );
-  return &a;
+  return sicnu::test::qtlifecycle::heapQApplication( argc, argv );
 }();
 
 TEST_CASE( "I2M keeps map-coordinate destination picking; I2I does not",

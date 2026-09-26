@@ -13848,3 +13848,95 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# ── Track 2 (R4 Deep, cluster A): teardown lifecycle fixtures (WP-C) ──────
+# Every binary here registers the shared ordered-teardown listener
+# (tests/support/qt_lifecycle.h) and must survive glibc exit() with no
+# std::_Exit defense. TEST_CASE names carry "teardown" for the ctest gate.
+
+add_executable(test_canvas_teardown_r4 test_canvas_teardown_r4.cpp)
+target_link_libraries(test_canvas_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_canvas_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+set_target_properties(test_canvas_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_canvas_teardown_r4)
+
+add_executable(test_dual_viewport_teardown_r4 test_dual_viewport_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_dual_viewport_sync_controller.cpp)
+target_link_libraries(test_dual_viewport_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_dual_viewport_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_dual_viewport_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_dual_viewport_teardown_r4)
+
+add_executable(test_timeline_scrubber_teardown_r4 test_timeline_scrubber_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/timeline_scrubber_widget.cpp)
+target_link_libraries(test_timeline_scrubber_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_timeline_scrubber_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_timeline_scrubber_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_timeline_scrubber_teardown_r4)
+
+add_executable(test_roi_statistics_teardown_r4 test_roi_statistics_teardown_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/algorithms/math_utils.cpp)
+target_link_libraries(test_roi_statistics_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_roi_statistics_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_roi_statistics_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_roi_statistics_teardown_r4)
+
+add_executable(test_maptool_teardown_r4 test_maptool_teardown_r4.cpp)
+target_link_libraries(test_maptool_teardown_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui
+)
+target_include_directories(test_maptool_teardown_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+set_target_properties(test_maptool_teardown_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_maptool_teardown_r4)
+
+add_executable(test_exit_path_contracts_r4 test_exit_path_contracts_r4.cpp)
+target_link_libraries(test_exit_path_contracts_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+  sicnu_task_center sicnu_jobs
+  qgis_core
+)
+target_include_directories(test_exit_path_contracts_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_exit_path_contracts_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_exit_path_contracts_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_exit_path_contracts_r4)
+
+add_executable(test_teardown_retirement_gate_r4 test_teardown_retirement_gate_r4.cpp)
+target_link_libraries(test_teardown_retirement_gate_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+  qgis_core
+)
+target_include_directories(test_teardown_retirement_gate_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_teardown_retirement_gate_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_teardown_retirement_gate_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_teardown_retirement_gate_r4)

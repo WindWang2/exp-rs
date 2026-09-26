@@ -15,28 +15,15 @@
 #include <QLabel>
 #include <QSplitter>
 
-#include <cstdlib>
+#include "support/qt_lifecycle.h"
 
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 static int argc = 1;
 static char arg0[] = "test_georef_dual_window";
 static char *argv[] = { arg0, nullptr };
 static QApplication *app = []() {
-  static QApplication a( argc, argv );
-  return &a;
+  return sicnu::test::qtlifecycle::heapQApplication( argc, argv );
 }();
 
 TEST_CASE( "I2I window has horizontal twin canvases and dual session maps",
