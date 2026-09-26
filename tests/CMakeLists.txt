@@ -13866,7 +13866,10 @@ target_compile_definitions(test_help_commands_schema PRIVATE
 set_target_properties(test_help_commands_schema PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-sicnu_discover_tests(test_help_commands_schema)
+# Static registration: 3 fast cases, no need for per-case discovery.
+add_test(NAME test_help_commands_schema
+  COMMAND test_help_commands_schema
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Track 17 R4 (WP-F): extraction/no-regression gate. Runs the single-source
 # string audit scanner over the frozen Phase 0 file list and asserts the
@@ -13880,7 +13883,9 @@ if(Python_EXECUTABLE)
             "--files" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_audit_files.txt"
             "--gate" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_string_baseline.json"
             "--selftest")
-  set_tests_properties(test_i18n_string_audit PROPERTIES TIMEOUT 300)
+  set_tests_properties(test_i18n_string_audit PROPERTIES
+    TIMEOUT 300
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
 # Track 17 R4 (WP-F guard): the WP-B zh_CN backfill entries live under moc
@@ -13898,4 +13903,6 @@ target_compile_definitions(test_i18n_migrated_translations PRIVATE
 set_target_properties(test_i18n_migrated_translations PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-sicnu_discover_tests(test_i18n_migrated_translations)
+add_test(NAME test_i18n_migrated_translations
+  COMMAND test_i18n_migrated_translations
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
