@@ -248,6 +248,39 @@ TEST_CASE( "syncFileUtf8 flushes an existing file and fails a missing one; "
   fs::remove_all( base );
 }
 
+// The staging-claim primitive behind the atomic publish lanes: the first
+// claim owns the name (file exists, empty), a concurrent claim of the SAME
+// name is refused (O_EXCL / CREATE_NEW — the check-then-use antidote), and
+// the name becomes claimable again only after the owner removes it.
+TEST_CASE( "claimExclusiveUtf8 grants one exclusive owner per name", "[platform][fs][staging]" )
+{
+  const fs::path base = fs::temp_directory_path() / "sicnu-portable-claim";
+  fs::remove_all( base );
+  fs::create_directories( base );
+  const std::string staged = sicnu::portable::pathToUtf8( base / "publish.tmp" );
+
+  // First claim: this caller now owns the name.
+  REQUIRE( sicnu::portable::claimExclusiveUtf8( staged ) );
+  // The claimed file exists and is empty (the caller writes and publishes it
+  // or removes it — the contract leaves no allocated-but-undefined state).
+  REQUIRE( fs::exists( sicnu::portable::pathFromUtf8( staged ) ) );
+  {
+    std::ifstream in( sicnu::portable::pathFromUtf8( staged ), std::ios::binary );
+    REQUIRE( std::string( std::istreambuf_iterator<char>( in ),
+                          std::istreambuf_iterator<char>() ).empty() );
+  }
+  // A second publisher of the same name is refused, and the first owner's
+  // file was not truncated or recreated by the attempt.
+  REQUIRE_FALSE( sicnu::portable::claimExclusiveUtf8( staged ) );
+  REQUIRE( fs::exists( sicnu::portable::pathFromUtf8( staged ) ) );
+
+  // After the owner removes the file the name is claimable again.
+  fs::remove( sicnu::portable::pathFromUtf8( staged ) );
+  REQUIRE( sicnu::portable::claimExclusiveUtf8( staged ) );
+
+  fs::remove_all( base );
+}
+
 #if !defined( _WIN32 )
 // POSIX publication contract (Windows equivalent is MoveFileExW/
 // ReplaceFileW inside atomic_fs): rename(2) swaps the directory entry and
