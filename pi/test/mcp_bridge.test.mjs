@@ -170,6 +170,21 @@ function readNotifyLog(path) {
   }
 }
 
+/** Poll the notify log until it has the given number of
+ * notifications/cancelled (or the deadline passes) - a fixed sleep races
+ * the child's appendFileSync under load (review P2). */
+async function waitForCancellations(path, count, deadlineMs = 5000) {
+  const start = Date.now();
+  for (;;) {
+    const cancellations = readNotifyLog(path).filter(
+      (n) => n.method === "notifications/cancelled",
+    );
+    if (cancellations.length >= count || Date.now() - start > deadlineMs)
+      return cancellations.length;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 test("abort mid-flight rejects the call and notifies the server exactly once (#645)", async () => {
   const counter = makeCounter();
   const notifyLog = join(dirname(counter), "notify.log");
@@ -187,15 +202,12 @@ test("abort mid-flight rejects the call and notifies the server exactly once (#6
     setTimeout(() => controller.abort(), 50);
     await assert.rejects(pending, /Aborted/);
 
-    // Give the notification a moment to reach the child, then count.
-    await new Promise((r) => setTimeout(r, 200));
-    const notifications = readNotifyLog(notifyLog).filter(
-      (n) => n.method === "notifications/cancelled",
-    );
+    // Wait for the notification to reach the child, then count exactly.
+    const cancellations = await waitForCancellations(notifyLog, 1);
     assert.equal(
-      notifications.length,
+      cancellations,
       1,
-      `expected exactly one notifications/cancelled, got ${notifications.length}`,
+      `expected exactly one notifications/cancelled, got ${cancellations}`,
     );
 
     // The bridge stays healthy after a cancellation (state reset): the next
@@ -214,25 +226,26 @@ test("the late reply after an abort is dropped, not delivered (#645 no-leak)", a
     assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
 
     const controller = new AbortController();
-    let settled = false;
-    const pending = bridge
-      .request("tools/call", { arguments: { delay_ms: 300 } }, controller.signal)
-      .then(
-        (v) => {
-          settled = true;
-          return v;
-        },
-        (e) => {
-          settled = true;
-          throw e;
-        },
-      );
+    let lateResolution = null;
+    const pending = bridge.request(
+      "tools/call",
+      { arguments: { delay_ms: 300 } },
+      controller.signal,
+    );
+    // The leak detector: a LATE resolve of the aborted call is the exact
+    // "result leaks after cancel" defect - watch for it directly.
+    pending.then(
+      (v) => {
+        lateResolution = v;
+      },
+      () => {},
+    );
     controller.abort();
     await assert.rejects(pending, /Aborted/);
-    // Outlive the fake server's delayed reply: it must NEVER resolve the
-    // dead call (the pending entry was removed on abort).
+    // Outlive the fake server's delayed reply: it must NEVER deliver a
+    // result to the dead call (the pending entry was removed on abort).
     await new Promise((r) => setTimeout(r, 500));
-    assert.equal(settled, true); // settled by the abort rejection, once
+    assert.equal(lateResolution, null);
     assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
   } finally {
     bridge.stop();
@@ -242,7 +255,7 @@ test("the late reply after an abort is dropped, not delivered (#645 no-leak)", a
 test("a pre-aborted signal rejects without a server round-trip for the call", async () => {
   const counter = makeCounter();
   const notifyLog = join(dirname(counter), "notify.log");
-  const bridge = makeBridge(counter);
+  const bridge = new McpBridge(fakeServer, ["--notify-log", notifyLog, counter]);
   try {
     const controller = new AbortController();
     controller.abort();
@@ -250,14 +263,13 @@ test("a pre-aborted signal rejects without a server round-trip for the call", as
       () => bridge.request("tools/call", {}, controller.signal),
       /Aborted/,
     );
-    await new Promise((r) => setTimeout(r, 150));
-    // The cancelled notification may reference the reserved rpc id (the
-    // #645 "harmless server-side" case) — but exactly ONE, and the bridge
-    // is none the worse: a normal call still works.
-    const cancellations = readNotifyLog(notifyLog).filter(
-      (n) => n.method === "notifications/cancelled",
-    );
-    assert.ok(cancellations.length <= 1);
+    // The pre-aborted path fires onAbort synchronously once the lazy
+    // respawn's recursive request() sees signal.aborted: exactly ONE
+    // notifications/cancelled for the reserved rpc id (#645 "harmless
+    // server-side") - an upper-bound assert here would miss a double-notify
+    // regression (review P2).
+    const cancellations = await waitForCancellations(notifyLog, 1);
+    assert.equal(cancellations, 1);
     assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
   } finally {
     bridge.stop();

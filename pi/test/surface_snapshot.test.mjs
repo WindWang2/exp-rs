@@ -19,7 +19,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MAX_RESULT_CHARS, piToolName, truncateTail } from "../mcp_bridge.ts";
+import {
+  MAX_RESULT_CHARS,
+  piToolName,
+  toolCategory,
+  truncateTail,
+} from "../mcp_bridge.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const piDir = join(here, "..");
@@ -48,11 +53,6 @@ function defaultCategories() {
     .filter(Boolean);
 }
 
-/** The shell's category extraction (structural twin of toolCategory()). */
-function familyOf(mcpName) {
-  return mcpName.includes(":") ? mcpName.split(":", 1)[0] : "meta";
-}
-
 const snapshotFamilies = new Set(snapshot.tools.map((t) => t.family));
 
 test("every default bridged category is a family the snapshot still has", () => {
@@ -67,9 +67,42 @@ test("every default bridged category is a family the snapshot still has", () => 
   }
 });
 
+test("every snapshot family is bridged OR explicitly declared unbridged", () => {
+  // The reverse gate: when C++ grows a NEW family, the pi side must make a
+  // conscious opt-in/opt-out decision - silence (the third drift edge of
+  // the triangle: C++ grows, pi never bridges, nobody notices) is a red.
+  const intentionallyUnbridged = new Set([
+    // processing/operator families: long-running algorithm work stays in
+    // the Task Center, discoverable via exprs_search_algorithms (ADR 0122).
+    "rs", "gdal", "gdal_tools", "otb", "otb_tools", "qgis", "qgis_algorithms",
+    "opencv",
+    // GUI-bound interaction surface (headless-hide rule; opt-in via env).
+    "view", "roi", "canvas", "layer", "raster",
+    // data-platform tables (dataset:/experiment:/reproducibility:/...):
+    // platform-governance surfaces, not spatial-intelligence surface.
+    "dataset", "experiment", "reproducibility", "benchmark", "scientific",
+    // workbench/governance/style families (Platform 3.0/5.0, ADR 0127/0128).
+    "workbench", "project", "asset", "collection", "lineage", "result", "run",
+    "solution", "style", "template",
+    // editing/foundation extras registered in the same registry.
+    "editing", "io", "preflight", "recipe", "suitability",
+    // RS14-15 why-this-step teaching surface (opt-in, not bridged by default).
+    "explain",
+  ]);
+  const categories = new Set(defaultCategories());
+  for (const family of snapshotFamilies) {
+    const decided = categories.has(family) || intentionallyUnbridged.has(family);
+    assert.ok(
+      decided,
+      `snapshot family '${family}' is neither bridged by default nor ` +
+        `declared intentionally unbridged - decide and update this list`,
+    );
+  }
+});
+
 test("every snapshot tool in a bridged category maps to a unique legal pi name", () => {
   const categories = new Set(defaultCategories());
-  const bridged = snapshot.tools.filter((t) => categories.has(familyOf(t.name)));
+  const bridged = snapshot.tools.filter((t) => categories.has(toolCategory(t.name)));
   assert.ok(bridged.length > 0, "the bridged slice must not be empty");
 
   const names = new Set();
@@ -85,9 +118,9 @@ test("every snapshot tool in a bridged category maps to a unique legal pi name",
 });
 
 test("the shell's hardcoded tools never collide with a bridged name", () => {
-  const hardcoded = [...shellSource.matchAll(/name:\s*"(exprs_[a-z_]+)"/g)].map(
-    (m) => m[1],
-  );
+  const hardcoded = [
+    ...shellSource.matchAll(/name:\s*"(exprs_[a-zA-Z0-9_-]+)"/g),
+  ].map((m) => m[1]);
   assert.ok(hardcoded.includes("exprs_wait_for_execution"));
   assert.ok(hardcoded.includes("exprs_status"));
   const bridged = new Set(snapshot.tools.map((t) => piToolName(t.name)));

@@ -31,13 +31,15 @@ import { existsSync, statSync } from "node:fs";
 import {
   McpBridge,
   piToolName,
+  toolCategory,
   truncateTail,
 } from "./mcp_bridge.ts";
 
-// piToolName (":" -> "_" sanitization) and truncateTail (tail-keeping cut at
-// MAX_RESULT_CHARS) live in mcp_bridge.ts since Track 9: one
-// implementation, importable — and therefore contract-testable — from
-// node --test against tests/surface_diff_snapshot.json.
+// piToolName (":" -> "_" sanitization), toolCategory (family extraction)
+// and truncateTail (tail-keeping cut at MAX_RESULT_CHARS) live in
+// mcp_bridge.ts since Track 9: one implementation, importable — and
+// therefore contract-testable — from node --test against
+// tests/surface_diff_snapshot.json.
 
 /** Runs a bridge request, cancellable via AbortSignal: on abort the local
  * promise rejects AND the server is told to cancel the work behind the rpc
@@ -86,11 +88,6 @@ function wantedCategories(): Set<string> {
     if (trimmed) set.add(trimmed);
   }
   return set;
-}
-
-function toolCategory(mcpName: string): string {
-  if (!mcpName.includes(":")) return "meta";
-  return mcpName.split(":", 1)[0];
 }
 
 export default async function (pi: ExtensionAPI) {
