@@ -677,8 +677,38 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
 
     // Single Task Center UI is the bottom RsJobPanel (rsJobPanelDock).
+    // F-05/F-06 (ui-backend-state-parity-r4): auto-load requests are stamped
+    // with the session that started the task (recorded at taskAdded). A
+    // request arriving after the shell moved on — project open/new or Save
+    // As bumped the epoch — is dropped with a status-bar trace instead of
+    // landing in the context the user has already left.
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskAdded,
+             this, [this]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.autoLoadLayer && !info.outputLayerPath.isEmpty() )
+                 {
+                     m_autoLoadTaskEpoch.insert( info.taskId, m_sessionEpoch );
+                     // Bound the map: task ids are monotonic, so dropping the
+                     // smallest keys retires the oldest submissions first.
+                     while ( m_autoLoadTaskEpoch.size() > 256 )
+                         m_autoLoadTaskEpoch.erase( m_autoLoadTaskEpoch.begin() );
+                 }
+             } );
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
              this, [this]( const QString &path ) {
+                 bool recorded = false;
+                 quint64 submittedEpoch = m_sessionEpoch;
+                 if ( !m_autoLoadTaskEpoch.isEmpty() )
+                 {
+                     submittedEpoch = m_autoLoadTaskEpoch.first();
+                     recorded = true;
+                     m_autoLoadTaskEpoch.erase( m_autoLoadTaskEpoch.begin() );
+                 }
+                 if ( !recorded || submittedEpoch != m_sessionEpoch )
+                 {
+                     statusBar()->showMessage(
+                         tr( "Dropped stale task auto-load: %1" ).arg( path ), 5000 );
+                     return;
+                 }
                  // Generic path open → DataManager + main Display View.
                  ( void ) loadDataLayer( path );
              } );
