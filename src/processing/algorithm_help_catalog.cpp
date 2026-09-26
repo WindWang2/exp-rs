@@ -146,9 +146,9 @@ QString SicnuAlgorithmHelp::shortHelpString( const QString &algorithmName, const
   QString html = QObject::tr( "<p><b>%1</b></p><p>%2</p>" )
                    .arg( displayName.isEmpty() ? algorithmName : displayName, body );
   if ( !cliName.isEmpty() )
-    html += QObject::tr( "<p>CLI / 应用: <code>%1</code></p>" ).arg( cliName );
+    html += QObject::tr( "<p>CLI / application: <code>%1</code></p>" ).arg( cliName );
   if ( !tags.isEmpty() )
-    html += QObject::tr( "<p>标签: %1</p>" ).arg( tags.join( QStringLiteral( ", " ) ) );
-  html += QObject::tr( "<p>在工具箱中悬停可查看简介；打开对话框后右侧/帮助区显示完整说明。" );
+    html += QObject::tr( "<p>Tags: %1</p>" ).arg( tags.join( QStringLiteral( ", " ) ) );
+  html += QObject::tr( "<p>Hover in the toolbox for a summary; the full description appears on the right/help area after opening the dialog." );
   return html;
 }
