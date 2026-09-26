@@ -13848,3 +13848,127 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# === ui-backend-state-parity-r4 (Track 3 R4): parity oracle suites ==========
+# Each suite drives the real shell library (#1312 full-shell precedent — no
+# embedded TU copies) against landing-policy / mirror contracts. The pairs,
+# drift registry and race classes live in
+# .planning/ui-backend-state-parity-r4/PARITY_MAP.md.
+add_executable(test_parity_async_late_arrival_r4
+  test_parity_async_late_arrival_r4.cpp
+)
+target_link_libraries(test_parity_async_late_arrival_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  # qgis usage requirements must come from a direct link: the shell library's
+  # PRIVATE deps propagate symbols only (same reasoning as the full-shell suite).
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+)
+target_include_directories(test_parity_async_late_arrival_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_async_late_arrival_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_async_late_arrival_r4)
+sicnu_discover_tests(test_parity_async_late_arrival_r4 TIMEOUT 300)
+
+add_executable(test_parity_selection_authority_r4
+  test_parity_selection_authority_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_parity_selection_authority_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_parity_selection_authority_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_selection_authority_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_parity_selection_authority_r4 TIMEOUT 300)
+
+add_executable(test_parity_state_mirror_r4
+  test_parity_state_mirror_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_workbench_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/timeline_scrubber_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+)
+target_link_libraries(test_parity_state_mirror_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_parity_state_mirror_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_state_mirror_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_state_mirror_r4)
+set_target_properties(test_parity_state_mirror_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_parity_state_mirror_r4 TIMEOUT 300)
+
+add_executable(test_parity_restore_failsafe_r4
+  test_parity_restore_failsafe_r4.cpp
+)
+target_link_libraries(test_parity_restore_failsafe_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  sicnu_processing
+)
+target_include_directories(test_parity_restore_failsafe_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_parity_restore_failsafe_r4 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_parity_restore_failsafe_r4)
+sicnu_discover_tests(test_parity_restore_failsafe_r4 TIMEOUT 300)
