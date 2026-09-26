@@ -599,3 +599,102 @@ TEST_CASE( "the engine probes only what the spec names — no implicit scan",
     REQUIRE( grids.gridCalls == 0 );
     REQUIRE( artifacts.readJsonCalls == 0 );
 }
+
+// ---------------------------------------------------------------------------
+// Track 16 WP-C: the two-level outcome boundary, contract-sourced edges.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "an empty spec refuses with the synthetic spec.valid Fail",
+           "[verify][engine][track16]" )
+{
+    // Contract (verify_types.cpp): "an empty verification must not exist" —
+    // validateSpec rejects, so the engine seals a single synthetic Fail
+    // instead of aggregating zero checks into anything.
+    VerificationSpec spec;
+    spec.specId = "spec.empty";
+    spec.scope = "node";
+
+    const VerificationContext context;
+    const VerificationReport report = evaluate( spec, context );
+
+    CHECK( report.overall == VerificationStatus::Fail );
+    REQUIRE( report.checks.size() == 1 );
+    CHECK( report.checks.front().checkId == "spec.valid" );
+    CHECK( report.checks.front().status == VerificationStatus::Fail );
+    CHECK( report.checks.front().code == kCodeInvalidSpec );
+    CHECK( report.checks.front().message.find( "no checks" ) != std::string::npos );
+}
+
+TEST_CASE( "two contradictory real checks aggregate to Fail with both verdicts "
+           "preserved",
+           "[verify][engine][track16]" )
+{
+    // Two checks pin OPPOSITE expectations on the same recorded fact. The
+    // engine does not arbitrate: each check judges honestly, the lattice
+    // folds any Fail to an overall Fail, and both verdicts stay visible.
+    FakeStateView view;
+    view.values["version"] = Json::Value( 1.0 );
+
+    VerificationSpec spec;
+    spec.specId = "spec.contradiction";
+    spec.scope = "node";
+
+    Json::Value expectsOne( Json::objectValue );
+    Json::Value one( Json::arrayValue );
+    {
+        Json::Value e( Json::objectValue );
+        e["key"] = "version";
+        e["op"] = "eq";
+        e["value"] = 1.0;
+        one.append( e );
+    }
+    expectsOne["expectations"] = one;
+
+    Json::Value expectsNotOne( Json::objectValue );
+    Json::Value notOne( Json::arrayValue );
+    {
+        Json::Value e( Json::objectValue );
+        e["key"] = "version";
+        e["op"] = "ne";
+        e["value"] = 1.0;
+        notOne.append( e );
+    }
+    expectsNotOne["expectations"] = notOne;
+
+    spec.checks.push_back( makeCheck( "pins-one", "state.invariant", expectsOne ) );
+    spec.checks.push_back( makeCheck( "pins-not-one", "state.invariant", expectsNotOne ) );
+
+    VerificationContext context;
+    context.stateView = &view;
+    const VerificationReport report = evaluate( spec, context );
+
+    CHECK( report.overall == VerificationStatus::Fail );
+    REQUIRE( report.checks.size() == 2 );
+    CHECK( report.checks[0].status == VerificationStatus::Pass );
+    CHECK( report.checks[1].status == VerificationStatus::Fail );
+    // The sealed report carries the contradiction; it does not hide it.
+    CHECK_FALSE( report.digest().empty() );
+}
+
+TEST_CASE( "kind matching is exact: cased and padded variants stay outside the "
+           "vocabulary",
+           "[verify][engine][track16]" )
+{
+    CHECK_FALSE( hasEvaluator( "STATE.INVARIANT" ) );
+    CHECK_FALSE( hasEvaluator( "state.invariant " ) );
+    CHECK_FALSE( hasEvaluator( " state.invariant" ) );
+
+    // A spec carrying a variant spelling is not evaluated at all: the
+    // closed-vocabulary gate refuses it with the synthetic spec.valid Fail.
+    VerificationSpec spec;
+    spec.specId = "spec.cased";
+    spec.scope = "node";
+    spec.checks.push_back( makeCheck( "cased", "STATE.INVARIANT" ) );
+
+    const VerificationContext context;
+    const VerificationReport report = evaluate( spec, context );
+    CHECK( report.overall == VerificationStatus::Fail );
+    REQUIRE( report.checks.size() == 1 );
+    CHECK( report.checks.front().checkId == "spec.valid" );
+    CHECK( report.checks.front().code == kCodeInvalidSpec );
+}
