@@ -57,21 +57,44 @@ sicnu::agent_ops::OpsDriver *defaultCliAgentOpsDriver()
     return &driver;
 }
 
+namespace {
+
+constexpr const char *kSessionUsage =
+    "usage: session <action> [flags] (run|resume|reconcile|status|timeline|export|"
+    "pause|cancel|clear-pause|clear-cancel|approve-repair|clear_pause|clear_cancel|actions)";
+
+/// Track 14 (WP-B): session's parse-time four-tuple construction site.
+int sessionError( const CliIO &io, const std::string &message, int exitCode,
+                  const std::string &expected = {}, const std::string &actual = {} )
+{
+    sicnu::cli::CliErrorDetails details;
+    details.exitCode = exitCode;
+    details.expected = expected;
+    details.actual = actual;
+    details.hint = kSessionUsage;
+    return io.finish( false, "session", {}, exitCode, {}, message, &details );
+}
+
+} // namespace
+
 int commandAgentSession( QStringList arguments, const CliIO &io,
                          sicnu::agent_ops::OpsDriver *driver )
 {
     if ( arguments.isEmpty() )
-        return io.finish( false, "session", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                          "usage: session <action> [flags] (run|resume|reconcile|status|"
-                          "timeline|export|pause|cancel|clear-pause|clear-cancel|"
-                          "approve-repair|clear_pause|clear_cancel|actions)" );
+        return sessionError( io, kSessionUsage,
+                             exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                             "run|resume|reconcile|status|timeline|export|pause|cancel|"
+                             "clear-pause|clear-cancel|approve-repair|clear_pause|"
+                             "clear_cancel|actions" );
 
     const QString action = arguments.takeFirst();
     if ( !isKnownAction( action ) )
-        return io.finish( false, "session", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                          "unknown session action '" + action.toStdString() + "'" );
+        return sessionError( io, "unknown session action '" + action.toStdString() + "'",
+                             exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                             "run|resume|reconcile|status|timeline|export|pause|cancel|"
+                             "clear-pause|clear-cancel|approve-repair|clear_pause|"
+                             "clear_cancel|actions",
+                             action.toStdString() );
 
     // Normalize CLI dashes to the wire's snake_case action names.
     QString wireAction = action;
@@ -109,9 +132,9 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
             bool ok = false;
             const Json::Value refs = parseRefs( next( "refs" ), &ok );
             if ( !ok )
-                return io.finish( false, "session", {},
-                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                                  "--refs must be a JSON object" );
+                return sessionError( io, "--refs must be a JSON object",
+                                     exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                     "--refs <json-object>" );
             args["refs"] = refs;
         }
         else if ( flag == QStringLiteral( "--approve" ) ||
@@ -124,16 +147,16 @@ int commandAgentSession( QStringList arguments, const CliIO &io,
         }
         else
         {
-            return io.finish( false, "session", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
-                              "unknown flag '" + flag.toStdString() + "'" );
+            return sessionError( io, "unknown flag '" + flag.toStdString() + "'",
+                                 exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                 "--goal|--intent|--mode|--journal-dir|--session-id|"
+                                 "--domain|--role|--refs|--approve", flag.toStdString() );
         }
     }
 
     if ( !driver )
-        return io.finish( false, "session", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::RuntimeUnavailable ), {},
-                          "AGENT_OPS_UNAVAILABLE" );
+        return sessionError( io, "AGENT_OPS_UNAVAILABLE",
+                             exprs_ns::exitCodeValue( exprs_ns::ExitCode::RuntimeUnavailable ) );
 
     const Json::Value doc = driver->apply( qstr( wireAction ), args );
 

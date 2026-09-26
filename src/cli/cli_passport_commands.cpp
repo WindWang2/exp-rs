@@ -73,6 +73,22 @@ bool readTextFile( const QString &path, std::string *out, std::string *error )
 
 } // namespace
 
+namespace {
+
+/// Track 14 (WP-B): passport's four-tuple construction site.
+int passportError( const CliIO &io, const std::string &message, int exitCode,
+                   const std::string &actual = {} )
+{
+    sicnu::cli::CliErrorDetails details;
+    details.exitCode = exitCode;
+    if ( !actual.empty() )
+        details.actual = actual;
+    details.hint = "usage: passport --path <file> [--json] [--teaching] [--diff <passport.json>]";
+    return io.finish( false, "passport", {}, exitCode, {}, message, &details );
+}
+
+} // namespace
+
 int commandPassport( QStringList args, const CliIO &io )
 {
     const bool json = takeFlag( args, QStringLiteral( "--json" ) );
@@ -83,24 +99,21 @@ int commandPassport( QStringList args, const CliIO &io )
     const QString path = takeValue( args, QStringLiteral( "--path" ), &pathPresent );
 
     if ( !pathPresent || path.isEmpty() )
-        return io.finish( false, "passport", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: passport --path <file> [--json] [--teaching] "
-                              "[--diff <passport.json>] (--json wins over --teaching)" );
+        return passportError( io, "--path <file> is required",
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) );
     if ( !args.isEmpty() )
-        return io.finish( false, "passport", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "unknown argument: " + args.first().toStdString() );
+        return passportError( io, "unknown argument: " + args.first().toStdString(),
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              args.first().toStdString() );
 
     sicnu::state::GdalFactsError collectError;
     const std::optional<sicnu::state::DatasetFacts> facts =
         sicnu::state::collectDatasetFacts( path.toStdString(), &collectError );
     if ( !facts.has_value() )
-        return io.finish( false, "passport", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {},
-                          collectError.code + ": " + collectError.detail + " (" +
-                              collectError.path + ")" );
+        return passportError( io,
+                              collectError.code + ": " + collectError.detail,
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              collectError.path );
 
     sicnu::state::StateResolutionInput input;
     input.dataset = *facts;
@@ -110,23 +123,21 @@ int commandPassport( QStringList args, const CliIO &io )
 
     std::optional<sicnu::state::StateDiff> diff;
     if ( diffPresent && diffPath.isEmpty() )
-        return io.finish( false, "passport", {},
-                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "--diff requires a passport document path" );
+        return passportError( io, "--diff requires a passport document path",
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) );
     if ( diffPresent )
     {
         std::string readError;
         std::string beforeText;
         if ( !readTextFile( diffPath, &beforeText, &readError ) )
-            return io.finish( false, "passport", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                              {}, readError );
+            return passportError( io, readError,
+                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  diffPath.toStdString() );
         sicnu::state::RemoteSensingAssetState before;
         sicnu::state::AssetStateError parseError;
         if ( !sicnu::state::assetStateFromJson( beforeText, before, parseError ) )
-            return io.finish( false, "passport", {},
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ),
-                              {}, "invalid passport document: " + parseError.message );
+            return passportError( io, "invalid passport document: " + parseError.message,
+                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ) );
         diff = sicnu::state::diffStates( before, state );
     }
 
