@@ -483,3 +483,6 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+
+# Track 13 dataset-governance-r4 planning artifacts (markdown only).
+!.planning/dataset-governance-r4/
