@@ -172,15 +172,19 @@ TEST_CASE( "chain: change difference, normalized difference and CVA stay closed-
 // ---------------------------------------------------------------------------
 
 TEST_CASE( "chain: terrain slope/aspect on the z=2x plane matches atan(2) with "
-           "NoData propagation",
+           "NoData centres never fabricated",
            "[r4][chain][terrain]" )
 {
     // 8x8 DEM, z = 2·col (east-west linear plane), unit cell size, zFactor 1.
     // Horn 3×3 on a linear plane is exact (the 7.0-matrix tradition):
     //   slope  = atan(2) in degrees ≈ 63.43494882…
-    //   aspect = 270 (east-facing, compass convention)
-    // The outer ring is declared NoData (-9999): any 3×3 window touching it
-    // must propagate NoData instead of fabricating a slope.
+    //   aspect = 270 (east-facing, compass convention; atan2(−dzdx, dzdy))
+    // The outer ring is declared NoData (-9999). The kernel's NoData
+    // fallback reduces a window with sentinel neighbours to a 2-pixel
+    // gradient — on a linear plane the 2-pixel gradient equals the Horn
+    // result, so every valid centre must return atan(2) (an invariance
+    // across both gradient paths); an invalid CENTRE is never fabricated:
+    // it propagates NoData.
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const int w = 8, h = 8;
@@ -204,15 +208,15 @@ TEST_CASE( "chain: terrain slope/aspect on the z=2x plane matches atan(2) with "
     double declared = 0.0;
     const auto slope = readBand( dir.filePath( "slope.tif" ), 1, &hasNd, &declared );
     const double atan2deg = std::atan( 2.0 ) * kDeg;
-    for ( int r = 2; r < h - 2; ++r )
-        for ( int c = 2; c < w - 2; ++c )
+    for ( int r = 1; r < h - 1; ++r )
+        for ( int c = 1; c < w - 1; ++c )
         {
             INFO( "slope pixel (" << r << "," << c << ")" );
             REQUIRE( nearRel( slope[static_cast<size_t>( r ) * w + c], atan2deg, 1e-6 ) );
         }
-    // Windows touching the NoData ring propagate NoData — never 0.
-    REQUIRE( nearRel( slope[static_cast<size_t>( 1 ) * w + 3], kSentinel ) );
+    // Sentinel centres (the outer ring) propagate NoData — never 0.
     REQUIRE( nearRel( slope[0], kSentinel ) );
+    REQUIRE( nearRel( slope[static_cast<size_t>( 7 ) * w + 7], kSentinel ) );
 
     Json::Value pa;
     pa["input"] = demPath.toStdString();
@@ -225,4 +229,5 @@ TEST_CASE( "chain: terrain slope/aspect on the z=2x plane matches atan(2) with "
     const auto aspect = readBand( dir.filePath( "aspect.tif" ), 1 );
     REQUIRE( nearRel( aspect[static_cast<size_t>( 3 ) * w + 3], 270.0, 1e-6 ) );
     REQUIRE( nearRel( aspect[static_cast<size_t>( 3 ) * w + 5], 270.0, 1e-6 ) );
+    REQUIRE( nearRel( aspect[static_cast<size_t>( 1 ) * w + 5], 270.0, 1e-6 ) );
 }
