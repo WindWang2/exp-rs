@@ -749,13 +749,20 @@ TEST_CASE( "budget truncation stays loud across an invalidation that swaps "
     CHECK( hasCode( before, "SPF_BUDGET_EXCEEDED" ) );
     CHECK( before.verdict == "blocked" );
 
-    // Invalidate into a DIFFERENT bad state (same finding volume, different
-    // content: re-imported onto another CRS with the threshold-grade unit):
+    // Invalidate into a DIFFERENT bad state (same finding volume — an
+    // off-list radiometric unit plus unrecognizable roles — but different
+    // content: re-imported onto another CRS with another bad unit):
     // truncation stays loud across the seam.
-    L.authority.passports["scene-a"] =
-        passportFromJson( scenePassportJson( "scene-a", "EPSG:32610", 10.0,
-                                             "toa_radiance" ),
-                          L.ok );
+    std::string reimported =
+        scenePassportJson( "scene-a", "EPSG:32610", 10.0, "toa_radiance" );
+    for ( const std::string &role : { std::string( "\"role\": \"red\"" ),
+                                      std::string( "\"role\": \"nir\"" ) } )
+    {
+        const auto at = reimported.find( role );
+        if ( at != std::string::npos )
+            reimported.replace( at, role.size(), "\"role\": \"\"" );
+    }
+    L.authority.passports["scene-a"] = passportFromJson( reimported, L.ok );
     REQUIRE( L.ok );
     L.broker.invalidateAsset( "scene-a" );
     const PreflightReport after = L.engine.evaluate( req, L.facts, L.capability );
