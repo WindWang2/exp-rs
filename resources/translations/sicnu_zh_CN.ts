@@ -20954,4 +20954,227 @@ Capsule reference: %1</source>
         <translation>&lt;font color='red'&gt;错误: %1&lt;/font&gt;</translation>
     </message>
 </context>
+<context>
+    <name>CartographyDock</name>
+    <message>
+        <source>Cartography Workbench</source>
+        <translation>制图工作台</translation>
+    </message>
+    <message>
+        <source>Map template</source>
+        <translation>地图模板</translation>
+    </message>
+    <message>
+        <source>Templates come from the cartography component catalog (same source as the agent tools).</source>
+        <translation>模板来自制图组件目录（与 agent 工具同源）。</translation>
+    </message>
+    <message>
+        <source>Template:</source>
+        <translation>模板：</translation>
+    </message>
+    <message>
+        <source>Layout name</source>
+        <translation>布局名称</translation>
+    </message>
+    <message>
+        <source>Map title</source>
+        <translation>地图标题</translation>
+    </message>
+    <message>
+        <source>Data source note</source>
+        <translation>数据来源说明</translation>
+    </message>
+    <message>
+        <source>Data source note (optional)</source>
+        <translation>数据来源说明（可选）</translation>
+    </message>
+    <message>
+        <source>Compose</source>
+        <translation>排版生成</translation>
+    </message>
+    <message>
+        <source>Fix</source>
+        <translation>修复</translation>
+    </message>
+    <message>
+        <source>Export format</source>
+        <translation>导出格式</translation>
+    </message>
+    <message>
+        <source>Export DPI</source>
+        <translation>导出 DPI</translation>
+    </message>
+    <message>
+        <source>Export directory</source>
+        <translation>导出目录</translation>
+    </message>
+    <message>
+        <source>…choose directory</source>
+        <translation>…选择目录</translation>
+    </message>
+    <message>
+        <source>Choose export directory</source>
+        <translation>选择导出目录</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>导出</translation>
+    </message>
+    <message>
+        <source>Production export</source>
+        <translation>生产导出</translation>
+    </message>
+    <message>
+        <source>Production export (compose → fix → export → manifest)</source>
+        <translation>生产导出（排版→修复→导出→清单）</translation>
+    </message>
+    <message>
+        <source>One pass: compose → bounded fix → export (with atlas) → manifest sidecar; atomic publish.</source>
+        <translation>一次完成：排版 → 有界修复 → 导出（含图集）→ 清单 sidecar；原子发布。</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <source>Stop the current cartography task</source>
+        <translation>停止当前制图任务</translation>
+    </message>
+    <message>
+        <source>Compose preview</source>
+        <translation>排版预览</translation>
+    </message>
+    <message>
+        <source>No preview yet — pick a template and click Compose.</source>
+        <translation>暂无预览 —— 选择模板并点击「排版生成」。</translation>
+    </message>
+    <message>
+        <source>Quality report</source>
+        <translation>质量报告</translation>
+    </message>
+    <message>
+        <source>Check / fix / export reports appear here.</source>
+        <translation>检查/修复/导出报告显示在这里。</translation>
+    </message>
+    <message>
+        <source>No templates available: check the data/cartography/templates directory.</source>
+        <translation>没有可用模板：请检查 data/cartography/templates 目录。</translation>
+    </message>
+    <message>
+        <source>No map layers available: add data to the canvas before composing.</source>
+        <translation>当前没有可用的地图图层：先在画布中加入数据，再生成排版。</translation>
+    </message>
+    <message>
+        <source>Template instantiation failed: %1</source>
+        <translation>模板实例化失败：%1</translation>
+    </message>
+    <message>
+        <source>A cartography task is already running (click Stop to cancel).</source>
+        <translation>已有一个制图任务在执行（可点「停止」取消）。</translation>
+    </message>
+    <message>
+        <source>Operator not registered: %1 (the cartography operator family should register at startup)</source>
+        <translation>算子未注册：%1（应用启动时应完成 cartography 算子族注册）</translation>
+    </message>
+    <message>
+        <source>Failed to submit %1 to the TaskCenter.</source>
+        <translation>%1 提交 TaskCenter 失败。</translation>
+    </message>
+    <message>
+        <source>Cartography task in progress: %1%</source>
+        <translation>制图任务进行中：%1%</translation>
+    </message>
+    <message>
+        <source>%1 task terminated abnormally.</source>
+        <translation>%1 任务异常终止。</translation>
+    </message>
+    <message>
+        <source>%1 structured errors</source>
+        <translation>%1 结构化错误</translation>
+    </message>
+    <message>
+        <source>%1 submitted as background task (#%2).</source>
+        <translation>%1 已提交后台任务（#%2）。</translation>
+    </message>
+    <message>
+        <source>Compose finished (structured summary)</source>
+        <translation>排版完成（结构化摘要）</translation>
+    </message>
+    <message>
+        <source>Compose did not pass</source>
+        <translation>排版未通过</translation>
+    </message>
+    <message>
+        <source>Compose finished: layout %1 generated.</source>
+        <translation>排版完成：布局 %1 已生成。</translation>
+    </message>
+    <message>
+        <source>Compose failed: see the quality report.</source>
+        <translation>排版失败：见质量报告。</translation>
+    </message>
+    <message>
+        <source>Compose task submitted.</source>
+        <translation>排版任务已提交。</translation>
+    </message>
+    <message>
+        <source>Check report</source>
+        <translation>检查报告</translation>
+    </message>
+    <message>
+        <source>Check finished: see the quality report.</source>
+        <translation>检查完成：见质量报告。</translation>
+    </message>
+    <message>
+        <source>Fix ledger (applied / still_reported)</source>
+        <translation>修复台账（applied / still_reported）</translation>
+    </message>
+    <message>
+        <source>Fix finished: %1 applied (%2 rounds).</source>
+        <translation>修复完成：%1 项已应用（%2 轮）。</translation>
+    </message>
+    <message>
+        <source>No composed layout yet: run Compose first.</source>
+        <translation>还没有已排版的布局：先执行「排版生成」。</translation>
+    </message>
+    <message>
+        <source>Choose an export directory first.</source>
+        <translation>请选择导出目录。</translation>
+    </message>
+    <message>
+        <source>Export evidence (atomic write + sha256)</source>
+        <translation>导出证据（原子写入 + sha256）</translation>
+    </message>
+    <message>
+        <source>Export result is missing a path (see report).</source>
+        <translation>导出返回缺少路径（见报告）。</translation>
+    </message>
+    <message>
+        <source>Export finished: %1</source>
+        <translation>导出完成：%1</translation>
+    </message>
+    <message>
+        <source>Production delivery (atomic publish + manifest)</source>
+        <translation>生产交付（原子发布 + 清单）</translation>
+    </message>
+    <message>
+        <source>Production finished: %1 (%2 pages)</source>
+        <translation>生产完成：%1（%2 页）</translation>
+    </message>
+    <message>
+        <source>Cancellation requested for task #%1.</source>
+        <translation>已请求取消任务 #%1。</translation>
+    </message>
+    <message>
+        <source>Task #%1 cannot be cancelled (it may have finished).</source>
+        <translation>任务 #%1 无法取消（可能已结束）。</translation>
+    </message>
+    <message>
+        <source>Layout %1 is unavailable (it may have been removed).</source>
+        <translation>布局 %1 不可用（可能已被移除）。</translation>
+    </message>
+    <message>
+        <source>Preview rendering failed (the layout can still be exported).</source>
+        <translation>预览渲染失败（布局仍可导出）。</translation>
+    </message>
+</context>
 </TS>
