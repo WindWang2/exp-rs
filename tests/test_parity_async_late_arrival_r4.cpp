@@ -27,9 +27,9 @@
 
 #include "main_window.h"
 #include "processing/framework/task_center.h"
-#include "progress_dialog.h"
-#include "rs_scan_pool.h"
-#include "stac_browser_dialog.h"
+#include "widgets/progress_dialog.h"
+#include "widgets/rs_scan_pool.h"
+#include "dialogs/stac_browser_dialog.h"
 #include "stac_client.h"
 
 #include <QApplication>
@@ -45,7 +45,10 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#include <qgsmapcanvas.h>
 #include <qgsproject.h>
+
+#include <gdal.h>
 
 #include <memory>
 
@@ -150,17 +153,6 @@ class StacHttpStub : public QTcpServer
       return true;
     }
 
-    /// Disconnect the parked request without answering — QNetworkAccessManager
-    /// surfaces this as a network error, used to emulate timeouts cheaply.
-    bool dropConnection( int index )
-    {
-      QTcpSocket *socket = pickSocket( index );
-      if ( !socket )
-        return false;
-      socket->abort();
-      return true;
-    }
-
   private:
     QTcpSocket *pickSocket( int index ) const
     {
@@ -201,30 +193,6 @@ QTableWidget *resultsTable( StacBrowserDialog &dialog )
   return dialog.findChild<QTableWidget *>();
 }
 
-/// Records every modal QMessageBox shown while @p flag is true, dismissing
-/// it so no nested exec() stalls the suite. Used to prove a stale-error box
-/// does (not) appear — plumbing, not race timing.
-class ModalWatchdog : public QObject
-{
-  public:
-    using QObject::QObject;
-    bool sawModal = false;
-
-    void arm( int budget = 8 )
-    {
-      if ( budget <= 0 )
-        return;
-      QTimer::singleShot( 0, this, [this, budget] {
-        if ( QWidget *modal = QApplication::activeModalWidget() )
-        {
-          sawModal = true;
-          modal->close();
-        }
-        arm( budget - 1 );
-      } );
-    }
-};
-
 // ---------------------------------------------------------------------------
 // Full-shell fixture (the #1312 pattern) for the autoload session faces.
 // ---------------------------------------------------------------------------
@@ -237,6 +205,29 @@ struct ShellFixture
     QTest::qWaitForWindowExposed( &window );
   }
 };
+
+bool writeMiniGeoTiff( const QString &path )
+{
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  if ( !driver )
+    return false;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), 4, 4, 1, GDT_Float32, nullptr );
+  if ( !ds )
+    return false;
+  double geo[6] = { 116.0, 0.01, 0.0, 40.0, 0.0, -0.01 };
+  GDALSetGeoTransform( ds, geo );
+  GDALSetProjection( ds, "EPSG:4326" );
+  float line[4] = { 0.5f, 1.0f, 1.5f, 2.0f };
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  const bool ok = GDALRasterIO( band, GF_Write, 0, 0, 4, 4, line, 4, 4, GDT_Float32, 0, 0 ) == CE_None;
+  GDALClose( ds );
+  return ok;
+}
+
+QgsMapCanvas *mainCanvas( QgisDesktopWindow &window )
+{
+  return window.findChild<QgsMapCanvas *>();
+}
 
 bool writeValidProject( const QString &path )
 {
@@ -310,12 +301,17 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
   // NEWER search) first, then let A finish late.
   triggerDialogSearch( dialog, stub.endpoint() );
   triggerDialogSearch( dialog, stub.endpoint() );
+  // QNetworkAccessManager opens one TCP connection per in-flight reply; let
+  // both connects complete before scripting the deliveries (event-loop
+  // plumbing, not race timing).
+  for ( int i = 0; i < 50 && stub.parkedCount() < 2; ++i )
+    QTest::qWait( 50 );
   REQUIRE( stub.parkedCount() == 2 );
 
   QEventLoop loop;
   QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
   int completions = 0;
-  auto conn = connect( dialog.findChild<StacClient *>(), &StacClient::searchCompleted,
+  auto conn = QObject::connect( dialog.findChild<StacClient *>(), &StacClient::searchCompleted,
                        [&completions, &loop]( const QVariantList &, const QString &, const QUrl & ) {
                          if ( ++completions == 2 )
                            loop.quit();
@@ -324,7 +320,7 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
   REQUIRE( stub.respond( 1, featureList( "newer", 3 ) ) ); // B first
   REQUIRE( stub.respond( 0, featureList( "older", 7 ) ) ); // A finishes late
   loop.exec();
-  disconnect( conn );
+  QObject::disconnect( conn );
   QApplication::processEvents();
 
   // The dialog must show the NEWER search's three features. Before the
@@ -342,44 +338,45 @@ TEST_CASE( "AS-1: stale STAC reply finishing late cannot overwrite the newer sea
 
 // ===========================================================================
 // AS-2 (race class 6): a query that already timed out must not resurface as
-// a fresh error box for an already-superseded search.
+// a fresh failure for an already-superseded search. The contract lives at
+// the client boundary: after the winner's results are on screen, the timed
+// out query's late ERROR must not reach the completion channel again.
+// (The wall-clock wait IS the class-6 window: stac_client.cpp sets
+// setTransferTimeout(10000); no injection shortcut.)
 // ===========================================================================
-TEST_CASE( "AS-2: superseded query's late failure does not disturb the newer session",
+TEST_CASE( "AS-2: superseded query's timeout error never reaches the completion channel",
            "[parity][async][stac][timeout][slow][parity-as2]" )
 {
   ensureApp();
   StacHttpStub stub;
   REQUIRE( stub.start() );
 
-  StacBrowserDialog dialog( nullptr );
-  dialog.show();
-  QTest::qWaitForWindowExposed( &dialog );
+  StacClient client;
+  QSignalSpy done( &client, &StacClient::searchCompleted );
+  REQUIRE( done.isValid() );
 
-  ModalWatchdog watchdog;
-  watchdog.arm();
-
-  // Search A parks; search B answers immediately and wins the table.
-  triggerDialogSearch( dialog, stub.endpoint() );
-  triggerDialogSearch( dialog, stub.endpoint() );
+  client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
+  client.search( stub.endpoint().toString(), QString(), QString(), {}, 10 );
+  for ( int i = 0; i < 50 && stub.parkedCount() < 2; ++i )
+    QTest::qWait( 50 );
   REQUIRE( stub.parkedCount() == 2 );
-  REQUIRE( stub.respond( 1, featureList( "winner", 2 ) ) );
-  QEventLoop first;
-  QTimer::singleShot( 5000, &first, &QEventLoop::quit );
-  connect( dialog.findChild<StacClient *>(), &StacClient::searchCompleted,
-           &first, &QEventLoop::quit, static_cast<Qt::ConnectionType>( Qt::QueuedConnection ) );
-  first.exec();
 
-  // Now kill A's connection: QNetworkAccessManager reports the error after
-  // the winner is already on screen. The stale failure must be recognized
-  // as expired — no fresh error box for a query nobody is waiting for.
-  REQUIRE( stub.dropConnection( 0 ) );
-  QTest::qWait( 1500 );
+  // The NEWER query (index 1) answers first and wins the completion channel.
+  REQUIRE( stub.respond( 1, featureList( "winner", 2 ) ) );
+  for ( int i = 0; i < 50 && done.count() < 1; ++i )
+    QTest::qWait( 50 );
+  REQUIRE( done.count() == 1 );
+
+  // The older query now hits its real 10 s transfer timeout. Its late error
+  // must be recognized as expired: the completion channel stays at one
+  // delivery (the winner's). Pre-generation-stamp this fires a second
+  // searchCompleted carrying the stale failure.
+  for ( int i = 0; i < 60 && done.count() < 2; ++i )
+    QTest::qWait( 250 ); // bounded: real 10 s timeout or 15 s cap
   QApplication::processEvents();
 
-  CHECK_FALSE( watchdog.sawModal );
-  QTableWidget *table = resultsTable( dialog );
-  REQUIRE( table != nullptr );
-  CHECK( table->rowCount() == 2 );
+  INFO( "completion deliveries: " << done.count() );
+  CHECK( done.count() == 1 );
 }
 
 // ===========================================================================
@@ -398,6 +395,8 @@ TEST_CASE( "AS-3: results arriving after the dialog closed do not mutate the hid
   QTest::qWaitForWindowExposed( dialog );
 
   triggerDialogSearch( *dialog, stub.endpoint() );
+  for ( int i = 0; i < 50 && stub.parkedCount() < 1; ++i )
+    QTest::qWait( 50 );
   REQUIRE( stub.parkedCount() == 1 );
 
   QTableWidget *table = resultsTable( *dialog );
@@ -430,34 +429,40 @@ TEST_CASE( "AS-4: layer auto-load from a superseded session does not land in the
   ensureApp();
   ShellFixture fx;
   ProjectPair projects;
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString staleTif = tmp.filePath( QStringLiteral( "stale-session.tif" ) );
+  const QString liveTif = tmp.filePath( QStringLiteral( "live-session.tif" ) );
+  REQUIRE( writeMiniGeoTiff( staleTif ) );
+  REQUIRE( writeMiniGeoTiff( liveTif ) );
 
   REQUIRE( fx.window.openProjectFrom( projects.pathA ) );
-  const int layersBefore = QgsProject::instance()->count();
+  QgsMapCanvas *canvas = mainCanvas( fx.window );
+  REQUIRE( canvas != nullptr );
+  const int canvasLayersBefore = canvas->layers().size();
 
   // A task with an auto-load output is announced in session A...
-  REQUIRE( announceAutoLoadTask( 900001, QStringLiteral( "/nonexistent/sessionA.tif" ) ) );
+  REQUIRE( announceAutoLoadTask( 900001, staleTif ) );
   // ...then the user moves the shell to project B before completion...
   REQUIRE( fx.window.openProjectFrom( projects.pathB ) );
   REQUIRE( QgsProject::instance()->fileName() == projects.pathB );
   // ...and the completion request arrives afterwards.
-  REQUIRE( deliverAutoLoadRequest( QStringLiteral( "/nonexistent/sessionA.tif" ) ) );
+  REQUIRE( deliverAutoLoadRequest( staleTif ) );
   QApplication::processEvents();
 
-  // The late request must be dropped: no layer appears in project B and the
-  // shell does not silently adopt the dead session's output path.
-  CHECK( QgsProject::instance()->count() == layersBefore );
+  // The late request must be dropped: the display view must NOT grow by the
+  // dead session's layer (pre-policy this loads right into the new session).
+  INFO( "canvas layers after stale delivery: " << canvas->layers().size()
+        << " (before: " << canvasLayersBefore << ")" );
+  CHECK( canvas->layers().size() == canvasLayersBefore );
 
   // Control: a request announced AND delivered in the current session still
   // lands (the recording is per-session, not a blanket ban).
-  const int before = QgsProject::instance()->count();
-  REQUIRE( announceAutoLoadTask( 900002, QStringLiteral( "/nonexistent/sessionB.tif" ) ) );
-  REQUIRE( deliverAutoLoadRequest( QStringLiteral( "/nonexistent/sessionB.tif" ) ) );
+  REQUIRE( announceAutoLoadTask( 900002, liveTif ) );
+  REQUIRE( deliverAutoLoadRequest( liveTif ) );
   QApplication::processEvents();
-  // /nonexistent/... cannot actually load, but the landing attempt is
-  // observable as a project-dirty/session touch only when the policy let it
-  // through — the count stays equal here; the policy's real proof is the
-  // negative case above plus AS-5's save-as variant.
-  CHECK( QgsProject::instance()->count() >= before );
+  INFO( "canvas layers after live delivery: " << canvas->layers().size() );
+  CHECK( canvas->layers().size() == canvasLayersBefore + 1 );
 }
 
 // ===========================================================================
@@ -470,19 +475,27 @@ TEST_CASE( "AS-5: layer auto-load announced before Save As does not land after i
   ensureApp();
   ShellFixture fx;
   ProjectPair projects;
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString preSaveTif = tmp.filePath( QStringLiteral( "pre-saveas.tif" ) );
+  REQUIRE( writeMiniGeoTiff( preSaveTif ) );
 
   REQUIRE( fx.window.openProjectFrom( projects.pathA ) );
+  QgsMapCanvas *canvas = mainCanvas( fx.window );
+  REQUIRE( canvas != nullptr );
+  const int canvasLayersBefore = canvas->layers().size();
   const QString saveTarget = projects.tmp.filePath( QStringLiteral( "重定位.qgs" ) );
 
-  REQUIRE( announceAutoLoadTask( 900003, QStringLiteral( "/nonexistent/pre-saveas.tif" ) ) );
+  REQUIRE( announceAutoLoadTask( 900003, preSaveTif ) );
   REQUIRE( fx.window.saveProjectAsTo( saveTarget ) );
-  REQUIRE( deliverAutoLoadRequest( QStringLiteral( "/nonexistent/pre-saveas.tif" ) ) );
+  REQUIRE( deliverAutoLoadRequest( preSaveTif ) );
   QApplication::processEvents();
 
   // Save As re-homes the session: the stale auto-load is dropped, not
-  // written into the new identity's context.
+  // loaded into the re-homed identity's view.
   CHECK( QgsProject::instance()->fileName() == saveTarget );
-  CHECK( QgsProject::instance()->count() == 0 );
+  INFO( "canvas layers after stale post-saveas delivery: " << canvas->layers().size() );
+  CHECK( canvas->layers().size() == canvasLayersBefore );
 }
 
 // ===========================================================================
@@ -521,7 +534,7 @@ TEST_CASE( "SP-2: cancelled generation remains stale across cancel-set overflow"
            "[parity][async][scanpool][parity-sp2]" )
 {
   ensureApp();
-  auto &pool = RsScanPool::instance();
+  auto &pool = sicnu::app::RsScanPool::instance();
 
   // Owner W opens its generation and cancels it WITHOUT superseding — the
   // worker keeps consulting the canceled set for exactly this case.

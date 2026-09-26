@@ -33,6 +33,7 @@
 #include <QApplication>
 #include <QItemSelectionModel>
 #include <QSignalSpy>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -43,6 +44,8 @@
 #include <qgslayertree.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertreeview.h>
+
+using sicnu::app::SelectionContext;
 
 namespace
 {
@@ -177,9 +180,9 @@ TEST_CASE( "SC-2: layer tree selection is the authority's selectedLayers project
   // Select layer B's tree node through the REAL tree selection model — the
   // same path a user's click takes (main_window_connections second writer
   // aside, the tree model is the authority input).
-  const QModelIndex indexA = fx.treeModel->node2index(
+  const QModelIndex indexA = fx.tree.node2index(
     QgsProject::instance()->layerTreeRoot()->findLayer( fx.layerA->id() ) );
-  const QModelIndex indexBNode = fx.treeModel->node2index(
+  const QModelIndex indexBNode = fx.tree.node2index(
     QgsProject::instance()->layerTreeRoot()->findLayer( fx.layerB->id() ) );
   REQUIRE( indexA.isValid() );
   REQUIRE( indexBNode.isValid() );
@@ -248,12 +251,12 @@ TEST_CASE( "SC-3: every notify push is absorbed and every empty push clears",
   CHECK( ctx.snapshot().selectedWorkflowRunIds.isEmpty() );
 
   // --- mission task (id + status)
-  ctx.notifyMissionTaskSelection( QStringLiteral( "task-1" ), MissionTaskStatus::Pending );
+  ctx.notifyMissionTaskSelection( QStringLiteral( "task-1" ), sicnu::app::MissionTaskStatus::Pending );
   auto missionSnap = ctx.snapshot();
   CHECK( missionSnap.selectedMissionTaskId == QStringLiteral( "task-1" ) );
-  CHECK( missionSnap.hasMissionTaskSelection() );
-  ctx.notifyMissionTaskSelection( QString(), MissionTaskStatus::Pending );
-  CHECK_FALSE( ctx.snapshot().hasMissionTaskSelection() );
+  CHECK( missionSnap.hasMissionTaskSelection );
+  ctx.notifyMissionTaskSelection( QString(), sicnu::app::MissionTaskStatus::Pending );
+  CHECK_FALSE( ctx.snapshot().hasMissionTaskSelection );
 
   // --- pipeline node
   ctx.notifyPipelineNodeSelection( QStringLiteral( "node-1" ) );

@@ -13869,6 +13869,10 @@ target_link_libraries(test_parity_async_late_arrival_r4 PRIVATE
   qgis_gui
   sicnu_geo_rs_shell
   sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
 )
 target_include_directories(test_parity_async_late_arrival_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -13879,7 +13883,9 @@ target_compile_definitions(test_parity_async_late_arrival_r4 PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_link_jsoncpp(test_parity_async_late_arrival_r4)
-sicnu_discover_tests(test_parity_async_late_arrival_r4 TIMEOUT 300)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_async_late_arrival_r4 TEST_PREFIX test_parity_async_late_arrival_r4:: TIMEOUT 300)
 
 add_executable(test_parity_selection_authority_r4
   test_parity_selection_authority_r4.cpp
@@ -13902,7 +13908,9 @@ target_include_directories(test_parity_selection_authority_r4 PRIVATE
 target_compile_definitions(test_parity_selection_authority_r4 PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-sicnu_discover_tests(test_parity_selection_authority_r4 TIMEOUT 300)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_selection_authority_r4 TEST_PREFIX test_parity_selection_authority_r4:: TIMEOUT 300)
 
 add_executable(test_parity_state_mirror_r4
   test_parity_state_mirror_r4.cpp
@@ -13946,7 +13954,9 @@ target_compile_definitions(test_parity_state_mirror_r4 PRIVATE
 )
 sicnu_link_jsoncpp(test_parity_state_mirror_r4)
 set_target_properties(test_parity_state_mirror_r4 PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_parity_state_mirror_r4 TIMEOUT 300)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_state_mirror_r4 TEST_PREFIX test_parity_state_mirror_r4:: TIMEOUT 300)
 
 add_executable(test_parity_restore_failsafe_r4
   test_parity_restore_failsafe_r4.cpp
@@ -13961,6 +13971,10 @@ target_link_libraries(test_parity_restore_failsafe_r4 PRIVATE
   qgis_gui
   sicnu_geo_rs_shell
   sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
 )
 target_include_directories(test_parity_restore_failsafe_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -13971,7 +13985,9 @@ target_compile_definitions(test_parity_restore_failsafe_r4 PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_link_jsoncpp(test_parity_restore_failsafe_r4)
-sicnu_discover_tests(test_parity_restore_failsafe_r4 TIMEOUT 300)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_restore_failsafe_r4 TEST_PREFIX test_parity_restore_failsafe_r4:: TIMEOUT 300)
 
 add_executable(test_parity_stress_r4
   test_parity_stress_r4.cpp
@@ -13986,6 +14002,10 @@ target_link_libraries(test_parity_stress_r4 PRIVATE
   qgis_gui
   sicnu_geo_rs_shell
   sicnu_processing
+  # PR #1335 (pending): sicnu_agent leaves agent_loop/OpsDriver undefined —
+  # resolve them at final link here until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
 )
 target_include_directories(test_parity_stress_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -13996,7 +14016,9 @@ target_compile_definitions(test_parity_stress_r4 PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_link_jsoncpp(test_parity_stress_r4)
-sicnu_discover_tests(test_parity_stress_r4 TIMEOUT 300)
+# TEST_PREFIX (D15): track-gate selection by binary name — every
+  # parity case must be selectable by `ctest -R "parity|..."`.
+  sicnu_discover_tests(test_parity_stress_r4 TEST_PREFIX test_parity_stress_r4:: TIMEOUT 300)
 
 # Living-documentation gate: PARITY_MAP.md rows must resolve to real oracle
 # tags in the parity suites (WP-G). No Qt needed.
@@ -14012,4 +14034,4 @@ target_compile_definitions(test_parity_map_gate_r4 PRIVATE
 set_target_properties(test_parity_map_gate_r4 PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-sicnu_discover_tests(test_parity_map_gate_r4)
+sicnu_discover_tests(test_parity_map_gate_r4 TEST_PREFIX test_parity_map_gate_r4::)

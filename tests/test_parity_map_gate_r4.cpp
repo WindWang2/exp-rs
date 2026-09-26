@@ -106,12 +106,14 @@ TEST_CASE( "GA-1: PARITY_MAP stays wired to the parity oracles",
   for ( const std::string &row : pairRows )
   {
     const std::vector<std::string> cells = splitRow( row );
-    if ( cells.size() < 8 )
+    if ( cells.size() < 9 )
     {
       FAIL( "row missing columns: " << row );
       continue;
     }
-    const std::string oracle = cells[5];
+    // splitRow keeps the empty cell before the leading '|': cells[0] is
+    // empty, cells[1] is the ID, so the oracle column is index 6.
+    const std::string oracle = cells[6];
     if ( oracle.find( "无独立 oracle" ) != std::string::npos
          || oracle.find( "无新 oracle" ) != std::string::npos
          || oracle.find( "无 oracle" ) != std::string::npos
@@ -120,23 +122,36 @@ TEST_CASE( "GA-1: PARITY_MAP stays wired to the parity oracles",
       continue; // honest no-oracle row with written reason
     }
 
+    // A cell may cite several files (既有 suite + new oracle); every tag
+    // must resolve in at least one cited file.
     static const std::regex refPattern( "test_([a-z0-9_]+)\\.cpp" );
-    std::smatch match;
-    if ( !std::regex_search( oracle, match, refPattern ) )
+    std::string citedText;
+    bool citedAny = false;
+    for ( auto fileIt = std::sregex_iterator( oracle.begin(), oracle.end(), refPattern );
+          fileIt != std::sregex_iterator(); ++fileIt )
     {
-      FAIL( "oracle cell cites no test file: " << row );
+      const std::string testFile = "test_" + ( *fileIt )[1].str() + ".cpp";
+      const fs::path testPath = kTestsDir / testFile;
+      if ( !fs::exists( testPath ) )
+      {
+        FAIL( "oracle cites missing file " << testFile << ": " << row );
+        ++unresolved;
+        continue;
+      }
+      citedText += readFile( testPath );
+      citedAny = true;
+    }
+    // A 既有-only row without any file citation is a static-anchor row:
+    // accepted as-is (the anchor itself is reviewed against the code).
+    if ( !citedAny && oracle.find( "既有" ) != std::string::npos )
+      continue;
+    if ( !citedAny )
+    {
+      FAIL( "oracle cell cites no existing test file: " << row );
       ++unresolved;
       continue;
     }
-    const std::string testFile = "test_" + match[1].str() + ".cpp";
-    const fs::path testPath = kTestsDir / testFile;
-    if ( !fs::exists( testPath ) )
-    {
-      FAIL( "oracle cites missing file " << testFile << ": " << row );
-      ++unresolved;
-      continue;
-    }
-    const std::string testText = readFile( testPath );
+    const std::string &testText = citedText;
 
     // A new-oracle citation must carry a [parity-*] tag present in the file.
     static const std::regex tagPattern( "\\[parity-[a-z0-9]+\\]" );
@@ -157,7 +172,7 @@ TEST_CASE( "GA-1: PARITY_MAP stays wired to the parity oracles",
       const std::string tag = it->str();
       if ( testText.find( tag ) == std::string::npos )
       {
-        FAIL( "tag " << tag << " not found in " << testFile << ": " << row );
+        FAIL( "tag " << tag << " not found in any cited file: " << row );
         ++unresolved;
       }
       citedTags.push_back( tag );

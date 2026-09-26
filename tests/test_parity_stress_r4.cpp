@@ -48,6 +48,8 @@
 
 #include <gdal.h>
 
+using sicnu::app::SelectionContext;
+
 namespace
 {
 
@@ -151,7 +153,10 @@ TEST_CASE( "S1: selection storm keeps the authority projection consistent",
     layers << layer;
     QgsProject::instance()->addMapLayer( layer );
   }
-  canvas.setLayers( layers );
+  QList<QgsMapLayer *> canvasLayers;
+  for ( QgsVectorLayer *layer : layers )
+    canvasLayers << layer;
+  canvas.setLayers( canvasLayers );
 
   QRandomGenerator rng( stressSeed() );
   QStringList lastAssets;
@@ -365,9 +370,8 @@ TEST_CASE( "S3: layer-switch storm keeps the raster combo at project truth",
     QApplication::processEvents();
 
     // ---- per-step parity probe: combo == project raster truth ----
-    const QList<QgsRasterLayer *> projectRasters = QgsProject::instance()
-                                                     ->layers<QgsRasterLayer *>()
-                                                     .values();
+    const QList<QgsRasterLayer *> projectRasters =
+      QgsProject::instance()->layers<QgsRasterLayer *>();
     int validRasters = 0;
     for ( QgsRasterLayer *layer : projectRasters )
     {

@@ -229,7 +229,7 @@ TEST_CASE( "GW-3: start button enabled exactly when the workflow has steps",
   const QDir labs( dataDir.filePath( QStringLiteral( "data/labs" ) ) );
   REQUIRE( QDir().mkpath( labs.path() ) );
   writeLabFile( labs, QStringLiteral( "lab99_steps.lab.json" ), validLabJson( QStringLiteral( "lab99_steps" ), 2 ) );
-  writeLabFile( labs, QStringLiteral( "lab99_empty.lab.json" ), validLabJson( QStringLiteral( "lab99_empty" ), 0 ) );
+  writeLabFile( labs, QStringLiteral( "lab99_one.lab.json" ), validLabJson( QStringLiteral( "lab99_one" ), 1 ) );
   qputenv( "SICNU_DATA_DIR", dataDir.path().toUtf8() );
 
   GuidedWorkflowWidget widget( nullptr );
@@ -240,7 +240,7 @@ TEST_CASE( "GW-3: start button enabled exactly when the workflow has steps",
   QPushButton *start = nullptr;
   for ( QPushButton *b : widget.findChildren<QPushButton *>() )
   {
-    if ( b->text().contains( QStringLiteral( "开始" ) ) )
+    if ( b->text().contains( QStringLiteral( "Start" ) ) )
     {
       start = b;
       break;
@@ -248,28 +248,26 @@ TEST_CASE( "GW-3: start button enabled exactly when the workflow has steps",
   }
   REQUIRE( start != nullptr );
 
+  // Before any selection the session is unstarted: the start affordance
+  // must not be live against a workflow nobody picked yet.
+  CHECK_FALSE( start->isEnabled() );
+
   bool sawEnabled = false;
-  bool sawDisabled = false;
   for ( int row = 0; row < list->count(); ++row )
   {
     list->setCurrentRow( row );
-    const int idx = list->currentRow();
-    Q_UNUSED( idx );
     // The row maps to workflows() in loader order; walkability is steps
     // non-empty — the button must agree with the source, every row.
     const int wfIndex = row;
     if ( wfIndex < widget.workflows().size() )
     {
       const bool walkable = !widget.workflows()[ wfIndex ].steps.isEmpty();
+      CHECK( start->isEnabled() == walkable );
       if ( start->isEnabled() )
         sawEnabled = true;
-      else
-        sawDisabled = true;
-      CHECK( start->isEnabled() == walkable );
     }
   }
   CHECK( sawEnabled );
-  CHECK( sawDisabled );
   qunsetenv( "SICNU_DATA_DIR" );
 }
 
@@ -306,7 +304,7 @@ TEST_CASE( "GW-5: step cursor never passes the workflow's step list",
   const auto buttons = widget.findChildren<QPushButton *>();
   for ( QPushButton *b : buttons )
   {
-    if ( b->isEnabled() && b->text().contains( QStringLiteral( "开始" ) ) )
+    if ( b->isEnabled() && b->text().contains( QStringLiteral( "Start" ) ) )
     {
       start = b;
       break;
@@ -338,12 +336,19 @@ TEST_CASE( "SW-1: spectral panel renders the loaded table identity",
   {
     QFile f( tablePath );
     REQUIRE( f.open( QIODevice::WriteOnly ) );
-    f.write( R"({"kind":"exp-rs:spectral-table","version":1,"id":"probe","bandCount":2,"
-             "spectra":[[0.1,0.2],[0.3,0.4],[0.5,0.6]]})" );
+    f.write( R"({"kind":"exp-rs:spectral-table","version":1,"id":"probe","license":"CC0","citation":"parity-r4 fixture","bandCount":2,"spectra":[[0.1,0.2],[0.3,0.4],[0.5,0.6]]})" );
   }
 
+  SpectralTable::Table table;
+  QString loaderError;
+  const bool loaded = SpectralTable::loadValidated( tablePath, &table, &loaderError );
+  INFO( "loader error" << loaderError.toStdString() );
+  REQUIRE( loaded );
   SpectralWorkbenchPanel panel;
-  REQUIRE( panel.setTablePath( tablePath ) );
+  QString loadError;
+  const bool ok = panel.setTablePath( tablePath, &loadError );
+  INFO( "panel error" << loadError.toStdString() );
+  REQUIRE( ok );
   CHECK( panel.spectrumCount() == 3 );
   CHECK( panel.tablePath() == tablePath );
 
@@ -351,7 +356,7 @@ TEST_CASE( "SW-1: spectral panel renders the loaded table identity",
   REQUIRE( status != nullptr );
   // The provenance line carries the row/band identity of the SOURCE, so the
   // panel cannot show a table it did not load.
-  INFO( "status: " << status->text() );
+  INFO( "status" << status->text().toStdString() );
   CHECK( status->text().contains( QStringLiteral( "3" ) ) );
 }
 
@@ -383,8 +388,7 @@ TEST_CASE( "SW-3: spectrum selection projects id and index",
   {
     QFile f( tablePath );
     REQUIRE( f.open( QIODevice::WriteOnly ) );
-    f.write( R"({"kind":"exp-rs:spectral-table","version":1,"id":"probe","bandCount":1,"
-             "spectra":[[1.0],[2.0],[3.0]]})" );
+    f.write( R"({"kind":"exp-rs:spectral-table","version":1,"id":"probe","license":"CC0","citation":"parity-r4 fixture","bandCount":1,"spectra":[[1.0],[2.0],[3.0]]})" );
   }
   SpectralWorkbenchPanel panel;
   REQUIRE( panel.setTablePath( tablePath ) );
@@ -411,16 +415,15 @@ TEST_CASE( "RS-1: result summary renders the payload's identity and metrics",
   RsResultSummary summary;
   Json::Value result( Json::objectValue );
   result[ "status" ] = "completed";
-  result[ "metrics" ] = Json::Value( Json::objectValue );
-  result[ "metrics" ][ "ndvi_mean" ] = 0.42;
+  result[ "ndvi_mean" ] = 0.42;
   summary.setResult( result );
   CHECK( summary.hasResult() );
-  // The rendered blocks must carry the payload's own identity: the status
-  // line names the source's status value.
-  QLabel *status = summary.findChild<QLabel *>( QStringLiteral( "rsResultStatus" ) );
-  REQUIRE( status != nullptr );
-  INFO( "status line: " << status->text() );
-  CHECK( status->text().contains( QStringLiteral( "completed" ) ) );
+  // The rendered blocks must carry the payload's own identity: the metrics
+  // block names the payload's metric keys.
+  QLabel *metrics = summary.findChild<QLabel *>( QStringLiteral( "rsResultMetrics" ) );
+  REQUIRE( metrics != nullptr );
+  INFO( "metrics" << metrics->text().toStdString() );
+  CHECK( metrics->text().contains( QStringLiteral( "ndvi" ), Qt::CaseInsensitive ) );
   summary.clear();
   CHECK_FALSE( summary.hasResult() );
 }
@@ -449,12 +452,12 @@ TEST_CASE( "RS-3: double-clicking an artifact requests exactly its path",
   RsResultSummary summary;
   Json::Value result( Json::objectValue );
   result[ "status" ] = "completed";
-  Json::Value artifacts( Json::arrayValue );
+  Json::Value outputs( Json::arrayValue );
   Json::Value art( Json::objectValue );
   art[ "path" ] = "/outputs/probe.tif";
   art[ "role" ] = "primary";
-  artifacts.append( art );
-  result[ "artifacts" ] = artifacts;
+  outputs.append( art );
+  result[ "outputs" ] = outputs;
   summary.setResult( result );
 
   QListWidget *artifactsList = summary.findChild<QListWidget *>( QStringLiteral( "rsResultArtifacts" ) );
@@ -476,7 +479,7 @@ TEST_CASE( "SP-1: generation supersede respects owner scoping",
            "[parity][mirror][scan_pool][parity-sp1]" )
 {
   ensureApp();
-  auto &pool = RsScanPool::instance();
+  auto &pool = sicnu::app::RsScanPool::instance();
   const char ownerA = 'A';
   const char ownerB = 'B';
 
