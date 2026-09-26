@@ -149,7 +149,12 @@ TEST_CASE("cn11: GF-3 SAR is identified and parsed at declared-metadata level",
     REQUIRE(metadata.modality == "sar");
     REQUIRE(metadata.platform == "GF3");
     REQUIRE(metadata.processingLevel == "L1A");
-    REQUIRE(metadata.radiometricState == "digital_number");
+    // f578db20c (#1230): SAR L1A stamps the SAR DN token "dn"; the calibrate
+    // vocabulary guard accepts only "dn" and REFUSES the optical
+    // "digital_number", so stamping optical here would smuggle an optical
+    // product past rs:sar_calibrate. Golden fixture gf3_sar_valid.json pins
+    // the same.
+    REQUIRE(metadata.radiometricState == "dn");
     // Declared polarizations, canonical tokens in declared order.
     REQUIRE(metadata.polarizations.size() == 2);
     REQUIRE(metadata.polarizations[0] == "HH");

@@ -48,6 +48,22 @@ RSOperator::run(params, RSOperatorContext)
 2. **job 内流式 runner**：ChunkPipeline/ChunkGraph per-node 线程（生命周期=run() 调用）。
 3. **IO/辅助线程**：trace 后台写、worker/插件进程 stdin 读、GUI 预览池、governance 导入池、pipeline_run_coordinator 进度聚合——均不做 job 调度决策。
 
+### 4.1 R4 收口轮新增的 allowlist 条目（2026-09-26，+15 审计记录）
+
+R3 波次合并（#1325/#1326/#1331/#1332 及 STAC/光谱剖面/任务中心 watchlog）
+引入了 14 个文件级的 scheduler 形态命中（15 个 allowlist 条目，含 .h）。
+逐点审计结论——全部属第 3 类"IO/辅助线程"，不做 job 调度决策：
+
+- `experiment_studio_dock.{cpp,h}`：live run 线程（member unique_ptr<thread>，析构 join）。
+- `teaching_admin_dock.{cpp,h}` + `batch_assessment.cpp`：批量评估 worker 池（成员线程 + pool，异常屏障注释，join 纪律）。
+- `spectral_profile_widget.cpp`：QtConcurrent::run 采样 + QFutureWatcher（Qt 池，无自建线程）。
+- `stac_client.cpp`：并发请求 worker 池（局部 vector<thread>，join）。
+- `model_ensemble.cpp`：ensemble 推理 workers（joinable-destroy 危险有显式注释，先 join 再重建）。
+- `task_center.{cpp,h}`：watchdog 成员线程（生命周期=服务）。
+- `exprs/plugin_registry.h`：`std::thread::id` 重载保护映射（无线程创建，注释级命中）。
+- `exprs/plugin_snapshot.cpp`：快照导出 worker（budget 限额，join）。
+- `ir2_registry_node_executor.cpp`：注释提及 QThreadPool（栈深护栏设计说明，非创建点）。
+
 ## 5. 已知重复/残留（记录，不扩权）
 
 - ExecutionPlane 的 ExecutionState 是 TaskStatus 镜像 + TimedOut（文档化镜像，第三枚举——保留：plane 需在无 TaskCenter 语境下运行）。

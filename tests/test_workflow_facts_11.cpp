@@ -206,10 +206,14 @@ TEST_CASE( "cadence from understanding: single scene + folded arrays", "[facts11
 
   understanding["dates"] = dateArray( { "2024-03-10", "2024-03-26", "2024-04-11" } );
   const wfacts::TemporalCadenceFacts folded = wfacts::temporalCadenceFromUnderstanding( understanding );
-  REQUIRE( folded.count == 4 ); // scene time + 3 folded
+  // The scene time and the folded date-only "2024-03-10" are the same
+  // acquisition reported at two precisions: day-dedup keeps the coarsest
+  // (date-only) representative, so 4 raw entries collapse to 3 observations.
+  REQUIRE( folded.count == 3 );
   // 16d gaps from 2024-03-10: regular.
   REQUIRE( folded.regularity == wfacts::regularity::kRegular );
   REQUIRE( folded.cadenceLabel == "16d" );
+  REQUIRE( folded.first == "2024-03-10" );
 }
 
 TEST_CASE( "collection descriptor: scene times are read, path-only scenes skipped", "[facts11][time]" )
@@ -278,10 +282,11 @@ TEST_CASE( "resolution: geographic degrees stay unknown_meters — no silent con
 
 TEST_CASE( "resolution: GEOGCS WKT carries degree units", "[facts11][resolution]" )
 {
+  // One raw-string line: the WKT value must stay inside a single JSON string
+  // (C++-style adjacent-literal concatenation does not exist inside R"(...)").
   Json::Value doc = parse( R"({
     "pixel_size": {"x": 0.00025, "y": 0.00025},
-    "crs": {"authid": "user", "wkt": "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\"],"
-            "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]"}
+    "crs": {"authid": "user", "wkt": "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\"],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]"}
   })" );
   REQUIRE( wfacts::spatialResolutionFacts( doc ).crsUnit == "degree" );
 }

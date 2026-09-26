@@ -480,6 +480,11 @@ TEST_CASE( "recovery does not sweep the tmp file of a run owned by a live proces
 
   auto run = WorkflowRun::createFromDefinition( def, "run-live-tmp" );
   REQUIRE( run );
+  // Lawful transition chain: the state machine refuses an unlawful jump
+  // (Created -> Running) silently, and a Created checkpoint is not a
+  // recovery candidate — the sweep oracle below needs a Running checkpoint.
+  run->transitionTo( WorkflowRunState::Planning );
+  run->transitionTo( WorkflowRunState::Ready );
   run->transitionTo( WorkflowRunState::Running );
   REQUIRE( !manager.saveCheckpoint( *run, tmpDir.path() ).isEmpty() );
 

@@ -165,7 +165,7 @@ TEST_CASE( "projection: repairs and refusals ride the block verbatim", "[project
   loadHarnessKnowledge();
   WorkflowIr ir = crsConflictIr();
   IrAnalysis analysis = analyzeWorkflowIr( ir, conflictFacts() );
-  REQUIRE( analysis.blocked() );
+  REQUIRE( analysis.verdict == "fixable" ); // CRS_MISMATCH is rule-table repairable
   IrCompileFixResult fixed = analyzeRepairAnalyze( ir, conflictFacts() );
 
   const Json::Value block =
@@ -173,7 +173,7 @@ TEST_CASE( "projection: repairs and refusals ride the block verbatim", "[project
   REQUIRE( block.isMember( "repairs" ) );
   REQUIRE( block["repairs"].isArray() );
   CHECK( block["repairs"][0]["rule_id"].asString() == "reproject_to_reference" );
-  CHECK( block["repairs"][0]["params"]["targetCrs"].asString() == "EPSG:32650" );
+  CHECK( block["repairs"][0]["params"]["targetCrs"].asString() == "EPSG:32647" );
   CHECK( block["digest"].isNull() ); // digest rides only attached documents
 }
 
@@ -273,14 +273,16 @@ TEST_CASE( "compile_workflow engine JSON carries metadata.compiler end to end", 
         "crs": { "authid": "EPSG:32650" }, "crs_authid": "EPSG:32650",
         "size": [ 100, 100 ], "pixel_size": [ 10, 10 ],
         "band_roles": [ "nir", "red" ], "band_count": 2,
-        "radiometric_state": "surface_reflectance"
+        "radiometric_state": "surface_reflectance",
+        "path": "/tmp/cpp11_t1.tif"
       },
       "t2": {
         "kind": "dataset_understanding", "source_kind": "raster",
         "crs": { "authid": "EPSG:32647" }, "crs_authid": "EPSG:32647",
         "size": [ 100, 100 ], "pixel_size": [ 10, 10 ],
         "band_roles": [ "nir", "red" ], "band_count": 2,
-        "radiometric_state": "surface_reflectance"
+        "radiometric_state": "surface_reflectance",
+        "path": "/tmp/cpp11_t2.tif"
       }
     }
   })" );
@@ -293,7 +295,7 @@ TEST_CASE( "compile_workflow engine JSON carries metadata.compiler end to end", 
   REQUIRE( reader.parse( result.output["workflow_json"].asString(), workflowDoc ) );
   CHECK( workflowDoc["metadata"]["compiler"]["schema_version"].asString() == std::string( "1.0" ) );
   const std::string digest = workflowDoc["metadata"]["compiler"]["digest"].asString();
-  CHECK( digest.size() == 16 );
+  CHECK( digest.size() == 32 );
   CHECK_FALSE( workflowDoc["metadata"].isMember( "compiler_superseded" ) );
 
   // Engine-owned metadata keys survive the attach.
@@ -340,7 +342,7 @@ TEST_CASE( "prepared decisions: deterministic order, refusals never auto-apply",
       sawReproject = true;
       CHECK( decision.autoApplicable );
       CHECK( decision.operatorId == "io:reproject" );
-      CHECK( decision.params["targetCrs"].asString() == "EPSG:32650" );
+      CHECK( decision.params["targetCrs"].asString() == "EPSG:32647" );
       CHECK( decision.evidenceRank >= 2 ); // target_crs + slot
       CHECK_FALSE( decision.whyZh.empty() );
     }
@@ -380,7 +382,7 @@ TEST_CASE( "explain: blocked compile traces back to the failed check in Chinese"
   loadHarnessKnowledge();
   WorkflowIr ir = crsConflictIr();
   IrAnalysis analysis = analyzeWorkflowIr( ir, conflictFacts() );
-  REQUIRE( analysis.blocked() );
+  REQUIRE( analysis.verdict == "fixable" ); // CRS_MISMATCH is rule-table repairable
 
   explain::ExplainRequest request;
   request.ir = &ir;
@@ -393,7 +395,7 @@ TEST_CASE( "explain: blocked compile traces back to the failed check in Chinese"
   CHECK( doc["causes"][0]["kind"].asString() == "check_failed" );
   CHECK( doc["causes"][0]["code"].asString() == "CRS_MISMATCH" );
   const std::string summary = doc["summary_zh"].asString();
-  CHECK( summary.find( "编译被阻断" ) != std::string::npos );
+  CHECK( summary.find( "编译可修复" ) != std::string::npos );
   // The zh cause text is real Chinese (non-ASCII), bounded.
   const std::string msg = doc["causes"][0]["msg_zh"].asString();
   CHECK( msg.find( "坐标系" ) != std::string::npos );

@@ -1256,6 +1256,24 @@
       "to" : "command.map.zoomOut"
     },
     {
+      "from" : "mission.task.resume",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.mission.task.resume"
+    },
+    {
+      "from" : "mission.task.retry",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.mission.task.retry"
+    },
+    {
+      "from" : "mission.timeline.show",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.mission.timeline.show"
+    },
+    {
       "from" : "project.exit",
       "kind" : "command_help",
       "origin" : "data/help/commands.json",
@@ -1412,6 +1430,12 @@
       "to" : "command.rs.terrain"
     },
     {
+      "from" : "teaching.labCockpit.show",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.teaching.labCockpit.show"
+    },
+    {
       "from" : "view.linkCenter",
       "kind" : "command_help",
       "origin" : "data/help/commands.json",
@@ -1476,6 +1500,12 @@
       "kind" : "command_help",
       "origin" : "data/help/commands.json",
       "to" : "command.workbench.datasetExperiment"
+    },
+    {
+      "from" : "workbench.experimentExplorationStudio",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.experimentExplorationStudio"
     },
     {
       "from" : "workbench.georefDual",
@@ -1574,10 +1604,82 @@
       "to" : "harness/ACQUISITION_DATES_MISSING"
     },
     {
+      "from" : "diagnostic.harness.autonomy_agent_mode_required",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_AGENT_MODE_REQUIRED"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_course_cap",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_COURSE_CAP"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_downgraded",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_DOWNGRADED"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_lab_student_execution",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_LAB_STUDENT_EXECUTION"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_level_too_low",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_LEVEL_TOO_LOW"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_mode_ceiling",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_MODE_CEILING"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_override_denied",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_OVERRIDE_DENIED"
+    },
+    {
+      "from" : "diagnostic.harness.autonomy_unknown_capability",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/AUTONOMY_UNKNOWN_CAPABILITY"
+    },
+    {
+      "from" : "diagnostic.harness.band_identity_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/BAND_IDENTITY_MISMATCH"
+    },
+    {
       "from" : "diagnostic.harness.band_role_unresolved",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
       "to" : "harness/BAND_ROLE_UNRESOLVED"
+    },
+    {
+      "from" : "diagnostic.harness.baseline_no_zero_doppler_master",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/BASELINE_NO_ZERO_DOPPLER_MASTER"
+    },
+    {
+      "from" : "diagnostic.harness.baseline_no_zero_doppler_slave",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/BASELINE_NO_ZERO_DOPPLER_SLAVE"
+    },
+    {
+      "from" : "diagnostic.harness.baseline_state_interpolation_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/BASELINE_STATE_INTERPOLATION_FAILED"
     },
     {
       "from" : "diagnostic.harness.calibration_mismatch",
@@ -1604,6 +1706,12 @@
       "to" : "harness/COMPLEX_BANDS_REQUIRED"
     },
     {
+      "from" : "diagnostic.harness.coregistration_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/COREGISTRATION_FAILED"
+    },
+    {
       "from" : "diagnostic.harness.crs_mismatch",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1622,6 +1730,24 @@
       "to" : "harness/DATES_NOT_ASCENDING"
     },
     {
+      "from" : "diagnostic.harness.dem_crs_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/DEM_CRS_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.dem_extent_insufficient",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/DEM_EXTENT_INSUFFICIENT"
+    },
+    {
+      "from" : "diagnostic.harness.dem_grid_unsupported",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/DEM_GRID_UNSUPPORTED"
+    },
+    {
       "from" : "diagnostic.harness.entity_ambiguous",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1638,6 +1764,12 @@
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
       "to" : "harness/FACT_CONFLICT"
+    },
+    {
+      "from" : "diagnostic.harness.grid_crs_missing",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/GRID_CRS_MISSING"
     },
     {
       "from" : "diagnostic.harness.grid_mismatch",
@@ -1712,6 +1844,30 @@
       "to" : "harness/MODEL_NOT_READY"
     },
     {
+      "from" : "diagnostic.harness.network_inversion_epoch_limit",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NETWORK_INVERSION_EPOCH_LIMIT"
+    },
+    {
+      "from" : "diagnostic.harness.network_inversion_pair_limit",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NETWORK_INVERSION_PAIR_LIMIT"
+    },
+    {
+      "from" : "diagnostic.harness.network_inversion_pattern_blowup",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NETWORK_INVERSION_PATTERN_BLOWUP"
+    },
+    {
+      "from" : "diagnostic.harness.network_inversion_rank_deficient",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NETWORK_INVERSION_RANK_DEFICIENT"
+    },
+    {
       "from" : "diagnostic.harness.nondeterministic_chain",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1724,6 +1880,30 @@
       "to" : "harness/NOT_SUPPORTED"
     },
     {
+      "from" : "diagnostic.harness.numeric_domain_chain",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NUMERIC_DOMAIN_CHAIN"
+    },
+    {
+      "from" : "diagnostic.harness.orbit_epoch_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/ORBIT_EPOCH_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.orbit_segment_invalid",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/ORBIT_SEGMENT_INVALID"
+    },
+    {
+      "from" : "diagnostic.harness.output_identity_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/OUTPUT_IDENTITY_MISMATCH"
+    },
+    {
       "from" : "diagnostic.harness.output_invalid",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1734,6 +1914,12 @@
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
       "to" : "harness/OUTPUT_PATH_COLLISION"
+    },
+    {
+      "from" : "diagnostic.harness.pair_graph_disconnected",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/PAIR_GRAPH_DISCONNECTED"
     },
     {
       "from" : "diagnostic.harness.path_outside_workspace",
@@ -1760,6 +1946,18 @@
       "to" : "harness/RESOURCE_OVER_BUDGET"
     },
     {
+      "from" : "diagnostic.harness.scene_truth_invalid",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/SCENE_TRUTH_INVALID"
+    },
+    {
+      "from" : "diagnostic.harness.temporal_calendar_conflict",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TEMPORAL_CALENDAR_CONFLICT"
+    },
+    {
       "from" : "diagnostic.harness.temporal_misalignment",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1778,6 +1976,18 @@
       "to" : "harness/TOOL_NOT_FOUND"
     },
     {
+      "from" : "diagnostic.harness.topo_phase_metadata_missing",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TOPO_PHASE_METADATA_MISSING"
+    },
+    {
+      "from" : "diagnostic.harness.topo_phase_orbit_coverage",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TOPO_PHASE_ORBIT_COVERAGE"
+    },
+    {
       "from" : "diagnostic.harness.training_invalid",
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
@@ -1788,6 +1998,24 @@
       "kind" : "diagnostic_for",
       "origin" : "diagnostics.json",
       "to" : "harness/TRANSIENT_FAILURE"
+    },
+    {
+      "from" : "diagnostic.harness.unwrap_provider_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/UNWRAP_PROVIDER_FAILED"
+    },
+    {
+      "from" : "diagnostic.harness.unwrap_provider_invalid_output",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/UNWRAP_PROVIDER_INVALID_OUTPUT"
+    },
+    {
+      "from" : "diagnostic.harness.unwrap_provider_timeout",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/UNWRAP_PROVIDER_TIMEOUT"
     },
     {
       "from" : "diagnostic.harness.unwrap_provider_unavailable",
@@ -1984,7 +2212,7 @@
     {
       "from" : "rs.spectralIndex",
       "kind" : "empty_state_cta",
-      "origin" : "command_defs.cpp:486",
+      "origin" : "command_defs.cpp:493",
       "to" : "rs.spectralIndex"
     },
     {
@@ -2002,85 +2230,85 @@
     {
       "from" : "align_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:277",
+      "origin" : "scientific_preflight.cpp:279",
       "to" : "align_to_reference"
     },
     {
       "from" : "calibrate_consistently",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:341",
+      "origin" : "scientific_preflight.cpp:347",
       "to" : "calibrate_consistently"
     },
     {
       "from" : "check_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:460",
+      "origin" : "scientific_preflight.cpp:489",
       "to" : "check_collection"
     },
     {
       "from" : "check_dataset",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:223",
+      "origin" : "scientific_preflight.cpp:225",
       "to" : "check_dataset"
     },
     {
       "from" : "check_training",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:386",
+      "origin" : "scientific_preflight.cpp:392",
       "to" : "check_training"
     },
     {
       "from" : "harness.plan",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:296",
+      "origin" : "scientific_preflight.cpp:302",
       "to" : "harness.plan"
     },
     {
       "from" : "harness.preflight",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:127",
+      "origin" : "scientific_preflight.cpp:129",
       "to" : "harness.preflight"
     },
     {
       "from" : "inspect_bands",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:233",
+      "origin" : "scientific_preflight.cpp:235",
       "to" : "inspect_bands"
     },
     {
       "from" : "normalize_radiometry",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:290",
+      "origin" : "scientific_preflight.cpp:296",
       "to" : "normalize_radiometry"
     },
     {
       "from" : "reproject_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:268",
+      "origin" : "scientific_preflight.cpp:270",
       "to" : "reproject_to_reference"
     },
     {
       "from" : "select_matching_polarization",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:336",
+      "origin" : "scientific_preflight.cpp:342",
       "to" : "select_matching_polarization"
     },
     {
       "from" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:571",
+      "origin" : "scientific_preflight.cpp:600",
       "to" : "select_model"
     },
     {
       "from" : "spatial.understand",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:120",
+      "origin" : "scientific_preflight.cpp:122",
       "to" : "spatial.understand"
     },
     {
       "from" : "temporal.preflight_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:447",
+      "origin" : "scientific_preflight.cpp:467",
       "to" : "temporal.preflight_collection"
     },
     {
@@ -3106,19 +3334,19 @@
     {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
-      "origin" : "main_window_workbench.cpp:407",
+      "origin" : "main_window_workbench.cpp:423",
       "to" : "app.commandPalette"
     },
     {
       "from" : "mission.timeline.show",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:767",
+      "origin" : "command_defs.cpp:774",
       "to" : "mission.timeline.show"
     },
     {
       "from" : "workbench.cartography",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:312",
+      "origin" : "command_defs.cpp:319",
       "to" : "workbench.cartography"
     },
     {
@@ -3128,15 +3356,21 @@
       "to" : "workbench.datasetExperiment"
     },
     {
-      "from" : "workbench.model",
+      "from" : "workbench.experimentExplorationStudio",
       "kind" : "surface_lookup",
       "origin" : "command_defs.cpp:304",
+      "to" : "workbench.experimentExplorationStudio"
+    },
+    {
+      "from" : "workbench.model",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:311",
       "to" : "workbench.model"
     },
     {
       "from" : "workbench.operatorCatalog",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:328",
+      "origin" : "command_defs.cpp:335",
       "to" : "workbench.operatorCatalog"
     },
     {
@@ -3154,7 +3388,7 @@
     {
       "from" : "workbench.visualAnalytics",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:321",
+      "origin" : "command_defs.cpp:328",
       "to" : "workbench.visualAnalytics"
     }
   ],
@@ -4508,27 +4742,27 @@
     {
       "id" : "app.commandPalette",
       "kind" : "command",
-      "origin" : "main_window_workbench.cpp:407"
+      "origin" : "main_window_workbench.cpp:423"
     },
     {
       "id" : "cartography.compose",
       "kind" : "command",
-      "origin" : "command_defs.cpp:338"
+      "origin" : "command_defs.cpp:345"
     },
     {
       "id" : "cartography.export",
       "kind" : "command",
-      "origin" : "command_defs.cpp:377"
+      "origin" : "command_defs.cpp:384"
     },
     {
       "id" : "cartography.preflight",
       "kind" : "command",
-      "origin" : "command_defs.cpp:351"
+      "origin" : "command_defs.cpp:358"
     },
     {
       "id" : "cartography.repair",
       "kind" : "command",
-      "origin" : "command_defs.cpp:364"
+      "origin" : "command_defs.cpp:371"
     },
     {
       "id" : "layer.addRaster",
@@ -4628,17 +4862,17 @@
     {
       "id" : "mission.task.resume",
       "kind" : "command",
-      "origin" : "command_defs.cpp:785"
+      "origin" : "command_defs.cpp:792"
     },
     {
       "id" : "mission.task.retry",
       "kind" : "command",
-      "origin" : "command_defs.cpp:774"
+      "origin" : "command_defs.cpp:781"
     },
     {
       "id" : "mission.timeline.show",
       "kind" : "command",
-      "origin" : "command_defs.cpp:767"
+      "origin" : "command_defs.cpp:774"
     },
     {
       "id" : "project.exit",
@@ -4683,142 +4917,147 @@
     {
       "id" : "rs.applyMask",
       "kind" : "command",
-      "origin" : "command_defs.cpp:512"
+      "origin" : "command_defs.cpp:519"
     },
     {
       "id" : "rs.atmospheric",
       "kind" : "command",
-      "origin" : "command_defs.cpp:506"
+      "origin" : "command_defs.cpp:513"
     },
     {
       "id" : "rs.bandMath",
       "kind" : "command",
-      "origin" : "command_defs.cpp:483"
+      "origin" : "command_defs.cpp:490"
     },
     {
       "id" : "rs.bandRatio",
       "kind" : "command",
-      "origin" : "command_defs.cpp:497"
+      "origin" : "command_defs.cpp:504"
     },
     {
       "id" : "rs.changeDetection",
       "kind" : "command",
-      "origin" : "command_defs.cpp:503"
+      "origin" : "command_defs.cpp:510"
     },
     {
       "id" : "rs.contrastStretch",
       "kind" : "command",
-      "origin" : "command_defs.cpp:489"
+      "origin" : "command_defs.cpp:496"
     },
     {
       "id" : "rs.extractBands",
       "kind" : "command",
-      "origin" : "command_defs.cpp:550"
+      "origin" : "command_defs.cpp:557"
     },
     {
       "id" : "rs.fusion",
       "kind" : "command",
-      "origin" : "command_defs.cpp:524"
+      "origin" : "command_defs.cpp:531"
     },
     {
       "id" : "rs.mosaic",
       "kind" : "command",
-      "origin" : "command_defs.cpp:500"
+      "origin" : "command_defs.cpp:507"
     },
     {
       "id" : "rs.ortho",
       "kind" : "command",
-      "origin" : "command_defs.cpp:518"
+      "origin" : "command_defs.cpp:525"
     },
     {
       "id" : "rs.pca",
       "kind" : "command",
-      "origin" : "command_defs.cpp:495"
+      "origin" : "command_defs.cpp:502"
     },
     {
       "id" : "rs.qaMask",
       "kind" : "command",
-      "origin" : "command_defs.cpp:509"
+      "origin" : "command_defs.cpp:516"
     },
     {
       "id" : "rs.radiometric",
       "kind" : "command",
-      "origin" : "command_defs.cpp:515"
+      "origin" : "command_defs.cpp:522"
     },
     {
       "id" : "rs.spatialFilter",
       "kind" : "command",
-      "origin" : "command_defs.cpp:492"
+      "origin" : "command_defs.cpp:499"
     },
     {
       "id" : "rs.speckle",
       "kind" : "command",
-      "origin" : "command_defs.cpp:533"
+      "origin" : "command_defs.cpp:540"
     },
     {
       "id" : "rs.spectralIndex",
       "kind" : "command",
-      "origin" : "command_defs.cpp:486"
+      "origin" : "command_defs.cpp:493"
     },
     {
       "id" : "rs.temporal",
       "kind" : "command",
-      "origin" : "command_defs.cpp:527"
+      "origin" : "command_defs.cpp:534"
     },
     {
       "id" : "rs.terrain",
       "kind" : "command",
-      "origin" : "command_defs.cpp:521"
+      "origin" : "command_defs.cpp:528"
+    },
+    {
+      "id" : "teaching.labCockpit.show",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:806"
     },
     {
       "id" : "view.linkCenter",
       "kind" : "command",
-      "origin" : "command_defs.cpp:634"
+      "origin" : "command_defs.cpp:641"
     },
     {
       "id" : "view.linkCursor",
       "kind" : "command",
-      "origin" : "command_defs.cpp:670"
+      "origin" : "command_defs.cpp:677"
     },
     {
       "id" : "view.linkGroupStatus",
       "kind" : "command",
-      "origin" : "command_defs.cpp:723"
+      "origin" : "command_defs.cpp:730"
     },
     {
       "id" : "view.linkScale",
       "kind" : "command",
-      "origin" : "command_defs.cpp:652"
+      "origin" : "command_defs.cpp:659"
     },
     {
       "id" : "view.linkUndo",
       "kind" : "command",
-      "origin" : "command_defs.cpp:706"
+      "origin" : "command_defs.cpp:713"
     },
     {
       "id" : "view.linkUnlinkAll",
       "kind" : "command",
-      "origin" : "command_defs.cpp:745"
+      "origin" : "command_defs.cpp:752"
     },
     {
       "id" : "view.linkVisibility",
       "kind" : "command",
-      "origin" : "command_defs.cpp:688"
+      "origin" : "command_defs.cpp:695"
     },
     {
       "id" : "workbench.cartography",
       "kind" : "command",
-      "origin" : "command_defs.cpp:312"
+      "origin" : "command_defs.cpp:319"
     },
     {
       "id" : "workbench.classify",
       "kind" : "command",
-      "origin" : "command_defs.cpp:392"
+      "origin" : "command_defs.cpp:399"
     },
     {
       "id" : "workbench.classifyStudio",
       "kind" : "command",
-      "origin" : "command_defs.cpp:443"
+      "origin" : "command_defs.cpp:450"
     },
     {
       "id" : "workbench.datasetExperiment",
@@ -4826,39 +5065,44 @@
       "origin" : "command_defs.cpp:295"
     },
     {
-      "id" : "workbench.georefDual",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:431"
-    },
-    {
-      "id" : "workbench.georefI2I",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:407"
-    },
-    {
-      "id" : "workbench.georefI2M",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:419"
-    },
-    {
-      "id" : "workbench.ir2Pipeline",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:455"
-    },
-    {
-      "id" : "workbench.model",
+      "id" : "workbench.experimentExplorationStudio",
       "kind" : "command",
       "origin" : "command_defs.cpp:304"
     },
     {
-      "id" : "workbench.obia",
+      "id" : "workbench.georefDual",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:438"
+    },
+    {
+      "id" : "workbench.georefI2I",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:414"
+    },
+    {
+      "id" : "workbench.georefI2M",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:426"
+    },
+    {
+      "id" : "workbench.ir2Pipeline",
       "kind" : "command",
       "origin" : "command_defs.cpp:462"
     },
     {
+      "id" : "workbench.model",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:311"
+    },
+    {
+      "id" : "workbench.obia",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:469"
+    },
+    {
       "id" : "workbench.operatorCatalog",
       "kind" : "command",
-      "origin" : "command_defs.cpp:328"
+      "origin" : "command_defs.cpp:335"
     },
     {
       "id" : "workbench.processingHistory",
@@ -4873,32 +5117,32 @@
     {
       "id" : "workbench.visualAnalytics",
       "kind" : "command",
-      "origin" : "command_defs.cpp:321"
+      "origin" : "command_defs.cpp:328"
     },
     {
       "id" : "workflow.new",
       "kind" : "command",
-      "origin" : "command_defs.cpp:570"
+      "origin" : "command_defs.cpp:577"
     },
     {
       "id" : "workflow.open",
       "kind" : "command",
-      "origin" : "command_defs.cpp:584"
+      "origin" : "command_defs.cpp:591"
     },
     {
       "id" : "workflow.run",
       "kind" : "command",
-      "origin" : "command_defs.cpp:608"
+      "origin" : "command_defs.cpp:615"
     },
     {
       "id" : "workflow.save",
       "kind" : "command",
-      "origin" : "command_defs.cpp:598"
+      "origin" : "command_defs.cpp:605"
     },
     {
       "id" : "workflow.stop",
       "kind" : "command",
-      "origin" : "command_defs.cpp:618"
+      "origin" : "command_defs.cpp:625"
     },
     {
       "id" : "diagnostic.dataset.label.conflict",
@@ -5176,7 +5420,67 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.autonomy_agent_mode_required",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_course_cap",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_downgraded",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_lab_student_execution",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_level_too_low",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_mode_ceiling",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_override_denied",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_unknown_capability",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.band_identity_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.band_role_unresolved",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_no_zero_doppler_master",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_no_zero_doppler_slave",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_state_interpolation_failed",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -5201,6 +5505,11 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.coregistration_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.crs_mismatch",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
@@ -5216,6 +5525,21 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.dem_crs_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dem_extent_insufficient",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dem_grid_unsupported",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.entity_ambiguous",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
@@ -5227,6 +5551,11 @@
     },
     {
       "id" : "diagnostic.harness.fact_conflict",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.grid_crs_missing",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -5291,6 +5620,26 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.network_inversion_epoch_limit",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_pair_limit",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_pattern_blowup",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_rank_deficient",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.nondeterministic_chain",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
@@ -5301,12 +5650,37 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.numeric_domain_chain",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.orbit_epoch_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.orbit_segment_invalid",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.output_identity_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.output_invalid",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
     {
       "id" : "diagnostic.harness.output_path_collision",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.pair_graph_disconnected",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -5331,6 +5705,16 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.scene_truth_invalid",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.temporal_calendar_conflict",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.temporal_misalignment",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
@@ -5346,12 +5730,37 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.topo_phase_metadata_missing",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.topo_phase_orbit_coverage",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.training_invalid",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
     {
       "id" : "diagnostic.harness.transient_failure",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_invalid_output",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_timeout",
       "kind" : "diagnostic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -5556,12 +5965,72 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/AUTONOMY_AGENT_MODE_REQUIRED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_ALLOWED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_COURSE_CAP",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_DOWNGRADED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_LAB_STUDENT_EXECUTION",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_LEVEL_TOO_LOW",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_MODE_CEILING",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_OVERRIDE_DENIED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/AUTONOMY_UNKNOWN_CAPABILITY",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/BAND_IDENTITY_MISMATCH",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
     {
       "id" : "harness/BAND_ROLE_UNRESOLVED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/BASELINE_NO_ZERO_DOPPLER_MASTER",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/BASELINE_NO_ZERO_DOPPLER_SLAVE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/BASELINE_STATE_INTERPOLATION_FAILED",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5586,6 +6055,11 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/COREGISTRATION_FAILED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/CRS_MISMATCH",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5601,6 +6075,21 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/DEM_CRS_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/DEM_EXTENT_INSUFFICIENT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/DEM_GRID_UNSUPPORTED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/ENTITY_AMBIGUOUS",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5612,6 +6101,11 @@
     },
     {
       "id" : "harness/FACT_CONFLICT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/GRID_CRS_MISSING",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5676,6 +6170,26 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/NETWORK_INVERSION_EPOCH_LIMIT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/NETWORK_INVERSION_PAIR_LIMIT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/NETWORK_INVERSION_PATTERN_BLOWUP",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/NETWORK_INVERSION_RANK_DEFICIENT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/NONDETERMINISTIC_CHAIN",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5691,6 +6205,16 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/ORBIT_EPOCH_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/ORBIT_SEGMENT_INVALID",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/OUTPUT_IDENTITY_MISMATCH",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5702,6 +6226,11 @@
     },
     {
       "id" : "harness/OUTPUT_PATH_COLLISION",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/PAIR_GRAPH_DISCONNECTED",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5722,6 +6251,11 @@
     },
     {
       "id" : "harness/RESOURCE_OVER_BUDGET",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/SCENE_TRUTH_INVALID",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5751,12 +6285,37 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/TOPO_PHASE_METADATA_MISSING",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TOPO_PHASE_ORBIT_COVERAGE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/TRAINING_INVALID",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
     {
       "id" : "harness/TRANSIENT_FAILURE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/UNWRAP_PROVIDER_FAILED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/UNWRAP_PROVIDER_INVALID_OUTPUT",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/UNWRAP_PROVIDER_TIMEOUT",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -6026,6 +6585,21 @@
       "origin" : "data/help/commands.json"
     },
     {
+      "id" : "command.mission.task.resume",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.mission.task.retry",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.mission.timeline.show",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
       "id" : "command.project.exit",
       "kind" : "help_topic",
       "origin" : "data/help/commands.json"
@@ -6156,6 +6730,11 @@
       "origin" : "data/help/commands.json"
     },
     {
+      "id" : "command.teaching.labCockpit.show",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
       "id" : "command.view.linkCenter",
       "kind" : "help_topic",
       "origin" : "data/help/commands.json"
@@ -6207,6 +6786,11 @@
     },
     {
       "id" : "command.workbench.datasetExperiment",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.experimentExplorationStudio",
       "kind" : "help_topic",
       "origin" : "data/help/commands.json"
     },
@@ -6621,7 +7205,67 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.autonomy_agent_mode_required",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_course_cap",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_downgraded",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_lab_student_execution",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_level_too_low",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_mode_ceiling",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_override_denied",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.autonomy_unknown_capability",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.band_identity_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.band_role_unresolved",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_no_zero_doppler_master",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_no_zero_doppler_slave",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.baseline_state_interpolation_failed",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -6646,6 +7290,11 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.coregistration_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.crs_mismatch",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
@@ -6661,6 +7310,21 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.dem_crs_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dem_extent_insufficient",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dem_grid_unsupported",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.entity_ambiguous",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
@@ -6672,6 +7336,11 @@
     },
     {
       "id" : "diagnostic.harness.fact_conflict",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.grid_crs_missing",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -6736,6 +7405,26 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.network_inversion_epoch_limit",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_pair_limit",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_pattern_blowup",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.network_inversion_rank_deficient",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.nondeterministic_chain",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
@@ -6746,12 +7435,37 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.numeric_domain_chain",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.orbit_epoch_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.orbit_segment_invalid",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.output_identity_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.output_invalid",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
     {
       "id" : "diagnostic.harness.output_path_collision",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.pair_graph_disconnected",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -6776,6 +7490,16 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.scene_truth_invalid",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.temporal_calendar_conflict",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.temporal_misalignment",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
@@ -6791,12 +7515,37 @@
       "origin" : "data/help/diagnostics.json"
     },
     {
+      "id" : "diagnostic.harness.topo_phase_metadata_missing",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.topo_phase_orbit_coverage",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
       "id" : "diagnostic.harness.training_invalid",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
     {
       "id" : "diagnostic.harness.transient_failure",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_invalid_output",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.unwrap_provider_timeout",
       "kind" : "help_topic",
       "origin" : "data/help/diagnostics.json"
     },
@@ -10347,72 +11096,72 @@
     {
       "id" : "align_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:277"
+      "origin" : "scientific_preflight.cpp:279"
     },
     {
       "id" : "calibrate_consistently",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:341"
+      "origin" : "scientific_preflight.cpp:347"
     },
     {
       "id" : "check_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:460"
+      "origin" : "scientific_preflight.cpp:489"
     },
     {
       "id" : "check_dataset",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:223"
+      "origin" : "scientific_preflight.cpp:225"
     },
     {
       "id" : "check_training",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:386"
+      "origin" : "scientific_preflight.cpp:392"
     },
     {
       "id" : "harness.plan",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:296"
+      "origin" : "scientific_preflight.cpp:302"
     },
     {
       "id" : "harness.preflight",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:127"
+      "origin" : "scientific_preflight.cpp:129"
     },
     {
       "id" : "inspect_bands",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:233"
+      "origin" : "scientific_preflight.cpp:235"
     },
     {
       "id" : "normalize_radiometry",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:290"
+      "origin" : "scientific_preflight.cpp:296"
     },
     {
       "id" : "reproject_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:268"
+      "origin" : "scientific_preflight.cpp:270"
     },
     {
       "id" : "select_matching_polarization",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:336"
+      "origin" : "scientific_preflight.cpp:342"
     },
     {
       "id" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:571"
+      "origin" : "scientific_preflight.cpp:600"
     },
     {
       "id" : "spatial.understand",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:120"
+      "origin" : "scientific_preflight.cpp:122"
     },
     {
       "id" : "temporal.preflight_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:447"
+      "origin" : "scientific_preflight.cpp:467"
     },
     {
       "attributes" : 

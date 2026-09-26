@@ -429,7 +429,10 @@ TEST_CASE( "rs:sar_terrain_flatten gamma0 matches the closed form on a 2:1 aniso
     REQUIRE( out->readBandData( 1, gamma.data(), kW, kH ) );
 
     // Closed form (independent of the kernel): Horn facet on the anisotropic
-    // spacing, local incidence from the look geometry, gamma0 = σ0·cosθ0/cosθi.
+    // spacing, local incidence from the look geometry, then the RTC factor
+    // gamma0 = σ0·sinθi/sinθ0 (Ulander 1996 / Small 2011 eq. 5 — the #1146
+    // radiometry change; the optical cosθ0/cosθi form leaves a tanθ0/tanθi
+    // bias and is NOT the flattening factor).
     const double dzdx = 20.0 / 10.0; // per meter
     const double dzdy = 10.0 / 20.0;
     const double slope = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) );
@@ -443,7 +446,8 @@ TEST_CASE( "rs:sar_terrain_flatten gamma0 matches the closed form on a 2:1 aniso
         std::cos( slope ) * std::cos( theta0 ) +
         std::sin( slope ) * std::sin( theta0 ) * std::cos( aspect - fromAzimuth );
     REQUIRE( cosThetaI > 0.0 ); // facet is illuminated, mask must be 1
-    const double expectedGamma = 0.25 * std::cos( theta0 ) / cosThetaI;
+    const double thetaI = std::acos( cosThetaI );
+    const double expectedGamma = 0.25 * std::sin( thetaI ) / std::sin( theta0 );
 
     // A comfortably interior pixel (away from border falloff of the window).
     const size_t probe = static_cast<size_t>( 3 ) * kW + 3;

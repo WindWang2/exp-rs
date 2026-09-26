@@ -404,14 +404,16 @@ TEST_CASE("plan11: GF-3 SAR imports at declared-metadata level with SAR stamps",
     REQUIRE(plan.identity.kindName == "gaofen3_sar_product");
     REQUIRE(plan.metadata.modality == "sar");
     REQUIRE(plan.metadata.polarizations.size() == 2);
-    REQUIRE(plan.metadata.radiometricState == "digital_number");
+    // f578db20c (#1230): SAR L1A stamps "dn", not the optical "digital_number"
+    // (golden fixture gf3_sar_valid.json pins the same).
+    REQUIRE(plan.metadata.radiometricState == "dn");
 
     sicnu::operators::RSOperatorContext context;
     const Json::Value result = sicnu::operators::rs::executeCnProductImport(
         plan, output.toStdString(), {}, false, context);
     REQUIRE(QFile::exists(output));
     REQUIRE(result["productKind"].asString() == "gaofen3_sar_product");
-    REQUIRE(result["radiometricState"].asString() == "digital_number");
+    REQUIRE(result["radiometricState"].asString() == "dn");
 
     // The stacked product carries the declared SAR semantics verbatim.
     GDALDatasetH ds = GDALOpen(output.toUtf8().constData(), GA_ReadOnly);
