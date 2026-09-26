@@ -163,7 +163,7 @@ Legend: ND = declared nodata sentinel; NaN = non-finite.
 | 109 | rs:feature_stack | :318-321 | sentinels copied verbatim + declared per band | 置NoData | 正确 |
 | 110 | rs:feature_normalize | :196-202 | isValid gates stats | 排除统计 + 置NoData | 正确 |
 | 111 | rs:feature_select | :291-301 | band-copy selector, declared | 置NoData | 正确 |
-| 112 | rs:pca | **none** (rs_pca_operator.cpp → ImageEnhancement::processPcaFile, no sentinel handling in path) | mean/covariance ingest declared sentinels as valid spectra; −9999 border voids rotate component axes | 参与统计 | 修复 (WP-A) |
+| 112 | rs:pca | per-band :1598-1601 (isPixelValid #444 float-space compare) | R4 re-verification: processPcaFile DOES read declared sentinels and excludes them from the mean AND covariance passes (validPixelCount gate, image_enhancement.cpp:1597-1689); the initial sweep claim was wrong and is corrected here | 排除统计 | 固化 |
 
 ## H. 其余（模型/推断/OBIA/时间辅助等）
 
@@ -177,7 +177,6 @@ Legend: ND = declared nodata sentinel; NaN = non-finite.
 
 | disposition | files | commit |
 |---|---|---|
-| 修复 rs:pca | src/processing/algorithms/image_enhancement.cpp (+operator) | _filled at close_ |
 | 修复 rs:spectral_derivative | src/operators/rs/rs_spectral_derivative_operator.cpp | _filled at close_ |
 | 修复 rs:spectral_similarity | src/operators/rs/rs_spectral_similarity_operator.cpp | _filled at close_ |
 | 修复 rs:sar_polsar_decompose | src/operators/rs/rs_sar_polsar_decompose_operator.cpp | _filled at close_ |
@@ -191,11 +190,13 @@ Legend: ND = declared nodata sentinel; NaN = non-finite.
 - Rows: **115** (≥60 required). Registered operators not individually listed
   are pure JSON/metadata/registry entries whose contract excludes raster
   pixels (e.g. capability/help surfaces), or aliases resolved above.
-- Defects fixed this track: 8 (4 "counted as data" repairs: pca,
+- Defects fixed this track: 7 (3 "counted as data" repairs:
   spectral_derivative, spectral_similarity, sar_polsar_decompose; 4
   output-declaration repairs: band_ratio IHS, contrast_stretch,
-  sar_phase_filter, register_images — image_enhancement counts in both
-  groups via its ratio path + missing declarations).
+  sar_phase_filter, register_images — image_enhancement counts in the
+  counted-as-data group via its unmasked ratio path and also gains output
+  declarations). The initially-suspected rs:pca defect was refuted on
+  direct code re-verification (exclusion present at the kernel).
 - Backlog (documented, out of scope by D4/risk): warp-family nodata
   contract (rs:resample/rs:align/rs:modis_georeference full fix),
   sar coregister family resampling contract, interferogram CFloat32
