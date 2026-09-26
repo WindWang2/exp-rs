@@ -125,3 +125,20 @@ Division of responsibility (the mission's core principle):
 - Follow-ups (not in this slice): streaming tile cache for embeddings,
   GPU-batch execution queue, richer model auto-selection, copilot-side
   `spatial:` dispatch (currently MCP/Pi-facing).
+
+### Surface contract lock (Track 9, mcp-surface-r4)
+
+The three renderings of this ADR's surface — the `SpatialToolRegistry`
+truth, the MCP `tools/list` projection (allow-prefix filtered), and the Pi
+bridge's consumption (`EXP_RS_TOOL_CATEGORIES` curation + `piToolName`
+renaming) — are pinned against ONE shared snapshot:
+`tests/surface_diff_snapshot.json`, generated from the in-process union
+projection by `tests/surface_snapshot_main` (`ninja -C build-r4
+surface_snapshot_regen` after any legitimate surface change, committed in
+the same commit). `tests/test_surface_snapshot.cpp` pins the C++ ends
+(registry vs projection vs wire vs snapshot);
+`pi/test/surface_snapshot.test.mjs` pins the Pi leg (category freshness,
+mapping injectivity, name-collision-freedom, schema round-trip) against the
+same file using the real `piToolName`/`truncateTail` functions now exported
+from `pi/mcp_bridge.ts`. Hand-editing the snapshot is a test failure by
+construction: every red message names the regen command.
