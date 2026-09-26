@@ -13872,3 +13872,18 @@ target_link_libraries(test_verify_chain_locale_matrix PRIVATE
 sicnu_link_jsoncpp(test_verify_chain_locale_matrix)
 target_include_directories(test_verify_chain_locale_matrix PRIVATE ${CMAKE_SOURCE_DIR}/src)
 sicnu_discover_tests(test_verify_chain_locale_matrix TEST_PREFIX "test_verify_chain_locale_matrix::")
+
+# WP-D: preflight <-> science_context invalidation linkage matrix (shared
+# authority, fail-closed transitions, no stale facts).
+add_executable(test_preflight_authority_invalidation test_preflight_authority_invalidation.cpp)
+target_link_libraries(test_preflight_authority_invalidation PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+  Sicnu::ScienceContext
+  sicnu_recipes
+)
+sicnu_link_jsoncpp(test_preflight_authority_invalidation)
+target_include_directories(test_preflight_authority_invalidation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_preflight_authority_invalidation TEST_PREFIX "test_preflight_authority_invalidation::")
