@@ -13853,3 +13853,8 @@ endif()
 # Light links (teaching_admin + lab_pack + Qt Core). See file header for the
 # B01..B22 boundary classes and the independent canonical-bytes oracle.
 sicnu_add_teaching_admin_test(test_lab_pack_boundaries_r4)
+
+# hardening/r4-teaching-lab (Track 12): batch failure semantics (empty run,
+# all-fail typing, throw isolation, duplicate discovery, corrupt/foreign
+# checkpoint degradation, cancel-then-resume, atomic publish + BOM).
+sicnu_add_teaching_admin_test(test_teaching_batch_r4)
