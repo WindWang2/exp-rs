@@ -157,3 +157,43 @@ paginate stably, and a bogus or filter-mismatched cursor fails closed.
   the writer round-trip, full/windowed and temporal replay comparisons are
   equivalence oracles, and all pass.
 - **No GPU dependency.** Every workload runs on CPU in a Debug build.
+
+---
+
+## Operator wing — `test_perf_operator_observatory` (perf-memory R4 track)
+
+New target (same `sicnu-perf-observatory/1` harness): six real-operator workloads
+as baseline records plus three "memory guard" RSS guards for the documented
+O(tile) promises. Produced by `ctest -R "obs op|memory guard" -j1` at
+`SICNU_OBS_SCALE=small` on Linux x64, GCC 16, **Release** (shared 16-core host,
+parallel agent sessions compiling — treat wall numbers accordingly; the guards'
+bound arithmetic is in each TEST_CASE comment).
+
+| record | workload | wall (ms) | peak-RSS delta (MB) |
+|---|---|---|---|
+| `obs_op_spectral_index_stream` | `rs:spectral_index` NDVI 4-band 1024² | 140.7 | 26 |
+| `obs_op_qa_mask_stream` | `rs:qa_mask` generic bitmask 1024² | 21.0 | 9 |
+| `obs_op_recode_stream` | `rs:recode` labels 1024² | 50.5 | 10 |
+| `obs_op_majority_filter_window` | `rs:majority_filter` kernel 3, 1024² | 99.0 | 10 |
+| `obs_op_temporal_composite` | `rs:temporal_composite` mean, 6×1024² | 277.4 | 48 |
+| `obs_op_change_detection` | `rs:change_detection` difference, 2×1024² | 95.2 | 12 |
+
+Memory guards (fixed discriminating input, GDAL block cache pinned at 64 MiB,
+external `PeakRssTracker`, each case a separate ctest process, double-run green):
+
+| guard | input | measured delta | declared bound | promise cited |
+|---|---|---|---|---|
+| `guard_tiled_inference_rss` | 4096² Float32, tile 256 | 66 MB | 96 MB | ADR 0073 Streaming O(tile); `task_resource_budget.cpp` Streaming=64 MiB |
+| `guard_temporal_composite_rss` | 6×4096² Float32 | 76 MB | 352 MB | `docs/USER_GUIDE.md:1227` T×tile×4B ≤ 256 MiB shrink rule |
+| `guard_change_detection_rss` | 2×4096² Float32 | 68 MB | 97 MB | ADR 0089 block-wise; `rs_change_primitives.cpp` 256² double buffer |
+
+A full-raster materialization of any guard input breaks its bound, so the
+guards discriminate O(tile) from O(raster). Honest limits: the RSS watermark is
+1 MiB / 2 ms sampled — run guards at their fixed size, never at the small
+rung, or the delta reads null and the bound passes vacuously; and in one
+shared process (all nine cases in a single binary run), guards read inflated
+deltas from cross-case GDAL block-cache residue (composite read 580 MB after
+the TaskCenter-driven cases, versus 76 MB in its own process) — under ctest,
+where every case is its own process, the numbers above are what repeat.
+`benchmarks/quality7.json` was regenerated from the same Release build via
+`benchmark_quality7 --out` (the target's documented evidence gate).

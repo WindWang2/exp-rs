@@ -12473,6 +12473,19 @@ endif()
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
 
+# Operator-path wing of the observatory (same harness, tests/perf/
+# perf_observatory.h): real operator workloads (spectral index, qa_mask,
+# recode, majority filter, temporal composite, change detection) as "obs op"
+# baseline records, plus the "memory guard" O(tile) RSS guards for the
+# documented streaming promises (ADR 0073 / USER_GUIDE temporal window /
+# ADR 0089). RUN_SERIAL keeps the RSS measurements uncontended; the guards pin
+# GDAL_CACHEMAX locally so the block cache is a constant, not a confounder.
+sicnu_add_test(test_perf_operator_observatory TIMEOUT 900 RUN_SERIAL TRUE)
+target_include_directories(test_perf_operator_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_link_jsoncpp(test_perf_operator_observatory)
+
 # ---------------------------------------------------------------------------
 # Data Scale 13.0 (Track C) — structural scale oracles for the DataManager
 # catalog (O(1) snapshot publication, generation-scoped path index) and the
