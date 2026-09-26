@@ -382,6 +382,22 @@ int commandAlgorithms( QStringList args, const CliIO &io )
         return io.finish( true, "algorithms", data, 0 );
     }
 
+    // Track 14 (WP-E): `algorithms list` accepts no flags; an unknown flag
+    // used to be silently ignored while the list printed anyway.
+    for ( const QString &leftover : args )
+    {
+        if ( leftover.startsWith( QStringLiteral( "--" ) ) )
+        {
+            const CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                .expected = "list takes no flags (see: algorithms search)",
+                .actual = leftover.toStdString() };
+            return io.finish( false, "algorithms", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                              "unknown flag: " + leftover.toStdString(), &details );
+        }
+    }
+
     // Track 14 (WP-E): an unknown subcommand used to fall through to `list`
     // and exit 0 — a silently-misleading verb. Reject it at parse time.
     if ( sub != "list" )
@@ -456,6 +472,22 @@ int commandRun( QStringList args, const CliIO &io )
             }
             for ( const std::string &key : fileParams.getMemberNames() )
                 params[key] = fileParams[key];
+        }
+    }
+
+    // Track 14 (WP-E): unknown flags are rejected at parse time instead of
+    // being silently ignored while the operator runs anyway.
+    for ( const QString &leftover : args )
+    {
+        if ( leftover.startsWith( QStringLiteral( "--" ) ) )
+        {
+            const CliErrorDetails details {
+                .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                .expected = "--param k=v | --params-file <file>",
+                .actual = leftover.toStdString() };
+            return io.finish( false, "run", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                              "unknown flag: " + leftover.toStdString(), &details );
         }
     }
 
