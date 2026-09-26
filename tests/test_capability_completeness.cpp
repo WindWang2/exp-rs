@@ -199,7 +199,7 @@ TEST_CASE( "First-class capabilities carry purpose, failure guidance and io cont
 // authored keys, and the census count is pinned for equality so the
 // requirement cannot silently weaken. The fill direction is authoring from
 // the operator implementation — never deleting the requirement.
-TEST_CASE( "Capability authored enrichment census: applicability, teaching_use, prerequisites and limitations",
+TEST_CASE( "capability authored enrichment census: applicability, teaching_use, prerequisites and limitations",
            "[capability][completeness][r4]" )
 {
     Bootstrap boot;
