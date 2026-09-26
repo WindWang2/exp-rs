@@ -1,0 +1,63 @@
+{
+  "rs:fill_holes": {
+    "prerequisites": [
+      "输入为类别图或二值掩膜：只有与图边界不接触的闭合背景连通域被视为孔洞；开放凹陷不属于孔洞。"
+    ],
+    "limitations": [
+      "FullRaster 内存契约（非流式）：孔洞判定需整图连通域结构；与栅格边界接触的背景区域永不填充。",
+      "填充值取周边类别（按邻接类别判定），报告 filledPixels 供质检；不修复与边界连通的缺失区域。"
+    ]
+  },
+  "rs:focal_stats": {
+    "prerequisites": [
+      "输入为连续场或类别栅格并给定邻域窗口；NoData 邻居自动排除，不参与统计也不产生 NoData 结果（除非窗口内全为 NoData）。"
+    ],
+    "limitations": [
+      "边缘采用复制（replicate）邻域策略（primitives/window.h）；stddev 为总体（population）约定，与样本方差口径不可混比。"
+    ]
+  },
+  "rs:fusion_brovey": {
+    "limitations": [
+      "按波段比例加权注入全色细节：计算快、色彩保持好，但存在光谱失真，适合快速出图而非定量分析。"
+    ]
+  },
+  "rs:fusion_gram_schmidt": {
+    "limitations": [
+      "以 Gram-Schmidt 正交化模拟全色波段，光谱保真度高于 Brovey/IHS，是定量用途的推荐融合方法，但仍非无失真融合。"
+    ]
+  },
+  "rs:fusion_ihs": {
+    "limitations": [
+      "RGB→IHS 后以全色替换亮度分量：色彩鲜艳但光谱失真较大，仅推荐显示用途，不用于定量反演。"
+    ]
+  },
+  "rs:fusion_linear": {
+    "limitations": [
+      "线性加权注入全色细节：参数可控、行为可预期；融合强度参数同时决定细节注入量与光谱改变量。"
+    ]
+  },
+  "rs:fusion_pca": {
+    "limitations": [
+      "以第一主成分承载空间结构并被全色替换：适合波段较多的多光谱数据；主成分方向随场景统计变化，跨场景行为不完全一致。"
+    ]
+  },
+  "rs:gaofen_import": {
+    "limitations": [
+      "离线导入：需要产品目录内含 CRESDA sidecar XML 与 TIFF；覆盖 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD 的 L1A 产品包。",
+      "定标为可选步骤：apply_calibration=true 且 sidecar 声明系数时才执行 DN→辐亮度；否则仅标记 SICNU_* 定标/太阳几何元数据。"
+    ]
+  },
+  "rs:hj_import": {
+    "limitations": [
+      "覆盖 HJ-1A/1B CCD 与 HJ-2A/B CCD 的 L1A 产品；波段角色固定映射 B1–B4，非 CCD 传感器不在本算子范围。"
+    ]
+  },
+  "rs:image_enhancement": {
+    "prerequisites": [
+      "先选 method 再给参：只有所选方法（stretch / filter / ratio_ihs transform / SAR speckle 族）的参数会被读取，其余忽略。"
+    ],
+    "limitations": [
+      "瓦片流式 O(tile) 内存，输出规模不受栅格大小限制；直方图类 stretch 会先做一次逐波段统计遍历再写出。"
+    ]
+  }
+}

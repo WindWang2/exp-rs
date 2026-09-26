@@ -1,0 +1,74 @@
+{
+  "rs:infer": {
+    "limitations": [
+      "推理模型必须已就绪（平台模型库清单声明输入/输出契约），缺失时类型化拒绝；输出形态由模型类型决定（分割类别图 / 场景分类 / 目标列表），模型库之外的模型不在本算子范围。"
+    ]
+  },
+  "rs:kmeans_classification": {
+    "prerequisites": [
+      "需给定聚类数 k 与输入波段集：输入应为反射率域多波段影像；算法可选 kmeans / isodata。",
+      "无监督方法没有类别语义：输出类别 ID 需用户对照影像/样区自行命名。"
+    ],
+    "limitations": [
+      "输出类别 ID 为 1..k；大栅格会对质心拟合做子采样，结果受初始中心影响（实现采用确定性的偶数行播种），跨参数与跨版本的类别编号不可直接对比。"
+    ]
+  },
+  "rs:landsat_import": {
+    "limitations": [
+      "覆盖 Landsat 5/7/8/9 产品包：自动解析元数据完成定标、角度与 QA 波段组织；非 Landsat 系列不在本算子范围。",
+      "导入后角色化堆栈（如 B2–B5）可直接接 rs:spectral_index；定标系数与角度以产品元数据声明为准。"
+    ]
+  },
+  "rs:local_extrema": {
+    "prerequisites": [
+      "输入为连续场栅格并给定窗口；窗口内 NoData 邻居不参与极值比较，NoData 中心像元不产出极值标记。"
+    ],
+    "limitations": [
+      "流式 halo 瓦片上做窗口 max/min 测试，边缘采用复制策略；窗口越大越容易把平缓高地把成噪声极值，参数应与目标尺度匹配。"
+    ]
+  },
+  "rs:local_rx_anomaly": {
+    "applicability": {
+      "land_cover": ["港口、机场等背景相对均质的区域", "背景与目标尺度差异明显的城区"],
+      "scenes": ["局部异常目标定位", "小目标检测预处理"],
+      "notes": "内窗口为保护带：目标位于内窗口、背景统计取自内外窗之间。"
+    },
+    "teaching_use": {
+      "concepts": ["局部 RX", "双窗口（guard window）", "马氏距离", "背景协方差"],
+      "courses": ["高光谱遥感", "异常检测"],
+      "exercise": "对同一高光谱场景分别运行全局 RX 与局部 RX，比较局部背景差异区域的检出差异，并解释内窗口保护带的作用。"
+    },
+    "prerequisites": [
+      "需给定内窗口（guard window）与外窗口尺寸；有效背景样本不足的像元输出 NaN（计入 unscoredPixels），绝不硬评分。",
+      "波段数很高时建议 covariance=diagonal（全协方差在窗口样本量下不稳定）。"
+    ]
+  },
+  "rs:majority_filter": {
+    "limitations": [
+      "窗口越大平滑越强，细小斑块可能被多数类吞并：分类后处理需在去噪与保全最小图斑之间权衡；仅对类别/整型栅格有意义。"
+    ]
+  },
+  "rs:mndwi": {
+    "prerequisites": [
+      "输入需含 Green 与 SWIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 2/5）。"
+    ]
+  },
+  "rs:modis_georeference": {
+    "limitations": [
+      "仅处理 Sinusoidal / Integerized 网格的 MODIS 产品：输出对齐到用户目标网格，几何对齐质量受源分辨率与目标网格匹配度限制。"
+    ]
+  },
+  "rs:modis_import": {
+    "limitations": [
+      "读取 MODIS HDF 产品（MOD13Q1 等）：完成重投影与 scale/offset 定标缩放，输出为缩放后的物理值栅格；未覆盖的产品族按导入失败路径处理。"
+    ]
+  },
+  "rs:morphology": {
+    "prerequisites": [
+      "输入为二值掩膜（0/1/255 约定）或灰度栅格，并给定结构元；NoData 像元受保护不参与运算。"
+    ],
+    "limitations": [
+      "共享 primitives/morphology 内核，边缘为文档化的复制策略；FullRaster 内存契约（非流式），超大栅格需预算内存。"
+    ]
+  }
+}

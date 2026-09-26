@@ -1,0 +1,76 @@
+{
+  "rs:connected_components": {
+    "prerequisites": [
+      "输入应为二值化栅格（非 0 为前景，0/NoData 为背景）：连续值场先经 rs:threshold_raster 二值化。"
+    ],
+    "limitations": [
+      "FullRaster 内存契约（非流式）：标签图与斑块属性驻留内存，超大栅格需预算内存。",
+      "两遍 union-find 标记，斑块编号按栅格行序紧凑输出且 0 号保留为背景/NoData；编号顺序依扫描次序，不作为跨输入的稳定斑块标识。"
+    ]
+  },
+  "rs:continuum_removal": {
+    "limitations": [
+      "输出是相对吸收深度（连续统归一化），不是反射率：只用于吸收特征位置/形状比对，不能回代辐射反演。",
+      "凸包拟合对参与波段范围敏感：拟合区间端点选取不当时吸收深度失真。"
+    ]
+  },
+  "rs:contrast_stretch": {
+    "prerequisites": [
+      "输入为待增强栅格；按方法给参：percent_clip→clipPercent（默认 2%），stddev→stddevK（默认 2），piecewise→piecewisePoints（≥2 个数值 [in,out] 点对，否则类型化拒绝）。"
+    ],
+    "limitations": [
+      "统计量（min-max/百分位/σ/直方图）按波段、以两遍流式计算，声明 NoData 像元同时从统计与输出中掩除。",
+      "显示级增强：不改变定量语义，下游定量分析链不要以拉伸后的影像为输入。"
+    ]
+  },
+  "rs:detect": {
+    "limitations": [
+      "检测模型必须已就绪（清单声明输入契约与类别），缺失时类型化拒绝；conf∈[0,1]、nms_iou∈(0,1] 越界即拒绝。",
+      "输出为目标框/类别/置信度预测，不是实例分割；小目标与密集排布目标的召回取决于模型训练域与输入分辨率匹配。"
+    ]
+  },
+  "rs:dn_to_radiance": {
+    "prerequisites": [
+      "需要传感器辐射定标参数（增益/偏置）：缺定标元数据的产品需先补齐定标链，或改用不依赖定标文件的经验校正族（quac）。"
+    ],
+    "limitations": [
+      "输出为 TOA 辐亮度：仅完成传感器级定标、未做大气校正；地表反射率反演需接 DOS1/DOS2/QUAC 等经验链。"
+    ]
+  },
+  "rs:embedding": {
+    "limitations": [
+      "嵌入模型必须已就绪（清单声明输入契约），缺失时类型化拒绝；嵌入语义由预训练模型决定，不同模型/版本的嵌入空间不可直接混比。"
+    ]
+  },
+  "rs:endmember_analysis": {
+    "applicability": {
+      "land_cover": ["矿物蚀变带", "植被-土壤-水体混合区"],
+      "scenes": ["端元集精简与冗余剔除", "光谱库构建与比对"],
+      "notes": "输入为端元光谱表（exp-rs:spectral-table）。"
+    },
+    "teaching_use": {
+      "concepts": ["端元", "光谱角制图（SAM）", "光谱表溯源", "传感器波段响应"],
+      "courses": ["高光谱遥感", "矿物光谱"],
+      "exercise": "对 PPI 提取的端元集执行 SAM 聚类压缩，比较压缩前后解混丰度图的差异，并解释投影到传感器波段网格的意义。"
+    }
+  },
+  "rs:endmember_extraction": {
+    "prerequisites": [
+      "场景必须包含以纯像元形式存在的端元：PPI 抽取的是数据云角点光谱，端元未以纯像元出现时只能得到混合估计。"
+    ]
+  },
+  "rs:evi": {
+    "prerequisites": [
+      "输入需含 NIR/Red/Blue 三波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 4/3/1）。",
+      "DN 域产品必须声明乘性 scale（如 Landsat Collection 2 的 0.0001）使常量工作在反射率域：显式 scale 参数 > 产品元数据印记 > 文档化量级回退。"
+    ]
+  },
+  "rs:extract_bands": {
+    "prerequisites": [
+      "bands 数组为 1-based 波段号，数组顺序即输出顺序；越界选择在处理开始前类型化拒绝。"
+    ],
+    "limitations": [
+      "纯波段拷贝/重排：不改像元值与地理参考，输出波段属性随数组顺序重排。"
+    ]
+  }
+}
