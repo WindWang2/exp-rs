@@ -143,6 +143,10 @@ vendor/
 !.planning/RS14-05-process-grader/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
+# Track 14 CLI surface R4 planning artifacts (markdown only).
+!.planning/cli-surface-r4/
+.planning/cli-surface-r4/*
+!.planning/cli-surface-r4/*.md
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/
