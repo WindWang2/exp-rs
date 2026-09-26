@@ -40,6 +40,15 @@
 `exit $status` 改为校验输出文件存在 + 返回真实 status；或彻底移除包装改用
 -fno-.../降低优化档位规避 ICE）。
 
+### 1.4 全仓 pin 对账（WP-A 口径的外部权威验证）
+
+/tmp/r4_blob_probe（header-only json_util 探针）遍历 `data/labs/packs/*.pack.json`
+全部 committed-fixture 输入：**48/48 PASS**——canonicalFileSha256(检出文件) ==
+pack 声明 sha256，canonicalFileSize(检出文件) == 声明 bytes（含文本 .json/.mapspec
+与二进制 .tif/.png 两类）。pins 由 Python foundry（git blob 字节口径）生成，
+跨语言对账证明：① C++ canonical 实现与 foundry 口径逐位一致；② Linux LF 检出下
+canonical==raw（零回归的结构性原因）；③ 测试 oracle（B01/B02）的规范化规则同源。
+
 ## 2. 交付对账（对照 3.2 下限）
 
 | 交付物 | 下限 | 实测 |
