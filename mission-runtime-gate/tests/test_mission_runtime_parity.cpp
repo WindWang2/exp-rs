@@ -178,9 +178,12 @@ TEST_CASE( "the mission family is wired into every surface", "[mission][parity]"
     CHECK( fileContains( QStringLiteral( "src/agent/tool_catalog/surface_registry.cpp" ),
                          QStringLiteral( "\"mission:\"" ) ) );
 
-    // 2. The MCP tools/call dispatch chain routes the family.
+    // 2. The MCP tools/call dispatch chain routes the family. Since the
+    // registry-truth routing refactor (#1250) the per-family prefix literal
+    // is gone: the dispatch consults the surface allow-list (pinned by gate
+    // 1) through isToolIdAllowed, so THAT is the wiring to pin here.
     CHECK( fileContains( QStringLiteral( "src/agent/mcp_server.cpp" ),
-                         QStringLiteral( "toolName.startsWith(QStringLiteral(\"mission:\"))" ) ) );
+                         QStringLiteral( "isToolIdAllowed(toolName)" ) ) );
 
     // 3. The catalog provider advertises the family prefix.
     CHECK( fileContains( QStringLiteral( "src/agent/spatial_tools/spatial_tool_provider.cpp" ),
