@@ -79,7 +79,7 @@ std::uintmax_t fileSize( const std::string &path )
   return ec ? 0 : size;
 }
 
-std::string stagedPathFor( const std::string &targetPath )
+std::string reservedStagedPathFor( const std::string &targetPath )
 {
   // All path handling stays UTF-8: never route through fs::path::string(),
   // which re-encodes into the active code page and throws on Unicode names.
@@ -96,20 +96,35 @@ std::string stagedPathFor( const std::string &targetPath )
   const std::string stem = dot == std::string::npos ? filename : filename.substr( 0, dot );
   const std::string extension = dot == std::string::npos ? "" : filename.substr( dot );
   // #1097: pid + counter alone still collide across forks that share a
-  // counter reset, and a check-then-use TOCTOU lets two publishers share one
-  // temp. Claim the name with O_EXCL / CREATE_NEW; random_device supplies
-  // entropy that ::rand() (never seeded in src/) cannot.
+  // counter reset. random_device supplies entropy that ::rand() (never
+  // seeded in src/) cannot.
   static thread_local std::mt19937_64 rng{ [] {
     std::random_device rd;
     return std::mt19937_64{ rd() ^ ( stagingProcessId() << 1 ) };
   }() };
+  const std::string leaf = stem + "." + std::to_string( stagingProcessId() ) + "." +
+                           std::to_string( stagingCounter()++ ) + "." +
+                           std::to_string( rng() ) + ".tmp" + extension;
+  // Join through fs::path (never a literal "/"): GDAL's Win32 VSI layer
+  // opens files through \\?\-prefixed paths, where forward slashes are NOT
+  // normalized away — a mixed-separator staged name made VRT/COG (and any
+  // driver taking the strict long-path open) fail with "Failed to open … to
+  // write". lexically_normal() rewrites every separator to the platform's
+  // preferred one, and u8string() renders it back as UTF-8.
+  const fs::path staged = directory.lexically_normal() / sicnu::portable::pathFromUtf8( leaf );
+  return u8( staged );
+}
+
+std::string stagedPathFor( const std::string &targetPath )
+{
+  // The O_EXCL / CREATE_NEW claim is the whole reservation contract: the
+  // name exists (as an empty file) from allocation until the writer fills
+  // it, so no other allocator can hand out the same path. Retry only on a
+  // lost claim race.
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
-    const std::string staged = u8( directory ) + "/" + stem + "." +
-                                 std::to_string( stagingProcessId() ) + "." +
-                                 std::to_string( stagingCounter()++ ) + "." +
-                                 std::to_string( rng() ) + ".tmp" + extension;
+    const std::string staged = reservedStagedPathFor( targetPath );
 #ifdef _WIN32
     const HANDLE handle = CreateFileW( wideFromUtf8( staged ).c_str(), GENERIC_WRITE,
                                        FILE_SHARE_READ, nullptr, CREATE_NEW,

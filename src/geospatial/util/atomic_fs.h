@@ -39,6 +39,17 @@ bool fileExists( const std::string &path );
 /// "<name>.<pid>.<counter>.<rand>.tmp<ext>", claimed with O_EXCL / CREATE_NEW.
 std::string stagedPathFor( const std::string &targetPath );
 
+/// Generates the same unique staging-path shape WITHOUT creating the file.
+/// For creators that hand the path to a library which creates the dataset
+/// itself and refuses an existing target (GDALCreate / GDALTranslate /
+/// GDALWarp — most GDAL/OGR drivers fail closed on an existing file, so the
+/// O_EXCL-pre-created empty file of stagedPathFor makes them fail before
+/// writing anything). Uniqueness comes from pid + counter + random_device
+/// entropy; a residual same-name collision makes the driver refuse, the
+/// error surfaces, and the caller's cleanup path discards the staged group —
+/// the failure is loud, never a silent cross-writer merge.
+std::string reservedStagedPathFor( const std::string &targetPath );
+
 /// Flushes file contents + metadata to stable storage. Throws GeoError(IoError)
 /// when the file cannot be opened or flushed.
 void fsyncFile( const std::string &path );

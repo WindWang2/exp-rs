@@ -161,7 +161,10 @@ TranslateResult translateRaster( const std::string &inputPath, const std::string
   ProgressCtx ctx{ progress };
   GDALTranslateOptionsSetProgress( translateOptions, &progressTrampoline, &ctx );
 
-  const std::string stagedPath = atomic_fs::stagedPathFor( targetPath );
+  // Reserved (not created) staging name: GDALTranslate/GDALWarp create the
+  // dataset through drivers that refuse an existing target — the
+  // O_EXCL-pre-created file of stagedPathFor would fail them up front.
+  const std::string stagedPath = atomic_fs::reservedStagedPathFor( targetPath );
   try
   {
     int usageError = 0;
@@ -249,7 +252,10 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   ProgressCtx ctx{ progress };
   GDALWarpAppOptionsSetProgress( warpOptions, &progressTrampoline, &ctx );
 
-  const std::string stagedPath = atomic_fs::stagedPathFor( targetPath );
+  // Reserved (not created) staging name: GDALTranslate/GDALWarp create the
+  // dataset through drivers that refuse an existing target — the
+  // O_EXCL-pre-created file of stagedPathFor would fail them up front.
+  const std::string stagedPath = atomic_fs::reservedStagedPathFor( targetPath );
   try
   {
     int usageError = 0;
@@ -337,7 +343,10 @@ TranslateResult cogStagedPublish( const std::string &inputPath, const std::strin
   ProgressCtx ctx{ progress };
   GDALTranslateOptionsSetProgress( translateOptions, &progressTrampoline, &ctx );
 
-  const std::string stagedPath = atomic_fs::stagedPathFor( targetPath );
+  // Reserved (not created) staging name: GDALTranslate/GDALWarp create the
+  // dataset through drivers that refuse an existing target — the
+  // O_EXCL-pre-created file of stagedPathFor would fail them up front.
+  const std::string stagedPath = atomic_fs::reservedStagedPathFor( targetPath );
   try
   {
     int usageError = 0;

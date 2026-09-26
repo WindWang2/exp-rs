@@ -120,7 +120,10 @@ VectorWriter VectorWriter::create( const std::string &targetPath, const std::str
     creationOptions.push_back( option.c_str() );
   creationOptions.push_back( nullptr );
 
-  const std::string stagedPath = atomic_fs::stagedPathFor( targetPath );
+  // Reserved (not created) staging name: GDALCreate refuses an existing
+  // target, so the O_EXCL-pre-created stagedPathFor empty file would fail
+  // the driver before a single feature lands.
+  const std::string stagedPath = atomic_fs::reservedStagedPathFor( targetPath );
   QuietCplErrors quiet;
   GDALDatasetH handle = GDALCreate( driver, stagedPath.c_str(), 0, 0, 0, GDT_Unknown,
                                     const_cast<char **>( creationOptions.data() ) );
