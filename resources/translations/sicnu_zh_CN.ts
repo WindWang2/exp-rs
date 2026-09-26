@@ -5409,6 +5409,22 @@ Revision: %2</source>
         <source>Label</source>
         <translation>标签</translation>
     </message>
+    <message>
+        <source>Map title</source>
+        <translation>地图标题</translation>
+    </message>
+    <message>
+        <source>Legend</source>
+        <translation>图例</translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation>文本</translation>
+    </message>
+    <message>
+        <source>Data source:</source>
+        <translation>数据来源：</translation>
+    </message>
 </context>
 <context>
     <name>QaMaskDialog</name>
