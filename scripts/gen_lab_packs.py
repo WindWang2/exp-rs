@@ -67,11 +67,8 @@ def canonical_bytes(path):
         data = handle.read()
     if b"\x00" in data[:8000]:
         return data
-    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return data.replace(b"\r\n", b"\n")
 
-
-def sha256_file(path):
-    return hashlib.sha256(canonical_bytes(path)).hexdigest()
 
 
 def committed(rel):
