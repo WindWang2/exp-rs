@@ -25,6 +25,7 @@
 #include <gdal_priv.h>
 
 #include <vector>
+#include <QJsonObject>
 
 namespace
 {

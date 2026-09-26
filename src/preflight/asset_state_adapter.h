@@ -7,8 +7,9 @@
 // FactStatus::Unknown; nothing is fabricated.
 //
 // Note on temporal facts: the passport carries temporal collection
-// references but not scene counts/dates; a provider with catalog access
-// should supply those. projectAssetState leaves them zero/empty (typed
+// references (projected into SlotFacts.temporalCollectionRefs, sorted) but
+// not scene counts/dates; a temporal provider with collection access should
+// supply those. projectAssetState leaves the counts/dates zero/empty (typed
 // unknown downstream), never guessed.
 
 #pragma once

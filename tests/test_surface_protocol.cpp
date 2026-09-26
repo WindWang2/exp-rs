@@ -21,6 +21,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include <QJsonObject>
 
 namespace {
 

@@ -29,6 +29,7 @@
 #include "processing/algorithms/temporal/temporal_stac_adapter.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/algorithm_descriptor_validator.h"
+#include <QJsonObject>
 
 using namespace sicnu::temporal;
 

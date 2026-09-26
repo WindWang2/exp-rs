@@ -157,7 +157,20 @@ class Wiring:
         self.repo_root = repo_root
         self.targets: dict[str, dict] = {}
         self.helpers: set[str] = set()
+        # link-only helpers (sicnu_link_jsoncpp …): call sites wire the
+        # helper body's links onto the named target
+        self.link_helpers: dict[str, dict] = {}
+        self.helper_info: dict[str, dict] = {}
         self.scripts: list[Path] = []
+        # link graph: target -> [(name, propagates)] where propagates marks
+        # PUBLIC/INTERFACE edges (PRIVATE on SHARED libs does not reach
+        # consumers; the wiring text cannot always tell the library type, so
+        # PRIVATE is kept but flagged)
+        self.links: dict[str, list[tuple[str, str]]] = {}
+        self.alias_of: dict[str, str] = {}
+        # targets registered with the ctest harness (sicnu_discover_tests /
+        # catch_discover_tests / add_test) — the only ones ctest can run
+        self.ctest_registered: set[str] = set()
         self._scan()
 
     def _cmake_scripts(self) -> list[Path]:
@@ -182,40 +195,104 @@ class Wiring:
                 stripped[s] = ""
 
         # helpers: functions/macros that create a target from a ${PARAM} arg
-        # and (optionally) reference the implicit ${PARAM}.cpp source.
+        # (self.helpers) and link-only helpers that wire dependencies onto
+        # their argument (sicnu_link_jsoncpp-style, self.link_helpers). Both
+        # carry the body facts their call sites need: the creating/linking
+        # ${PARAM}, parse_arguments prefix/keywords, body link lists and the
+        # parameters the body registers with the ctest harness.
         for s in self.scripts:
             text = stripped[s]
-            for name, args in scan_commands(text):
-                if name not in ("function", "macro"):
-                    continue
-                params = args.split()
+            # precise signature iteration: the previous find-from-zero walk
+            # associated every function name with the wrong body once two
+            # helpers shared an add_executable(${NAME}) shape
+            for fm in re.finditer(r"\b(function|macro)\s*\(([A-Za-z0-9_ ]+)\)", text):
+                name = fm.group(1)
+                params = fm.group(2).split()
                 if len(params) < 2:
                     continue
                 fname, pnames = params[0], set(params[1:])
                 endkw = "end" + name
-                start = text.find(f"{name}(", 0)
-                while start != -1:
-                    body_at = text.find(")", start) + 1
-                    end = text.find(f"{endkw}(", body_at)
-                    if end == -1:
-                        break
-                    body = text[body_at:end]
-                    for tcmd in TARGET_CMDS:
-                        m = re.search(re.escape(tcmd) + r"\s*\(\s*\$\{(\w+)\}", body)
+                end = text.find(f"{endkw}(", fm.end())
+                if end == -1:
+                    continue
+                body = text[fm.end():end]
+                info: dict = {"param": "", "params": list(params),
+                                  "link_lists": [], "discovers": [],
+                                  "multi_kws": set(), "prefix": ""}
+                parse = re.search(
+                    r"cmake_parse_arguments\s*\(\s*(?:PARSE_ARGV\s+\d+\s+)?(\w+)"
+                    r"(?:\s+\S+)?(?:\s+\S+)?\s+\S*\"([^\"]*)\"[^)]*\)", body)
+                for bname, bargs in scan_commands(body):
+                    btoks = bargs.split()
+                    if bname in TARGET_CMDS:
+                        m = re.match(r"\$\{(\w+)\}", btoks[0]) if btoks else None
                         if m and m.group(1) in pnames:
-                            self.helpers.add(fname)
-                            break
-                    start = text.find(f"{name}(", end)
+                            info["param"] = m.group(1)
+                    elif bname == "target_link_libraries":
+                        m = re.match(r"\$\{(\w+)\}", btoks[0]) if btoks else None
+                        if m and m.group(1) in pnames:
+                            info["param"] = m.group(1)
+                            info["link_lists"].append(btoks[1:])
+                    elif bname in ("sicnu_discover_tests", "gtest_discover_tests"):
+                        m = re.match(r"\$\{(\w+)\}", btoks[0]) if btoks else None
+                        if m and m.group(1) in pnames:
+                            info["discovers"].append(m.group(1))
+                if parse:
+                    info["prefix"] = parse.group(1)
+                    for piece in parse.group(2).split(";"):
+                        if piece:
+                            info["multi_kws"].add(piece)
+                if info["param"]:
+                    self.helpers.add(fname)
+                    self.helper_info[fname] = info
+                elif info["link_lists"]:
+                    self.link_helpers[fname] = info
+
+        # per-script literal set()/list(APPEND) variables — ${…}-composed
+        # tokens are kept: the chain resolution below expands the resolvable
+        # ones (${CMAKE_SOURCE_DIR}/x, references to earlier variables)
+        script_vars: dict[Path, dict[str, list[str]]] = {}
+        for s in self.scripts:
+            try:
+                text = stripped[s]
+            except KeyError:
+                text = strip_comments(s.read_text(encoding="utf-8", errors="replace"))
+                stripped[s] = text
+            for name, args in scan_commands(text):
+                toks = args.split()
+                if name == "set" and len(toks) >= 2 \
+                        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", toks[0]):
+                    script_vars.setdefault(s, {}).setdefault(toks[0], []).extend(toks[1:])
+                elif name == "list" and len(toks) >= 3 and toks[0] == "APPEND" \
+                        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", toks[1]):
+                    script_vars.setdefault(s, {}).setdefault(toks[1], []).extend(toks[2:])
+        # fixed-point chain resolution, depth-capped
+        for sv in script_vars.values():
+            for _ in range(8):
+                changed = False
+                for var, tokens in sv.items():
+                    nxt: list[str] = []
+                    for tok in tokens:
+                        if "$" in tok:
+                            m = re.fullmatch(r"\$\{(\w+)\}", tok)
+                            if m and m.group(1) in sv and m.group(1) != var:
+                                nxt.extend(sv[m.group(1)])
+                                changed = True
+                                continue
+                        nxt.append(tok)
+                    if nxt != tokens:
+                        sv[var] = nxt
+                if not changed:
+                    break
 
         # target definitions and their source lists. Sources composed through
         # set()/list(APPEND) variables are expanded per script, in command
         # order — the QGIS-style `set(QGIS_CORE_SRCS a.cpp …)` convention.
-        var_lists: dict[Path, dict[str, list[str]]] = {}
 
         def expand(tok: str, script: Path) -> list[str]:
             m = re.fullmatch(r"\$\{(\w+)\}", tok)
             if m:
-                return list(var_lists.get(script, {}).get(m.group(1), []))
+                return list(script_vars.get(script, {}).get(m.group(1), []))
             return [tok]
 
         def harvest(entry: dict, toks: list[str], script: Path) -> None:
@@ -229,25 +306,18 @@ class Wiring:
         for s in self.scripts:
             text = stripped[s]
             for name, args in scan_commands(text):
-                if name == "set":
-                    toks = args.split()
-                    if len(toks) >= 2 and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", toks[0]):
-                        # keep the literal elements; ${...}-composed elements
-                        # cannot be resolved statically
-                        var_lists.setdefault(s, {}).setdefault(toks[0], []).extend(
-                            t for t in toks[1:] if "$" not in t)
-                elif name == "list":
-                    toks = args.split()
-                    if len(toks) >= 3 and toks[0] == "APPEND" \
-                            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", toks[1]):
-                        var_lists.setdefault(s, {}).setdefault(toks[1], []).extend(
-                            t for t in toks[2:] if "$" not in t)
-                elif name in TARGET_CMDS:
+                if name in TARGET_CMDS:
                     toks = args.split()
                     if not toks or not _is_target_name(toks[0]) or _ends_with_source_ext(toks[0]):
                         continue
+                    if len(toks) >= 3 and name == "add_library" and toks[1] == "ALIAS":
+                        self.alias_of[toks[0]] = toks[2]
+                        continue
                     entry = self.targets.setdefault(
-                        toks[0], {"script": s, "sources": [], "implicit": False})
+                        toks[0], {"script": s, "sources": [], "implicit": False,
+                                  "kind": "executable"
+                                  if name in ("add_executable", "qt_add_executable")
+                                  else "library"})
                     harvest(entry, toks[1:], s)
                 elif name == "target_sources":
                     toks = args.split()
@@ -256,12 +326,89 @@ class Wiring:
                     entry = self.targets.setdefault(
                         toks[0], {"script": s, "sources": [], "implicit": False})
                     harvest(entry, toks[1:], s)
+                elif name in ("sicnu_discover_tests", "catch_discover_tests", "add_test",
+                              "gtest_discover_tests", "catch_discover_tests"):
+                    tname = _first_token(args)
+                    if _is_target_name(tname) and "$" not in tname:
+                        self.ctest_registered.add(tname)
+                elif name in ("target_link_libraries", "link_libraries"):
+                    toks = args.split()
+                    scope = ""
+                    subject = ""
+                    items = toks
+                    if name == "target_link_libraries":
+                        if not items or not _is_target_name(items[0]) or "$" in items[0]:
+                            continue
+                        if _ends_with_source_ext(items[0]) or items[0] in _SOURCE_NOISE:
+                            continue
+                        subject = items[0]
+                        items = items[1:]
+                    for tok in items:
+                        if tok in ("PUBLIC", "INTERFACE", "PRIVATE"):
+                            scope = tok
+                            continue
+                        if tok in ("debug", "optimized", "general", "LINK_PUBLIC",
+                                   "LINK_PRIVATE", "LINK_INTERFACE_LIBRARIES"):
+                            continue
+                        if tok.startswith("-") or "$" in tok:
+                            continue
+                        # scanner desyncs (paren inside a quoted string) can
+                        # glue neighbouring commands in: build-type keywords
+                        # and source files are never link items
+                        if tok in _SOURCE_NOISE or _ends_with_source_ext(tok):
+                            continue
+                        propagates = "public" if scope in ("PUBLIC", "INTERFACE", "") else "private"
+                        if subject:
+                            self.links.setdefault(subject, []).append((tok, propagates))
+                        else:
+                            # directory-scope link_libraries(): every target
+                            # this script defines inherits the dependency
+                            for tname, entry in self.targets.items():
+                                if entry["script"] == s:
+                                    self.links.setdefault(tname, []).append((tok, propagates))
+                elif name in self.link_helpers:
+                    # link-only helper call: sicnu_link_jsoncpp(test_x) wires
+                    # the body's links onto test_x
+                    info = self.link_helpers[name]
+                    toks = args.split()
+                    if not toks or not _is_target_name(toks[0]) or "$" in toks[0]:
+                        continue
+                    subject = _resolve_alias(self, toks[0])
+                    bindings = {info["param"]: toks[0]}
+                    current_kw = ""
+                    for tok in toks[1:]:
+                        if re.fullmatch(r"[A-Z][A-Z0-9_]*", tok) and "$" not in tok:
+                            current_kw = tok
+                            continue
+                        if current_kw:
+                            bindings.setdefault(current_kw, []).append(tok)
+                    scope = ""
+                    for raw in [t for lst in info["link_lists"] for t in lst]:
+                        if raw in ("PUBLIC", "INTERFACE", "PRIVATE"):
+                            scope = raw
+                            continue
+                        if raw in ("debug", "optimized", "general") or raw in _SOURCE_NOISE:
+                            continue
+                        m = re.fullmatch(r"\$\{(\w+)\}", raw)
+                        if m:
+                            vals = bindings.get(m.group(1),
+                                                bindings.get(m.group(1).split("_", 1)[-1], []))
+                            resolved = [v for v in vals if not v.startswith("-") and "$" not in v
+                                        and not _ends_with_source_ext(v) and v not in _SOURCE_NOISE]
+                        elif "$" in raw or raw.startswith("-") or _ends_with_source_ext(raw):
+                            continue
+                        else:
+                            resolved = [raw]
+                        propagates = "public" if scope in ("PUBLIC", "INTERFACE", "") else "private"
+                        for v in resolved:
+                            self.links.setdefault(subject, []).append((v, propagates))
                 elif name in self.helpers:
                     tname = _first_token(args)
                     if not _is_target_name(tname):
                         continue
                     entry = self.targets.setdefault(
-                        tname, {"script": s, "sources": [], "implicit": True})
+                        tname, {"script": s, "sources": [], "implicit": True,
+                                "kind": "executable"})
                     if not entry["sources"]:
                         # helper template: the implicit ${NAME}.cpp next to the
                         # calling script (tests/CMakeLists.txt convention)
@@ -269,6 +416,56 @@ class Wiring:
                                                  .relative_to(self.repo_root.resolve()).as_posix(),
                                                  True))
                         entry["implicit"] = True
+                    # bind the helper body's link list and harness registration
+                    # onto this call's target (sicnu_add_test links the
+                    # sicnu_* chain through ${NAME})
+                    hinfo = self.helper_info.get(name, {})
+                    subject = _resolve_alias(self, tname)
+                    kw_values: dict[str, list[str]] = {}
+                    current_kw = ""
+                    for tok in args.split()[1:]:
+                        if re.fullmatch(r"[A-Z][A-Z0-9_]*", tok) and "$" not in tok:
+                            current_kw = tok
+                            continue
+                        if current_kw:
+                            kw_values.setdefault(current_kw, []).append(tok)
+                    scope = ""
+                    for raw in [t for lst in hinfo.get("link_lists", []) for t in lst]:
+                        if raw in ("PUBLIC", "INTERFACE", "PRIVATE"):
+                            scope = raw
+                            continue
+                        if raw in ("debug", "optimized", "general") or raw in _SOURCE_NOISE:
+                            continue
+                        m = re.fullmatch(r"\$\{(\w+)\}", raw)
+                        if m:
+                            key = m.group(1)
+                            vals = kw_values.get(key) or kw_values.get(key.split("_", 1)[-1], [])
+                            resolved = [v for v in vals if not v.startswith("-") and "$" not in v
+                                        and not _ends_with_source_ext(v) and v not in _SOURCE_NOISE]
+                        elif "$" in raw or raw.startswith("-") or _ends_with_source_ext(raw):
+                            continue
+                        else:
+                            resolved = [raw]
+                        propagates = "public" if scope in ("PUBLIC", "INTERFACE", "") else "private"
+                        for v in resolved:
+                            self.links.setdefault(subject, []).append((v, propagates))
+                    for pname in hinfo.get("discovers", []):
+                        self.ctest_registered.add(tname)
+                        if pname != hinfo.get("param"):
+                            break
+                    # keyword groups at the call site (SOURCES/LIBS style):
+                    # values of *_SOURCES-style groups are embed sources of
+                    # this target (d17 test family convention)
+                    rest = args.split()[1:]
+                    current_kw = ""
+                    for tok in rest:
+                        if re.fullmatch(r"[A-Z][A-Z0-9_]*", tok) and "$" not in tok:
+                            current_kw = tok
+                            continue
+                        if "SOURCE" in current_kw:
+                            # ${VAR}-composed values expand through the
+                            # script's resolved variable lists
+                            harvest(entry, expand(tok, s), s)
 
     def targets_defining_script(self, script: Path) -> list[str]:
         want = script.resolve()
@@ -288,6 +485,61 @@ def collect_paths(repo_root: Path, args: argparse.Namespace) -> list[str] | None
             paths += [l for l in proc.stdout.splitlines() if l.strip()]
         return sorted(set(paths))
     return None
+
+
+def _resolve_alias(wiring: Wiring, name: str) -> str:
+    seen = set()
+    while name in wiring.alias_of and name not in seen:
+        seen.add(name)
+        name = wiring.alias_of[name]
+    return name
+
+
+def _consumers(wiring: Wiring, owners: set[str]) -> dict[str, list[str]]:
+    """Executables/test targets that (transitively) link any of `owners`.
+
+    Follows every link edge — for STATIC libraries even PRIVATE dependencies
+    propagate (LINK_ONLY), and the wiring text cannot always tell the library
+    type, so this is deliberately the over-approximation: it may suggest a
+    consumer that would not actually relink, never hide one.
+    """
+    root_targets = {_resolve_alias(wiring, o) for o in owners}
+    consumers: dict[str, list[str]] = {}
+    for tname, entry in wiring.targets.items():
+        kind = entry.get("kind", "")
+        if kind != "executable":
+            continue
+        seen: set[str] = set()
+        stack = [tname]
+        hit: list[str] = []
+        while stack:
+            cur = stack.pop()
+            real = _resolve_alias(wiring, cur)
+            if real in seen:
+                continue
+            seen.add(real)
+            if real in root_targets and real != tname:
+                hit.append(real)
+            for lib, _scope in wiring.links.get(real, []):
+                r = _resolve_alias(wiring, lib)
+                if r not in seen and (r in wiring.targets or r in wiring.alias_of):
+                    stack.append(r)
+        if hit:
+            consumers[tname] = sorted(hit)
+    return consumers
+
+
+_CTEST_SUGGESTION_CAP = 25
+
+
+def _ctest_suggestion(ctest: list[str]) -> str | None:
+    uniq = sorted(set(ctest))
+    if not uniq:
+        return None
+    shown = uniq[:_CTEST_SUGGESTION_CAP]
+    pattern = "|".join(re.escape(t) for t in shown)
+    extra = "" if len(uniq) <= _CTEST_SUGGESTION_CAP else         f"  (+{len(uniq) - _CTEST_SUGGESTION_CAP} more — see ctest_targets)"
+    return "ctest --test-dir <build> -R '^(" + pattern + ")'" + extra
 
 
 def map_paths(wiring: Wiring, paths: list[str]) -> dict:
@@ -343,14 +595,45 @@ def map_paths(wiring: Wiring, paths: list[str]) -> dict:
         else:
             unwired.append(raw)
 
+    # classification + verification level per suggested target
+    details: dict[str, dict] = {}
+    for t, v in sorted(build.items()):
+        entry = wiring.targets.get(t, {})
+        kind = entry.get("kind", "unknown")
+        if kind == "executable" or t in ctest:
+            verification = "link+test"
+        elif kind == "library":
+            verification = "compile+link"
+        else:
+            verification = "compile"
+        details[t] = {"weak": v["weak"], "paths": sorted(set(v["paths"])),
+                      "kind": kind, "verification": verification}
+
+    # consumers: test executables that link the changed code (transitively)
+    owners = {t for t, d in details.items() if d["kind"] == "library" and not d["weak"]}
+    consumers = _consumers(wiring, owners) if owners else {}
+    # the consuming executables are themselves build+test verification for
+    # the changed sources; fold the new ones into the suggestion set
+    for consumer in consumers:
+        if consumer not in details:
+            details[consumer] = {"weak": False,
+                                 "paths": sorted({p for hit in consumers[consumer]
+                                                  for p in paths
+                                                  if hit in {t for t, d in details.items()
+                                                             if p in d["paths"]}}),
+                                 "kind": "executable",
+                                 "verification": "link+test",
+                                 "reason": "links " + ", ".join(consumers[consumer])}
+        if consumer in wiring.ctest_registered:
+            ctest.append(consumer)
+
     return {
-        "build_targets": sorted(build),
-        "target_details": {t: {"weak": v["weak"], "paths": sorted(set(v["paths"]))}
-                           for t, v in sorted(build.items())},
+        "build_targets": sorted(details),
+        "target_details": details,
+        "consumers": {c: {"exercises": hits, "verification": "link+test"}
+                      for c, hits in sorted(consumers.items())},
         "ctest_targets": sorted(set(ctest)),
-        "ctest_suggestion": (
-            "ctest --test-dir <build> -R '^(" + "|".join(re.escape(t) for t in sorted(set(ctest))) + ")'"
-            if ctest else None),
+        "ctest_suggestion": _ctest_suggestion(ctest),
         "oversized_scripts": huge_scripts,
         "unwired": sorted(set(unwired)),
     }
@@ -374,8 +657,9 @@ def main(argv: list[str] | None = None) -> int:
     if paths is None:
         return _refuse("no paths to map: pass paths or a resolvable --base")
     if not paths:
-        payload = {"build_targets": [], "target_details": {}, "ctest_targets": [],
-                   "ctest_suggestion": None, "oversized_scripts": {}, "unwired": []}
+        payload = {"build_targets": [], "target_details": {}, "consumers": {},
+                   "ctest_targets": [], "ctest_suggestion": None,
+                   "oversized_scripts": {}, "unwired": []}
         emit(payload, ns.json, ["no changed paths; nothing to map"])
         return EXIT_OK
 

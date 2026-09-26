@@ -26,6 +26,7 @@
 #include <QDir>
 
 #include "operators/framework/model_catalog.h"
+#include <QTemporaryDir>
 
 int main( int argc, char *argv[] )
 {

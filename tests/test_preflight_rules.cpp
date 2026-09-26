@@ -445,6 +445,48 @@ TEST_CASE( "temporal_policy: scene shortfall blocks, gaps require ack, order blo
     REQUIRE( hasCode( truncated.run(), "SPF_TEMPORAL_DATES_TRUNCATED" ) );
 }
 
+TEST_CASE( "temporal_policy: scenes with missing/bad times are an explicit "
+           "incomplete-series finding, never silently narrowed",
+           "[preflight][rules]" )
+{
+    Json::Value entry = ndviCapability();
+    Json::Value temporal( Json::objectValue );
+    temporal["min_scenes"] = 2;
+    temporal["requires_acquisition_time"] = true;
+    temporal["max_gap_days"] = 16;
+    entry["temporal"] = temporal;
+
+    // A collection of 4 scenes where one scene has no parseable time: the
+    // provider keeps only the 3 parseable dates and MUST count the dropped
+    // scene, so the series judgment knows it is partial.
+    Loaded loaded( entry );
+    SlotFacts scene = opticalScene();
+    scene.hasAcquisitionTime = true;
+    scene.temporalSceneCount = 4;
+    scene.temporalDates = { "2026-01-01", "2026-01-15", "2026-02-01" };
+    scene.temporalInvalidTimeCount = 1;
+    loaded.facts.set( "scene-a", scene );
+
+    const PreflightReport report = loaded.run();
+    const auto hit = findings( report, "SPF_TEMPORAL_TIME_INCOMPLETE" );
+    REQUIRE( hit.size() == 1 );
+    REQUIRE( hit[0]->severity == PreflightSeverity::RequireAck );
+    REQUIRE( hit[0]->basis == "observed" );
+    REQUIRE( hit[0]->evidence["invalid_time_scenes"].asInt() == 1 );
+    REQUIRE( hit[0]->evidence["declared_scenes"].asInt() == 4 );
+    REQUIRE( hit[0]->affectedInputs.size() == 1 );
+    REQUIRE( hit[0]->affectedInputs[0] == "scene-a" );
+
+    // Zero invalid scenes stays clean (no finding).
+    Loaded clean( entry );
+    SlotFacts whole = opticalScene();
+    whole.hasAcquisitionTime = true;
+    whole.temporalSceneCount = 3;
+    whole.temporalDates = { "2026-01-01", "2026-01-15", "2026-02-01" };
+    clean.facts.set( "scene-a", whole );
+    REQUIRE_FALSE( hasCode( clean.run(), "SPF_TEMPORAL_TIME_INCOMPLETE" ) );
+}
+
 TEST_CASE( "train_eval_leakage: identical assets block; derived reuse blocks; unknown typed",
            "[preflight][rules]" )
 {

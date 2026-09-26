@@ -41,6 +41,7 @@
 #include <vector>
 #include <gdal.h>
 #include <cpl_conv.h>
+#include <QJsonObject>
 
 // Synthesise a small GeoTIFF per distinct `relative` path and cache it for the
 // process lifetime, so the test does not depend on a committed sample raster
