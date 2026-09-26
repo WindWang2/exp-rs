@@ -13848,3 +13848,22 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
+# Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
+# stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.
+add_executable(test_help_commands_schema test_help_commands_schema.cpp)
+target_link_libraries(test_help_commands_schema PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_help_commands_schema PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_help_commands_schema PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_help_commands_schema PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_help_commands_schema)
