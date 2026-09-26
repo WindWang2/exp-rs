@@ -1312,3 +1312,164 @@ TEST_CASE( "rounding and verdict boundaries behave deterministically",
         CHECK( outcome.report.verdict == ReportVerdict::Fail );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Track 16 WP-E: process-aware boundaries — ungradeable is never a score.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+GradingRubric metricRubric16()
+{
+    GradingRubric rubric;
+    rubric.rubricId = "track16-metric";
+    rubric.revision = 1;
+    rubric.title = "metric lab";
+    rubric.totalPoints = 100.0;
+    rubric.passingScore = 60.0;
+    Dimension dim;
+    dim.dimensionId = "process";
+    dim.title = "Process";
+    dim.weight = 100.0;
+    Criterion criterion;
+    criterion.criterionId = "proc-metric";
+    criterion.title = "metric window";
+    criterion.maxPoints = 100.0;
+    criterion.kind = CriterionKind::Metric;
+    criterion.evidenceKey = "ndvi_mean";
+    criterion.metric.mode = MetricExpectation::Mode::AtLeast;
+    criterion.metric.value = 0.35;
+    dim.criteria.push_back( criterion );
+    rubric.dimensions.push_back( dim );
+    return rubric;
+}
+
+GradeEvidence metricEvidence16( bool withMetric )
+{
+    GradeEvidence evidence;
+    evidence.subject.experimentId = "exp-1";
+    if ( withMetric )
+    {
+        GradeEvidenceItem item;
+        item.evidenceId = "ev-1";
+        item.kind = EvidenceKind::Metric;
+        item.key = "ndvi_mean";
+        item.hasValue = true;
+        item.value = 0.4;
+        item.source = "metrics:run.json";
+        evidence.items.push_back( item );
+    }
+    return evidence;
+}
+
+} // namespace
+
+TEST_CASE( "required evidence that is absent blocks the report at zero",
+           "[grader][engine][track16]" )
+{
+    GradingRubric rubric = stageRubric();
+    HardConstraint required;
+    required.constraintId = "req-train";
+    required.mode = HardConstraint::Mode::RequiredEvidence;
+    required.evidenceKey = "train";
+    required.fact.minCount = 1;
+    rubric.hardConstraints.push_back( required );
+
+    // Partial submission: a different stage was recorded, the required one
+    // was never.
+    GradeEvidence evidence;
+    evidence.subject.experimentId = "exp-1";
+    addStage( evidence, "ev-cleanup", "cleanup", "Completed" );
+
+    const GradeOutcome outcome = grade( rubric, evidence );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.report.verdict == ReportVerdict::Blocked );
+    CHECK( outcome.report.score == 0.0 );
+    REQUIRE( outcome.report.hardConstraintOutcomes.size() == 1 );
+    CHECK( outcome.report.hardConstraintOutcomes.front().violated );
+    CHECK( outcome.report.hardConstraintOutcomes.front().explanation.find(
+               "required evidence" ) != std::string::npos );
+}
+
+TEST_CASE( "an all-indeterminate report stays machine-distinguishable from an "
+           "honest zero",
+           "[grader][engine][track16]" )
+{
+    const GradingRubric rubric = metricRubric16();
+
+    // Ungradeable: the metric was never recorded.
+    GradeOutcome missing = grade( rubric, metricEvidence16( false ) );
+    REQUIRE( missing.ok );
+    REQUIRE( missing.report.dimensions.size() == 1 );
+    const CriterionOutcome &missingOutcome = missing.report.dimensions.front().criteria.front();
+    CHECK( missingOutcome.status == OutcomeStatus::Indeterminate );
+    CHECK( missingOutcome.earned == 0.0 );
+    CHECK( missingOutcome.rawEarned == 0.0 );
+    REQUIRE_FALSE( missingOutcome.reasonCodes.empty() );
+    CHECK( missingOutcome.reasonCodes.front() == "grader:metric-missing" );
+    CHECK( missing.report.verdict == ReportVerdict::Fail );
+
+    // Honest zero: the metric was recorded and measured below the band.
+    GradeEvidence zero = metricEvidence16( true );
+    zero.items.front().value = 0.0;
+    GradeOutcome measured = grade( rubric, zero );
+    REQUIRE( measured.ok );
+    const CriterionOutcome &earnedOutcome = measured.report.dimensions.front().criteria.front();
+    CHECK( earnedOutcome.status != OutcomeStatus::Indeterminate );
+    CHECK( earnedOutcome.earned == 0.0 );
+    CHECK( measured.report.verdict == ReportVerdict::Fail );
+
+    // Same payout, different epistemic state: the reason chains differ.
+    CHECK( earnedOutcome.reasonCodes != missingOutcome.reasonCodes );
+}
+
+TEST_CASE( "a partial submission scores the covered stages and leaves the rest "
+           "indeterminate",
+           "[grader][engine][track16]" )
+{
+    GradingRubric rubric;
+    rubric.rubricId = "track16-partial";
+    rubric.revision = 1;
+    rubric.totalPoints = 100.0;
+    rubric.passingScore = 60.0;
+    Dimension first;
+    first.dimensionId = "train-dim";
+    first.weight = 50.0;
+    Criterion train;
+    train.criterionId = "train";
+    train.maxPoints = 50.0;
+    train.kind = CriterionKind::Stage;
+    train.evidenceKey = "train";
+    train.stage.expectedState = "Completed";
+    first.criteria.push_back( train );
+    rubric.dimensions.push_back( first );
+    Dimension second;
+    second.dimensionId = "cleanup-dim";
+    second.weight = 50.0;
+    Criterion cleanup;
+    cleanup.criterionId = "cleanup";
+    cleanup.maxPoints = 50.0;
+    cleanup.kind = CriterionKind::Stage;
+    cleanup.evidenceKey = "cleanup";
+    cleanup.stage.expectedState = "Completed";
+    second.criteria.push_back( cleanup );
+    rubric.dimensions.push_back( second );
+
+    GradeEvidence evidence;
+    evidence.subject.experimentId = "exp-1";
+    addStage( evidence, "ev-train", "train", "Completed" );
+
+    const GradeOutcome outcome = grade( rubric, evidence );
+    REQUIRE( outcome.ok );
+    CHECK( outcome.report.verdict == ReportVerdict::Partial );
+    CHECK( outcome.report.score == 50.0 );
+
+    const CriterionOutcome &trained = outcome.report.dimensions[0].criteria.front();
+    CHECK( trained.status == OutcomeStatus::Earned );
+    CHECK( trained.earned == 50.0 );
+    const CriterionOutcome &cleaned = outcome.report.dimensions[1].criteria.front();
+    CHECK( cleaned.status == OutcomeStatus::Indeterminate );
+    CHECK( cleaned.earned == 0.0 );
+    CHECK_FALSE( cleaned.reasonCodes.empty() );
+    CHECK_FALSE( cleaned.explanation.empty() );
+}
