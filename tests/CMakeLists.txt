@@ -13925,3 +13925,15 @@ target_compile_definitions(test_exit_path_contracts_r4 PRIVATE
   SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 set_target_properties(test_exit_path_contracts_r4 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_exit_path_contracts_r4)
+
+add_executable(test_teardown_retirement_gate_r4 test_teardown_retirement_gate_r4.cpp)
+target_link_libraries(test_teardown_retirement_gate_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core Qt6::Test
+)
+target_include_directories(test_teardown_retirement_gate_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_teardown_retirement_gate_r4 PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+set_target_properties(test_teardown_retirement_gate_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_teardown_retirement_gate_r4)
