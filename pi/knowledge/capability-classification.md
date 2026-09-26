@@ -13,11 +13,19 @@
 - 输入：inputA（raster）、inputB（raster）
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bandsA（integer）、bandsB（integer）、batchCap（integer）、device（string）、model（string）、output（string）
+- 前置条件：两个时相按位置喂入（A=inputs[0]，B=inputs[1]）且必须已配准：首个 feed 为网格权威，未配准输入被类型化拒绝，不做隐式扭曲。；推理模型必须已就绪：模型清单需声明输入契约与输出类别，模型缺失或未加载时以类型化错误拒绝。
+- 局限：输出为变化概率堆栈，类别语义来自清单输出类；输入时相的辐射一致性由上游算子负责，本算子执行模型推理与网格校验。
+- 适用地物：城镇建成区、植被覆盖区、水体
+- 适用场景：双时相变化检测、灾害前后对比、城市扩展监测
+- 适用性备注：要求两个时相已配准，且所用模型清单覆盖目标变化类型。
 - 失败模式：
   - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
   - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 change_detection。处置：改用 task 为 change_detection 的模型（siamese/change manifest）
   - `GRID_MISMATCH` — 两个时相输入的网格或 CRS 不一致（未配准）。处置：先执行 rs:align 或提供已配准输入；运行时拒绝扭曲对齐，不隐式重采样
   - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 inputA/inputB/model/output 必填项。处置：按 schema 提供必填参数
+- 教学概念：深度学习变化检测、双时相推理、模型清单契约、变化概率
+- 适用课程：遥感应用、深度学习
+- 典型练习：用已训练的变化检测模型对两个时相影像执行推理，故意传入未配准时相验证类型化拒绝行为，并解释首个 feed 作为网格权威的约定。
 
 ## rs:classify
 
@@ -28,10 +36,18 @@
 - 输入：input（raster）
 - 输出：backend（string）、device（string）、model（string）、output（string）、predicted_class（string）、predicted_index（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
+- 前置条件：分类模型必须已就绪：模型清单声明输入契约与类别集合，模型缺失或未加载时以类型化错误拒绝。；输入影像窗口不超过 chip 上限 2048×2048 像素。
+- 局限：单次前向推理输出场景级预测（类别平面经空间均值池化），不是逐像素分割图；概率分布质量取决于模型训练域与输入影像的匹配程度。
+- 适用地物：地物分类制图区
+- 适用场景：单景场景分类、切片批量推理
+- 适用性备注：输入为单景窗口（chip 上限 2048×2048 像素），类别平面按空间均值池化聚合为场景级预测。
 - 失败模式：
   - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
   - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 classification，或多输入/检测类请求走了单输入路径。处置：改用 task 为 classification 的模型；本算子只处理单景单次前向
   - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 input/model/output 必填项。处置：按 schema 提供必填参数
+- 教学概念：深度学习分类、前向推理、类别概率分布、空间均值池化
+- 适用课程：遥感数字图像处理、深度学习
+- 典型练习：对单景影像运行分类模型，读取 typed 分类 JSON 产物中的预测类别与概率分布，并解释置信度的含义与局限。
 
 ## rs:detect
 
@@ -43,6 +59,7 @@
 - 输出：backend（string）、classes（string）、detections（integer）、device（string）、model（string）、output（raster）、rawDetections（integer）、tileSize（integer）、tiles（integer）
 - 参数：bands（integer）、batchCap（integer）、conf（numeric）、device（string）、model（string）、nms_iou（numeric）、output（string）、tta（enum）
 - 前置条件：需要已部署的检测模型与匹配的输入规格。
+- 局限：检测模型必须已就绪（清单声明输入契约与类别），缺失时类型化拒绝；conf∈[0,1]、nms_iou∈(0,1] 越界即拒绝。；输出为目标框/类别/置信度预测，不是实例分割；小目标与密集排布目标的召回取决于模型训练域与输入分辨率匹配。
 - 适用地物：船舶、车辆、人工目标
 - 适用场景：港口船舶监测、交通目标普查
 - 失败模式：
@@ -62,6 +79,7 @@
 - 输出：backend（string）、device（string）、embedding_dim（integer）、mean_vector（string）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）
 - 参数：aggregate（enum）、bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
 - 前置条件：需要嵌入模型；输出为非显示用特征数据。
+- 局限：嵌入模型必须已就绪（清单声明输入契约），缺失时类型化拒绝；嵌入语义由预训练模型决定，不同模型/版本的嵌入空间不可直接混比。
 - 适用地物：任意地物
 - 适用场景：样本检索与相似影像搜索、少样本分类的特征底座
 - 失败模式：
@@ -139,6 +157,7 @@
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bands（integer）、batchCap（integer）、blend（enum）、device（string）、model（string）、named_inputs（json）、output（string）、tta（enum）
 - 前置条件：Model must be loadable by cv::dnn::readNetFromONNX.；需要平台模型库中的已注册模型。
+- 局限：推理模型必须已就绪（平台模型库清单声明输入/输出契约），缺失时类型化拒绝；输出形态由模型类型决定（分割类别图 / 场景分类 / 目标列表），模型库之外的模型不在本算子范围。
 - 适用地物：任意地物
 - 适用场景：模型业务化落地、地物要素智能提取
 - 失败模式：
@@ -158,6 +177,8 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 输入：input（raster）
 - 输出：k（integer）、output（raster）、samplesUsed（integer）
 - 参数：algorithm（enum）、bands（integer）、k（integer）、maxSamples（integer）、output（string）、scale（boolean）
+- 前置条件：需给定聚类数 k 与输入波段集：输入应为反射率域多波段影像；算法可选 kmeans / isodata。；无监督方法没有类别语义：输出类别 ID 需用户对照影像/样区自行命名。
+- 局限：输出类别 ID 为 1..k；大栅格会对质心拟合做子采样，结果受初始中心影响（实现采用确定性的偶数行播种），跨参数与跨版本的类别编号不可直接对比。
 - 适用地物：任意地物
 - 适用场景：无训练数据时的快速聚类、类内光谱结构探索
 - 失败模式：
@@ -177,10 +198,18 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 输入：input（raster）
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
+- 前置条件：回归模型必须已就绪：清单声明输入契约与输出通道，模型缺失或未加载时类型化拒绝。；首个 feed 为网格权威：多输入按位置喂入且必须已配准，未配准输入被类型化拒绝。
+- 局限：输出为连续值波段（无 argmax、无类别堆栈）：值语义遵循模型契约，模型训练域决定外推可靠性。
+- 适用地物：连续变量制图区（生物量、叶面积指数、PM 浓度等）
+- 适用场景：回归模型推理、定量参数反演
+- 适用性备注：输出为每个清单输出通道一条连续值波段。
 - 失败模式：
   - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
   - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 regression。处置：改用 task 为 regression 的模型
   - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 input/model/output 必填项。处置：按 schema 提供必填参数
+- 教学概念：回归推理、模型清单契约、连续值波段、NoData 传播
+- 适用课程：遥感应用、机器学习
+- 典型练习：用回归模型对栅格推理，检查输出通道数与清单一致，并验证 NoData 输入像元在输出中保持 NoData。
 
 ## rs:sam_classify
 
@@ -211,6 +240,7 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 输出：classes（integer）、imbalanceWarnings（string）、kappa（numeric）、meanConfidence（numeric）、mode（string）、output（raster）、overallAccuracy（numeric）、perClassMetrics（string）、trainSamples（integer）、trainSamplesByClass（string）、uncertaintyOutput（string）
 - 参数：bands（integer）、classField（string）、maxSamplesPerClass（integer）、method（enum）、modelIn（string）、modelOut（string）、output（string）、probabilityOutput（string）、rejectThreshold（numeric）、scale（boolean）、seed（integer）、testSplit（numeric）、uncertaintyMeasure（enum）、uncertaintyOutput（string）
 - 前置条件：Train mode: training polygons must overlap the raster；Predict-only: modelIn must match method and band set；需要标注训练数据；输入特征建议先统一网格与量纲。
+- 局限：分类质量取决于训练样本的代表性与质量（随机森林/SVM 按 model 参数选择）：算子输出精度报告但不纠正样本偏差；类别集合由训练样本决定。
 - 适用地物：农田、森林、城市、水体
 - 适用场景：土地覆盖/利用制图、作物分布制图
 - 失败模式：

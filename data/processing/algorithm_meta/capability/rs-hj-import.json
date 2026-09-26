@@ -90,7 +90,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u8986\u76d6 HJ-1A/1B CCD \u4e0e HJ-2A/B CCD \u7684 L1A \u4ea7\u54c1\uff1b\u6ce2\u6bb5\u89d2\u8272\u56fa\u5b9a\u6620\u5c04 B1\u2013B4\uff0c\u975e CCD \u4f20\u611f\u5668\u4e0d\u5728\u672c\u7b97\u5b50\u8303\u56f4\u3002"
+    ],
     "modality" : 
     [
       "optical"

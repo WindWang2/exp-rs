@@ -12377,6 +12377,57 @@ sicnu_add_test(test_snapshot_drift_12)
 target_link_libraries(test_snapshot_drift_12 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_snapshot_drift_12)
 
+# R4 processing-meta track: the byte gate itself as a Catch2 assertion.
+# test_snapshot_drift_12 answers "is the graph sound / how does drift render?";
+# this lane adds what it deliberately omits — committed-vs-live byte freshness
+# for BOTH snapshots, double-run generator stability, and drift attribution —
+# so a stale snapshot ("算子/元数据改了、快照没跟") is red locally without the
+# CLI tool. Read-only: regeneration stays a reviewed commit, never a test
+# side effect (see tests/test_snapshot_gate_r4.cpp header).
+sicnu_add_test(test_snapshot_gate_r4)
+target_link_libraries(test_snapshot_gate_r4 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_snapshot_gate_r4)
+
+# R4 processing-meta track (hardening/r4-processing-meta): at this baseline
+# every executable that links sicnu_agent fails to resolve two symbols that
+# live in the sibling static libs — agent_loop::VerificationReport::aggregate
+# (src/agent_loop) and agent_ops::OpsDriver::apply (src/agent_ops) — because
+# sicnu_agent's own link does not propagate them (upstream repair in flight:
+# PR #1335 "restore master build/CI (review P0) — link graph"). This block
+# resolves them for the affected test targets so the capability/meta/snapshot
+# gates can link and run; DELETE this block once #1335 lands and propagates
+# the link through the sicnu_agent target itself.
+foreach( r4_agent_link_target IN ITEMS
+    capability_knowledge_tool
+    test_algorithm_meta_drift
+    test_capability_completeness
+    test_capability_contract_9
+    test_capability_drift
+    test_capability_knowledge
+    test_capability_surface_parity
+    test_chunk_contract_11
+    test_command_contract_9
+    test_contract_census_11
+    test_contract_cross_surface_11
+    test_contract_determinism_11
+    test_contract_fuzz_agent
+    test_contract_fuzz_data
+    test_contract_fuzz_io
+    test_contract_fuzz_ops
+    test_contract_platform_9
+    test_contract_projection_9
+    test_diagnostics_contract_9
+    test_fault_registry
+    test_harness9_contracts
+    test_scientific_contract_10
+    test_snapshot_drift_12
+    test_snapshot_gate_r4
+    test_spatial_contracts
+    test_trace_contract
+    test_verification_metamorphic_11 )
+  target_link_libraries( ${r4_agent_link_target} PRIVATE sicnu_agent_loop sicnu_agent_ops )
+endforeach()
+
 # E-16: `origin/master` ships 25 unparseable `data/**/*.json` files, landed by
 # two EVIL MERGES (43dcf19cd truncated-capability-block x19, 4713528ef
 # zero-byte x4). E-15 was the same defect in one file; E-16 is the census.

@@ -13,6 +13,7 @@
 - 输入：input（raster）
 - 输出：expression（string）、height（integer）、output（raster）、width（integer）
 - 参数：expression（string）、output（string）
+- 前置条件：输入必须为多波段栅格；表达式中的波段引用为 1-based（b1, b2, ...），空表达式与越界引用在执行前即被类型化错误拒绝。
 - 局限：Expression uses 1-based band references (b1, b2, ...).
 - 适用地物：任意地物
 - 适用场景：自定义指数构建、教学演示波段运算
@@ -32,6 +33,7 @@
 - 输入：input（raster）
 - 输出：bands（integer）、output（raster）
 - 参数：blueBand（integer）、denominatorBand（integer）、greenBand（integer）、mode（enum）、numeratorBand（integer）、output（string）、redBand（integer）
+- 前置条件：ratio 模式要求分子/分母波段号不同（相同即类型化拒绝）；ihs 模式需 1-based R/G/B 波段号（默认 1/2/3）。
 - 局限：IHS masks NoData/sentinel pixels to NaN in all components.
 - 适用地物：植被、矿物、水体
 - 适用场景：矿物吸收特征增强、教学演示比值运算
@@ -51,11 +53,17 @@
 - 参数：angleMatrix（boolean）、endmembersRef（string）、mergeAngleDegrees（numeric）、output（string）、ppiCounts（integer）、requireFullCoverage（boolean）、sensor（string）
 - 前置条件：Input must be an exp-rs:spectral-table with finite, non-zero endmember rows.
 - 局限：Reduction caps at 512 input rows; the angle matrix embed caps at 64 rows (payload bound).；Projection reflects the reduced NATIVE-space set; angles change under resampling by design.
+- 适用地物：矿物蚀变带、植被-土壤-水体混合区
+- 适用场景：端元集精简与冗余剔除、光谱库构建与比对
+- 适用性备注：输入为端元光谱表（exp-rs:spectral-table）。
 - 失败模式：
   - `DATASET_NOT_FOUND` — endmembersRef 指向的端元表文件不存在。处置：确认 endmembersRef 路径（如上游 rs:endmember_extraction 的 endmembersOut）
   - `INVALID_PARAMETER` — endmembersRef 不是合法的 exp-rs:spectral-table（行含非有限值或零范数、行宽与 bandCount 不一致），或输入行数超过 512 行的归并上限。处置：重新生成合法端元表，或先筛选/合并到 512 行以内
   - `INVALID_PARAMETER` — ppiCounts 长度与表行数不符或含负值、angleMatrix/requireFullCoverage 非布尔、缩减后行数超过 64 仍请求角度矩阵。处置：按输入表行数对齐 ppiCounts，修正布尔参数，或在 64 行以内再请求角度矩阵
   - `WAVELENGTH_INCOMPATIBLE` — 传感器投影失败：输入表缺波长元数据、sensor id 未在 data/spectral/sensors.json 注册或未声明波段、端元波长覆盖不足且 requireFullCoverage 被开启。处置：为端元表补齐波长元数据、使用已注册的 sensor id，或关闭 requireFullCoverage 并接受未覆盖波段为 NaN
+- 教学概念：端元、光谱角制图（SAM）、光谱表溯源、传感器波段响应
+- 适用课程：高光谱遥感、矿物光谱
+- 典型练习：对 PPI 提取的端元集执行 SAM 聚类压缩，比较压缩前后解混丰度图的差异，并解释投影到传感器波段网格的意义。
 
 ## rs:evi
 
@@ -67,6 +75,7 @@
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：blue（integer）、nir（integer）、output（string）、red（integer）、scale（numeric）
+- 前置条件：输入需含 NIR/Red/Blue 三波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 4/3/1）。；DN 域产品必须声明乘性 scale（如 Landsat Collection 2 的 0.0001）使常量工作在反射率域：显式 scale 参数 > 产品元数据印记 > 文档化量级回退。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：森林、密集农田
 - 适用场景：高生物量区植被监测、森林蓄积量相关研究
@@ -86,6 +95,8 @@
 - 输入：input（raster）
 - 输出：bands（integer）、output（raster）
 - 参数：bands（integer）、output（string）
+- 前置条件：bands 数组为 1-based 波段号，数组顺序即输出顺序；越界选择在处理开始前类型化拒绝。
+- 局限：纯波段拷贝/重排：不改像元值与地理参考，输出波段属性随数组顺序重排。
 - 适用地物：任意地物
 - 适用场景：制作指数计算所需的最小波段集、多源影像波段统一
 - 失败模式：
@@ -121,12 +132,19 @@
 - 输入：input（raster）
 - 输出：covariance（string）、max（numeric）、mean（numeric）、output（raster）、scoredPixels（integer）、unscoredPixels（integer）
 - 参数：covariance（enum）、innerWindow（integer）、loading（numeric）、minSamples（integer）、outerWindow（integer）、output（string）、qualityOut（string）
+- 前置条件：需给定内窗口（guard window）与外窗口尺寸；有效背景样本不足的像元输出 NaN（计入 unscoredPixels），绝不硬评分。；波段数很高时建议 covariance=diagonal（全协方差在窗口样本量下不稳定）。
 - 局限：Pixels whose window has fewer valid background samples than the minimum stay NaN (reported in unscoredPixels), never faked.；Raster edges use clamped (shrunken) windows; no replicated border pixels enter the statistics.
+- 适用地物：港口、机场等背景相对均质的区域、背景与目标尺度差异明显的城区
+- 适用场景：局部异常目标定位、小目标检测预处理
+- 适用性备注：内窗口为保护带：目标位于内窗口、背景统计取自内外窗之间。
 - 失败模式：
   - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格
   - `INVALID_PARAMETER` — outerWindow 非奇数或小于 3、innerWindow 非奇数/小于 1/不小于 outerWindow、covariance 取值不在 full/diagonal 之内、loading 为负或非有限。处置：按约束设置窗口与协方差参数（outer 为 >=3 的奇数，inner 为小于 outer 的奇数）
   - `NOT_SUPPORTED` — 输入栅格波段数少于 2（无法估计局部协方差），或 full 协方差模式下波段数超过 8192。处置：提供至少 2 个波段；高光谱场景改用 covariance=diagonal
   - `EXECUTION_FAILED` — 瓦片 halo 读取、分数/质量栅格写出或栅格 finalize 失败，或 RX 内核计算返回错误。处置：检查输出路径可写与磁盘空间，缩小 AOI 后重试
+- 教学概念：局部 RX、双窗口（guard window）、马氏距离、背景协方差
+- 适用课程：高光谱遥感、异常检测
+- 典型练习：对同一高光谱场景分别运行全局 RX 与局部 RX，比较局部背景差异区域的检出差异，并解释内窗口保护带的作用。
 
 ## rs:mndwi
 
@@ -138,6 +156,7 @@
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：green（integer）、output（string）、swir（integer）
+- 前置条件：输入需含 Green 与 SWIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 2/5）。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：水体、城市水体、湿地
 - 适用场景：城市水体提取、细小水体识别
@@ -177,6 +196,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：nir（integer）、output（string）、swir（integer）
+- 前置条件：输入需含 SWIR 与 NIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 5/4）。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：城市、不透水面
 - 适用场景：城市扩张监测、不透水面制图
@@ -197,6 +217,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：nir（integer）、output（string）、red（integer）
+- 前置条件：输入需含 NIR 与 Red 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 4/3）；建议在大气校正后计算。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：植被、农田、林地、草地
 - 适用场景：植被长势监测、农作物估产预处理、生态变化监测
@@ -218,6 +239,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：green（integer）、nir（integer）、output（string）
+- 前置条件：输入需含 Green 与 NIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 2/4）。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：水体、湿地、河流、湖泊
 - 适用场景：水体范围制图、洪涝监测的输入特征
@@ -237,6 +259,8 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输入：input（raster）
 - 输出：numComponents（integer）、output（raster）
 - 参数：numComponents（integer）、output（string）
+- 前置条件：输入为波段数 ≥2 的多波段影像，建议同量纲（反射率域）输入：混合量纲会使方差最大波段主导第一成分。；输出主成分按方差贡献降序排列，应结合各成分方差贡献选择保留数。
+- 局限：载荷与成分由场景统计决定：跨场景/跨时相的主成分不可直接比较，语义解释必须结合当景方差贡献。
 - 适用地物：任意地物
 - 适用场景：多波段数据压缩、分类前特征降维、变化检测（PC 差异法）的输入
 - 失败模式：
@@ -256,6 +280,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输入：input（raster）
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：nir（integer）、output（string）、red（integer）、scale（numeric）
+- 前置条件：输入需含 NIR 与 Red 波段（默认 4/3，可由 SICNU_BAND_ROLE 解析或显式指定）；L = 0.5 常量按反射率域工作，DN 域产品需声明乘性 scale。
 - 局限：Band numbers are resolved from SICNU_BAND_ROLE when omitted.
 - 适用地物：干旱半干旱植被、稀疏草地、裸土混合区
 - 适用场景：干旱区植被监测、低覆盖度植被估测
@@ -277,11 +302,17 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 参数：bands（integer）、collinearAngleDegrees（numeric）、endmembers（string）、endmembersRef（string）、errorOut（string）、lambda（numeric）、libraryMaterials（string）、libraryPath（string）、maxIterations（integer）、output（string）、sumToOnePenalty（numeric）、tolerance（numeric）
 - 前置条件：Atoms must use the same band order and units as the input raster.
 - 局限：Sum-to-one is a penalty (like the FCLS solver), not a hard constraint; report mean |sum-1| via sumToOnePenalty QA if needed.；Near-duplicate atoms (below collinearAngleDegrees) refuse: an L1 split across near-identical atoms is not interpretable.
+- 适用地物：矿物丰度制图区、植被-土壤-不透水面混合区
+- 适用场景：过完备光谱库解混、丰度图生产
+- 适用性备注：端元字典可多于波段数（过完备），lambda 控制稀疏度。
 - 失败模式：
   - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格（必要时先转换格式）
   - `INVALID_PARAMETER` — 必填参数 input/output 缺失，解混参数越界（lambda/sumToOnePenalty 为负、tolerance<=0、maxIterations<1），端元字典（endmembers/endmembersRef/libraryPath）未提供或同时提供多种，或端元波段数与影像波段数不一致且任一侧无波长元数据。处置：补齐必填参数、把解混参数调到合法范围，只通过一种形式提供字典，并使端元波段数与影像一致或补齐波长元数据
   - `WAVELENGTH_INCOMPATIBLE` — 端元字典与输入影像的波长范围不重叠，或所选输入波段落在端元波长覆盖之外。处置：选择落在端元覆盖范围内的输入波段，或提供波长范围匹配的字典
   - `NOT_SUPPORTED` — 字典构建被拒绝：两原子光谱角小于 collinearAngleDegrees（近共线）、端元为零向量或含非有限值、原子数超过 2048、Gram 矩阵退化。处置：删除重复或近共线端元、调高 collinearAngleDegrees（或置 0 显式关闭守卫），并检查端元有限且非零
+- 教学概念：稀疏解混、L1 正则、FISTA 迭代、丰度、过完备字典
+- 适用课程：高光谱遥感
+- 典型练习：调节 lambda 与容差观察丰度稀疏性与收敛行为，并解释 sum-to-one 作为软约束（惩罚项）而非硬约束的含义。
 
 ## rs:spectral_band_select
 
@@ -354,9 +385,15 @@ SID-SAM 混合光谱相似度：把光谱角（形状）与信息散度（分布
 - 参数：bands（integer）、form（enum）、libraryMaterials（string）、libraryPath（string）、output（string）、refs（string）、refsRef（string）、scoreOut（string）
 - 前置条件：References must be reflectance-like (non-negative) on the same band grid as the input.
 - 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.
+- 适用地物：矿物/植被光谱匹配区
+- 适用场景：参考光谱逐像元标注、光谱库比对分类
+- 适用性备注：参考光谱需为同网格、反射率域的非负光谱。
 - 失败模式：
   - `DATASET_NOT_FOUND` — 输入多波段栅格文件不存在或无法用 GDAL 打开。处置：确认 input 路径存在且为可读栅格
   - `INVALID_PARAMETER` — 必填参数 input/output 缺失，form 取值不在 product_normalized/classic_tan 之内，参考光谱（refs/refsRef/libraryPath）未提供或同时提供多种，或参考波段数与影像波段数不一致且任一侧无波长元数据。处置：补齐必填参数、只通过一种形式提供参考光谱，并使参考波段数与影像一致或补齐波长元数据
   - `INVALID_RADIOMETRY` — 参考光谱为 DN/辐亮度等非反射率量纲或含负波段，SID 的概率分布假设不成立，这些像元只能留空（NaN 分数）而不被强行归类。处置：先做辐射定标与大气校正，提供反射率量纲、非负的参考光谱
   - `WAVELENGTH_INCOMPATIBLE` — 参考光谱与输入影像的波长范围不重叠，或所选输入波段超出参考光谱波长覆盖。处置：选择落在参考覆盖范围内的输入波段，或提供波长匹配的参考光谱
+- 教学概念：光谱信息散度（SID）、光谱角（SAM）、混合相似度度量
+- 适用课程：高光谱遥感
+- 典型练习：调整 SID-SAM 混合形式观察标注变化，并解释负值波段/零范数光谱输出 NaN（未标注）而非强行归类的设计。
 

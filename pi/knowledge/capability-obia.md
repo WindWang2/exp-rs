@@ -14,6 +14,7 @@
 - 输出：accuracy（string）、classes（integer）、labeledSegments（integer）、output（raster）、segments（integer）
 - 参数：bands（integer）、cellSize（integer）、classColors（string）、classField（string）、featureSelection（string）、features（enum）、method（enum）、minLabelPixels（integer）、minRegionSize（integer）、mlpHiddenLayerSize（integer）、mlpMaxIter（integer）、output（string）、outputUncertainty（string）、quantizeBins（integer）、rfMaxDepth（integer）、rfMinSampleCount（integer）、rfNumTrees（integer）、scale（boolean）、segmentClasses（string）、segmentMethod（enum）、smoothKernel（integer）
 - 前置条件：需要对象特征表（rs:obia_features）。
+- 局限：训练来源为多边形标注或交互式对象标注（默认 svm）：分类质量取决于训练质量与对象特征表完备度，应先完成 rs:obia_features。；输出为对象级类别图（矢量/栅格），不是逐像元分类：对象内部的异质性由分割质量决定。
 - 适用地物：城市、农田、林地
 - 适用场景：面向对象土地覆盖制图、建筑/植被对象提取
 - 失败模式：
@@ -34,6 +35,7 @@
 - 输出：bands（integer）、features（integer）、output（table）、segments（integer）
 - 参数：bands（integer）、output（string）
 - 前置条件：需要先有分割对象图层。
+- 局限：标签栅格网格必须与源影像一致；标签波段按 UInt32 原样读取，不做重映射。；特征表为逐对象一行（光谱统计 + GLCM 纹理 + 形状指数）的 CSV：GLCM 计算开销随窗口与灰阶级数增长。
 - 适用地物：城市、农田
 - 适用场景：对象分类特征工程、对象级统计分析
 - 失败模式：
@@ -53,6 +55,8 @@
 - 输入：input（raster）、labelsCoarse（raster）、labelsFine（raster）、training（vector）
 - 输出：coarseSegments（integer）、fineSegments（integer）、labeledSegments（integer）
 - 参数：classColors（string）、classField（string）、classifyLevel（integer）、maxIterations（integer）、method（enum）、minLabelPixels（integer）、minRegionSize（integer）、mlpHiddenLayerSize（integer）、mlpMaxIter（integer）、outputClass（string）、outputCoarse（string）、outputFine（string）、outputParents（string）、outputUncertainty（string）、parents（string）、rangeRadius（numeric）、rfMaxDepth（integer）、rfMinSampleCount（integer）、rfNumTrees（integer）、segmentClasses（string）、spatialRadius（integer）、threshold（numeric）、watershedThreshold（numeric）
+- 前置条件：build 模式依赖 OTB Segmentation CLI（SICNU_OTB_PATH）；rehydrate（labelsFine）模式复用此前构建输出的层级。
+- 局限：层级为两级（fine/coarse）父子结构：更细的多尺度层级栈不在本算子范围；可选对某一层级执行分类（method 默认 svm）。
 - 适用地物：城市、流域
 - 适用场景：多尺度分析、地块→区域聚合统计
 - 失败模式：
@@ -70,6 +74,8 @@
 - 输入：input（raster）、labels（raster）、training（vector）
 - 输出：labeled（integer）、output（table）
 - 参数：classField（string）、minLabelPixels（integer）、output（string）
+- 前置条件：训练多边形需携带类别字段且 CRS 可解析；标签网格必须与源分割栅格一致（不可解析即 fail-closed 拒绝）。
+- 局限：按像元多数投票把多边形标签赋给对象：边界混合像元按多数归入，边界对象的标签纯度取决于分割质量。
 - 适用地物：任意地物
 - 适用场景：对象样本采集、标注质量控制
 - 失败模式：
@@ -87,6 +93,8 @@ OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象标
 - 输入：input（raster）
 - 输出：engine（string）、output（raster）、segments（integer）
 - 参数：bands（integer）、engine（enum）、maxIterations（integer）、minRegionSize（integer）、output（string）、quantizeBins（integer）、rangeRadius（numeric）、smoothKernel（integer）、spatialRadius（integer）、threshold（numeric）
+- 前置条件：simple 引擎开箱即用（教学级质量）；OTB MeanShift 质量引擎依赖 OTB CLI（SICNU_OTB_PATH）并受收敛阈值参数（threshold，默认 0.1）影响。
+- 局限：输出为对象标签栅格：对象层级构建、特征统计与对象分类分别接 rs:obia_hierarchy / rs:obia_features / rs:obia_classify。
 - 适用地物：城市、农田、林地
 - 适用场景：对象层级构建、OBIA 分类底图
 - 失败模式：
@@ -106,6 +114,7 @@ OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象标
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、format（enum）、model（string）、output（string）、tta（enum）
 - 前置条件：需要平台模型库中的已注册分割模型。
+- 局限：薄适配器：分割模型必须已在平台模型库就绪（清单声明输入/输出契约），缺失时类型化拒绝；经典多尺度分割不在本算子范围（用 rs:obia_segment）。；输出为模型定义的类别/对象栅格：分割粒度与类别语义由模型决定，不可调尺度。
 - 适用地物：城市、农田、森林
 - 适用场景：业务化地物要素提取、面向对象分析的对象底图生产
 - 失败模式：
@@ -124,6 +133,8 @@ OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象标
 - 输入：input（raster）、labels（raster）
 - 输出：output（table）、segments（integer）
 - 参数：bands（integer）、output（string）
+- 前置条件：输入为分割标签栅格（UInt32 对象 ID）与源影像：两者网格必须一致，标签值按原样读取不重映射。
+- 局限：统计为逐对象一行属性表（均值/方差/占比等）：对象边界混合像元计入所在对象，统计质量受分割质量约束。
 - 适用地物：农田、城市、水体
 - 适用场景：对象属性报表、异质性诊断
 - 失败模式：

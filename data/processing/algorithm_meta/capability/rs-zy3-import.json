@@ -88,7 +88,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u8bfb\u53d6 ZY-3 TLC/NAD/FWD/BWD \u7684 L1A \u4ea7\u54c1\uff1a\u5168\u8272/\u591a\u5149\u8c31\u6309\u58f0\u660e\u6ce2\u6bb5\u6e05\u5355\u81ea\u52a8\u533a\u5206\u5e76\u6620\u5c04\u89d2\u8272\uff1b\u975e ZY-3 \u4ea7\u54c1\u4e0d\u5728\u672c\u7b97\u5b50\u8303\u56f4\u3002"
+    ],
     "modality" : 
     [
       "optical"

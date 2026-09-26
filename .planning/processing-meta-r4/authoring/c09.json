@@ -1,0 +1,74 @@
+{
+  "rs:temporal_composite": {
+    "limitations": [
+      "合成质量取决于质量分：quality_band=0（默认）表示各期等分、按目标日期就近选取；经典 MVC 需把指数波段显式设为 quality_band。",
+      "合成会压制云与噪声，但云掩膜不完整时污染期仍会进入合成；输出为重构值而非单一观测。"
+    ]
+  },
+  "rs:temporal_decompose": {
+    "prerequisites": [
+      "需要覆盖完整季节周期、等间隔或声明时间戳的时序：STL 思想的分解在观测不足时季节/趋势分离失真。"
+    ],
+    "limitations": [
+      "容差级算子（并行归约的浮点重排在容差内）：分量解释依赖周期与窗宽参数；残差分量包含未建模噪声，不宜单独当物理量使用。"
+    ]
+  },
+  "rs:temporal_extract_regions": {
+    "prerequisites": [
+      "多个点/面区域以参数列表给出：区域几何需与影像 CRS 一致。"
+    ],
+    "limitations": [
+      "输出区域×日期统计表：面区域统计为区域内像元聚合，大区域会平滑内部异质性；区域数量增长线性增加计算量。"
+    ]
+  },
+  "rs:temporal_extract_series": {
+    "prerequisites": [
+      "影像集合以路径列表给出：影像需带地理参考，ROI 与影像 CRS 一致。"
+    ],
+    "limitations": [
+      "云/无效像元按掩膜剔除后输出：缺失期在时序表中留空，连续建模前应接 rs:temporal_gap_fill 等插值链。"
+    ]
+  },
+  "rs:temporal_gap_fill": {
+    "prerequisites": [
+      "时序中的缺失（云/阴影）需以掩膜/NoData 标示：插值仅按时间维度进行（线性/最近邻）。"
+    ],
+    "limitations": [
+      "长缺口插值不可信：线性插值会抹平真实事件信号，最近邻跨大缺口产生阶跃；补洞结果应视为重构值并保留缺失位置信息。"
+    ]
+  },
+  "rs:temporal_harmonic_breaks": {
+    "prerequisites": [
+      "需要覆盖完整季节周期的时序：逐段谐波+线性趋势重拟合要求每段最少观测数。"
+    ],
+    "limitations": [
+      "断点密度受断点预算约束；谐波阶数过高会吸收真实突变——与 BFAST/CCDP 相同的阶数-灵敏度权衡。"
+    ]
+  },
+  "rs:temporal_harmonic_fit": {
+    "prerequisites": [
+      "需要至少覆盖一个年周期的时序并给定谐波阶数：采样过稀时高阶谐波不稳定。"
+    ],
+    "limitations": [
+      "拟合重构会平滑掉短时突变（收割/火灾等事件信号），同时插值与去云属模型化重构而非观测值；高阶谐波对噪声敏感。"
+    ]
+  },
+  "rs:temporal_index_series": {
+    "prerequisites": [
+      "多期影像需已完成辐射归一化且指数参数逐期一致：否则时序立方体内不可比。"
+    ],
+    "limitations": [
+      "时序质量受最差一期限制：云未掩膜的期会在时序中产生尖峰，建议先做 QA 掩膜再进入时序分析。"
+    ]
+  },
+  "rs:temporal_model_select": {
+    "limitations": [
+      "模型选择只在候选网格（谐波阶数 × 断点预算）内进行：网格外的模型形态不可达；按 AICc/BIC/分块 CV 打分，平局取最小模型，退化像元如实拒绝而不强制输出。"
+    ]
+  },
+  "rs:temporal_phenology": {
+    "limitations": [
+      "物候期提取依赖上游重构时序质量：云污染与假峰会导致生长季开始/结束误判；二季作区/干旱年的多峰情形需参数适配。"
+    ]
+  }
+}

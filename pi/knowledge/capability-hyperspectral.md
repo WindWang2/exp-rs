@@ -39,6 +39,9 @@
 - 失败模式：
   - `INVALID_PARAMETER` — 目标光谱与影像波段数不匹配。处置：将目标光谱重采样到影像波段，保证每个波段对应一个有限值
   - `INVALID_PARAMETER` — 有效背景像元不足（无 loading 需 2B+2，loading>0 需 B+1）。处置：扩大场景范围或增大 loading 对角加载系数
+- 教学概念：约束能量最小化、目标检测、背景相关矩阵、投影滤波
+- 适用课程：高光谱遥感、目标检测
+- 典型练习：在小场景高光谱影像上指定目标光谱运行 CEM，比较不同背景正则强度（loading）下目标得分的稳定性，并解释无失真约束下目标得分恒为 1 的含义。
 
 ## rs:continuum_removal
 
@@ -50,6 +53,7 @@
 - 输出：bands（integer）、output（raster）
 - 参数：output（string）
 - 前置条件：Input should be reflectance (0..1); DN values give meaningless ratios.
+- 局限：输出是相对吸收深度（连续统归一化），不是反射率：只用于吸收特征位置/形状比对，不能回代辐射反演。；凸包拟合对参与波段范围敏感：拟合区间端点选取不当时吸收深度失真。
 - 适用地物：矿物、植被
 - 适用场景：矿物吸收特征分析、实验室光谱与影像光谱比对
 - 失败模式：
@@ -67,6 +71,7 @@
 - 输入：input（raster）
 - 输出：endmembers（string）、indices（string）
 - 参数：endmembersOut（string）、nEndmembers（integer）、projections（integer）
+- 前置条件：场景必须包含以纯像元形式存在的端元：PPI 抽取的是数据云角点光谱，端元未以纯像元出现时只能得到混合估计。
 - 局限：PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene.
 - 适用地物：矿物、植被、土壤
 - 适用场景：端元光谱库构建、解混前的端元估计
@@ -131,6 +136,9 @@ MNF 最小噪声分离变换：按信噪比排序的正交变换，先白化噪�
   - `INVALID_PARAMETER` — 缺少干扰光谱或干扰光谱波段数不匹配。处置：通过 interference / interferenceRef 提供至少一个与影像波段数一致的非零干扰光谱
   - `INVALID_PARAMETER` — 干扰光谱线性相关（UᵀU 奇异），或目标投影后能量不足。处置：剔除重复或共线的干扰光谱；确认目标不在干扰子空间内
   - `INVALID_PARAMETER` — 为 OSP 提供了 background 参数。处置：OSP 不消费背景栅格；需要背景驱动检测时使用 rs:tcimf_detection 或 rs:cem_detection
+- 教学概念：正交子空间投影（OSP）、干扰子空间、正交补投影、目标检测
+- 适用课程：高光谱遥感、目标检测
+- 典型练习：给定目标光谱与干扰光谱运行 OSP，验证干扰光谱像元得分恒为 0，并与 CEM 的背景统计路线比较各自的适用条件。
 
 ## rs:rx_anomaly
 
@@ -141,6 +149,7 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 输入：input（raster）
 - 输出：max（numeric）、mean（numeric）、output（raster）
 - 参数：output（string）
+- 前置条件：输入应为定标后的反射率/辐亮度多波段影像：RX 以全场景为背景统计，场景污染（云/大面积异常）会抬高虚警。
 - 局限：Global RX uses the whole scene as background; for local background use a windowed variant.
 - 适用地物：任意异常目标
 - 适用场景：未知异常目标搜索、安全监测筛查
@@ -185,6 +194,9 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 失败模式：
   - `INVALID_PARAMETER` — 输入不是单波段得分栅格。处置：先用 rs:matched_filter/rs:ace/rs:cem_detection 生成单波段得分图
   - `INVALID_PARAMETER` — sigmaRange 非正或非有限值。处置：method='bilateral' 时提供有限的 sigmaRange（得分单位）
+- 教学概念：得分图邻域聚合、均值滤波、双边滤波（保边）、虚警抑制
+- 适用课程：目标检测、高光谱遥感
+- 典型练习：对目标检测得分图分别用 mean 与 bilateral 聚合，比较孤立虚警抑制效果与目标边缘保持的权衡。
 
 ## rs:spectral_unmixing
 
@@ -223,4 +235,7 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
   - `INVALID_PARAMETER` — 缺少干扰光谱或干扰光谱波段数不匹配。处置：通过 interference / interferenceRef 提供至少一个与影像波段数一致的非零干扰光谱
   - `INVALID_PARAMETER` — 干扰光谱在背景度量下线性相关，或目标位于干扰子空间内。处置：剔除重复或共线的干扰光谱；确认目标不在干扰张成的子空间内
   - `INVALID_PARAMETER` — 有效背景像元不足（无 loading 需 2B+2，loading>0 需 B+1）。处置：扩大场景范围或增大 loading 对角加载系数
+- 教学概念：目标约束干扰最小化滤波（TCIMF）、零约束、干扰光谱、背景相关矩阵
+- 适用课程：高光谱遥感、目标检测
+- 典型练习：在已知干扰光谱条件下对比 CEM 与 TCIMF：验证 TCIMF 对干扰光谱得分恒为 0 的精确零约束，并讨论目标灵敏度的差异。
 

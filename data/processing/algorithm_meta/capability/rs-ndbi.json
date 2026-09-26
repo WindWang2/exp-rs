@@ -104,7 +104,10 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : [],
+    "prerequisites" : 
+    [
+      "\u8f93\u5165\u9700\u542b SWIR \u4e0e NIR \u6ce2\u6bb5\uff1a\u53ef\u7531 SICNU_BAND_ROLE \u89e3\u6790\u6216\u663e\u5f0f 1-based \u6ce2\u6bb5\u53f7\u6307\u5b9a\uff08\u9ed8\u8ba4 5/4\uff09\u3002"
+    ],
     "schema_version" : 2,
     "summary" : "\u5f52\u4e00\u5316\u5efa\u7b51\u6307\u6570 NDBI = (SWIR-NIR)/(SWIR+NIR)\uff0c\u7a81\u51fa\u4e0d\u900f\u6c34\u9762\u4e0e\u5efa\u7b51\u4fe1\u606f\u3002",
     "teaching_use" : 

@@ -105,7 +105,10 @@
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : [],
+    "prerequisites" : 
+    [
+      "\u8f93\u5165\u9700\u542b Green \u4e0e SWIR \u6ce2\u6bb5\uff1a\u53ef\u7531 SICNU_BAND_ROLE \u89e3\u6790\u6216\u663e\u5f0f 1-based \u6ce2\u6bb5\u53f7\u6307\u5b9a\uff08\u9ed8\u8ba4 2/5\uff09\u3002"
+    ],
     "schema_version" : 2,
     "summary" : "\u6539\u8fdb\u578b\u5f52\u4e00\u5316\u6c34\u4f53\u6307\u6570 MNDWI = (Green-SWIR)/(Green+SWIR)\uff0c\u5bf9\u57ce\u9547\u80cc\u666f\u4e2d\u7684\u6c34\u4f53\u66f4\u7a33\u5065\u3002",
     "teaching_use" : 

@@ -141,6 +141,7 @@ vendor/
 .gstack/
 .planning/*
 !.planning/RS14-05-process-grader/
+!.planning/processing-meta-r4/
 !.planning/unified-help-diagnostics-6/
 !.planning/context-help-diagnostics-11/
 !.planning/cartography-platform-7/

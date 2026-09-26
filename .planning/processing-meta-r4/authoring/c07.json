@@ -1,0 +1,84 @@
+{
+  "rs:sar_backscatter": {
+    "prerequisites": [
+      "输入必须是已定标强度数据（声明 sigma0/gamma0/beta0 辐射状态与线性功率/dB 量纲）：DN 与 SLC 复数据不在本算子范围（类型化拒绝）。"
+    ]
+  },
+  "rs:sar_coregister_local": {
+    "applicability": {
+      "land_cover": ["InSAR 试验区"],
+      "scenes": ["主从 SLC 局部配准", "形变链前置几何对齐"],
+      "notes": "要求同网格复 SLC 对。"
+    },
+    "teaching_use": {
+      "concepts": ["NCC 偏移场", "抛物线亚像元精化", "中值滤波", "主从重采样"],
+      "courses": ["微波遥感", "InSAR"],
+      "exercise": "对同网格 SLC 对执行局部配准，检查偏移场与滤波后的全局平移输出，并解释亚像元精化对配准精度的贡献。"
+    }
+  },
+  "rs:sar_network_inversion": {
+    "applicability": {
+      "land_cover": ["城市/矿区/滑坡等形变监测区"],
+      "scenes": ["小基线时序反演", "线性速度场生产"],
+      "notes": "输入为连通成对网络的逐对解缠视线向位移栅格。"
+    },
+    "teaching_use": {
+      "concepts": ["小基线集（SBAS）", "网络反演", "历元位移", "线性速度场", "拟合 RMS"],
+      "courses": ["InSAR", "形变测量"],
+      "exercise": "对解缠位移网络执行小基线反演，读取各历元位移与线性速度场，并结合拟合 RMS 与缺失数据质量账评估结果可靠性。"
+    }
+  },
+  "rs:sar_pair_network": {
+    "applicability": {
+      "land_cover": ["任意 SAR 台栈规划场景"],
+      "scenes": ["干涉对筛选", "重处理前的网络构建"],
+      "notes": "基于场景真值栈（轨道、波长、采集时刻）按时间/垂直基线约束筛选。"
+    },
+    "teaching_use": {
+      "concepts": ["时间基线", "垂直基线", "连通性网络", "fail-closed 类型化拒绝"],
+      "courses": ["InSAR"],
+      "exercise": "给定基线约束从场景栈生成干涉对网络，并故意引入缺失轨道元数据验证类型化拒绝路径。"
+    }
+  },
+  "rs:sar_remove_topographic_phase": {
+    "applicability": {
+      "land_cover": ["起伏地形的形变监测区"],
+      "scenes": ["地形相位剔除", "形变/大气相位分离前置步骤"],
+      "notes": "需要 DEM 与两景轨道的逐像素严格距离差几何。"
+    },
+    "teaching_use": {
+      "concepts": ["地形相位", "距离差几何", "DEM", "残余相位"],
+      "courses": ["InSAR"],
+      "exercise": "对复干涉图执行地形相位剔除，比较剔除前后的相位结构并解释残余相位的可能来源。"
+    }
+  },
+  "rs:sar_ratio": {
+    "prerequisites": [
+      "输入必须为同网格、同辐射状态（如均为 sigma0）的已定标强度数据；支持双通道或多时相栈。"
+    ]
+  },
+  "rs:savi": {
+    "prerequisites": [
+      "输入需含 NIR 与 Red 波段（默认 4/3，可由 SICNU_BAND_ROLE 解析或显式指定）；L = 0.5 常量按反射率域工作，DN 域产品需声明乘性 scale。"
+    ]
+  },
+  "rs:segment": {
+    "limitations": [
+      "薄适配器：分割模型必须已在平台模型库就绪（清单声明输入/输出契约），缺失时类型化拒绝；经典多尺度分割不在本算子范围（用 rs:obia_segment）。",
+      "输出为模型定义的类别/对象栅格：分割粒度与类别语义由模型决定，不可调尺度。"
+    ]
+  },
+  "rs:segment_stats": {
+    "prerequisites": [
+      "输入为分割标签栅格（UInt32 对象 ID）与源影像：两者网格必须一致，标签值按原样读取不重映射。"
+    ],
+    "limitations": [
+      "统计为逐对象一行属性表（均值/方差/占比等）：对象边界混合像元计入所在对象，统计质量受分割质量约束。"
+    ]
+  },
+  "rs:sentinel2_import": {
+    "limitations": [
+      "解析 SAFE/JP2 结构的 Sentinel-2 产品包：输出保留 10/20/60 m 多分辨率组织并附 SCL 掩膜；非 SAFE/JP2 结构按导入失败路径处理。"
+    ]
+  }
+}

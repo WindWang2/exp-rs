@@ -1,7 +1,20 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269\u4e30\u5ea6\u5236\u56fe\u533a",
+        "\u690d\u88ab-\u571f\u58e4-\u4e0d\u900f\u6c34\u9762\u6df7\u5408\u533a"
+      ],
+      "notes" : "\u7aef\u5143\u5b57\u5178\u53ef\u591a\u4e8e\u6ce2\u6bb5\u6570\uff08\u8fc7\u5b8c\u5907\uff09\uff0clambda \u63a7\u5236\u7a00\u758f\u5ea6\u3002",
+      "scenes" : 
+      [
+        "\u8fc7\u5b8c\u5907\u5149\u8c31\u5e93\u89e3\u6df7",
+        "\u4e30\u5ea6\u56fe\u751f\u4ea7"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -169,7 +182,22 @@
     ],
     "schema_version" : 2,
     "summary" : "\u7a00\u758f\u89e3\u6df7\uff08L1 + \u975e\u8d1f FISTA\uff09\uff1a\u5728\uff08\u53ef\u8d85\u5b8c\u5907\u7684\uff09\u7aef\u5143\u5b57\u5178\u4e0a\u4f30\u8ba1\u6bcf\u50cf\u5143\u7a00\u758f\u4e30\u5ea6\uff0c\u652f\u6301\u7aef\u5143\u6570\u591a\u4e8e\u6ce2\u6bb5\u6570\u7684\u8fc7\u5b8c\u5907\u5b57\u5178\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7a00\u758f\u89e3\u6df7",
+        "L1 \u6b63\u5219",
+        "FISTA \u8fed\u4ee3",
+        "\u4e30\u5ea6",
+        "\u8fc7\u5b8c\u5907\u5b57\u5178"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u8c03\u8282 lambda \u4e0e\u5bb9\u5dee\u89c2\u5bdf\u4e30\u5ea6\u7a00\u758f\u6027\u4e0e\u6536\u655b\u884c\u4e3a\uff0c\u5e76\u89e3\u91ca sum-to-one \u4f5c\u4e3a\u8f6f\u7ea6\u675f\uff08\u60e9\u7f5a\u9879\uff09\u800c\u975e\u786c\u7ea6\u675f\u7684\u542b\u4e49\u3002"
+    }
   },
   "description" : "Sparse abundance estimation (L1 + non-negativity, optional sum-to-one penalty) with FISTA; supports overcomplete dictionaries.",
   "display_name" : "Sparse Unmixing (L1 + Non-negative)",

@@ -1,7 +1,19 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5149\u5b66-SAR \u8de8\u6a21\u6001\u53e0\u5408\u533a"
+      ],
+      "notes" : "\u8f93\u51fa\u914d\u51c6\u7ed3\u679c\u4e0e CE90/\u6b8b\u5dee\u573a\u8d28\u91cf\u62a5\u544a\uff1b\u4f4e\u7f6e\u4fe1\u7ed3\u679c\u6807\u8bb0\u5f85\u5ba1\u3002",
+      "scenes" : 
+      [
+        "\u8de8\u6a21\u6001\u5f71\u50cf\u914d\u51c6",
+        "\u53d8\u5316\u68c0\u6d4b\u524d\u7684\u51e0\u4f55\u7edf\u4e00"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -143,7 +155,11 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u62d2\u914d\u65f6 fail-closed \u4e0d\u5199\u8f93\u51fa\uff1a\u5b81\u7f3a\u6bcb\u6ee5\uff1b\u4f4e\u7f6e\u4fe1\u914d\u51c6\u7ed3\u679c\u4f1a\u6807\u8bb0\u5f85\u5ba1\uff0c\u4e0d\u58f0\u79f0\u8fbe\u5230\u6807\u79f0\u7cbe\u5ea6\u3002",
+      "\u914d\u51c6\u7cbe\u5ea6\u62a5\u544a\uff08CE90/\u6b8b\u5dee\u573a\uff09\u57fa\u4e8e\u5339\u914d\u70b9\u62df\u5408\uff0c\u4e0d\u7b49\u4e8e\u5168\u56fe\u9010\u50cf\u5143\u51e0\u4f55\u7cbe\u5ea6\u3002"
+    ],
     "modality" : 
     [
       "optical",
@@ -156,7 +172,23 @@
     ],
     "schema_version" : 2,
     "summary" : "\u8de8\u6a21\u6001\uff08\u5149\u5b66-SAR\uff09\u5f71\u50cf\u914d\u51c6\uff1a\u5339\u914d\u3001\u62df\u5408\u3001\u91cd\u91c7\u6837\u5230\u53c2\u8003\u6846\u67b6\u5e76\u62a5\u544a CE90/\u6b8b\u5dee\u573a\u8d28\u91cf\uff0c\u62d2\u914d\u65f6 fail-closed \u4e0d\u5199\u8f93\u51fa\uff0c\u4f4e\u7f6e\u4fe1\u7ed3\u679c\u6807\u8bb0\u5f85\u5ba1\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f71\u50cf\u914d\u51c6",
+        "\u7279\u5f81\u5339\u914d",
+        "CE90 \u7cbe\u5ea6\u8bc4\u5b9a",
+        "\u6b8b\u5dee\u573a",
+        "\u91cd\u91c7\u6837"
+      ],
+      "courses" : 
+      [
+        "\u6444\u5f71\u6d4b\u91cf\u4e0e\u9065\u611f",
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u5149\u5b66\u4e0e SAR \u5f71\u50cf\u6267\u884c\u8de8\u6a21\u6001\u914d\u51c6\uff0c\u8bfb\u53d6 CE90 \u4e0e\u6b8b\u5dee\u573a\u62a5\u544a\uff0c\u5e76\u9a8c\u8bc1\u62d2\u914d\uff08fail-closed\uff09\u8def\u5f84\u4e0d\u4ea7\u51fa\u7ed3\u679c\u6587\u4ef6\u3002"
+    }
   },
   "description" : "Cross-modal (optical-SAR) image registration with refusal semantics: match, fit, warp into the reference frame, and report CE90/residual-field quality. Refusals write nothing; low-confidence outputs are flagged.",
   "display_name" : "Image Registration",
