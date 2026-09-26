@@ -270,14 +270,14 @@ bool announceAutoLoadTask( long taskId, const QString &outputPath )
                                     Q_ARG( sicnu::AlgorithmTaskInfo, info ) );
 }
 
-/// Deliver a layerAutoLoadRequested through the real TaskCenter signal.
-/// The taskId argument carries a default so the one-arg form resolves both
-/// before and after the signature gains the task id.
-bool deliverAutoLoadRequest( const QString &path )
+/// Deliver a layerAutoLoadRequested through the real TaskCenter signal,
+/// paired with the announcing task id (the F-05 pairing contract).
+bool deliverAutoLoadRequest( const QString &path, long taskId )
 {
   return QMetaObject::invokeMethod( &sicnu::TaskCenter::instance(),
                                     "layerAutoLoadRequested",
-                                    Q_ARG( QString, path ) );
+                                    Q_ARG( QString, path ),
+                                    Q_ARG( long, taskId ) );
 }
 
 } // namespace
@@ -457,7 +457,7 @@ TEST_CASE( "AS-4: layer auto-load from a superseded session does not land in the
   REQUIRE( fx.window.openProjectFrom( projects.pathB ) );
   REQUIRE( QgsProject::instance()->fileName() == projects.pathB );
   // ...and the completion request arrives afterwards.
-  REQUIRE( deliverAutoLoadRequest( staleTif ) );
+  REQUIRE( deliverAutoLoadRequest( staleTif, 900001 ) );
   QApplication::processEvents();
 
   // The late request must be dropped: the display view must NOT grow by the
@@ -469,7 +469,7 @@ TEST_CASE( "AS-4: layer auto-load from a superseded session does not land in the
   // Control: a request announced AND delivered in the current session still
   // lands (the recording is per-session, not a blanket ban).
   REQUIRE( announceAutoLoadTask( 900002, liveTif ) );
-  REQUIRE( deliverAutoLoadRequest( liveTif ) );
+  REQUIRE( deliverAutoLoadRequest( liveTif, 900002 ) );
   QApplication::processEvents();
   INFO( "canvas layers after live delivery: " << canvas->layers().size() );
   CHECK( canvas->layers().size() == canvasLayersBefore + 1 );
@@ -498,7 +498,7 @@ TEST_CASE( "AS-5: layer auto-load announced before Save As does not land after i
 
   REQUIRE( announceAutoLoadTask( 900003, preSaveTif ) );
   REQUIRE( fx.window.saveProjectAsTo( saveTarget ) );
-  REQUIRE( deliverAutoLoadRequest( preSaveTif ) );
+  REQUIRE( deliverAutoLoadRequest( preSaveTif, 900003 ) );
   QApplication::processEvents();
 
   // Save As re-homes the session: the stale auto-load is dropped, not

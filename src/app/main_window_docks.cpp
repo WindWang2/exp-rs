@@ -694,16 +694,21 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
                  }
              } );
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
-             this, [this]( const QString &path ) {
-                 bool recorded = false;
-                 quint64 submittedEpoch = m_sessionEpoch;
-                 if ( !m_autoLoadTaskEpoch.isEmpty() )
+             this, [this]( const QString &path, long taskId ) {
+                 // Pair by task id — a FIFO pop would mispair when tasks
+                 // complete out of order, and an unpaired request (its task
+                 // never registered, e.g. pre-window submission) is stale by
+                 // definition and dropped with a trace.
+                 const auto it = m_autoLoadTaskEpoch.constFind( taskId );
+                 if ( it == m_autoLoadTaskEpoch.constEnd() )
                  {
-                     submittedEpoch = m_autoLoadTaskEpoch.first();
-                     recorded = true;
-                     m_autoLoadTaskEpoch.erase( m_autoLoadTaskEpoch.begin() );
+                     statusBar()->showMessage(
+                         tr( "Dropped stale task auto-load: %1" ).arg( path ), 5000 );
+                     return;
                  }
-                 if ( !recorded || submittedEpoch != m_sessionEpoch )
+                 const quint64 submittedEpoch = it.value();
+                 m_autoLoadTaskEpoch.erase( it );
+                 if ( submittedEpoch != m_sessionEpoch )
                  {
                      statusBar()->showMessage(
                          tr( "Dropped stale task auto-load: %1" ).arg( path ), 5000 );
