@@ -279,6 +279,34 @@ void requireOutputGeometry( const QString &path, int width, int height )
     CHECK( out.height() == height );
 }
 
+/// Deterministic output digest for A/B change verification: an exactly-additive
+/// Kahan sum of all pixels of band 1. Identical inputs must give identical
+/// sums before/after a behavior-preserving optimization.
+double rasterPixelSum( const QString &path )
+{
+    ensureGdalInit();
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( path ) );
+    const int w = ds.width();
+    const int h = ds.height();
+    std::vector<float> buf( static_cast<size_t>( w ) );
+    double sum = 0.0;
+    for ( int y = 0; y < h; ++y )
+    {
+        REQUIRE( ds.readBandWindow( 1, 0, y, w, 1, buf.data() ) );
+        for ( int x = 0; x < w; ++x )
+        {
+            const double v = buf[static_cast<size_t>( x )];
+            const double t = sum + v;
+            if ( std::abs( sum ) >= std::abs( v ) )
+                sum = t + ( sum - t ) + v;
+            else
+                sum = t + ( v - t ) + sum;
+        }
+    }
+    return sum;
+}
+
 } // namespace
 
 //------------------------------------------------------------------------------
@@ -631,6 +659,7 @@ TEST_CASE( "memory guard temporal composite peak RSS stays within documented 256
     structural["tile_pixels"] = 256 * 256;
     structural["promise"] = "docs/USER_GUIDE.md:1227 T×tile×4B ≤ 256MiB shrink rule";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, kScenes );
+    s.extra["output_sum"] = rasterPixelSum( out );
     record( "guard_temporal_composite_rss", std::move( s ), structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
@@ -684,6 +713,7 @@ TEST_CASE( "memory guard change detection peak RSS stays within declared O(tile)
     structural["tile_pixels"] = 256 * 256;
     structural["promise"] = "ADR 0089 block-wise O(tile); rs_change_primitives 256² double buffer";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 2 );
+    s.extra["output_sum"] = rasterPixelSum( out );
     record( "guard_change_detection_rss", std::move( s ), structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
