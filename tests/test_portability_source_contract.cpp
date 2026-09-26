@@ -187,3 +187,84 @@ TEST_CASE( "path-valued environment reads enter through envUtf8",
     repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/sdk/exprs/path_policy.cpp" );
   REQUIRE( policy.find( "std::getenv( \"SICNU_MCP_WORKSPACE\" )" ) == std::string::npos );
 }
+
+
+TEST_CASE( "portable.h: the staging/durability helpers ride the wide, exclusive API",
+           "[portability][contract][static][fs]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+  const std::string header =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/platform/portable.h" );
+  REQUIRE_FALSE( header.empty() );
+
+  // claimExclusiveUtf8 must CLAIM through CREATE_NEW on Windows (the
+  // check-then-use antidote). A mutation to OPEN_ALWAYS (or a plain
+  // CreateFileW without CREATE_NEW) compiles and passes every POSIX lane
+  // while reopening the staging-collision race the helper exists to close.
+  {
+    const std::size_t signature = header.find( "inline bool claimExclusiveUtf8(" );
+    REQUIRE( signature != std::string::npos );
+    const std::size_t bodyEnd = header.find( "\n}", signature );
+    REQUIRE( bodyEnd != std::string::npos );
+    const std::string body = header.substr( signature, bodyEnd - signature );
+    INFO( "claimExclusiveUtf8 body:\n" << body );
+    REQUIRE( body.find( "CREATE_NEW" ) != std::string::npos );
+    REQUIRE( body.find( "O_EXCL" ) != std::string::npos );
+  }
+
+  // syncFileUtf8 must flush through FlushFileBuffers on Windows and fsync(2)
+  // on POSIX — a silent drop of the flush would reopen the crash window the
+  // publish contract closes.
+  {
+    const std::size_t signature = header.find( "inline bool syncFileUtf8(" );
+    REQUIRE( signature != std::string::npos );
+    const std::size_t bodyEnd = header.find( "\n}", signature );
+    REQUIRE( bodyEnd != std::string::npos );
+    const std::string body = header.substr( signature, bodyEnd - signature );
+    INFO( "syncFileUtf8 body:\n" << body );
+    REQUIRE( body.find( "FlushFileBuffers" ) != std::string::npos );
+    REQUIRE( body.find( "::fsync" ) != std::string::npos );
+  }
+
+  // fileOpenUtf8 must widen on Windows (the narrow fopen decodes with the
+  // process ANSI code page and misses non-ASCII cache directories).
+  {
+    const std::size_t signature = header.find( "inline std::FILE *fileOpenUtf8(" );
+    REQUIRE( signature != std::string::npos );
+    const std::size_t bodyEnd = header.find( "\n}", signature );
+    REQUIRE( bodyEnd != std::string::npos );
+    const std::string body = header.substr( signature, bodyEnd - signature );
+    INFO( "fileOpenUtf8 body:\n" << body );
+    REQUIRE( body.find( "_wfopen" ) != std::string::npos );
+    REQUIRE( body.find( "wideFromUtf8" ) != std::string::npos );
+  }
+}
+
+TEST_CASE( "atomic publish callers never hand-roll the staging claim",
+           "[portability][contract][static][staging]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+
+  // Hand-rolled check-then-use staging (exists() then open) is the TOCTOU
+  // race the exclusive claim closes: each publisher in the table must go
+  // through the helper, never a hand-rolled two-step.
+  struct Claim
+  {
+    const char *file;
+    const char *required;
+  };
+  const Claim claims[] = {
+    // The journal's staging claim goes through the portable helper.
+    { "src/agent_loop/session_journal.cpp",
+      "sicnu::portable::claimExclusiveUtf8( sicnu::portable::pathToUtf8( temp ) )" },
+  };
+  for ( const Claim &claim : claims )
+  {
+    const std::string source = repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, claim.file );
+    REQUIRE_FALSE( source.empty() );
+    INFO( "file: " << claim.file );
+    REQUIRE( source.find( claim.required ) != std::string::npos );
+  }
+}
