@@ -37,6 +37,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -187,4 +188,55 @@ TEST_CASE( "First-class capabilities carry purpose, failure guidance and io cont
     // either is a Track D1 non-goal, so the gap is measured, not asserted.
     WARN( "NoData semantics mentioned by " << noDataMentions << " / " << boot.ids.size()
                                            << " capability sidecars (no structured contract exists yet)" );
+}
+
+// R4 processing-meta track (hardening/r4-processing-meta): the D1 gate above
+// only requires summary/failure_modes/io. The authored-enrichment keys that
+// survive regeneration (applicability / teaching_use / prerequisites /
+// limitations) stayed optional, so operators kept landing with holes — 111 of
+// 157 sidecars carried at least one empty authored key at the R4 baseline.
+// This lane closes that: every first-class capability must carry all four
+// authored keys, and the census count is pinned for equality so the
+// requirement cannot silently weaken. The fill direction is authoring from
+// the operator implementation — never deleting the requirement.
+TEST_CASE( "Capability authored enrichment census: applicability, teaching_use, prerequisites and limitations",
+           "[capability][completeness][r4]" )
+{
+    Bootstrap boot;
+
+    std::map<std::string, std::string> holes;
+    for ( const std::string &id : boot.ids )
+    {
+        const Json::Value block = boot.catalog.capability( id );
+        std::string missing;
+
+        const Json::Value &applicability = block[ "applicability" ];
+        if ( !applicability.isObject() || applicability.empty() ||
+             !applicability[ "land_cover" ].isArray() || applicability[ "land_cover" ].empty() ||
+             !applicability[ "scenes" ].isArray() || applicability[ "scenes" ].empty() )
+            missing += "applicability,";
+
+        const Json::Value &teaching = block[ "teaching_use" ];
+        if ( !teaching.isObject() || teaching.empty() ||
+             !teaching[ "concepts" ].isArray() || teaching[ "concepts" ].empty() ||
+             !teaching[ "courses" ].isArray() || teaching[ "courses" ].empty() ||
+             !teaching[ "exercise" ].isString() || teaching[ "exercise" ].asString().empty() )
+            missing += "teaching_use,";
+
+        if ( !block[ "prerequisites" ].isArray() || block[ "prerequisites" ].empty() )
+            missing += "prerequisites,";
+        if ( !block[ "limitations" ].isArray() || block[ "limitations" ].empty() )
+            missing += "limitations,";
+
+        if ( !missing.empty() )
+            holes[ id ] = missing.substr( 0, missing.size() - 1 );
+    }
+
+    for ( const auto &[ id, missing ] : holes )
+        FAIL( "capability sidecar missing authored enrichment (" + id + "): " + missing );
+
+    // Equality-pinned census: the requirement spans the whole live registry
+    // set, so a sidecar-count change must be a conscious registry event
+    // (same convention as the kIoInputsExempt equality table above).
+    REQUIRE( boot.ids.size() == 157 );
 }
