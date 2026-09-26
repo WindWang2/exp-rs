@@ -299,6 +299,40 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
             QStringLiteral( "truths and predictions are required" ) ) );
     }
 
+    // One truth row and one prediction row per sample id, ENFORCED: a
+    // duplicated truth silently overwrote its predecessor (last-wins map
+    // insert) and a duplicated prediction counted once more in the confusion
+    // matrix — every derived metric re-weighted with no marker anywhere
+    // (#1333 item 2). Duplicates are refused rather than deduplicated:
+    // dropping either row would equally fabricate the evidence.
+    QSet<QString> seenTruthIds;
+    for ( const BenchmarkTruth &truth : request.truths )
+    {
+        if ( seenTruthIds.contains( truth.sampleId ) )
+        {
+            return Result<BenchmarkResult>::success( failResult(
+                def, QStringLiteral( "experiment.benchmark_duplicate_sample" ),
+                QStringLiteral( "duplicate truth row for sample id '%1'; exactly"
+                                " one truth row per sample id is required" )
+                    .arg( truth.sampleId ) ) );
+        }
+        seenTruthIds.insert( truth.sampleId );
+    }
+    QSet<QString> seenPredictionIds;
+    for ( const BenchmarkPrediction &pred : request.predictions )
+    {
+        if ( seenPredictionIds.contains( pred.sampleId ) )
+        {
+            return Result<BenchmarkResult>::success( failResult(
+                def, QStringLiteral( "experiment.benchmark_duplicate_sample" ),
+                QStringLiteral( "duplicate prediction row for sample id '%1';"
+                                " repeated rows would re-weight the confusion"
+                                " matrix" )
+                    .arg( pred.sampleId ) ) );
+        }
+        seenPredictionIds.insert( pred.sampleId );
+    }
+
     // Classification path: build confusion matrix from matched sample ids.
     QHash<QString, QString> truthById;
     QHash<QString, sicnu::dataset::AnnotationSourceType> sourceById;

@@ -3420,6 +3420,22 @@ target_include_directories(test_experiment_consistency_r4 PRIVATE
 )
 sicnu_discover_tests(test_experiment_consistency_r4 TIMEOUT 180)
 
+# Track 11 R4 benchmark input-contract regressions (#1333 item 2). LIGHT —
+# science-core libs only.
+qt_add_executable(test_experiment_benchmark_r4 test_experiment_benchmark_r4.cpp)
+target_link_libraries(test_experiment_benchmark_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_experiment_benchmark_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_experiment_benchmark_r4 TIMEOUT 180)
+
 # RS14-17 reproducibility capsule: LIGHT executable on purpose — links only
 # the capsule projection module + experiment/dataset (Qt/Core level). The
 # default sicnu_add_test chain would drag QGIS/agent/operators into a
