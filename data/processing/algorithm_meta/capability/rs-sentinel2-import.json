@@ -89,7 +89,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u89e3\u6790 SAFE/JP2 \u7ed3\u6784\u7684 Sentinel-2 \u4ea7\u54c1\u5305\uff1a\u8f93\u51fa\u4fdd\u7559 10/20/60 m \u591a\u5206\u8fa8\u7387\u7ec4\u7ec7\u5e76\u9644 SCL \u63a9\u819c\uff1b\u975e SAFE/JP2 \u7ed3\u6784\u6309\u5bfc\u5165\u5931\u8d25\u8def\u5f84\u5904\u7406\u3002"
+    ],
     "modality" : 
     [
       "optical"
