@@ -31,6 +31,7 @@
 #include <fstream>
 #include <regex>
 #include <string>
+#include <vector>
 
 #ifndef SICNU_TEST_CLI
 #error "SICNU_TEST_CLI must point at sicnu_geo_rs_cli"
@@ -81,19 +82,29 @@ void requireFourTuple( const std::string &args, int code, const std::string &sym
         FAIL( "exit code for `" << args << "` was " << result.exitCode << ", expected " << code
               << ";\noutput: " << result.out );
 
-    // First stderr line = first output line in merged mode only when stdout
-    // is silent on error paths; be strict about that (stdout carries only the
-    // final envelope in --json mode, and text-mode errors print to stderr).
-    const std::string::size_type nl = result.out.find( '\n' );
-    const std::string firstLine = nl == std::string::npos ? result.out : result.out.substr( 0, nl );
-
+    // Startup may emit unrelated stderr noise (Qt/plugin bootstrap); the
+    // contract is about the ERROR line: exactly one line carries the
+    // [E-n:SYMBOL] anchor, and its optional segments match the failure class.
     const std::string prefix = "[E-" + std::to_string( code ) + ":" + symbol + "]";
-    INFO( "first line was: " << firstLine );
-    REQUIRE( firstLine.rfind( prefix, 0 ) == 0 );
-    REQUIRE( firstLine.size() > prefix.size() + 2 ); // reason text present
-    REQUIRE( ( wantExpected ) == ( firstLine.find( "expected:" ) != std::string::npos ) );
-    REQUIRE( ( wantActual ) == ( firstLine.find( "actual:" ) != std::string::npos ) );
-    REQUIRE( ( wantHint ) == ( firstLine.find( "hint:" ) != std::string::npos ) );
+    std::vector<std::string> anchored;
+    std::string::size_type start = 0;
+    while ( start <= result.out.size() )
+    {
+        const std::string::size_type nl = result.out.find( '\n', start );
+        const std::string line = result.out.substr(
+            start, nl == std::string::npos ? std::string::npos : nl - start );
+        if ( line.rfind( prefix, 0 ) == 0 )
+            anchored.push_back( line );
+        if ( nl == std::string::npos )
+            break;
+        start = nl + 1;
+    }
+    INFO( "output was:\n" << result.out );
+    REQUIRE( anchored.size() == 1 );
+    REQUIRE( anchored[0].size() > prefix.size() + 2 ); // reason text present
+    REQUIRE( ( wantExpected ) == ( anchored[0].find( "expected:" ) != std::string::npos ) );
+    REQUIRE( ( wantActual ) == ( anchored[0].find( "actual:" ) != std::string::npos ) );
+    REQUIRE( ( wantHint ) == ( anchored[0].find( "hint:" ) != std::string::npos ) );
 }
 
 /// Asserts the JSON envelope carries additive `error_details` with the code
@@ -176,8 +187,9 @@ TEST_CASE( "dataset argument errors carry the four-tuple", "[cli][errors][r4][da
         const std::string missing = "/nonexistent/sicnu-r4/missing.db";
         const auto result = runCli( "dataset --dataset-db " + missing + " inspect", true );
         REQUIRE( result.exitCode == 6 );
-        REQUIRE( result.out.find( "[E-6:INVALID_INPUT]" ) == 0 );
-        REQUIRE( result.out.find( missing ) != std::string::npos );
+        const std::string::size_type at = result.out.find( "[E-6:INVALID_INPUT]" );
+        REQUIRE( at != std::string::npos );
+        REQUIRE( result.out.find( missing, at ) != std::string::npos );
     }
 }
 
