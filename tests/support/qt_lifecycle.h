@@ -45,6 +45,14 @@ namespace sicnu::test::qtlifecycle
     return new QApplication( argc, argv );
   }
 
+  // Core-only variant for widget-less binaries (same teardown contract).
+  inline QCoreApplication *heapQCoreApplication( int &argc, char **argv )
+  {
+    if ( QCoreApplication::instance() )
+      return QCoreApplication::instance();
+    return new QCoreApplication( argc, argv );
+  }
+
   inline QgsApplication *heapQgsApplication( int &argc, char **argv, bool guiEnabled )
   {
     if ( QCoreApplication::instance() )
