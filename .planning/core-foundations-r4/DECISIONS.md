@@ -22,3 +22,9 @@ Oracle 正则命中 11 目标;其余 237 目标不在正则内不构建。ctest 
 
 ## D-7 白名单声明扩展(review P2-2 记账)
 本轨在 `tests/test_platform_portability.cpp`(+140,纯追加)与 `tests/test_portability_source_contract.cpp`(+81,纯追加)两个**既有**测试文件内追加用例。按 prompt 白名单字面("tests/ 新测试文件 + tests/CMakeLists.txt 注册行")属扩展项;按 prompt 白名单首条 `tests/(core 对应测试)` 属内。两 diff 0 删除、不改变既有断言,作为声明扩展逐处记账于此。
+
+## D-8 单构建目录 ninja 互斥纪律(期间事故复盘)
+本轮门禁构建期间,本轨的前台快速验证构建与后台全量门禁构建在同一 build-r4 上并发(ninja 文件锁不保护整个构建过程,仅保护 restat/deplog 一致性),造成 `libqgis_gui.so`/`libsicnu_agent_loop.a` 双写损坏,级联 ~5700 步重建。教训入库:同一 build 目录**任何时刻只允许一个 ninja 进程**;临时验证构建必须等待或使用独立构建目录。本机 10 条并行轨道各自持有独立构建目录,互不影响(已核实全部 ninja 进程 cwd)。坏产物特征备查:`ld: file format not recognized`、静态归档 `nm` 缺新符号。
+
+## D-9 重型测试目标链接图 defer-#1335
+`libsicnu_agent.so` 引用 `agent_loop::VerificationReport::aggregate` 而其链接线缺 `sicnu_agent_loop`(ELF 允许 .so 带未定义符号,错误后移到下游全部可执行文件,~161 个)——master 预存,逐字即 PR #1335 的 review P0;修复文件 `src/agent/CMakeLists.txt` 属 #1335 独占 → 本轨 defer。影响:门禁正则命中的 7 个重型目标在 master 基线即不可构建(与本轨改动无关,闭包论证见 EVIDENCE §2/§4),合并 #1335 后应复跑。

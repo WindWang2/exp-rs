@@ -506,7 +506,13 @@ TEST_CASE( "session journal: every staging failure path removes the claimed stag
   // return after the claim must remove it, or a failed save leaks an orphan
   // staging file into the session directory (the exact residue class the
   // atomic_fs contract's discardStaged path exists to prevent).
-  for ( const char *marker : { "cannot open temp file", "cannot write temp file" } )
+  // The master-era paths ("cannot flush temp file", the rename-failure
+  // branch) already cleaned up — the same branch-bounded pin holds them so
+  // the whole failure lattice stays covered, not just this track's additions.
+  // Order within the branch is free (master cleans after the message, the
+  // r4 branches before): the pinned property is membership in the branch.
+  for ( const char *marker : { "cannot open temp file", "cannot write temp file",
+                               "cannot flush temp file" } )
   {
     const std::size_t at = source.find( marker );
     INFO( "marker: " << marker << " at=" << at );
@@ -524,7 +530,7 @@ TEST_CASE( "session journal: every staging failure path removes the claimed stag
     REQUIRE( cleanup != std::string::npos );
     REQUIRE( giveUp != std::string::npos );
     REQUIRE( branchStart <= cleanup );
-    REQUIRE( cleanup < at );
+    REQUIRE( cleanup < giveUp );
     REQUIRE( at < giveUp );
   }
 }

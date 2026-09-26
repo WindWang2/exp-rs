@@ -69,8 +69,8 @@
 | 1 | test_io_atomic_failures | 42 | 43/12(4 FAILED) | **8/12,4 预存红 = #1338 Cluster A(§2),两遍数量一致** |
 | 2 | 同上 7 目标,同序 | 同上 | 同上 | **与 PASS 1 完全一致** |
 
-- 两遍原始日志:`/tmp/gate_p1_*.log`、`/tmp/gate_p2_*.log`(各目标逐套件);汇总即本表。
-- **相对 Phase 0 基线零新增失败** ✓;重型 7 目标不可链接为 master 预存(#1335 在修,见 §4)。
+- 两遍原始日志:`/tmp/gate_p1_*.log`、`/tmp/gate_p2_*.log`;review 修复后又以**最终代码**复跑两遍(F1/F2,`/tmp/gate_F1_*.log`、`/tmp/gate_F2_*.log`):结果与 §7 表完全一致(6 全绿 + 恒定 4 预存红);`test_atomic_fs_caller_contract` 最终态为 160 断言/13 用例(journal 清理 pin 扩展至 master 时代 flush-fail 分支后)。
+- **相对 Phase 0 基线零新增失败** ✓;重型 7 目标不可链接为 master 预存(#1335 在修,见 §4 / DECISIONS D-9)。
 
 ## 8. 收尾提交链
 
