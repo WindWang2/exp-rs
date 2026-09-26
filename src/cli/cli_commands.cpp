@@ -517,6 +517,18 @@ int commandPipeline( QStringList args, const CliIO &io )
 {
     extractGlobalFlags( args );
     QString sub = args.isEmpty() ? "run" : args.takeFirst();
+    // Track 14 (WP-E): an unknown subcommand used to be treated as `run` —
+    // reject it instead of executing the pipeline under a renamed verb.
+    if ( sub != "run" && sub != "validate" && sub != "resume" )
+    {
+        const CliErrorDetails details {
+            .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+            .expected = "run|validate|resume",
+            .actual = sub.toStdString() };
+        return io.finish( false, "pipeline", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown pipeline subcommand: " + sub.toStdString(), &details );
+    }
     if ( args.isEmpty() )
     {
         return usageError( io, "pipeline", "usage: pipeline run <file.json>" );
