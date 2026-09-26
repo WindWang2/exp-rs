@@ -80,8 +80,10 @@ struct ObjectStoreCredentials
     std::string secretAccessKey;
     std::string sessionToken;   ///< "" when none
     std::string region;         ///< "" leaves the ambient region untouched
-    std::string endpoint;       ///< custom endpoint ("http://127.0.0.1:9000")
-                                ///< for S3-compatible stores; "" = provider default
+    std::string endpoint;       ///< custom endpoint for S3-compatible stores,
+                                ///< "http://127.0.0.1:9000" or "127.0.0.1:9000"
+                                ///< (the credential window normalizes either
+                                ///< spelling for GDAL; "" = provider default)
     bool anonymous = false;     ///< true = force unsigned requests (public data)
 
     bool empty() const;
