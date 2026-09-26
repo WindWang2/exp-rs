@@ -15,7 +15,6 @@
 
 #include <QApplication>
 
-#include <cstdlib>
 
 #include <gdal_priv.h>
 
@@ -42,6 +41,7 @@
 #include "agent/layout_tools/layout_service.h"
 #include "agent/layout_tools/layout_tools.h"
 #include "agent/spatial_tools/spatial_tool.h"
+#include "support/qt_lifecycle.h"
 
 using sicnu::agent::layout_tools::LayoutService;
 using sicnu::agent::spatial_tools::SpatialToolRegistry;
@@ -51,17 +51,8 @@ namespace
 // Full QGIS teardown at process exit is a destruction-order minefield (see
 // test_layout_designer.cpp): report results, then leave via _Exit before any
 // static destructor runs.
-class FastExitListener : public Catch::EventListenerBase
-{
-  public:
-    using Catch::EventListenerBase::EventListenerBase;
-    void testRunEnded( const Catch::TestRunStats &stats ) override
-    {
-      std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-    }
-};
 }
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
