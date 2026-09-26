@@ -49,8 +49,10 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
     // Use the first layer to set up the sink
     QString dest;
     QgsFields outputFields = layers.first()->fields();
+    const Qgis::WkbType sinkWkbType = layers.first()->wkbType();
+    const Qgis::GeometryType sinkGeometryClass = QgsWkbTypes::geometryType( sinkWkbType );
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
-        outputFields, layers.first()->wkbType(), layers.first()->crs() ) );
+        outputFields, sinkWkbType, layers.first()->crs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
@@ -104,6 +106,21 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                 if ( outIdx >= 0 )
                     outFeat.setAttribute( outIdx, inAttrs.at( i ) );
             }
+            // #1043: the sink is typed from the FIRST layer — a feature whose
+            // geometry CLASS differs (point vs polygon vs line) cannot be
+            // stored there. Memory sinks accept anything and report success,
+            // so the addFeature() check alone never fires for them; the
+            // merge would silently publish a mixed-class output under a
+            // typed contract. Refuse it loudly instead. An Unknown-class
+            // sink (Geometry-typed memory layer, generic GPKG geometry
+            // table) legally stores every class and is exempt; multiplicity
+            // variants (point↔multipoint) share one class and stay
+            // accepted, matching what the sink actually stores.
+            if ( sinkGeometryClass != Qgis::GeometryType::Unknown
+                 && outFeat.hasGeometry() && outFeat.geometry().type() != sinkGeometryClass )
+                throw QgsProcessingException( QObject::tr( "Could not write feature: geometry type %1 cannot be stored in the %2 output" )
+                                                  .arg( QgsWkbTypes::displayString( outFeat.geometry().wkbType() ),
+                                                        QgsWkbTypes::displayString( sinkWkbType ) ) );
             if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
                 throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );
         }

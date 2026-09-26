@@ -93,6 +93,62 @@ TEST_CASE( "vector writer streams features and publishes atomically", "[io][vect
   CHECK( tail.empty() );
 }
 
+TEST_CASE( "overwrite replaces an existing target; without it the create refuses",
+           "[io][vector][contract]" )
+{
+  const std::string target = ( fs::path( scratchDir( "overwrite" ) ) / "cities.gpkg" ).string();
+
+  {
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = "Chengdu";
+    attrs["value"] = 500.0;
+    attrs["code"] = static_cast<Json::Int64>( 2701 );
+    writer.writeFeature( attrs, "POINT (104.0668 30.5728)" );
+    writer.finalize();
+  }
+  REQUIRE( sicnu::geo::atomic_fs::fileExists( target ) );
+
+  // overwrite=false on an existing target refuses loudly and keeps the
+  // previous product untouched.
+  bool refused = false;
+  try
+  {
+    sicnu::geo::VectorWriter::create( target, "cities", "Point", demoFields(),
+                                      sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    FAIL( "expected target-already-exists refusal" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    refused = true;
+    CHECK( error.code() == sicnu::geo::ErrorCode::IoError );
+  }
+  CHECK( refused );
+
+  // overwrite=true replaces the dataset: the reader sees exactly the new
+  // content, not a merge with the previous generation.
+  {
+    sicnu::geo::VectorWriteOptions options;
+    options.overwrite = true;
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), options );
+    Json::Value attrs( Json::objectValue );
+    attrs["name"] = "Beijing";
+    attrs["value"] = 1000.0;
+    attrs["code"] = static_cast<Json::Int64>( 1100 );
+    writer.writeFeature( attrs, "POINT (116.4074 39.9042)" );
+    writer.finalize();
+  }
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  CHECK( reader.layerInfo().featureCount == 1 );
+  std::vector<sicnu::geo::VectorFeature> batch;
+  REQUIRE( reader.nextBatch( batch, 10 ) );
+  REQUIRE( batch.size() == 1 );
+  CHECK( batch[0].attributes["name"].asString() == "Beijing" );
+  CHECK( batch[0].attributes["value"].asDouble() == Approx( 1000.0 ) );
+}
+
 TEST_CASE( "attribute projection and filters stream bounded batches", "[io][vector][contract]" )
 {
   const std::string target = ( fs::path( scratchDir( "filters" ) ) / "cities.gpkg" ).string();

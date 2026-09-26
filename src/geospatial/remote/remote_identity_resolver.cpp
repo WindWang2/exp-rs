@@ -151,11 +151,13 @@ std::function<std::string( const std::string &path )> makeRemoteInputIdentityRes
 
         SessionCache &cache = sessionCache();
         SessionEntry entry;
+        bool known = false;
         {
             std::lock_guard<std::mutex> lock( cache.mutex );
-            if ( !cache.find( url, &entry ) )
-                return probeAndStore( cache, url ); // first sight: probe unlocked
+            known = cache.find( url, &entry );
         }
+        if ( !known )
+            return probeAndStore( cache, url ); // first sight: probe unlocked
 
         const auto age = std::chrono::steady_clock::now() - entry.lastChecked;
         if ( age < revalidateTtl() )

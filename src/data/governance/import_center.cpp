@@ -109,10 +109,15 @@ ImportScanReport ImportCenter::importRemote( const QStringList &urls )
             continue;
         // The GDAL provider normalizes http(s) to /vsicurl/ at resolve time,
         // so the durable alias carries the NORMALIZED spelling — check both
-        // plus the runtime authority before treating a URL as new.
-        const QString normalized = url.startsWith( QLatin1String( "http" ) )
-                                       ? QStringLiteral( "/vsicurl/" ) + url
-                                       : url;
+        // plus the runtime authority before treating a URL as new. The
+        // scheme check is case-insensitive and scheme-shaped ("http://" /
+        // "https://" only): a case-variant spelling would otherwise miss the
+        // alias the GDAL provider resolves to and double-register, and a
+        // bare "http"-prefix match would also catch non-URL spellings.
+        const QString lowered = url.toLower();
+        const bool isHttp = lowered.startsWith( QLatin1String( "http://" ) )
+                            || lowered.startsWith( QLatin1String( "https://" ) );
+        const QString normalized = isHttp ? QStringLiteral( "/vsicurl/" ) + url : url;
         const bool known = m_service.store().assetByPath( url ).has_value()
                            || m_service.store().assetByPath( normalized ).has_value()
                            || m_dataManager->findByPath( url ).has_value();

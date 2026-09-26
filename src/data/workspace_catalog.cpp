@@ -1,6 +1,8 @@
 // workspace_catalog.cpp — see workspace_catalog.h for the contract.
 #include "workspace_catalog.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include <QDateTime>
 #include <QDir>
 
@@ -214,7 +216,7 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
                                                    QStringLiteral( "catalog not open" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
     QVector<Diagnostic> collisions;
-    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+    if ( SICNU_FAULT_POINT( "workspace_catalog.begin" ) || !m_impl->exec( "BEGIN IMMEDIATE" ) )
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.transaction" ),
                                                    QStringLiteral( "cannot begin transaction" ) ) );
     {
@@ -344,7 +346,7 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
             }
         }
     }
-    if ( !m_impl->exec( "COMMIT" ) )
+    if ( SICNU_FAULT_POINT( "workspace_catalog.commit" ) || !m_impl->exec( "COMMIT" ) )
     {
         // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
         // roll back so the connection never leaks its write lock.

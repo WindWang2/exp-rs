@@ -262,7 +262,11 @@ TEST_CASE("VectorMergeAlgorithm refuses unwritable features instead of dropping 
 
     bool ok = true;
     try {
-        (void)alg->run(params, context, &feedback, &ok);
+        // catchExceptions=false: run() swallows QgsProcessingException by
+        // default (logging it and setting *ok=false); the #1043 contract is
+        // that the algorithm REFUSES unwritable features with the typed
+        // exception, so this test observes it through the documented knob.
+        (void)alg->run(params, context, &feedback, &ok, QVariantMap(), false);
         FAIL("expected QgsProcessingException for features the sink cannot store");
     } catch (const QgsProcessingException &e) {
         const QString message = e.what();
@@ -351,4 +355,47 @@ TEST_CASE("VectorDissolveAlgorithm unions groups once and keeps every group (#10
     }
     CHECK_THAT(areaA, Catch::Matchers::WithinAbs(2.0, 1e-6));
     CHECK_THAT(areaB, Catch::Matchers::WithinAbs(1.0, 1e-6));
+}
+
+TEST_CASE("VectorMergeAlgorithm accepts every geometry class into an Unknown-class sink",
+          "[processing][vector][merge]") {
+    // Review P2: the #1043 class guard must not fire when the FIRST layer
+    // types the sink as Unknown (Geometry-typed memory layer, generic GPKG
+    // geometry table) — such sinks legally store every class, and master
+    // accepted this merge before the guard existed.
+    std::unique_ptr<QgsVectorLayer> anyLayer(new QgsVectorLayer(
+        "Geometry?crs=EPSG:4326&field=name:string", "merge_any", "memory"));
+    REQUIRE(anyLayer->isValid());
+    QgsFeature pg(anyLayer->fields());
+    pg.setAttribute("name", "pg");
+    pg.setGeometry(QgsGeometry::fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"));
+    REQUIRE(anyLayer->dataProvider()->addFeatures(QgsFeatureList{pg}));
+
+    std::unique_ptr<QgsVectorLayer> pointLayer(new QgsVectorLayer(
+        "Point?crs=EPSG:4326&field=name:string", "merge_pt3", "memory"));
+    REQUIRE(pointLayer->isValid());
+    QgsFeature pt(pointLayer->fields());
+    pt.setAttribute("name", "pt");
+    pt.setGeometry(QgsGeometry::fromWkt("POINT(2 2)"));
+    REQUIRE(pointLayer->dataProvider()->addFeatures(QgsFeatureList{pt}));
+
+    VectorMergeAlgorithm proto;
+    std::unique_ptr<QgsProcessingAlgorithm> alg(proto.create());
+
+    QgsProcessingContext context;
+    QgsProcessingFeedback feedback;
+    QVariantMap params;
+    QVariantList mapLayers = {
+        QVariant::fromValue(static_cast<QgsMapLayer *>(anyLayer.get())),
+        QVariant::fromValue(static_cast<QgsMapLayer *>(pointLayer.get()))
+    };
+    params[QStringLiteral("INPUT_LAYERS")] = mapLayers;
+    params[QStringLiteral("OUTPUT")] = QStringLiteral("memory:");
+
+    bool ok = false;
+    QVariantMap res = alg.run(params, context, &feedback, &ok, QVariantMap(), false);
+    REQUIRE(ok);
+    auto *outLayer = qobject_cast<QgsVectorLayer *>(context.getMapLayer(res[QStringLiteral("OUTPUT")].toString()));
+    REQUIRE(outLayer != nullptr);
+    CHECK(outLayer->featureCount() == 2);
 }

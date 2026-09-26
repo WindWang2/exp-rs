@@ -30,11 +30,14 @@
 #include <gdal.h>
 
 #include "data/asset_types.h"
+#include "data/artifact_store.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "data/derivation_record.h"
 #include "data/artifact_object_pool.h"
+#include "data/governance/governance_store.h"
 #include "data/source_descriptor.h"
+#include "data/workspace_catalog.h"
 #include "runtime/observability/fault_registry.h"
 #include "processing/framework/output_committer.h"
 #include "workflow/workflow_checkpoint.h"
@@ -470,4 +473,136 @@ TEST_CASE( "fault matrix: QUAC multi-band output fails truthfully on a "
     REQUIRE( AtmosphericCorrection::processFileMultiBand(
         source, output, AtmosphericCorrection::Quac, &error, {} ) );
     REQUIRE( QFile::exists( output ) );
+}
+
+// ---------------------------------------------------------------------------
+// Data-layer transactions (artifact store / workspace catalog / governance)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "fault matrix: artifact-store commit failure rolls back and the "
+           "store stays usable",
+           "[fault][artifact_store]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    sicnu::data::ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "artifacts.sqlite" ), &err ) );
+
+    const QString payload = dir.filePath( "payload-a.tif" );
+    {
+        QFile f( payload );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "payload-bytes" );
+    }
+    sicnu::data::ArtifactRegistration reg;
+    reg.logicalKey = QStringLiteral( "fault/ndvi" );
+    reg.storagePath = payload;
+    reg.kind = QStringLiteral( "raster" );
+
+    // Injected COMMIT failure: the register must fail truthfully, roll the
+    // transaction back (no leaked write lock) and leave NO version row.
+    armFault( { "artifact_store.commit", Mode::NextN, 1, {} } );
+    const auto failed = store.registerArtifact( reg );
+    REQUIRE_FALSE( failed );
+    REQUIRE_FALSE( store.latestByLogicalKey( reg.logicalKey ).has_value() );
+    REQUIRE( store.versionsByLogicalKey( reg.logicalKey ).isEmpty() );
+
+    // The connection is healthy: an immediate real register succeeds and is
+    // the only version (the failed attempt left nothing behind).
+    const auto ok = store.registerArtifact( reg );
+    REQUIRE( ok );
+    REQUIRE( ok.value().version == 1 );
+    REQUIRE( store.versionsByLogicalKey( reg.logicalKey ).size() == 1 );
+}
+
+TEST_CASE( "fault matrix: artifact-store step failure rolls back cleanly",
+           "[fault][artifact_store]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    sicnu::data::ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "artifacts.sqlite" ), &err ) );
+
+    const QString payload = dir.filePath( "payload-b.tif" );
+    {
+        QFile f( payload );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "payload-bytes" );
+    }
+    sicnu::data::ArtifactRegistration reg;
+    reg.logicalKey = QStringLiteral( "fault/step" );
+    reg.storagePath = payload;
+    reg.kind = QStringLiteral( "raster" );
+
+    armFault( { "artifact_store.step", Mode::NextN, 1, {} } );
+    const auto failed = store.registerArtifact( reg );
+    REQUIRE_FALSE( failed );
+    REQUIRE_FALSE( store.latestByLogicalKey( reg.logicalKey ).has_value() );
+
+    const auto ok = store.registerArtifact( reg );
+    REQUIRE( ok );
+    REQUIRE( ok.value().version == 1 );
+}
+
+TEST_CASE( "fault matrix: workspace-catalog commit failure rolls back and the "
+           "catalog stays usable",
+           "[fault][workspace_catalog]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    sicnu::data::WorkspaceCatalog catalog;
+    QString err;
+    REQUIRE( catalog.open( dir.filePath( "catalog.sqlite" ), &err ) );
+
+    sicnu::data::CatalogAsset asset;
+    asset.assetId = QStringLiteral( "fault-asset-1" );
+    asset.sourceKey = QStringLiteral( "fault/asset-1" );
+    asset.canonicalSource = QStringLiteral( "/data/fault-asset-1.tif" );
+    asset.kind = QStringLiteral( "raster" );
+    asset.state = QStringLiteral( "Ready" );
+    asset.persistence = QStringLiteral( "session" );
+    asset.displayName = QStringLiteral( "fault asset" );
+
+    armFault( { "workspace_catalog.commit", Mode::NextN, 1, {} } );
+    const auto failed = catalog.upsertAssets( { asset } );
+    REQUIRE_FALSE( failed );
+    REQUIRE( catalog.page( {}, 0, 10 ).total == 0 );
+
+    // Disarmed again: the same upsert succeeds and is the only row.
+    const auto ok = catalog.upsertAssets( { asset } );
+    REQUIRE( ok );
+    REQUIRE( catalog.page( {}, 0, 10 ).total == 1 );
+}
+
+TEST_CASE( "fault matrix: governance-store commit failure rolls back and the "
+           "store stays usable",
+           "[fault][governance_store]" )
+{
+    FaultScope scope;
+    QTemporaryDir dir;
+    sicnu::workspace::GovernanceStore store;
+    QString err;
+    REQUIRE( store.open( dir.filePath( "governance.sqlite" ), &err ) );
+
+    sicnu::workspace::GovernedAsset asset;
+    asset.assetId = QStringLiteral( "fault-gov-1" );
+    asset.sourceKey = QStringLiteral( "fault/gov-1" );
+    asset.canonicalSource = QStringLiteral( "/data/fault-gov-1.tif" );
+    asset.kind = QStringLiteral( "raster" );
+    asset.state = QStringLiteral( "Ready" );
+    asset.persistence = QStringLiteral( "session" );
+    asset.displayName = QStringLiteral( "fault governance asset" );
+
+    armFault( { "governance_store.commit", Mode::NextN, 1, {} } );
+    const auto failed = store.upsertAsset( asset );
+    REQUIRE_FALSE( failed );
+    REQUIRE_FALSE( store.assetByPath( asset.canonicalSource ).has_value() );
+
+    const auto ok = store.upsertAsset( asset );
+    REQUIRE( ok );
+    const auto round = store.assetByPath( asset.canonicalSource );
+    REQUIRE( round.has_value() );
+    REQUIRE( round->assetId == asset.assetId );
 }
