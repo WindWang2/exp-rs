@@ -180,7 +180,7 @@ TEST_CASE( "dataset argument errors carry the four-tuple", "[cli][errors][r4][da
     SECTION( "unknown dataset subcommand" )
     {
         requireFourTuple( "dataset bogus-sub --dataset-db /nonexistent/sicnu-r4.db", 6,
-                          "INVALID_INPUT", true, /*actual*/ true, true );
+                          "INVALID_INPUT", true, /*actual*/ true, /*hint*/ false );
     }
     SECTION( "store open failure names the unreadable path" )
     {
@@ -243,7 +243,7 @@ TEST_CASE( "usage hints ride along on usage errors", "[cli][errors][r4]" )
     SECTION( "pipeline run on a missing file (class fixed by WP-A)" )
     {
         requireFourTuple( "pipeline run /nonexistent/sicnu-r4/missing.json", 6,
-                          "INVALID_INPUT", false, false, false );
+                          "INVALID_INPUT", true, true, true );
     }
 }
 
@@ -253,5 +253,5 @@ TEST_CASE( "plugin uninstall failure is classified, not bare", "[cli][errors][r4
     // "uninstall failed" message. Contract class for "unknown plugin id" is
     // MissingDependency(5) — same as `plugin inspect` on an unknown id.
     requireFourTuple( "plugin uninstall org.example.no-such-plugin", 5, "MISSING_DEPENDENCY",
-                      false, false, false );
+                      true, true, true );
 }
