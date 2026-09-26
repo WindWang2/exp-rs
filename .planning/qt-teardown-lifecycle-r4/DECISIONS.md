@@ -79,3 +79,16 @@ Fixture skeleton per brief: construct (explicit parent chain) → use (touch bac
 **QNetworkReply audit (whitelist; 11 files)**: stac_client.cpp (191-199) and qgscodeeditorwidget.cpp (596-608) show the repo-standard pattern — `connect(reply, …, this, …)` + `reply->deleteLater()` on finished. Remaining 9 files touch replies via wrappers/indirect members; per-file confirmation during execution pass (WP-D budget), each recorded here.
 
 **先亡宿主 representative test** (WP-D deliverable): dual-viewport fixture case "controller dies before canvases" already asserts the no-post-mortem-delivery contract for the sync path; the canvas/CRS churn cases cover the PROJ-cache side. Network-path 先亡宿主 rides on stac_client execution-pass verification.
+
+## 6. Root cause CONFIRMED (red-step stack, 2026-09-27)
+
+A-1/A-3 upgraded from hypothesis: captured SIGSEGV (rc=139 after all assertions pass) —
+`exit()` LIFO destroys the leaked static `QApplication` → `~QApplicationPrivate::cleanupThreadData()`
+→ `QThreadStorage<QgsProjContext*>::deleteData` → `~QgsProjContext` (qgsprojutils.cpp:50)
+→ `QgsCoordinateReferenceSystem::removeFromCacheObjectsBelongingToCurrentThread`
+(qgscoordinatereferencesystem.cpp:770) → `QgsReadWriteLocker` on the already-destroyed
+`Q_GLOBAL_STATIC` cache lock → `lockForWrite(0x0)` → SEGV.
+This build resolves `qgsprojutils.h:296-304` to the `QThreadStorage` branch (`USE_THREAD_LOCAL` undefined),
+so the context dies inside `~QCoreApplication`'s thread-data cleanup — before that, `~QgsApplication`
+(and our listener) run `invalidateCaches()` while guards are alive, which is the safe documented path.
+Full trace in EVIDENCE.md §2. Retirement = production exit ordering (main.cpp:622-635) inside the run.
