@@ -129,8 +129,12 @@ LineageGraph::LineageGraph( const DatasetStore &datasetStore, const ExperimentSt
     // dangling lineage this layer exists to expose.
     appendEdgesFrom( datasetStore.allLineageEdges(), m_edges, m_outgoing, m_incoming,
                      m_referencedNodes );
-    appendEdgesFrom( experimentStore.allLineageEdges(), m_edges, m_outgoing, m_incoming,
+    // Page read, not a silent scan (#1333 item 9): a truncated feed is
+    // carried on the graph so every query answer can disclose it.
+    const auto experimentEdges = experimentStore.lineageEdgePage();
+    appendEdgesFrom( experimentEdges.edges, m_edges, m_outgoing, m_incoming,
                      m_referencedNodes );
+    m_experimentSourceTruncated = experimentEdges.truncated;
 }
 
 void LineageGraph::addEdge( const LineageNodeId &from, const QString &edgeKind,
@@ -148,15 +152,19 @@ void LineageGraph::addEdge( const LineageNodeId &from, const QString &edgeKind,
 LineageQueryResult LineageGraph::ancestors( const LineageNodeId &start, int maxDepth,
                                             qint64 maxNodes ) const
 {
-    return traverse( start, true, m_edges, m_outgoing, m_incoming, m_referencedNodes, m_resolver,
-                     maxDepth, maxNodes );
+    LineageQueryResult result = traverse( start, true, m_edges, m_outgoing, m_incoming,
+                                          m_referencedNodes, m_resolver, maxDepth, maxNodes );
+    result.experimentSourceTruncated = m_experimentSourceTruncated;
+    return result;
 }
 
 LineageQueryResult LineageGraph::descendants( const LineageNodeId &start, int maxDepth,
                                               qint64 maxNodes ) const
 {
-    return traverse( start, false, m_edges, m_outgoing, m_incoming, m_referencedNodes, m_resolver,
-                     maxDepth, maxNodes );
+    LineageQueryResult result = traverse( start, false, m_edges, m_outgoing, m_incoming,
+                                          m_referencedNodes, m_resolver, maxDepth, maxNodes );
+    result.experimentSourceTruncated = m_experimentSourceTruncated;
+    return result;
 }
 
 QVector<LineageEdgeRecord> LineageGraph::edgesOf( const LineageNodeId &node ) const
@@ -198,6 +206,7 @@ QJsonObject LineageQueryResult::toJson() const
     }
     json.insert( QStringLiteral( "edges" ), edgeArray );
     json.insert( QStringLiteral( "budget_exhausted" ), budgetExhausted );
+    json.insert( QStringLiteral( "experiment_source_truncated" ), experimentSourceTruncated );
     return json;
 }
 

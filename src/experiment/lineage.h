@@ -57,6 +57,12 @@ struct LineageQueryResult
     QVector<LineageNode> nodes;       // visited nodes, start node excluded
     QVector<LineageEdgeRecord> edges; // traversed edges
     bool budgetExhausted = false;     ///< node budget hit (result is a prefix)
+    /// The experiment-side edge feed behind the graph was page-truncated
+    /// (#1333 item 9): the traversal ran over a PREFIX of the store's
+    /// lineage, so "absent" is weaker than usual. The dataset-side feed has
+    /// the same shape but its store API does not report truncation yet —
+    /// recorded as a known limitation, not hidden here.
+    bool experimentSourceTruncated = false;
     QJsonObject toJson() const;
 };
 
@@ -90,8 +96,11 @@ class LineageGraph
     QVector<LineageEdgeRecord> edgesOf( const LineageNodeId &node ) const;
 
     qint64 edgeCount() const { return m_edges.size(); }
+    /// Whether the experiment-side edge feed was truncated at graph assembly.
+    bool experimentSourceTruncated() const { return m_experimentSourceTruncated; }
 
   private:
+    bool m_experimentSourceTruncated = false;
     QVector<LineageEdgeRecord> m_edges;
     QHash<QString, QVector<int>> m_outgoing; // from-key → edge indexes
     QHash<QString, QVector<int>> m_incoming; // to-key → edge indexes
