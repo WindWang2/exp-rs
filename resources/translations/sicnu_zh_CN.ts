@@ -5425,6 +5425,16 @@ Revision: %2</source>
         <source>Data source:</source>
         <translation>数据来源：</translation>
     </message>
+    <message>
+        <source>%1
+⚠ %2</source>
+        <translation>%1
+⚠ %2</translation>
+    </message>
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
 </context>
 <context>
     <name>QaMaskDialog</name>
@@ -12764,6 +12774,10 @@ Beware that this option will be applied on all vertices of the edited geometries
         <source>Expand Ribbon (Ctrl+F1)</source>
         <translation>展开功能区 (Ctrl+F1)</translation>
     </message>
+    <message>
+        <source>%1%2</source>
+        <translation>%1%2</translation>
+    </message>
 </context>
 <context>
     <name>RoiStatisticsWidget</name>
@@ -20036,6 +20050,20 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
     <message>
         <source>Design map frames, legends and scale bars, and export map products.</source>
         <translation>设计图框、图例、比例尺与导出地图产品。</translation>
+    </message>
+</context>
+<context>
+    <name>DataManagerPanel</name>
+    <message>
+        <source>%1 · %2</source>
+        <translation>%1 · %2</translation>
+    </message>
+</context>
+<context>
+    <name>VaCursorProbe</name>
+    <message>
+        <source>Cursor coordinates could not be transformed to the layer CRS.</source>
+        <translation>光标坐标无法变换到图层 CRS。</translation>
     </message>
 </context>
 </TS>
