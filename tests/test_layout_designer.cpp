@@ -28,12 +28,13 @@
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemscalebar.h>
-#include <cstdlib>
 #include <gui/layout/qgslayoutviewtoolselect.h>
 #include <gui/layout/qgslayoutviewtoolpan.h>
 #include <gui/layout/qgslayoutviewtoolzoom.h>
 #include <gui/layout/qgslayoutviewmouseevent.h>
 #include "layout/qgslayoutdesignerdialog.h"
+
+#include "support/qt_lifecycle.h"
 
 namespace
 {
