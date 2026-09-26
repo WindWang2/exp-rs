@@ -13862,3 +13862,8 @@ sicnu_add_teaching_admin_test(test_teaching_batch_r4)
 # hardening/r4-teaching-lab (Track 12): authoring-family failure paths +
 # fixture/pack asset consistency through the SAME inventory entry.
 sicnu_add_teaching_admin_test(test_teaching_authoring_failures_r4)
+
+# hardening/r4-teaching-lab (Track 12): transcript parity residuals +
+# session-family failure paths (restore byte-stability, order invariance,
+# partial-failure integrity, concurrency == sequential replay).
+sicnu_add_teaching_test(test_teaching_parity_r4)
