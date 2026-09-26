@@ -1198,7 +1198,7 @@
   },
   {
     "id": "command.workbench.experimentExplorationStudio",
-    "purpose": "打开实验探索工作台：参数敏感性、空间对比、故障教学与首分支分析。",
+    "purpose": "打开实验探索工作台：参数敏感性、空间对比、故障教学与首次分歧分析。",
     "prerequisites": [],
     "related": [],
     "keywords": [

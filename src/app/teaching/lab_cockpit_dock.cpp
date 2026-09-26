@@ -201,7 +201,7 @@ void LabCockpitDock::launchOperator( const QString &operatorId, const QString &p
   }
   QMessageBox::information(
     this, tr( "Jump to Processing Toolbox" ),
-    tr( "Please run operator %1 in the existing Processing Toolbox / Guided Workflow (open the toolbox to run directly; Guided Workflow supports step-by-step execution)." )
+    tr( "Please run operator %1 in the existing Processing Toolbox / Guided Workflow. The experiment workbench only projects; it does not duplicate operator UI." )
       .arg( operatorId ) );
 }
 

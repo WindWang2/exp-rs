@@ -1461,7 +1461,7 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
     </message>
     <message>
         <source>&lt;b&gt;Step %1/%2: %3&lt;/b&gt;</source>
-        <translation>&lt;b&gt;第 %1/%2 步：%3&lt;/b&gt;</translation>
+        <translation>&lt;b&gt;步骤 %1/%2：%3&lt;/b&gt;</translation>
     </message>
     <message>
         <source>Spectral Analysis</source>
@@ -20360,8 +20360,8 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
         <translation>跳转到处理工具箱</translation>
     </message>
     <message>
-        <source>Please run operator %1 in the existing Processing Toolbox / Guided Workflow (open the toolbox to run directly; Guided Workflow supports step-by-step execution).</source>
-        <translation>请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。（处理工具箱打开后可直接运行；Guided Workflow 支持分步执行 UI）</translation>
+        <source>Please run operator %1 in the existing Processing Toolbox / Guided Workflow. The experiment workbench only projects; it does not duplicate operator UI.</source>
+        <translation>请在现有 Processing Toolbox / Guided Workflow 中执行算子 %1。实验工作台只投影，不复制算子 UI。</translation>
     </message>
     <message>
         <source>Export failed: %1</source>

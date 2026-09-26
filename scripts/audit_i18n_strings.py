@@ -192,6 +192,11 @@ def classify_file(path: Path) -> dict:
             continue
 
         uv = USER_VISIBLE_RE.search(stmt)
+        if not uv and MSGBOX_RE.search(stmt):
+            # QMessageBox::information(w, "title", "text") — the literal
+            # arguments follow the receiver, so treat the whole statement
+            # as a user-visible sink.
+            uv = MSGBOX_RE.search(stmt)
         has_tr = TR_WRAPPER_RE.search(stmt)
         lits = literals_in(stmt)
 
@@ -283,6 +288,18 @@ def selftest() -> int:
         if r3["counts"]["fmt_concat"] + r3["counts"]["hard_zh"] < 2:
             print(f"SELFTEST FAIL concat: {r3['counts']}")
             ok = False
+        # Message-box sink (previously-defined-but-unused MSGBOX_RE path).
+        p5 = Path(td) / "box.cpp"
+        p5.write_text(
+            'void h() {\n'
+            '  QMessageBox::warning( this, "错误", "导出失败" );\n'
+            '}\n',
+            encoding="utf-8",
+        )
+        r5 = classify_file(p5)
+        if r5["counts"]["hard_zh"] < 2:
+            print(f"SELFTEST FAIL msgbox: {r5['counts']}")
+            ok = False
         # Log exemption.
         p4 = Path(td) / "log.cpp"
         p4.write_text(
@@ -311,7 +328,9 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.selftest:
-        return selftest()
+        rc = selftest()
+        if rc != 0 or not (args.files or args.gate or args.auto):
+            return rc
 
     if args.auto:
         import subprocess
