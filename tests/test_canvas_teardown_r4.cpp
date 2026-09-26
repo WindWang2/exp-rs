@@ -128,7 +128,7 @@ TEST_CASE( "Canvas teardown: CRS switch churn then delete is safe", "[teardown][
     const char *epsgs[] = { "EPSG:4326", "EPSG:3857", "EPSG:32633", "EPSG:4326" };
     for ( const char *code : epsgs )
     {
-      canvas.mapSettings().setDestinationCrs( QgsCoordinateReferenceSystem( QStringLiteral( code ) ) );
+      canvas.mapSettings().setDestinationCrs( QgsCoordinateReferenceSystem( QString::fromLatin1( code ) ) );
       canvas.zoomToFullExtent();
       QTest::qWait( 10 );
     }

@@ -7,6 +7,7 @@
 // keep receiving canvas extent signals (Qt disconnect-on-destroy contract).
 // The process must exit() cleanly afterwards with no _Exit defense.
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
@@ -18,6 +19,8 @@
 #include <qgsrectangle.h>
 
 #include "shell/rs_dual_viewport_sync_controller.h"
+
+using Catch::Approx;
 
 #include "support/qt_lifecycle.h"
 
@@ -73,18 +76,23 @@ TEST_CASE( "Dual viewport teardown: controller dies before canvases", "[teardown
   ensureApp();
   CanvasPair pair;
   QPointer<RsDualViewportSyncController> guard;
+  QgsRectangle lastSynced;
   {
     RsDualViewportSyncController ctl( pair.primary.get(), pair.secondary.get() );
     guard = &ctl;
     pair.primary->setExtent( QgsRectangle( 5, 5, 15, 15 ) );
     QTest::qWait( 40 );
+    lastSynced = pair.secondary->extent();
+    REQUIRE( !lastSynced.isEmpty() );
   }
   // Qt disconnect-on-destroy: a further primary pan must NOT reach the dead
-  // controller — the secondary keeps the last synced extent (x=5 story).
+  // controller — the secondary stays exactly where the last live sync left it.
   pair.primary->setExtent( QgsRectangle( 20, 20, 30, 30 ) );
   QTest::qWait( 60 );
   REQUIRE( guard.isNull() );
-  REQUIRE( pair.secondary->extent().xMinimum() == Approx( 5.0 ).margin( 1e-3 ) );
+  const QgsRectangle afterDeath = pair.secondary->extent();
+  REQUIRE( afterDeath.xMinimum() == Approx( lastSynced.xMinimum() ).margin( 1e-3 ) );
+  REQUIRE( afterDeath.yMinimum() == Approx( lastSynced.yMinimum() ).margin( 1e-3 ) );
 }
 
 TEST_CASE( "Dual viewport teardown: rapid extent churn then delete-all", "[teardown][r4]" )

@@ -71,7 +71,7 @@ namespace
   // Pool drain predicate on the widget family's dedicated bounded pool.
   bool scanPoolBusy()
   {
-    return sicnu::gui::RoiStatisticsWidget::analysisThreadPool()->activeThreadCount() > 0;
+    return RoiStatisticsWidget::analysisThreadPool()->activeThreadCount() > 0;
   }
 
   void waitForPoolDrain( int budgetRounds = 100 )
@@ -88,9 +88,9 @@ TEST_CASE( "ROI statistics teardown: compute-then-destroy keeps pool clean", "[t
   REQUIRE( dir.isValid() );
   Scene scene = makeScene( dir.path() );
 
-  QPointer<sicnu::gui::RoiStatisticsWidget> guard;
+  QPointer<RoiStatisticsWidget> guard;
   {
-    sicnu::gui::RoiStatisticsWidget w;
+    RoiStatisticsWidget w;
     guard = &w;
     w.setRasterLayer( scene.raster.get() );
     w.setRoiLayer( scene.roi.get() );
@@ -109,9 +109,9 @@ TEST_CASE( "ROI statistics teardown: destroy mid-compute cancels generation", "[
   REQUIRE( dir.isValid() );
   Scene scene = makeScene( dir.path() );
 
-  QPointer<sicnu::gui::RoiStatisticsWidget> guard;
+  QPointer<RoiStatisticsWidget> guard;
   {
-    sicnu::gui::RoiStatisticsWidget w;
+    RoiStatisticsWidget w;
     guard = &w;
     w.setRasterLayer( scene.raster.get() );
     w.setRoiLayer( scene.roi.get() );
@@ -125,7 +125,7 @@ TEST_CASE( "ROI statistics teardown: destroy mid-compute cancels generation", "[
 
   // A fresh widget on the same scene must compute cleanly — no stale
   // generation/owner state leaked by the destroyed one.
-  sicnu::gui::RoiStatisticsWidget fresh;
+  RoiStatisticsWidget fresh;
   fresh.setRasterLayer( scene.raster.get() );
   fresh.setRoiLayer( scene.roi.get() );
   fresh.computeStatistics();
@@ -141,9 +141,9 @@ TEST_CASE( "ROI statistics teardown: repeated widgets over one pool stay clean",
 
   for ( int round = 0; round < 3; ++round )
   {
-    QPointer<sicnu::gui::RoiStatisticsWidget> guard;
+    QPointer<RoiStatisticsWidget> guard;
     {
-      sicnu::gui::RoiStatisticsWidget w;
+      RoiStatisticsWidget w;
       guard = &w;
       w.setRasterLayer( scene.raster.get() );
       w.setRoiLayer( scene.roi.get() );

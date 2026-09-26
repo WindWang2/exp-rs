@@ -13891,7 +13891,8 @@ sicnu_discover_tests(test_timeline_scrubber_teardown_r4)
 
 add_executable(test_roi_statistics_teardown_r4 test_roi_statistics_teardown_r4.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/roi_statistics_widget.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp)
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/algorithms/math_utils.cpp)
 target_link_libraries(test_roi_statistics_teardown_r4 PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
@@ -13918,6 +13919,7 @@ target_link_libraries(test_exit_path_contracts_r4 PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core Qt6::Test
   sicnu_task_center sicnu_jobs
+  qgis_core
 )
 target_include_directories(test_exit_path_contracts_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
@@ -13930,6 +13932,7 @@ add_executable(test_teardown_retirement_gate_r4 test_teardown_retirement_gate_r4
 target_link_libraries(test_teardown_retirement_gate_r4 PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core Qt6::Test
+  qgis_core
 )
 target_include_directories(test_teardown_retirement_gate_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})

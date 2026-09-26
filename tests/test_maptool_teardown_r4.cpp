@@ -67,28 +67,27 @@ TEST_CASE( "Map tool teardown: canvas destroyed with active parented tool", "[te
   REQUIRE( toolGuard.isNull() );
 }
 
-TEST_CASE( "Map tool teardown: tool survives canvas, then dies alone", "[teardown][r4]" )
+TEST_CASE( "Map tool teardown: unsetMapTool then canvas destruction retires both", "[teardown][r4]" )
 {
   ensureApp();
   auto canvas = std::make_unique<QgsMapCanvas>();
   canvas->resize( 300, 300 );
+  // QgsMapTool parents itself to the canvas (QGIS ownership contract): the
+  // canvas owns the tool, so the production shell's unset-then-destroy order
+  // must retire both exactly once — no double delete, no survivor leak.
   auto tool = std::make_unique<ProbeTool>( canvas.get() );
+  QPointer<ProbeTool> toolGuard( tool.get() );
   canvas->setMapTool( tool.get() );
   QTest::qWait( 20 );
-
-  // Production shell unsets the active tool before destroying the canvas
-  // (main_window.cpp contract). Do exactly that, then destroy the canvas.
   canvas->unsetMapTool( tool.get() );
+
+  // Relinquish unique_ptr ownership: the canvas (QObject parent) owns the
+  // tool now — exactly one deleter for the tool.
+  tool.release();
   QPointer<QgsMapCanvas> canvasGuard( canvas.get() );
   canvas.reset();
   QTest::qWait( 30 );
   REQUIRE( canvasGuard.isNull() );
-  REQUIRE( toolGuard != nullptr );
-
-  // The orphaned tool must still be destructible afterwards.
-  QPointer<ProbeTool> toolGuard( tool.get() );
-  tool.reset();
-  QTest::qWait( 20 );
   REQUIRE( toolGuard.isNull() );
 }
 
@@ -105,7 +104,7 @@ TEST_CASE( "Map tool teardown: tool switch churn then delete-all", "[teardown][r
     auto probe = std::make_unique<ProbeTool>( &canvas );
     firstToolGuard = probe.get();
     for ( int i = 0; i < 10; ++i )
-      canvas.setMapTool( i % 2 == 0 ? probe.get() : pan.get() );
+      canvas.setMapTool( i % 2 == 0 ? static_cast<QgsMapTool *>( probe.get() ) : pan.get() );
     QTest::qWait( 20 );
   }
   QTest::qWait( 40 );
