@@ -250,3 +250,84 @@ TEST_CASE( "missing inputs and degenerate band counts are typed refusals",
     }
     REQUIRE( threw );
 }
+
+TEST_CASE( "mask-grid CRS mismatch and missing QA band roles are typed refusals",
+           "[r4][refusal][grid]" )
+{
+    // Closes review P2-6: the two WP-E refusal classes the suite originally
+    // dropped — a mask raster on a different CRS (apply_mask aligns
+    // nearest-neighbour only within one CRS) and a qa_mask request that
+    // needs product band roles the raster does not carry.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // (a) apply_mask: input in EPSG:4326, mask deliberately shifted to a
+    // different CRS (UTM 33N WKT) → typed refusal, never a silent align.
+    std::vector<float> v( 100, 3.0f );
+    const QString raster = writeFloatRaster( dir.filePath( "grid.tif" ), 10, 10, { v },
+                                             true, kSentinel );
+    std::vector<uint8_t> mask( 100, 0 );
+    mask[4] = 1;
+    GDALAllRegister();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    const QString maskCrs = dir.filePath( "mask_utm.tif" );
+    GDALDatasetH ds = GDALCreate( driver, maskCrs.toUtf8().constData(), 10, 10, 1, GDT_Byte,
+                                  nullptr );
+    REQUIRE( ds != nullptr );
+    const char *utmWkt =
+        "PROJCS[\"WGS 84 / UTM zone 33N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\","
+        "SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],"
+        "AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],"
+        "UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],"
+        "AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],"
+        "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",15],"
+        "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
+        "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],"
+        "AUTHORITY[\"EPSG\",\"32633\"]]";
+    const double utmGt[6] = { 500000.0, 1.0, 0.0, 4000010.0, 0.0, -1.0 };
+    REQUIRE( GDALSetGeoTransform( ds, utmGt ) == CE_None );
+    REQUIRE( GDALSetProjection( ds, utmWkt ) == CE_None );
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 10, 10, mask.data(), 10, 10, GDT_Byte, 0, 0 )
+             == CE_None );
+    GDALClose( ds );
+
+    bool threw = false;
+    try
+    {
+        Json::Value p;
+        p["input"] = raster.toStdString();
+        p["mask"] = maskCrs.toStdString();
+        p["output"] = dir.filePath( "masked.tif" ).toStdString();
+        runOperator( "rs:apply_mask", p, dir.path().toStdString() );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = true;
+        INFO( "message: " << e.message() );
+        REQUIRE( e.message().find( "CRS" ) != std::string::npos );
+    }
+    REQUIRE( threw );
+
+    // (b) qa_mask without qa_band on a raster without product band roles →
+    // typed refusal (role resolution has nothing to resolve).
+    const QString roleLess = writeU16Raster( dir.filePath( "scl.tif" ), 4, 1,
+                                             { 4, 8, 3, 255 }, false, 0.0 );
+    threw = false;
+    try
+    {
+        Json::Value p;
+        p["input"] = roleLess.toStdString();
+        p["output"] = dir.filePath( "qa.tif" ).toStdString();
+        p["source"] = "sentinel2_scl";
+        runOperator( "rs:qa_mask", p, dir.path().toStdString() );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        threw = true;
+        INFO( "message: " << e.message() );
+        REQUIRE( !e.message().empty() );
+    }
+    REQUIRE( threw );
+}

@@ -329,3 +329,38 @@ TEST_CASE( "digest: mosaic overlap merge is byte-stable", "[r4][digest][mosaic]"
     requireRasterDigestStable( "rs:mosaic", p, dir.filePath( "m1.tif" ),
                                dir.filePath( "m2.tif" ), dir.path() );
 }
+
+TEST_CASE( "digest: spectral similarity labels are byte-stable", "[r4][digest][similarity]" )
+{
+    // Closes the review P2-1 gate gap: 12 digest cases. The similarity seam
+    // carries a per-tile classification (background covariance-free, but a
+    // per-pixel scan over references) — byte-stable labels and scores across
+    // runs evidence the serial anchor for it too.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const size_t n = static_cast<size_t>( 30 ) * 20;
+    std::vector<float> b1( n ), b2( n );
+    for ( size_t i = 0; i < n; ++i )
+    {
+        b1[i] = static_cast<float>( i % 17 ) + 1.0f;
+        b2[i] = static_cast<float>( ( i * 7 ) % 23 ) + 1.0f;
+    }
+    b1[99] = 255.0f;
+    b2[99] = 255.0f; // declared-sentinel void
+    const QString input = writeFloatRaster( dir.filePath( "img.tif" ), 30, 20, { b1, b2 },
+                                            true, 255.0 );
+    Json::Value refs( Json::arrayValue );
+    Json::Value r0( Json::arrayValue );
+    r0.append( 2 );
+    r0.append( 1 );
+    Json::Value r1( Json::arrayValue );
+    r1.append( 1 );
+    r1.append( 2 );
+    refs.append( r0 );
+    refs.append( r1 );
+    Json::Value p;
+    p["input"] = input.toStdString();
+    p["refs"] = refs;
+    requireRasterDigestStable( "rs:spectral_similarity", p, dir.filePath( "sim1.tif" ),
+                               dir.filePath( "sim2.tif" ), dir.path() );
+}

@@ -45,10 +45,11 @@ fixed; the rs:pca claim was REFUTED that way and the matrix row corrected
   |---|---|---|
   | test_operator_nodata_semantics | 7 | 254 |
   | test_operator_chain_tolerance | 3 | 504 |
-  | test_operator_preflight_refusals | 4 | 64 |
+  | test_operator_preflight_refusals | 5 | 86 |
   | test_known_answer_corpus_r4 | 8 | 269 |
-  | test_operator_determinism_digest | 11 | 120 |
-  | **total** | **33** | **1,211** |
+  | test_operator_determinism_digest | 12 | 129 |
+  | **total (post-review)** | **35** | **1,242** |
+  (pre-review: 33 cases / 1,211 assertions)
 - Potency (red) demonstration: with `src/` reverted to 8d6cc2fcc
   (pre-fix), rebuilt and re-run: nodata_semantics → **3 cases red**
   (derivative NaN-ization, ratio masking, stretch declaration — exactly
@@ -59,8 +60,9 @@ fixed; the rs:pca claim was REFUTED that way and the matrix row corrected
   **red pre-fix**; fixes restored → all green.
 - Gate double run (catch_discover_tests TEST_PREFIX `r4::`, D15
   convention):
-  `ctest -R "^r4::" -j1` → **33/33 passed, exit 0** (12.92 s)
-  `ctest -R "^r4::" -j1` → **33/33 passed, exit 0** (12.78 s)
+  pre-review:  `ctest -R "^r4::" -j1` → 33/33 passed, exit 0 (12.92 s) ×2
+  post-review: `ctest -R "^r4::" -j1` → **35/35 passed, exit 0** (15.56 s)
+               `ctest -R "^r4::" -j1` → **35/35 passed, exit 0** (13.18 s)
 - Scope note (honest): the brief's full regex `operator|nodata|known|
   determinis` spans ~all 194 test targets; this worktree builds only the
   sicnu_processing/sicnu_operators closure (a full qgis_gui-chain build

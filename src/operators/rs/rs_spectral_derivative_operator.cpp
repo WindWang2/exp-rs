@@ -243,6 +243,11 @@ Json::Value RsSpectralDerivativeOperator::run( const Json::Value &params, RSOper
     output.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
 
     const size_t tilePixels = static_cast<size_t>( kTileDim ) * kTileDim;
+    // Sentinel-masking scratch (review P3-10): hoisted so the per-tile path
+    // does not reallocate; untouched entirely when no band declares a
+    // sentinel (the masked copy itself is then skipped, keeping that path
+    // bit-identical).
+    std::vector<float> masked;
     std::vector<float> outTile( tilePixels );
     std::vector<float> d1( tilePixels * std::max( 1, bandCount - 1 ) );
     std::vector<float> d2( tilePixels * std::max( 1, bandCount - 2 ) );
@@ -255,7 +260,6 @@ Json::Value RsSpectralDerivativeOperator::run( const Json::Value &params, RSOper
         // NaN-ize declared sentinels before differencing (no-op copy when
         // no band declares a sentinel, keeping the no-sentinel path
         // bit-identical to the previous behavior).
-        std::vector<float> masked;
         const float *pixelSource = bip;
         if ( anySentinel )
         {

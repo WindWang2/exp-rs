@@ -10,3 +10,13 @@
 | D6 | temporal family untouched beyond fixation coverage (flash-temporal-phenology-12 owns recent work) | `rs:temporal_summary` delegates to `temporal_stream.cpp` which masks sentinels correctly; no defect found. | matrix row rs:temporal_summary |
 | D7 | Determinism digests assert byte-identical raster outputs via `compareRastersBitExact` + CSV sha256 for tabular products; in-process double-run only (the "restart process" variant is covered by ctest itself re-launching the binary per case via catch_discover_tests) | Serial execution is the documented ADR 0124 regression anchor; catch_discover_tests launches a fresh process per TEST_CASE, so cross-case runs are genuine restarts. | raster_bit_compare.h; CMakeLists sicnu_discover_tests |
 | D8 | Token accounting honesty: the 280M budget in the brief models a long-horizon multi-agent harness; this session records measured subagent token usage per round in the ledger and states the delta plainly in the PR instead of inflating numbers to hit a gate | Falsifying ledger numbers would corrupt the very audit trail the track exists to build. | .goal-loop-ledger.md; PR body |
+
+## Review pass 1 amendments (independent reviewer, SHIP-WITH-FIXES → all dispositioned)
+
+| # | amendment | rationale |
+|---|---|---|
+| D3b | D3 correction: `rs:pca` is NOT a defect (kernel `isPixelValid` excludes sentinels in both PCA passes); the fix set is the remaining 7. Verified by direct code read; matrix row 112 corrected. | review pass 1 / matrix accuracy |
+| D4b | Backlog additions: (a) rs:image_enhancement filter/speckle windowed kernels ingest sentinels as data (review P2-4) — masked-in-window repair deferred with the warp-family seam work; (b) similarity kernel single-sentinel interface: multi-sentinel inputs get the first declared sentinel applied to all used bands (review P3-9). | scope/risk boundaries |
+| D7b | D7 reworded honestly: every digest comparison is an in-process double-run; ctest re-launches the binary per TEST_CASE but does not compare outputs ACROSS processes. Process-restart variant not exercised. | review P3-11 |
+| D9 | Gate regex narrowing (brief regex → `^r4::`) accepted because the worktree builds only the sicnu_processing/sicnu_operators light closure; disclosed in EVIDENCE §4 and the PR body; full-regex run recommended in CI before merge. | review P2-5 |
+| D10 | WP-E delivered 6 refusal scenarios (2 added after review P2-6: mask CRS mismatch, missing QA band roles); "wrong-dtype mask grid" is covered indirectly by the CRS-mismatch fixture (different CRS AND uint8 vs the dialog's typical float products) — further dtype matrix expansion → backlog. | review P2-6 |
