@@ -9670,6 +9670,16 @@ target_link_libraries(test_cli_fail_fast_r4 PRIVATE sicnu_sdk sicnu_plugins_fram
 target_compile_definitions(test_cli_fail_fast_r4 PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+
+# Track 14 (WP-C): README command vocabulary <-> CLI, bidirectional. Reads
+# the source tree (like test_cli_command_surface) and spawns the real binary
+# (like test_cli_commands_json) — POSIX popen only.
+if(NOT WIN32)
+sicnu_add_sdk_test(test_cli_help_vocabulary_r4)
+target_compile_definitions(test_cli_help_vocabulary_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+endif()
 endif()
 endif()
 

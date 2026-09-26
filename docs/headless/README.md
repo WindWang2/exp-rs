@@ -31,6 +31,7 @@ row without a dispatch branch) fails the suite.
 | `env-doctor` | (no sub-command; `--json` only — see `docs/deployment/env-doctor.md`) |
 | `tools` | `list`, `search <query>`, `schema <tool-id>` |
 | `batch` | `run <manifest.json\|jsonl> [--fail-fast] [--dry-run]`, `validate <manifest.json\|jsonl>` |
+| `session` | `<action>` — `run`, `resume`, `reconcile`, `status`, `timeline`, `export`, `pause`, `cancel`, `clear-pause`, `clear-cancel`, `approve-repair`, `clear_pause`, `clear_cancel`, `actions` (agent ops driver over OperationsCoordinator) |
 | `passport` | `--path <file> [--json] [--teaching] [--diff <passport.json>]` |
 
 Global flags are parsed by the command layer, so they must appear **after** the
@@ -69,6 +70,34 @@ filter vocabulary and closest id suggestions.
 | 5 | missing dependency (unknown algorithm/model/plugin) |
 | 6 | invalid input (malformed arguments/unreadable files) |
 | 7 | runtime unavailable (core failed to initialize) |
+
+## Error message format (stable contract)
+
+Every command-level error is a four-tuple: **code + one-sentence reason +
+expected/actual + suggested action**.
+
+In text mode it is one stderr line:
+
+```
+[E-6:INVALID_INPUT] --dataset-db <path> is required; expected: --dataset-db <path>; hint: usage: dataset <subcommand> --dataset-db <path> [options]
+```
+
+`expected:`/`actual:` segments are present only when the failure is a
+mismatch or names a resource; `hint:` carries the usage line or the fix.
+In `--json` mode the envelope keeps its published fields and adds the same
+tuple as an object:
+
+```json
+{"ok":false,"command":"dataset","error":"--dataset-db <path> is required",
+ "error_details":{"code":"E-6:INVALID_INPUT","expected":"--dataset-db <path>",
+                  "hint":"usage: dataset <subcommand> --dataset-db <path> [options]"},
+ "data":null,"api_version":"3.0"}
+```
+
+The `E-<exit>:<SYMBOL>` code is anchored to the exit-code table above, so
+scripts can match errors without parsing prose. Unknown-subcommand errors
+carry the full valid vocabulary in `error_details.expected`
+(e.g. `create|inspect|validate|...`).
 
 ## Examples
 
