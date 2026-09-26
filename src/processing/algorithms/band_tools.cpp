@@ -127,6 +127,10 @@ bool BandTools::processRgbToIhsFile( const QString &sourcePath, const QString &o
                              src.geoTransform(), src.projection() );
     if ( !dst.isOpen() )
         return fail( errorMessage, QStringLiteral( "无法创建输出栅格。" ) );
+    // ihsTransformTile writes NaN holes for masked pixels; declaring them
+    // keeps the holes machine-readable (band_ratio already declares NaN).
+    for ( int ob = 1; ob <= 3; ++ob )
+        dst.setBandNoDataValue( ob, std::numeric_limits<float>::quiet_NaN() );
 
     GdalMultibandBlockStream stream( src, triple, kTileDim, kTileDim );
     std::vector<float> outI( static_cast<size_t>( kTileDim ) * kTileDim );
@@ -259,6 +263,16 @@ bool BandTools::processContrastStretchFile( const QString &sourcePath, const QSt
                              src.geoTransform(), src.projection() );
     if ( !dst.isOpen() )
         return fail( errorMessage, QStringLiteral( "无法创建输出栅格。" ) );
+    // streamBandStretch rewrites invalid pixels with the band's resolved
+    // sentinel (NaN when the band declares none); declare exactly that so
+    // the output holes stay machine-readable instead of undeclared magic
+    // values (R4 NoData audit, rs:contrast_stretch row).
+    for ( int ob = 1; ob <= bandCount; ++ob )
+    {
+        const float nd = bandNodata( src, ob );
+        dst.setBandNoDataValue( ob, std::isfinite( nd ) ? static_cast<double>( nd )
+                                                        : std::numeric_limits<float>::quiet_NaN() );
+    }
 
     ImageEnhancementStreaming::StretchParams params;
     params.kind = spec.kind;

@@ -256,6 +256,12 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     if (!outDs)
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Cannot create output raster: " + outputPath);
+    // The shared warp seam fills unmapped target pixels with the WarpOptions
+    // sentinel (-9999, resampler.h); declare it so the voids are readable
+    // NoData instead of undeclared magic values (R4 NoData audit). A source
+    // with a different declared sentinel keeps its pixels as data — the
+    // warp-nodata contract itself is tracked as backlog.
+    outDs->GetRasterBand(1)->SetNoDataValue(warp.noDataValue);
     outDs->SetGeoTransform(refGtBuf);
     if (!refProjection.empty())
         outDs->SetProjection(refProjection.c_str());
