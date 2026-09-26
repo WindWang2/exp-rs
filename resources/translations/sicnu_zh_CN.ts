@@ -7697,7 +7697,32 @@ Cancel these tasks and continue?</source>
         <source>Stay on Current Operation</source>
         <translation>留在当前操作</translation>
     </message>
-</context>
+
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
+    <message>
+        <source>Teacher Authoring &amp; Assessment Console</source>
+        <translation>教学作者与评测控制台</translation>
+    </message>
+    <message>
+        <source>Import Domestic Satellite Product...</source>
+        <translation>导入国产卫星产品...</translation>
+    </message>
+    <message>
+        <source>Student name:</source>
+        <translation>学生姓名：</translation>
+    </message>
+    <message>
+        <source>Lab session (class/cohort):</source>
+        <translation>实验 session（班级/批次）：</translation>
+    </message>
+    <message>
+        <source>Printable HTML report (*.html);;JSON (*.json);;Markdown (*.md)</source>
+        <translation>可打印 HTML 报告 (*.html);;JSON (*.json);;Markdown (*.md)</translation>
+    </message>
+    </context>
 <context>
     <name>QgsAngleMagnetWidget</name>
     <message>
@@ -20064,6 +20089,25 @@ Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apo
     <message>
         <source>Cursor coordinates could not be transformed to the layer CRS.</source>
         <translation>光标坐标无法变换到图层 CRS。</translation>
+    </message>
+</context>
+<context>
+    <name>VaChartWidget</name>
+    <message>
+        <source>Visualization chart</source>
+        <translation>可视化图表</translation>
+    </message>
+    <message>
+        <source>Loading…</source>
+        <translation>加载中…</translation>
+    </message>
+    <message>
+        <source>No data yet</source>
+        <translation>暂无数据</translation>
+    </message>
+    <message>
+        <source>Load failed: %1</source>
+        <translation>加载失败：%1</translation>
     </message>
 </context>
 </TS>
