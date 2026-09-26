@@ -21,25 +21,12 @@
 #include "app/workbench/georef_dual_window.h"
 
 #include <cmath>
+#include "support/qt_lifecycle.h"
 
 using Catch::Matchers::WithinAbs;
 using namespace rs::app;
 
-// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup;
-// bypass it with std::_Exit once Catch has reported (see test_dual_viewport_sync).
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -51,8 +38,7 @@ namespace
   {
     if ( !QCoreApplication::instance() )
     {
-      static QApplication app( fake_argc, fake_argv );
-      return &app;
+      return sicnu::test::qtlifecycle::heapQApplication( fake_argc, fake_argv );
     }
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
