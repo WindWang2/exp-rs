@@ -3402,6 +3402,24 @@ target_link_libraries(test_d19_foundry_benchmark_chain PRIVATE Sicnu::experiment
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
 target_link_libraries(test_experiment_evaluation PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# Track 11 R4 experiment-consistency oracles (#1333 known-limitations list).
+# LIGHT executable on purpose — links only the science-core libs
+# (experiment/dataset/data + sqlite), so the red/green loop for store-level
+# contracts stays independent of the full vendored QGIS build.
+qt_add_executable(test_experiment_consistency_r4 test_experiment_consistency_r4.cpp)
+target_link_libraries(test_experiment_consistency_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_experiment_consistency_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_experiment_consistency_r4 TIMEOUT 180)
+
 # RS14-17 reproducibility capsule: LIGHT executable on purpose — links only
 # the capsule projection module + experiment/dataset (Qt/Core level). The
 # default sicnu_add_test chain would drag QGIS/agent/operators into a

@@ -303,14 +303,15 @@ sicnu::data::Result<void> MatrixLedger::link( const QString &cellId, const QStri
 
 QStringList MatrixLedger::runsForCell( const QString &cellId, qint64 limit ) const
 {
+    // The edge-kind/to-kind filters bind inside the query, BEFORE the page
+    // limit (#1333 ⑤): the limit bounds recorded runs, never other edges
+    // sharing the cell node.
     QStringList runIds;
-    const auto edges = m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit );
+    const auto edges = m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit,
+                                              QStringLiteral( "recorded" ),
+                                              QStringLiteral( "run" ) );
     for ( const auto &edge : edges )
-    {
-        if ( edge.edgeKind == QStringLiteral( "recorded" ) &&
-             edge.toKind == QStringLiteral( "run" ) )
-            runIds.append( edge.toId );
-    }
+        runIds.append( edge.toId );
     return runIds;
 }
 

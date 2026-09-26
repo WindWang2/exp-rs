@@ -1947,17 +1947,34 @@ sicnu::data::Result<void> ExperimentStore::addLineageEdge( const QString &fromKi
 namespace
 {
 
-QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QString &sql,
+QVector<ExperimentStore::LineageEdge> queryEdgesLocked( sqlite3 *db, const QString &sqlBase,
                                                         const QString &kind,
-                                                        const QString &id, qint64 limit )
+                                                        const QString &id, qint64 limit,
+                                                        const QString &edgeKind = QString(),
+                                                        const QString &toKind = QString() )
 {
+    // Optional edge-kind/to-kind filters bind INSIDE the query, before the
+    // page limit: a caller paging over one edge kind must not have its page
+    // consumed by rows it would discard (#1333 ⑤).
+    QString sql = sqlBase;
+    if ( !edgeKind.isEmpty() )
+        sql += QStringLiteral( " AND edge_kind=?" );
+    if ( !toKind.isEmpty() )
+        sql += QStringLiteral( " AND to_kind=?" );
+    sql += QStringLiteral( " LIMIT ?" );
+
     QVector<ExperimentStore::LineageEdge> edges;
     Stmt stmt( db, sql );
     if ( !stmt )
         return edges;
-    stmt.bind( 1, kind );
-    stmt.bind( 2, id );
-    stmt.bind( 3, limit );
+    int bindIndex = 1;
+    stmt.bind( bindIndex++, kind );
+    stmt.bind( bindIndex++, id );
+    if ( !edgeKind.isEmpty() )
+        stmt.bind( bindIndex++, edgeKind );
+    if ( !toKind.isEmpty() )
+        stmt.bind( bindIndex++, toKind );
+    stmt.bind( bindIndex++, limit );
     while ( stmt.stepRow() )
     {
         ExperimentStore::LineageEdge edge;
@@ -2000,7 +2017,9 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::allLineageEdges( qint64 l
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::outgoingEdges( const QString &kind,
                                                                       const QString &id,
-                                                                      qint64 limit ) const
+                                                                      qint64 limit,
+                                                                      const QString &edgeKind,
+                                                                      const QString &toKind ) const
 {
     if ( !m_impl )
         return {};
@@ -2008,8 +2027,9 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::outgoingEdges( const QStr
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
-                                 " FROM experiment_lineage WHERE from_kind=? AND from_id=? LIMIT ?" ),
-                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+                                 " FROM experiment_lineage WHERE from_kind=? AND from_id=?" ),
+                             kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ),
+                             edgeKind, toKind );
 }
 
 QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QString &kind,
@@ -2022,7 +2042,7 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QStr
     return queryEdgesLocked( m_impl->db,
                              QStringLiteral(
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
-                                 " FROM experiment_lineage WHERE to_kind=? AND to_id=? LIMIT ?" ),
+                                 " FROM experiment_lineage WHERE to_kind=? AND to_id=?" ),
                              kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
 }
 

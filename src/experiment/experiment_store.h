@@ -169,8 +169,16 @@ class ExperimentStore
         QString toKind;
         QString toId;
     };
+    /// Outgoing lineage edges of one node. When @p edgeKind / @p toKind are
+    /// non-empty they filter INSIDE the query, before the page @p limit —
+    /// so a caller looking for one edge kind can never have its page
+    /// consumed by edges it would discard (#1333 ⑤: LIMIT-before-filter
+    /// made runsForCell silently under-report when other edge kinds shared
+    /// the node).
     QVector<LineageEdge> outgoingEdges( const QString &kind, const QString &id,
-                                        qint64 limit = 1000 ) const;
+                                        qint64 limit = 1000,
+                                        const QString &edgeKind = QString(),
+                                        const QString &toKind = QString() ) const;
     QVector<LineageEdge> incomingEdges( const QString &kind, const QString &id,
                                         qint64 limit = 1000 ) const;
     /// Whole-table edge scan (graph assembly input; bounded by @p limit).
