@@ -69,6 +69,16 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # sicnu_agent.so references agent_loop symbols (e.g.
+    # VerificationReport::aggregate via tools/agent_session_adapter.cpp) but
+    # src/agent/CMakeLists.txt does not link sicnu_agent_loop — the library-
+    # level edge is in-flight PR #1335 (P0-3). Linking the archive plainly is
+    # NOT enough on GNU ld: it never extracts archive members to satisfy a
+    # SHARED library's undefined symbols, so the whole archive must be forced
+    # in; the definitions then live in the executable and are exported to
+    # libsicnu_agent.so at runtime. Drop this line together with the
+    # mapspec-specific one once #1335 merges.
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -801,6 +811,10 @@ target_link_libraries(test_mapspec PRIVATE
   qgis_gui
   sicnu_data
   sicnu_agent
+  # See the sicnu_add_test note: whole-archive agent_loop until #1335 lands
+  # the library-level edge (plain archive links do not satisfy a shared
+  # library's undefined symbols on GNU ld).
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>"
   sicnu_operators
   sicnu_workflow
   sicnu_processing
