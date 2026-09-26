@@ -219,7 +219,7 @@ void configureNameCell( QTreeWidgetItem *item,
   if ( !item )
     return;
   item->setIcon( 0, icon );
-  item->setText( 0, QStringLiteral( "%1 · %2" ).arg( kindLabel, displayName ) );
+  item->setText( 0, tr( "%1 · %2" ).arg( kindLabel, displayName ) );
   item->setData( 0, kDisplayNameRole, displayName );
   item->setData( 0, kKindLabelRole, kindLabel );
   item->setData( 0, kStatusLabelRole, statusLabel );
