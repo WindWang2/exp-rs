@@ -20,6 +20,24 @@ export type Pending = {
   timer: NodeJS.Timeout;
 };
 
+/** MCP ids contain ":" which some providers reject; sanitize for Pi/OpenAI.
+ * Lives beside the bridge (not in the extension shell) so the mapping is
+ * importable — and therefore contract-testable — from node --test
+ * (pi/test/surface_snapshot.test.mjs pins it against the surface snapshot). */
+export function piToolName(mcpName: string): string {
+  return "exprs_" + mcpName.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** Tail-keeping truncation for tool results: the caller sees HOW MUCH was
+ * dropped (never a silent cut), and the tail — the part agents act on —
+ * survives. Track 9: moved here for the same single-source reason as
+ * piToolName; the shell imports it. */
+export function truncateTail(text: string, max = MAX_RESULT_CHARS): string {
+  if (text.length <= max) return text;
+  const cut = text.length - max;
+  return `[… ${cut} characters truncated, tail kept …]\n${text.slice(cut)}`;
+}
+
 /** Live bridges, so the (single) process-exit hook tears all of them down.
  * Extension reload used to leak the previous child for the whole session
  * because start() re-registered `process.on("exit")` per spawn and Pi never
