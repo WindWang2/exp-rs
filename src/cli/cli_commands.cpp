@@ -100,9 +100,10 @@ namespace {
 /// assembles error strings by hand.
 int usageError( const CliIO &io, const std::string &command, const std::string &usage )
 {
+    // The usage line IS the reason and the suggested action in one; the
+    // hint segment stays empty so text mode does not print it twice.
     const CliErrorDetails details {
-        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-        .hint = usage };
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) };
     return io.finish( false, command, {},
                       exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
                       usage, &details );
@@ -2001,7 +2002,7 @@ int commandModels( QStringList args, const CliIO &io )
 
     // Track 14 (WP-E): `models inspect` without an id and unknown subcommands
     // used to fall through to `list` and exit 0. Reject both at parse time.
-    if ( sub == "inspect" || ( sub != "list" ) )
+    if ( sub != "list" )
     {
         const sicnu::cli::CliErrorDetails details {
             .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -2611,8 +2612,13 @@ int commandData( QStringList args, const CliIO &io )
                           exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, error.what() );
     }
+    const CliErrorDetails dataDetails {
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+        .expected = "inspect|doctor|probe|capabilities|product|plan|stac|identity|cache|"
+                    "cube|mirror|<url>",
+        .actual = sub.toStdString() };
     return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "unknown data subcommand: " + sub.toStdString() );
+                      {}, "unknown data subcommand: " + sub.toStdString(), &dataDetails );
 }
 
 int commandDataProviders( QStringList args, const CliIO &io )
