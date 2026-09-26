@@ -32,7 +32,9 @@
 - 轻量:test_io_atomic_failures(8/12,见 §2)、test_portability_contract、test_platform_portability、test_portability_source_contract、test_atomic_fs_caller_contract、test_core_failure_injection_r4、test_core_concurrency_stress_r4
 - 重型(全栈闭包,构建中):test_atomic_algorithm_adapter、test_atomic_algorithm_registry、test_atomic_registry_contract、test_dataset_core、test_fault_injection、test_store_fault_injection、test_harness_lab_injection
 
-**双跑结果(待 build-r4 完成后回填)→ 见 §7。**
+**双跑结果(最终口径)→ 见 §7。**
+
+**重型 7 目标最终定案(重要)**:在 master 上即**无法链接**——`libsicnu_agent.so` 引用 `agent_loop::VerificationReport::aggregate` 而链接线不含 `sicnu_agent_loop`(ELF 允许 .so 带未定义符号,错误推迟到下游全部可执行文件)。**逐字即 PR #1335 所修的 review P0**(其 diff 原文:"~161 test executables failed to link";修复 = `src/agent/CMakeLists.txt` 增 PUBLIC `sicnu_agent_loop`,该文件 #1335 独占)。基线口径:基线时它们同样不可链接 → "相对基线零新增失败"对重型 7 目标平凡成立;修复 defer-#1335。
 
 ## 5. 交付下限对照(Oracle §2/§3/§4)
 
@@ -52,10 +54,23 @@
 - `/tmp` 为 32G tmpfs(今日实测 98% 满——为兄弟轨道并行构建所致;本轨 fixture 均在 /tmp 下小文件,不受影响)。
 - 资源红线:`ninja -j2`、`ctest -j1`;全程未超。注意 shell 别名 `ninja='ninja -j40'` 已规避(显式绝对路径调用)。
 
-## 7. 门禁双跑日志(回填区)
+## 7. 门禁双跑日志(最终,2026-09-27)
 
-PASS-1:(待回填)
-PASS-2:(待回填)
+执行方式(口径):`ctest -R` 无法按二进制名选取——轻量 lane 的 `catch_discover_tests(PRE_TEST)` 以 **Catch2 用例名**(无 TEST_PREFIX)注册 ctest 条目,Oracle 正则按二进制名匹配不到;等价门禁实现为**逐二进制串行双跑、退出码判据**(每跑执行该套件全部用例,天然 -j1 串行),`QT_QPA_PLATFORM=offscreen`、`LD_LIBRARY_PATH=/home/kevin/pwb-sdks/root/usr/lib`。
+
+| PASS | 目标 | 退出码 | 断言/用例 | 结果 |
+|---|---|---|---|---|
+| 1 | test_portability_contract | 0 | 17/3 | 全绿 |
+| 1 | test_portability_source_contract | 0 | 56/6 | 全绿 |
+| 1 | test_platform_portability | 0 | 103/17 | 全绿 |
+| 1 | test_atomic_fs_caller_contract | 0 | 154/13 | 全绿 |
+| 1 | test_core_failure_injection_r4 | 0 | 137/21 | 全绿 |
+| 1 | test_core_concurrency_stress_r4 | 0 | 8/2 | 全绿 |
+| 1 | test_io_atomic_failures | 42 | 43/12(4 FAILED) | **8/12,4 预存红 = #1338 Cluster A(§2),两遍数量一致** |
+| 2 | 同上 7 目标,同序 | 同上 | 同上 | **与 PASS 1 完全一致** |
+
+- 两遍原始日志:`/tmp/gate_p1_*.log`、`/tmp/gate_p2_*.log`(各目标逐套件);汇总即本表。
+- **相对 Phase 0 基线零新增失败** ✓;重型 7 目标不可链接为 master 预存(#1335 在修,见 §4)。
 
 ## 8. 收尾提交链
 
