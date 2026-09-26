@@ -192,7 +192,7 @@ void StacClient::runSearch(const QUrl &url)
                          QNetworkRequest::NoLessSafeRedirectPolicy);
 
     // Capture this reply's generation: only the newest query may deliver.
-    const int generation = m_searchGeneration;
+    const quint64 generation = m_searchGeneration;
 
     QNetworkReply *reply = mManager.get(request);
     connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &url){

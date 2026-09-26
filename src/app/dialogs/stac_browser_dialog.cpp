@@ -38,14 +38,15 @@ StacBrowserDialog::StacBrowserDialog( QgsMapCanvas *canvas, QWidget *parent )
            this, &StacBrowserDialog::onSearchCompleted );
 }
 
-void StacBrowserDialog::closeEvent( QCloseEvent *event )
+void StacBrowserDialog::hideEvent( QHideEvent *event )
 {
-  // F-04 (ui-backend-state-parity-r4): closing the dialog ends its queries
-  // logically. Replies landing afterwards are dropped by the client's
-  // generation check (searchDropped trace) instead of mutating the hidden
-  // dialog's result state behind the user's back.
+  // F-04 (ui-backend-state-parity-r4): the dialog leaving view ends its
+  // queries logically — hideEvent (not closeEvent) because Esc/reject()/done()
+  // hide a QDialog without ever delivering a close event, and a closed dialog
+  // hides too. Replies landing afterwards are dropped by the client's
+  // generation check (searchDropped trace) instead of mutating hidden state.
   m_stacClient->cancelInFlight();
-  QDialog::closeEvent( event );
+  QDialog::hideEvent( event );
 }
 
 void StacBrowserDialog::setupUi()

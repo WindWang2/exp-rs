@@ -39,6 +39,10 @@ void RasterLayerCombo::populate()
 void RasterLayerCombo::refreshFromProject()
 {
   const QString selectedId = currentLayerId();
+  // Suppress the transient -1 index churn while rebuilding: host dialogs
+  // react to currentIndexChanged and must not observe a phantom empty state
+  // between clear() and the re-selection.
+  const QSignalBlocker blocker( this );
   populate();
   if ( !selectedId.isEmpty() )
     selectLayer( selectedId );

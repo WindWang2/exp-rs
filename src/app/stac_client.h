@@ -74,7 +74,8 @@ private:
     /// Monotonic query generation (same shape as RsScanPool's generation
     /// token, DECISIONS D-1): every user-initiated search supersedes every
     /// older one; superseded replies are dropped with a trace.
-    int m_searchGeneration = 0;
+    /// Unsigned: this counter lives for the process lifetime.
+    quint64 m_searchGeneration = 0;
 
     void runSearch(const QUrl &url);
 };
