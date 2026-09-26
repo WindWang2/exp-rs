@@ -148,9 +148,11 @@ bool rehydrateMovedOutput( const StepPlan &plan )
         return false;
     }
     // #1178: ReplaceFileW / MoveFileExW — never remove-then-rename (Windows
-    // sharing violation after deleting the previous good artifact).
+    // sharing violation after deleting the previous good artifact). Durability
+    // gate (atomic_fs.h contract): flush the staged bytes before the rename.
     try
     {
+        sicnu::geo::atomic_fs::fsyncFile( tmp.toStdString() );
         sicnu::geo::atomic_fs::publishStagedFile( tmp.toStdString(), destination.toStdString() );
     }
     catch ( const sicnu::geo::GeoError & )

@@ -378,6 +378,9 @@ TEST_CASE( "staged publishers flush through atomic_fs::fsyncFile before publishi
     { "src/analysis/segmentation/rs_class_raster.cpp",
       "atomic_fs::fsyncFile( tempPath.toStdString() )",
       "atomic_fs::publishStagedFile( tempPath.toStdString()" },
+    { "src/workflow/workflow_run_coordinator.cpp",
+      "atomic_fs::fsyncFile( tmp.toStdString() )",
+      "atomic_fs::publishStagedFile( tmp.toStdString()" },
   };
   for ( const Publisher &publisher : publishers )
   {
@@ -430,6 +433,43 @@ TEST_CASE( "group publishers flush every staged member before the group publish"
   REQUIRE( groupPublish != std::string::npos );
   REQUIRE( groupFsync < groupPublish );
   REQUIRE( mainFsync < groupPublish );
+
+  // Same group-publish discipline for the operator-side producers. The
+  // needles follow each file's own formatting (the polygonize operator is
+  // compact-style; the tile engine is spaced).
+  struct GroupPublisher
+  {
+    const char *file;
+    const char *sidecarFsyncNeedle;
+    const char *mainFsyncNeedle;
+    const char *groupAnchorNeedle;
+  };
+  const GroupPublisher groupPublishers[] = {
+    { "src/operators/gdal/gdal_polygonize_operator.cpp",
+      "atomic_fs::fsyncFile(stagedSidecar)",
+      "atomic_fs::fsyncFile(workPath)",
+      "atomic_fs::publishStagedGroup(workPath" },
+    { "src/operators/runtime/detection_tile_engine.cpp",
+      "atomic_fs::fsyncFile( stagedSidecar )",
+      "atomic_fs::fsyncFile( workPath.toStdString() )",
+      "atomic_fs::publishStagedGroup( workPath.toStdString()" },
+  };
+  for ( const GroupPublisher &publisher : groupPublishers )
+  {
+    const std::string source = repoSource( CMAKE_SOURCE_DIR, publisher.file );
+    REQUIRE_FALSE( source.empty() );
+    INFO( "file: " << publisher.file );
+    const std::size_t sidecarFsync = source.find( publisher.sidecarFsyncNeedle );
+    const std::size_t mainFsyncGate = source.find( publisher.mainFsyncNeedle );
+    const std::size_t groupAnchor = source.find( publisher.groupAnchorNeedle );
+    INFO( "sidecarFsync=" << sidecarFsync << " mainFsyncGate=" << mainFsyncGate
+                          << " groupAnchor=" << groupAnchor );
+    REQUIRE( sidecarFsync != std::string::npos );
+    REQUIRE( mainFsyncGate != std::string::npos );
+    REQUIRE( groupAnchor != std::string::npos );
+    REQUIRE( sidecarFsync < groupAnchor );
+    REQUIRE( mainFsyncGate < groupAnchor );
+  }
 }
 
 // ============================================================================
