@@ -162,6 +162,10 @@ void StacClient::search(const QString &endpoint, const QString &collection,
                         const QString &datetime, const QStringList &bbox,
                         int limit)
 {
+    // F-02: every user-initiated search supersedes every older one (the
+    // generation the finished handlers compare against). searchNext()
+    // deliberately does NOT bump — pagination continues the same query.
+    ++m_searchGeneration;
     QUrl endpointUrl(endpoint);
     // Allow endpoint without path scheme form "https://host/stac"
     if (!endpointUrl.scheme().isEmpty()) {
