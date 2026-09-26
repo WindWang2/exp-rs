@@ -17,26 +17,11 @@
 #include <QCoreApplication>
 #include <QTemporaryDir>
 
-#include <cstdlib>
 #include <cmath>
 
 using Catch::Approx;
 
-// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup (same
-// issue as the georef window tests). Bypass with std::_Exit after Catch reports.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -158,8 +143,7 @@ QCoreApplication *ensureApp()
     static int argc = 1;
     static char name[] = "test_georeferencing_session";
     static char *argv[] = { name, nullptr };
-    static QCoreApplication app( argc, argv );
-    return &app;
+    return sicnu::test::qtlifecycle::heapQCoreApplication( argc, argv );
   }
   return QCoreApplication::instance();
 }
@@ -834,6 +818,7 @@ TEST_CASE( "Georeferencer/Session: Destructor cancels running warp and cleans up
 }
 
 #include "test_georeferencing_session.moc"
+#include "support/qt_lifecycle.h"
 
 TEST_CASE( "GeoreferencingSession: configuration sync never dirties a fresh session",
            "[georef][session][dirty][1052]" )
