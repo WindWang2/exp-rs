@@ -12,7 +12,7 @@
 | B04 | UTF-16 误标为 .json | **R** | 解析失败 → `pack_schema` error，信息含 NUL/解码事实 |
 | B05 | 非 ASCII 资产名（NFC/NFD 变体） | **N** | 路径按 UTF-8 字节精确匹配（不做 Unicode 归一）；pins 对 NFC/NFD 各自独立成立；清单中不存在归并 |
 | B06 | 缺失资产（committed-fixture） | **R** | `input_missing` error，offline_available=false |
-| B07 | 缺失资产（generated-samples/tmp） | **W** | `input_missing` warning（regenerable），不降 verdict |
+| B07 | 缺失资产（generated-samples/tmp） | **W** | `input_missing` warning（regenerable）；admin inventory 的 offlineAvailable 仍置 false（保守诚实），verdict 侧由 verifier 报 degraded |
 | B08 | 零字节资产（declared>0，committed） | **R** | `byte_mismatch` error（declared vs 0） |
 | B09 | 零字节资产（无 declared，committed 无 sha） | **R** | sha 必填（authority `lab.pack_input`） |
 | B10 | 目录冒名资产（path 指向目录） | **R** | 非 regular file → `input_missing` 语义类错误（exists&&!isFile 分支） |
