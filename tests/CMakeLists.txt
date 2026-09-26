@@ -13372,6 +13372,11 @@ target_link_libraries(test_workbench_full_shell_lifecycle PRIVATE
   qgis_core
   qgis_gui
   sicnu_geo_rs_shell
+  # PR #1335 (pending): resolve sicnu_agent's agent_loop/OpsDriver undefineds
+  # at final link — the parity-r4 track carries the same explicit links as
+  # its own suites until the central fix merges.
+  sicnu_agent_loop
+  Sicnu::agent_ops
 )
 target_include_directories(test_workbench_full_shell_lifecycle PRIVATE
   ${CMAKE_SOURCE_DIR}/src

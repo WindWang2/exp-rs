@@ -67,7 +67,7 @@
 | ID | UI 控件 | 状态源 | 方向 | 触发时机 | oracle 引用 | 前序 |
 |---|---|---|---|---|---|---|
 | PD-1 | 取消态：按钮禁用+文案+`cancelled()` 恰一次（cpp:90-98） | m_cancelled | UI 内部契约 | cancel | 既有 test_progress_dialog.cpp | — |
-| PD-2 | 取消后迟到 max 进度**不得**以成功态 auto-accept（cpp:50-58 现无 cancelled 防护） | setValue 落地策略 | 源→UI 策略 | 晚到 setValue(≥max) | test_parity_async_late_arrival_r4.cpp [parity-pd2] | **本轨道修复（竞态类 5）** |
+| PD-2 | 取消后迟到 max 进度**不得**以成功态 auto-accept（cpp:50-58 现无 cancelled 防护） | setValue 落地策略 | 源→UI 策略 | 晚到 setValue(≥max) | test_parity_async_late_arrival_r4.cpp [parity-pd2]+[parity-pd3] | **本轨道修复（竞态类 5）** |
 
 ## I. RsEmptyStateWidget（真相在宿主翻页逻辑）
 
@@ -113,7 +113,7 @@
 | AS-3 | 宿主对话框关闭后 in-flight 结果失效 + 丢弃留痕（stac_browser_dialog.cpp:37 现落地无检查） | 对话框生命周期 | 策略 | 关闭后到达 | test_parity_async_late_arrival_r4.cpp [parity-as3] | **类 2 修复（漂移 F-04）** |
 | AS-4 | `layerAutoLoadRequested` 只落地发起会话（main_window_docks.cpp:679-683 现无会话检查；task_center.cpp:3148-3149 发射） | TaskCenter 任务 + 窗口会话代际 | 源→UI 策略 | markTaskCompleted | test_parity_async_late_arrival_r4.cpp [parity-as4] | **类 1 修复（漂移 F-05）** |
 | AS-5 | SaveAs 后晚到自动加载不得进入新会话（saveProjectAsTo 会话代际推进） | 同上 | 源→UI 策略 | SaveAs 后到达 | test_parity_async_late_arrival_r4.cpp [parity-as5] | **类 3 修复（漂移 F-06）** |
-| AS-6 | 取消后仍落地：TaskCenter 终态取消的完成回调消费面按取消态处置（rs_job_runner.cpp:44-66、cartography_dock.cpp:305-330 为正面样板；PD-2 为反例） | TaskStatus::Canceled | 源→UI 策略 | 取消后回调 | test_parity_async_late_arrival_r4.cpp [parity-pd2]+[parity-sp2] | **类 5（=PD-2+SP-2）** |
+| AS-6 | 取消后仍落地：TaskCenter 终态取消的完成回调消费面按取消态处置（rs_job_runner.cpp:44-66、cartography_dock.cpp:305-330 为正面样板；PD-2 为反例） | TaskStatus::Canceled | 源→UI 策略 | 取消后回调 | test_parity_async_late_arrival_r4.cpp [parity-pd2]+[parity-pd3]+[parity-sp2] | **类 5（=PD-2+SP-2）** |
 
 ## N. restore-state 完备性（WP-E；#1312 B12 已收项去重）
 

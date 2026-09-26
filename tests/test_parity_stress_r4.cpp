@@ -341,6 +341,11 @@ TEST_CASE( "S3: layer-switch storm keeps the raster combo at project truth",
     rasters << layer;
   }
 
+  // Layers NOT currently owned by the project. removeMapLayer deletes the
+  // C++ object (the project owns what it holds) — a removed layer must never
+  // be touched again, so the storm picks only from the surviving pool.
+  QList<QgsRasterLayer *> available = rasters;
+
   RasterLayerCombo combo;
   QRandomGenerator rng( stressSeed() + 2 );
 
@@ -350,13 +355,28 @@ TEST_CASE( "S3: layer-switch storm keeps the raster combo at project truth",
     switch ( rng.bounded( 4 ) )
     {
       case 0:
-        QgsProject::instance()->addMapLayer( rasters[ rng.bounded( rasters.size() ) ] );
+        if ( !available.isEmpty() )
+        {
+          const int idx = rng.bounded( available.size() );
+          QgsProject::instance()->addMapLayer( available.takeAt( idx ) );
+        }
         break;
       case 1:
       {
         const QList<QgsMapLayer *> inProject = QgsProject::instance()->mapLayers().values();
         if ( !inProject.isEmpty() )
-          QgsProject::instance()->removeMapLayer( inProject.first()->id() );
+        {
+          QgsMapLayer *victim = inProject.first();
+          for ( QgsRasterLayer *candidate : rasters )
+          {
+            if ( candidate == victim )
+            {
+              available.removeAll( candidate ); // the project deletes it
+              break;
+            }
+          }
+          QgsProject::instance()->removeMapLayer( victim->id() );
+        }
         break;
       }
       case 2:
