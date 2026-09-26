@@ -153,6 +153,8 @@ def looks_like_text(lit: str) -> bool:
         return False
     if NON_TEXT_RE.search(inner):
         return False
+    if not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", inner):
+        return False
     if " " not in inner and not HAN_RE.search(inner):
         return False
     return True
