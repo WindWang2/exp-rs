@@ -94,9 +94,12 @@ struct StudyAnalysis
     QString declaredBestBasis;
 };
 
-/// Projects the recorded truth of a study. Reads stores only.
-StudyAnalysis analyzeStudy( experiment::ExperimentStore &store,
-                            experiment::MatrixLedger &ledger, const ParameterStudySpec &spec,
-                            const QVector<StudyPoint> &points );
+/// Projects the recorded truth of a study. Reads stores only. Refuses
+/// (typed) when a point's run page overflows the ledger bound — a truncated
+/// point silently missing from curves/envelopes would fabricate the
+/// analysis (#1333 item 4 propagation).
+sicnu::data::Result<StudyAnalysis> analyzeStudy(
+    experiment::ExperimentStore &store, experiment::MatrixLedger &ledger,
+    const ParameterStudySpec &spec, const QVector<StudyPoint> &points );
 
 } // namespace sicnu::study

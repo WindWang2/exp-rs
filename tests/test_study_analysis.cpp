@@ -113,7 +113,9 @@ TEST_CASE( "analysis projects recorded truth with hand-computed aggregates",
         fix.recordRun( spec, point, metrics, point.seed );
     }
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     REQUIRE( analysis.points.size() == 5 );
     for ( const PointAggregate &aggregate : analysis.points )
         REQUIRE( aggregate.status == QStringLiteral( "recorded" ) );
@@ -163,7 +165,9 @@ TEST_CASE( "uncertainty envelope pools seed replicates of one parameter set",
         fix.recordRun( spec, point, metrics, point.seed );
     }
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     REQUIRE( analysis.envelopes.size() == 1 );
     const UncertaintyEnvelope &envelope = analysis.envelopes.first();
     REQUIRE( envelope.bands.size() == 5 );
@@ -225,7 +229,9 @@ TEST_CASE( "failures are truthfully classified, never aggregated as data",
         fix.recordRun( spec, point, metrics, point.seed );
     }
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     const StudyPoint &baseline = pointWithThreshold( points, 0.5 );
     const StudyPoint &low = pointWithThreshold( points, 0.0 );
     const StudyPoint &high = pointWithThreshold( points, 1.0 );
@@ -270,7 +276,9 @@ TEST_CASE( "missing runs are reported as missing, never silently dropped",
     metrics.insert( QStringLiteral( "maskedPercent" ), 50.0 );
     fix.recordRun( spec, points.first(), metrics, points.first().seed );
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     qint64 missing = 0;
     qint64 recorded = 0;
     for ( const PointAggregate &aggregate : analysis.points )
@@ -331,7 +339,9 @@ TEST_CASE( "pareto dominance handles mixed objective directions",
         fix.recordRun( spec, points.at( i ), metrics, points.at( i ).seed );
     }
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     QStringList pareto = analysis.paretoPointIds;
     pareto.sort();
     REQUIRE( pareto.size() == 2 );
@@ -366,7 +376,9 @@ TEST_CASE( "analysis keeps cancelled as its own point status", "[study][analysis
                  .has_value() );
     REQUIRE( fix.ledger.link( point.pointId, runId.value() ).has_value() );
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     REQUIRE( analysis.points.size() == points.size() );
     bool checked = false;
     for ( const PointAggregate &aggregate : analysis.points )
@@ -405,7 +417,9 @@ TEST_CASE( "metric names resolve through the dotted-path rule, not top-level key
         fix.recordRun( spec, point, metrics, point.seed );
     }
 
-    const StudyAnalysis analysis = analyzeStudy( fix.store, fix.ledger, spec, points );
+    const auto analysisPage = analyzeStudy( fix.store, fix.ledger, spec, points );
+    REQUIRE( analysisPage.has_value() );
+    const StudyAnalysis &analysis = analysisPage.value();
     REQUIRE( analysis.points.size() == 5 );
     for ( const PointAggregate &aggregate : analysis.points )
         REQUIRE( aggregate.status == QStringLiteral( "recorded" ) );
@@ -436,5 +450,9 @@ TEST_CASE( "matrix ledger surfaces every linked run, not the first 100",
     for ( int i = 0; i < 150; ++i )
         REQUIRE( ledger.link( cell, QStringLiteral( "run-%1" ).arg( i, 4, 10, QLatin1Char( '0' ) ) )
                      .has_value() );
-    REQUIRE( ledger.runsForCell( cell ).size() == 150 );
+    // 150 runs sit under the kMaxMatrixCells budget: the whole page reads,
+    // no overflow refusal (#1333 item 4 — refusal only past the budget).
+    const auto runs = ledger.runsForCell( cell );
+    REQUIRE( runs.has_value() );
+    REQUIRE( runs.value().size() == 150 );
 }

@@ -301,27 +301,52 @@ sicnu::data::Result<void> MatrixLedger::link( const QString &cellId, const QStri
                                    QStringLiteral( "run" ), runId );
 }
 
-QStringList MatrixLedger::runsForCell( const QString &cellId, qint64 limit ) const
+Result<QStringList> MatrixLedger::runsForCell( const QString &cellId, qint64 limit ) const
 {
     // The edge-kind/to-kind filters bind inside the query, BEFORE the page
     // limit (#1333 ⑤): the limit bounds recorded runs, never other edges
-    // sharing the cell node.
+    // sharing the cell node. The page is probed one row past the limit so
+    // overflowing the budget is a typed refusal, never a silent truncation
+    // (#1333 ④) — the same honesty contract as the kMaxMatrixCells cap.
+    if ( cellId.isEmpty() )
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_invalid" ),
+            QStringLiteral( "ledger lookup requires a cell id" ) ) );
+    if ( limit < 1 )
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_invalid" ),
+            QStringLiteral( "ledger page limit must be positive" ) ) );
+    const auto edges =
+        m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit + 1,
+                               QStringLiteral( "recorded" ), QStringLiteral( "run" ) );
+    if ( edges.size() > limit )
+    {
+        return Result<QStringList>::failure( matrixError(
+            QStringLiteral( "experiment.matrix_cell_runs_overflow" ),
+            QStringLiteral( "cell %1 has more than %2 recorded runs (%3 visible);"
+                            " statistics over a truncated list would be fabricated —"
+                            " raise the limit explicitly to proceed" )
+                .arg( cellId, QString::number( limit ), QString::number( edges.size() ) ) ) );
+    }
     QStringList runIds;
-    const auto edges = m_store.outgoingEdges( QStringLiteral( "matrix" ), cellId, limit,
-                                              QStringLiteral( "recorded" ),
-                                              QStringLiteral( "run" ) );
+    runIds.reserve( edges.size() );
     for ( const auto &edge : edges )
         runIds.append( edge.toId );
-    return runIds;
+    return Result<QStringList>::success( runIds );
 }
 
-QHash<QString, QStringList> MatrixLedger::ledgerForMatrix(
+Result<QHash<QString, QStringList>> MatrixLedger::ledgerForMatrix(
     const QVector<MatrixCell> &cells ) const
 {
     QHash<QString, QStringList> ledger;
     for ( const MatrixCell &cell : cells )
-        ledger.insert( cell.cellId, runsForCell( cell.cellId ) );
-    return ledger;
+    {
+        const auto runs = runsForCell( cell.cellId );
+        if ( !runs )
+            return Result<QHash<QString, QStringList>>::failure( runs.diagnostics() );
+        ledger.insert( cell.cellId, runs.value() );
+    }
+    return Result<QHash<QString, QStringList>>::success( ledger );
 }
 
 QJsonObject MetricAggregate::toJson() const
@@ -357,7 +382,10 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
         CellAggregate cellAggregate;
         cellAggregate.cellId = cell.cellId;
         cellAggregate.assignments = cell.assignments;
-        cellAggregate.runIds = m_ledger->runsForCell( cell.cellId );
+        const auto cellRuns = m_ledger->runsForCell( cell.cellId );
+        if ( !cellRuns )
+            return Result<MatrixAggregate>::failure( cellRuns.diagnostics() );
+        cellAggregate.runIds = cellRuns.value();
 
         bool anyRecorded = false;
         bool anyFailed = false;

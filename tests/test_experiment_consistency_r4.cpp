@@ -78,9 +78,58 @@ TEST_CASE( "runsForCell filters edge kind before the page limit",
                                                QStringLiteral( "c1" ), /*limit=*/16 );
     REQUIRE( allEdges.size() == 6 );
 
-    const QStringList runs = ledger.runsForCell( QStringLiteral( "c1" ), /*limit=*/3 );
-    REQUIRE( runs.size() == 3 );
-    CHECK( runs == recorded );
+    const auto runsPage = ledger.runsForCell( QStringLiteral( "c1" ), /*limit=*/3 );
+    REQUIRE( runsPage.has_value() );
+    CHECK( runsPage.value() == recorded );
+}
+
+// ④ (item 4): exceeding the cell run budget is a TYPED refusal, never a
+// silent truncation — the same honesty contract as the kMaxMatrixCells cap.
+// A refusal must be countable: the diagnostic names the cell, the budget and
+// the visible lower bound.
+TEST_CASE( "runsForCell refuses a cell whose recorded runs overflow the page",
+           "[experiment][matrix][r4]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+    MatrixLedger ledger( store );
+
+    const int budget = 5;
+    for ( int i = 0; i < budget + 1; ++i )
+    {
+        REQUIRE( ledger
+                     .link( QStringLiteral( "c-full" ),
+                            QStringLiteral( "r%1" ).arg( i, 3, 10, QLatin1Char( '0' ) ) )
+                     .operator bool() );
+    }
+    // A second cell stays under the budget: pages are per-cell.
+    REQUIRE( ledger.link( QStringLiteral( "c-ok" ), QStringLiteral( "rx" ) ).operator bool() );
+
+    const auto refused = ledger.runsForCell( QStringLiteral( "c-full" ), budget );
+    REQUIRE( !refused.has_value() );
+    bool overflowTyped = false;
+    for ( const auto &diagnostic : refused.diagnostics() )
+    {
+        CHECK( diagnostic.message.contains( QStringLiteral( "c-full" ) ) );
+        CHECK( diagnostic.message.contains( QString::number( budget ) ) );
+        if ( diagnostic.code == QLatin1String( "experiment.matrix_cell_runs_overflow" ) )
+            overflowTyped = true;
+    }
+    CHECK( overflowTyped );
+
+    // Truth source: budget+1 recorded edges are really in the store, so the
+    // refusal reports a truncation that would really have happened.
+    const auto allEdges = store.outgoingEdges( QStringLiteral( "matrix" ),
+                                               QStringLiteral( "c-full" ), budget + 2,
+                                               QStringLiteral( "recorded" ),
+                                               QStringLiteral( "run" ) );
+    REQUIRE( allEdges.size() == budget + 1 );
+
+    // Under-budget cell still reads whole.
+    const auto ok = ledger.runsForCell( QStringLiteral( "c-ok" ), budget );
+    REQUIRE( ok.has_value() );
+    CHECK( ok.value() == QStringList{ QStringLiteral( "rx" ) } );
 }
 } // namespace
 // ⑥ (item 6): the identity-twin scan is bounded (50 by contract); hitting

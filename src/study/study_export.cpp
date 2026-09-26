@@ -345,7 +345,27 @@ StudyReport buildStudyReport( experiment::ExperimentStore &store,
                               const StudyRunSummary *runnerSummary,
                               QDateTime generatedAtUtc )
 {
-    const StudyAnalysis analysis = analyzeStudy( store, ledger, spec, points );
+    const auto analysisPage = analyzeStudy( store, ledger, spec, points );
+    if ( !analysisPage )
+    {
+        // The ledger refused (typed, #1333 item 4): the report is STOPPED
+        // with the refusal — empty table, zero accounting — never a silently
+        // truncated analysis dressed up as truth. (Signature stays
+        // StudyReport: this function's seam is a display projection; the
+        // typed refusal belongs to analyzeStudy/aggregate.)
+        const Diagnostic &refusal = analysisPage.diagnostics().constFirst();
+        StudyReport stopped;
+        stopped.studyId = spec.studyId;
+        stopped.experimentId = spec.experimentId;
+        stopped.algorithmId = spec.algorithmId;
+        stopped.strategy = samplingStrategyToString( spec.strategy );
+        stopped.specJson = spec.toJson();
+        stopped.generatedAtUtc = generatedAtUtc;
+        stopped.stoppedReason =
+            QStringLiteral( "analysis refused: %1 (%2)" ).arg( refusal.code, refusal.message );
+        return stopped;
+    }
+    const StudyAnalysis &analysis = analysisPage.value();
 
     StudyReport report;
     report.studyId = spec.studyId;
@@ -544,15 +564,17 @@ Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
         return outputDir.filePath( point.pointId + QStringLiteral( "/output.tif" ) );
     };
     const auto hasRecordedOutput = [&]( const StudyPoint &point ) {
-        const QStringList runs = ledger.runsForCell( point.pointId );
-        for ( const QString &runId : runs )
+        const auto runsPage = ledger.runsForCell( point.pointId );
+        if ( !runsPage )
+            return Result<bool>::failure( runsPage.diagnostics() );
+        for ( const QString &runId : runsPage.value() )
         {
             const auto run = store.runById( runId );
             if ( run && run.value().status() == dataset::RunStatus::Completed
                  && QFile::exists( outputOf( point ) ) )
-                return true;
+                return Result<bool>::success( true );
         }
-        return false;
+        return Result<bool>::success( false );
     };
 
     // Baseline: the reference point (every dimension at its reference ladder
@@ -575,10 +597,17 @@ Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
                     break;
                 }
             }
-            if ( atReference && hasRecordedOutput( point ) )
+            if ( atReference )
             {
-                baselineOutput = outputOf( point );
-                break;
+                const auto recorded = hasRecordedOutput( point );
+                if ( !recorded )
+                    return Result<QVector<SpatialDifferenceSummary>>::failure(
+                        recorded.diagnostics() );
+                if ( recorded.value() )
+                {
+                    baselineOutput = outputOf( point );
+                    break;
+                }
             }
         }
     }
@@ -586,7 +615,11 @@ Result<QVector<SpatialDifferenceSummary>> summarizeStudyOutputs(
     {
         for ( const StudyPoint &point : points )
         {
-            if ( hasRecordedOutput( point ) )
+            const auto recorded = hasRecordedOutput( point );
+            if ( !recorded )
+                return Result<QVector<SpatialDifferenceSummary>>::failure(
+                    recorded.diagnostics() );
+            if ( recorded.value() )
             {
                 baselineOutput = outputOf( point );
                 break;
