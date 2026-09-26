@@ -13848,3 +13848,25 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+###############################################################################
+# Track R4 (plugin lifecycle & exprs registry rollback)
+add_library(broken_plugin MODULE fixtures/broken_plugin/broken_plugin.cpp)
+target_include_directories(broken_plugin PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/sdk
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(broken_plugin PRIVATE sicnu_operators sicnu_operators_core jsoncpp)
+set_target_properties(broken_plugin PROPERTIES
+  LIBRARY_OUTPUT_NAME broken_plugin
+  PREFIX "lib"
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/broken_plugin
+)
+
+sicnu_add_sdk_test(test_plugin_lifecycle_halffail_r4)
+target_link_libraries(test_plugin_lifecycle_halffail_r4 PRIVATE sicnu_operators_core)
+target_compile_definitions(test_plugin_lifecycle_halffail_r4 PRIVATE
+  SICNU_TEST_BROKEN_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/broken_plugin"
+)
+# #1186 rule: target-scoped builds must build runtime-loaded fixtures first.
+add_dependencies(test_plugin_lifecycle_halffail_r4 broken_plugin)
