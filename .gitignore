@@ -483,3 +483,6 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+
+# Track 8 R4 planning artifacts
+!.planning/agent-harness-r4/
