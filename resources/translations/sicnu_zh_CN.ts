@@ -20508,7 +20508,12 @@ Provenance badges: system fact | authoring guidance | inferred
         <source>Connection successful, but no content returned</source>
         <translation>连接成功，但无内容返回</translation>
     </message>
-</context>
+
+    <message>
+        <source>gpt-4o, qwen-plus, etc.</source>
+        <translation>gpt-4o, qwen-plus, etc.</translation>
+    </message>
+    </context>
 <context>
     <name>GuidedLabWorkspace</name>
     <message>

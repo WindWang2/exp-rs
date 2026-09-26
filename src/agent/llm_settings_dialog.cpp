@@ -28,7 +28,7 @@ LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
   m_apiKeyEdit->setPlaceholderText( tr( "Enter the API key (leave empty for local models)" ) );
   m_apiKeyEdit->setToolTip( tr( "Authentication token" ) );
   m_modelNameEdit = new QLineEdit( this );
-  m_modelNameEdit->setPlaceholderText( QStringLiteral( "gpt-4o, qwen-plus, etc." ) );
+  m_modelNameEdit->setPlaceholderText( tr( "gpt-4o, qwen-plus, etc." ) );
   m_modelNameEdit->setToolTip( tr( "Model name to request" ) );
   m_tempSpin = new QDoubleSpinBox( this );
   m_tempSpin->setRange( 0.0, 1.0 );
