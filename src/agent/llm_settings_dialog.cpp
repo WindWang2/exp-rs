@@ -12,41 +12,41 @@ namespace sicnu::agent
 LlmSettingsDialog::LlmSettingsDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "AI Copilot 模型与服务设置" ) );
+  setWindowTitle( tr( "AI Copilot Model & Service Settings" ) );
   resize( 500, 320 );
 
   auto *mainLayout = new QVBoxLayout( this );
   auto *formLayout = new QFormLayout();
 
   m_providerCombo = new QComboBox( this );
-  m_providerCombo->setToolTip( tr( "选择预设或自定义大模型服务提供商" ) );
+  m_providerCombo->setToolTip( tr( "Pick a preset or custom LLM service provider" ) );
   m_baseUrlEdit = new QLineEdit( this );
   m_baseUrlEdit->setPlaceholderText( QStringLiteral( "https://api.openai.com/v1" ) );
-  m_baseUrlEdit->setToolTip( tr( "大模型 API 服务端点根路径" ) );
+  m_baseUrlEdit->setToolTip( tr( "LLM API endpoint root path" ) );
   m_apiKeyEdit = new QLineEdit( this );
   m_apiKeyEdit->setEchoMode( QLineEdit::Password );
-  m_apiKeyEdit->setPlaceholderText( tr( "输入 API 密钥 (本地模型可留空)" ) );
-  m_apiKeyEdit->setToolTip( tr( "身份鉴权令牌" ) );
+  m_apiKeyEdit->setPlaceholderText( tr( "Enter the API key (leave empty for local models)" ) );
+  m_apiKeyEdit->setToolTip( tr( "Authentication token" ) );
   m_modelNameEdit = new QLineEdit( this );
   m_modelNameEdit->setPlaceholderText( QStringLiteral( "gpt-4o, qwen-plus, etc." ) );
-  m_modelNameEdit->setToolTip( tr( "请求调用的模型名称" ) );
+  m_modelNameEdit->setToolTip( tr( "Model name to request" ) );
   m_tempSpin = new QDoubleSpinBox( this );
   m_tempSpin->setRange( 0.0, 1.0 );
   m_tempSpin->setSingleStep( 0.1 );
   m_tempSpin->setValue( 0.2 );
-  m_tempSpin->setToolTip( tr( "采样温度 (0.0~1.0)" ) );
+  m_tempSpin->setToolTip( tr( "Sampling temperature (0.0-1.0)" ) );
 
-  formLayout->addRow( tr( "服务提供商：" ), m_providerCombo );
-  formLayout->addRow( tr( "接口地址 (Base URL)：" ), m_baseUrlEdit );
-  formLayout->addRow( tr( "API 密钥 (API Key)：" ), m_apiKeyEdit );
-  formLayout->addRow( tr( "模型名称 (Model)：" ), m_modelNameEdit );
-  formLayout->addRow( tr( "采样温度 (Temperature)：" ), m_tempSpin );
+  formLayout->addRow( tr( "Provider:" ), m_providerCombo );
+  formLayout->addRow( tr( "Base URL:" ), m_baseUrlEdit );
+  formLayout->addRow( tr( "API key:" ), m_apiKeyEdit );
+  formLayout->addRow( tr( "Model name:" ), m_modelNameEdit );
+  formLayout->addRow( tr( "Temperature:" ), m_tempSpin );
 
   mainLayout->addLayout( formLayout );
 
   auto *testLayout = new QHBoxLayout();
-  m_testBtn = new QPushButton( tr( "测试网络连通性" ), this );
-  m_testBtn->setToolTip( tr( "测试与大模型服务的连通性" ) );
+  m_testBtn = new QPushButton( tr( "Test connectivity" ), this );
+  m_testBtn->setToolTip( tr( "Test connectivity to the LLM service" ) );
   m_statusLabel = new QLabel( this );
   testLayout->addWidget( m_testBtn );
   testLayout->addWidget( m_statusLabel, 1 );
@@ -119,23 +119,23 @@ LlmProviderProfile LlmSettingsDialog::selectedProfile() const
 
 void LlmSettingsDialog::onTestConnectionClicked()
 {
-  m_statusLabel->setText( tr( "正在测试连接..." ) );
+  m_statusLabel->setText( tr( "Testing connection..." ) );
   m_statusLabel->setStyleSheet( QStringLiteral( "color: #0284c7; font-weight: 500;" ) );
 
   if ( !m_testClient )
   {
     m_testClient = new LlmStreamingClient( this );
     connect( m_testClient, &LlmStreamingClient::contentTokenReceived, this, [this]( const QString & ) {
-      m_statusLabel->setText( tr( "连接成功！" ) );
+      m_statusLabel->setText( tr( "Connection successful!" ) );
       m_statusLabel->setStyleSheet( QStringLiteral( "color: #16a34a; font-weight: 600;" ) );
     } );
     connect( m_testClient, &LlmStreamingClient::errorOccurred, this, [this]( const QString &err ) {
-      m_statusLabel->setText( tr( "连接失败：%1" ).arg( err ) );
+      m_statusLabel->setText( tr( "Connection failed: %1" ).arg( err ) );
       m_statusLabel->setStyleSheet( QStringLiteral( "color: #dc2626;" ) );
     } );
     connect( m_testClient, &LlmStreamingClient::finished, this, [this]() {
-      if (m_statusLabel->text().contains(tr("正在测试"))) {
-        m_statusLabel->setText( tr( "连接成功，但无内容返回" ) );
+      if (m_statusLabel->text().contains(tr("Testing"))) {
+        m_statusLabel->setText( tr( "Connection successful, but no content returned" ) );
         m_statusLabel->setStyleSheet( QStringLiteral( "color: #d97706;" ) );
       }
     } );

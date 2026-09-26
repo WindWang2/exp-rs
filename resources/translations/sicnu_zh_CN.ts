@@ -1935,7 +1935,96 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
         <source>Class map produced; accuracy reviewed; result available on main map.</source>
         <translation>已生成分类图；查看精度；结果可在主地图中查看。</translation>
     </message>
-</context>
+
+    <message>
+        <source>⚠ Experiment spec load failures (%1)</source>
+        <translation>⚠ 实验规格加载失败（%1 项）</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Experiment spec load failures&lt;/b&gt;</source>
+        <translation>&lt;b&gt;实验规格加载失败&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;The following LabSpec files failed to load. Fix them and restart or reopen this panel:&lt;/p&gt;&lt;ul&gt;</source>
+        <translation>&lt;p&gt;以下 LabSpec 文件无法加载，请修复后重启或重新打开本面板：&lt;/p&gt;&lt;ul&gt;</translation>
+    </message>
+    <message>
+        <source>Click &lt;b&gt;Start experiment&lt;/b&gt; to begin.</source>
+        <translation>点击 &lt;b&gt;开始实验&lt;/b&gt; 以开始。</translation>
+    </message>
+    <message>
+        <source>This experiment is a LabSpec 2/3 document: the operation sequence is defined by a pipeline; no step-by-step guidance yet.</source>
+        <translation>此实验为 LabSpec 2/3 文档：操作序列由流水线定义，暂无分步引导。</translation>
+    </message>
+    <message>
+        <source>Step</source>
+        <translation>步骤</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Experiment complete!&lt;/b&gt;</source>
+        <translation>&lt;b&gt;实验完成！&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;Congratulations! You completed the &lt;b&gt;%1&lt;/b&gt; experiment.&lt;/p&gt;&lt;p&gt;You can try other experiments or adjust parameters for further exploration.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;恭喜！你已完成 &lt;b&gt;%1&lt;/b&gt; 实验。&lt;/p&gt;&lt;p&gt;可以继续尝试其他实验，或调整参数进行更多探索。&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>Action "%1" does not exist on the main window; the experiment spec may be outdated.</source>
+        <translation>主窗口上不存在操作 “%1”，实验规格可能已过期。</translation>
+    </message>
+    <message>
+        <source>A task is already running; wait for it to finish before the next step.</source>
+        <translation>已有任务正在运行，请等待其完成后再执行下一步。</translation>
+    </message>
+    <message>
+        <source>Cannot create the output directory: %1</source>
+        <translation>无法创建输出目录：%1</translation>
+    </message>
+    <message>
+        <source>Running…</source>
+        <translation>运行中…</translation>
+    </message>
+    <message>
+        <source>Run this step</source>
+        <translation>执行此步</translation>
+    </message>
+    <message>
+        <source>"%1" finished. Output: %2</source>
+        <translation>“%1” 完成。输出：%2</translation>
+    </message>
+    <message>
+        <source>"%1" cancelled.</source>
+        <translation>“%1” 已取消。</translation>
+    </message>
+    <message>
+        <source>"%1" failed: %2</source>
+        <translation>“%1” 失败：%2</translation>
+    </message>
+    <message>
+        <source>Task submission was rejected; try again later.</source>
+        <translation>任务提交被拒绝，请稍后重试。</translation>
+    </message>
+    <message>
+        <source>Bound operator:</source>
+        <translation>绑定算子：</translation>
+    </message>
+    <message>
+        <source>UI action:</source>
+        <translation>界面操作：</translation>
+    </message>
+    <message>
+        <source>Rationale:</source>
+        <translation>原理：</translation>
+    </message>
+    <message>
+        <source>Completion sign:</source>
+        <translation>完成标志：</translation>
+    </message>
+    <message>
+        <source>Task:</source>
+        <translation>任务：</translation>
+    </message>
+    </context>
 <context>
     <name>HelpCenterDialog</name>
     <message>
@@ -20339,6 +20428,186 @@ Provenance badges: system fact | authoring guidance | inferred
         <translation>
 来源徽章: 系统事实 | 编写指引 | 推断
 </translation>
+    </message>
+</context>
+<context>
+    <name>LlmSettingsDialog</name>
+    <message>
+        <source>AI Copilot Model &amp; Service Settings</source>
+        <translation>AI Copilot 模型与服务设置</translation>
+    </message>
+    <message>
+        <source>Pick a preset or custom LLM service provider</source>
+        <translation>选择预设或自定义大模型服务提供商</translation>
+    </message>
+    <message>
+        <source>LLM API endpoint root path</source>
+        <translation>大模型 API 服务端点根路径</translation>
+    </message>
+    <message>
+        <source>Enter the API key (leave empty for local models)</source>
+        <translation>输入 API 密钥 (本地模型可留空)</translation>
+    </message>
+    <message>
+        <source>Authentication token</source>
+        <translation>身份鉴权令牌</translation>
+    </message>
+    <message>
+        <source>Model name to request</source>
+        <translation>请求调用的模型名称</translation>
+    </message>
+    <message>
+        <source>Sampling temperature (0.0-1.0)</source>
+        <translation>采样温度 (0.0~1.0)</translation>
+    </message>
+    <message>
+        <source>Provider:</source>
+        <translation>服务提供商：</translation>
+    </message>
+    <message>
+        <source>Base URL:</source>
+        <translation>接口地址 (Base URL)：</translation>
+    </message>
+    <message>
+        <source>API key:</source>
+        <translation>API 密钥 (API Key)：</translation>
+    </message>
+    <message>
+        <source>Model name:</source>
+        <translation>模型名称 (Model)：</translation>
+    </message>
+    <message>
+        <source>Temperature:</source>
+        <translation>采样温度 (Temperature)：</translation>
+    </message>
+    <message>
+        <source>Test connectivity</source>
+        <translation>测试网络连通性</translation>
+    </message>
+    <message>
+        <source>Test connectivity to the LLM service</source>
+        <translation>测试与大模型服务的连通性</translation>
+    </message>
+    <message>
+        <source>Testing connection...</source>
+        <translation>正在测试连接...</translation>
+    </message>
+    <message>
+        <source>Connection successful!</source>
+        <translation>连接成功！</translation>
+    </message>
+    <message>
+        <source>Connection failed: %1</source>
+        <translation>连接失败：%1</translation>
+    </message>
+    <message>
+        <source>Testing</source>
+        <translation>正在测试</translation>
+    </message>
+    <message>
+        <source>Connection successful, but no content returned</source>
+        <translation>连接成功，但无内容返回</translation>
+    </message>
+</context>
+<context>
+    <name>GuidedLabWorkspace</name>
+    <message>
+        <source>Why-this-step / explainable workflow notes</source>
+        <translation>Why-this-step / 可解释工作流说明</translation>
+    </message>
+    <message>
+        <source>Manual / reflection step: enter structured evidence here (the answer key is never leaked)</source>
+        <translation>人工/反思步骤：在此填写结构化证据（不会泄露标准答案）</translation>
+    </message>
+    <message>
+        <source>Artifact paths (files produced by the Processing Toolbox, used for validation and grading)</source>
+        <translation>产物路径（处理工具箱输出的文件，用于验证与评分）</translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation>上一步</translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation>下一步</translation>
+    </message>
+    <message>
+        <source>Run / jump to operator</source>
+        <translation>运行/跳转算子</translation>
+    </message>
+    <message>
+        <source>Submit manual evidence</source>
+        <translation>提交人工证据</translation>
+    </message>
+    <message>
+        <source>Validate &amp; grade</source>
+        <translation>验证与评分</translation>
+    </message>
+    <message>
+        <source>Export capsule / report</source>
+        <translation>导出胶囊/报告</translation>
+    </message>
+    <message>
+        <source>Parameters (teaching-masked)</source>
+        <translation>参数（教学掩码后）</translation>
+    </message>
+    <message>
+        <source>Artifacts to validate</source>
+        <translation>待验证产物</translation>
+    </message>
+    <message>
+        <source>Validation / grading feedback</source>
+        <translation>验证 / 评分反馈</translation>
+    </message>
+    <message>
+        <source>Readiness: %1</source>
+        <translation>就绪: %1</translation>
+    </message>
+    <message>
+        <source>Autonomy level: %1 (%2)</source>
+        <translation>自主等级: %1（%2）</translation>
+    </message>
+    <message>
+        <source>Ladder:
+</source>
+        <translation>阶梯:
+</translation>
+    </message>
+    <message>
+        <source>Overall: %1 (counted as pass=%2)
+%3
+%4
+</source>
+        <translation>总评: %1（计为通过=%2）
+%3
+%4
+</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>是</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>否</translation>
+    </message>
+    <message>
+        <source>
+Capsule reference: %1</source>
+        <translation>
+胶囊引用: %1</translation>
+    </message>
+    <message>
+        <source> Manual step required</source>
+        <translation> 需要人工</translation>
+    </message>
+    <message>
+        <source>No steps</source>
+        <translation>无步骤</translation>
+    </message>
+    <message>
+        <source>type=%1  operator=%2  manual=%3  AI allowed=%4</source>
+        <translation>类型=%1  算子=%2  人工=%3  AI允许=%4</translation>
     </message>
 </context>
 </TS>
