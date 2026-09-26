@@ -156,20 +156,30 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
 
     for ( const QString &runId : twins )
     {
-        const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+        const auto recorded = m_store->runRecordById( runId );
         if ( !recorded )
         {
-            // A row whose JSON no longer parses cannot back a verdict.
+            // Corrupt and vanished rows are distinguishable now (#1333 item
+            // 11); neither can back a verdict, both are named honestly.
+            const auto &diagnostics = recorded.diagnostics();
+            const bool corrupt = !diagnostics.isEmpty() &&
+                                 diagnostics.constFirst().code ==
+                                     QLatin1String( "experiment.run_corrupt" );
             verdict.reasons.append(
-                QStringLiteral( "matched run %1 is unreadable; excluded from the verdict" )
-                    .arg( runId ) );
+                corrupt
+                    ? QStringLiteral( "matched run %1 is unreadable; excluded from the verdict" )
+                          .arg( runId )
+                    : QStringLiteral( "matched run %1 is no longer present; excluded from"
+                                      " the verdict" )
+                          .arg( runId ) );
             continue;
         }
+        const ExperimentRun &recordedRun = recorded.value();
         verdict.matchedRunIds.append( runId );
         // Drift evidence is computed ONCE, against the first matched run.
         if ( repeatEnvironment && verdict.environmentDrift.isEmpty() )
             verdict.environmentDrift =
-                environmentDrift( recorded->environment(), *repeatEnvironment );
+                environmentDrift( recordedRun.environment(), *repeatEnvironment );
     }
 
     // Every identity twin is unreadable: twins.isNotEmpty means the indexed
@@ -245,7 +255,7 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
     QStringList sameResult;
     for ( const QString &runId : verdict.matchedRunIds )
     {
-        const std::optional<ExperimentRun> recorded = m_store->runById( runId );
+        const auto recorded = m_store->runRecordById( runId );
         if ( recorded && recorded->resultFingerprint() == resultFingerprint )
             sameResult.append( runId );
     }

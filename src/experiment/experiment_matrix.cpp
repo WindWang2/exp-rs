@@ -394,9 +394,19 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
 
         for ( const QString &runId : cellAggregate.runIds )
         {
-            const auto run = m_store->runById( runId );
+            const auto run = m_store->runRecordById( runId );
             if ( !run )
+            {
+                // A corrupt row is evidence the ledger vouches for — refusing
+                // beats aggregating over a silently missing run (#1333 item 11).
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return Result<MatrixAggregate>::failure( diagnostics );
                 continue; // dangling ledger edge: counted as neither recorded nor failed
+            }
             if ( run->status() == RunStatus::Completed )
             {
                 anyRecorded = true;
@@ -441,12 +451,21 @@ Result<MatrixAggregate> MatrixAggregator::aggregate(
         bool anyInFlight = false;
         for ( const QString &runId : cellAggregate.runIds )
         {
-            const auto run = m_store->runById( runId );
-            if ( run.has_value() &&
-                 ( run->status() == RunStatus::Created ||
-                   run->status() == RunStatus::Running ||
-                   run->status() == RunStatus::Interrupted ||
-                   run->status() == RunStatus::Cancelling ) )
+            const auto run = m_store->runRecordById( runId );
+            if ( !run )
+            {
+                const auto &diagnostics = run.diagnostics();
+                const bool corrupt = !diagnostics.isEmpty() &&
+                                     diagnostics.constFirst().code ==
+                                         QLatin1String( "experiment.run_corrupt" );
+                if ( corrupt )
+                    return Result<MatrixAggregate>::failure( diagnostics );
+                continue;
+            }
+            if ( run->status() == RunStatus::Created ||
+                 run->status() == RunStatus::Running ||
+                 run->status() == RunStatus::Interrupted ||
+                 run->status() == RunStatus::Cancelling )
                 anyInFlight = true;
         }
         cellAggregate.status =
