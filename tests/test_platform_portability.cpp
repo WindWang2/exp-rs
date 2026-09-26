@@ -281,6 +281,113 @@ TEST_CASE( "claimExclusiveUtf8 grants one exclusive owner per name", "[platform]
   fs::remove_all( base );
 }
 
+// ============================================================================
+// UTF-8 boundary regression family (WP-D, core-foundations-r4): six named
+// asset classes that historically broke narrow-conversion code paths. Each
+// case asserts (a) the pathFromUtf8 ∘ pathToUtf8 round-trip is the identity
+// and (b) a real create/write/reopen cycle lands byte-identical content
+// under a byte-exact directory-entry name.
+// ============================================================================
+
+namespace
+{
+void utf8RoundTripCase( const std::string &label, const std::string &dirName,
+                        const std::string &fileName, const std::string &payload )
+{
+  const fs::path base = fs::temp_directory_path() /
+                        fs::path( "sicnu-utf8-r4" ) / fs::path( dirName );
+  fs::remove_all( base );
+  fs::create_directories( base );
+
+  const std::string filePath = base / fs::path( fileName );
+  // (a) identity round-trip.
+  REQUIRE( pathToUtf8( pathFromUtf8( filePath ) ) == filePath );
+
+  // (b) real fs cycle: write → reopen → byte-exact read → byte-exact name.
+  {
+    std::ofstream out( pathFromUtf8( filePath ), std::ios::binary | std::ios::trunc );
+    REQUIRE( static_cast<bool>( out ) );
+    out.write( payload.data(), static_cast<std::streamsize>( payload.size() ) );
+    REQUIRE( static_cast<bool>( out ) );
+  }
+  std::ifstream in( pathFromUtf8( filePath ), std::ios::binary );
+  REQUIRE( static_cast<bool>( in ) );
+  const std::string body( ( std::istreambuf_iterator<char>( in ) ),
+                          std::istreambuf_iterator<char>() );
+  INFO( "label: " << label );
+  REQUIRE( body == payload );
+
+  bool nameSeen = false;
+  for ( const fs::directory_entry &entry : fs::directory_iterator( base ) )
+  {
+    if ( pathToUtf8( entry.path().filename() ) == fileName )
+      nameSeen = true;
+  }
+  REQUIRE( nameSeen );
+
+  fs::remove_all( base );
+}
+} // namespace
+
+TEST_CASE( "utf8: Chinese directory and file names survive the boundary", "[platform][utf8][r4]" )
+{
+  utf8RoundTripCase( "chinese", "\xe6\x95\xb0\xe6\x8d\xae\xe7\x9b\xae\xe5\xbd\x95",
+                     "\xe5\x9c\xb0\xe5\x9b\xbe\xe4\xbf\xa1\xe6\x81\xaf.json",
+                     "\xe4\xb8\xad\xe6\x96\x87 payload" );
+}
+
+TEST_CASE( "utf8: spaced and punctuation names survive the boundary", "[platform][utf8][r4]" )
+{
+  utf8RoundTripCase( "spaces", "data dir (2026) [r4]", "my report file v2.final.txt",
+                     "payload with spaces" );
+}
+
+TEST_CASE( "utf8: paths beyond the 260-character legacy MAX_PATH", "[platform][utf8][r4][long]" )
+{
+  // Total path > 260 bytes (the legacy Windows MAX_PATH) via a long
+  // directory segment plus a long name, while every single component stays
+  // within the 255-byte NAME_MAX every lane shares. POSIX is
+  // byte-transparent and must stay exact.
+  const std::string longDir( 160, 'd' );
+  const std::string longName( 120, 'l' );
+  utf8RoundTripCase( "long-path", longDir, longName + ".txt", "long-path payload" );
+  REQUIRE( longDir.size() + longName.size() + 5 > 260 );
+}
+
+TEST_CASE( "utf8: mixed-case names round-trip byte-exact (no case folding)", "[platform][utf8][r4]" )
+{
+  utf8RoundTripCase( "mixed-case", "RePoRt DiR", "FiLeNaMe.TxT", "case payload" );
+}
+
+TEST_CASE( "utf8: BOM-prefixed content and a U+FEFF name character", "[platform][utf8][r4][bom]" )
+{
+  // The name carries U+FEFF (the BOM codepoint as a name character) and the
+  // content starts with the UTF-8 BOM bytes EF BB BF — both must ride the
+  // boundary as opaque bytes.
+  utf8RoundTripCase( "bom", "\xef\xbb\xbfdir", "\xef\xbb\xbfnamed.txt",
+                     "\xef\xbb\xbf{ \xef\xbb\xbfquoted }" );
+}
+
+TEST_CASE( "utf8: mixed separators normalize to one directory-entry name", "[platform][utf8][r4]" )
+{
+  // POSIX is byte-transparent: a name containing a backslash is a legal
+  // single-entry file name. pathFromUtf8 must not reinterpret the bytes.
+  const fs::path base = fs::temp_directory_path() / fs::path( "sicnu-utf8-r4-sep" );
+  fs::remove_all( base );
+  fs::create_directories( base );
+  const std::string mixedName = "odd\\name.txt";
+  const std::string filePath = base / fs::path( mixedName );
+  REQUIRE( pathToUtf8( pathFromUtf8( filePath ) ) == filePath );
+  {
+    std::ofstream out( pathFromUtf8( filePath ), std::ios::binary );
+    REQUIRE( static_cast<bool>( out ) );
+    out << "sep payload";
+  }
+  REQUIRE( fs::exists( pathFromUtf8( filePath ) ) );
+  REQUIRE( pathToUtf8( pathFromUtf8( filePath ).filename() ) == mixedName );
+  fs::remove_all( base );
+}
+
 #if !defined( _WIN32 )
 // POSIX publication contract (Windows equivalent is MoveFileExW/
 // ReplaceFileW inside atomic_fs): rename(2) swaps the directory entry and
