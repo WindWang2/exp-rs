@@ -153,6 +153,11 @@ std::vector<SnapshotEntry> loadSnapshot()
     if (!parsed)
         INFO("snapshot does not round-trip through jsoncpp: " << errors << ". " << kRegenHint);
     REQUIRE(parsed);
+    if (!root["schemaVersion"].isConvertibleTo(Json::ValueType::intValue))
+    {
+        INFO("snapshot schemaVersion is not an integer: " << kRegenHint);
+        REQUIRE(root["schemaVersion"].isConvertibleTo(Json::ValueType::intValue));
+    }
     const int version = root["schemaVersion"].asInt();
     if (version != 1)
         INFO("snapshot schemaVersion must be 1 (got " << version << "): " << kRegenHint);
@@ -167,6 +172,12 @@ std::vector<SnapshotEntry> loadSnapshot()
     std::set<std::string> seen;
     for (const auto &entry : tools)
     {
+        if (!entry["name"].isString() || !entry["family"].isString()
+            || !entry["description"].isString() || !entry["inputSchema"].isObject())
+        {
+            INFO("snapshot entry has a wrongly-typed field: " << kRegenHint);
+            REQUIRE(entry["name"].isString());
+        }
         SnapshotEntry e;
         e.name = entry["name"].asString();
         e.family = entry["family"].asString();
@@ -192,6 +203,47 @@ std::vector<SnapshotEntry> loadSnapshot()
 TEST_CASE("Surface snapshot is self-validating", "[surface_snapshot]")
 {
     REQUIRE(loadSnapshot().size() > 20);
+}
+
+TEST_CASE("Snapshot carries known-answer anchor tools (independent oracle)", "[surface_snapshot]")
+{
+    // Hand-written expectations for one tool per surface source (meta /
+    // data-platform / spatial registry). These are INDEPENDENT of the
+    // generator: collectSurfaceTools() agreeing with itself would never
+    // catch a generator blind spot, so the three entries below pin the
+    // snapshot's shape from outside the implementation (review P2).
+    std::map<std::string, SnapshotEntry> snap;
+    for (const SnapshotEntry &entry : loadSnapshot())
+        snap.emplace(entry.name, entry);
+
+    // Meta protocol tool: unprefixed name, family "meta", object schema.
+    {
+        const auto it = snap.find("list_algorithms");
+        REQUIRE(it != snap.end());
+        REQUIRE(it->second.family == "meta");
+        REQUIRE(it->second.description.find("algorithm") != std::string::npos);
+        REQUIRE(canonicalJson(it->second.inputSchema).find("\"type\":\"object\"")
+                != std::string::npos);
+    }
+    // Data-platform tool: dataset: family, object schema with properties.
+    {
+        const auto it = snap.find("dataset:list");
+        REQUIRE(it != snap.end());
+        REQUIRE(it->second.family == "dataset");
+        const std::string schema = canonicalJson(it->second.inputSchema);
+        REQUIRE(schema.find("\"type\":\"object\"") != std::string::npos);
+        REQUIRE(schema.find("\"properties\"") != std::string::npos);
+    }
+    // Spatial registry tool: the ADR 0122 raster inspector, string-typed
+    // path parameter.
+    {
+        const auto it = snap.find("spatial:raster_inspect");
+        REQUIRE(it != snap.end());
+        REQUIRE(it->second.family == "spatial");
+        const std::string schema = canonicalJson(it->second.inputSchema);
+        REQUIRE(schema.find("\"path\"") != std::string::npos);
+        REQUIRE(schema.find("\"type\":\"string\"") != std::string::npos);
+    }
 }
 
 TEST_CASE("Snapshot equals the live union projection", "[surface_snapshot]")

@@ -459,6 +459,21 @@ void McpServer::handleRequest(const QVariantMap &request)
     QString method = request.value(QStringLiteral("method")).toString();
     QVariantMap params = request.value(QStringLiteral("params")).toMap();
 
+    // JSON-RPC 2.0: "method" is REQUIRED. A frame without one is not a
+    // valid request, so it answers -32600 Invalid Request — routing it into
+    // the unknown-method branch would report -32601, implying an empty
+    // method name exists to be not found (Track 9 protocol hardening).
+    // The check precedes the -32002 gate on purpose: Invalid Request ranks
+    // the FRAME, the gate ranks requests, and a method-less frame is not a
+    // request the gate could rank (review P2). Notifications stay silent
+    // (nothing to answer to).
+    if ( method.isEmpty() )
+    {
+        if ( !isNotification )
+            sendError( id, -32600, QStringLiteral( "Invalid Request: missing method" ) );
+        return;
+    }
+
     // MCP spec: requests other than initialize/ping before the handshake
     // are rejected with -32002 Server not initialized (#701.7) — the old
     // server answered everything, so a mis-ordered client got confusing
@@ -467,18 +482,6 @@ void McpServer::handleRequest(const QVariantMap &request)
          && method != QStringLiteral( "ping" ) && !method.startsWith( QStringLiteral( "notifications/" ) ) )
     {
         sendError( id, -32002, QStringLiteral( "Server not initialized" ) );
-        return;
-    }
-
-    // JSON-RPC 2.0: "method" is REQUIRED. A frame without one is not a
-    // valid request, so it answers -32600 Invalid Request — routing it into
-    // the unknown-method branch would report -32601, implying an empty
-    // method name exists to be not found (Track 9 protocol hardening).
-    // Notifications stay silent (nothing to answer to).
-    if ( method.isEmpty() )
-    {
-        if ( !isNotification )
-            sendError( id, -32600, QStringLiteral( "Invalid Request: missing method" ) );
         return;
     }
 

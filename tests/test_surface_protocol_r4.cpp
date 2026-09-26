@@ -29,6 +29,8 @@
 #include "agent/tool_catalog/meta_protocol_tools.h"
 #include "agent/tool_catalog/surface_registry.h"
 #include "agent/data_platform_tools.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 namespace {
 
@@ -39,6 +41,10 @@ using sicnu::agent::tool_catalog::surfaceAllowedPrefixes;
 /// answerable; parse/invalid-request errors answer with id:null) is
 /// mirrored from McpServer::sendResponse/sendError so the counts reflect
 /// what the WIRE would see rather than what the dispatcher attempted.
+/// KEEP-IN-SYNC: if the guard in McpServer::sendResponse/sendError changes
+/// (absent-id policy, answerable codes), mirror it HERE - the double has no
+/// mechanical drift alarm (review P2); the shapes are cross-linked from the
+/// sendError comment in mcp_server.cpp.
 class CountingServer : public McpServer
 {
 public:
@@ -120,6 +126,34 @@ public:
     }
 };
 
+/// Trivial fast operator (same shape as test_surface_protocol's fixture):
+/// execute_operator needs a real registered operator so the rpc-id -> task
+/// cancellation bookkeeping is populated through a genuine execution.
+class NoopOperator : public sicnu::operators::RSOperator
+{
+public:
+    std::string name() const override { return "rs:surface_noop"; }
+    Json::Value run(const Json::Value &, sicnu::operators::RSOperatorContext &) override
+    {
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/surface_noop.tif";
+        return result;
+    }
+};
+
+void registerNoopOperator()
+{
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+        "rs:surface_noop", []() { return std::make_unique<NoopOperator>(); });
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    if (!registry.findAdapter("rs:surface_noop"))
+    {
+        auto op = sicnu::operators::RSOperatorRegistry::instance().create("rs:surface_noop");
+        if (op)
+            registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
+    }
+}
+
 /// The tools/call result payload rides content[0].text as compact JSON.
 QJsonObject payloadOf(const QVariantMap &callResult)
 {
@@ -171,13 +205,11 @@ TEST_CASE("a request frame without a method member is Invalid Request (-32600), 
 {
     // JSON-RPC 2.0: "method" is REQUIRED; a frame lacking it is not a valid
     // request and must answer -32600, not -32601 (which would imply an
-    // empty method name exists to be not found). The -32002 pre-init gate
-    // legitimately runs first, so the server is initialized here: this pins
-    // the post-handshake contract.
+    // empty method name exists to be not found). Invalid Request ranks the
+    // FRAME, so the check deliberately PRECEDES the -32002 pre-init gate:
+    // this case runs on a fresh (uninitialized) server and still expects
+    // -32600 (review P2: state-independent frame classification).
     CountingServer s;
-    s.initialize(7);
-    s.responses.clear();
-    s.errors.clear();
     s.request(QVariantMap{
         { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
         { QStringLiteral("id"), 7 } });
@@ -277,17 +309,35 @@ TEST_CASE("unknown tool inside a valid tools/call names the tool and answers -32
     REQUIRE(s.errors.first().errorMessage.contains(QStringLiteral("python:never_allowed")));
 }
 
-TEST_CASE("notifications/cancelled is one-shot, maps the rpc id, and never answers (#634/#644)", "[surface][protocol][r4]")
+TEST_CASE("notifications/cancelled never answers and cannot poison rpc-id bookkeeping (#634/#644)", "[surface][protocol][r4]")
 {
+    registerNoopOperator();
     CountingServer canceller;
     canceller.initialize(21);
+
+    // Populate the rpc-id -> task map through a REAL execution (the map is
+    // only fed when a tools/call yields an execution_id): without this the
+    // cancellation bookkeeping below would only ever walk an empty table
+    // (review P1: the vacuous-path guard). The actual cancelTask effect on
+    // TaskCenter is covered end-to-end by test_surface_e2e.
+    QVariantMap execParams;
+    execParams[QStringLiteral("name")] = QStringLiteral("execute_operator");
+    execParams[QStringLiteral("arguments")] =
+        QVariantMap{ { QStringLiteral("operator_id"), QStringLiteral("rs:surface_noop") } };
+    canceller.callRaw(QVariant(50), execParams);
+    REQUIRE(canceller.responses.size() == 2); // initialize + execution
+    const QString execId = payloadOf(canceller.responses.last().result)
+                               .value(QStringLiteral("execution_id"))
+                               .toString();
+    REQUIRE(execId.startsWith(QStringLiteral("task-"))); // map entry now exists
+    canceller.responses.clear();
 
     // A cancelled notification is NEVER answered...
     canceller.request(QVariantMap{
         { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
         { QStringLiteral("method"), QStringLiteral("notifications/cancelled") },
         { QStringLiteral("params"), QVariantMap{ { QStringLiteral("requestId"), 21 } } } });
-    REQUIRE(canceller.responses.size() == 1); // only initialize
+    REQUIRE(canceller.responses.size() == 0); // cleared: nothing new arrived
     REQUIRE(canceller.errors.isEmpty());
     // ...a duplicate cancel for the same id is a consumed-map no-op...
     canceller.request(QVariantMap{
@@ -304,7 +354,7 @@ TEST_CASE("notifications/cancelled is one-shot, maps the rpc id, and never answe
         { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
         { QStringLiteral("method"), QStringLiteral("notifications/cancelled") },
         { QStringLiteral("params"), QVariantMap{} } }); // no requestId at all
-    REQUIRE(canceller.responses.size() == 1);
+    REQUIRE(canceller.responses.size() == 0); // still cleared: notifications answer nothing
     REQUIRE(canceller.errors.isEmpty());
 
     // The cancelled request's own rpc id stays answerable afterwards: a
@@ -314,7 +364,7 @@ TEST_CASE("notifications/cancelled is one-shot, maps the rpc id, and never answe
         { QStringLiteral("id"), 22 },
         { QStringLiteral("method"), QStringLiteral("ping") },
         { QStringLiteral("params"), QVariantMap{} } });
-    REQUIRE(canceller.responses.size() == 2);
+    REQUIRE(canceller.responses.size() == 1); // just this ping
     REQUIRE(canceller.responses.last().id.toInt() == 22);
 }
 
@@ -375,8 +425,10 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
     s.initialize(41);
 
     // A catalog tool under a NON-allowed family must be invisible to
-    // tools/list even though it IS registered (the filter is the contract;
-    // this is the inverse of the ghost-surface gate in test_surface_parity).
+    // tools/list even though it IS registered. This exercises the WHOLE
+    // stack (projection filter -> wire render), which is the agent-visible
+    // contract; the allow-list function in isolation has its own case in
+    // test_surface_parity.
     auto &catalog = sicnu::agent::tool_catalog::AgentToolCatalog::instance();
     sicnu::agent::tool_catalog::AgentTool forbidden;
     forbidden.name = "python:train_forbidden";
@@ -384,6 +436,16 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
     forbidden.description = "must never be listed";
     forbidden.inputSchema = Json::Value(Json::objectValue);
     catalog.registerCustomTool(forbidden);
+    // RAII cleanup: a mid-case failure must not leak the probe into the
+    // later cases of this binary (review P2).
+    struct Unregister
+    {
+        ~Unregister()
+        {
+            sicnu::agent::tool_catalog::AgentToolCatalog::instance().unregisterCustomTool(
+                "python:train_forbidden");
+        }
+    } unregisterGuard;
 
     s.request(QVariantMap{
         { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
@@ -439,7 +501,6 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
         if (type.isValid())
             REQUIRE(type.toString() == QStringLiteral("object"));
     }
-    catalog.unregisterCustomTool(forbidden.name);
 }
 
 TEST_CASE("every projected inputSchema survives the jsoncpp <-> QJsonDocument round-trip", "[surface][protocol][r4]")
