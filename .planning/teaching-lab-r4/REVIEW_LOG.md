@@ -28,4 +28,20 @@ FAILED 检查）；脚本修复移交（白名单外）。
 
 ## Round R3（收口前）— 独立对抗性评审（general-purpose subagent，只读）
 
-（评审完成后回填：P0/P1/P2 分级发现与处置、终审裁决）
+对象：`git diff 15e5c66b5..HEAD` 全量 + 独立实跑 4 套件（92/18、77/7、46/8、29/7，与文档声称精确一致）。
+
+**总裁决：YES-WITH-FIXES。P0：无**（两个真缺陷修复——令牌门反转、BOM——均确认正确且必要）。
+
+| 级别 | 发现 | 处置 |
+|---|---|---|
+| P1-1 | json_util.h 注释现在时声称"mirror 权威 fileSha256"，但本基（#1336 未合并）权威仍按原始字节——合并序耦合未在代码注释披露 | **已修**：注释改为如实陈述合并序事实 + "#1336 合入后本入口须委托权威"的义务说明；测试头文件同步勘正 |
+| P1-2 | 流式 pending-CR 跨 chunk 逻辑零直接覆盖（全部 inventory fixture <8000B；canonicalFileSha256 无直接调用点） | **已修**：CHUNK-1（64KiB 边界 CRLF + EOF 孤立 CR，对整段 oracle 直测）、CHUNK-2（NUL@7999/8000 探测边界 + 可观测 CRLF 差异）、CHUNK-3（空文件/全 CR 恒等） |
+| P2 | B03/B18 两类无直接用例（矩阵"22 类"实为 20 类有例） | **已修**：B03（BOM 参与哈希）、B18（generated 字节漂移 warning）各补一例 → 22/22 类全有例（23 用例 121 断言） |
+| P2 | parity"byte-stable"名不副实（Json::Value 语义比较非字节比较） | **已修**：升级为 jsoncpp 重序列化字节串比对 |
+| P2 | preflight digest 同对象两次调用近同义反复 | **已修**：两次独立 runPreflight 摘要相等 + 输入扰动摘要必变 |
+| P2 | 22/22 表第 3 行声称未行使的"不可读文件"路径 | **已修**：措辞改为实际行使路径 |
+| P2 | canonicalSize=-1 时 byte pin 静默跳过（基线 fi.size() 仍可报） | 接受：committed 层 sha256 必填（B09 authority 兜底）使该路径实际不可达；已在代码注释与表格中如实标注 |
+| P2 | 并发 parity 用例近乎必过（被测为纯函数） | 接受：定位为防回归护栏（纯函数化回归即变红） |
+| 确认 | 越界 C1 / 新轴 C2 / CMakeLists 冲突 C3 / 文档诚实性 D1 / LF 回归 E1（48/48 pin 独立复算） | 全部通过 |
+
+处置后复验：/tmp/r4_verify.sh 全绿（boundaries 121 断言/23 用例，parity 47，authoring 30，零回归）。
