@@ -299,7 +299,7 @@ TEST_CASE( "dataset family failure classes follow the contract",
         // "unknown resource" class.
         // RED at introduction (was GenericError 1).
         requireErrorEnvelope( "dataset --dataset-db " + db +
-                                  " version --version 00000000-0000-0000-0000-000000000000",
+                                  " inspect --version 00000000-0000-0000-0000-000000000000",
                               "dataset", kMissingDependency );
     }
 }

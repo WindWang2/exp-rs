@@ -220,7 +220,7 @@ TEST_CASE( "resource-not-found errors name expected vs actual",
         // expected: an existing version id; actual: the unknown id.
         requireFourTuple(
             "dataset --dataset-db " + db +
-                " version --version 00000000-0000-0000-0000-000000000000",
+                " inspect --version 00000000-0000-0000-0000-000000000000",
             5, "MISSING_DEPENDENCY", true, true, false );
     }
     SECTION( "algorithms schema for unknown id (already 5; pins the code prefix)" )

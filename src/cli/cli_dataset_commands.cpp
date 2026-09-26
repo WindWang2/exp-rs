@@ -242,6 +242,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
     if ( sub == QLatin1String( "leakage" ) && options.splitManifestId.isEmpty() )
         return fail( io, "dataset", "--split is required", kInvalidInput,
                      { .expected = "--split <id>" } );
+    if ( sub == QLatin1String( "version" ) && options.datasetId.isEmpty() )
+        return fail( io, "dataset", "--dataset is required", kInvalidInput,
+                     { .expected = "--dataset <id>" } );
 
     sicnu::dataset::DatasetStore store;
     QString error;

@@ -156,7 +156,7 @@ TEST_CASE( "parity 8-11: dataset family store semantics are the MCP dataset:* tr
     // Unknown version id -> MissingDependency(5), matching the not-found
     // semantics of the MCP dataset:version tool.
     runForEnvelope( "dataset --dataset-db " + db +
-                        " version --version 00000000-0000-0000-0000-000000000000 --json",
+                        " inspect --version 00000000-0000-0000-0000-000000000000 --json",
                     5 );
 }
 
