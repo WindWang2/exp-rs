@@ -9,6 +9,7 @@
 #include "experiment/experiment_matrix.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
+#include "experiment/repeat_execution.h"
 
 #include <QTemporaryDir>
 
@@ -82,3 +83,65 @@ TEST_CASE( "runsForCell filters edge kind before the page limit",
     CHECK( runs == recorded );
 }
 } // namespace
+// ⑥ (item 6): the identity-twin scan is bounded (50 by contract); hitting
+// the bound used to be invisible. The invariant: a verdict decided against
+// a full page says so — twinScanCapped / "twin_scan_capped" — and a verdict
+// decided against a partial page does not.
+TEST_CASE( "repeat verdict marks when the twin scan hits its cap",
+           "[experiment][repeat][r4]" )
+{
+    QTemporaryDir dir;
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
+
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r4-twins" ) );
+    experiment.setName( QStringLiteral( "twin cap oracle" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    // 50 identity twins: distinct run ids, identical pins (all still in
+    // Created — status plays no role in the identity hash).
+    for ( int i = 0; i < 50; ++i )
+    {
+        ExperimentRun run =
+            makeRun( QStringLiteral( "twin-%1" ).arg( i ), experiment.experimentId() );
+        run.setStatus( RunStatus::Created );
+        REQUIRE( store.upsertRun( run ).has_value() );
+    }
+
+    RepeatExecutionClassifier classifier( store );
+    const ExperimentRun probe =
+        makeRun( QStringLiteral( "probe" ), experiment.experimentId() );
+
+    // Full page: the verdict must disclose that the scan hit the cap.
+    {
+        const auto verdict = classifier.classify( probe.executionIdentity() );
+        REQUIRE( verdict.has_value() );
+        CHECK( verdict.value().twinScanCapped );
+        CHECK( verdict.value().toJson().value( QStringLiteral( "twin_scan_capped" ) ).toBool() );
+        CHECK( verdict.value().matchedRunIds.size() == 50 );
+    }
+
+    // One twin short of the cap: nothing to disclose.
+    {
+        ExperimentStore store49;
+        REQUIRE( store49.open( dir.filePath( QStringLiteral( "experiments49.db" ) ) ) );
+        Experiment experiment49;
+        experiment49.setExperimentId( QStringLiteral( "exp-r4-twins49" ) );
+        experiment49.setName( QStringLiteral( "twin cap oracle 49" ) );
+        REQUIRE( store49.upsertExperiment( experiment49 ).has_value() );
+        for ( int i = 0; i < 49; ++i )
+        {
+            ExperimentRun run = makeRun( QStringLiteral( "twin-%1" ).arg( i ),
+                                         experiment49.experimentId() );
+            run.setStatus( RunStatus::Created );
+            REQUIRE( store49.upsertRun( run ).has_value() );
+        }
+        RepeatExecutionClassifier classifier49( store49 );
+        const ExperimentRun probe49 =
+            makeRun( QStringLiteral( "probe" ), experiment49.experimentId() );
+        const auto verdict = classifier49.classify( probe49.executionIdentity() );
+        REQUIRE( verdict.has_value() );
+        CHECK( !verdict.value().twinScanCapped );
+    }
+}

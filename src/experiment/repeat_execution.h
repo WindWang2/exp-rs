@@ -56,6 +56,11 @@ class RepeatExecutionClassifier
         /// Recorded runs the verdict was decided against (may be fewer than
         /// the store matches — bounded lookup).
         QStringList matchedRunIds;
+        /// True when the twin scan hit its cap and the store may hold further
+        /// identity twins beyond the scanned page (#1333 ⑥: the cap used to
+        /// be invisible — a verdict could read "New" without ever reaching
+        /// the matching rows).
+        bool twinScanCapped = false;
         /// Pin-level comparison against the first matched run (Deviation
         /// evidence; empty otherwise). From RunComparison::compare.
         QJsonObject pinComparison;

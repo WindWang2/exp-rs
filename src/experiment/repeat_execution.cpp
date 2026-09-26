@@ -90,12 +90,19 @@ QString classificationToString( RepeatExecutionClassifier::Classification classi
 
 } // namespace
 
+/// Upper bound of the identity-twin scan per verdict (#1333 ⑥). The scan is
+/// a bounded lookup by contract; when the store matches this many twins,
+/// more rows may exist beyond the page and the verdict says so
+/// (Verdict::twinScanCapped) instead of staying silent about the bound.
+constexpr qint64 kMaxTwinScan = 50;
+
 QJsonObject RepeatExecutionClassifier::Verdict::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "schema_version" ), kRepeatExecutionSchemaVersion );
     json.insert( QStringLiteral( "classification" ),
                  classificationToString( classification ) );
+    json.insert( QStringLiteral( "twin_scan_capped" ), twinScanCapped );
     QJsonArray matched;
     for ( const QString &runId : matchedRunIds )
         matched.append( runId );
@@ -133,10 +140,19 @@ Result<RepeatExecutionClassifier::Verdict> RepeatExecutionClassifier::classify(
     // Identity twins via the indexed fingerprint column (12.0): the hash IS
     // the identity semantics, so the index lookup is exact, not heuristic.
     const QString identityHash = runExecutionFingerprint( identity );
-    const auto twinLookup = m_store->runIdsByExecutionFingerprint( identityHash, /*limit=*/50 );
+    const auto twinLookup =
+        m_store->runIdsByExecutionFingerprint( identityHash, kMaxTwinScan );
     if ( !twinLookup )
         return Result<Verdict>::failure( twinLookup.diagnostics() );
     const QStringList twins = twinLookup.value();
+    if ( twins.size() >= kMaxTwinScan )
+    {
+        verdict.twinScanCapped = true;
+        verdict.reasons.append(
+            QStringLiteral( "twin scan hit its %1-record cap; further identity"
+                            " twins may exist beyond the scanned page" )
+                .arg( kMaxTwinScan ) );
+    }
 
     for ( const QString &runId : twins )
     {
