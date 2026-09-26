@@ -148,15 +148,16 @@ TEST_CASE( "parity 8-11: dataset family store semantics are the MCP dataset:* tr
     const std::string datasetId = created["data"]["dataset_id"].asString();
     REQUIRE_FALSE( datasetId.empty() );
 
-    // stats on the created id: shared store truth, sample_count shape.
-    const Json::Value stats = runForEnvelope(
-        "dataset stats --dataset-db " + db + " --dataset " + datasetId + " --json", 0 );
-    REQUIRE( stats["data"].isMember( "sample_count" ) );
+    // inspect on the created id: shared store truth (the same DatasetStore
+    // the MCP dataset:* family and the GUI panel open).
+    const Json::Value inspected = runForEnvelope(
+        "dataset inspect --dataset-db " + db + " --dataset " + datasetId + " --json", 0 );
+    REQUIRE( inspected["data"].isMember( "dataset" ) );
 
-    // Unknown version id -> MissingDependency(5), matching the not-found
-    // semantics of the MCP dataset:version tool.
+    // stats iterates a version: a missing one is MissingDependency(5),
+    // matching the not-found semantics of the MCP dataset:version tool.
     runForEnvelope( "dataset --dataset-db " + db +
-                        " inspect --version 00000000-0000-0000-0000-000000000000 --json",
+                        " stats --version 00000000-0000-0000-0000-000000000000 --json",
                     5 );
 }
 

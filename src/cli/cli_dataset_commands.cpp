@@ -223,8 +223,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         return fail( io, "dataset", "--name is required", kInvalidInput,
                      { .expected = "--name <name>",
                        .hint = "usage: dataset create --dataset-db <path> --name <name>" } );
-    if ( ( sub == QLatin1String( "validate" ) || sub == QLatin1String( "version" ) ||
-           sub == QLatin1String( "sample" ) ) &&
+    // validate and stats both iterate a version (master behaviour); the
+    // version subcommand takes --dataset instead (gated below).
+    if ( ( sub == QLatin1String( "validate" ) || sub == QLatin1String( "stats" ) ) &&
          options.versionId.isEmpty() )
         return fail( io, "dataset", "--version is required", kInvalidInput,
                      { .expected = "--version <id>" } );
