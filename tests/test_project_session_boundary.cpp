@@ -22,39 +22,10 @@
 
 #include <qgsproject.h>
 
-#include <cstdlib>
 #include <cstdio>
+#include "support/qt_lifecycle.h"
 
-// QgsProject::read/write touch the thread-local QgsProjContext, which
-// crashes during glibc atexit cleanup after a Catch2 run; bypass it with
-// std::_Exit once Catch has reported the final result (the
-// test_dual_viewport_sync precedent).
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        // The console reporter may not have printed its summary yet when the
-        // listener chain runs — emit the verdict ourselves so the transcript
-        // survives std::_Exit.
-        const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-        std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                      ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                      static_cast<unsigned>( stats.totals.assertions.passed ),
-                      static_cast<unsigned>( stats.totals.assertions.passed
-                                             + stats.totals.assertions.failed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed
-                                             + stats.totals.testCases.failed ) );
-        std::fflush( stderr );
-        std::_Exit( ok ? 0 : 1 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -66,8 +37,7 @@ QCoreApplication *ensureApp()
 {
     if ( !QCoreApplication::instance() )
     {
-        static QCoreApplication app( fake_argc, fake_argv );
-        return &app;
+        return sicnu::test::qtlifecycle::heapQCoreApplication( fake_argc, fake_argv );
     }
     return static_cast<QCoreApplication *>( QCoreApplication::instance() );
 }
