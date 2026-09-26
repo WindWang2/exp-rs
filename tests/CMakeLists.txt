@@ -13848,3 +13848,8 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# hardening/r4-teaching-lab (Track 12): teaching-chain boundary matrix.
+# Light links (teaching_admin + lab_pack + Qt Core). See file header for the
+# B01..B22 boundary classes and the independent canonical-bytes oracle.
+sicnu_add_teaching_admin_test(test_lab_pack_boundaries_r4)
