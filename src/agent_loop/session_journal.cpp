@@ -92,6 +92,10 @@ bool writeFileAtomic( const fs::path &target, const std::string &body, std::stri
         std::ofstream out( temp, std::ios::binary | std::ios::trunc );
         if ( !out )
         {
+            // The claim created an empty staged file: a failed open must not
+            // strand it in the session directory.
+            std::error_code cleanup;
+            fs::remove( temp, cleanup );
             error = "cannot open temp file " + sicnu::portable::pathToUtf8( temp );
             return false;
         }
@@ -99,6 +103,8 @@ bool writeFileAtomic( const fs::path &target, const std::string &body, std::stri
         out.flush();
         if ( !out )
         {
+            std::error_code cleanup;
+            fs::remove( temp, cleanup );
             error = "cannot write temp file " + sicnu::portable::pathToUtf8( temp );
             return false;
         }

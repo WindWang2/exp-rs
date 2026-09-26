@@ -128,9 +128,11 @@ RsEditPersistence::ExportResult RsEditPersistence::exportLayer( QgsVectorLayer *
     }
 
     // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW). Never
-    // remove-then-rename — a locked target must fail closed.
+    // remove-then-rename — a locked target must fail closed. Durability gate
+    // (atomic_fs.h contract): flush the staged bytes before the rename.
     try
     {
+        sicnu::geo::atomic_fs::fsyncFile( written.toStdString() );
         sicnu::geo::atomic_fs::publishStagedFile( written.toStdString(),
                                                   targetPath.toStdString() );
     }

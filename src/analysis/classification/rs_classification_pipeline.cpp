@@ -1379,6 +1379,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     members.emplace_back( tempOutputPath.toStdString(), config.outputRaster.toStdString() );
     try
     {
+      // Durability gate (atomic_fs.h contract): flush every staged member
+      // that exists before the ordered publish. Existence-guarded: the
+      // ordered publish skips missing staged files, and the flush must not
+      // narrow that contract.
+      for ( const auto &member : members )
+      {
+        if ( sicnu::geo::atomic_fs::fileExists( member.first ) )
+          sicnu::geo::atomic_fs::fsyncFile( member.first );
+      }
       sicnu::geo::atomic_fs::publishStagedMembers( members );
     }
     catch ( const sicnu::geo::GeoError &ex )

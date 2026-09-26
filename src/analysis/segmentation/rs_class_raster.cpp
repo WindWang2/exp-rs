@@ -269,9 +269,11 @@ RsClassRasterResult RsClassRaster::paint(
 
     // #1178: publish via atomic_fs (ReplaceFileW / MoveFileExW on Windows) —
     // never delete-then-rename (that strips an unlocked previous output when
-    // the target is locked / QFile::rename refuses the replace).
+    // the target is locked / QFile::rename refuses the replace). Durability
+    // gate (atomic_fs.h contract): flush the staged bytes before the rename.
     try
     {
+        sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
         sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(), outputPath.toStdString() );
     }
     catch ( const sicnu::geo::GeoError &ex )
@@ -440,8 +442,19 @@ RsClassRasterResult RsClassRaster::polygonize(
 
     // #1174: sidecars-first / main-last with .bak rollback. Do NOT delete the
     // previous output first — that destroyed the last good group on failure.
+    // Durability gate (atomic_fs.h contract): flush the staged main and every
+    // staged sidecar that exists before the group publish (existence-guarded:
+    // publishStagedGroup skips missing staged sidecars, and the flush must
+    // not narrow that contract).
     try
     {
+        for ( const std::string &stagedSidecar :
+              sicnu::geo::atomic_fs::sidecarsFor( tempVectorPath.toStdString() ) )
+        {
+            if ( sicnu::geo::atomic_fs::fileExists( stagedSidecar ) )
+                sicnu::geo::atomic_fs::fsyncFile( stagedSidecar );
+        }
+        sicnu::geo::atomic_fs::fsyncFile( tempVectorPath.toStdString() );
         sicnu::geo::atomic_fs::publishStagedGroup( tempVectorPath.toStdString(),
                                                    outputVectorPath.toStdString() );
     }

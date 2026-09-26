@@ -10519,6 +10519,12 @@ target_include_directories(test_contract_fuzz_agent PRIVATE
 # (Catch2 + Sicnu::Geospatial only).
 sicnu_add_io_test(test_portability_contract)
 
+# core-foundations-r4 (Track 5): atomic_fs caller contract lane — runtime
+# contract cases over atomic_fs itself + source pins for the caller-side
+# fsync gate / staged-cleanup unification. Light lane (Catch2 +
+# Sicnu::Geospatial only).
+sicnu_add_io_test(test_atomic_fs_caller_contract)
+
 # Header self-containment probes (task A, failure class F1 / PR #833): every
 # nominated first-party leaf header must compile as the FIRST include of a
 # cold translation unit. OBJECT libraries = compile-only (nothing to link,

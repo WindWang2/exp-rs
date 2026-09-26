@@ -190,18 +190,21 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
     temp.setAutoRemove( true );
     if ( !temp.open() )
         return fail( QStringLiteral( "cannot create a temporary manifest in '%1'" ).arg( dir.path() ) );
+    const QString tempPath = temp.fileName();
     const QByteArray payloadBytes( serialized.c_str(), static_cast<qsizetype>( serialized.size() ) );
     if ( temp.write( payloadBytes ) != payloadBytes.size() )
         return fail( QStringLiteral( "short write on the temporary manifest" ) );
     if ( !temp.flush() )
         return fail( QStringLiteral( "cannot flush the temporary manifest" ) );
+    // Durability gate (atomic_fs.h contract): the flushed bytes must reach
+    // the device before either rename mechanism commits the directory entry.
+    sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
 
     // Prefer QTemporaryFile::rename (closes + clears auto-remove). On
     // Windows overwrite refusal, fall through to atomic_fs publish rather
     // than remove+rename (#1178).
     if ( !temp.rename( finalPath ) )
     {
-        const QString tempPath = temp.fileName();
         try
         {
             sicnu::geo::atomic_fs::publishStagedFile( tempPath.toStdString(),
