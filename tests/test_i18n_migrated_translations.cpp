@@ -16,7 +16,7 @@
  * This gate pins a representative sample of migrated (context, source,
  * translation) triples so the regression is loud.
  ***************************************************************************/
-#include <catch2/catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
 #include <QString>
@@ -97,7 +97,7 @@ TEST_CASE( "WP-B migrated strings keep their zh_CN translations under the",
   QStringList missing;
   for ( const Triple &t : triples )
   {
-    if ( !hasTranslation( ts, QString::fromLatin1( t.ctx ), QString::fromLatin1( t.src ) ) )
+    if ( !hasTranslation( ts, QString::fromUtf8( t.ctx ), QString::fromUtf8( t.src ) ) )
       missing << QStringLiteral( "%1 / %2" ).arg( t.ctx, t.src );
   }
   for ( const QString &m : missing )
