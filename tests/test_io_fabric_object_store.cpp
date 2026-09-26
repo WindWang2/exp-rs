@@ -232,12 +232,18 @@ TEST_CASE( "the credential window hands GDAL a scheme-free endpoint",
   }
 
   // A scheme-less endpoint reaches GDAL verbatim (host[:port] only, no
-  // trailing slash) and keeps the ambient AWS_HTTPS default (https).
+  // trailing slash) and leaves AWS_HTTPS exactly as the ambient environment
+  // had it — captured so a developer machine that exports AWS_HTTPS does
+  // not produce a false red.
   credentials.endpoint = "127.0.0.1:9000";
+  const bool hadAmbientHttps = CPLGetConfigOption( "AWS_HTTPS", nullptr ) != nullptr;
+  const std::string ambientHttps = CPLGetConfigOption( "AWS_HTTPS", "" );
   {
     ScopedObjectStoreCredentials window( "/vsis3/", credentials );
     CHECK( std::string( CPLGetConfigOption( "AWS_S3_ENDPOINT", "" ) ) == "127.0.0.1:9000" );
-    CHECK( CPLGetConfigOption( "AWS_HTTPS", nullptr ) == nullptr );
+    CHECK( ( CPLGetConfigOption( "AWS_HTTPS", nullptr ) != nullptr ) == hadAmbientHttps );
+    if ( hadAmbientHttps )
+      CHECK( std::string( CPLGetConfigOption( "AWS_HTTPS", "" ) ) == ambientHttps );
   }
   CHECK( activeScopedCredentialWindows() == 0 );
 }

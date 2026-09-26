@@ -436,11 +436,13 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
       options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
 
     ContextProgress progress( context );
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     const sicnu::geo::TranslateResult result = sicnu::geo::warpRaster(
-      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(), options, &progress );
+      input, target.openPath(), options, &progress );
     context.reportProgressForced( 1.0, "clip complete" );
     Json::Value json = result.toJson();
-    json["output"] = params::requireString( params, "output" );   // report the caller's spelling, not the \\?\ open form
+    json["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
     return json;
   } );
 }
