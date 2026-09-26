@@ -28,10 +28,13 @@ function argAfter(flag) {
   const i = args.indexOf(flag);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
-// Counter: the argument after --mcp when present; legacy shape falls back
-// to args[0] (a bare counter path spawned without the --mcp flag).
-const counterPath = argAfter("--mcp") ?? (args[0] === "--mcp" ? args[1] : args[0]);
+// The counter is the LAST argument that is neither a flag nor the notify
+// log's value: it may ride directly after --mcp (legacy shape
+// ["--mcp", counter]) or after other flag/value pairs
+// (["--mcp", "--notify-log", path, counter]). The notify log rides its own
+// "--notify-log <path>" pair.
 const notifyLog = argAfter("--notify-log");
+const counterPath = [...args].reverse().find((a) => !a.startsWith("--") && a !== notifyLog);
 appendFileSync(counterPath, "1\n");
 
 let buffer = "";
