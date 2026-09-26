@@ -159,15 +159,16 @@ TEST_CASE( "known-answer: continuum removal divides by the convex hull envelope"
     p["output"] = dir.filePath( "cr.tif" ).toStdString();
     runOperator( "rs:continuum_removal", p, dir.path().toStdString() );
 
-    const auto out = readBand( dir.filePath( "cr.tif" ), 1 );
-    REQUIRE( out.size() == 7 );
-    REQUIRE( nearRel( out[0], 1.0, 1e-6 ) );
-    REQUIRE( nearRel( out[1], 0.75, 1e-6 ) );
-    REQUIRE( nearRel( out[2], 11.0 / 12.0, 1e-6 ) );
-    REQUIRE( nearRel( out[3], 1.0, 1e-6 ) );
-    REQUIRE( nearRel( out[4], 11.0 / 12.0, 1e-6 ) );
-    REQUIRE( nearRel( out[5], 0.875, 1e-6 ) );
-    REQUIRE( nearRel( out[6], 1.0, 1e-6 ) );
+    // The 1x1 fixture keeps one pixel per output band: band b carries the
+    // continuum-removed value of wavelength axis position b.
+    const std::vector<double> want = { 1.0, 0.75, 11.0 / 12.0, 1.0, 11.0 / 12.0, 0.875, 1.0 };
+    for ( size_t b = 1; b <= 7; ++b )
+    {
+        INFO( "output band " << b );
+        const auto band = readBand( dir.filePath( "cr.tif" ), static_cast<int>( b ) );
+        REQUIRE( band.size() == 1 );
+        REQUIRE( nearRel( band[0], want[b - 1], 1e-6 ) );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,15 +218,18 @@ TEST_CASE( "known-answer: similarity labels the angularly closest reference and 
            "[r4][known][similarity]" )
 {
     // References r0 = [2,1], r1 = [1,2] (non-negative per the contract).
-    // Pixels: A = [2,1] → angle 0 to r0 → label 0; B = [1,2] → label 1;
-    // declared-sentinel pixel → unlabelled (-9999) — the R4 declared-
-    // sentinel fix (previously only the hardcoded -9999 was excluded).
+    // Pixels: A = [2,1] → angle 0 to r0 → label 0; B = [1,2] → label 1.
+    // The void pixel carries the declared sentinel 255 (positive, so the
+    // kernel's reflectance-like negativity guard does not hide the case, and
+    // deliberately not the hardcoded −9999): pre-R4-fix the void was
+    // classified as real data; post-fix it is unlabelled.
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    const std::vector<float> b1 = { 2, 1, static_cast<float>( kSentinel ) };
-    const std::vector<float> b2 = { 1, 2, static_cast<float>( kSentinel ) };
+    constexpr float kDeclaredSentinel = 255.0f;
+    const std::vector<float> b1 = { 2, 1, kDeclaredSentinel };
+    const std::vector<float> b2 = { 1, 2, kDeclaredSentinel };
     const QString input = writeFloatRaster( dir.filePath( "img.tif" ), 3, 1, { b1, b2 },
-                                            true, kSentinel );
+                                            true, kDeclaredSentinel );
     Json::Value refs( Json::arrayValue );
     Json::Value r0( Json::arrayValue );
     r0.append( 2 );

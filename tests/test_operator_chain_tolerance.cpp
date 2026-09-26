@@ -49,10 +49,11 @@ TEST_CASE( "chain: MTL calibration to radiance then NDVI is algebraically "
     // 2-band DN raster, 10x10: DN_nir(r,c) = r + c + 2, DN_red(r,c) = r + c + 1.
     // MTL: L = RADIANCE_MULT·DN + RADIANCE_ADD with mult=0.1, add=0.2 for
     // both bands. Chain end:
-    //   NDVI = (L_nir − L_red)/(L_nir + L_red) = (DN_nir − DN_red)/(DN_nir + DN_red)
-    //        = 1 / (2(r+c) + 3)
-    // The gain/add cancel algebraically — the 7.0-matrix NDVI gain-invariance
-    // tradition, asserted through two real operators.
+    //   NDVI = (0.1(n−r)) / (0.1(n+r) + 0.4) = 1 / (n + r + 4)
+    //        = 1 / (2(r+c) + 7)
+    // The gain cancels algebraically (7.0-matrix gain-invariance tradition);
+    // the scene-independent ADD does NOT — asserting through two real
+    // operators that the add survives the normalized difference.
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const int w = 10, h = 10;
@@ -96,7 +97,7 @@ TEST_CASE( "chain: MTL calibration to radiance then NDVI is algebraically "
     for ( int r = 0; r < h; ++r )
         for ( int c = 0; c < w; ++c )
         {
-            const double want = 1.0 / ( 2.0 * ( r + c ) + 3.0 );
+            const double want = 1.0 / ( 2.0 * ( r + c ) + 7.0 );
             INFO( "pixel (" << r << "," << c << ") expected " << want );
             REQUIRE( nearRel( out[static_cast<size_t>( r ) * w + c], want, 1e-5 ) );
         }
@@ -109,44 +110,49 @@ TEST_CASE( "chain: MTL calibration to radiance then NDVI is algebraically "
 TEST_CASE( "chain: change difference, normalized difference and CVA stay closed-form",
            "[r4][chain][change]" )
 {
-    // Two-band rasters, 10x10, before pixel i = (1+i, 1+i); after = (2i+3, 3i+4).
-    //   difference band k:  Δ_k = after_k − before_k → (i+2, 2i+3)
-    //   normalized difference band 1: (i+2) / ((2i+3)+(1+i)) = (i+2)/(3i+4)
+    // The change primitives consume band 1 of each input (BIP band 0) and
+    // emit ONE magnitude band; CVA is the only band-pair metric here.
+    // Single-band inputs (10x10), before pixel i = 1+i, after = 2i+3:
+    //   difference (legacy facade): |after − before| = i + 2
+    //   normalized difference:      (i+2) / ((2i+3)+(1+i)) = (i+2)/(3i+4)
+    // Two-band inputs for CVA, before = (1+i, 1+i), after = (2i+3, 3i+4):
     //   CVA magnitude: √(Δ_1² + Δ_2²) = √((i+2)² + (2i+3)²)
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const int w = 10, h = 10;
     const size_t n = static_cast<size_t>( w ) * h;
-    std::vector<float> before1( n ), before2( n ), after1( n ), after2( n );
+    std::vector<float> before1( n ), before2( n ), after1( n ), after2( n ), b1s( n ), a1s( n );
     for ( int i = 0; i < w * h; ++i )
     {
         before1[static_cast<size_t>( i )] = static_cast<float>( 1 + i );
         before2[static_cast<size_t>( i )] = static_cast<float>( 1 + i );
         after1[static_cast<size_t>( i )] = static_cast<float>( 2 * i + 3 );
         after2[static_cast<size_t>( i )] = static_cast<float>( 3 * i + 4 );
+        b1s[static_cast<size_t>( i )] = static_cast<float>( 1 + i );
+        a1s[static_cast<size_t>( i )] = static_cast<float>( 2 * i + 3 );
     }
+    const QString beforeS = writeFloatRaster( dir.filePath( "before1.tif" ), w, h, { b1s },
+                                              true, kSentinel );
+    const QString afterS = writeFloatRaster( dir.filePath( "after1.tif" ), w, h, { a1s },
+                                             true, kSentinel );
     const QString before = writeFloatRaster( dir.filePath( "before.tif" ), w, h,
                                              { before1, before2 }, true, kSentinel );
     const QString after = writeFloatRaster( dir.filePath( "after.tif" ), w, h,
                                             { after1, after2 }, true, kSentinel );
 
     Json::Value pd;
-    pd["before"] = before.toStdString();
-    pd["after"] = after.toStdString();
+    pd["before"] = beforeS.toStdString();
+    pd["after"] = afterS.toStdString();
     pd["output"] = dir.filePath( "diff.tif" ).toStdString();
     runOperator( "rs:change_difference", pd, dir.path().toStdString() );
 
     const auto d1 = readBand( dir.filePath( "diff.tif" ), 1 );
-    const auto d2 = readBand( dir.filePath( "diff.tif" ), 2 );
     for ( int i = 0; i < w * h; ++i )
-    {
         REQUIRE( nearRel( d1[static_cast<size_t>( i )], i + 2.0, 1e-5 ) );
-        REQUIRE( nearRel( d2[static_cast<size_t>( i )], 2 * i + 3.0, 1e-5 ) );
-    }
 
     Json::Value pn;
-    pn["before"] = before.toStdString();
-    pn["after"] = after.toStdString();
+    pn["before"] = beforeS.toStdString();
+    pn["after"] = afterS.toStdString();
     pn["output"] = dir.filePath( "nd.tif" ).toStdString();
     runOperator( "rs:change_normalized_difference", pn, dir.path().toStdString() );
     const auto nd = readBand( dir.filePath( "nd.tif" ), 1 );

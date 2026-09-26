@@ -152,8 +152,8 @@ TEST_CASE( "apply_mask refuses undeclared-NoData bands without an explicit no_da
     {
         threw = true;
         INFO( "message: " << e.message() );
-        REQUIRE( e.message().find( "NoData" ) != std::string::npos
-                 || e.message().find( "no_data" ) != std::string::npos );
+        REQUIRE( ( e.message().find( "NoData" ) != std::string::npos
+                   || e.message().find( "no_data" ) != std::string::npos ) );
     }
     REQUIRE( threw );
 }
