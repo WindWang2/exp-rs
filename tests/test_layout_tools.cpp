@@ -46,12 +46,11 @@
 using sicnu::agent::layout_tools::LayoutService;
 using sicnu::agent::spatial_tools::SpatialToolRegistry;
 
-namespace
-{
-// Full QGIS teardown at process exit is a destruction-order minefield (see
-// test_layout_designer.cpp): report results, then leave via _Exit before any
-// static destructor runs.
-}
+// Retirement note (Track 2 R4): the retired defense left via _Exit before any
+// static destructor could run. The shared TeardownListener
+// (support/qt_lifecycle.h) instead performs the ordered teardown — deferred
+// deletes, exitQgis()/invalidateCaches() while the Q_GLOBAL_STATIC guards are
+// alive, then heap-owned app deletion — inside the run, before main returns.
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace

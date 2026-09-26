@@ -108,10 +108,12 @@ TEST_CASE( "Retirement gate: RETIREMENT.md 退役 rows are _Exit-free", "[teardo
     // them, so require the call form with an open parenthesis.
     int hits = 0;
     size_t pos = 0;
-    while ( ( pos = src.find( "::_Exit(", pos ) ) != std::string::npos )
+    // "_Exit(" is a deliberate superset of "std::_Exit(" — it also catches a
+    // reintroduced unqualified call (review P2, Phase 5).
+    while ( ( pos = src.find( "_Exit(", pos ) ) != std::string::npos )
     {
       ++hits;
-      pos += 8;
+      pos += 6;
     }
     pos = 0;
     while ( ( pos = src.find( "_exit(", pos ) ) != std::string::npos )

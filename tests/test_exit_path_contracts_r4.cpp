@@ -74,17 +74,18 @@ TEST_CASE( "Exit path: shutdownForTests is idempotent and leaves reusable engine
 {
   sicnu::TaskCenter::instance().shutdownForTests();
   sicnu::jobs::JobEngine::instance().shutdownForTests();
-  // Second pass must be a safe no-op join, not a double-join crash.
+  // Second pass must be a safe no-op join, not a double-join crash; the app
+  // object must still be alive afterwards (teardown must not fire early).
   sicnu::TaskCenter::instance().shutdownForTests();
   sicnu::jobs::JobEngine::instance().shutdownForTests();
-  REQUIRE( true );
+  REQUIRE( QCoreApplication::instance() != nullptr );
 }
 
 TEST_CASE( "Exit path: terminal shutdown tolerates late cleanup call", "[teardown][r4]" )
 {
   sicnu::jobs::JobEngine::instance().shutdown();
   sicnu::jobs::JobEngine::instance().shutdownForTests();
-  REQUIRE( true );
+  REQUIRE( QCoreApplication::instance() != nullptr );
 }
 
 TEST_CASE( "Exit path: exitQgis idempotent with and without QGIS application", "[teardown][r4]" )
@@ -93,5 +94,5 @@ TEST_CASE( "Exit path: exitQgis idempotent with and without QGIS application", "
   // guard "don't create just to delete" instead of instantiating singletons.
   QgsApplication::exitQgis();
   QgsApplication::exitQgis();
-  REQUIRE( true );
+  REQUIRE( QCoreApplication::instance() != nullptr );
 }

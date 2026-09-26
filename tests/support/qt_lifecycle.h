@@ -41,7 +41,15 @@ namespace sicnu::test::qtlifecycle
   inline QApplication *heapQApplication( int &argc, char **argv )
   {
     if ( QCoreApplication::instance() )
-      return qobject_cast<QApplication *>( QCoreApplication::instance() );
+    {
+      // Fail fast on app-kind mismatch rather than returning a nullptr the
+      // caller would dereference (review P2, Phase 5).
+      QCoreApplication *existing = QCoreApplication::instance();
+      QCoreApplication *asApp = qobject_cast<QApplication *>( existing );
+      if ( !asApp )
+        qFatal( "qt_lifecycle: existing app is not a QApplication" );
+      return asApp;
+    }
     return new QApplication( argc, argv );
   }
 
@@ -72,6 +80,11 @@ namespace sicnu::test::qtlifecycle
     if ( QCoreApplication::instance() )
       QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
     QgsApplication::exitQgis();
+    // Ownership contract: every listener-using binary must own its app on
+    // the HEAP (heapQApplication / heapQgsApplication / explicit new). A
+    // value-static app here would be atexit-registered AND heap-deleted —
+    // the exact "free(): invalid size" double-ownership this once hit on
+    // test_provider_http before its app was made heap-owned (EVIDENCE §4).
     QCoreApplication *app = QCoreApplication::instance();
     delete app;
   }

@@ -34,6 +34,8 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+
 #include "main_window.h"
 #include "project_context.h"
 #include "shell/secondary_map_view_session.h"
@@ -526,4 +528,3 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
 }
 
 #include "test_workbench_full_shell_lifecycle.moc"
-#include "support/qt_lifecycle.h"

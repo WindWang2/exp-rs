@@ -8,6 +8,8 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+
 #include "app/georeferencer/rs_georeferencing_session.h"
 #include "app/georeferencer/qgsgeoreftransform.h"
 #include "operators/framework/rs_operator_context.h"
@@ -818,7 +820,6 @@ TEST_CASE( "Georeferencer/Session: Destructor cancels running warp and cleans up
 }
 
 #include "test_georeferencing_session.moc"
-#include "support/qt_lifecycle.h"
 
 TEST_CASE( "GeoreferencingSession: configuration sync never dirties a fresh session",
            "[georef][session][dirty][1052]" )

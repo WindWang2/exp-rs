@@ -29,6 +29,8 @@ Procedure: baseline binary green with defense → defense disabled via temp edit
 
 ## 3. Retirement evidence — 27/31 rows 退役, all double-run green
 All 26 atexit-family `_Exit` sites (rows 1–26 of RETIREMENT.md) + the #1319 `test_view_link` leak (row 31): defense removed, shared `TeardownListener` + heap-owned app, **run 1: 26/27 green (1 pre-existing functional red, see below); run 2: 26/26 green** (the same red excluded from round 2 as it is a failing product assertion, not a crash).
+
+**Correction (Phase-5 review P0, applied)**: rows 9 (`test_georeferencing_session`) and 26 (`test_workbench_full_shell_lifecycle`) initially recorded green from STALE binaries — their last `#include` sits at EOF, so the transform's include-append landed after first use and the TUs did not compile; the binaries kept the old defense. Fix: includes moved to the top include block, targets rebuilt (listener verified present in the binary via marker string, old defense absent), then genuine double-run green ×2 (`/tmp/r4qtt-p0r*.log`, marker present in all 4 logs). Lesson recorded: the verification loop must assert the NEW code is actually in the binary (marker check), not just rc==0.
 - Pre-existing red (unchanged by this track, verified identical at baseline): `test_georef_dual_window` case at :126 `REQUIRE( w.hasPendingSourceForTest() )` — product-side behavior red on master; recorded for the georef-workbench owners.
 - Per-file commits: `git log --grep 'retire(r4-qt-teardown)'` (26 commits + `9c3bc4bb2` view_link).
 - Full-repo `_Exit` call sites after track: **4** (down from 30): 3× `test_chunk_resume_11` (语义保留, crash-injection semantics) + 1× `offline_probe.h:254` (语义保留, probe protocol). Zero `_Exit` remains in the retired files (enforced by gate).
@@ -61,10 +63,15 @@ Known-adjacent reds OUTSIDE the regex's selected set (documented, pre-existing o
 | retirements | ≥8 | **27** |
 | teardown fixtures | ≥15 | **18** (+ exit-path/gate cases) |
 | atomic commits | ≥20 | **40+** (per-file retirements included; each compiles — helper committed before consumers) |
-| files touched | ≥25 | **36** (26 retired files + view_link + 7 cluster files + 6 new fixtures/gate + support header + CMakeLists + planning docs) |
+| files touched | ≥25 | **50 in the committed diff** (git diff --stat origin/master..HEAD; 26 retired + view_link + 7 cluster + 6 new test files + support header + tests/CMakeLists.txt + .gitignore + tracked ledger + planning docs) |
 | planning artifacts | 5 | BASELINE / DECISIONS / RETIREMENT / EVIDENCE / REVIEW_LOG ✓ |
 
 ## 10. Environment & honesty notes
 - Fresh build dir `build-r4` (Debug, `ENABLE_TESTS=ON`, Ninja, `-j2` hard; RAM stayed ≤ ~58%, no `-j1` downgrade needed).
 - Local uncommitted overlay = PR #1335 P0-3 CMake hunks (`src/agent/CMakeLists.txt`, `src/agent_loop/CMakeLists.txt`, `src/app/CMakeLists.txt`) required because master's link graph is broken for 25 targets until #1335 merges. This branch's own commits never touch those files.
 - Token accounting in `.goal-loop-ledger.md` is an honest agent-side estimate (no harness meter); it is far below the brief's 280M arithmetic — the brief's own workload model assumed a different (unmeasured) scale; actuals recorded as actuals.
+
+## 11. Post-review (Phase 5) verification — review-fix commit
+- Rebuilt + double-run green ×2 with the listener verified IN the binary: `test_georeferencing_session`, `test_workbench_full_shell_lifecycle` (the review-P0 pair), `test_layout_tools`, `test_qgis_display_manager`, `test_exit_path_contracts_r4`, `test_teardown_retirement_gate_r4`.
+- Gate pattern broadened to `"_Exit("` (superset); drill conclusion unchanged.
+- REVIEW_LOG.md carries the full 10-finding resolution table.
