@@ -140,6 +140,10 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
         QString runId;
     };
     std::deque<InFlight> inFlight;
+    int nextIndex = 0;
+    bool cancelled = false;
+    bool aborted = false;
+    QString abortCode;
 
     // Truthful failure with NO execution behind it (submit refusal): the run
     // exists, carries the typed code under metrics["error"], and an empty
@@ -163,6 +167,8 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
         {
             emitProgress( StudyProgress::Phase::Aborted, point.pointId,
                           QStringLiteral( "store refused run creation" ), 0 );
+            aborted = true;
+            abortCode = QStringLiteral( "study.store_unavailable" );
             return false;
         }
         QString message;
@@ -182,9 +188,23 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
         {
             emitProgress( StudyProgress::Phase::Aborted, point.pointId,
                           QStringLiteral( "store refused the failure transition" ), 0 );
+            aborted = true;
+            abortCode = QStringLiteral( "study.store_unavailable" );
             return false;
         }
-        m_ledger->link( point.pointId, runId.value() );
+        // Same doctrine for the ledger edge: a refusal here makes the point's
+        // failure invisible to every matrix consumer while the summary still
+        // reports it — abort, and name the LEDGER as the faulting authority
+        // instead of blaming the store.
+        if ( !m_ledger->link( point.pointId, runId.value() ).has_value() )
+        {
+            emitProgress( StudyProgress::Phase::Aborted, point.pointId,
+                          QStringLiteral( "ledger refused the point link" ),
+                          static_cast<int>( inFlight.size() ) );
+            aborted = true;
+            abortCode = QStringLiteral( "study.ledger_unavailable" );
+            return false;
+        }
         summary.runIds.append( runId.value() );
         ++summary.failedCount;
         emitProgress( StudyProgress::Phase::PointFinished, point.pointId,
@@ -197,11 +217,6 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
 
     emitProgress( StudyProgress::Phase::Started, QString(),
                   QStringLiteral( "sampled %1 points" ).arg( points.size() ), 0 );
-
-    int nextIndex = 0;
-    bool cancelled = false;
-    bool aborted = false;
-    QString abortCode;
 
     while ( true )
     {
@@ -242,11 +257,7 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
             if ( !submission )
             {
                 if ( !recordSubmitRefusal( point, submission.diagnostics() ) )
-                {
-                    aborted = true;
-                    abortCode = QStringLiteral( "study.store_unavailable" );
-                    break;
-                }
+                    break; // the recorder lambda named the abort reason
                 continue;
             }
 

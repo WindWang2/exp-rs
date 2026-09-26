@@ -2,6 +2,9 @@
 #include "benchmark_service.h"
 
 #include <QSet>
+#include <QStringList>
+
+#include <algorithm>
 
 namespace sicnu::experiment
 {
@@ -34,12 +37,17 @@ Result<void> BenchmarkService::hydrateFromStore( qint64 definitionLimit, qint64 
         m_definitions.insert( defKey( definition.benchmarkId(), definition.benchmarkVersion() ),
                               definition );
 
-    // Results: page via listing each known definition id, plus any already cached.
+    // Results: page via listing each known definition id, plus any already
+    // cached. The ids are visited in sorted order (QSet/QHash iteration
+    // order is seeded per process — unsorted, which ids hydrate within the
+    // remaining-result budget would vary between runs of the same binary).
     QSet<QString> seenIds;
     for ( auto it = m_definitions.constBegin(); it != m_definitions.constEnd(); ++it )
         seenIds.insert( it.value().benchmarkId() );
+    QStringList orderedIds = QStringList( seenIds.cbegin(), seenIds.cend() );
+    std::sort( orderedIds.begin(), orderedIds.end() );
     qint64 remaining = resultLimit;
-    for ( const QString &benchmarkId : seenIds )
+    for ( const QString &benchmarkId : orderedIds )
     {
         if ( remaining <= 0 )
             break;
@@ -119,14 +127,22 @@ QVector<BenchmarkDefinition> BenchmarkService::listDefinitions( qint64 limit ) c
         if ( page )
             return page.value().second;
     }
-    QVector<BenchmarkDefinition> out;
+    // Deterministic order AND deterministic cut: the cache is a QHash, so
+    // the unsorted iteration leaked a process-random order (and a random
+    // subset once the limit cut) into the listing.
+    QVector<BenchmarkDefinition> cached;
+    cached.reserve( m_definitions.size() );
     for ( auto it = m_definitions.constBegin(); it != m_definitions.constEnd(); ++it )
-    {
-        out.append( it.value() );
-        if ( out.size() >= limit )
-            break;
-    }
-    return out;
+        cached.append( it.value() );
+    std::sort( cached.begin(), cached.end(),
+               []( const BenchmarkDefinition &a, const BenchmarkDefinition &b ) {
+                   if ( a.benchmarkId() != b.benchmarkId() )
+                       return a.benchmarkId() < b.benchmarkId();
+                   return a.benchmarkVersion() < b.benchmarkVersion();
+               } );
+    if ( cached.size() > limit )
+        cached.resize( int( limit ) );
+    return cached;
 }
 
 Result<BenchmarkResult> BenchmarkService::run( const BenchmarkRunRequest &request )

@@ -1861,6 +1861,110 @@ TEST_CASE( "Review: provenance edge order never hides dependencies",
     REQUIRE( !sawRoot );
 }
 
+TEST_CASE( "Review: duplicate resolved step identities are corrupt evidence, not a quirk",
+           "[debugger][review]" )
+{
+    // Two nodeExec NODES with distinct node ids (which the strict provenance
+    // parse accepts) but the SAME nodeId attribute collapse into two snapshot
+    // steps sharing one step id. RunSnapshot::fromJson refuses such documents
+    // ("duplicate step id"); the in-memory normalizer is the primary build
+    // path and must apply the same gate — downstream alignment and identity
+    // digests silently key the collision away otherwise.
+    QJsonObject doc;
+    doc.insert( QLatin1String( "kind" ), QLatin1String( "d17_provenance" ) );
+    doc.insert( QLatin1String( "version" ), QLatin1String( "1.0" ) );
+    QJsonArray nodes;
+    QJsonObject runNode;
+    runNode.insert( QLatin1String( "id" ), QStringLiteral( "run:r1" ) );
+    runNode.insert( QLatin1String( "kind" ), QLatin1String( "run" ) );
+    runNode.insert( QLatin1String( "attributes" ), QJsonObject{} );
+    nodes.append( runNode );
+    for ( const QString &nodeId :
+          { QStringLiteral( "nodeExec:1" ), QStringLiteral( "nodeExec:2" ) } )
+    {
+        QJsonObject node;
+        node.insert( QLatin1String( "id" ), nodeId );
+        node.insert( QLatin1String( "kind" ), QLatin1String( "nodeExec" ) );
+        node.insert( QLatin1String( "attributes" ),
+                     QJsonObject{ { QLatin1String( "nodeId" ), QStringLiteral( "twin_step" ) },
+                                  { QLatin1String( "operatorId" ), QStringLiteral( "rs:prep" ) },
+                                  { QLatin1String( "state" ), QStringLiteral( "Succeeded" ) } } );
+        nodes.append( node );
+    }
+    doc.insert( QLatin1String( "nodes" ), nodes );
+    doc.insert( QLatin1String( "edges" ), QJsonArray{} );
+
+    auto evidence = stepEvidenceFromProvenanceDoc( doc );
+    REQUIRE( !evidence.has_value() );
+    REQUIRE( evidence.diagnostics().front().code == QLatin1String( kCodeMalformedEvidence ) );
+    REQUIRE( evidence.diagnostics().front().message.contains(
+        QStringLiteral( "duplicate step id" ) ) );
+}
+
+TEST_CASE( "Review: duplicate artifact identities are corrupt evidence too",
+           "[debugger][review]" )
+{
+    // Distinct artifact NODES claiming the same path attribute produce two
+    // ArtifactSnapshots with one artifact id — the snapshot document gate
+    // refuses that shape, so the normalizer must as well.
+    QJsonObject doc;
+    doc.insert( QLatin1String( "kind" ), QLatin1String( "d17_provenance" ) );
+    doc.insert( QLatin1String( "version" ), QLatin1String( "1.0" ) );
+    QJsonArray nodes;
+    QJsonObject runNode;
+    runNode.insert( QLatin1String( "id" ), QStringLiteral( "run:r1" ) );
+    runNode.insert( QLatin1String( "kind" ), QLatin1String( "run" ) );
+    runNode.insert( QLatin1String( "attributes" ), QJsonObject{} );
+    nodes.append( runNode );
+    for ( const QString &nodeId :
+          { QStringLiteral( "artifact:1" ), QStringLiteral( "artifact:2" ) } )
+    {
+        QJsonObject node;
+        node.insert( QLatin1String( "id" ), nodeId );
+        node.insert( QLatin1String( "kind" ), QLatin1String( "artifact" ) );
+        node.insert( QLatin1String( "attributes" ),
+                     QJsonObject{ { QLatin1String( "path" ), QStringLiteral( "/lab/twin.tif" ) },
+                                  { QLatin1String( "fingerprint" ),
+                                    QStringLiteral( "sha256fl:aa" ) } } );
+        nodes.append( node );
+    }
+    doc.insert( QLatin1String( "nodes" ), nodes );
+    doc.insert( QLatin1String( "edges" ), QJsonArray{} );
+
+    auto evidence = stepEvidenceFromProvenanceDoc( doc );
+    REQUIRE( !evidence.has_value() );
+    REQUIRE( evidence.diagnostics().front().code == QLatin1String( kCodeMalformedEvidence ) );
+    REQUIRE( evidence.diagnostics().front().message.contains(
+        QStringLiteral( "duplicate artifact id" ) ) );
+}
+
+TEST_CASE( "Review: bridge step summaries with duplicate ids are malformed, not merged",
+           "[debugger][review]" )
+{
+    // The workflow runtime keys steps by id (checkpoint loading already
+    // rejects duplicate plan ids upstream), so a summary list repeating one
+    // id is corrupt evidence — a typed refusal, never two same-named steps
+    // drifting through alignment.
+    QJsonObject workflow;
+    workflow.insert( QLatin1String( "steps_truncated" ), false );
+    QJsonArray steps;
+    for ( int i = 0; i < 2; ++i )
+    {
+        QJsonObject entry;
+        entry.insert( QLatin1String( "id" ), QStringLiteral( "twin_step" ) );
+        entry.insert( QLatin1String( "operator" ), QStringLiteral( "rs:prep" ) );
+        entry.insert( QLatin1String( "status" ), QStringLiteral( "Succeeded" ) );
+        steps.append( entry );
+    }
+    workflow.insert( QLatin1String( "steps" ), steps );
+
+    auto evidence = stepEvidenceFromBridgeWorkflowMetrics( workflow );
+    REQUIRE( !evidence.has_value() );
+    REQUIRE( evidence.diagnostics().front().code == QLatin1String( kCodeMalformedEvidence ) );
+    REQUIRE( evidence.diagnostics().front().message.contains(
+        QStringLiteral( "duplicate step id" ) ) );
+}
+
 TEST_CASE( "Review: the findings cap never flips the verdict or drops the first divergence",
            "[debugger][review]" )
 {
@@ -2191,6 +2295,39 @@ TEST_CASE( "Round-2: final-digest invariant evaluates the pipeline SINK, not the
     REQUIRE( singleSink.size() == 1 );
     CHECK( singleSink.first().evaluable );
     CHECK( singleSink.first().passed );
+}
+
+TEST_CASE( "Review: a failed invariant is never truncated into an equivalent verdict",
+           "[debugger][review]" )
+{
+    // analyzeAgainstInvariants set anyFailed only AFTER the findings-cap
+    // check, so maxFindings == 0 made the first failed invariant take the
+    // truncation branch: the verdict fell through to "equivalent" while the
+    // report's own checks recorded passed:false. Seeing the failure is not a
+    // truncation decision — the verdict must flip first.
+    QVector<Invariant> invariants;
+    Invariant metricBounds;
+    metricBounds.kind = Invariant::Kind::MetricWithin;
+    metricBounds.invariantId = QStringLiteral( "area-sane" );
+    metricBounds.metricPath = QStringLiteral( "area_km2" );
+    metricBounds.minValue = 0.0;
+    metricBounds.maxValue = 100.0;
+    invariants.append( metricBounds );
+
+    InMemoryEvidenceSource source;
+    RunSnapshot snapshot = buildSnapshot( source, QStringLiteral( "run-stu" ),
+                                          checkpointPipeline( QStringLiteral( "bbbb" ),
+                                                              thresholdParams( 0.35 ) ) );
+    QJsonObject metrics;
+    metrics.insert( QStringLiteral( "area_km2" ), 4200.0 );
+    snapshot.setMetrics( metrics );
+
+    FirstDivergenceOptions tight;
+    tight.maxFindings = 0;
+    auto report = analyzeAgainstInvariants( snapshot, invariants, tight );
+    REQUIRE( report.has_value() );
+    REQUIRE( report->verdict == QStringLiteral( "divergent" ) );
+    REQUIRE( report->hasFirstDivergence );
 }
 
 // ============================================================================

@@ -1930,6 +1930,14 @@ sicnu::data::Result<void> ExperimentStore::addLineageEdge( const QString &fromKi
     insert.bind( 4, toKind );
     insert.bind( 5, toId );
     insert.bind( 6, QDateTime::currentMSecsSinceEpoch() );
+    if ( SICNU_FAULT_POINT( "experiment_store.lineage_commit" ) )
+    {
+        // Injected write failure (8.0 fault matrix, test-only arming): the
+        // caller-facing lineage seam must be exercisable without corrupting
+        // the store — the edge simply did not land.
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "lineage write failed" ) ) );
+    }
     if ( !insert.step() )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             insert.error( m_impl->db ) ) );

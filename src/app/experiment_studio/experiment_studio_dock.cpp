@@ -915,6 +915,9 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
         return;
     }
     const FirstDivergenceViewModel vm = projectFirstDivergence( report.value() );
+    // No synthetic marker here: this IS analyzer output over recorded runs.
+    // (The #1293 merge stranded the old demo marker on this live path, which
+    // exported real evidence labeled "not derived from recorded runs".)
     m_lastDivergenceVm = vm.toJson();
     // Provenance honesty: this VM IS analyzer output over recorded runs — the
     // synthetic marker belongs ONLY on documents derived from no recorded run

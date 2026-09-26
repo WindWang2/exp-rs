@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QtMath>
 
+#include <algorithm>
+
 namespace sicnu::experiment
 {
 
@@ -163,6 +165,15 @@ QVector<BenchmarkSeedSummary> summarizeAcrossSeeds( const QVector<BenchmarkResul
         }
         out.append( summary );
     }
+    // Sorted order so the summary layout is deterministic across processes
+    // (QHash iteration order is seeded) — the same doctrine the families in
+    // comparison_ext follow.
+    std::sort( out.begin(), out.end(),
+               []( const BenchmarkSeedSummary &a, const BenchmarkSeedSummary &b ) {
+                   if ( a.metricName != b.metricName )
+                       return a.metricName < b.metricName;
+                   return a.scope < b.scope;
+               } );
     return out;
 }
 

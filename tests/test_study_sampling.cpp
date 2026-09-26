@@ -286,3 +286,29 @@ TEST_CASE( "study matrix identity is namespaced per study", "[study][sampling]" 
     s.studyId = QStringLiteral( "other" );
     REQUIRE( studyMatrixId( s ) == QStringLiteral( "study:other" ) );
 }
+
+TEST_CASE( "the one-at-a-time budget gate counts the baseline point set",
+           "[study][sampling][budget][oat]" )
+{
+    // OneAtATime produces 1 baseline set + (stepCount - 1) swept sets per
+    // dimension. The pre-flight budget check must count the baseline too: a
+    // study whose true size is one set over budget is refused BEFORE sampling
+    // with the "narrow the study" guidance, not discovered by the sampler's
+    // post-count after the points were already built.
+    const auto overBudget = sampleStudyPoints(
+        spec( SamplingStrategy::OneAtATime,
+              { dim( QStringLiteral( "threshold" ), 0.0, 1.0, 4 ) },
+              /*maxRuns=*/3 ) );
+    REQUIRE( !overBudget.has_value() ); // 1 baseline + 3 swept = 4 > 3
+    REQUIRE( hasCode( overBudget, QStringLiteral( "study.budget_exceeded" ) ) );
+    REQUIRE( overBudget.diagnostics().front().message.contains(
+        QStringLiteral( "narrow the study" ) ) );
+
+    // Exactly at budget: baseline + 3 swept = 4 points pass.
+    const auto exactlyBudget = sampleStudyPoints(
+        spec( SamplingStrategy::OneAtATime,
+              { dim( QStringLiteral( "threshold" ), 0.0, 1.0, 4 ) },
+              /*maxRuns=*/4 ) );
+    REQUIRE( exactlyBudget.has_value() );
+    REQUIRE( exactlyBudget.value().size() == 4 );
+}

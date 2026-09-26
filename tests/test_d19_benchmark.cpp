@@ -2,6 +2,7 @@
 // Service + ExperimentRun benchmark pins + pseudo-label safety.
 #include <catch2/catch_test_macros.hpp>
 
+#include "dataset/dataset_store.h"
 #include "dataset/dataset_types.h"
 #include "experiment/benchmark_compare.h"
 #include "experiment/benchmark_definition.h"
@@ -12,8 +13,11 @@
 
 #include <cmath>
 
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QJsonObject>
+
+#include <algorithm>
 
 using namespace sicnu::experiment;
 using namespace sicnu::dataset;
@@ -237,4 +241,154 @@ TEST_CASE( "D19 BenchmarkService persists via ExperimentStore",
     const auto results = cold.resultsFor( QStringLiteral( "bench-class-v1" ) );
     REQUIRE( !results.isEmpty() );
     CHECK( results.first().resultId() == run->resultId() );
+}
+
+TEST_CASE( "BenchmarkResult::fromJson refuses a corrupt protocol like its siblings",
+           "[d19][benchmark]" )
+{
+    // MetricRecord::fromJson and BenchmarkDefinition::fromJson both propagate
+    // protocol parse failure. The result parser silently substituted a
+    // default-constructed protocol instead, so a torn protocol block slipped
+    // past the store's fail-closed read gates carrying fabricated evaluation
+    // semantics (default IoU 0.5 / subset "test" / macro) into comparisons.
+    QJsonObject protocol;
+    protocol.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+    protocol.insert( QStringLiteral( "split_manifest_id" ), QStringLiteral( "sp-1" ) );
+    protocol.insert( QStringLiteral( "subset" ), QStringLiteral( "test" ) );
+    protocol.insert( QStringLiteral( "iou_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "confidence_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "aggregation" ), QStringLiteral( "macro" ) );
+
+    QJsonObject json;
+    json.insert( QStringLiteral( "schema_version" ), 1 );
+    json.insert( QStringLiteral( "result_id" ), QStringLiteral( "res-1" ) );
+    json.insert( QStringLiteral( "benchmark_id" ), QStringLiteral( "bench-1" ) );
+    json.insert( QStringLiteral( "status" ), QStringLiteral( "completed" ) );
+    json.insert( QStringLiteral( "protocol" ), protocol );
+
+    // A threshold outside (0,1] fails EvaluationProtocol::validate — the
+    // result parser must refuse the document, not default it.
+    QJsonObject hostileProtocol = protocol;
+    hostileProtocol.insert( QStringLiteral( "iou_threshold" ), 1.7 );
+    json.insert( QStringLiteral( "protocol" ), hostileProtocol );
+    REQUIRE( !BenchmarkResult::fromJson( json ).has_value() );
+
+    // A missing protocol block is the same corruption class.
+    json.remove( QStringLiteral( "protocol" ) );
+    REQUIRE( !BenchmarkResult::fromJson( json ).has_value() );
+}
+
+TEST_CASE( "BenchmarkResult::fromJson clamps a negative benchmark_version to zero",
+           "[d19][benchmark]" )
+{
+    // benchmark_definition.cpp clamps a negative stored version with
+    // qMax<qint64>(0, …); the result parser cast straight through quint64, so
+    // -5 wrapped to ~2^64 and defeated id/version comparability in
+    // compareBenchmarkResults. Same clamp, same authority.
+    QJsonObject protocol;
+    protocol.insert( QStringLiteral( "dataset_version_id" ), QStringLiteral( "dv-1" ) );
+    protocol.insert( QStringLiteral( "split_manifest_id" ), QStringLiteral( "sp-1" ) );
+    protocol.insert( QStringLiteral( "subset" ), QStringLiteral( "test" ) );
+    protocol.insert( QStringLiteral( "iou_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "confidence_threshold" ), 0.5 );
+    protocol.insert( QStringLiteral( "aggregation" ), QStringLiteral( "macro" ) );
+
+    QJsonObject json;
+    json.insert( QStringLiteral( "schema_version" ), 1 );
+    json.insert( QStringLiteral( "result_id" ), QStringLiteral( "res-1" ) );
+    json.insert( QStringLiteral( "benchmark_id" ), QStringLiteral( "bench-1" ) );
+    json.insert( QStringLiteral( "benchmark_version" ), -5 );
+    json.insert( QStringLiteral( "status" ), QStringLiteral( "completed" ) );
+    json.insert( QStringLiteral( "protocol" ), protocol );
+    const auto parsed = BenchmarkResult::fromJson( json );
+    REQUIRE( parsed.has_value() );
+    CHECK( parsed.value().benchmarkVersion() == quint64( 0 ) );
+}
+
+TEST_CASE( "BenchmarkService::listDefinitions order is deterministic from the cache",
+           "[d19][benchmark][determinism]" )
+{
+    // The cache is a QHash; iterating it hands listDefinitions a
+    // process-random order AND a random subset when the limit cuts. Benchmark
+    // ids are inserted here in sorted order, so the listed order must be the
+    // insertion order — any other order is QHash leakage (compare
+    // comparison_ext.cpp: families are iterated sorted so summaries are
+    // deterministic across processes).
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.sqlite" ) ) ) );
+    BenchmarkService service( &store );
+
+    constexpr int kDefinitions = 12;
+    for ( int i = 0; i < kDefinitions; ++i )
+    {
+        BenchmarkDefinition definition = makeDefinition();
+        definition.setBenchmarkId( QStringLiteral( "bench-%1" ).arg( i, 2, 10, QLatin1Char( '0' ) ) );
+        REQUIRE( service.publishDefinition( definition ).has_value() );
+    }
+
+    const auto listed = service.listDefinitions( kDefinitions );
+    REQUIRE( listed.size() == kDefinitions );
+    QStringList ids;
+    for ( const BenchmarkDefinition &definition : listed )
+        ids << definition.benchmarkId();
+    QStringList sorted = ids;
+    std::sort( sorted.begin(), sorted.end() );
+    REQUIRE( ids == sorted );
+}
+
+TEST_CASE( "a recorded benchmark refusal round-trips without poisoning its history",
+           "[d19][benchmark][fail-closed]" )
+{
+    // failResult used to persist a default-constructed (pin-less) protocol;
+    // the read gate correctly refuses protocols that fail validation, so one
+    // recorded refusal made benchmarkResultsFor refuse the WHOLE listing and
+    // hydrateFromStore fail store-wide. A refusal run carries the completed,
+    // validated definition protocol it declined to evaluate under.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.sqlite" ) ) ) );
+
+    BenchmarkService service( &store );
+    REQUIRE( service.publishDefinition( makeDefinition() ).has_value() );
+
+    // A definition whose dataset pin points nowhere: the store is open, so
+    // run() takes the truthful refusal path (version_missing) and records it.
+    BenchmarkDefinition unreachable = makeDefinition();
+    unreachable.setDatasetVersionId( QStringLiteral( "00000000-0000-4000-8000-000000000000" ) );
+    // keep the protocol pins aligned, or definition validation refuses the
+    // whole request instead of recording the truthful refusal
+    unreachable.protocol().setDatasetVersionId( unreachable.datasetVersionId() );
+    sicnu::dataset::DatasetStore datasets;
+    REQUIRE( datasets.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+    BenchmarkRunRequest request;
+    request.definition = unreachable;
+    request.store = &datasets; // the pin checks run only against a wired store
+    request.modelId = QStringLiteral( "model-a" );
+    request.modelDigest = QStringLiteral( "digest" );
+    request.softwareRevision = QStringLiteral( "rev" );
+    BenchmarkTruth truth;
+    truth.sampleId = QStringLiteral( "s1" );
+    truth.truthClass = QStringLiteral( "water" );
+    request.truths.append( truth );
+    BenchmarkPrediction pred;
+    pred.sampleId = QStringLiteral( "s1" );
+    pred.predictedClass = QStringLiteral( "water" );
+    request.predictions.append( pred );
+    const auto run = service.run( request );
+    REQUIRE( run.has_value() );
+    CHECK( run->status() == BenchmarkRunStatus::Failed );
+
+    // Hydrating the store must NOT refuse: the Failed row is valid evidence.
+    BenchmarkService cold( &store );
+    REQUIRE( cold.hydrateFromStore().has_value() );
+    const auto results = cold.resultsFor( makeDefinition().benchmarkId() );
+    REQUIRE( results.size() == 1 );
+    CHECK( results.first().status() == BenchmarkRunStatus::Failed );
+    CHECK( !results.first().failureCode().isEmpty() );
+    // And its protocol is the definition's, not a default fabrication.
+    CHECK( results.first().protocol().datasetVersionId()
+           == unreachable.datasetVersionId() );
 }

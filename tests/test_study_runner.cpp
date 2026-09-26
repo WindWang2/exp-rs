@@ -10,6 +10,7 @@
 
 #include "experiment/experiment_matrix.h"
 #include "experiment/experiment_store.h"
+#include "runtime/observability/fault_registry.h"
 
 #include <QDir>
 #include <QJsonArray>
@@ -553,4 +554,30 @@ TEST_CASE( "cancellation before any submission leaves zero runs and a typed reas
     REQUIRE( summary.cancelledCount == 0 );
     REQUIRE( fix.backend.submissions == 0 );
     REQUIRE( summary.runIds.isEmpty() );
+}
+
+TEST_CASE( "a lineage link refusal during submit-refusal recording aborts the study",
+           "[study][runner][fault]" )
+{
+    Fixture fix;
+    fix.backend.refuseAll = true;
+    StudyRunner runner( fix.store, fix.ledger, fix.backend );
+    const auto spec = specFor( 2 );
+    std::atomic<bool> cancel{ false };
+
+    // The submit-refusal path records the failed run and links it into the
+    // matrix ledger. When the ledger write fails, the point's failure becomes
+    // invisible to every matrix consumer — the study must stop and say so
+    // (same truth-chain doctrine as the store-refusal aborts), never report
+    // a point whose ledger edge silently vanished.
+    sicnu::runtime::observability::fault::ArmedFault fault(
+        { "experiment_store.lineage_commit",
+          sicnu::runtime::observability::fault::Mode::NextN, 1, {} } );
+    const auto result = runner.run( spec, cancel, fix.outputDir() );
+    REQUIRE( result.has_value() );
+    // The stopped reason names the faulting authority — the LEDGER, not the
+    // store (misattributing it would send the operator looking in the wrong
+    // subsystem).
+    REQUIRE( result.value().stoppedReason
+             == QStringLiteral( "aborted:study.ledger_unavailable" ) );
 }

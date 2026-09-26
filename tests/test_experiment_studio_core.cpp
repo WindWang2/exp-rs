@@ -21,7 +21,11 @@
 #include <QTemporaryDir>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
+#include <string>
 
 using namespace sicnu::experiment_studio;
 using namespace sicnu::study;
@@ -377,6 +381,42 @@ TEST_CASE( "experiment_studio csv export neutralizes formula cells",
     CHECK( !csv.contains( QStringLiteral( ",=" ) ) );
     CHECK( !csv.contains( QStringLiteral( ",@" ) ) );
     CHECK( csv.contains( QStringLiteral( "'=cmd" ) ) );
+}
+
+TEST_CASE( "studio dock: only the synthetic demo builder may stamp synthetic documents",
+           "[studio][honesty]" )
+{
+    // Structure oracle for the #1293/#1294 merge residue: the live
+    // first-divergence path composes REAL analyzer output over recorded runs,
+    // yet carried r2's stranded demo marker ("synthetic": true + "not derived
+    // from recorded runs") into the exported bundle. Exactly one stamp site
+    // may exist in the dock — the synthetic demo report builder; any second
+    // site turns this red with the count.
+    const std::filesystem::path dockPath =
+        std::filesystem::path( SICNU_TEST_SOURCE_DIR ) / "src" / "app" /
+        "experiment_studio" / "experiment_studio_dock.cpp";
+    REQUIRE( std::filesystem::exists( dockPath ) );
+    std::ifstream file( dockPath );
+    REQUIRE( file.is_open() );
+    const std::string source( ( std::istreambuf_iterator<char>( file ) ),
+                              std::istreambuf_iterator<char>() );
+    // The note stamp is pinned for the same reason: "not derived from
+    // recorded runs" on real analyzer output is the dishonesty this gate
+    // exists for, with or without the boolean beside it.
+    const std::string stamp = "insert( QStringLiteral( \"synthetic\" ), true )";
+    const std::string noteStamp = "QStringLiteral( \"synthetic_note\" )";
+    int sites = 0;
+    for ( std::size_t at = source.find( stamp ); at != std::string::npos;
+          at = source.find( stamp, at + 1 ) )
+        ++sites;
+    int noteSites = 0;
+    for ( std::size_t at = source.find( noteStamp ); at != std::string::npos;
+          at = source.find( noteStamp, at + 1 ) )
+        ++noteSites;
+    INFO( "synthetic stamp sites in experiment_studio_dock.cpp: " << sites );
+    INFO( "synthetic_note stamp sites: " << noteSites );
+    REQUIRE( sites == 1 );
+    REQUIRE( noteSites == 1 );
 }
 
 TEST_CASE( "synthetic provenance survives export round-trip; live VMs never carry the marker",

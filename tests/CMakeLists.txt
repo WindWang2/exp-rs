@@ -292,6 +292,8 @@ sicnu_add_io_test(test_io_canonical_metadata)
 sicnu_add_study_test(test_study_spec)
 sicnu_add_study_test(test_study_sampling)
 sicnu_add_study_test(test_study_runner)
+# The runner fault oracle arms experiment_store.lineage_commit (sicnu_runtime).
+target_link_libraries(test_study_runner PRIVATE sicnu_runtime)
 sicnu_add_study_test(test_study_analysis)
 sicnu_add_study_test(test_study_spatial)
 sicnu_add_study_test(test_study_export)
@@ -335,6 +337,10 @@ sicnu_add_test(test_study_e2e)
 target_link_libraries(test_study_e2e PRIVATE
   Sicnu::study
   Sicnu::study_bridge
+  Sicnu::experiment
+  Sicnu::experiment_debugger
+  Sicnu::experiment_capsule
+  Sicnu::dataset
   GDAL::GDAL
 )
 # Studio live-execution closed loop: fake + real-shaped backend over the

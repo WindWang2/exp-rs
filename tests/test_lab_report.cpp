@@ -960,3 +960,104 @@ TEST_CASE( "lab_report: an end-to-end lab run produces a report whose blockers a
     CHECK( replay.value( QStringLiteral( "level" ) ).toString() == QLatin1String( "impossible" ) );
     CHECK_FALSE( replay.value( QStringLiteral( "blockers" ) ).toArray().isEmpty() );
 }
+
+TEST_CASE( "lab_report: metric records leave the report byte-identical to the store",
+           "[lab_report][secrets]" )
+{
+    // A persisted metric record is hash-committed evidence scrubbed AT
+    // INGESTION (run_recorder). Re-running the denylist on export masks
+    // legitimate secret-SHAPED metric keys ("token_accuracy") into "***" and
+    // breaks the metrics_hash round-trip — the same boundary violation round
+    // 2 removed from the reproduction bundle (see reproduction_bundle.cpp).
+    // The report's statistics section consumes the same records through the
+    // same store and must ship them byte-identical.
+    ReportFixture fixture;
+    LabReportRequest request = fixture.baseRequest();
+
+    // A second run of the same lab carries a secret-SHAPED (but legitimate)
+    // metric key; the store derives the content hash at save time.
+    ExperimentRun run;
+    run.setRunId( QStringLiteral( "run-lab-2" ) );
+    run.setExperimentId( fixture.experimentId );
+    run.setAlgorithmId( QStringLiteral( "rs:spectral_index" ) );
+    run.setStatus( RunStatus::Completed );
+    run.setStartedAtUtc( QDateTime::currentDateTimeUtc().addSecs( -30 ) );
+    run.setFinishedAtUtc( QDateTime::currentDateTimeUtc().addSecs( -5 ) );
+    REQUIRE( fixture.experiments.upsertRun( run ).has_value() );
+
+    MetricRecord record;
+    record.runId = run.runId();
+    record.protocol.setDatasetVersionId( fixture.datasetVersionId );
+    record.protocol.setSplitManifestId( fixture.splitManifestId );
+    record.metrics = QJsonObject{ { QStringLiteral( "token_accuracy" ), 0.9 } };
+    REQUIRE( fixture.experiments.saveMetricRecord( record ).has_value() );
+    const auto stored = fixture.experiments.metricRecordForRun( run.runId() );
+    REQUIRE( stored.has_value() );
+
+    const auto built =
+        LabReportBuilder( fixture.experiments, &fixture.datasets ).build( request );
+    REQUIRE( built.has_value() );
+    const QJsonArray statistics = built->value( QStringLiteral( "statistics" ) ).toArray();
+    QJsonObject exported;
+    for ( const QJsonValue &value : statistics )
+    {
+        const QJsonObject entry = value.toObject();
+        if ( entry.value( QStringLiteral( "run_id" ) ).toString() == run.runId() )
+            exported = entry;
+    }
+    REQUIRE( !exported.isEmpty() );
+    // The legitimate metric key survives verbatim — ingestion was the
+    // boundary; the report is not a second one.
+    REQUIRE( exported.value( QStringLiteral( "metrics" ) )
+                 .toObject()
+                 .value( QStringLiteral( "token_accuracy" ) )
+                 .toDouble( -1.0 ) == 0.9 );
+    // And the exported document still commits to the hash it embeds: a
+    // consumer recomputing the content hash sees the store's record, not a
+    // masked forgery of it.
+    const auto reparsed = MetricRecord::fromJson( exported );
+    REQUIRE( reparsed.has_value() );
+    REQUIRE( reparsed.value().contentHash() == stored->metricsHash );
+}
+
+TEST_CASE( "lab_report: markdown rendering escapes recorded content like the html writer",
+           "[lab_report][secrets]" )
+{
+    // The html writer escapes every interpolated field; the markdown writer
+    // escaped only three. Recorded strings are unvalidated content: an
+    // artifact path like `a"](https://evil.example).tif` forged a link out of
+    // the artifact list, and a session field carried raw inline HTML into
+    // every Markdown renderer.
+    ReportFixture fixture;
+    const auto built =
+        LabReportBuilder( fixture.experiments, &fixture.datasets )
+            .build( fixture.baseRequest() );
+    REQUIRE( built.has_value() );
+    QJsonObject document = built.value();
+
+    // Plant hostility through the same fields a real run can carry.
+    QJsonObject header = document.value( QStringLiteral( "header" ) ).toObject();
+    header.insert( QStringLiteral( "session" ),
+                   QStringLiteral( "s <script>alert(1)</script>" ) );
+    document.insert( QStringLiteral( "header" ), header );
+    QJsonArray runs = document.value( QStringLiteral( "runs" ) ).toArray();
+    QJsonObject run = runs.at( 0 ).toObject();
+    QJsonArray artifacts = run.value( QStringLiteral( "artifacts" ) ).toArray();
+    QJsonObject artifact = artifacts.at( 0 ).toObject();
+    artifact.insert( QStringLiteral( "path" ),
+                     QStringLiteral( "a](https://evil.example).tif" ) );
+    artifacts.replace( 0, artifact );
+    run.insert( QStringLiteral( "artifacts" ), artifacts );
+    runs.replace( 0, run );
+    document.insert( QStringLiteral( "runs" ), runs );
+
+    const auto markdown = labReportMarkdown( document );
+    REQUIRE( markdown.has_value() );
+    const QString md = markdown.value();
+    // Raw inline HTML never survives…
+    CHECK( !md.contains( QStringLiteral( "<script>" ) ) );
+    CHECK( md.contains( QStringLiteral( "\\<script\\>" ) ) );
+    // …and the artifact path can no longer close a link mid-list.
+    CHECK( !md.contains( QStringLiteral( "a](https://evil.example)" ) ) );
+    CHECK( md.contains( QStringLiteral( "a\\](https://evil.example)" ) ) );
+}
