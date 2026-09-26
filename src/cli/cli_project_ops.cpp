@@ -113,6 +113,28 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
     if ( sub == QLatin1String( "info" ) )
         return -1;  // handled by the caller (legacy path)
 
+    // Track 14 (WP-E): reject an unknown subcommand BEFORE loading the
+    // project - loading is the expensive step and a rejected invocation must
+    // not depend on the file being readable at all.
+    static const QStringList kKnownSubs = {
+        QStringLiteral( "validate" ), QStringLiteral( "health" ),
+        QStringLiteral( "search" ),   QStringLiteral( "migrate" ),
+        QStringLiteral( "relink" ),   QStringLiteral( "lineage" ),
+        QStringLiteral( "import" ),   QStringLiteral( "export-manifest" ),
+        QStringLiteral( "audit" ) };
+    if ( !kKnownSubs.contains( sub ) )
+    {
+        sicnu::cli::CliErrorDetails details;
+        details.exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
+        details.expected =
+            "info|validate|health|search|migrate|relink|lineage|import|export-manifest|audit";
+        details.actual = sub.toStdString();
+        details.hint = usage.toStdString();
+        return io.finish( false, "project", {},
+                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ), {},
+                          "unknown project subcommand: " + sub.toStdString(), &details );
+    }
+
     // Every governance subcommand needs a file argument.
     if ( args.isEmpty() )
         return io.finish( false, "project", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
