@@ -35,13 +35,19 @@
 13 项修复 = 11 个提交（F-02/03/04 合一个原语提交；F-05/06 合一个会话纪元提交；F-11/12 合一个）：
 `95e3481c6, 4e09e0f18, 0aab187c2, 7d9c460a1, 3bdf35e75, a5fe044bd, e6d292fcf, e6eb16f24` 等（见 git log）。
 
-**完成门禁双跑**（修复后，`ctest -R "parity.*r4::" -j1`）：
-- RUN 1：`100% tests passed, 0 tests failed out of 40`，CTEST_EXIT=0（/tmp/r4-green-run1.log）
-- RUN 2：`100% tests passed, 0 tests failed out of 40`，CTEST_EXIT=0（/tmp/r4-green-run2.log）
+**完成门禁双跑**（评审修复后终局，`ctest -R "parity.*r4::" -j1`）：
+- 终局 RUN 1：`100% tests passed, 0 tests failed out of 40`，CTEST_EXIT=0（/tmp/r4-final-run1.log）
+- 终局 RUN 2：`100% tests passed, 0 tests failed out of 40`，CTEST_EXIT=0（/tmp/r4-final-run2.log）
+- 中间轮记录：/tmp/r4-green-run1.log、/tmp/r4-green-run2.log（评审前 40/40 ×2）
 
 压测：S1+S2+S3 共 **1430 个断言/步进探针**全绿（种子 20260927；`SICNU_PARITY_STRESS_SEED` 可复跑）。
 
-## 3. 邻接回归（本轨道触及面的既有套件，全部 rc=0 / 全绿）
+## 3. 邻接回归（本轨道触及面的既有套件）
+
+**评审修复后终局复跑**（taskId 配对改动触及 task_center → 全邻接重链）：full_shell_lifecycle、
+scan_pool、progress_dialog、selection_context、layer_sync_contract 全部 rc=0。
+
+首轮记录（同批全绿）：
 
 | 套件 | 触及面 | 结果 |
 |---|---|---|
