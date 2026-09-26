@@ -117,12 +117,13 @@ std::set<std::string> documentedSubcommands( const std::string &cell )
     return out;
 }
 
-/// The CLI's own statement of its vocabulary: run the command with a
-/// certainly-bogus verb and capture the rejection (usage line and/or
+/// The CLI's own statement of its vocabulary: run the given argument string
+/// (a certainly-bogus verb, or a bare command whose usage line enumerates the
+/// vocabulary) and capture the rejection (usage line and/or
 /// error_details.expected in the JSON envelope).
-std::string cliVocabularyText( const std::string &command )
+std::string cliVocabularyText( const std::string &args )
 {
-    const auto result = runCli( command + " __no_such_sub_r4__ --json" );
+    const auto result = runCli( args + " --json" );
     REQUIRE( result.exitCode != 0 );
     REQUIRE( result.exitCode != -1 );
     return result.output;
@@ -192,24 +193,28 @@ TEST_CASE( "documented subcommands are enumerated by the CLI itself",
     struct Probe
     {
         std::string command;
-        std::string probe; // appended after the command name
+        std::string args; // full argument string probed for the vocabulary
     };
     const std::vector<Probe> probes = {
-        { "algorithms", "__no_such_sub_r4__" },
-        { "pipeline", "__no_such_sub_r4__" },
-        { "workflow", "__no_such_sub_r4__" },
-        { "plugin", "__no_such_sub_r4__" },
-        { "models", "__no_such_sub_r4__" },
-        { "project", "__no_such_sub_r4__ /nonexistent/sicnu-r4/probe.qgz" },
-        { "dataset", "__no_such_sub_r4__" },
-        { "experiment", "__no_such_sub_r4__" },
-        { "reproduce", "__no_such_sub_r4__" },
-        { "tools", "__no_such_sub_r4__" },
-        { "batch", "__no_such_sub_r4__" },
-        { "session", "__no_such_sub_r4__" },
-        { "catalog", "__no_such_sub_r4__" },
-        { "data", "" }, // positional-URL grammar: use the usage line
-        { "env-doctor", "" },
+        { "algorithms", "algorithms __no_such_sub_r4__" },
+        { "pipeline", "pipeline __no_such_sub_r4__" },
+        { "workflow", "workflow __no_such_sub_r4__" },
+        { "plugin", "plugin __no_such_sub_r4__" },
+        { "models", "models __no_such_sub_r4__" },
+        { "project", "project __no_such_sub_r4__ /nonexistent/sicnu-r4/probe.qgz" },
+        { "dataset", "dataset __no_such_sub_r4__" },
+        { "experiment", "experiment __no_such_sub_r4__" },
+        { "reproduce", "reproduce __no_such_sub_r4__" },
+        { "tools", "tools __no_such_sub_r4__" },
+        { "batch", "batch __no_such_sub_r4__" },
+        { "session", "session __no_such_sub_r4__" },
+        { "catalog", "catalog __no_such_sub_r4__" },
+        // Positional-URL legacy grammar: a bogus verb would be taken as a
+        // URL, so the vocabulary comes from the bare-command usage line.
+        { "data", "data" },
+        // NOT probed (flag-driven, no subcommand vocabulary): lab, passport,
+        // env-doctor, data-providers, run — classified in
+        // EXIT_CODE_CONTRACT.md rows 2/9/13/14/16.
     };
 
     for ( const Probe &probe : probes )
@@ -226,8 +231,7 @@ TEST_CASE( "documented subcommands are enumerated by the CLI itself",
                       << ": no subcommand-shaped documentation (flag-driven command)" );
                 return;
             }
-            const std::string vocabulary =
-                cliVocabularyText( probe.command + ( probe.probe.empty() ? "" : " " + probe.probe ) );
+            const std::string vocabulary = cliVocabularyText( probe.args );
             for ( const std::string &sub : documented )
             {
                 INFO( probe.command << " subcommand <" << sub << "> must be enumerated by the CLI:\n"
@@ -298,7 +302,7 @@ TEST_CASE( "the session usage line enumerates every accepted action",
     const std::set<std::string> documented = documentedSubcommands( rows.at( "session" ) );
     REQUIRE_FALSE( documented.empty() );
 
-    const std::string vocabulary = cliVocabularyText( "session" );
+    const std::string vocabulary = cliVocabularyText( "session __no_such_sub_r4__" );
     for ( const std::string &action : documented )
     {
         INFO( "session action <" << action << "> must appear in the rejection usage line" );
