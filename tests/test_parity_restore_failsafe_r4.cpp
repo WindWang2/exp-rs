@@ -92,6 +92,7 @@ struct ShellFixture
 
 bool writeMiniGeoTiff( const QString &path )
 {
+  GDALAllRegister(); // QApplication init does not register GDAL drivers
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   if ( !driver )
     return false;
@@ -273,6 +274,8 @@ TEST_CASE( "HS-1: a UI-applied stretch marks the project dirty",
   const rs::display::StretchSpec spec =
     rs::display::StretchSpec::realDataRange( rs::display::ChannelScope::MasterRgb );
   const auto result = rs::display::applyToLayer( layer, spec, 1 );
+  INFO( "registered=" << ( QgsProject::instance()->mapLayer( layer->id() ) == layer )
+        << " resultOk=" << result.isOk() );
   REQUIRE( result.isOk() );
 
   CHECK( QgsProject::instance()->isDirty() );
