@@ -132,7 +132,9 @@ Json::Value RsSpectralDerivativeOperator::metadata() const {
     meta["prerequisites"].append("Bands must carry WAVELENGTH metadata (nm) or an explicit 'wavelengths' parameter; the axis must be strictly ascending in band order.");
     meta["workflowHints"].append("Apply after atmospheric correction; derivatives amplify noise — consider rs:temporal_smooth-style smoothing upstream.");
     meta["limitations"].append("Output band count shrinks by the derivative order (B−1 / B−2); output band b carries the midpoint wavelength of its input pair.");
-    meta["limitations"].append("NaN pixels propagate to every output derivative that touches them.");
+    meta["limitations"].append("NaN pixels propagate to every output derivative that touches them; "
+                               "declared NoData sentinels are NaN-ized per band before differencing "
+                               "and therefore propagate identically.");
     return meta;
 }
 
@@ -213,6 +215,25 @@ Json::Value RsSpectralDerivativeOperator::run( const Json::Value &params, RSOper
     context.logInfo( "Spectral derivative order " + std::to_string( order ) + " over " +
                      std::to_string( bandCount ) + " bands -> " + std::to_string( bandsOut ) );
 
+    // Per-band declared sentinels (float-space compare, #444). A declared
+    // sentinel behaves exactly like NaN: it propagates to every output
+    // derivative that touches its band. Without this, a finite sentinel such
+    // as -9999 participates in the finite differences as a real reflectance.
+    std::vector<bool> hasSentinel( static_cast<size_t>( bandCount ), false );
+    std::vector<float> sentinels( static_cast<size_t>( bandCount ), 0.0f );
+    bool anySentinel = false;
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        bool has = false;
+        const double nd = ds.bandNoDataValue( b, &has );
+        if ( has && std::isfinite( nd ) )
+        {
+            hasSentinel[static_cast<size_t>( b - 1 )] = true;
+            sentinels[static_cast<size_t>( b - 1 )] = static_cast<float>( nd );
+            anySentinel = true;
+        }
+    }
+
     GdalMultibandBlockStream stream( ds, bandCount, kTileDim, kTileDim );
 
     GdalStreamingOutput output( QString::fromStdString( outputPath ), width, height, bandsOut,
@@ -231,10 +252,30 @@ Json::Value RsSpectralDerivativeOperator::run( const Json::Value &params, RSOper
     const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *bip ) {
         context.throwIfCancelled();
         const size_t tp = static_cast<size_t>( tile.width ) * tile.height;
+        // NaN-ize declared sentinels before differencing (no-op copy when
+        // no band declares a sentinel, keeping the no-sentinel path
+        // bit-identical to the previous behavior).
+        std::vector<float> masked;
+        const float *pixelSource = bip;
+        if ( anySentinel )
+        {
+            masked.assign( bip, bip + tp * static_cast<size_t>( bandCount ) );
+            for ( size_t p = 0; p < tp; ++p )
+            {
+                float *pixel = masked.data() + p * static_cast<size_t>( bandCount );
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    if ( hasSentinel[static_cast<size_t>( b )]
+                         && pixel[b] == sentinels[static_cast<size_t>( b )] )
+                        pixel[b] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+            pixelSource = masked.data();
+        }
         // Per-pixel derivative over the band axis.
         for ( size_t p = 0; p < tp; ++p )
         {
-            const float *pixel = bip + p * bandCount;
+            const float *pixel = pixelSource + p * bandCount;
             if ( order == 1 )
             {
                 SpectralDerivative::firstDerivative( pixel, wavelengths.data(), bandCount,
