@@ -20799,4 +20799,159 @@ Capsule reference: %1</source>
         <translation>检查发现 %1 个问题</translation>
     </message>
 </context>
+<context>
+    <name>AgentCopilotDockWidget</name>
+    <message>
+        <source>AI Copilot Assistant</source>
+        <translation>AI Copilot 智能助手</translation>
+    </message>
+    <message>
+        <source>Select AI model service profile</source>
+        <translation>选择 AI 模型服务配置</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>设置</translation>
+    </message>
+    <message>
+        <source>Open AI Copilot model and connection settings</source>
+        <translation>打开 AI Copilot 模型与连接设置</translation>
+    </message>
+    <message>
+        <source>Clear conversation</source>
+        <translation>清空对话</translation>
+    </message>
+    <message>
+        <source>Clear conversation history</source>
+        <translation>清空对话历史</translation>
+    </message>
+    <message>
+        <source>Model:</source>
+        <translation>模型:</translation>
+    </message>
+    <message>
+        <source>Enter an RS instruction (e.g. compute NDVI on the current Landsat image)...</source>
+        <translation>输入遥感指令 (例: 对当前 Landsat 图像计算 NDVI)...</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>发送</translation>
+    </message>
+    <message>
+        <source>Send RS instruction (Ctrl+Enter)</source>
+        <translation>发送遥感指令 (Ctrl+Enter)</translation>
+    </message>
+    <message>
+        <source>Run monitor</source>
+        <translation>运行监测器</translation>
+    </message>
+    <message>
+        <source>Collapse</source>
+        <translation>折叠</translation>
+    </message>
+    <message>
+        <source>Expand</source>
+        <translation>展开</translation>
+    </message>
+    <message>
+        <source>Phase: -</source>
+        <translation>阶段: -</translation>
+    </message>
+    <message>
+        <source>Task: -</source>
+        <translation>任务: -</translation>
+    </message>
+    <message>
+        <source>Calls: 0</source>
+        <translation>调用: 0</translation>
+    </message>
+    <message>
+        <source>Errors: 0</source>
+        <translation>错误: 0</translation>
+    </message>
+    <message>
+        <source>Elapsed: 0s</source>
+        <translation>耗时: 0s</translation>
+    </message>
+    <message>
+        <source>Run monitor — %1</source>
+        <translation>运行监测器 — %1</translation>
+    </message>
+    <message>
+        <source>Phase: %1</source>
+        <translation>阶段: %1</translation>
+    </message>
+    <message>
+        <source>Task: %1 (ID %2)</source>
+        <translation>任务: %1 (ID %2)</translation>
+    </message>
+    <message>
+        <source>Calls: %1</source>
+        <translation>调用: %1</translation>
+    </message>
+    <message>
+        <source>Errors: %1%2</source>
+        <translation>错误: %1%2</translation>
+    </message>
+    <message>
+        <source>Elapsed: %1s</source>
+        <translation>耗时: %1s</translation>
+    </message>
+    <message>
+        <source>Succeeded</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <source>Preparing to run tool: &lt;b&gt;%1&lt;/b&gt;</source>
+        <translation>准备执行工具: &lt;b&gt;%1&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>Status: submitted</source>
+        <translation>状态: 已提交</translation>
+    </message>
+    <message>
+        <source>AI Copilot proposed an RS processing workflow plan with &lt;b&gt;%1 steps&lt;/b&gt;</source>
+        <translation>AI Copilot 提出了 &lt;b&gt;%1 个步骤&lt;/b&gt; 的遥感处理工作流计划</translation>
+    </message>
+    <message>
+        <source>Preview on canvas</source>
+        <translation>在画布中预览</translation>
+    </message>
+    <message>
+        <source>Confirm &amp; run</source>
+        <translation>确认并执行</translation>
+    </message>
+    <message>
+        <source>Stop ⏹</source>
+        <translation>停止 ⏹</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;Reasoning:&lt;/b&gt;&lt;br/&gt;%1</source>
+        <translation>&lt;b&gt;思考过程:&lt;/b&gt;&lt;br/&gt;%1</translation>
+    </message>
+    <message>
+        <source>Running…</source>
+        <translation>执行中…</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>重试执行</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>已完成</translation>
+    </message>
+    <message>
+        <source>Send ▶</source>
+        <translation>发送 ▶</translation>
+    </message>
+    <message>
+        <source>&lt;font color='red'&gt;Error: %1&lt;/font&gt;</source>
+        <translation>&lt;font color='red'&gt;错误: %1&lt;/font&gt;</translation>
+    </message>
+</context>
 </TS>
