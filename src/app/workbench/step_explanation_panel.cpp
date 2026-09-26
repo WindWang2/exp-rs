@@ -73,7 +73,7 @@ StepExplanationPanel::StepExplanationPanel( KnowledgeProvider knowledge, Guidanc
     m_body->setWordWrap( true );
     layout->addWidget( m_body );
     layout->addStretch( 1 );
-    m_body->setText( tr( "未选择需要解释的步骤。" ) );
+    m_body->setText( tr( "No step selected to explain." ) );
 }
 
 void StepExplanationPanel::setRendered( const QString &html, const QString &plainText )
@@ -96,8 +96,8 @@ void StepExplanationPanel::showStep( const sicnu::explain::ExplanationRequest &r
     const sicnu::explain::IExecutionEvidence *evidence = m_evidence ? m_evidence() : nullptr;
     if ( !knowledge || !guidance )
     {
-        setRendered( tr( "解释知识源不可用（算子注册表或编写指引库未就绪），无法解释此步骤。" ),
-                     tr( "解释知识源不可用（算子注册表或编写指引库未就绪），无法解释此步骤。" ) );
+        setRendered( tr( "Explanation knowledge sources unavailable (operator registry or authoring guidance library not ready); cannot explain this step." ),
+                     tr( "Explanation knowledge sources unavailable (operator registry or authoring guidance library not ready); cannot explain this step." ) );
         return;
     }
 
@@ -110,8 +110,8 @@ void StepExplanationPanel::showStep( const sicnu::explain::ExplanationRequest &r
         const QString line = QString::fromStdString( outcome.failureCode ) + QStringLiteral( ": " )
                              + QString::fromStdString( outcome.failureMessage );
         setRendered( QStringLiteral( "<h3>%1</h3><p style='color:#b71c1c'>%2</p>" )
-                         .arg( tr( "无法解释此步骤" ), escape( line ) ),
-                     tr( "无法解释此步骤" ) + QStringLiteral( "\n" ) + line );
+                         .arg( tr( "Cannot explain this step" ), escape( line ) ),
+                     tr( "Cannot explain this step" ) + QStringLiteral( "\n" ) + line );
         return;
     }
 
@@ -121,8 +121,8 @@ void StepExplanationPanel::showStep( const sicnu::explain::ExplanationRequest &r
     // unknown parameter references) — the panel never filters them.
     if ( !outcome.problems.empty() )
     {
-        QString problemHtml = QStringLiteral( "<h3>%1</h3><ul>" ).arg( tr( "问题（Problems）" ) );
-        QString problemText = tr( "问题（Problems）" ) + QStringLiteral( ":\n" );
+        QString problemHtml = QStringLiteral( "<h3>%1</h3><ul>" ).arg( tr( "Problems" ) );
+        QString problemText = tr( "Problems" ) + QStringLiteral( ":\n" );
         for ( const sicnu::explain::BuildProblem &problem : outcome.problems )
         {
             const QString line = QStringLiteral( "%1 [%2] %3" )
@@ -156,7 +156,7 @@ void StepExplanationPanel::renderExplanation( const sicnu::explain::StepExplanat
     if ( !model.operatorLine.empty() )
     {
         html += QStringLiteral( "<p>%1 <code>%2</code></p>" )
-                    .arg( tr( "算子:" ), escape( QString::fromStdString( model.operatorLine ) ) );
+                    .arg( tr( "Operator:" ), escape( QString::fromStdString( model.operatorLine ) ) );
         plain += QStringLiteral( "\n算子: " ) + QString::fromStdString( model.operatorLine );
     }
 
@@ -191,15 +191,15 @@ void StepExplanationPanel::renderExplanation( const sicnu::explain::StepExplanat
     {
         QString unknown;
         if ( !evidenceProblemCodes.isEmpty() )
-            unknown = tr( "执行情况未知（证据记录被拒绝；见下方“证据记录问题”）。" );
+            unknown = tr( "Execution status unknown (evidence record rejected; see evidence record issues below)." );
         else if ( request.runId.empty() )
-            unknown = tr( "执行情况未知（计划模式：尚无此步骤的运行证据）。" );
+            unknown = tr( "Execution status unknown (plan mode: no run evidence for this step yet)." );
         else
-            unknown = tr( "执行情况未知（运行 %1 中没有此步骤的执行证据）。" )
+            unknown = tr( "Execution status unknown (run %1 has no execution evidence for this step)." )
                           .arg( QString::fromStdString( request.runId ) );
         html += QStringLiteral( "<h3>%1</h3><p style='color:#616161'>%2</p>" )
-                    .arg( tr( "执行情况（Execution）" ), escape( unknown ) );
-        plain += QStringLiteral( "\n" ) + tr( "执行情况（Execution）" ) + QStringLiteral( ":\n- " ) + unknown
+                    .arg( tr( "Execution" ), escape( unknown ) );
+        plain += QStringLiteral( "\n" ) + tr( "Execution" ) + QStringLiteral( ":\n- " ) + unknown
                  + QStringLiteral( "\n" );
     }
 
@@ -208,8 +208,8 @@ void StepExplanationPanel::renderExplanation( const sicnu::explain::StepExplanat
     if ( !evidenceProblemCodes.isEmpty() )
     {
         html += QStringLiteral( "<p style='color:#b8860b'>⚠ %1</p><ul>" )
-                    .arg( tr( "证据记录问题（记录被拒绝，以下条目不可用）:" ) );
-        plain += tr( "证据记录问题（记录被拒绝，以下条目不可用）:" ) + QStringLiteral( "\n" );
+                    .arg( tr( "Evidence record issues (record rejected; entries below unavailable):" ) );
+        plain += tr( "Evidence record issues (record rejected; entries below unavailable):" ) + QStringLiteral( "\n" );
         for ( const QString &code : evidenceProblemCodes )
         {
             html += QStringLiteral( "<li><span style='color:#b8860b'>%1</span></li>" ).arg( escape( code ) );
@@ -220,8 +220,8 @@ void StepExplanationPanel::renderExplanation( const sicnu::explain::StepExplanat
 
     if ( !model.trustNotes.empty() )
     {
-        html += QStringLiteral( "<h3>%1</h3><ul>" ).arg( tr( "注意（Trust notes）" ) );
-        plain += tr( "注意（Trust notes）" ) + QStringLiteral( ":\n" );
+        html += QStringLiteral( "<h3>%1</h3><ul>" ).arg( tr( "Trust notes" ) );
+        plain += tr( "Trust notes" ) + QStringLiteral( ":\n" );
         for ( const std::string &note : model.trustNotes )
         {
             html += QStringLiteral( "<li><span style='color:#b8860b'>⚠ %1</span></li>" )
@@ -246,7 +246,7 @@ void StepExplanationPanel::showNote( const QString &text )
 
 void StepExplanationPanel::reset()
 {
-    showNote( tr( "未选择需要解释的步骤。" ) );
+    showNote( tr( "No step selected to explain." ) );
 }
 
 } // namespace sicnu::app
