@@ -19,3 +19,6 @@ Oracle 正则命中 11 目标;其余 237 目标不在正则内不构建。ctest 
 
 ## D-6 fsync 门槛放置原则(批 1)
 单点 fsync 放在**第一个 rename 机制之前**(覆盖主路径+回退路径),不放进回退分支(否则主路径裸奔);组发布 existence-guarded 逐成员 fsync,不收窄 publishStagedGroup/Members 的 skip-missing 合同。所有 fsync 走 atomic_fs::fsyncFile(同一 typed GeoError 失败语义),调用方零平台分支(WP-B 审查门禁)。
+
+## D-7 白名单声明扩展(review P2-2 记账)
+本轨在 `tests/test_platform_portability.cpp`(+140,纯追加)与 `tests/test_portability_source_contract.cpp`(+81,纯追加)两个**既有**测试文件内追加用例。按 prompt 白名单字面("tests/ 新测试文件 + tests/CMakeLists.txt 注册行")属扩展项;按 prompt 白名单首条 `tests/(core 对应测试)` 属内。两 diff 0 删除、不改变既有断言,作为声明扩展逐处记账于此。

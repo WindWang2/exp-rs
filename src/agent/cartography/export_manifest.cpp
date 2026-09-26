@@ -198,7 +198,17 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
         return fail( QStringLiteral( "cannot flush the temporary manifest" ) );
     // Durability gate (atomic_fs.h contract): the flushed bytes must reach
     // the device before either rename mechanism commits the directory entry.
-    sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
+    // This function reports through bool + *error (no exception escapes to
+    // the produce path — a throw here would bypass its page rollback).
+    try
+    {
+        sicnu::geo::atomic_fs::fsyncFile( tempPath.toStdString() );
+    }
+    catch ( const sicnu::geo::GeoError &ex )
+    {
+        return fail( QStringLiteral( "cannot flush the temporary manifest: %1" )
+                       .arg( QString::fromUtf8( ex.what() ) ) );
+    }
 
     // Prefer QTemporaryFile::rename (closes + clears auto-remove). On
     // Windows overwrite refusal, fall through to atomic_fs publish rather

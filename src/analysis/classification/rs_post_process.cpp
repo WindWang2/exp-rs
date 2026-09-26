@@ -617,6 +617,9 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   }
   catch ( const sicnu::geo::GeoError &ex )
   {
+    // Same cleanup discipline as the publish-failure path below: a failed
+    // gate must not strand the staged raster next to the output.
+    drv->Delete( tmpPath.toUtf8().constData() );
     setErr( err, QStringLiteral( "Failed to flush the staged output: %1 (%2)" )
                    .arg( path, QString::fromUtf8( ex.what() ) ) );
     return false;

@@ -387,12 +387,29 @@ TEST_CASE( "staged publishers flush through atomic_fs::fsyncFile before publishi
     const std::string source = repoSource( CMAKE_SOURCE_DIR, publisher.file );
     REQUIRE_FALSE( source.empty() );
     INFO( "file: " << publisher.file );
-    const std::size_t fsync = source.find( publisher.requiredFsync );
-    const std::size_t publish = source.find( publisher.publishAnchor );
-    INFO( "fsync=" << fsync << " publish=" << publish );
-    REQUIRE( fsync != std::string::npos );
-    REQUIRE( publish != std::string::npos );
-    REQUIRE( fsync < publish );
+
+    // Walk EVERY publish anchor in the file: each one needs its own fsync
+    // occurrence between the previous anchor (or 0) and this anchor. A
+    // first-occurrence-only find is blind to the second gated site
+    // (export.cpp's atlas page loop) — review P1-3.
+    std::size_t prevAnchor = 0;
+    std::size_t anchor = source.find( publisher.publishAnchor );
+    int sites = 0;
+    while ( anchor != std::string::npos )
+    {
+      ++sites;
+      const std::size_t gate = source.find( publisher.requiredFsync, prevAnchor );
+      INFO( "site #" << sites << " anchor=" << anchor << " gate=" << gate
+                    << " (must be in (" << prevAnchor << ", " << anchor << "))" );
+      REQUIRE( gate != std::string::npos );
+      REQUIRE( prevAnchor <= gate );
+      REQUIRE( gate < anchor );
+      prevAnchor = anchor + 1;
+      anchor = source.find( publisher.publishAnchor,
+                            anchor + std::string( publisher.publishAnchor ).size() );
+    }
+    INFO( "gated sites found: " << sites );
+    REQUIRE( sites >= 1 );
   }
 }
 
@@ -494,14 +511,20 @@ TEST_CASE( "session journal: every staging failure path removes the claimed stag
     const std::size_t at = source.find( marker );
     INFO( "marker: " << marker << " at=" << at );
     REQUIRE( at != std::string::npos );
-    // The cleanup sits inside the same failure branch: the nearest
-    // "fs::remove( temp, cleanup" BEFORE the marker, and the branch's own
-    // "return false" AFTER it.
-    const std::size_t cleanup = source.rfind( "fs::remove( temp, cleanup", at );
+    // The cleanup must sit in THIS branch: after the PREVIOUS branch's
+    // "return false" (or the function start) and before this marker. A bare
+    // rfind resolves to the previous branch's cleanup when this branch's is
+    // deleted — review P1-2 mutation found exactly that blindness.
+    const std::size_t prevGiveUp = source.rfind( "return false", at );
+    const std::size_t branchStart = prevGiveUp == std::string::npos ? 0 : prevGiveUp;
+    const std::size_t cleanup = source.find( "fs::remove( temp, cleanup", branchStart );
     const std::size_t giveUp = source.find( "return false", at );
-    INFO( "cleanup=" << cleanup << " giveUp=" << giveUp );
+    INFO( "branchStart=" << branchStart << " cleanup=" << cleanup
+                         << " giveUp=" << giveUp );
     REQUIRE( cleanup != std::string::npos );
     REQUIRE( giveUp != std::string::npos );
-    REQUIRE( cleanup < giveUp );
+    REQUIRE( branchStart <= cleanup );
+    REQUIRE( cleanup < at );
+    REQUIRE( at < giveUp );
   }
 }

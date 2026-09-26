@@ -368,6 +368,8 @@ TEST_CASE( "utf8: BOM-prefixed content and a U+FEFF name character", "[platform]
                      "\xef\xbb\xbf{ \xef\xbb\xbfquoted }" );
 }
 
+// POSIX-only semantics: a backslash is a legal byte of a single file name.
+#if !defined( _WIN32 )
 TEST_CASE( "utf8: mixed separators normalize to one directory-entry name", "[platform][utf8][r4]" )
 {
   // POSIX is byte-transparent: a name containing a backslash is a legal
@@ -387,6 +389,7 @@ TEST_CASE( "utf8: mixed separators normalize to one directory-entry name", "[pla
   REQUIRE( pathToUtf8( pathFromUtf8( filePath ).filename() ) == mixedName );
   fs::remove_all( base );
 }
+#endif
 
 #if !defined( _WIN32 )
 // POSIX publication contract (Windows equivalent is MoveFileExW/

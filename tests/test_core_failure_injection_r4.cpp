@@ -28,8 +28,7 @@
  ***************************************************************************/
 
 #include "geospatial/io/stage_ledger.h"
-#include "geospatial/raster/raster_reader.h"
-#include "geospatial/raster/raster_writer.h"
+#include "geospatial/raster/raster_writer.h" // RasterWindow rides raster_writer.h
 #include "geospatial/util/atomic_fs.h"
 #include "platform/portable.h"
 
