@@ -13867,3 +13867,18 @@ set_target_properties(test_help_commands_schema PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_help_commands_schema)
+
+# Track 17 R4 (WP-F): extraction/no-regression gate. Runs the single-source
+# string audit scanner over the frozen Phase 0 file list and asserts the
+# frozen baseline (tests/fixtures/i18n_string_baseline.json — the time anchor;
+# do not recompute at close): hard classes at 0 steady state, non-UI Chinese
+# ceiling, tr()-extraction floor. Selftest-gated scanner (constructive pos/neg).
+if(Python_EXECUTABLE)
+  add_test(NAME test_i18n_string_audit
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/scripts/audit_i18n_strings.py"
+            "--files" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_audit_files.txt"
+            "--gate" "${CMAKE_SOURCE_DIR}/tests/fixtures/i18n_string_baseline.json"
+            "--selftest")
+  set_tests_properties(test_i18n_string_audit PROPERTIES TIMEOUT 300)
+endif()

@@ -306,14 +306,23 @@ def main() -> int:
     ap.add_argument("--tsv", help="write per-file counts TSV here")
     ap.add_argument("--gate", help="baseline JSON: fail if hard_zh/hard_en/fmt_concat exceed it")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--auto", action="store_true",
+                    help="discover Chinese-containing cpp files via the unified rg command")
     args = ap.parse_args()
 
     if args.selftest:
         return selftest()
 
-    files = [l.strip() for l in open(args.files, encoding="utf-8") if l.strip()] if args.files else [
-        l.strip() for l in sys.stdin if l.strip()
-    ]
+    if args.auto:
+        import subprocess
+        out = subprocess.run(
+            ["rg", "-l", "[\\x{4e00}-\\x{9fff}]", "src", "-g", "*.cpp"],
+            capture_output=True, text=True, check=True)
+        files = sorted(l.strip() for l in out.stdout.splitlines() if l.strip())
+    elif args.files:
+        files = [l.strip() for l in open(args.files, encoding="utf-8") if l.strip()]
+    else:
+        files = [l.strip() for l in sys.stdin if l.strip()]
     results = [classify_file(Path(f)) for f in files]
 
     totals = {}
@@ -336,12 +345,26 @@ def main() -> int:
             encoding="utf-8",
         )
     if args.gate:
-        base = json.loads(Path(args.gate).read_text(encoding="utf-8"))["totals"]
-        for k in ("hard_zh", "hard_en", "fmt_concat"):
+        spec = json.loads(Path(args.gate).read_text(encoding="utf-8"))
+        base = spec["phase0_totals"]
+        failures = []
+        for k in spec.get("must_be_zero", []):
+            if totals.get(k, 0) != 0:
+                failures.append(f"{k}={totals.get(k, 0)} (steady state must be 0; phase0 {base.get(k)})")
+        for k, cap in spec.get("ceilings", {}).items():
+            if totals.get(k, 0) > cap:
+                failures.append(f"{k}={totals.get(k, 0)} > ceiling {cap}")
+        for k, floor in spec.get("floors", {}).items():
+            if totals.get(k, 0) < floor:
+                failures.append(f"{k}={totals.get(k, 0)} < floor {floor} (extraction surface regressed)")
+        for k in ("hard_zh", "hard_en", "fmt_concat", "tr_zh_source"):
             if totals.get(k, 0) > base.get(k, 0):
-                print(f"GATE FAIL: {k} {totals.get(k, 0)} > baseline {base.get(k, 0)}")
-                return 1
-        print("GATE PASS", {k: totals.get(k, 0) for k in ("hard_zh", "hard_en", "fmt_concat")})
+                failures.append(f"{k}={totals.get(k, 0)} > phase0 baseline {base.get(k)}")
+        if failures:
+            for f in failures:
+                print("GATE FAIL:", f)
+            return 1
+        print("GATE PASS", {k: totals.get(k, 0) for k in sorted(totals)})
     print(
         f"TOTALS tr_wrapped_en={totals.get('tr_wrapped_en', 0)} tr_zh_source={totals.get('tr_zh_source', 0)} hard_zh={totals.get('hard_zh', 0)} "
         f"hard_en={totals.get('hard_en', 0)} fmt_concat={totals.get('fmt_concat', 0)} "
