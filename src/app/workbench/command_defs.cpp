@@ -803,7 +803,7 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // ── Undergraduate Lab Cockpit (append-only) ───────────────────────────
     {
-        RS_CMD( d, "teaching.labCockpit.show", QObject::tr( "遥感实验学习工作台" ),
+        RS_CMD( d, "teaching.labCockpit.show", QObject::tr( "Undergraduate Lab Teaching Workbench" ),
                 QObject::tr( "Opens the Undergraduate Lab Cockpit: course home, readiness, guided steps." ),
                 "lab_cockpit", QObject::tr( "Teaching" ) );
         d.handler = [window] { window->showLabCockpit(); };
