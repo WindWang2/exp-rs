@@ -62,12 +62,22 @@
 
 **33 个测试文件全部已接线**（`helper_teaching_fake_grader_cli.cpp` 为共享 helper 编译单元，非独立目标）。无孤儿需复活。本轨道新增测试目标（矩阵/三路径/parity 等）注册进 `tests/CMakeLists.txt` 即可，不与 #1335 的接线 hunk 冲突（其新增 `test_teacher_credential` 目标同理，rebase 时按追加处理）。
 
-## 7. 基线红绿分布
+## 7. 基线红绿分布（部分基线实测 2026-09-27）
 
-构建 15 个已接线目标后跑：
-`ctest -R "lab|teaching|pack|copilot|autonomy" -j1`（结果追加于此）
+qgis-free 子集（19 个二进制直跑，等价于过滤面的轻闭包部分）——**全部 rc=0 全绿**：
+test_teaching_admin_core(3409) / test_teaching_lab_cockpit(171) / test_verifier_packs(57) /
+test_lab_document(59) / test_lab_runtime(687) / test_lab_source(23) / test_faultlab(501) /
+test_scientific_planner_teaching(25) / test_scientific_state_teaching(31) /
+test_suitability_labels(119) / test_suitability_teaching(76) / test_teaching_foundation_e2e(211) /
+test_autonomy_audit(2028) / test_autonomy_classification(83) / test_autonomy_decision(106) /
+test_autonomy_holder(15) / test_autonomy_policy(127) / test_autonomy_precedence(52) /
+test_autonomy_projection(57)（括号=断言数）
 
-（占位——build 完成后回填）
+例外（master 既有、非本轨引入）：
+- `tests/test_lab_data_pack.cpp` **编译破损**（残留 `#include <QJsonValue>`，#1335 P0-3 认领修复）→ 本轨不碰该文件。
+- 其余 qgis 依赖目标的基线在尾巴构建完成后由 EVIDENCE.md 记录（完整 ctest 双跑）。
+
+结论：过滤面基线为**全绿**，本轨道新增失败必须为 0。
 
 ## 8. 本轨道边界声明
 
