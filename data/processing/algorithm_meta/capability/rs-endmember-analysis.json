@@ -1,7 +1,20 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269\u8680\u53d8\u5e26",
+        "\u690d\u88ab-\u571f\u58e4-\u6c34\u4f53\u6df7\u5408\u533a"
+      ],
+      "notes" : "\u8f93\u5165\u4e3a\u7aef\u5143\u5149\u8c31\u8868\uff08exp-rs:spectral-table\uff09\u3002",
+      "scenes" : 
+      [
+        "\u7aef\u5143\u96c6\u7cbe\u7b80\u4e0e\u5197\u4f59\u5254\u9664",
+        "\u5149\u8c31\u5e93\u6784\u5efa\u4e0e\u6bd4\u5bf9"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -118,7 +131,22 @@
     ],
     "schema_version" : 2,
     "summary" : "\u7aef\u5143\u96c6\u5408\u5206\u6790\uff1a\u6309\u5149\u8c31\u89d2\u805a\u7c7b\u628a\u7aef\u5143\u96c6\u538b\u7f29\u4e3a\u975e\u5197\u4f59\u4ee3\u8868\uff0c\u8f93\u51fa SAM \u89d2\u5ea6\u77e9\u9635\uff0c\u5e76\u53ef\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u7f51\u683c\uff0c\u751f\u6210\u5e26\u6eaf\u6e90\u7684\u5149\u8c31\u8868\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7aef\u5143",
+        "\u5149\u8c31\u89d2\u5236\u56fe\uff08SAM\uff09",
+        "\u5149\u8c31\u8868\u6eaf\u6e90",
+        "\u4f20\u611f\u5668\u6ce2\u6bb5\u54cd\u5e94"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f",
+        "\u77ff\u7269\u5149\u8c31"
+      ],
+      "exercise" : "\u5bf9 PPI \u63d0\u53d6\u7684\u7aef\u5143\u96c6\u6267\u884c SAM \u805a\u7c7b\u538b\u7f29\uff0c\u6bd4\u8f83\u538b\u7f29\u524d\u540e\u89e3\u6df7\u4e30\u5ea6\u56fe\u7684\u5dee\u5f02\uff0c\u5e76\u89e3\u91ca\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u7f51\u683c\u7684\u610f\u4e49\u3002"
+    }
   },
   "description" : "Reduce an endmember set to non-redundant representatives (spectral-angle clustering), report the SAM matrix, and optionally project onto a sensor grid \u2014 as a provenance-carrying spectral table.",
   "display_name" : "Endmember Analysis",
