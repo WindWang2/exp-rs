@@ -50,12 +50,28 @@ LANDCOVER_GENERATOR = (
 )
 
 
-def sha256_file(path):
-    digest = hashlib.sha256()
+def canonical_bytes(path):
+    """The bytes git stores for ``path``: text normalised to LF, binary verbatim.
+
+    Committed fixtures are checksum-pinned so the pack is a function of the
+    repository rather than the machine (module header). Reading raw
+    working-tree bytes broke that promise: a Windows checkout with
+    ``core.autocrlf=true`` materialises text fixtures with CRLF while the
+    committed blob -- and every recorded sha256/bytes -- is LF, so ``--check``
+    reported drift on Windows only. Normalise exactly as git does at commit
+    time: text to LF, binary untouched. Text-ness uses git's own heuristic (a
+    NUL byte in the first 8000 bytes means binary), so files without an
+    explicit ``text`` attribute behave here exactly as they do in git.
+    """
     with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        data = handle.read()
+    if b"\x00" in data[:8000]:
+        return data
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def sha256_file(path):
+    return hashlib.sha256(canonical_bytes(path)).hexdigest()
 
 
 def committed(rel):
@@ -66,12 +82,13 @@ def committed(rel):
     if not os.path.isfile(rel):
         print(f"gen_lab_packs: committed fixture missing: {rel}")
         sys.exit(1)
+    data = canonical_bytes(rel)
     return {
         "path": rel.replace(os.sep, "/"),
         "role": "fixture",
         "provenance": "committed-fixture",
-        "sha256": sha256_file(rel),
-        "bytes": os.path.getsize(rel),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
     }
 
 
