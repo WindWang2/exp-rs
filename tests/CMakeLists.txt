@@ -13884,3 +13884,12 @@ target_compile_definitions(test_plugin_host_boundary_r4 PRIVATE
   SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
 )
 add_dependencies(test_plugin_host_boundary_r4 hello_plugin)
+
+sicnu_add_sdk_test(test_plugin_channel_parity_r4)
+target_link_libraries(test_plugin_channel_parity_r4 PRIVATE
+  sicnu_plugins_hostprocess sicnu_operators_core)
+target_compile_definitions(test_plugin_channel_parity_r4 PRIVATE
+  SICNU_TEST_HELLO_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/hello_plugin"
+  SICNU_TEST_PARITY_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
+)
+add_dependencies(test_plugin_channel_parity_r4 hello_plugin exprs_plugin_host_worker)
