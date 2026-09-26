@@ -53,8 +53,8 @@ canonical==raw（零回归的结构性原因）；③ 测试 oracle（B01/B02）
 
 | 交付物 | 下限 | 实测 |
 |---|---|---|
-| 边界矩阵类 | ≥15 | B01-B22 = 22 类（DECISIONS.md） |
-| 矩阵用例 | ≥18 | 18 用例 / 92 断言（test_lab_pack_boundaries_r4） |
+| 边界矩阵类 | ≥15 | B01-B22 = 22 类（DECISIONS.md），22/22 类均有直接用例 |
+| 矩阵用例 | ≥18 | 23 用例 / 121 断言（test_lab_pack_boundaries_r4；含 CHUNK-1/2/3 跨块边界直测） |
 | 头文件模块失败路径 | 22/22 | MODULE_FAILURE_PATHS.md 22 行全表（每行 typed 断言+提交号） |
 | parity 残余 | ≥4 | 4 用例（restore 字节稳定/乱序不变/部分失败完整性/并发==串行） |
 | 凭据 fail-closed 三路径 | 3/3 | labAsk / harness:autonomy_status / labReference × 4 token 态（5 用例） |

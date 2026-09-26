@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
+#include <json/writer.h>
 
 #include <algorithm>
 #include <sstream>
@@ -87,7 +88,14 @@ TEST_CASE( "parity r4: restored feedback summary round-trips byte-stable",
     const LabFeedbackProjection restored = LabFeedbackProjection::fromJson( doc1 );
     REQUIRE( restored.ok );
     const Json::Value doc2 = restored.toJson();
-    CHECK( doc2 == doc1 ); // restart restore never rewrites history
+    // Byte-level stability, not merely structural equality: the persisted
+    // document re-serializes to identical bytes after a restart.
+    Json::StreamWriterBuilder b;
+    b["indentation"] = "";
+    const std::string bytes1 = Json::writeString( b, doc1 );
+    const std::string bytes2 = Json::writeString( b, doc2 );
+    CHECK( bytes1 == bytes2 );
+    CHECK( doc2 == doc1 );
     CHECK( restored.overallStatus == live.overallStatus );
     CHECK( restored.overallCountsAsPass == live.overallCountsAsPass );
     CHECK( restored.graderScore == live.graderScore );

@@ -160,10 +160,16 @@ TEST_CASE( "authoring r4: preflight report keeps ok=false with a stable canonica
     const TeachingReleaseReport report = runPreflight( in );
     CHECK_FALSE( report.ok );
     CHECK_FALSE( report.issues.isEmpty() );
-    // The release-gate artifact must be reproducible: same input → same
-    // canonical digest, so a teacher cannot quietly re-roll a failed gate.
-    CHECK( report.canonicalDigest() == report.canonicalDigest() );
-    CHECK( report.canonicalBytes().size() > 0 );
+    // The release-gate artifact must be reproducible across INDEPENDENT
+    // runs: same input twice → identical canonical digest, so a teacher
+    // cannot quietly re-roll a failed gate.
+    const TeachingReleaseReport rerun = runPreflight( in );
+    CHECK( report.canonicalDigest() == rerun.canonicalDigest() );
+    CHECK( report.canonicalBytes() == rerun.canonicalBytes() );
+    // And the gate actually binds to its input: perturbing the spec moves
+    // the digest.
+    in.labSpec.insert( QStringLiteral( "title" ), QStringLiteral( "t2" ) );
+    CHECK( runPreflight( in ).canonicalDigest() != report.canonicalDigest() );
 }
 
 TEST_CASE( "authoring r4: operator catalog loads valid sidecars and types broken ones",

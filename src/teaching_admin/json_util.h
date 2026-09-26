@@ -107,8 +107,13 @@ inline qint64 canonicalFileDigest( const QString &path, QCryptographicHash *hash
 /// sha256 over the canonical bytes of @p path — the byte stream git would
 /// store for it (any NUL in the first 8000 bytes ⇒ binary, hashed as-is;
 /// otherwise CRLF→LF with lone CRs kept). ONE normalization entry for the
-/// admin side, mirroring the pack authority's fileSha256; committed-fixture
-/// pins taken from git objects compare equal against a CRLF checkout.
+/// admin side, implementing the canonical-bytes spec the foundry's pins are
+/// computed over (gen_lab_packs.py canonical_bytes(), arriving with #1336).
+/// MERGE-ORDER NOTE: until #1336 lands, the agent-side authority
+/// (lab_pack.cpp fileSha256) still hashes raw bytes, so on a Windows CRLF
+/// checkout the admin verdict (matches pins) and the agent verdict
+/// (spurious mismatch) diverge — the agent-side gap is exactly what #1336
+/// fixes; this entry must delegate to it once that lands.
 /// Empty string when unreadable.
 inline QString canonicalFileSha256( const QString &path, qint64 chunkBytes = 64 * 1024 )
 {

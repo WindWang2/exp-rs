@@ -7,16 +7,19 @@
   a canonical form whose digest/size is stable. Truth is INDEPENDENT of the
   implementation: pins are computed in this file from the git canonical-bytes
   rule (NUL in first 8000 ⇒ binary as-is; else CRLF→LF, lone CR kept) — the
-  same rule scripts/gen_lab_packs.py canonical_bytes() applies — never by
-  calling the code under test.
+  rule the repo's committed pins were produced with — never by calling the
+  code under test.
 
   Entries:
     sicnu::labpack::PackVerifier::loadFromBytes  — the ONE pack parser
     sicnu::teaching_admin::inventoryPacks        — the admin inventory entry
-    (both linked via Sicnu::teaching_admin's PUBLIC sicnu_lab_pack)
+    sicnu::teaching_admin::canonicalFileSha256/Size — direct unit pins
+    (linked via Sicnu::teaching_admin's PUBLIC sicnu_lab_pack)
 
   The #1336 first-round semantics (fileSha256 canonicalization) must NOT
-  regress: B01/B02/B17 pin it from the outside.
+  regress: B01/B02/B17 pin it from the outside. Chunk-boundary cases
+  (CHUNK-1/2/3) exercise the streaming pending-CR logic directly — the
+  inventory fixtures are tiny, so these are the only cases > 8000 bytes.
  ***************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
@@ -458,4 +461,118 @@ TEST_CASE( "boundary B15: committed digest drift is a named hard rejection (no c
     CHECK( hasIssue( inv.packs.front(), QStringLiteral( "digest_mismatch" ), QStringLiteral( "error" ),
                      QStringLiteral( "declared" ) ) );
     CHECK_FALSE( inv.packs.front().offlineAvailable );
+}
+
+// ---------------------------------------------------------------------------
+// Direct canonical-function pins (chunking + probe boundary) — P1-2/R3
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes",
+           "[teaching_r4][boundary][chunking]" )
+{
+    QTemporaryDir root;
+    // 8000-byte text head, then 64KiB chunk whose LAST byte is '\r' with its
+    // '\n' in the next chunk, then more text, then a lone trailing '\r' at
+    // EOF (kept as-is).
+    QByteArray raw;
+    raw.reserve( 8000 + 65536 + 16 + 1 );
+    raw.append( QByteArray( 8000, 'h' ) );
+    QByteArray block( 65536, 'a' );
+    block[65535] = '\r'; // last byte of the first 64KiB chunk after head
+    raw.append( block );
+    raw.append( "\nmid" ); // '\n' arrives in the NEXT chunk
+    raw.append( QByteArray( 8, 'b' ) );
+    raw.append( '\r' ); // lone CR at EOF — kept
+
+    const QString path = root.filePath( QStringLiteral( "chunked.txt" ) );
+    writeBytes( path, raw );
+
+    // The oracle normalizes the WHOLE content in one pass (no chunking);
+    // equality proves the streamed pending-CR logic is equivalent.
+    CHECK( canonicalFileSha256( path ) == oracleSha256( canonicalBytes( raw ) ) );
+    CHECK( canonicalFileSize( path ) == static_cast<qint64>( canonicalBytes( raw ).size() ) );
+    // The mid-file CRLF normalized away, the trailing lone CR kept:
+    CHECK( canonicalFileSize( path ) == static_cast<qint64>( raw.size() - 1 ) );
+}
+
+TEST_CASE( "boundary CHUNK-2: NUL probe edge decides binary vs text classification",
+           "[teaching_r4][boundary][chunking]" )
+{
+    QTemporaryDir root;
+    // Classification is only observable when a CRLF follows: text mode
+    // collapses it, binary mode keeps it. git probes the FIRST 8000 bytes.
+    // A: NUL at index 8000 (outside the window) -> TEXT -> CRLF collapses.
+    QByteArray rawA( 8000, 't' );
+    rawA.append( '\0' );
+    rawA.append( "A\r\nB" );
+    // B: NUL at index 7999 (inside the window) -> BINARY -> CRLF kept raw.
+    QByteArray rawB( 7999, 't' );
+    rawB.append( '\0' );
+    rawB.append( "A\r\nB" );
+
+    const QString pathA = root.filePath( QStringLiteral( "edge_a.bin" ) );
+    const QString pathB = root.filePath( QStringLiteral( "edge_b.bin" ) );
+    writeBytes( pathA, rawA );
+    writeBytes( pathB, rawB );
+
+    CHECK( canonicalFileSha256( pathA ) == oracleSha256( canonicalBytes( rawA ) ) );
+    CHECK( canonicalFileSize( pathA ) == static_cast<qint64>( canonicalBytes( rawA ).size() ) );
+    // The oracle classifies rawB binary too (NUL within its 8000-byte probe)
+    // — both sides keep the CRLF, and A vs B digests must DIFFER.
+    CHECK( canonicalFileSha256( pathB ) == oracleSha256( rawB ) );
+    CHECK( canonicalFileSha256( pathA ) != canonicalFileSha256( pathB ) );
+}
+
+TEST_CASE( "boundary CHUNK-3: empty and all-CR files have stable canonical identity",
+           "[teaching_r4][boundary][chunking]" )
+{
+    QTemporaryDir root;
+    const QString emptyPath = root.filePath( QStringLiteral( "empty.bin" ) );
+    writeBytes( emptyPath, QByteArray() );
+    CHECK( canonicalFileSha256( emptyPath ) == oracleSha256( QByteArray() ) );
+    CHECK( canonicalFileSize( emptyPath ) == 0 );
+
+    const QString crPath = root.filePath( QStringLiteral( "allcr.txt" ) );
+    const QByteArray allCr = QByteArray( 100, '\r' );
+    writeBytes( crPath, allCr );
+    // Lone CRs are content: canonical == raw, nothing rewritten.
+    CHECK( canonicalFileSha256( crPath ) == oracleSha256( allCr ) );
+    CHECK( canonicalFileSize( crPath ) == 100 );
+}
+
+TEST_CASE( "boundary B03: a UTF-8 BOM is content — it participates in the pin",
+           "[teaching_r4][boundary][encoding]" )
+{
+    InventoryFixture fx;
+    // BOM + CRLF text: the BOM bytes are not EOL — canonicalization keeps
+    // them, only the CRLF collapses.
+    const QByteArray onDisk = "\xEF\xBB\xBF"
+                              "line1\r\nline2\r\n";
+    writeBytes( fx.root.filePath( QStringLiteral( "data/bom.txt" ) ), onDisk );
+    const QString pin = sha256Hex( canonicalBytes( onDisk ) );
+
+    fx.writePack( packWith( QStringLiteral( "data/bom.txt" ), pin.toLatin1().constData(),
+                            canonicalBytes( onDisk ).size() ) );
+    const PackInventory inv = fx.inventory();
+    REQUIRE( inv.packs.size() == 1 );
+    CHECK_FALSE( hasIssue( inv.packs.front(), QStringLiteral( "digest_mismatch" ),
+                           QStringLiteral( "error" ), QString() ) );
+    CHECK( inv.packs.front().offlineAvailable );
+}
+
+TEST_CASE( "boundary B18: generated-tier byte drift degrades as a warning, not an error",
+           "[teaching_r4][boundary][bytes]" )
+{
+    InventoryFixture fx;
+    const QByteArray onDisk = "regen-bytes";
+    writeBytes( fx.root.filePath( QStringLiteral( "data/r.tif" ) ), onDisk );
+    const QString pin = sha256Hex( canonicalBytes( onDisk ) );
+
+    fx.writePack( packWith( QStringLiteral( "data/r.tif" ), pin.toLatin1().constData(),
+                            onDisk.size() + 55, "generated-samples" ) );
+    const PackInventory inv = fx.inventory();
+    CHECK( hasIssue( inv.packs.front(), QStringLiteral( "byte_mismatch" ), QStringLiteral( "warning" ),
+                     QStringLiteral( "declared" ) ) );
+    CHECK_FALSE( hasIssue( inv.packs.front(), QStringLiteral( "byte_mismatch" ), QStringLiteral( "error" ),
+                           QString() ) );
 }

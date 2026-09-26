@@ -7,7 +7,7 @@ ctest 名 = ctest 二进制前缀 + TEST_CASE 名（teaching_admin/自定义目�
 |---|---|---|---|---|
 | 1 | teaching_admin/admin_types.h | ValidationResult/issue 序列化契约（各套件 typed 断言的公共底座：severity 归一、ok 翻转） | 经 test_lab_pack_boundaries_r4::boundary B06/B15/B17 与 authoring 套件各断言行使 | 33cf816d5e |
 | 2 | teaching_admin/admin_errors.h | 拒绝信封错误码合同（不新增错误码轴：TEACHING_REFUSAL 精确复现） | test_teaching_credential_paths_r4::credential paths r4: unset/empty/wrong token … | 0e2fcdd452 |
-| 3 | teaching_admin/json_util.h | canonical digest/size 对不可读文件返回空/-1；unsafe path 拒绝 | test_lab_pack_boundaries_r4::boundary B01/B02（canonical 口径）+ core "unsafe relative path helper" | 33cf816d5e |
+| 3 | teaching_admin/json_util.h | unsafe path 四形态拒绝（绝对/盘符/../反斜杠）；canonical 函数不可读文件返回空/-1（经 CHUNK-3 空文件与 inventory 未读文件路径行使） | test_lab_pack_boundaries_r4::boundary CHUNK-1/2/3（canonical 直测）+ core "unsafe relative path helper" | 33cf816d5e |
 | 4 | teaching_admin/data_pack_manager.h | B01-B22 边界矩阵全族：CRLF/CR-only/UTF-16/BOM/NFC-NFD/大小写、缺失/目录冒名/零字节/超长路径/symlink 逃逸/路径逃逸、digest/byte 漂移（tier 强度）、pack 级 declared 漂移、空目录 | test_lab_pack_boundaries_r4::boundary B01…B22（18 用例 92 断言） | 33cf816d5e |
 | 5 | teaching_admin/batch_assessment.h | 空批 typed 空跑；全败不造假 pass；throw 隔离；重复发现两行确定序；损坏/外来 checkpoint 降级 fresh start；取消行永不入 checkpoint、重启续传 resumed==2；publish 拒不可写前缀 | test_teaching_batch_r4::batch r4: empty/all-fail/throwing/duplicate/corrupt+foreign/cancellation+restart/atomic publish（7 用例） | ece627ce37 |
 | 6 | teaching_admin/class_summary.h | 空报告 rate=0.0 非 NaN；全败直方仅单桶诚实 | test_teaching_batch_r4::batch r4: empty… / all-fail… | ece627ce37 |
