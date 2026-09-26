@@ -206,6 +206,9 @@ TEST_CASE( "RE-4: corrupt toolbar flow settings clamp to legal defaults",
   host.resize( 1000, 80 );
   QTest::qWaitForWindowExposed( &host );
   host.setProductToolbars( { &garbageBar, &hugeBar, &tinyBar } );
+  // The window pairs setProductToolbars with applyVisibility (the chips'
+  // visibility truth lives in the want-map); mirror that here.
+  host.applyVisibility( { { &garbageBar, true }, { &hugeBar, true }, { &tinyBar, true } } );
   QApplication::processEvents();
   REQUIRE( host.hasProductToolbars() );
   CHECK( host.usedRows() >= 1 );
