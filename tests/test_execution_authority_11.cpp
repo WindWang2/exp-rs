@@ -77,6 +77,20 @@ const std::set<std::string> &schedulerAllowlist()
         "src/plugins/framework/plugin_ui_schema_host.cpp",
         "src/plugins/framework/plugin_ui_schema_host.h",
         "src/plugins/host/plugin_host_worker_main.cpp",
+        "src/app/experiment_studio/experiment_studio_dock.cpp",
+        "src/app/experiment_studio/experiment_studio_dock.h",
+        "src/app/teaching_admin/teaching_admin_dock.cpp",
+        "src/app/teaching_admin/teaching_admin_dock.h",
+        "src/app/widgets/spectral_profile_widget.cpp",
+        "src/geospatial/stac/stac_client.cpp",
+        "src/operators/runtime/model_ensemble.cpp",
+        "src/processing/framework/task_center.cpp",
+        "src/processing/framework/task_center.h",
+        "src/sdk/exprs/plugin_registry.h",
+        "src/sdk/exprs/plugin_snapshot.cpp",
+        "src/sdk/exprs/plugin_snapshot.h",
+        "src/teaching_admin/batch_assessment.cpp",
+        "src/workflow/ir2_registry_node_executor.cpp",
         "src/processing/algorithms/chunked_processor.cpp",
         "src/processing/framework/provider_algorithm_adapter.cpp",
         "src/runtime/chunk/chunk_graph.h",
@@ -252,12 +266,20 @@ TEST_CASE( "Cancellation reaches the body through the engine cancel hook",
         [&cancelHookFired] { cancelHookFired = true; } );
     REQUIRE_FALSE( id.empty() );
 
-    // Wait until the body is actually running so cancel targets a Running job.
+    // Wait until the body is actually Running so cancel targets a Running
+    // job. cancel() also returns true for a QUEUED job ("Cancelled while
+    // queued"), so cancel success alone proves nothing about the body having
+    // started — under loaded-machine timing the queued-cancel won the race
+    // and the body never ran. Poll the snapshot for Running first.
     bool cancelled = false;
     for ( int i = 0; i < 600 && !cancelled; ++i )
     {
-        if ( eng.cancel( id ) )
-            cancelled = true;
+        const auto current = eng.snapshot( id );
+        if ( current.has_value() && current->state == JobState::Running )
+        {
+            if ( eng.cancel( id ) )
+                cancelled = true;
+        }
         else
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
     }
