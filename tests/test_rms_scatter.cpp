@@ -11,23 +11,9 @@
 
 #include "rs_rms_scatter_widget.h"
 
-#include <cstdlib>
+#include "support/qt_lifecycle.h"
 
-// Same fast-exit shim used in other Qt widget tests — bypasses Qt/glibc
-// teardown crashes that have nothing to do with the assertions under test.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -39,8 +25,7 @@ namespace
   {
     if ( !QCoreApplication::instance() )
     {
-      static QApplication app( fake_argc, fake_argv );
-      return &app;
+      return sicnu::test::qtlifecycle::heapQApplication( fake_argc, fake_argv );
     }
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
