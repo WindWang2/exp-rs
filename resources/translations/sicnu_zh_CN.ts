@@ -20615,4 +20615,188 @@ Capsule reference: %1</source>
         <translation>类型=%1  算子=%2  人工=%3  AI允许=%4</translation>
     </message>
 </context>
+<context>
+    <name>VaWorkbenchPanel</name>
+    <message>
+        <source>Visual Analytics</source>
+        <translation>可视化分析</translation>
+    </message>
+    <message>
+        <source>Band A</source>
+        <translation>波段 A</translation>
+    </message>
+    <message>
+        <source>Band B</source>
+        <translation>波段 B</translation>
+    </message>
+    <message>
+        <source>Refresh charts</source>
+        <translation>刷新图表</translation>
+    </message>
+    <message>
+        <source>Band A:</source>
+        <translation>波段 A：</translation>
+    </message>
+    <message>
+        <source>Band B:</source>
+        <translation>波段 B：</translation>
+    </message>
+    <message>
+        <source>Select a raster layer, then refresh.</source>
+        <translation>选择一个栅格图层后刷新。</translation>
+    </message>
+    <message>
+        <source>Cursor: —</source>
+        <translation>光标：—</translation>
+    </message>
+    <message>
+        <source>Linked: band %1 selected.</source>
+        <translation>联动：选中波段 %1。</translation>
+    </message>
+    <message>
+        <source>Cursor sample: band %1 = %2</source>
+        <translation>光标采样：波段 %1 = %2</translation>
+    </message>
+    <message>
+        <source>Cursor sample: NoData (%1)</source>
+        <translation>光标采样：NoData（%1）</translation>
+    </message>
+    <message>
+        <source>Cursor sampling unavailable: %1</source>
+        <translation>光标采样不可用：%1</translation>
+    </message>
+    <message>
+        <source>Band histogram (sampled estimate)</source>
+        <translation>波段直方图（抽样估计）</translation>
+    </message>
+    <message>
+        <source>Linked (%1): class %2 selected.</source>
+        <translation>联动（%1）：选中类别 %2。</translation>
+    </message>
+    <message>
+        <source>Linked pixel: row %1, col %2</source>
+        <translation>联动像素：row %1, col %2</translation>
+    </message>
+    <message>
+        <source>Link filter: scatter limited to histogram range [%1, %2], %3 points.</source>
+        <translation>联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。</translation>
+    </message>
+    <message>
+        <source>Cursor: %1, %2</source>
+        <translation>光标：%1, %2</translation>
+    </message>
+    <message>
+        <source>The current selection has no raster layer.</source>
+        <translation>当前选择没有栅格图层。</translation>
+    </message>
+    <message>
+        <source>Sampling from %1 (bounded and cancellable).</source>
+        <translation>正在从 %1 抽样计算（有界、可取消）。</translation>
+    </message>
+    <message>
+        <source>Per-band means (sampled estimate %1×%2)</source>
+        <translation>各波段均值（抽样估计 %1×%2）</translation>
+    </message>
+    <message>
+        <source>Band</source>
+        <translation>波段</translation>
+    </message>
+    <message>
+        <source>Mean (estimated)</source>
+        <translation>均值（估计）</translation>
+    </message>
+    <message>
+        <source>Band %1</source>
+        <translation>波段 %1</translation>
+    </message>
+</context>
+<context>
+    <name>CourseHomePage</name>
+    <message>
+        <source>Undergraduate Lab Teaching Workbench</source>
+        <translation>遥感实验学习工作台</translation>
+    </message>
+    <message>
+        <source>Mode:</source>
+        <translation>体验模式:</translation>
+    </message>
+    <message>
+        <source>Guided mode (beginner)</source>
+        <translation>实验模式（初学者）</translation>
+    </message>
+    <message>
+        <source>Expert mode</source>
+        <translation>专家模式</translation>
+    </message>
+    <message>
+        <source>Continue learning</source>
+        <translation>继续学习</translation>
+    </message>
+    <message>
+        <source>Overall progress: %1%</source>
+        <translation>总进度: %1%</translation>
+    </message>
+</context>
+<context>
+    <name>TeachingAdminDock</name>
+    <message>
+        <source>A Courses</source>
+        <translation>A 课程</translation>
+    </message>
+    <message>
+        <source>B Experiments</source>
+        <translation>B 实验</translation>
+    </message>
+    <message>
+        <source>C Rubrics</source>
+        <translation>C 量规</translation>
+    </message>
+    <message>
+        <source>D Data packs</source>
+        <translation>D 数据包</translation>
+    </message>
+    <message>
+        <source>E Preflight</source>
+        <translation>E 预检</translation>
+    </message>
+    <message>
+        <source>F Offline packs</source>
+        <translation>F 离线包</translation>
+    </message>
+    <message>
+        <source>G Batch grading</source>
+        <translation>G 批量评分</translation>
+    </message>
+    <message>
+        <source>H/I Feedback &amp; stats</source>
+        <translation>H/I 反馈与统计</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineEditorDock</name>
+    <message>
+        <source>Check workflow structure (loops / unknown operators / missing parameters / output conflicts); errors map to node badges</source>
+        <translation>检查工作流结构（循环/未知算子/缺失参数/输出冲突），错误映射到节点徽标</translation>
+    </message>
+    <message>
+        <source>Check</source>
+        <translation>检查</translation>
+    </message>
+    <message>
+        <source>The workflow:preflight tool is not registered.</source>
+        <translation>workflow:preflight 工具未注册。</translation>
+    </message>
+    <message>
+        <source>(fixable)</source>
+        <translation>（可修复）</translation>
+    </message>
+    <message>
+        <source>No structural issues found (verdict: %1).</source>
+        <translation>未发现结构问题（verdict: %1）。</translation>
+    </message>
+    <message>
+        <source>Check found %1 issue(s)</source>
+        <translation>检查发现 %1 个问题</translation>
+    </message>
+</context>
 </TS>

@@ -97,7 +97,7 @@ VaWorkbenchPanel::VaWorkbenchPanel( RasterPathProvider provider,
     } )
 {
     setObjectName( QStringLiteral( "rsVaWorkbenchDock" ) );
-    setWindowTitle( tr( "可视化分析" ) );
+    setWindowTitle( tr( "Visual Analytics" ) );
     buildUi();
 }
 
@@ -110,27 +110,27 @@ void VaWorkbenchPanel::buildUi()
     auto *controls = new QHBoxLayout;
     m_bandA = new QComboBox( central );
     m_bandA->setObjectName( QStringLiteral( "rsVaBandA" ) );
-    m_bandA->setAccessibleName( tr( "波段 A" ) );
+    m_bandA->setAccessibleName( tr( "Band A" ) );
     m_bandB = new QComboBox( central );
     m_bandB->setObjectName( QStringLiteral( "rsVaBandB" ) );
-    m_bandB->setAccessibleName( tr( "波段 B" ) );
-    m_refreshBtn = new QPushButton( tr( "刷新图表" ), central );
+    m_bandB->setAccessibleName( tr( "Band B" ) );
+    m_refreshBtn = new QPushButton( tr( "Refresh charts" ), central );
     m_refreshBtn->setObjectName( QStringLiteral( "rsVaRefresh" ) );
-    m_refreshBtn->setAccessibleName( tr( "刷新图表" ) );
-    controls->addWidget( new QLabel( tr( "波段 A：" ), central ) );
+    m_refreshBtn->setAccessibleName( tr( "Refresh charts" ) );
+    controls->addWidget( new QLabel( tr( "Band A:" ), central ) );
     controls->addWidget( m_bandA );
-    controls->addWidget( new QLabel( tr( "波段 B：" ), central ) );
+    controls->addWidget( new QLabel( tr( "Band B:" ), central ) );
     controls->addWidget( m_bandB );
     controls->addWidget( m_refreshBtn );
     controls->addStretch( 1 );
     layout->addLayout( controls );
 
-    m_statusLabel = new QLabel( tr( "选择一个栅格图层后刷新。" ), central );
+    m_statusLabel = new QLabel( tr( "Select a raster layer, then refresh." ), central );
     m_statusLabel->setObjectName( QStringLiteral( "rsVaStatus" ) );
     m_statusLabel->setWordWrap( true );
     layout->addWidget( m_statusLabel );
 
-    m_cursorLabel = new QLabel( tr( "光标：—" ), central );
+    m_cursorLabel = new QLabel( tr( "Cursor: —" ), central );
     m_cursorLabel->setObjectName( QStringLiteral( "rsVaCursor" ) );
     m_cursorLabel->setWordWrap( true );
     layout->addWidget( m_cursorLabel );
@@ -180,7 +180,7 @@ void VaWorkbenchPanel::buildUi()
                  subject.index = index;
                  publishToHub( subject );
                  m_statusLabel->setText(
-                   tr( "联动：选中波段 %1。" ).arg( index + 1 ) );
+                   tr( "Linked: band %1 selected." ).arg( index + 1 ) );
              } );
 
     // ── Hub consumption: other surfaces' brush events drive this panel.
@@ -192,19 +192,19 @@ void VaWorkbenchPanel::buildUi()
     connect( &m_probe, &VaCursorProbe::sampled, this,
              [this]( bool ok, double value, int band, bool noData, const QString &message ) {
                  if ( ok )
-                     m_cursorLabel->setText( tr( "光标采样：波段 %1 = %2" )
+                     m_cursorLabel->setText( tr( "Cursor sample: band %1 = %2" )
                                                .arg( band )
                                                .arg( value, 0, 'g', 6 ) );
                  else if ( noData )
-                     m_cursorLabel->setText( tr( "光标采样：NoData（%1）" ).arg( message ) );
+                     m_cursorLabel->setText( tr( "Cursor sample: NoData (%1)" ).arg( message ) );
                  else
-                     m_cursorLabel->setText( tr( "光标采样不可用：%1" ).arg( message ) );
+                     m_cursorLabel->setText( tr( "Cursor sampling unavailable: %1" ).arg( message ) );
              } );
 
     connect( &m_histogramSource, &VaDataSource::ready, m_histogramChart,
              [this]( const VaData &data ) {
                  m_histogramChart->setData( data );
-                 m_histogramChart->setAccessibleName( tr( "波段直方图（抽样估计）" ) );
+                 m_histogramChart->setAccessibleName( tr( "Band histogram (sampled estimate)" ) );
              } );
     connect( &m_histogramSource, &VaDataSource::failed, m_histogramChart,
              [this]( const QString &message ) { m_histogramChart->setError( message ); } );
@@ -265,14 +265,14 @@ void VaWorkbenchPanel::consumeHubEvent( const VaSelectionEvent &event )
             break;
         case VaSelectionKind::ChartCategory:
             m_statusLabel->setText(
-              tr( "联动（%1）：选中类别 %2。" )
+              tr( "Linked (%1): class %2 selected." )
                 .arg( event.origin, event.subject.chartId ) );
             break;
         case VaSelectionKind::Pixel:
             // External pixel picks cannot be resolved to OUR raster
             // honestly (the subject carries no path) — readout only.
             m_cursorLabel->setText(
-              tr( "联动像素：row %1, col %2" )
+              tr( "Linked pixel: row %1, col %2" )
                 .arg( event.subject.row )
                 .arg( event.subject.column ) );
             break;
@@ -294,7 +294,7 @@ void VaWorkbenchPanel::applyScatterRangeFilter( double x0, double x1,
     m_displayedScatter = filtered;
     m_scatterChart->setData( filtered );
     m_statusLabel->setText(
-      tr( "联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。" )
+      tr( "Link filter: scatter limited to histogram range [%1, %2], %3 points." )
         .arg( x0, 0, 'g', 4 )
         .arg( x1, 0, 'g', 4 )
         .arg( filtered.scatter.xs.size() ) );
@@ -352,7 +352,7 @@ void VaWorkbenchPanel::onViewCursorMoved( const QString &viewId, double x, doubl
                                           const QString &crsWkt )
 {
     Q_UNUSED( viewId );
-    m_cursorLabel->setText( tr( "光标：%1, %2" ).arg( x, 0, 'g', 6 ).arg( y, 0, 'g', 6 ) );
+    m_cursorLabel->setText( tr( "Cursor: %1, %2" ).arg( x, 0, 'g', 6 ).arg( y, 0, 'g', 6 ) );
     const int band = m_bandA->currentData().isValid() ? m_bandA->currentData().toInt() : 1;
     m_probe.request( QgsPointXY( x, y ), crsWkt, band );
 }
@@ -360,7 +360,7 @@ void VaWorkbenchPanel::onViewCursorMoved( const QString &viewId, double x, doubl
 void VaWorkbenchPanel::onViewCursorLeft( const QString &viewId )
 {
     Q_UNUSED( viewId );
-    m_cursorLabel->setText( tr( "光标：—" ) );
+    m_cursorLabel->setText( tr( "Cursor: —" ) );
 }
 
 void VaWorkbenchPanel::refreshCharts()
@@ -368,13 +368,13 @@ void VaWorkbenchPanel::refreshCharts()
     const QString path = m_provider ? m_provider() : QString();
     if ( path.isEmpty() )
     {
-        m_statusLabel->setText( tr( "当前选择没有栅格图层。" ) );
+        m_statusLabel->setText( tr( "The current selection has no raster layer." ) );
         m_histogramChart->clear();
         m_scatterChart->clear();
         m_profileChart->clear();
         return;
     }
-    m_statusLabel->setText( tr( "正在从 %1 抽样计算（有界、可取消）。" ).arg( path ) );
+    m_statusLabel->setText( tr( "Sampling from %1 (bounded and cancellable)." ).arg( path ) );
     requestProfile();
     requestHistogram();
     requestScatter();
@@ -392,9 +392,9 @@ void VaWorkbenchPanel::requestProfile()
             const auto &meta = reader.metadata();
             const int bandCount = meta.bandCount;
             VaSeries series;
-            series.name = QObject::tr( "各波段均值（抽样估计 %1×%2）" ).arg( kThumbSize ).arg( kThumbSize );
-            series.xLabel = QObject::tr( "波段" );
-            series.yLabel = QObject::tr( "均值（估计）" );
+            series.name = QObject::tr( "Per-band means (sampled estimate %1×%2)" ).arg( kThumbSize ).arg( kThumbSize );
+            series.xLabel = QObject::tr( "Band" );
+            series.yLabel = QObject::tr( "Mean (estimated)" );
             // Bands stream one at a time so cancellation polls between them.
             for ( int band = 1; band <= bandCount; ++band )
             {
@@ -517,8 +517,8 @@ void VaWorkbenchPanel::requestScatter()
                 readThumbnail( reader, { bandA, bandB }, kScatterThumb, &tw, &th );
 
             VaScatter scatter;
-            scatter.xLabel = QObject::tr( "波段 %1" ).arg( bandA );
-            scatter.yLabel = QObject::tr( "波段 %1" ).arg( bandB );
+            scatter.xLabel = QObject::tr( "Band %1" ).arg( bandA );
+            scatter.yLabel = QObject::tr( "Band %1" ).arg( bandB );
             const qint64 total = static_cast<qint64>( tw ) * th;
             const int stride = std::max( 1, static_cast<int>( total / kMaxScatterPoints ) );
             for ( qint64 i = 0; i < total; i += stride )
