@@ -329,7 +329,11 @@ TemporalCadenceFacts temporalCadenceFromDates( const Json::Value &dates )
                                                      : parsed.epochSeconds % 86400 + 86400 );
     // Merge precision on collision, coarsest wins: a date-only member makes
     // the whole day-collision collapse onto that day's midnight (the coarsest
-    // report of the acquisition is the honest representative).
+    // report of the acquisition is the honest representative). Corner case —
+    // two distinct timestamped entries PLUS a date-only entry on the same
+    // day: the date-only folds into the FIRST timestamp's day bucket (its
+    // representative moves to that midnight) and the second timestamp stays
+    // a distinct observation.
     bool merged = false;
     for ( auto &existing : instants )
     {
