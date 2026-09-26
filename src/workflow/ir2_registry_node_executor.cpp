@@ -107,16 +107,41 @@ QString resolveArtifactPath( const QString &root, const QString &path )
 
 /// True when @p path names something strictly inside @p root — never the root
 /// itself and never a sibling reached through ".." or another drive.
+///
+/// Both sides resolve through the filesystem before the prefix test:
+/// cleanPath is lexical only, so a symlinked component inside the run
+/// directory (sub → elsewhere) let a declared output carry the operator's
+/// write through the link and only the post-hoc artifact re-check noticed —
+/// after the bytes had landed outside the run root. Existing components
+/// canonicalize; a not-yet-existing tail (outputs are written after this
+/// check) anchors on the canonical parent plus the lexical file name, which
+/// cannot contain a link because it does not exist yet.
 bool isInsideRunRoot( const QString &root, const QString &path )
 {
     if ( root.isEmpty() || path.isEmpty() )
         return false;
-    const QString rootNorm = QDir::cleanPath( root );
-    const QString pathNorm = QDir::cleanPath( path );
-    const QString prefix = rootNorm.endsWith( QLatin1Char( '/' ) )
-                               ? rootNorm
-                               : rootNorm + QLatin1Char( '/' );
-    return pathNorm.startsWith( prefix );
+    QString rootCanon = QDir( root ).canonicalPath();
+    if ( rootCanon.isEmpty() )
+        rootCanon = QDir::cleanPath( root );
+    QString pathCanon;
+    const QFileInfo info( path );
+    if ( info.exists() )
+        pathCanon = info.canonicalFilePath();
+    if ( pathCanon.isEmpty() )
+    {
+        // Degraded-mode asymmetry is deliberate: operator outputs are
+        // system-internal, so an unresolvable parent falls back to the
+        // lexical form (fail-open keeps the run alive); transcript-driven
+        // rule probes (lab_grader_kernels) refuse instead.
+        const QString parentCanon = info.dir().canonicalPath();
+        pathCanon = ( parentCanon.isEmpty() ? QDir::cleanPath( info.dir().absolutePath() )
+                                            : parentCanon )
+                    + QLatin1Char( '/' ) + info.fileName();
+    }
+    const QString prefix = rootCanon.endsWith( QLatin1Char( '/' ) )
+                               ? rootCanon
+                               : rootCanon + QLatin1Char( '/' );
+    return pathCanon.startsWith( prefix );
 }
 
 } // namespace

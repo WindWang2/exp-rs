@@ -55,9 +55,12 @@ bool isHex16( const std::string &text )
 
 bool validRecord( const RepairPlanningRecord &record )
 {
-    return !record.subject.empty() && isHex16( record.findingsDigest ) &&
-           !record.planId.empty() && isHex16( record.planFingerprint ) &&
-           isKnownPlanStatus( record.status );
+    // The sequence is the caller-supplied eviction order; a negative value
+    // is a broken clock, not a legal record — fail closed so garbage input
+    // cannot silently jump the eviction queue.
+    return record.sequence >= 0 && !record.subject.empty() &&
+           isHex16( record.findingsDigest ) && !record.planId.empty() &&
+           isHex16( record.planFingerprint ) && isKnownPlanStatus( record.status );
 }
 
 } // namespace

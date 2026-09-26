@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "exprs/path_policy.h"
 
+#include "platform/portable.h"
+
 #include <cstdlib>
 
 #include <filesystem>
@@ -37,12 +39,24 @@ const char *pathPolicyRejectionName( PathPolicyRejection rejection )
 
 namespace {
 
+/// The UTF-8 twin of pathFromUtf8: path::generic_string() re-encodes through
+/// the process ANSI code page on MSVC, so every path RENDERED back into the
+/// std::string world here goes through the wide native form instead.
+std::string pathToUtf8String( const fs::path &path )
+{
+    const std::u8string u8 = path.generic_u8string();
+    return std::string( u8.begin(), u8.end() );
+}
+
 /// True when @p candidate (already canonical) equals @p root or lies under
 /// it (root + separator + at least one character).
 bool isInside( const fs::path &root, const fs::path &candidate )
 {
-    const std::string rootText = root.generic_string();
-    const std::string candidateText = candidate.generic_string();
+    // Rendered as UTF-8 on every platform: generic_string() is ACP-encoded
+    // on Windows, and a '?'-substituted rendering could make two different
+    // paths compare equal under the prefix test below.
+    const std::string rootText = pathToUtf8String( root );
+    const std::string candidateText = pathToUtf8String( candidate );
     if ( candidateText == rootText )
         return true; // the root itself is contained (cwd == workspace root)
     if ( candidateText.size() <= rootText.size() )
@@ -69,6 +83,7 @@ fs::path pathFromUtf8( const std::string &text )
     return fs::path( std::u8string( reinterpret_cast<const char8_t *>( text.data() ),
                                     text.size() ) );
 }
+
 
 } // namespace
 
@@ -109,7 +124,7 @@ std::string PathPolicy::canonical( const std::string &path )
         const fs::path resolved = fs::weakly_canonical( pathFromUtf8( path ), error );
         if ( error )
             return {};
-        return resolved.generic_string();
+        return pathToUtf8String( resolved );
     }
     catch ( const std::exception & )
     {
@@ -161,7 +176,7 @@ PathPolicyRejection PathPolicy::checkPayloadInsideRoot( const std::string &root,
         if ( !isInside( canonicalRoot, resolved ) )
             return PathPolicyRejection::OutsideRoot;
 
-        resolvedPath = resolved.generic_string();
+        resolvedPath = pathToUtf8String( resolved );
         return PathPolicyRejection::Accepted;
     }
     catch ( const std::exception & )
@@ -195,8 +210,11 @@ bool PathPolicy::resolvesInsideRoot( const std::string &root, const std::string 
 
 std::string PathPolicy::workspaceRoot()
 {
-    const char *raw = std::getenv( "SICNU_MCP_WORKSPACE" );
-    if ( !raw || !*raw )
+    // The sandbox root is a path value consumed as UTF-8 text: read it
+    // through the portable boundary so a non-ASCII workspace path on
+    // Windows is not mangled into the ANSI code page before canonical().
+    const std::string raw = sicnu::portable::envUtf8( "SICNU_MCP_WORKSPACE" );
+    if ( raw.empty() )
         return {};
     return canonical( raw );
 }

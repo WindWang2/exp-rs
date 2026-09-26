@@ -54,6 +54,7 @@
 //
 
 #include <json/json.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -73,7 +74,19 @@ class CapabilityKnowledge {
     std::string directory() const;
 
     /// (Re)scans the directory. Returns the number of valid entries loaded.
+    /// Consumers that cache derived state key on revision(): it advances
+    /// exactly when a reload changes the loaded content (content digest).
     int reload();
+
+    /// Monotonic generation of the loaded content: starts at 0 and advances
+    /// by one per reload() whose loaded content differs from the previous
+    /// (same-content rescans keep the revision stable, so caches keyed on it
+    /// never churn without cause). Lazy-loads like the query API.
+    std::uint64_t revision() const;
+
+    /// Stable content identity of the loaded entries (first 16 hex of FNV-1a
+    /// over the sorted id set and each raw entry). Empty before any load.
+    std::string contentDigest() const;
 
     bool loaded() const { return mLoaded; }
 
@@ -117,6 +130,14 @@ class CapabilityKnowledge {
     /// Counts: band_roles maps role -> minimum count (missing = 0).
     static int bandRoleMinimum( const Json::Value &entry, const std::string &role );
 
+    /// Fact-sets the authority serves for a closed intent, shaped for the
+    /// science_context CapabilityFactsLookup seam: base entries declaring the
+    /// intent, plus one overlay per variant declaring it (variant keys
+    /// override the base; `when`/`intents` bookkeeping stripped). Consumers
+    /// MUST evaluate every candidate — picking one loses variant-scoped
+    /// requirements.
+    std::vector<Json::Value> factSetsForIntent( const std::string &intent ) const;
+
   private:
     CapabilityKnowledge() = default;
     std::string defaultDirectory() const;
@@ -132,6 +153,8 @@ class CapabilityKnowledge {
     Json::Value mFamilyDefaults{Json::objectValue}; ///< family -> raw entry
     std::vector<std::string> mOrder;            ///< entry ids in load order
     std::vector<std::string> mLoadProblems;
+    std::uint64_t mRevision = 0;                ///< generation of loaded content
+    std::string mContentDigest;                 ///< content identity of loaded entries
 };
 
 } // namespace sicnu::agent::harness

@@ -10,6 +10,10 @@ add_library(sicnu_agent SHARED
   lab_grader_kernels.h
   # D15 classification-change-studio: agent diagnosis seam
   tools/classification_tool.cpp
+  # R3 agent-ops live driver: production agent_loop seam adapter (verifier
+  # over harness::verifyArtifact; planner/executor seams stay caller-injected).
+  tools/agent_session_adapter.cpp
+  tools/agent_session_adapter.h
   tools/classification_tool.h
   data_platform_tools.cpp
   data_platform_tools.h
@@ -57,6 +61,10 @@ add_library(sicnu_agent SHARED
   harness/tool_shortlist.h
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
+  # R3 repair-planner integration: live CapabilityKnowledge -> repair
+  # provider adapter (read-only; the planner keeps no operator table).
+  harness/repair_capability_source.cpp
+  harness/repair_capability_source.h
   harness/curriculum_catalog.cpp
   harness/curriculum_catalog.h
   harness/curriculum_progress.cpp
@@ -270,6 +278,12 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters
+  # repair_capability_source adapts the live knowledge to the repair
+  # planner's provider seam (Qt-free leaf).
+  sicnu_repair_planner
+  # sicnu.lab-pack/1: lab_data_pack is a Qt façade over the Qt-free shared
+  # leaf — the ONE parser/validator shared with sicnu::teaching_admin.
+  sicnu_lab_pack
   ${JSONCPP_LIBRARIES}
 )
 

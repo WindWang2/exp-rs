@@ -5,9 +5,13 @@
 
 #include <filesystem>
 #include <fstream>
+
+#include <algorithm>
+
 #ifdef _WIN32
 #include <cstdlib> // _exit
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -117,6 +121,90 @@ TEST_CASE( "external process validates argv", "[sdk][external]" )
     REQUIRE_FALSE( ExternalProcess::validateArgv( { "/nonexistent/binary-xyz" }, error ) );
     REQUIRE( ExternalProcess::validateArgv( { "/bin/echo" }, error ) );
 }
+
+TEST_CASE( "PATH walk: pure helper resolves entries, empty entry is the "
+           "current directory, entries beyond MAX_PATH are not truncated",
+           "[sdk][external][path_lookup]" )
+{
+    std::vector<std::string> probes;
+    const auto probe = [ & ]( const std::string &candidate ) {
+        probes.push_back( candidate );
+        return candidate.rfind( "/hit/program" ) != std::string::npos
+               || candidate == "./program";
+    };
+
+    // First matching entry wins; later entries are still spelled correctly.
+    probes.clear();
+    REQUIRE( programInSearchPath( "program", "/a:/hit:/c", ':', probe ) );
+    REQUIRE( probes.size() == 2 );
+    REQUIRE( probes[0] == "/a/program" );
+    REQUIRE( probes[1] == "/hit/program" );
+
+    // An EMPTY entry is the current directory (POSIX exec convention):
+    // ":/x" and "x:" and "::" all probe "./program", never "/program".
+    for ( const std::string &searchPath : { std::string( ":/x" ), std::string( "x:" ),
+                                            std::string( ":" ) } )
+    {
+        probes.clear();
+        REQUIRE( programInSearchPath( "program", searchPath, ':', probe ) );
+        INFO( "searchPath: " << searchPath );
+        REQUIRE( std::find( probes.begin(), probes.end(), "./program" ) != probes.end() );
+        REQUIRE( std::find( probes.begin(), probes.end(), "/program" ) == probes.end() );
+    }
+
+    // A single empty search path still probes the current directory.
+    probes.clear();
+    REQUIRE( programInSearchPath( "program", "", ':', probe ) );
+    REQUIRE( probes == std::vector<std::string>{ "./program" } );
+
+    // An entry far beyond MAX_PATH passes through untruncated: the mock
+    // oracle pins the pure string contract that a filesystem probe on any
+    // one platform could silently violate (static evidence for the Windows
+    // SearchPathW ladder, which retries beyond its MAX_PATH stack buffer).
+    const std::string huge( 5000, 'd' );
+    probes.clear();
+    REQUIRE( programInSearchPath( "program", huge + ":/hit", ':', probe ) );
+    REQUIRE( probes.size() == 2 );
+    REQUIRE( probes[0] == huge + "/program" );
+    REQUIRE( probes[0].size() == 5000 + 8 );
+    REQUIRE( probes[1] == "/hit/program" );
+
+    // No entry matches -> false.
+    REQUIRE_FALSE( programInSearchPath( "miss", "/a:/b", ':',
+                                        []( const std::string & ) { return false; } ) );
+}
+
+#if !defined( _WIN32 )
+TEST_CASE( "PATH walk: an empty PATH entry resolves a program in the "
+           "current working directory",
+           "[sdk][external][path_lookup]" )
+{
+    // The old inline walk spliced an empty entry into "/program" and probed
+    // the filesystem ROOT, so a bare program name sitting in the CWD with
+    // PATH=":<anything>" was misreported as "not found in PATH".
+    const std::filesystem::path program = "sicnu-path-lookup-prog";
+    {
+        std::ofstream out( program, std::ios::trunc | std::ios::binary );
+        REQUIRE( static_cast<bool>( out ) );
+        out << "#!/bin/sh\nexit 0\n";
+    }
+    REQUIRE( ::chmod( program.c_str(), 0755 ) == 0 );
+
+    const char *savedPath = ::getenv( "PATH" );
+    const std::string savedValue = savedPath ? savedPath : "";
+    REQUIRE( ::setenv( "PATH", ":/definitely/not/here", 1 ) == 0 );
+    std::string error;
+    const bool found = ExternalProcess::validateArgv( { program.string() }, error );
+    if ( savedPath )
+        REQUIRE( ::setenv( "PATH", savedValue.c_str(), 1 ) == 0 );
+    else
+        ::unsetenv( "PATH" );
+    std::filesystem::remove( program );
+
+    INFO( "validateArgv error: " << error );
+    REQUIRE( found );
+}
+#endif
 
 TEST_CASE( "external process reports exec failures", "[sdk][external]" )
 {

@@ -18,6 +18,7 @@
 #include "operators/runtime/model_execution_service.h"
 #include "runtime/observability/fault_registry.h"
 #include "operators/runtime/model_runtime.h"
+#include "operators/runtime/provenance_verify.h"
 #include "operators/runtime/tile_inference_engine.h"
 #include "synthetic_raster_builder.h"
 
@@ -347,6 +348,19 @@ TEST_CASE( "a provider crash mid-run leaves no partial output", "[models][failur
                      RSOperatorError );
   CHECK_FALSE( fileExists( output ) );
   CHECK_FALSE( fileExists( tmpResidue( output ) ) );
+
+  // R3 track 13 — host-crash recovery analog: the crashed forward must not
+  // wedge the lane. With the provider healed, the NEXT request acquires a
+  // (fresh or cached) session and publishes a verified product+sidecar pair.
+  guard.script->crashAfter = 0;
+  TileInferenceEngine recoveryEngine( model, ModelRuntimeRegistry::instance().acquire( model ) );
+  REQUIRE_NOTHROW(
+    recoveryEngine.run( input.toStdString(), {}, output.toStdString(), context ) );
+  CHECK( fileExists( output ) );
+  CHECK( fileExists( output + QStringLiteral( ".prov.json" ) ) );
+  const auto verdict =
+    sicnu::operators::runtime::verifyProductProvenance( output.toStdString() );
+  CHECK( verdict.state == sicnu::operators::runtime::ProvenanceVerdict::State::Ok );
 }
 
 TEST_CASE( "an unwritable output path fails with FileNotWritable and no residue", "[models][failure][diskfull]" )

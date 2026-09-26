@@ -170,6 +170,8 @@ void ScientificAgentSession::note( const std::string &event, const std::string &
                                    Json::Value payload )
 {
     mJournal.append( event, stage, std::move( payload ), now() );
+    if ( mCheckpointSink )
+        mCheckpointSink( mJournal );
 }
 
 void ScientificAgentSession::recordDecision( const std::string &stage, DecisionRecord decision )
@@ -185,6 +187,8 @@ void ScientificAgentSession::recordDecision( const std::string &stage, DecisionR
         decision.policy[ "version" ] = mPolicy.policyVersion();
     }
     mJournal.append( "decision", stage, Json::Value( Json::objectValue ), now(), decision );
+    if ( mCheckpointSink )
+        mCheckpointSink( mJournal );
     mDecisions.push_back( std::move( decision ) );
 }
 

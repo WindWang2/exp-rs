@@ -134,6 +134,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         auto *demoBtn = new QPushButton( tr( "Load NDVI/threshold demo" ) );
         m_openStoreBtn = new QPushButton( tr( "Open experiment store…" ) );
         m_runLiveBtn = new QPushButton( tr( "Run study (live spine)" ) );
+        m_runLiveBtn->setObjectName( QStringLiteral( "rsStudioRunLiveBtn" ) );
         m_runLiveBtn->setEnabled( false );
         form->addRow( tr( "Algorithm" ), m_algorithmEdit );
         form->addRow( tr( "Strategy" ), m_strategyCombo );
@@ -174,6 +175,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         row->addWidget( cancelBtn );
         layout->addLayout( row );
         m_matrixStatus = new QLabel;
+        m_matrixStatus->setObjectName( QStringLiteral( "rsStudioMatrixStatus" ) );
         layout->addWidget( m_matrixStatus );
         m_matrixTable = new QTableWidget( 0, 6 );
         m_matrixTable->setHorizontalHeaderLabels(
@@ -473,13 +475,26 @@ void ExperimentStudioDock::openLiveStore()
         tr( "SQLite store (*.db *.sqlite *.sqlite3);;All files (*)" ) );
     if ( path.isEmpty() )
         return;
+    openLiveStoreAtPath( path );
+}
+
+bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
+{
+    if ( liveBusy() )
+    {
+        // The in-flight run's queued result must land on the store it ran
+        // against — switching stores mid-run would let run A's callback
+        // publish its report over store B's session state.
+        m_designerLog->setPlainText( tr( "study run in progress — wait or cancel first" ) );
+        return false;
+    }
     auto store = std::make_shared<sicnu::experiment::ExperimentStore>();
     QString error;
     if ( !store->open( path, &error ) )
     {
         logTypedFailure( m_designerLog, QStringLiteral( "open store" ),
                          QStringLiteral( "experiment_studio.store_open_failed" ), error );
-        return;
+        return false;
     }
     m_liveStore = store;
     // Run refs from a previous store must not leak into the new one's
@@ -497,6 +512,7 @@ void ExperimentStudioDock::openLiveStore()
             "Set the input raster, then Run study (live spine)." )
             .arg( path, m_liveStudyOutputDir ) );
     m_runLiveBtn->setEnabled( true );
+    return true;
 }
 
 void ExperimentStudioDock::runLiveStudy()
@@ -903,6 +919,10 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
     // (The #1293 merge stranded the old demo marker on this live path, which
     // exported real evidence labeled "not derived from recorded runs".)
     m_lastDivergenceVm = vm.toJson();
+    // Provenance honesty: this VM IS analyzer output over recorded runs — the
+    // synthetic marker belongs ONLY on documents derived from no recorded run
+    // (the demo study report). Stamping it here mislabeled live evidence as a
+    // hand-built demo and the marker leaked into export bundles that way.
     m_session.referenceRunId = vm.referenceRunId;
     m_session.studentRunId = vm.studentRunId;
     m_divergenceLog->setPlainText(

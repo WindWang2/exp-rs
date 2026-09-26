@@ -34,6 +34,27 @@ target_include_directories(sicnu_lab_batch PUBLIC
     ${CMAKE_BINARY_DIR}
 )
 
+# Agent ops driver command (`session`): a small static lib so tests drive
+# the command over an injected OpsDriver without linking the CLI executable.
+add_library(sicnu_cli_agent_ops STATIC
+    cli_agent_ops_commands.cpp
+    cli_agent_ops_commands.h
+)
+target_include_directories(sicnu_cli_agent_ops PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_cli_agent_ops PUBLIC
+    Qt6::Core
+    Sicnu::agent_ops
+    sicnu_sdk
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_cli_agent_ops PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_link_libraries(sicnu_cli_agent_ops PUBLIC ${JSONCPP_LIBRARIES})
+endif()
+
 # Surface-11 batch manifest runner: a small static lib so
 # test_cli_batch_manifest can drive the runner without the CLI executable.
 add_library(sicnu_cli_batch STATIC
@@ -158,6 +179,8 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    Sicnu::agent_ops
+    sicnu_cli_agent_ops
     sicnu_lab_batch
     sicnu_cli_batch
     sicnu_lab_report

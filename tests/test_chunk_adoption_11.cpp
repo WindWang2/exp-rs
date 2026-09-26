@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "platform/portable.h"
+
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -35,11 +37,7 @@ namespace
 {
 int selfPid()
 {
-#if defined( _WIN32 )
-    return static_cast<int>( _getpid() );
-#else
-    return static_cast<int>( ::getpid() );
-#endif
+    return static_cast<int>( sicnu::portable::pid() );
 }
 } // namespace
 

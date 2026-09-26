@@ -35,6 +35,7 @@
 #include <sstream>
 #include <vector>
 #include <expat.h>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -96,20 +97,20 @@ std::string extensionOfLower( const std::string &fileName )
 bool fileExistsLocal( const std::string &path )
 {
   std::error_code ec;
-  return fs::exists( fs::u8path( path ), ec );
+  return fs::exists( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 bool isDirectoryLocal( const std::string &path )
 {
   std::error_code ec;
-  return fs::is_directory( fs::u8path( path ), ec );
+  return fs::is_directory( sicnu::portable::pathFromUtf8( path ), ec );
 }
 
 std::vector<std::string> listDirectoryBounded( const std::string &dir, int maxEntries = 512 )
 {
   std::vector<std::string> names;
   std::error_code ec;
-  fs::directory_iterator it( fs::u8path( dir ), ec );
+  fs::directory_iterator it( sicnu::portable::pathFromUtf8( dir ), ec );
   if ( ec )
     return names;
   for ( fs::directory_iterator end; it != end && static_cast<int>( names.size() ) < maxEntries;
@@ -127,7 +128,7 @@ bool readFileText( const std::string &path, std::string &out )
 {
   // Open through the wide-char filesystem path: a narrow std::ifstream on
   // Windows cannot address product directories with non-ANSI (Chinese) names.
-  std::ifstream in( fs::u8path( path ), std::ios::binary );
+  std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
   std::ostringstream buffer;

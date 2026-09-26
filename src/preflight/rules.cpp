@@ -3,6 +3,7 @@
 #include "preflight/engine.h"  // full PreflightRequest definition
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -86,6 +87,39 @@ bool stringInArray( const Json::Value &array, const std::string &value )
         if ( item.isString() && item.asString() == value )
             return true;
     return false;
+}
+
+/// Finite and strictly positive — the only pixel sizes a ratio may consult.
+/// NaN slips past every `<= 0` comparison and would poison the ratio into a
+/// fabricated mismatch (or a fabricated pass).
+bool finitePositive( double value )
+{
+    return std::isfinite( value ) && value > 0.0;
+}
+
+/// Shared per-family policy gate: "no <policy> declared" is a pass only when
+/// the capability entry genuinely declares nothing. When the operator's
+/// policies are variant-parameterized and no variant matched the request
+/// params, the policy vocabulary exists but is not consultable — the check
+/// degrades to a typed unknown, never a silent pass.
+void policyGateOutcome( RuleResult &result, const RuleFacts &facts,
+                        const std::string &operatorId, const char *code, const char *domain,
+                        const char *policy )
+{
+    if ( facts.capability.variantPoliciesDropped )
+    {
+        result.findings.push_back( unknownFinding(
+            code, domain, operatorId,
+            std::string( policy ) +
+                " is variant-parameterized and no variant matched the request params" ) );
+        result.detail = std::string( policy ) + " unconsultable: no variant matched";
+        // Same trace vocabulary as the per-slot unknown paths: a rule that
+        // could not decide says insufficient_facts, never "finding".
+        result.outcome = "insufficient_facts";
+        return;
+    }
+    result.detail = std::string( "no " ) + policy + " declared";
+    result.outcome = "pass";
 }
 
 /// Gridded raster kinds the raster rules judge. VRT-style mosaics
@@ -186,7 +220,7 @@ bool isoDayNumber( const std::string &iso, long long &days )
 
 // ---- preflight.band_role -----------------------------------------------------
 
-RuleResult bandRoleEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult bandRoleEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     std::string gateDetail;
@@ -199,8 +233,8 @@ RuleResult bandRoleEvaluate( const PreflightRequest &, const RuleFacts &facts )
     const Json::Value &roles = facts.capability.entry["band_roles"];
     if ( !roles.isObject() || roles.empty() )
     {
-        result.detail = "no band_roles declared";
-        result.outcome = "pass";
+        policyGateOutcome( result, facts, request.operatorId, "SPF_BAND_ROLE_UNKNOWN", "spectral",
+                           "band_roles" );
         return result;
     }
 
@@ -250,7 +284,7 @@ RuleResult bandRoleEvaluate( const PreflightRequest &, const RuleFacts &facts )
 
 // ---- preflight.pair_crs ------------------------------------------------------
 
-RuleResult pairCrsEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult pairCrsEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     const auto rasters = rasterSlots( facts );
@@ -338,7 +372,7 @@ double meanPixelSize( const SlotFacts &f )
     return ( f.pixelSizeX + f.pixelSizeY ) / 2.0;
 }
 
-RuleResult resolutionRatioEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult resolutionRatioEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     const auto rasters = rasterSlots( facts );
@@ -357,8 +391,9 @@ RuleResult resolutionRatioEvaluate( const PreflightRequest &, const RuleFacts &f
             const auto &a = rasters[i];
             const auto &b = rasters[j];
             const std::string subject = a.slot->slot + " + " + b.slot->slot;
-            if ( !a.facts->hasPixelSize || !b.facts->hasPixelSize || a.facts->pixelSizeX <= 0 ||
-                 a.facts->pixelSizeY <= 0 || b.facts->pixelSizeX <= 0 || b.facts->pixelSizeY <= 0 )
+            if ( !a.facts->hasPixelSize || !b.facts->hasPixelSize ||
+                 !finitePositive( a.facts->pixelSizeX ) || !finitePositive( a.facts->pixelSizeY ) ||
+                 !finitePositive( b.facts->pixelSizeX ) || !finitePositive( b.facts->pixelSizeY ) )
             {
                 result.findings.push_back( unknownFinding(
                     "SPF_RESOLUTION_UNKNOWN", "grid", subject,
@@ -397,7 +432,7 @@ RuleResult resolutionRatioEvaluate( const PreflightRequest &, const RuleFacts &f
 
 // ---- preflight.radiometric_state_policy --------------------------------------
 
-RuleResult radiometricStateEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult radiometricStateEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     std::string gateDetail;
@@ -411,8 +446,8 @@ RuleResult radiometricStateEvaluate( const PreflightRequest &, const RuleFacts &
     if ( !radiometric.isObject() ||
          ( !radiometric.isMember( "acceptable" ) && !radiometric.isMember( "warn" ) ) )
     {
-        result.detail = "no radiometric policy declared";
-        result.outcome = "pass";
+        policyGateOutcome( result, facts, request.operatorId, "SPF_RADIOMETRIC_STATE_UNKNOWN",
+                           "radiometric", "radiometric policy" );
         return result;
     }
     const Json::Value acceptable = radiometric.isMember( "acceptable" )
@@ -471,7 +506,7 @@ RuleResult radiometricStateEvaluate( const PreflightRequest &, const RuleFacts &
 
 // ---- preflight.modality_policy ------------------------------------------------
 
-RuleResult modalityEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult modalityEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     std::string gateDetail;
@@ -484,8 +519,8 @@ RuleResult modalityEvaluate( const PreflightRequest &, const RuleFacts &facts )
     const Json::Value &modalities = facts.capability.entry["modality"];
     if ( !modalities.isArray() || modalities.empty() )
     {
-        result.detail = "no modality expectation declared";
-        result.outcome = "pass";
+        policyGateOutcome( result, facts, request.operatorId, "SPF_MODALITY_UNKNOWN", "modality",
+                           "modality expectation" );
         return result;
     }
 
@@ -530,15 +565,25 @@ RuleResult modalityEvaluate( const PreflightRequest &, const RuleFacts &facts )
 
 // ---- preflight.quality_mask ---------------------------------------------------
 
-RuleResult qualityMaskEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult qualityMaskEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
+    std::size_t unknownCount = 0;
     for ( const auto &raster : rasterSlots( facts ) )
     {
         const RuleFacts::Slot *slot = raster.slot;
         const SlotFacts &f = *raster.facts;
         if ( !f.hasCloudCover )
             continue;
+        if ( !std::isfinite( f.cloudCoverPercent ) )
+        {
+            // The provider claims cloud evidence the value cannot back.
+            result.findings.push_back( unknownFinding( "SPF_QUALITY_UNKNOWN", "quality",
+                                                       slot->slot,
+                                                       "cloud cover value is not finite" ) );
+            ++unknownCount;
+            continue;
+        }
         if ( f.cloudCoverPercent <= kCloudAckPercent )
             continue;
         const bool blocking = f.cloudCoverPercent >= kCloudBlockPercent;
@@ -558,7 +603,7 @@ RuleResult qualityMaskEvaluate( const PreflightRequest &, const RuleFacts &facts
         finding.evidence["quality_mask"] = f.qualityMaskInfo;
         result.findings.push_back( std::move( finding ) );
     }
-    result.outcome = result.findings.empty() ? "pass" : "finding";
+    result.outcome = outcomeFor( result.findings, unknownCount );
     if ( result.outcome == "pass" )
         result.detail = "no declared cloud cover over threshold";
     return result;
@@ -566,7 +611,7 @@ RuleResult qualityMaskEvaluate( const PreflightRequest &, const RuleFacts &facts
 
 // ---- preflight.temporal_policy -------------------------------------------------
 
-RuleResult temporalEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult temporalEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     std::string gateDetail;
@@ -579,8 +624,8 @@ RuleResult temporalEvaluate( const PreflightRequest &, const RuleFacts &facts )
     const Json::Value &temporal = facts.capability.entry["temporal"];
     if ( !temporal.isObject() )
     {
-        result.detail = "no temporal policy declared";
-        result.outcome = "pass";
+        policyGateOutcome( result, facts, request.operatorId, "SPF_TEMPORAL_UNKNOWN", "temporal",
+                           "temporal policy" );
         return result;
     }
     const int minScenes = temporal.isMember( "min_scenes" ) && temporal["min_scenes"].isInt()
@@ -718,7 +763,7 @@ RuleResult temporalEvaluate( const PreflightRequest &, const RuleFacts &facts )
 
 // ---- preflight.train_eval_leakage ---------------------------------------------
 
-RuleResult leakageEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult leakageEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     const RuleFacts::Slot *training = nullptr;
@@ -805,7 +850,7 @@ RuleResult leakageEvaluate( const PreflightRequest &, const RuleFacts &facts )
 
 // ---- preflight.model_compatibility ---------------------------------------------
 
-RuleResult modelCompatEvaluate( const PreflightRequest &, const RuleFacts &facts )
+RuleResult modelCompatEvaluate( const PreflightRequest &request, const RuleFacts &facts )
 {
     RuleResult result;
     std::string gateDetail;
@@ -818,8 +863,8 @@ RuleResult modelCompatEvaluate( const PreflightRequest &, const RuleFacts &facts
     const Json::Value &model = facts.capability.entry["model_compatibility"];
     if ( !model.isObject() )
     {
-        result.detail = "no model_compatibility declared";
-        result.outcome = "pass";
+        policyGateOutcome( result, facts, request.operatorId, "SPF_MODEL_UNKNOWN", "model",
+                           "model_compatibility" );
         return result;
     }
 

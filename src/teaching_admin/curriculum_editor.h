@@ -39,4 +39,13 @@ QJsonObject diffCurriculum( const QJsonObject &previous, const QJsonObject &curr
 /// Thin student course-home preview VM (duplicated idea; does not use #1237 sources).
 QJsonObject projectCourseHomePreview( const QJsonObject &manifest );
 
+/// Leak oracle for student-facing course projections: the projection must not
+/// carry the teacher_notes object (or its key) anywhere, and no teacher-note
+/// string (objectives_zh / common_mistakes_zh{mistake_zh,why_zh,check_zh} /
+/// grading_hook_zh — the vocabulary of data/schemas/curriculum.schema.json
+/// and src/agent/harness/curriculum_catalog.cpp) may appear verbatim in the
+/// projected document. Mutation-tested in test_teaching_admin_core.
+ValidationResult assertNoTeacherNotesLeak( const QJsonObject &projection,
+                                           const QJsonObject &manifest );
+
 } // namespace sicnu::teaching_admin

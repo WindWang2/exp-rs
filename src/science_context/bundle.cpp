@@ -263,6 +263,7 @@ Json::Value bundleToJson( const ScientificContextBundle &bundle )
     trunc["dropped_recipes"] = bundle.truncation.droppedRecipes;
     trunc["dropped_capabilities"] = bundle.truncation.droppedCapabilities;
     trunc["dropped_questions"] = bundle.truncation.droppedQuestions;
+    trunc["dropped_assets"] = bundle.truncation.droppedAssets;
     trunc["original_bytes"] = bundle.truncation.originalBytes;
     trunc["final_bytes"] = bundle.truncation.finalBytes;
     root["truncation"] = trunc;
@@ -393,6 +394,7 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.truncation.droppedRecipes = trunc.get( "dropped_recipes", 0 ).asInt();
         b.truncation.droppedCapabilities = trunc.get( "dropped_capabilities", 0 ).asInt();
         b.truncation.droppedQuestions = trunc.get( "dropped_questions", 0 ).asInt();
+        b.truncation.droppedAssets = trunc.get( "dropped_assets", 0 ).asInt();
         b.truncation.originalBytes = trunc.get( "original_bytes", 0 ).asInt();
         b.truncation.finalBytes = trunc.get( "final_bytes", 0 ).asInt();
     }

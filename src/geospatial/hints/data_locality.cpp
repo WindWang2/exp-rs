@@ -16,6 +16,7 @@
 #include <system_error>
 
 #include <filesystem>
+#include "platform/portable.h"
 
 namespace sicnu::geo
 {
@@ -153,7 +154,7 @@ DataLocalityHints dataLocalityHintsFor( const std::string &path, const DataLocal
 
   // Local estimated bytes: a plain stat.
   std::error_code ec;
-  const auto size = std::filesystem::file_size( std::filesystem::u8path( path ), ec );
+  const auto size = std::filesystem::file_size( sicnu::portable::pathFromUtf8( path ), ec );
   if ( !ec )
   {
     hints.hasEstimatedBytes = true;

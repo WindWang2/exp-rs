@@ -14,10 +14,16 @@
 //   IVerifier          — tri-state verification of the produced artifacts
 //   IDiagnoser         — typed root cause + bounded repair proposals
 //
-// The production implementations live in src/agent/tools/agent_session_adapter
-// (they delegate to the harness: compileWorkflow / preflightIntent /
-// WorkflowRunCoordinator / verifyArtifact / diagnose_run). Deterministic
-// offline doubles for tests and the offline exemplar live in fake_seams.h.
+// SEAM STATUS (re-verified 2026-09): the only implementations in the tree
+// are the deterministic offline doubles in fake_seams.h and the harness
+// verifier adapter (src/agent/tools/agent_session_adapter.h). The remaining
+// production seams (planner over compileWorkflow, preflight over
+// preflightIntent, executor over WorkflowRunCoordinator/ExecutionPlane,
+// diagnoser over harness:diagnose_run) are NOT wired yet — a host injects
+// them through OperationsCoordinator::Dependencies; missing seams fail
+// closed (the driver refuses SEAMS_UNAVAILABLE before the loop starts).
+// Deterministic offline doubles for tests and the offline exemplar live in
+// fake_seams.h.
 //
 // All value types are plain data with JSON projections; no Qt.
 //
