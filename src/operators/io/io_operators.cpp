@@ -191,12 +191,16 @@ Json::Value IoTranslateOperator::run( const Json::Value &params, RSOperatorConte
     options.resampling = params::getString( params, "resampling" );
 
     ContextProgress progress( context );
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     const sicnu::geo::TranslateResult result =
       sicnu::geo::translateRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
-                                   sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
+                                   target.openPath(),
                                    options, &progress );
     context.reportProgressForced( 1.0, "translate complete" );
-    return result.toJson();
+    Json::Value json = result.toJson();
+    json["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
+    return json;
   } );
 }
 
@@ -262,12 +266,16 @@ Json::Value IoWarpOperator::run( const Json::Value &params, RSOperatorContext &c
     options.creationOptions.emplace_back( "TILED=YES" );
 
     ContextProgress progress( context );
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     const sicnu::geo::TranslateResult result =
       sicnu::geo::warpRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
-                              sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
+                              target.openPath(),
                               options, &progress );
     context.reportProgressForced( 1.0, "warp complete" );
-    return result.toJson();
+    Json::Value json = result.toJson();
+    json["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
+    return json;
   } );
 }
 
@@ -330,11 +338,14 @@ Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorConte
     options.resampling = params::getString( params, "resampling", "near" );
     options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
     ContextProgress progress( context );
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::warpRaster( input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
-                              options, &progress );
+      sicnu::geo::warpRaster( input, target.openPath(), options, &progress );
     context.reportProgressForced( 1.0, "reproject complete" );
-    return result.toJson();
+    Json::Value json = result.toJson();
+    json["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
+    return json;
   } );
 }
 
@@ -428,7 +439,9 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
     const sicnu::geo::TranslateResult result = sicnu::geo::warpRaster(
       input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(), options, &progress );
     context.reportProgressForced( 1.0, "clip complete" );
-    return result.toJson();
+    Json::Value json = result.toJson();
+    json["output"] = params::requireString( params, "output" );   // report the caller's spelling, not the \\?\ open form
+    return json;
   } );
 }
 
@@ -472,7 +485,9 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
 {
   return guarded( [ & ] {
     const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
-    const std::string output = sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath();
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
+    const std::string output = target.openPath();
     const std::string driver = params::getString( params, "driver", "GTiff" );
     // Vector routing is capability-based (11.0): a vector driver that can
     // create datasets goes through the streaming reader→writer contract —
@@ -493,6 +508,7 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
       ContextProgress progress( context );
       Json::Value result = sicnu::geo::vectorConvert( input, output, driver, "", "", "", {}, &progress );
       context.reportProgressForced( 1.0, "conversion complete" );
+      result["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
       return result;
     }
     if ( !vectorTarget.usable && vectorTarget.reasonCode != "not_vector" )
@@ -508,7 +524,9 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
     ContextProgress progress( context );
     sicnu::geo::TranslateResult result = sicnu::geo::translateRaster( input, output, options, &progress );
     context.reportProgressForced( 1.0, "conversion complete" );
-    return result.toJson();
+    Json::Value json = result.toJson();
+    json["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
+    return json;
   } );
 }
 
@@ -651,14 +669,17 @@ Json::Value IoMakeCogOperator::run( const Json::Value &params, RSOperatorContext
 
     const sicnu::geo::io::CogProductionPlan plan = sicnu::geo::io::planCogProduction( options );
 
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result = sicnu::geo::makeCogWithOptions(
-      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(), plan.creationOptions,
+      input, target.openPath(), plan.creationOptions,
       &progress );
 
     // Deterministic mode implies reproducibility demands; record the plan so
     // the produced COG is explainable (which knob came from where).
     Json::Value cogResult = result.toJson();
+    cogResult["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
     cogResult["cog_plan"] = plan.toJson();
     context.reportProgressForced( 1.0, "COG creation complete" );
     return cogResult;
@@ -712,12 +733,15 @@ Json::Value IoVectorConvertOperator::run( const Json::Value &params, RSOperatorC
         clipBounds.push_back( bound.asDouble() );
     }
     ContextProgress progress( context );
+    const sicnu::geo::io::CheckedPath target =
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
     Json::Value result = sicnu::geo::vectorConvert(
       sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath(),
-      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).openPath(),
+      target.openPath(),
       params::getString( params, "driver", "GPKG" ), params::getString( params, "layer" ),
       params::getString( params, "targetCrs" ), params::getString( params, "where" ), clipBounds, &progress );
     context.reportProgressForced( 1.0, "vector conversion complete" );
+    result["output"] = target.raw;   // report the caller's spelling, not the \\?\ open form
     return result;
   } );
 }
