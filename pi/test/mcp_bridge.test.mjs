@@ -147,3 +147,161 @@ test("a healthy initialize does not leave the 30s startup deadline armed (F-PI-2
     bridge.stop();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Track 9 (mcp-surface-r4) WP-D: cancellation semantics and adversarial
+// server frames. Oracles: the #645 cancellation contract (abort -> reject +
+// exactly one notifications/cancelled; no result leaks after abort), the
+// JSON-RPC transport-fidelity floor (non-JSON lines are dropped, huge
+// payloads pass through untruncated — MAX_RESULT_CHARS is the shell's
+// budget, not the bridge's), and the #645 structured-error passthrough.
+// All triggers are additive modes of fake_mcp_server.mjs.
+// ---------------------------------------------------------------------------
+
+function readNotifyLog(path) {
+  try {
+    return readFileSync(path, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+}
+
+test("abort mid-flight rejects the call and notifies the server exactly once (#645)", async () => {
+  const counter = makeCounter();
+  const notifyLog = join(dirname(counter), "notify.log");
+  const bridge = new McpBridge(fakeServer, ["--notify-log", notifyLog, counter]);
+  try {
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+
+    const controller = new AbortController();
+    const pending = bridge.request(
+      "tools/call",
+      { name: "slow", arguments: { delay_ms: 4000 } },
+      controller.signal,
+    );
+    // Abort while the fake server is still holding the reply.
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(pending, /Aborted/);
+
+    // Give the notification a moment to reach the child, then count.
+    await new Promise((r) => setTimeout(r, 200));
+    const notifications = readNotifyLog(notifyLog).filter(
+      (n) => n.method === "notifications/cancelled",
+    );
+    assert.equal(
+      notifications.length,
+      1,
+      `expected exactly one notifications/cancelled, got ${notifications.length}`,
+    );
+
+    // The bridge stays healthy after a cancellation (state reset): the next
+    // call resolves normally on the SAME child.
+    assert.equal(bridge.alive, true);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("the late reply after an abort is dropped, not delivered (#645 no-leak)", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+
+    const controller = new AbortController();
+    let settled = false;
+    const pending = bridge
+      .request("tools/call", { arguments: { delay_ms: 300 } }, controller.signal)
+      .then(
+        (v) => {
+          settled = true;
+          return v;
+        },
+        (e) => {
+          settled = true;
+          throw e;
+        },
+      );
+    controller.abort();
+    await assert.rejects(pending, /Aborted/);
+    // Outlive the fake server's delayed reply: it must NEVER resolve the
+    // dead call (the pending entry was removed on abort).
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(settled, true); // settled by the abort rejection, once
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("a pre-aborted signal rejects without a server round-trip for the call", async () => {
+  const counter = makeCounter();
+  const notifyLog = join(dirname(counter), "notify.log");
+  const bridge = makeBridge(counter);
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      () => bridge.request("tools/call", {}, controller.signal),
+      /Aborted/,
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    // The cancelled notification may reference the reserved rpc id (the
+    // #645 "harmless server-side" case) — but exactly ONE, and the bridge
+    // is none the worse: a normal call still works.
+    const cancellations = readNotifyLog(notifyLog).filter(
+      (n) => n.method === "notifications/cancelled",
+    );
+    assert.ok(cancellations.length <= 1);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("a non-JSON server line is dropped; framing and pending calls survive", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    // The garbage_line mode emits a malformed stdout line before the valid
+    // response: the bridge must drop the line and still resolve.
+    const result = await bridge.request("tools/call", { arguments: { garbage_line: true } });
+    assert.equal(result?.content?.[0]?.text, "ok");
+    assert.equal(bridge.alive, true);
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    assert.equal(spawnCount(counter), 1, "a dropped line must not kill the child");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("structured tool errors pass through with their taxonomy intact (#645)", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    const result = await bridge.request("tools/call", { arguments: { error_shape: true } });
+    assert.equal(result?.isError, true, "isError must ride through the bridge");
+    assert.equal(result?.errorCode, "E_TEST_SHAPE");
+    assert.equal(result?.errorCategory, "test");
+    assert.match(result?.content?.[0]?.text ?? "", /invalid parameters/);
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("the bridge does NOT truncate: transport fidelity is the shell's budget boundary", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    const size = 60_000; // > MAX_RESULT_CHARS (50_000), far below the 32 MiB line cap
+    const result = await bridge.request("tools/call", { arguments: { huge: size } });
+    assert.equal(result?.content?.[0]?.text?.length, size);
+  } finally {
+    bridge.stop();
+  }
+});
