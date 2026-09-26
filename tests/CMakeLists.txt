@@ -10525,6 +10525,14 @@ sicnu_add_io_test(test_portability_contract)
 # Sicnu::Geospatial only).
 sicnu_add_io_test(test_atomic_fs_caller_contract)
 
+# core-foundations-r4 (Track 5): controlled error-path failure injection
+# (RO-DIR / MISSING / AS-DIR / CORRUPT / INTERRUPT devices) through public
+# geospatial seams. POSIX-only: the injection devices are chmod-based (the
+# same lane precedent as test_fault_injection).
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_failure_injection_r4)
+endif()
+
 # Header self-containment probes (task A, failure class F1 / PR #833): every
 # nominated first-party leaf header must compile as the FIRST include of a
 # cold translation unit. OBJECT libraries = compile-only (nothing to link,
