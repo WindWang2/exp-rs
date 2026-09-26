@@ -29,6 +29,23 @@ requires the host-configured credential `SICNU_LAB_TEACHER_TOKEN`, injected
 only into authenticated teacher sessions; when the variable is unset the
 teacher surface is disabled entirely (fail-closed).
 
+### Token rotation (ops)
+
+The credential is a deployment secret, not a per-user account. To rotate it:
+set a fresh `SICNU_LAB_TEACHER_TOKEN` in the host/session-server environment
+and restart the session hosts that inject it — teacher sessions re-read the
+variable per request (`teacherCredentialValid` calls `getenv` every time), so
+no per-teacher state needs migration. Empty and unset are the same
+fail-closed state (teacher surfaces off, teacher-role claims degrade to
+student); rotating to an empty value is therefore a supported kill switch.
+During a rolling restart, old and new hosts may briefly hold different
+values — a token is all-or-nothing per host, so there is no mixed-trust
+window inside one host. The comparison is constant-time-ish over the
+request-supplied string (same-length wrong tokens are rejected byte-wise);
+tokens of different lengths are rejected before comparison. All three
+consumer seams (the lab copilot teacher surfaces, the privileged autonomy
+session layer, and the grade-citation surface) share this one gate.
+
 ## Intents
 
 Closed vocabulary (`intent_vocabulary.h`, lab list): `lab_troubleshoot`,

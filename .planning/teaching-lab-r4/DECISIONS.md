@@ -26,7 +26,7 @@
 | B18 | declared bytes 与实际不符（generated） | **W** | `byte_mismatch` warning（GDAL 漂移容忍） |
 | B19 | pack 级 declared_offline_bytes ≠ inputs 和 | **W** | `byte_mismatch`（pack 级 warning，信息性） |
 | B20 | 超长路径（>PATH_MAX 量级） | **R** | 文件打开失败 → `input_missing` 类错误（打不开=缺失，诚实降级） |
-| B21 | JSON 尾随逗号 | **R** | authority `lab.pack_schema`（jsoncpp 严格解析） |
+| B21 | JSON 尾随逗号 | **R** | typed 拒绝；jsoncpp 恢复点决定归 `lab.pack_schema`（解析失败）或 `lab.pack_field`（截断后缺字段）——两类码均为拒绝，实测落在 `lab.pack_field` |
 | B22 | 空 pack 目录 | **N** | 空 inventory（不是错误）；byteBudget 内 |
 
 （#1336 合并后 B01-B04 同步在 PackVerifier 直测面复核，语义不得漂移。）
