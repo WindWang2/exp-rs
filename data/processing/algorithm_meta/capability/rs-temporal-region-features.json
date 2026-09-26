@@ -203,13 +203,19 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u7279\u5f81\u8868\u5e26\u7248\u672c\u5316 schema sidecar\uff1a\u4e0b\u6e38\u5e94\u6309 schema \u7248\u672c\u89e3\u6790\u5217\uff0c\u4e0d\u5047\u8bbe\u56fa\u5b9a\u8868\u7ed3\u6784\u3002"
+    ],
     "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" : [],
+    "prerequisites" : 
+    [
+      "\u8f93\u5165\u4e3a\u533a\u57df\u00d7\u65e5\u671f\u65f6\u5e8f\uff08\u6216\u65f6\u5e8f\u7acb\u65b9\u4f53\u4e0e\u533a\u57df\u5b9a\u4e49\uff09\uff1a\u533a\u57df\u51e0\u4f55\u9700\u4e0e\u5f71\u50cf CRS \u4e00\u81f4\u3002"
+    ],
     "schema_version" : 2,
     "summary" : "\u533a\u57df\u7ea7\u65f6\u5e8f\u7279\u5f81\u8868\uff1a\u8d28\u91cf\u3001\u5206\u5e03\u3001Sen/OLS \u8d8b\u52bf\u3001\u5f02\u5e38\u4e0e\u591a\u7269\u5019\u7279\u5f81\uff0c\u5e26\u7248\u672c\u5316 schema sidecar\u3002",
     "teaching_use" : 
