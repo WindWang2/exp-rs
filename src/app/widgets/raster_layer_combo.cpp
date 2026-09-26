@@ -12,11 +12,16 @@ RasterLayerCombo::RasterLayerCombo( QWidget *parent )
   // snapshot — layers added/removed while the host dialog stayed open (a
   // background task's auto-load, an import) left a stale picker behind. The
   // project layer set is the source of truth; track it.
+  // Queued: the refresh must observe the project AFTER its mutation pass
+  // finishes — re-entering QgsProject from inside layersAdded/Removed
+  // delivery races the layer teardown (S3 stress caught the use-after-free).
   connect( QgsProject::instance(),
            qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersAdded ),
-           this, [this]( const QList<QgsMapLayer *> & ) { refreshFromProject(); } );
+           this, [this]( const QList<QgsMapLayer *> & ) { refreshFromProject(); },
+           Qt::QueuedConnection );
   connect( QgsProject::instance(), &QgsProject::layersRemoved,
-           this, [this]( const QStringList & ) { refreshFromProject(); } );
+           this, [this]( const QStringList & ) { refreshFromProject(); },
+           Qt::QueuedConnection );
 }
 
 void RasterLayerCombo::populate()
