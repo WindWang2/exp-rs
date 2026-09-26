@@ -17,18 +17,19 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : [
-   {
-    "code" : "GRID_MISMATCH",
-    "when" : "the optical and SAR inputs are not on the same pixel grid",
-    "remedy" : "co-register both inputs first (rs:align or io:warp); the operator never resamples"
-   },
-   {
-    "code" : "INVALID_PARAMETER",
-    "when" : "a band name in the fusion band list is missing from one of the inputs",
-    "remedy" : "check band names against each input's wavelength metadata before running"
-   }
-  ],
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "co-register both inputs first (rs:align or io:warp); the operator never resamples",
+        "when" : "the optical and SAR inputs are not on the same pixel grid"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "check band names against each input's wavelength metadata before running",
+        "when" : "a band name in the fusion band list is missing from one of the inputs"
+      }
+    ],
     "family" : "temporal",
     "io" : 
     {
