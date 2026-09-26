@@ -9656,6 +9656,20 @@ target_link_libraries(test_cli_exit_codes_r4 PRIVATE sicnu_sdk sicnu_plugins_fra
 target_compile_definitions(test_cli_exit_codes_r4 PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+
+# Track 14 (WP-B): structured error-message four-tuple on failure paths.
+sicnu_add_test(test_cli_error_messages_r4)
+target_link_libraries(test_cli_error_messages_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_error_messages_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-E): parse-time rejection with zero side effects.
+sicnu_add_test(test_cli_fail_fast_r4)
+target_link_libraries(test_cli_fail_fast_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_fail_fast_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
 endif()
 endif()
 
