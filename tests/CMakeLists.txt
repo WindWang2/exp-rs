@@ -10533,6 +10533,13 @@ if(NOT WIN32)
   sicnu_add_io_test(test_core_failure_injection_r4)
 endif()
 
+# core-foundations-r4 (Track 5): hot publish-path concurrency stress with
+# pre-declared criteria (16-thread staging uniqueness; 8-thread same-target
+# atomic publish storm with a torn-state monitor). Light lane.
+if(NOT WIN32)
+  sicnu_add_io_test(test_core_concurrency_stress_r4)
+endif()
+
 # Header self-containment probes (task A, failure class F1 / PR #833): every
 # nominated first-party leaf header must compile as the FIRST include of a
 # cold translation unit. OBJECT libraries = compile-only (nothing to link,
