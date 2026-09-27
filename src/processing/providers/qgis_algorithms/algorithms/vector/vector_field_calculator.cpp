@@ -123,7 +123,15 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
         QVariant value = expr.evaluate( &evalContext );
 
         QgsFeature outputFeat = feat;
-        outputFeat.setFields( outputFields );
+        // initAttributes: the vendored setFields defaults to NOT initializing
+        // the attribute storage, so a NEWLY APPENDED calculated field sat
+        // outside the copied input attribute storage and setAttribute() was
+        // a silent out-of-range no-op — the new field came out NULL on every
+        // feature. Size to the output fields, restore the input values, then
+        // write the calculated field.
+        outputFeat.setFields( outputFields, /*initAttributes=*/true );
+        for ( int i = 0; i < feat.attributeCount() && i < outputFields.count(); ++i )
+            outputFeat.setAttribute( i, feat.attribute( i ) );
         outputFeat.setAttribute( fieldName, value );
 
         if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )

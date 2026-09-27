@@ -212,6 +212,14 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
         // the previous output before publish (the old delete-then-rename path
         // destroyed the last good group on rename failure).
         try {
+            // Durability gate (atomic_fs.h contract): flush the staged main
+            // and every staged sidecar that exists before the group publish
+            // (existence-guarded: publishStagedGroup skips missing sidecars).
+            for (const std::string &stagedSidecar : sicnu::geo::atomic_fs::sidecarsFor(workPath)) {
+                if (sicnu::geo::atomic_fs::fileExists(stagedSidecar))
+                    sicnu::geo::atomic_fs::fsyncFile(stagedSidecar);
+            }
+            sicnu::geo::atomic_fs::fsyncFile(workPath);
             sicnu::geo::atomic_fs::publishStagedGroup(workPath, outputPath);
         } catch (const sicnu::geo::GeoError &ex) {
             removeVectorFiles(QString::fromStdString(workPath));

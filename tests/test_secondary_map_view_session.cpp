@@ -26,38 +26,11 @@
 
 #include <memory>
 #include <algorithm>
+#include "support/qt_lifecycle.h"
 
 using Catch::Approx;
 
-// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup when
-// run after a Catch2 process that exercised QgsMapCanvas; bypass it with
-// std::_Exit once Catch has reported the final result.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        // The console reporter may not have printed its summary yet when the
-        // listener chain runs — emit the verdict ourselves so the transcript
-        // survives std::_Exit.
-        const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-        std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                      ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                      static_cast<unsigned>( stats.totals.assertions.passed ),
-                      static_cast<unsigned>( stats.totals.assertions.passed
-                                             + stats.totals.assertions.failed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed
-                                             + stats.totals.testCases.failed ) );
-        std::fflush( stderr );
-        std::_Exit( ok ? 0 : 1 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -81,8 +54,7 @@ namespace
   {
     if ( !QCoreApplication::instance() )
     {
-      static QApplication app( fake_argc, fake_argv );
-      return &app;
+      return sicnu::test::qtlifecycle::heapQApplication( fake_argc, fake_argv );
     }
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }

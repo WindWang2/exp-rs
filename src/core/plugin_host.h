@@ -37,8 +37,33 @@ public:
 
     sicnu::python::isolated::PythonPluginHost *pythonPluginHost() const { return m_pythonHost.get(); }
 
+    /**
+     * Scans @p pluginDir (review P1-5 hardening):
+     *  - native libraries are loaded ONLY when their module name (file base
+     *    name without a "lib" prefix) is in trustedNativePlugins(); anything
+     *    else found in the directory (Qt SQL drivers, stray/dropped-in DLLs)
+     *    is never dlopen'ed. The default allowlist is EMPTY, so a directory
+     *    scan loads no native code unless the host opts first-party modules in;
+     *  - entries whose canonical path escapes the directory (symlinks) and
+     *    world-writable plugin directories are refused;
+     *  - Python plugin directories load only when pythonPluginsEnabled().
+     * Third-party native plugins belong to the validated exprs registry
+     * (manifest, id, checksum, zip-slip checks), not to this legacy channel.
+     */
     void loadPlugins(const QString &pluginDir);
+    /// Loads one native plugin. The Qt plugin metadata IID must equal
+    /// SicnuPluginInterface_iid BEFORE the library is instantiated.
     bool loadPlugin(const QString &pluginPath);
+
+    /// First-party native module names a directory scan may load.
+    void setTrustedNativePlugins(const QStringList &moduleNames) { m_trustedNativePlugins = moduleNames; }
+    QStringList trustedNativePlugins() const { return m_trustedNativePlugins; }
+    /// Whether directory scans load Python plugin directories (default true).
+    void setPythonPluginsEnabled(bool enabled) { m_pythonPluginsEnabled = enabled; }
+    bool pythonPluginsEnabled() const { return m_pythonPluginsEnabled; }
+
+    /// Module name used for the allowlist: "libfoo.so" / "foo.dll" -> "foo".
+    static QString nativeModuleName(const QString &libraryPath);
     bool loadPythonPlugin(const QString &pluginDir);
     void unloadAll();
 
@@ -60,6 +85,8 @@ private:
     };
 
     QMap<QString, PluginInfo> m_plugins;
+    QStringList m_trustedNativePlugins;
+    bool m_pythonPluginsEnabled = true;
     SicnuAppInterface *m_appInterface = nullptr;
     int m_pythonPoolSize = DEFAULT_PYTHON_POOL_SIZE;
     std::unique_ptr<sicnu::python::isolated::PythonPluginHost> m_pythonHost;

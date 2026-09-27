@@ -48,6 +48,8 @@ const std::vector<HarnessActionSpec> &harnessActionTable()
     // tool (the same loop harness map confirmation drives).
     { "add_source_note", "cartography:repair", "", "", "tool" },
     { "add_title", "cartography:repair", "", "", "tool" },
+    { "snap_align", "cartography:repair", "", "", "tool" },
+    { "balance_whitespace", "cartography:repair", "", "", "tool" },
     // Plan-authoring actions: Pi edits the plan document it is holding.
     // Where a supporting lookup exists it is attached as the tool.
     { "rename_input", "", "", "", "author" },

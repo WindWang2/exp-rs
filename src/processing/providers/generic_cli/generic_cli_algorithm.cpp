@@ -102,11 +102,11 @@ QString GenericCliAlgorithm::shortHelpString() const
         const QString n = p.value( QStringLiteral( "name" ) ).toString();
         const QString d = p.value( QStringLiteral( "description" ) ).toString();
         if ( !n.isEmpty() )
-            paramLines << QStringLiteral( "• <b>%1</b>: %2" ).arg( n, d.isEmpty() ? QObject::tr( "（无描述）" ) : d );
+            paramLines << QStringLiteral( "• <b>%1</b>: %2" ).arg( n, d.isEmpty() ? QObject::tr( "(no description)" ) : d );
     }
     QString html = QObject::tr( "<p><b>%1</b></p><p>%2</p>" ).arg( displayName(), body );
     if ( !paramLines.isEmpty() )
-        html += QObject::tr( "<p><b>参数</b></p><p>%1</p>" ).arg( paramLines.join( QStringLiteral( "<br/>" ) ) );
+        html += QObject::tr( "<p><b>Parameters</b></p><p>%1</p>" ).arg( paramLines.join( QStringLiteral( "<br/>" ) ) );
     const QString cmd = m_config.value( QStringLiteral( "command" ) ).toString();
     if ( !cmd.isEmpty() )
         html += QObject::tr( "<p>CLI: <code>%1</code></p>" ).arg( cmd );
