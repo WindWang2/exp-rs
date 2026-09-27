@@ -14725,7 +14725,6 @@ set_target_properties(test_parity_map_gate_r4 PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_parity_map_gate_r4 TEST_PREFIX test_parity_map_gate_r4::)
-=======
 # ---------------------------------------------------------------------------
 # track-16 verify-chain closure (hardening/r4-verify-chain) — new test targets
 # Append-only; each block is independent so sibling-track rebase conflicts
