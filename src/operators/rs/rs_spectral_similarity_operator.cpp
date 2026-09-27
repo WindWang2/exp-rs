@@ -70,6 +70,9 @@ Json::Value RsSpectralSimilarityOperator::metadata() const {
                                  "across scenes; classic_tan is the unbounded literature form.");
     meta["limitations"].append("Spectra with negative bands or zero norm are unlabelled "
                                "(NaN score), never forced into a class.");
+    meta["limitations"].append("Pixels whose spectrum carries a declared NoData sentinel are "
+                               "unlabelled; the first declared finite sentinel on the used bands "
+                               "is honoured (-9999 when none is declared).");
     return meta;
 }
 
@@ -112,6 +115,21 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
 
     const std::vector<int> bands = parseBands(params, bandCount);
     const int nBands = static_cast<int>(bands.size());
+
+    // Declared per-band sentinel on the used bands (float-space compare in
+    // the kernel, #444). First declared finite sentinel wins — the kernel
+    // interface carries a single sentinel. With no declaration the spectral
+    // family sentinel (-9999) keeps the historical behavior. NaN-declared
+    // bands need no sentinel: the kernel already rejects non-finite samples.
+    float inputSentinel = -9999.0f;
+    for (const int b : bands) {
+        bool has = false;
+        const double nd = ds.bandNoDataValue(b, &has);
+        if (has && std::isfinite(nd)) {
+            inputSentinel = static_cast<float>(nd);
+            break;
+        }
+    }
 
     QString gridError;
     const RasterWavelengthGrid inputGrid = RasterWavelengthGrid::read(ds, bands, &gridError);
@@ -174,7 +192,7 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
                 if (!SpectralHybridSimilarity::classify(
                         bip, tilePixels, nBands, refs.data(), refCount,
                         labels.data(), scores.data(),
-                        form, -9999.0f, &kernelError))
+                        form, inputSentinel, &kernelError))
                     throw RSOperatorError(ErrorCode::ComputationError,
                                           kernelError.isEmpty()
                                               ? "Hybrid similarity classification failed"

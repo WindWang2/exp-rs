@@ -23,8 +23,60 @@
 #include <json/json.h>
 
 #include <string>
+#include <string_view>
 
 namespace sicnu::cli {
+
+/// Stable symbol for a published exit code (docs/headless/README.md
+/// "Exit codes (stable contract)"). Returns "GENERIC_ERROR" for unknown
+/// values so the [E-n:SYMBOL] anchor never prints empty. Inline so test
+/// fakes of CliIO stay linkable without the CLI executable TU.
+inline std::string_view exitCodeSymbol( int code )
+{
+    switch ( code )
+    {
+        case 0: return "OK";
+        case 2: return "VALIDATION_FAILURE";
+        case 3: return "EXECUTION_FAILURE";
+        case 4: return "CANCELLED";
+        case 5: return "MISSING_DEPENDENCY";
+        case 6: return "INVALID_INPUT";
+        case 7: return "RUNTIME_UNAVAILABLE";
+        case 1:
+        default: return "GENERIC_ERROR";
+    }
+}
+
+/// The structured half of a command-level error message (Track 14 WP-B):
+/// expected/actual when the failure is a mismatch, plus the suggested
+/// action. The one-sentence reason keeps living in finish()'s
+/// errorMessage — together they form the published four-tuple
+/// code + reason + expected/actual + hint.
+struct CliErrorDetails
+{
+    int exitCode = 1;
+    std::string expected;
+    std::string actual;
+    std::string hint;
+
+    /// "E-6:INVALID_INPUT" — anchored to the published contract table.
+    std::string codeToken() const
+    {
+        return "E-" + std::to_string( exitCode ) + ":" + std::string( exitCodeSymbol( exitCode ) );
+    }
+    Json::Value toJson() const
+    {
+        Json::Value json( Json::objectValue );
+        json["code"] = codeToken();
+        if ( !expected.empty() )
+            json["expected"] = expected;
+        if ( !actual.empty() )
+            json["actual"] = actual;
+        if ( !hint.empty() )
+            json["hint"] = hint;
+        return json;
+    }
+};
 
 /// Output mode flags shared by every command.
 struct CliIO
@@ -40,9 +92,15 @@ struct CliIO
     void reportLog( const std::string &level, const std::string &message ) const;
 
     /// Prints the final envelope to stdout and returns the mapped exit code.
+    /// @p errorDetails is additive (Track 14 WP-B): when set, JSON mode gains
+    /// an "error_details" object and text mode upgrades the bare stderr line
+    /// to "[E-n:SYMBOL] <reason>; expected: …; actual: …; hint: …". Omit it
+    /// and the published envelope/bare-line shapes are byte-identical to the
+    /// pre-Track-14 contract.
     int finish( bool ok, const std::string &command, Json::Value data, int exitCode,
                 const Json::Value &diagnostics = Json::Value( Json::nullValue ),
-                const std::string &errorMessage = {} ) const;
+                const std::string &errorMessage = {},
+                const CliErrorDetails *errorDetails = nullptr ) const;
 };
 
 /// True when @p firstArg is a CLI 3.0 command (used by main to route).

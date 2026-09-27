@@ -34,6 +34,8 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
+#include "support/qt_lifecycle.h"
+
 #include "main_window.h"
 #include "project_context.h"
 #include "shell/secondary_map_view_session.h"
@@ -56,33 +58,7 @@
 #include <qgsproject.h>
 #include <qgsrectangle.h>
 
-// QgsProject + canvas keep thread-local QgsProjContext state that crashes
-// during glibc atexit cleanup after a Catch2 run; bypass it with std::_Exit
-// once Catch has reported the final result (suite precedent:
-// test_project_session_boundary, test_secondary_map_view_session).
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        const bool ok = !stats.aborting && stats.totals.testCases.failed == 0;
-        std::fprintf( stderr, "\n%s: %u/%u assertions, %u/%u test cases\n",
-                      ok ? "ALL TESTS PASSED" : "TESTS FAILED",
-                      static_cast<unsigned>( stats.totals.assertions.passed ),
-                      static_cast<unsigned>( stats.totals.assertions.passed
-                                             + stats.totals.assertions.failed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed ),
-                      static_cast<unsigned>( stats.totals.testCases.passed
-                                             + stats.totals.testCases.failed ) );
-        std::fflush( stderr );
-        std::_Exit( ok ? 0 : 1 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {

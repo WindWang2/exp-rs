@@ -12,8 +12,13 @@ models/
     weights.onnx      # ONNX readable by cv::dnn (or your framework's format)
 ```
 
-`models/` resolves via `$SICNU_MODELS_DIR`, `<cwd>/models`, or the
-application-relative `../models`. Set `artifact.path` and (strongly
+`models/` resolves via `$SICNU_MODELS_DIR` or the application-relative
+`../models` (the working directory is never searched: a `models/` folder in
+an untrusted launch directory must not supply manifests). Python workers may
+only name a Python launcher as `interpreter` (`python`, `python3`,
+`python3.N`, `pythonw`, `py`) or a path listed in `SICNU_MODEL_INTERPRETERS`
+/ `SICNU_PYTHON_EXECUTABLE`, and `worker_script` must live inside the
+manifest directory. Set `artifact.path` and (strongly
 recommended) `artifact.checksum` (`sha256:<hex>`) + `size_bytes` after
 downloading weights. Without a checksum the bytes are still hashed for
 identity — but a declared checksum is what *enforces* integrity.

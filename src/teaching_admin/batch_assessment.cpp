@@ -504,7 +504,6 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
     }
 
     QString csv;
-    csv += QStringLiteral( "\xEF\xBB\xBF" ); // UTF-8 BOM
     csv += QStringLiteral( "student_id,lab_id,score,verdict,status,message,missing_evidence,grader_digest,top_deduction,unavailable_reason,rubric_version,lab_version,software_version\r\n" );
     QVector<BatchRowResult> sorted = report.rows;
     std::sort( sorted.begin(), sorted.end(),
@@ -557,7 +556,11 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
         QSaveFile sf( csvPath );
         if ( !sf.open( QIODevice::WriteOnly ) )
             return false;
-        const QByteArray bytes = csv.toUtf8();
+        // Real UTF-8 BOM as BYTES: a QStringLiteral "\xEF\xBB\xBF" would hold
+        // code points U+00EF/U+00BB/U+00BF and toUtf8() would double-encode
+        // them (C3 AF …) — a BOM no spreadsheet recognizes.
+        const QByteArray bytes =
+          QByteArrayLiteral( "\xEF\xBB\xBF" ) + csv.toUtf8();
         if ( sf.write( bytes ) != bytes.size() )
             return false;
         if ( !sf.commit() )

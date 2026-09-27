@@ -148,9 +148,11 @@ bool rehydrateMovedOutput( const StepPlan &plan )
         return false;
     }
     // #1178: ReplaceFileW / MoveFileExW — never remove-then-rename (Windows
-    // sharing violation after deleting the previous good artifact).
+    // sharing violation after deleting the previous good artifact). Durability
+    // gate (atomic_fs.h contract): flush the staged bytes before the rename.
     try
     {
+        sicnu::geo::atomic_fs::fsyncFile( tmp.toStdString() );
         sicnu::geo::atomic_fs::publishStagedFile( tmp.toStdString(), destination.toStdString() );
     }
     catch ( const sicnu::geo::GeoError & )
@@ -492,6 +494,27 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         run->setResumeOf( resumeOf );
     run->transitionTo( WorkflowRunState::Ready );
     run->transitionTo( WorkflowRunState::Running );
+
+    // Degenerate document guard (Track 10): a definition with zero steps
+    // would be dispatched as an empty pipeline whose roll-up can never fire
+    // (allTerminal requires non-empty plans), wedging the run in Running
+    // with its flock held for the process lifetime. Refuse it up front —
+    // persist the terminal Failed verdict and never take the run lock.
+    if ( def.steps.empty() )
+    {
+        run->setErrorMessage( "Workflow contains no steps" );
+        run->transitionTo( WorkflowRunState::Failed );
+        PersistRequest emptyPersist;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            emptyPersist = capturePersistLocked( run );
+            queueRunStateNotificationLocked( *run, QDateTime::currentMSecsSinceEpoch(),
+                                             QDateTime::currentMSecsSinceEpoch() );
+        }
+        persistRun( std::move( emptyPersist ) );
+        drainRunNotifications();
+        return -1;
+    }
 
     // Cross-process ownership (#727): hold the run's lock for the whole
     // execution so no other process reconciles or resumes this runId under

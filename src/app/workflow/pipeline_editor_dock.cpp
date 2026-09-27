@@ -79,7 +79,7 @@ void PipelineEditorDock::createToolBar()
   // scoped to a step light that node's error badge, and every finding stays
   // listed with its repair suggestion.
   auto *preflightAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "to_ology_check" ), QIcon( QStringLiteral( ":/icons/to_ology_check" ) ) ), tr( "Check" ) );
-  preflightAct->setToolTip( tr( "检查工作流结构（循环/未知算子/缺失参数/输出冲突），错误映射到节点徽标" ) );
+  preflightAct->setToolTip( tr( "Check workflow structure (loops / unknown operators / missing parameters / output conflicts); errors map to node badges" ) );
   preflightAct->setObjectName( QStringLiteral( "rsPipelinePreflightAction" ) );
   connect( preflightAct, &QAction::triggered, this, &PipelineEditorDock::runPreflightProjection );
 
@@ -212,13 +212,13 @@ void PipelineEditorDock::runPreflightProjection()
       "workflow:preflight" );
   if ( !tool )
   {
-    QMessageBox::warning( this, tr( "检查" ), tr( "workflow:preflight 工具未注册。" ) );
+    QMessageBox::warning( this, tr( "Check" ), tr( "The workflow:preflight tool is not registered." ) );
     return;
   }
   const auto result = ( *tool )->execute( input );
   if ( !result.success )
   {
-    QMessageBox::warning( this, tr( "检查" ),
+    QMessageBox::warning( this, tr( "Check" ),
                           QString::fromStdString( result.error ) );
     return;
   }
@@ -253,7 +253,7 @@ void PipelineEditorDock::runPreflightProjection()
                  .arg( QString::fromStdString( severity ).toUpper(),
                        QString::fromStdString( message ),
                        issue.isMember( "repairable" ) && issue["repairable"].asBool()
-                           ? tr( "（可修复）" )
+                           ? tr( "(fixable)" )
                            : QString() );
   }
 
@@ -261,10 +261,10 @@ void PipelineEditorDock::runPreflightProjection()
                               ? QString::fromStdString( result.output["verdict"].asString() )
                               : QString();
   if ( errors == 0 )
-    QMessageBox::information( this, tr( "检查" ),
-                              tr( "未发现结构问题（verdict: %1）。" ).arg( verdict ) );
+    QMessageBox::information( this, tr( "Check" ),
+                              tr( "No structural issues found (verdict: %1)." ).arg( verdict ) );
   else
-    QMessageBox::warning( this, tr( "检查发现 %1 个问题" ).arg( errors ), lines.join( QLatin1Char( '\n' ) ) );
+    QMessageBox::warning( this, tr( "Check found %1 issue(s)" ).arg( errors ), lines.join( QLatin1Char( '\n' ) ) );
 }
 
 void PipelineEditorDock::onTogglePresetCatalog()

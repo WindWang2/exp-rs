@@ -508,8 +508,22 @@ sicnu::data::Result<SplitConfig> SplitConfig::fromJson( const QJsonObject &json 
     config.validationRatio = json.value( QStringLiteral( "validation_ratio" ) ).toDouble( 0.15 );
     config.testRatio = json.value( QStringLiteral( "test_ratio" ) ).toDouble( 0.15 );
     {
-        const QString seedHex = json.value( QStringLiteral( "seed_hex" ) ).toString();
-        if ( !seedHex.isEmpty() )
+        // Seed contract (split.h): 0 is a legal seed, ABSENCE is not. A
+        // missing seed_hex must be refused loudly — silently defaulting to 0
+        // would mint degenerate reproducible splits from an operator
+        // mistake and make forgotten seeds indistinguishable from explicit
+        // zeros.
+        if ( !json.contains( QStringLiteral( "seed_hex" ) ) )
+            return Result::failure(
+                splitError( QStringLiteral( "seed_hex is required (0 is a legal seed, absence is not)" ) ) );
+        // A non-string seed_hex (number, null, object) must refuse too —
+        // skipping the parse would leave the default 0 in place, which is
+        // exactly the silent-seeding this gate exists to prevent.
+        const QJsonValue seedValue = json.value( QStringLiteral( "seed_hex" ) );
+        if ( !seedValue.isString() )
+            return Result::failure(
+                splitError( QStringLiteral( "seed_hex must be a hexadecimal string" ) ) );
+        const QString seedHex = seedValue.toString();
         {
             bool ok = false;
             config.seed = seedHex.toULongLong( &ok, 16 );

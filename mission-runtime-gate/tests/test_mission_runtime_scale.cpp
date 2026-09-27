@@ -15,6 +15,7 @@
 #include "app/workbench/mission_timeline_model.h"
 
 #include <QElapsedTimer>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>

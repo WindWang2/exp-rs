@@ -35,6 +35,8 @@
 
 #include <gdal.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 
 using sicnu::app::ViewLinkController;
@@ -78,14 +80,26 @@ struct DataManager
 
 int main( int argc, char *argv[] )
 {
-    // Mirror test_qgis_display_manager: a heap-held QgsApplication with GUI
-    // enabled (QT_QPA_PLATFORM=offscreen carries it); QgsMapCanvas aborts
-    // without the QGIS singletons.
-    static QgsApplication app( argc, argv, true );
+    // A scoped QgsApplication with GUI enabled (QT_QPA_PLATFORM=offscreen
+    // carries it); QgsMapCanvas aborts without the QGIS singletons.
+    // Track 2 R4 retirement of the #1319 leak: the app is now DESTROYED on
+    // scope exit — after exitQgis() invalidated the CRS/transform/ellipsoid
+    // caches while the thread-local PROJ context is still alive (the
+    // qgsapplication.cpp invalidateCaches contract), and BEFORE glibc
+    // exit() would otherwise tear the QApplication down after the
+    // Q_GLOBAL_STATIC cache guards (the captured SIGSEGV chain:
+    // ~QApplicationPrivate::cleanupThreadData -> ~QgsProjContext ->
+    // removeFromCacheObjectsBelongingToCurrentThread -> null cache lock).
+    QgsApplication app( argc, argv, true );
     QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
-    QgsApplication::exitQgis();
-    return result;
+    // Canvas/project cases still crashed in glibc atexit cleanup (QGIS
+    // thread-local PROJ context) once ctest ran them one case per process,
+    // after every assertion had passed. Skip static destruction entirely,
+    // like test_workbench_full_shell_lifecycle / test_twincanvas_sync.
+    std::fflush( stdout );
+    std::fflush( stderr );
+    std::_Exit( result );
 }
 
 TEST_CASE( "view link propagates extents across linked views",

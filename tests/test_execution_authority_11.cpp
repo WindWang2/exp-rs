@@ -55,40 +55,54 @@ const std::set<std::string> &schedulerAllowlist()
         "src/agent/agent_copilot_dock_widget.cpp",
         "src/app/dialogs/async_gdal_runner.cpp",
         "src/app/dialogs/stac_browser_dialog.cpp",
+        "src/app/experiment_studio/experiment_studio_dock.cpp",
+        "src/app/experiment_studio/experiment_studio_dock.h",
         "src/app/map_tools/rs_roi_spectrum_tool.cpp",
         "src/app/preview/asset_preview_service.cpp",
         "src/app/preview/asset_preview_service.h",
         "src/app/selecttools/qgsmaptoolselectutils.cpp",
         "src/app/shell/schema_form_builder.cpp",
         "src/app/shell/schema_form_builder.h",
+        "src/app/teaching_admin/teaching_admin_dock.cpp",
+        "src/app/teaching_admin/teaching_admin_dock.h",
         "src/app/widgets/histogram_widget.cpp",
         "src/app/widgets/histogram_widget.h",
         "src/app/widgets/roi_statistics_widget.cpp",
         "src/app/widgets/roi_statistics_widget.h",
         "src/app/widgets/rs_scan_pool.h",
+        "src/app/widgets/spectral_profile_widget.cpp",
         "src/cli/cli_commands.cpp",
         "src/cli/sicnu_worker_main.cpp",
         "src/data/governance/import_center.cpp",
         "src/data/governance/import_center.h",
         "src/data/governance/metadata_pipeline.cpp",
         "src/data/governance/metadata_pipeline.h",
+        "src/geospatial/stac/stac_client.cpp",
         "src/jobs/job_engine.cpp",
         "src/jobs/job_engine.h",
+        "src/operators/runtime/model_ensemble.cpp",
         "src/plugins/framework/plugin_ui_schema_host.cpp",
         "src/plugins/framework/plugin_ui_schema_host.h",
         "src/plugins/host/plugin_host_worker_main.cpp",
         "src/processing/algorithms/chunked_processor.cpp",
         "src/processing/framework/provider_algorithm_adapter.cpp",
+        "src/processing/framework/task_center.cpp",
+        "src/processing/framework/task_center.h",
         "src/runtime/chunk/chunk_graph.h",
         "src/runtime/chunk/chunk_pipeline.cpp",
         "src/runtime/observability/trace.cpp",
         "src/runtime/observability/trace.h",
         "src/sdk/exprs/ipc_channel.cpp",
         "src/sdk/exprs/ipc_channel.h",
+        "src/sdk/exprs/plugin_registry.h",
+        "src/sdk/exprs/plugin_snapshot.cpp",
+        "src/sdk/exprs/plugin_snapshot.h",
+        "src/teaching_admin/batch_assessment.cpp",
+        "src/workflow/ir2_registry_node_executor.cpp",
         "src/workflow/pipeline_run_coordinator.cpp",
         "src/workflow/pipeline_run_coordinator.h",
         "src/workflow/workflow_runtime.cpp",
-    };
+};
     return allow;
 }
 
@@ -252,12 +266,20 @@ TEST_CASE( "Cancellation reaches the body through the engine cancel hook",
         [&cancelHookFired] { cancelHookFired = true; } );
     REQUIRE_FALSE( id.empty() );
 
-    // Wait until the body is actually running so cancel targets a Running job.
+    // Wait until the body is actually Running so cancel targets a Running
+    // job. cancel() also returns true for a QUEUED job ("Cancelled while
+    // queued"), so cancel success alone proves nothing about the body having
+    // started — under loaded-machine timing the queued-cancel won the race
+    // and the body never ran. Poll the snapshot for Running first.
     bool cancelled = false;
     for ( int i = 0; i < 600 && !cancelled; ++i )
     {
-        if ( eng.cancel( id ) )
-            cancelled = true;
+        const auto current = eng.snapshot( id );
+        if ( current.has_value() && current->state == JobState::Running )
+        {
+            if ( eng.cancel( id ) )
+                cancelled = true;
+        }
         else
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
     }

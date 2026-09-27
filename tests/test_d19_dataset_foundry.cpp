@@ -171,6 +171,44 @@ TEST_CASE( "D19 FeatureSet MissingRequiredColumn yields Fail not Unknown",
     CHECK( nullJoin.findings.first().status == FeatureJoinStatus::MissingRequiredColumn );
 }
 
+TEST_CASE( "D19 FeatureSet join names missing required columns deterministically",
+           "[d19][foundry][features][r4]" )
+{
+    // Several required columns are missing at once: the finding must name
+    // the alphabetically-first one, every run — a QSet-ordered scan would
+    // make the detail text process-dependent.
+    FeatureSet set;
+    set.setFeatureSetId( QStringLiteral( "fs-multi-req" ) );
+    set.setInputDatasetVersionId( QStringLiteral( "version-a" ) );
+    set.setProducer( QStringLiteral( "rs:test" ) );
+    for ( const QString &name :
+          QStringList{ QStringLiteral( "zulu" ), QStringLiteral( "alpha" ),
+                       QStringLiteral( "mike" ) } )
+    {
+        FeatureColumn column;
+        column.name = name;
+        column.dtype = QStringLiteral( "float64" );
+        column.required = true;
+        set.columns().append( column );
+    }
+    REQUIRE( set.validate().has_value() );
+
+    FeatureRow row;
+    row.sampleId = QStringLiteral( "s1" );
+    row.values.insert( QStringLiteral( "unrelated" ), 1.0 );
+
+    for ( int run = 0; run < 8; ++run )
+    {
+        const auto join = joinFeaturesBySampleId( set, QVector<FeatureRow>{ row },
+                                                  QStringList{ QStringLiteral( "s1" ) },
+                                                  QStringLiteral( "version-a" ) );
+        REQUIRE( join.missingRequiredColumns == 1 );
+        REQUIRE( join.findings.size() == 1 );
+        CHECK( join.findings.first().detail ==
+               QStringLiteral( "missing required column: alpha" ) );
+    }
+}
+
 TEST_CASE( "D19 sample catalog pages and summaries stay bounded", "[d19][foundry][catalog]" )
 {
     QVector<SampleCatalogRow> rows;

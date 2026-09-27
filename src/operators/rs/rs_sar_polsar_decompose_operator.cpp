@@ -24,6 +24,7 @@
 #include <gdal.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -271,12 +272,34 @@ Json::Value RsSarPolsarDecomposeOperator::run( const Json::Value &params,
     const ProductBandSpec spec = productBands( decomposition );
     const int halo = radius;
 
+    // Per-channel declared sentinels (R4 NoData audit): complex covariance
+    // windows must not ingest declared NoData as signal. A sample is
+    // skipped when any of its three channels matches that channel's declared
+    // finite sentinel on either component (fail-closed); non-finite samples
+    // stay excluded inside accumulatePolSample.
+    std::array<bool, 3> channelHasSentinel {};
+    std::array<float, 3> channelSentinel {};
+    for ( int i = 0; i < 3; ++i )
+    {
+        bool has = false;
+        const double nd = ds.bandNoDataValue( bands[static_cast<size_t>( i )], &has );
+        if ( has && std::isfinite( nd ) )
+        {
+            channelHasSentinel[static_cast<size_t>( i )] = true;
+            channelSentinel[static_cast<size_t>( i )] = static_cast<float>( nd );
+        }
+    }
+
     sicnu::sar::ComplexBandTileStream stream( ds, bands, kTileDim, kTileDim, halo );
     GdalStreamingOutput out( QString::fromStdString( outputPath ), ds.width(), ds.height(),
                              spec.count, GDT_Float32, ds.geoTransform(), ds.projection() );
     if ( !out.isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable,
                                "Failed to create output raster: " + outputPath );
+    // Windows that cannot finalize any sample (e.g. fully NoData) write NaN;
+    // declare it so the voids are readable NoData instead of bare NaN.
+    for ( int b = 1; b <= spec.count; ++b )
+        out.setBandNoDataValue( b, kNaN );
 
     out.setMetadataItem( sicnu::sar::kModalityKey, "sar" );
     out.setMetadataItem( "SICNU_SAR_POLARIZATION_MODE", "full_complex" );
@@ -293,6 +316,7 @@ Json::Value RsSarPolsarDecomposeOperator::run( const Json::Value &params,
     std::vector<float> product( static_cast<size_t>( spec.count ) * kTileDim * kTileDim );
 
     long noValidSamplePixels = 0;
+    long noDataSamples = 0;
     long tiles = 0;
     const long totalTiles = stream.tileCount();
 
@@ -330,6 +354,24 @@ Json::Value RsSarPolsarDecomposeOperator::run( const Json::Value &params,
                     {
                         const int sx = x0 + wx + halo;
                         const size_t base = ( static_cast<size_t>( sy ) * bw + sx ) * 3;
+                        bool sentinel = false;
+                        for ( int ch = 0; ch < 3; ++ch )
+                        {
+                            if ( !channelHasSentinel[static_cast<size_t>( ch )] )
+                                continue;
+                            const std::complex<float> v = bip[base + static_cast<size_t>( ch )];
+                            const float s = channelSentinel[static_cast<size_t>( ch )];
+                            if ( v.real() == s || v.imag() == s )
+                            {
+                                sentinel = true;
+                                break;
+                            }
+                        }
+                        if ( sentinel )
+                        {
+                            ++noDataSamples;
+                            continue;
+                        }
                         sicnu::sar::accumulatePolSample(
                             ens, bip[base + 0], bip[base + 1], bip[base + 2] );
                     }
@@ -430,6 +472,7 @@ Json::Value RsSarPolsarDecomposeOperator::run( const Json::Value &params,
     result["reciprocityAssumed"] = mapping.reciprocalAssumed;
     result["channelSource"] = mapping.source.toStdString();
     result["noValidSamplePixels"] = Json::Value::Int64( noValidSamplePixels );
+    result["noDataSamples"] = Json::Value::Int64( noDataSamples );
     context.reportProgress( 1.0, "PolSAR decomposition complete" );
     return result;
 }
