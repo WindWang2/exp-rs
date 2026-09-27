@@ -126,15 +126,20 @@ TEST_CASE( "PluginHost refusal log carries the same fact as the pluginError sign
     QObject::connect( &host, &PluginHost::pluginError,
                       [&signalled]( const QString &, const QString &error ) { signalled << error; } );
 
+    // qInstallMessageHandler takes a plain function pointer, so the capture
+    // rides a file-static buffer.
     std::vector< QString > warnings;
+    static std::vector< QString > *activeWarnings = nullptr;
     QtMessageHandler previousHandler = qInstallMessageHandler(
-      [&warnings]( QtMsgType type, const QMessageLogContext &context, const QString &message ) {
-          if ( type == QtWarningMsg )
-              warnings.push_back( message );
+      []( QtMsgType type, const QMessageLogContext &context, const QString &message ) {
+          if ( type == QtWarningMsg && activeWarnings )
+              activeWarnings->push_back( message );
       } );
+    activeWarnings = &warnings;
 
     host.loadPlugins( dir.path() );
 
+    activeWarnings = nullptr;
     qInstallMessageHandler( previousHandler );
     QFile::setPermissions( dir.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner |
                                            QFileDevice::ExeOwner | QFileDevice::ReadGroup |
