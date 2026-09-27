@@ -40,14 +40,46 @@
 - ⑪：promotion gate 读作 missingEvidence（success）而非 typed 拒绝。
 - ④：合同缺失（Result API 编译失败即红）+ ⑤ 轮 RED 输出证明静默页行为。
 - ⑨：同上（新 API 编译失败即红）。
-- ⑦：待重链后补（stash evidence_source.cpp → overflow 目录被当 attempt-0 采纳）。
+- ⑦：已补（续作会话）：反向应用 7f62b2b0c9 于 evidence_source.cpp → 重链 test_experiment_debugger → attempt-scan oracle 红（`steps.has_value()` 展开为 true，损坏 attempt 号冒充 attempt-0 被采纳；6 断言 1 失败）→ 恢复修复重链 → 绿（7 断言）。RED/GREEN 双向实证。
 
 ## 3. 变异效力（mutation potency）
 
 - WP-E：删除 `saveMetricRecordsBatch` conflict 分支的 rollback → O-txn-1 红
   （directCount 见到部分行）；恢复 → 绿。42 断言/3 例。
 
-## 4. 绿色证据（轻量道，每轮全量重跑）
+## 4. 绿色证据
+
+### 4.1 轻量道（前会话，15e5c66b5 基线上）
+
+- test_experiment_consistency_r4：218→243 断言 / 8→9 例（随 WP-D 增长），All tests passed。
+- test_study_analysis：1374 断言 / 10 例，All tests passed（含 1001 边溢出端到端拒绝）。
+- test_experiment_benchmark_r4：11 断言 / 3 例，All tests passed。
+- test_experiment_parity_r4：126 断言 / 4 例，All tests passed。
+- test_experiment_txn_r4：42 断言 / 3 例，All tests passed。
+- test_experiment_capsule：261 断言 / 55 例，All tests passed。
+
+### 4.2 union 树快反馈（续作会话 2026-09-28，merge a726d17a6 后 build-r4-light 增量重建 exit 0，28/28 载体直跑）
+
+| 载体 | 结果 |
+|---|---|
+| test_experiment_consistency_r4 | 271 断言 / 10 例，All tests passed |
+| test_experiment_benchmark_r4 | 11 断言 / 3 例，All tests passed |
+| test_experiment_parity_r4 | 1138 断言 / 5 例，All tests passed |
+| test_experiment_txn_r4 | 42 断言 / 3 例，All tests passed |
+| test_experiment_bridge_r4 | 16 断言 / 3 例，All tests passed（③ fence oracle + 分区两态在内） |
+| test_study_analysis | 1374 断言 / 10 例，All tests passed |
+| test_study_spec / sampling / runner / spatial / export / exemplars | 63/9、166/10、133/13、69/7、3931/9、168/4，全部 passed |
+| test_experiment_debugger | 529 断言 / 61 例，All tests passed（含 ⑦ oracle） |
+| test_experiment_capsule | 261 断言 / 55 例，All tests passed（含 ⑫ 重放闭环） |
+| test_experiment_evaluation | 488 断言 / 31 例，All tests passed |
+| test_study_e2e（真实 spine） | 168 断言 / 1 例，All tests passed |
+| test_studio_live_e2e（真实 spine 闭环） | 115 断言 / 2 例，All tests passed |
+| test_experiment_studio_dock | 55 断言 / 4 例，All tests passed |
+| test_scientific_state_core/diff/fixtures/geo/provenance/resolver/review/teaching | 76/12、41/12、102/9、171/37、71/15、78/18、39/10、31/8，全部 passed |
+| test_scientific_state_catalog | 42 断言 / 3 例，All tests passed（exit 0） |
+| test_scientific_state_gdal | 三连跑 exit=0 全绿（76 断言/5 例）。备注：多套件顺序循环首跑曾现一次性 3 断言红（22 断言处中断），隔离复跑 ×3 不可复现；门禁双跑重点盯 |
+
+树面 oracle 计数（TEST_CASE）：新文件 25（consistency 11 + benchmark 3 + parity 5 + txn 3 + bridge 3）+ 既有扩展 4（study_analysis 2、debugger 1、capsule 1）= **29 ≥ 15**（5 个新文件 + 3 个既有文件扩展，双门均过）；与门禁 ctest -N 输出对数见 §5。
 
 - test_experiment_consistency_r4：218→243 断言 / 8→9 例（随 WP-D 增长），All tests passed。
 - test_study_analysis：1374 断言 / 10 例，All tests passed（含 1001 边溢出端到端拒绝）。
