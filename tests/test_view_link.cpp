@@ -80,15 +80,17 @@ struct DataManager
 
 int main( int argc, char *argv[] )
 {
-    // Mirror test_qgis_display_manager: a heap-held QgsApplication with GUI
-    // enabled (QT_QPA_PLATFORM=offscreen carries it); QgsMapCanvas aborts
-    // without the QGIS singletons.
-    // Intentionally leaked (never destroyed, no exitQgis): a function-static
-    // QgsApplication is torn down during static destruction after QGIS
-    // singletons are gone, which segfaulted Catch2 test discovery
-    // (`--list-tests`) and aborted the whole CTest run.
-    auto *app = new QgsApplication( argc, argv, true );
-    ( void ) app;
+    // A scoped QgsApplication with GUI enabled (QT_QPA_PLATFORM=offscreen
+    // carries it); QgsMapCanvas aborts without the QGIS singletons.
+    // Track 2 R4 retirement of the #1319 leak: the app is now DESTROYED on
+    // scope exit — after exitQgis() invalidated the CRS/transform/ellipsoid
+    // caches while the thread-local PROJ context is still alive (the
+    // qgsapplication.cpp invalidateCaches contract), and BEFORE glibc
+    // exit() would otherwise tear the QApplication down after the
+    // Q_GLOBAL_STATIC cache guards (the captured SIGSEGV chain:
+    // ~QApplicationPrivate::cleanupThreadData -> ~QgsProjContext ->
+    // removeFromCacheObjectsBelongingToCurrentThread -> null cache lock).
+    QgsApplication app( argc, argv, true );
     QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
     // Canvas/project cases still crashed in glibc atexit cleanup (QGIS
