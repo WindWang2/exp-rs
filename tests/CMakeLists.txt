@@ -11643,6 +11643,31 @@ target_include_directories(test_workflow_durability_13 PRIVATE
 )
 sicnu_discover_tests(test_workflow_durability_13)
 
+
+# Track 10 durability R4: lock-semantics + checkpoint-durability light lane
+# (same compiled-sources pattern as durability_13, plus the runtime fault
+# registry so the PRODUCTION workflow_checkpoint.write/.publish fault points
+# route through their real failure branches).
+add_executable(test_workflow_run_lock_r4 test_workflow_run_lock_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_definition.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  ${CMAKE_SOURCE_DIR}/src/geospatial/util/atomic_fs.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
+)
+target_link_libraries(test_workflow_run_lock_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Network
+  jsoncpp
+)
+target_include_directories(test_workflow_run_lock_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_run_lock_r4)
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------
