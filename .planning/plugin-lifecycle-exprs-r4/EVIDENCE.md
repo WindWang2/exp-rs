@@ -45,11 +45,11 @@ platform seams (see plugin_loader.cpp:22 "Platform library-loading seam").
 All 20 plugin/exprs test targets built in the fresh heavy `build-dev/` and run
 directly (binaries, `-j1` semantics, offscreen). PASS 1 and PASS 2 both:
 **20/20 "All tests passed"**, zero failures — logs: `gate_pass1.txt` /
-`gate_pass2.txt` in this directory. Totals include:
-loader 281/34, manifest 378/11, plugin_system 129/16, host_process 336/30,
-capabilities 112/13, ipc 136/24, and the six r4 suites (halffail 67/9,
-unload_order 34/4, boundary 35/8, parity 10/3, pollution 19/3, plus the
-registrations above).
+`gate_pass2.txt` in this directory (1,873 assertions per pass, post-review
+re-run). Highlights: loader 281/34, manifest 378/11, plugin_system 129/16,
+host_process 336/30, capabilities 112/13, ipc 136/24, and the five r4 suites
+(halffail 68/9, unload_order 34/4, boundary 35/8, parity 10/3, pollution
+19/3).
 
 Sweep finding (pre-existing, fixed in this track): the ONLY red on master
 Linux was `test_exprs_ipc` "the recv cap refuses oversized peer frames (E6003)"

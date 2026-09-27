@@ -142,12 +142,12 @@ struct UnloadOrderFixture
         registry.unloadAll();
         registry.setContributionSink( nullptr );
         std::error_code ec;
+        // This fixture sets tempDirectory = root, so ALL of its snapshots
+        // (including the last-good tree) live under the private root —
+        // removing it is the whole cleanup. The shared default snapshot
+        // root (empty-tempDirectory fallback) belongs to OTHER registry
+        // users and is never touched here.
         std::filesystem::remove_all( root, ec );
-        // The dev-mode temp tree must not leak into the next test.
-        std::filesystem::remove_all(
-            std::filesystem::temp_directory_path().generic_string()
-                + "/sicnu-plugin-snapshots",
-            ec );
     }
 
     bool sawEvent( const std::string &event ) const
@@ -255,13 +255,15 @@ TEST_CASE( "the drain wait is bounded — a refusing barrier cannot hang unload"
     REQUIRE( elapsedMs < 10000 );
 }
 
-TEST_CASE( "unloading while the last-good capture is in flight stays bounded and clean",
+TEST_CASE( "unloading right after a dev-mode load (capture possibly in flight) stays bounded and clean",
            "[plugin][unloadorder][r4]" )
 {
     // Sibling contract of "registry teardown joins an in-flight snapshot
-    // capture" (test_exprs_plugin_loader): a single unload racing the async
-    // last-good capture must complete, stay bounded, and leave the registry
-    // consistent — whichever way the race resolves.
+    // capture" (test_exprs_plugin_loader): a single unload issued right
+    // after a dev-mode load — while the async last-good capture may still
+    // be in flight — must complete, stay bounded, and leave the registry
+    // consistent — whichever way the race resolves. (The race is not
+    // deterministic here; the assertions are race-neutral on purpose.)
     UnloadOrderFixture fixture;
     REQUIRE( fixture.registry.load( kHelloId ) );
 

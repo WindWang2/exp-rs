@@ -210,6 +210,18 @@ AttemptOutcome attemptLoad( ParityFixture &fixture, bool hostProcess,
     return outcome;
 }
 
+/// Removes the shared per-case temp dir on ANY exit path (a failed REQUIRE
+/// must not leak /tmp/exprs_parity_temp into the next run).
+struct TempDirCleanup
+{
+    std::string path;
+    ~TempDirCleanup()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all( path, ec );
+    }
+};
+
 } // namespace
 
 TEST_CASE( "garbage payload is reported typed by BOTH channels",
@@ -222,6 +234,7 @@ TEST_CASE( "garbage payload is reported typed by BOTH channels",
     const std::string tempDir =
         ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
     std::filesystem::create_directories( tempDir );
+    TempDirCleanup tempCleanup{ tempDir };
 
     // Identical bad sample, one per channel: a regular file that is not a
     // library (passes containment + validation, fails at map time).
@@ -253,7 +266,6 @@ TEST_CASE( "garbage payload is reported typed by BOTH channels",
                          kParityTable[ 0 ].inProcess ) );
     REQUIRE( sawCodeFor( host.globalItems, hostProc.id,
                          kParityTable[ 0 ].hostProcess ) );
-    std::filesystem::remove_all( tempDir );
 }
 
 TEST_CASE( "entrypoint missing is reported typed by BOTH channels",
@@ -266,6 +278,7 @@ TEST_CASE( "entrypoint missing is reported typed by BOTH channels",
     const std::string tempDir =
         ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
     std::filesystem::create_directories( tempDir );
+    TempDirCleanup tempCleanup{ tempDir };
 
     // The named entrypoint file does not exist — the refusal belongs to the
     // validation stage, which is channel-INDEPENDENT, so the codes match
@@ -288,7 +301,6 @@ TEST_CASE( "entrypoint missing is reported typed by BOTH channels",
     // channel-independent.
     REQUIRE( in.recordHasCode );
     REQUIRE( host.recordHasCode );
-    std::filesystem::remove_all( tempDir );
 }
 
 TEST_CASE( "manifest/binary id mismatch is reported typed by BOTH channels",
@@ -301,6 +313,7 @@ TEST_CASE( "manifest/binary id mismatch is reported typed by BOTH channels",
     const std::string tempDir =
         ( std::filesystem::temp_directory_path() / "exprs_parity_temp" ).generic_string();
     std::filesystem::create_directories( tempDir );
+    TempDirCleanup tempCleanup{ tempDir };
 
     // Both manifests declare an id the PAYLOAD does not report: in-process,
     // the loader's pluginId() == manifest id check refuses; host-process,
@@ -334,5 +347,4 @@ TEST_CASE( "manifest/binary id mismatch is reported typed by BOTH channels",
                          kParityTable[ 2 ].inProcess ) );
     REQUIRE( sawCodeFor( host.globalItems, "org.test.parity.declared",
                          kParityTable[ 2 ].hostProcess ) );
-    std::filesystem::remove_all( tempDir );
 }

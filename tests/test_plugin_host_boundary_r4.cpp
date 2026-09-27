@@ -201,7 +201,7 @@ TEST_CASE( "a prefixed directory is a different record, never a wildcard match",
     // it is a DIFFERENT record (if valid) and can never satisfy a lookup
     // for <id>; there is no prefix/suffix matching anywhere.
     BoundaryFixture fixture;
-    fixture.writeManifest( kHelloId ); // real record at <root>/<id>
+    fixture.writeManifest( kHelloEntrypoint ); // real record at <root>/<id>
 
     const std::string impostorDir = fixture.root + "/foo_" + kHelloId;
     std::error_code ec;
@@ -284,6 +284,13 @@ TEST_CASE( "a symlinked entrypoint file escaping the root is refused at "
     options.policy.allowThirdPartyNative = true;
     AcceptingSink sink; // the load preflight needs a sink to reach the loader
     registry.setContributionSink( &sink );
+    // A failed REQUIRE below must not leave the singleton pointing at the
+    // destroyed stack sink for the rest of the binary's cases.
+    struct SinkReset
+    {
+        PluginRegistry &registry;
+        ~SinkReset() { registry.setContributionSink( nullptr ); }
+    } sinkReset{ registry };
     registry.configure( options );
     REQUIRE( registry.record( kHelloId ) != nullptr );
     REQUIRE( registry.record( kHelloId )->state == PluginState::Validated );
@@ -312,7 +319,6 @@ TEST_CASE( "a symlinked entrypoint file escaping the root is refused at "
         if ( item.code == PluginDiagnosticCode::EntrypointOutsideRoot )
             sawEscape = true;
     REQUIRE( sawEscape );
-    registry.setContributionSink( nullptr );
 }
 
 TEST_CASE( "an empty plugin directory is invisible to the scan and typed on inspect",

@@ -519,6 +519,13 @@ TEST_CASE( "the recv cap refuses oversized peer frames (E6003)", "[ipc][channel]
     std::thread requester( [&host, &outcome] {
         outcome = host.request( "work", {}, 5000 );
     } );
+    // A failed REQUIRE unwinds the case while `requester` is joinable — the
+    // std::thread destructor would then std::terminate the whole binary.
+    struct JoinGuard
+    {
+        std::thread &thread;
+        ~JoinGuard() { if ( thread.joinable() ) thread.join(); }
+    } joinGuard{ requester };
     auto readFull = [ &workerSide ]( char *data, size_t len ) {
         size_t got = 0;
         while ( got < len )

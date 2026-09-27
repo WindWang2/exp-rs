@@ -30,10 +30,12 @@
 #include "exprs/plugin_snapshot.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -62,7 +64,11 @@ using namespace exprs;
 namespace {
 
 const char *kBrokenId = "org.exprs.test.broken-plugin";
+#ifdef _WIN32
+const char *kBrokenEntrypoint = "libbroken_plugin.dll";
+#else
 const char *kBrokenEntrypoint = "libbroken_plugin.so";
+#endif
 
 /// RAII env selector for the fixture's failure mode.
 class BrokenMode
@@ -174,6 +180,12 @@ struct HalfFailFixture
         options.roots = { pluginDir + "/.." };
         options.tempDirectory = root;
         options.policy.allowThirdPartyNative = true;
+        // Dev mode arms the async last-good capture on SUCCESSFUL loads —
+        // the positive control below needs it to prove the snapshot root is
+        // real (non-empty after a healthy load), which is what makes the
+        // failure cases' emptiness assertions meaningful. Failed loads must
+        // still publish nothing (asserted per case).
+        options.policy.devMode = true;
         registry.setContributionSink( &sink );
         registry.configure( options );
         registry.setEnabled( kBrokenId, true );
@@ -248,6 +260,15 @@ TEST_CASE( "positive control: the broken fixture loads healthy in ok mode",
     REQUIRE( fixture.registry.isLoaded( kBrokenId ) );
     REQUIRE( fixture.sink.factories == 1 );
     REQUIRE( fixture.sink.operatorIds == std::vector<std::string>{ "test:broken" } );
+    // Positive control for the emptiness claims in the failure cases below:
+    // snapshotRootEntries() is empty-by-iteration on a MISSING root, so the
+    // success path must prove the root actually gets created (bounded wait
+    // for the async last-good capture).
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+    while ( fixture.snapshotRootEntries().empty()
+            && std::chrono::steady_clock::now() < deadline )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    REQUIRE( !fixture.snapshotRootEntries().empty() );
 }
 
 TEST_CASE( "dlopen failure leaves the registry exactly as before the attempt",
