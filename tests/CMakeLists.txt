@@ -80,6 +80,19 @@ function(sicnu_add_test NAME)
   # places static archives before shared libs on the line — a plain archive
   # ahead of sicnu_agent.so would never be pulled (Track 13 R4; tests-link
   # layer only, the src/agent PUBLIC-link fix is recommended upstream).
+  # The LINK_LIBRARY generator expression requires CMake 3.24; fail loudly
+  # on older CMake instead of silently reverting to an ineffective plain
+  # archive (the closure was already broken there — undefined
+  # VerificationReport::aggregate — this just names the actual remedy).
+  if( CMAKE_VERSION VERSION_LESS 3.24 )
+    message( FATAL_ERROR
+      "sicnu_add_test needs CMake 3.24+ for the $<LINK_LIBRARY:WHOLE_ARCHIVE> "
+      "generator expression (found ${CMAKE_VERSION}). The test closure must "
+      "force-load sicnu_agent_loop to resolve sicnu_agent.so's "
+      "VerificationReport::aggregate; either upgrade CMake or apply the "
+      "upstream fix: add sicnu_agent_loop to sicnu_agent's PUBLIC "
+      "target_link_libraries in src/agent/CMakeLists.txt." )
+  endif()
   set_property( TARGET ${NAME} APPEND PROPERTY LINK_LIBRARIES
     "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>" )
   target_include_directories(${NAME} PRIVATE
