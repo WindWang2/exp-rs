@@ -15,6 +15,8 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 
+#include <limits>
+
 using namespace sicnu::dataset;
 
 namespace
@@ -319,6 +321,21 @@ TEST_CASE( "annotation chains append-only, store-enforced", "[dataset][annotatio
     DatasetStore store;
     makeStoreWithDraftVersion( store, dir, &versionId );
 
+    // Chain codes live under a real schema: unknown codes are refused at
+    // ingest (schema-aware fail-fast), so the chain fixture references one.
+    LabelSchema chainSchema;
+    chainSchema.setSchemaId( LabelSchemaId::generate().toString() );
+    chainSchema.setVersion( 1 );
+    auto chainClass = []( const QString &code ) {
+        LabelClass labelClass;
+        labelClass.setStableId( LabelSchemaId::generate().toString() );
+        labelClass.setCode( code );
+        return labelClass;
+    };
+    chainSchema.classes() = { chainClass( QStringLiteral( "cropland" ) ),
+                              chainClass( QStringLiteral( "forest" ) ) };
+    REQUIRE( store.saveLabelSchema( chainSchema ).has_value() );
+
     const QString annotationId = AnnotationId::generate().toString();
     AnnotationRecord v1;
     v1.setAnnotationId( annotationId );
@@ -326,6 +343,8 @@ TEST_CASE( "annotation chains append-only, store-enforced", "[dataset][annotatio
     v1.setDatasetVersionId( versionId );
     v1.setRevision( 1 );
     v1.setSourceType( AnnotationSourceType::Human );
+    v1.setLabelSchemaId( chainSchema.schemaId() );
+    v1.setLabelSchemaVersion( 1 );
     v1.setClassCode( QStringLiteral( "cropland" ) );
     v1.setAuthorRole( QStringLiteral( "annotator" ) );
     REQUIRE( store.addAnnotation( v1 ).has_value() );
@@ -451,4 +470,176 @@ TEST_CASE( "label schemas are immutable per (id, version)", "[dataset][label][st
     const auto loaded = store.labelSchema( schema.schemaId(), 1 );
     REQUIRE( loaded.has_value() );
     CHECK( loaded.value() == schema );
+}
+
+// --- Track 13 R4 WP-D: ontology ingest is fail-fast -------------------------
+
+namespace
+{
+
+SampleRecord makeSample( const QString &versionId, SampleKind kind )
+{
+    SampleRecord sample;
+    sample.setSampleId( SampleId::generate().toString() );
+    sample.setDatasetVersionId( versionId );
+    sample.setKind( kind );
+    return sample;
+}
+
+} // namespace
+
+TEST_CASE( "ingest rejects provably illegal sample payloads (fail-fast)",
+           "[dataset][sample][validation][r4]" )
+{
+    QTemporaryDir dir;
+    DatasetStore store;
+    QString versionId;
+    makeStoreWithDraftVersion( store, dir, &versionId );
+
+    // Point coordinates must be finite (weight already is — same discipline).
+    SampleRecord nanPoint = makeSample( versionId, SampleKind::Point );
+    PointSample nanPayload;
+    nanPayload.x = std::numeric_limits<double>::quiet_NaN();
+    nanPayload.y = 1.0;
+    nanPoint.payload() = nanPayload;
+    {
+        const auto rejected = store.addSamples( { nanPoint } );
+        REQUIRE( !rejected.has_value() );
+        CHECK( rejected.diagnostics().first().message.contains(
+            QStringLiteral( "point" ) ) );
+    }
+
+    SampleRecord infPoint = makeSample( versionId, SampleKind::Point );
+    PointSample infPayload;
+    infPayload.x = std::numeric_limits<double>::infinity();
+    infPayload.y = 1.0;
+    infPoint.payload() = infPayload;
+    CHECK( !store.addSamples( { infPoint } ).has_value() );
+
+    // Pixel indices are unsigned-domain: negatives are illegal, not "far left".
+    SampleRecord negativePixel = makeSample( versionId, SampleKind::Pixel );
+    PixelSample negativePayload;
+    negativePayload.column = -1;
+    negativePayload.row = 5;
+    negativePixel.payload() = negativePayload;
+    {
+        const auto rejected = store.addSamples( { negativePixel } );
+        REQUIRE( !rejected.has_value() );
+        CHECK( rejected.diagnostics().first().message.contains(
+            QStringLiteral( "column" ) ) );
+    }
+
+    // Pair samples reference two DISTINCT members by id.
+    SampleRecord emptyPair = makeSample( versionId, SampleKind::Pair );
+    PairSample emptyPairPayload;
+    emptyPairPayload.primaryRef.clear();
+    emptyPairPayload.secondaryRef = QStringLiteral( "post" );
+    emptyPair.payload() = emptyPairPayload;
+    CHECK( !store.addSamples( { emptyPair } ).has_value() );
+
+    SampleRecord selfPair = makeSample( versionId, SampleKind::Pair );
+    PairSample selfPairPayload;
+    selfPairPayload.primaryRef = QStringLiteral( "same" );
+    selfPairPayload.secondaryRef = QStringLiteral( "same" );
+    selfPair.payload() = selfPairPayload;
+    CHECK( !store.addSamples( { selfPair } ).has_value() );
+
+    // Object samples must name their segment.
+    SampleRecord anonymousObject = makeSample( versionId, SampleKind::Object );
+    ObjectSample anonymousPayload;
+    anonymousPayload.assetId = QStringLiteral( "asset-1" );
+    anonymousPayload.objectRef.clear();
+    anonymousObject.payload() = anonymousPayload;
+    CHECK( !store.addSamples( { anonymousObject } ).has_value() );
+
+    // Polygon geometry must parse (reuses the module's own WKT reader).
+    SampleRecord brokenPolygon = makeSample( versionId, SampleKind::Polygon );
+    PolygonSample brokenPayload;
+    brokenPayload.wkt = QStringLiteral( "POLYGON((not a ring" );
+    brokenPolygon.payload() = brokenPayload;
+    CHECK( !store.addSamples( { brokenPolygon } ).has_value() );
+
+    // Nothing above reached the store: the version stays empty.
+    const auto versionKey = DatasetVersionId::fromString( versionId );
+    REQUIRE( versionKey.has_value() );
+    CHECK( store.sampleCount( versionKey.value() ) == 0 );
+}
+
+TEST_CASE( "validation errors locate the record and the field",
+           "[dataset][sample][validation][r4]" )
+{
+    SampleRecord sample;
+    sample.setSampleId( SampleId::generate().toString() );
+    sample.setDatasetVersionId( QStringLiteral( "version-x" ) );
+    sample.setKind( SampleKind::Point );
+    PointSample payload;
+    payload.x = std::numeric_limits<double>::quiet_NaN();
+    payload.y = 1.0;
+    sample.payload() = payload;
+
+    const auto rejected = validateSample( sample );
+    REQUIRE( !rejected.has_value() );
+    const QString message = rejected.diagnostics().first().message;
+    // Machine-parseable locator: the record id and the offending field.
+    CHECK( message.contains( sample.sampleId() ) );
+    CHECK( message.contains( QStringLiteral( "x" ) ) );
+
+    SampleRecord anonymous;
+    anonymous.setKind( SampleKind::Point );
+    anonymous.payload() = PointSample{};
+    const auto idless = validateSample( anonymous );
+    REQUIRE( !idless.has_value() );
+    CHECK( idless.diagnostics().first().message.contains(
+        QStringLiteral( "id" ) ) );
+}
+
+TEST_CASE( "annotations with unknown class codes are refused against their schema",
+           "[dataset][annotation][validation][r4]" )
+{
+    QTemporaryDir dir;
+    DatasetStore store;
+    QString versionId;
+    makeStoreWithDraftVersion( store, dir, &versionId );
+
+    LabelSchema schema;
+    schema.setSchemaId( LabelSchemaId::generate().toString() );
+    schema.setVersion( 1 );
+    LabelClass landCover;
+    landCover.setStableId( LabelSchemaId::generate().toString() );
+    landCover.setCode( QStringLiteral( "landcover" ) );
+    schema.classes() = { landCover };
+    REQUIRE( store.saveLabelSchema( schema ).has_value() );
+
+    auto makeAnnotation = [&]( const QString &code ) {
+        AnnotationRecord annotation;
+        annotation.setAnnotationId( AnnotationId::generate().toString() );
+        annotation.setTargetSampleId( SampleId::generate().toString() );
+        annotation.setDatasetVersionId( versionId );
+        annotation.setRevision( 1 );
+        annotation.setLabelSchemaId( schema.schemaId() );
+        annotation.setLabelSchemaVersion( 1 );
+        annotation.setClassCode( code );
+        annotation.setConfidence( 1.0 );
+        return annotation;
+    };
+
+    // A known code is accepted.
+    CHECK( store.addAnnotation( makeAnnotation( QStringLiteral( "landcover" ) ) ).has_value() );
+
+    // An unknown code is refused and the message names the code.
+    const auto ghost = store.addAnnotation( makeAnnotation( QStringLiteral( "ghost-code" ) ) );
+    REQUIRE( !ghost.has_value() );
+    CHECK( ghost.diagnostics().first().message.contains(
+        QStringLiteral( "ghost-code" ) ) );
+
+    // A missing schema version is refused too, not silently label-less.
+    AnnotationRecord futureSchema = makeAnnotation( QStringLiteral( "landcover" ) );
+    futureSchema.setLabelSchemaVersion( 99 );
+    CHECK( !store.addAnnotation( futureSchema ).has_value() );
+
+    // Pure geometry annotations (empty class code) stay legal.
+    AnnotationRecord geometryOnly = makeAnnotation( QString() );
+    geometryOnly.setLabelSchemaId( QString() );
+    geometryOnly.setLabelSchemaVersion( 0 );
+    CHECK( store.addAnnotation( geometryOnly ).has_value() );
 }
