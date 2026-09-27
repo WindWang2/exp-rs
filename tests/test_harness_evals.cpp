@@ -36,6 +36,7 @@
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
 #include "agent/harness/plan_tools.h"
+#include "agent/harness/provenance_projection.h"
 #include "agent/harness/recipe_catalog.h"
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/tool_manifest.h"
@@ -953,6 +954,64 @@ TEST_CASE( "Eval: bounded plan repair fixes structure and stays advisory on scie
             if ( action["action"].asString() == "search_capabilities" )
                 suggestsSearch = true;
     CHECK( suggestsSearch );
+}
+
+TEST_CASE( "Eval: repair of a compiled plan supersedes its stale compiler provenance",
+           "[harness][eval][repair][r5]" )
+{
+    // #1359: repair_plan re-compiled a provenance-carrying wire document with
+    // the PRE-repair compiler block presented as current — the superseded
+    // chain only existed on the full compile path. The repaired engine JSON
+    // must not claim a compile event that never saw the repaired content.
+    SpatialToolRegistry::instance().registerBuiltinTools();
+
+    Json::Value plan;
+    Json::Value steps( Json::arrayValue );
+    Json::Value s1, s2;
+    s1["id"] = "ndvi"; s1["operator_id"] = "rs:ndvi";
+    s1["params"]["red"] = "/x.tif"; s1["params"]["nir"] = "/x.tif";
+    s1["params"]["output"] = "/y.tif";
+    s2 = s1; // duplicate id: deterministically repairable
+    steps.append( s1 );
+    steps.append( s2 );
+    plan["schema_version"] = "2.0";
+    plan["kind"] = "execution_plan";
+    plan["plan_id"] = "plan-repair-provenance";
+    plan["intent"] = "ndvi";
+    plan["steps"] = steps;
+
+    // A compiler block as a lowered plan would carry it: bound to the
+    // UNREPAIRED content, self-digest consistent.
+    AgentPlan preRepair;
+    HarnessError readError;
+    REQUIRE( readAgentPlan( plan, preRepair, readError ) );
+    Json::Value block( Json::objectValue );
+    block["schema_version"] = "1.0";
+    block["ir_fingerprint"] = "0123456789abcdef";
+    block["ir_id"] = "ir-pre-repair";
+    block["plan_fingerprint"] = planFingerprint( preRepair );
+    block["digest"] = projection::projectionDigest( block );
+    plan["compiler"] = block;
+
+    Json::Value input;
+    input["plan"] = plan;
+    const SpatialToolResult repaired = callTool( "harness:repair_plan", input );
+    REQUIRE( repaired.success );
+    REQUIRE( repaired.output["compilable"].asBool() );
+    REQUIRE( repaired.output["repair_log"].size() >= 1 );
+
+    Json::Value engineJson;
+    REQUIRE( Json::Reader().parse( repaired.output["workflow_json"].asString(),
+                                   engineJson ) );
+    // No compiler block may claim the repaired document: the compile event
+    // for THIS content never happened.
+    CHECK_FALSE( engineJson["metadata"].isMember( "compiler" ) );
+    // The stale block survives on the bounded superseded chain.
+    CHECK( engineJson["metadata"]["compiler_superseded"]["digest"].asString() ==
+           block["digest"].asString() );
+    // And the engine JSON names the content it actually carries.
+    CHECK( engineJson["metadata"]["plan_fingerprint"].asString() !=
+           block["plan_fingerprint"].asString() );
 }
 
 TEST_CASE( "Eval: intent ambiguity resolves through typed candidates and decisions",

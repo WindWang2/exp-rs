@@ -14,6 +14,7 @@
 #include "agent/harness/capability_catalog.h"
 #include "agent/harness/capability_knowledge.h"
 #include "agent/harness/capability_relations.h"
+#include "agent/harness/provenance_projection.h"
 
 using namespace sicnu::agent::harness;
 
@@ -146,6 +147,104 @@ TEST_CASE( "The lowered plan round-trips into a readable AgentPlan document",
   // The wire document compiles to the same engine JSON.
   const std::string json = compilePlanToWorkflowJson( reparsed, error );
   CHECK( json == compiled.workflowJson );
+}
+
+TEST_CASE( "A plan mutated after its compile supersedes the carried compiler block",
+           "[workflow_planner][provenance][r5]" )
+{
+  // #1359: compilePlanToWorkflowJson copied plan.raw["compiler"] verbatim, so
+  // a repair (or any post-compile mutation) re-compiled with the PRE-repair
+  // provenance presented as this document's compile event. The block is now
+  // bound to the plan fingerprint it was produced from; on mismatch it moves
+  // to the compiler_superseded chain instead of claiming currency.
+  loadHarnessKnowledge();
+  HarnessError error;
+  const CompiledWorkflow compiled = compileWorkflow( requestFor( ndviIr() ), error );
+  REQUIRE( compiled.workflowJson.size() > 0 );
+  REQUIRE( compiled.plan.raw.isMember( "compiler" ) );
+  REQUIRE( compiled.plan.raw["compiler"].isMember( "plan_fingerprint" ) );
+
+  // Unmutated content: the block is still bound to this fingerprint — the
+  // verbatim round-trip (and its byte-identical engine JSON) is unchanged.
+  {
+    AgentPlan reparsed;
+    REQUIRE( readAgentPlan( agentPlanToDocument( compiled.plan ), reparsed, error ) );
+    Json::Value engineJson;
+    REQUIRE( Json::Reader().parse( compilePlanToWorkflowJson( reparsed, error ),
+                                   engineJson ) );
+    CHECK( engineJson["metadata"]["compiler"] == compiled.plan.raw["compiler"] );
+    CHECK_FALSE( engineJson["metadata"].isMember( "compiler_superseded" ) );
+  }
+
+  // Mutate the science content behind the block (what repair_plan does when
+  // it renames steps or rewires outputs): the stale block may not ride as
+  // current provenance.
+  Json::Value doc = agentPlanToDocument( compiled.plan );
+  doc["steps"][0]["params"]["index"] = "NDWI";
+  AgentPlan mutated;
+  REQUIRE( readAgentPlan( doc, mutated, error ) );
+  Json::Value mutatedEngine;
+  REQUIRE( Json::Reader().parse( compilePlanToWorkflowJson( mutated, error ),
+                                 mutatedEngine ) );
+  CHECK_FALSE( mutatedEngine["metadata"].isMember( "compiler" ) );
+  CHECK( mutatedEngine["metadata"]["compiler_superseded"]
+         == compiled.plan.raw["compiler"] );
+  // The engine JSON still names the ACTUAL content it carries.
+  CHECK( mutatedEngine["metadata"]["plan_fingerprint"].asString() ==
+         planFingerprint( mutated ) );
+  CHECK( mutatedEngine["metadata"]["plan_fingerprint"].asString() !=
+         compiled.plan.raw["compiler"]["plan_fingerprint"].asString() );
+}
+
+TEST_CASE( "readAgentPlan rejects a torn compiler provenance block",
+           "[workflow_planner][provenance][r5]" )
+{
+  // #1359 (record level): the raw block rode verbatim into persisted
+  // documents and run context with no shape or integrity gate. A block whose
+  // digest no longer matches its content is corruption, not provenance.
+  loadHarnessKnowledge();
+  HarnessError error;
+
+  Json::Value block( Json::objectValue );
+  block["schema_version"] = "1.0";
+  block["ir_fingerprint"] = "0123456789abcdef";
+  block["ir_id"] = "ir-1";
+  Json::Value bound = block;
+  bound["plan_fingerprint"] = "abcdef0123456789";
+  bound["digest"] = projection::projectionDigest( bound );
+
+  // A well-formed, digest-consistent block passes the read gate.
+  Json::Value goodDoc = parse( R"({
+    "kind": "execution_plan", "schema_version": "2.0",
+    "plan_id": "plan-gate-1", "intent": "ndvi",
+    "steps": [ { "id": "s1", "operator_id": "rs:ndvi",
+                 "params": { "red": "/x.tif", "nir": "/x.tif" } } ]
+  })" );
+  goodDoc["compiler"] = bound;
+  AgentPlan plan;
+  REQUIRE( readAgentPlan( goodDoc, plan, error ) );
+
+  // A non-object block is refused outright.
+  Json::Value tornDoc = goodDoc;
+  tornDoc["compiler"] = "compiler";
+  CHECK( !readAgentPlan( tornDoc, plan, error ) );
+  CHECK( error.code == "INVALID_PLAN" );
+
+  // An edited block: digest no longer matches the carried content.
+  Json::Value editedDoc = goodDoc;
+  editedDoc["compiler"]["ir_fingerprint"] = "ffffffffffffffff";
+  CHECK( !readAgentPlan( editedDoc, plan, error ) );
+
+  // A truncated block missing its digest stamp is refused the same way.
+  Json::Value unstampedDoc = goodDoc;
+  unstampedDoc["compiler"].removeMember( "digest" );
+  CHECK( !readAgentPlan( unstampedDoc, plan, error ) );
+
+  // The companion lowering provenance block is shape-gated too: it is bound
+  // into run context verbatim via the plan binding.
+  Json::Value tornIrDoc = goodDoc;
+  tornIrDoc["workflow_ir"] = "workflow_ir";
+  CHECK( !readAgentPlan( tornIrDoc, plan, error ) );
 }
 
 TEST_CASE( "Slot wiring lowers to grounded paths; ungrounded slots refuse honestly",

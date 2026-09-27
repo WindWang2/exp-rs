@@ -6,6 +6,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "provenance_projection.h"
 
 #include <QCryptographicHash>
 #include <QString>
@@ -134,6 +135,42 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
       return false;
     }
     plan.cleanup = doc["cleanup"].asString();
+  }
+
+  // Provenance blocks ride verbatim into engine JSON metadata and run
+  // context (#1359), so a torn or hand-edited block is refused here — nothing
+  // downstream has to trust it. Whether the block still describes THIS
+  // content is a compile-time property; compilePlanToWorkflowJson supersedes
+  // stale ones by fingerprint comparison.
+  if ( doc.isMember( "compiler" ) )
+  {
+    if ( !doc["compiler"].isObject() )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "compiler provenance block must be an object" );
+      return false;
+    }
+    if ( !doc["compiler"].isMember( "digest" ) )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "compiler provenance block needs a digest" );
+      return false;
+    }
+    Json::Value body = doc["compiler"];
+    const std::string claimed = body["digest"].asString();
+    body.removeMember( "digest" );
+    if ( projection::projectionDigest( body ) != claimed )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "compiler provenance digest does not match its content" );
+      return false;
+    }
+  }
+  if ( doc.isMember( "workflow_ir" ) && !doc["workflow_ir"].isObject() )
+  {
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "workflow_ir provenance block must be an object" );
+    return false;
   }
 
   // v1 steps used "operator_id" too (makeExecutionStep), so both versions
@@ -366,8 +403,21 @@ std::string compilePlanToWorkflowJson( const AgentPlan &plan, HarnessError &erro
   // Compiler provenance rides metadata.compiler when the plan carries it
   // (round-trip of a lowered plan through its wire document); the raw
   // compiler projection is copied verbatim so the digest stays stable.
+  // A block bound to a DIFFERENT plan fingerprint describes a compile that
+  // predates this content (repair or post-compile mutation, #1359): it moves
+  // to the superseded chain instead of claiming currency — this path never
+  // ran the compiler, so no fresh block may be invented here. Unbound legacy
+  // blocks keep the verbatim round-trip.
   if ( plan.raw.isObject() && plan.raw.isMember( "compiler" ) )
-    metadata["compiler"] = plan.raw["compiler"];
+  {
+    const Json::Value &compilerBlock = plan.raw["compiler"];
+    const std::string boundFingerprint =
+      compilerBlock.isObject() ? compilerBlock.get( "plan_fingerprint", "" ).asString() : "";
+    if ( !boundFingerprint.empty() && boundFingerprint != planFingerprint( plan ) )
+      metadata["compiler_superseded"] = compilerBlock;
+    else
+      metadata["compiler"] = compilerBlock;
+  }
   def["metadata"] = metadata;
 
   Json::StreamWriterBuilder builder;

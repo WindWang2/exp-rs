@@ -585,8 +585,13 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
         Json::Reader docReader;
         if ( docReader.parse( workflowJson, workflowDoc ) )
         {
-          const Json::Value block = projection::compilerProjection(
+          Json::Value block = projection::compilerProjection(
             result.ir, result.analysis, result.repairs, result.refusals );
+          // Bind the projection to the exact lowered plan content (#1359):
+          // a later re-compile of a mutated document detects the mismatch by
+          // fingerprint comparison instead of trusting the carried block.
+          // Stamped before the attach so the digest covers the binding.
+          block["plan_fingerprint"] = planFingerprint( plan );
           Json::StreamWriterBuilder compact;
           compact["indentation"] = "";
           result.workflowJson =
