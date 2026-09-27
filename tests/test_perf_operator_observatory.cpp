@@ -597,6 +597,7 @@ TEST_CASE( "memory guard tiled inference peak RSS stays within declared O(tile) 
     structural["tile_pixels"] = tile * tile;
     structural["promise"] = "ADR 0073 Streaming O(tile); task_resource_budget.cpp Streaming=64MiB";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
+    s.extra["output_sum"] = rasterPixelSum( outPath );
     record( "guard_tiled_inference_rss", std::move( s ), structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );

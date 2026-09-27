@@ -17,21 +17,21 @@
     "os" : "linux"
   },
   "extra" : {},
-  "generated_at" : "2026-09-26T19:46:18Z",
+  "generated_at" : "2026-09-27T00:10:18Z",
   "measurement" : 
   {
-    "cpu_ms" : 21.259999999999991,
+    "cpu_ms" : 40.562000000000012,
     "io" : 
     {
       "available" : true,
       "unavailable_reason" : null
     },
-    "peak_rss_baseline_mb" : 127,
+    "peak_rss_baseline_mb" : 125,
     "peak_rss_mb" : 9,
     "peak_rss_unavailable_reason" : null,
     "read_bytes" : 0,
-    "read_ops" : 98,
-    "wall_ms" : 21.007442000000001,
+    "read_ops" : 107,
+    "wall_ms" : 43.143407000000003,
     "write_bytes" : 0,
     "write_ops" : 9
   },
