@@ -350,6 +350,13 @@ std::string deriveNumericDomain( const Json::Value &facts )
     return artifact_facts::kDomainToa;
   if ( radiometric == "dn" || radiometric.find( "digital_number" ) != std::string::npos )
     return artifact_facts::kDomainDn;
+  // Calibration-family states ride the same key: calibrated SAR/radar
+  // products carry "db"/"linear_power" as their radiometric state, and the
+  // chain check must see them exactly like the calibration-key spelling.
+  if ( radiometric == "db" )
+    return artifact_facts::kDomainDb;
+  if ( radiometric == "linear_power" )
+    return artifact_facts::kDomainLinearPower;
   const std::string calibration = lowered( facts.get( "calibration", "" ).asString() );
   if ( calibration == "sigma0" || calibration == "gamma0" || calibration == "beta0" )
     return artifact_facts::kDomainLinearPower;

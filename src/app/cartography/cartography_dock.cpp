@@ -62,7 +62,7 @@ CartographyDock::CartographyDock( LayerSourcesProvider layers, WorkDirProvider w
     , m_workDir( std::move( workDir ) )
 {
     setObjectName( QStringLiteral( "rsCartographyDock" ) );
-    setWindowTitle( tr( "制图工作台" ) );
+    setWindowTitle( tr( "Cartography Workbench" ) );
     buildUi();
     reloadTemplates();
 }
@@ -77,40 +77,40 @@ void CartographyDock::buildUi()
     auto *templateRow = new QHBoxLayout;
     m_templateCombo = new QComboBox( central );
     m_templateCombo->setObjectName( QStringLiteral( "rsCartographyTemplate" ) );
-    m_templateCombo->setAccessibleName( tr( "地图模板" ) );
-    m_templateCombo->setToolTip( tr( "模板来自制图组件目录（与 agent 工具同源）。" ) );
-    templateRow->addWidget( new QLabel( tr( "模板：" ), central ), 0 );
+    m_templateCombo->setAccessibleName( tr( "Map template" ) );
+    m_templateCombo->setToolTip( tr( "Templates come from the cartography component catalog (same source as the agent tools)." ) );
+    templateRow->addWidget( new QLabel( tr( "Template:" ), central ), 0 );
     templateRow->addWidget( m_templateCombo, 1 );
     layout->addLayout( templateRow );
 
     m_layoutNameEdit = new QLineEdit( QStringLiteral( "wb-map" ), central );
     m_layoutNameEdit->setObjectName( QStringLiteral( "rsCartographyLayoutName" ) );
-    m_layoutNameEdit->setAccessibleName( tr( "布局名称" ) );
+    m_layoutNameEdit->setAccessibleName( tr( "Layout name" ) );
     layout->addWidget( m_layoutNameEdit );
 
     m_titleEdit = new QLineEdit( central );
     m_titleEdit->setObjectName( QStringLiteral( "rsCartographyTitle" ) );
-    m_titleEdit->setAccessibleName( tr( "地图标题" ) );
-    m_titleEdit->setPlaceholderText( tr( "地图标题" ) );
+    m_titleEdit->setAccessibleName( tr( "Map title" ) );
+    m_titleEdit->setPlaceholderText( tr( "Map title" ) );
     layout->addWidget( m_titleEdit );
 
     m_sourceNoteEdit = new QLineEdit( central );
     m_sourceNoteEdit->setObjectName( QStringLiteral( "rsCartographySourceNote" ) );
-    m_sourceNoteEdit->setAccessibleName( tr( "数据来源说明" ) );
-    m_sourceNoteEdit->setPlaceholderText( tr( "数据来源说明（可选）" ) );
+    m_sourceNoteEdit->setAccessibleName( tr( "Data source note" ) );
+    m_sourceNoteEdit->setPlaceholderText( tr( "Data source note (optional)" ) );
     layout->addWidget( m_sourceNoteEdit );
 
     // ── Actions (each one an operator dispatch) ─────────────────────────
     auto *composeRow = new QHBoxLayout;
-    m_composeBtn = new QPushButton( tr( "排版生成" ), central );
+    m_composeBtn = new QPushButton( tr( "Compose" ), central );
     m_composeBtn->setObjectName( QStringLiteral( "rsCartographyCompose" ) );
-    m_composeBtn->setAccessibleName( tr( "排版生成" ) );
-    m_preflightBtn = new QPushButton( tr( "检查" ), central );
+    m_composeBtn->setAccessibleName( tr( "Compose" ) );
+    m_preflightBtn = new QPushButton( tr( "Check" ), central );
     m_preflightBtn->setObjectName( QStringLiteral( "rsCartographyPreflight" ) );
-    m_preflightBtn->setAccessibleName( tr( "检查" ) );
-    m_repairBtn = new QPushButton( tr( "修复" ), central );
+    m_preflightBtn->setAccessibleName( tr( "Check" ) );
+    m_repairBtn = new QPushButton( tr( "Fix" ), central );
     m_repairBtn->setObjectName( QStringLiteral( "rsCartographyRepair" ) );
-    m_repairBtn->setAccessibleName( tr( "修复" ) );
+    m_repairBtn->setAccessibleName( tr( "Fix" ) );
     composeRow->addWidget( m_composeBtn );
     composeRow->addWidget( m_preflightBtn );
     composeRow->addWidget( m_repairBtn );
@@ -121,30 +121,30 @@ void CartographyDock::buildUi()
     auto *exportRow = new QHBoxLayout;
     m_formatCombo = new QComboBox( central );
     m_formatCombo->setObjectName( QStringLiteral( "rsCartographyFormat" ) );
-    m_formatCombo->setAccessibleName( tr( "导出格式" ) );
+    m_formatCombo->setAccessibleName( tr( "Export format" ) );
     m_formatCombo->addItems( { tr( "png" ), tr( "pdf" ), tr( "svg" ) } );
     m_dpiSpin = new QSpinBox( central );
     m_dpiSpin->setObjectName( QStringLiteral( "rsCartographyDpi" ) );
-    m_dpiSpin->setAccessibleName( tr( "导出 DPI" ) );
+    m_dpiSpin->setAccessibleName( tr( "Export DPI" ) );
     m_dpiSpin->setRange( 72, 1200 );
     m_dpiSpin->setValue( 300 );
     m_directoryEdit = new QLineEdit( central );
     m_directoryEdit->setObjectName( QStringLiteral( "rsCartographyDirectory" ) );
-    m_directoryEdit->setAccessibleName( tr( "导出目录" ) );
-    m_directoryEdit->setPlaceholderText( tr( "导出目录" ) );
-    auto *browseBtn = new QPushButton( tr( "…选择目录" ), central );
-    browseBtn->setAccessibleName( tr( "选择导出目录" ) );
-    m_exportBtn = new QPushButton( tr( "导出" ), central );
+    m_directoryEdit->setAccessibleName( tr( "Export directory" ) );
+    m_directoryEdit->setPlaceholderText( tr( "Export directory" ) );
+    auto *browseBtn = new QPushButton( tr( "…choose directory" ), central );
+    browseBtn->setAccessibleName( tr( "Choose export directory" ) );
+    m_exportBtn = new QPushButton( tr( "Export" ), central );
     m_exportBtn->setObjectName( QStringLiteral( "rsCartographyExport" ) );
-    m_exportBtn->setAccessibleName( tr( "导出" ) );
-    m_produceBtn = new QPushButton( tr( "生产导出" ), central );
+    m_exportBtn->setAccessibleName( tr( "Export" ) );
+    m_produceBtn = new QPushButton( tr( "Production export" ), central );
     m_produceBtn->setObjectName( QStringLiteral( "rsCartographyProduce" ) );
-    m_produceBtn->setAccessibleName( tr( "生产导出（排版→修复→导出→清单）" ) );
+    m_produceBtn->setAccessibleName( tr( "Production export (compose → fix → export → manifest)" ) );
     m_produceBtn->setToolTip(
-      tr( "一次完成：排版 → 有界修复 → 导出（含图集）→ 清单 sidecar；原子发布。" ) );
-    m_stopBtn = new QPushButton( tr( "停止" ), central );
+      tr( "One pass: compose → bounded fix → export (with atlas) → manifest sidecar; atomic publish." ) );
+    m_stopBtn = new QPushButton( tr( "Stop" ), central );
     m_stopBtn->setObjectName( QStringLiteral( "rsCartographyStop" ) );
-    m_stopBtn->setAccessibleName( tr( "停止当前制图任务" ) );
+    m_stopBtn->setAccessibleName( tr( "Stop the current cartography task" ) );
     m_stopBtn->setEnabled( false );
     exportRow->addWidget( m_formatCombo );
     exportRow->addWidget( new QLabel( tr( "DPI：" ), central ) );
@@ -160,7 +160,7 @@ void CartographyDock::buildUi()
         const QString start = m_directoryEdit->text().isEmpty()
                                   ? ( m_workDir ? m_workDir() : QString() )
                                   : m_directoryEdit->text();
-        const QString dir = QFileDialog::getExistingDirectory( this, tr( "导出目录" ), start );
+        const QString dir = QFileDialog::getExistingDirectory( this, tr( "Export directory" ), start );
         if ( !dir.isEmpty() )
             m_directoryEdit->setText( dir );
     } );
@@ -168,10 +168,10 @@ void CartographyDock::buildUi()
     // ── Preview + report ────────────────────────────────────────────────
     m_previewLabel = new QLabel( central );
     m_previewLabel->setObjectName( QStringLiteral( "rsCartographyPreview" ) );
-    m_previewLabel->setAccessibleName( tr( "排版预览" ) );
+    m_previewLabel->setAccessibleName( tr( "Compose preview" ) );
     m_previewLabel->setMinimumSize( 320, 220 );
     m_previewLabel->setAlignment( Qt::AlignCenter );
-    m_previewLabel->setText( tr( "暂无预览 —— 选择模板并点击「排版生成」。" ) );
+    m_previewLabel->setText( tr( "No preview yet — pick a template and click Compose." ) );
     auto *scroll = new QScrollArea( central );
     scroll->setWidgetResizable( true );
     scroll->setWidget( m_previewLabel );
@@ -179,9 +179,9 @@ void CartographyDock::buildUi()
 
     m_reportView = new QPlainTextEdit( central );
     m_reportView->setObjectName( QStringLiteral( "rsCartographyReport" ) );
-    m_reportView->setAccessibleName( tr( "质量报告" ) );
+    m_reportView->setAccessibleName( tr( "Quality report" ) );
     m_reportView->setReadOnly( true );
-    m_reportView->setPlaceholderText( tr( "检查/修复/导出报告显示在这里。" ) );
+    m_reportView->setPlaceholderText( tr( "Check / fix / export reports appear here." ) );
     layout->addWidget( m_reportView, 1 );
 
     connect( m_composeBtn, &QPushButton::clicked, this, &CartographyDock::runCompose );
@@ -233,14 +233,14 @@ Json::Value CartographyDock::buildDraft( QString *error ) const
     if ( templateId.isEmpty() )
     {
         if ( error )
-            *error = tr( "没有可用模板：请检查 data/cartography/templates 目录。" );
+            *error = tr( "No templates available: check the data/cartography/templates directory." );
         return {};
     }
     const QStringList sources = m_layers ? m_layers() : QStringList();
     if ( sources.isEmpty() )
     {
         if ( error )
-            *error = tr( "当前没有可用的地图图层：先在画布中加入数据，再生成排版。" );
+            *error = tr( "No map layers available: add data to the canvas before composing." );
         return {};
     }
     Json::Value params( Json::objectValue );
@@ -260,7 +260,7 @@ Json::Value CartographyDock::buildDraft( QString *error ) const
     if ( draft.isNull() )
     {
         if ( error )
-            *error = tr( "模板实例化失败：%1" ).arg( instantiateError );
+            *error = tr( "Template instantiation failed: %1" ).arg( instantiateError );
         return {};
     }
     return draft;
@@ -272,14 +272,14 @@ bool CartographyDock::submitOperatorJob(
 {
     if ( m_runningTaskId >= 0 )
     {
-        emit statusMessage( tr( "已有一个制图任务在执行（可点「停止」取消）。" ) );
+        emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
         return false;
     }
     auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId.toStdString() );
     if ( !op )
     {
         emit statusMessage(
-          tr( "算子未注册：%1（应用启动时应完成 cartography 算子族注册）" ).arg( operatorId ) );
+          tr( "Operator not registered: %1 (the cartography operator family should register at startup)" ).arg( operatorId ) );
         return false;
     }
 
@@ -296,7 +296,7 @@ bool CartographyDock::submitOperatorJob(
     const long taskId = sicnu::TaskCenter::instance().submitJob( request );
     if ( taskId <= 0 )
     {
-        emit statusMessage( tr( "%1 提交 TaskCenter 失败。" ).arg( operatorId ) );
+        emit statusMessage( tr( "Failed to submit %1 to the TaskCenter." ).arg( operatorId ) );
         return false;
     }
     m_runningTaskId = taskId;
@@ -313,7 +313,7 @@ bool CartographyDock::submitOperatorJob(
                      return;
                  if ( info.status == sicnu::TaskStatus::Running &&
                       info.progressPercentage >= 0.0 )
-                     emit statusMessage( tr( "制图任务进行中：%1%" )
+                     emit statusMessage( tr( "Cartography task in progress: %1%" )
                                            .arg( static_cast<int>( info.progressPercentage *
                                                                   100.0 ) ) );
              } );
@@ -335,13 +335,13 @@ bool CartographyDock::submitOperatorJob(
                      return;
                  }
                  const QString message = info.errorMessage.isEmpty()
-                                           ? tr( "%1 任务异常终止。" ).arg( operatorId )
+                                           ? tr( "%1 task terminated abnormally." ).arg( operatorId )
                                            : info.errorMessage;
                  if ( !info.resultPayload.isNull() && m_reportView )
-                     showReport( tr( "%1 结构化错误" ).arg( operatorId ), info.resultPayload );
+                     showReport( tr( "%1 structured errors" ).arg( operatorId ), info.resultPayload );
                  onDone( {}, message );
              } );
-    emit statusMessage( tr( "%1 已提交后台任务（#%2）。" ).arg( operatorId ).arg( taskId ) );
+    emit statusMessage( tr( "%1 submitted as background task (#%2)." ).arg( operatorId ).arg( taskId ) );
     return true;
 }
 
@@ -392,19 +392,19 @@ void CartographyDock::runCompose()
           }
           adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : draft );
           const bool compiled = result.isMember( "compiled" ) && result["compiled"].asBool();
-          showReport( compiled ? tr( "排版完成（结构化摘要）" ) : tr( "排版未通过" ), result );
+          showReport( compiled ? tr( "Compose finished (structured summary)" ) : tr( "Compose did not pass" ), result );
           if ( compiled )
           {
               updatePreview( m_composedLayoutName );
-              emit statusMessage( tr( "排版完成：布局 %1 已生成。" ).arg( m_composedLayoutName ) );
+              emit statusMessage( tr( "Compose finished: layout %1 generated." ).arg( m_composedLayoutName ) );
           }
           else
           {
-              emit statusMessage( tr( "排版失败：见质量报告。" ) );
+              emit statusMessage( tr( "Compose failed: see the quality report." ) );
           }
       } );
     if ( submitted )
-        m_reportView->setPlainText( tr( "排版任务已提交。" ) );
+        m_reportView->setPlainText( tr( "Compose task submitted." ) );
 }
 
 void CartographyDock::runPreflight()
@@ -430,8 +430,8 @@ void CartographyDock::runPreflight()
               emit statusMessage( jobError );
               return;
           }
-          showReport( tr( "检查报告" ), result );
-          emit statusMessage( tr( "检查完成：见质量报告。" ) );
+          showReport( tr( "Check report" ), result );
+          emit statusMessage( tr( "Check finished: see the quality report." ) );
       } );
 }
 
@@ -459,8 +459,8 @@ void CartographyDock::runRepair()
               return;
           }
           adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : spec );
-          showReport( tr( "修复台账（applied / still_reported）" ), result );
-          emit statusMessage( tr( "修复完成：%1 项已应用（%2 轮）。" )
+          showReport( tr( "Fix ledger (applied / still_reported)" ), result );
+          emit statusMessage( tr( "Fix finished: %1 applied (%2 rounds)." )
                                   .arg( result.isMember( "repairs_applied" )
                                             ? result["repairs_applied"].asInt()
                                             : 0 )
@@ -474,7 +474,7 @@ void CartographyDock::runExport()
 {
     if ( m_composedLayoutName.isEmpty() )
     {
-        emit statusMessage( tr( "还没有已排版的布局：先执行「排版生成」。" ) );
+        emit statusMessage( tr( "No composed layout yet: run Compose first." ) );
         return;
     }
     const QString directory =
@@ -482,7 +482,7 @@ void CartographyDock::runExport()
                                                                  : m_directoryEdit->text().trimmed();
     if ( directory.isEmpty() )
     {
-        emit statusMessage( tr( "请选择导出目录。" ) );
+        emit statusMessage( tr( "Choose an export directory first." ) );
         return;
     }
     Json::Value params( Json::objectValue );
@@ -498,13 +498,13 @@ void CartographyDock::runExport()
               emit statusMessage( jobError );
               return;
           }
-          showReport( tr( "导出证据（原子写入 + sha256）" ), result );
+          showReport( tr( "Export evidence (atomic write + sha256)" ), result );
           if ( !result.isObject() || !result.isMember( "path" ) || !result["path"].isString() )
           {
-              emit statusMessage( tr( "导出返回缺少路径（见报告）。" ) );
+              emit statusMessage( tr( "Export result is missing a path (see report)." ) );
               return;
           }
-          emit statusMessage( tr( "导出完成：%1" )
+          emit statusMessage( tr( "Export finished: %1" )
                                   .arg( QString::fromStdString( result["path"].asString() ) ) );
       } );
 }
@@ -527,7 +527,7 @@ void CartographyDock::runProduce()
                                                                  : m_directoryEdit->text().trimmed();
     if ( directory.isEmpty() )
     {
-        emit statusMessage( tr( "请选择导出目录。" ) );
+        emit statusMessage( tr( "Choose an export directory first." ) );
         return;
     }
     Json::Value params( Json::objectValue );
@@ -546,13 +546,13 @@ void CartographyDock::runProduce()
           }
           if ( result.isMember( "mapspec" ) )
               adoptSpec( result["mapspec"] );
-          showReport( tr( "生产交付（原子发布 + 清单）" ), result );
+          showReport( tr( "Production delivery (atomic publish + manifest)" ), result );
           const QString delivered =
             result.isMember( "output" ) && result["output"].isString()
               ? QString::fromStdString( result["output"].asString() )
               : QString();
           const int pages = result.isMember( "page_count" ) ? result["page_count"].asInt() : 0;
-          emit statusMessage( tr( "生产完成：%1（%2 页）" ).arg( delivered ).arg( pages ) );
+          emit statusMessage( tr( "Production finished: %1 (%2 pages)" ).arg( delivered ).arg( pages ) );
       } );
 }
 
@@ -562,9 +562,9 @@ void CartographyDock::cancelRunningJob()
         return;
     const long taskId = m_runningTaskId;
     if ( sicnu::TaskCenter::instance().cancelTask( taskId ) )
-        emit statusMessage( tr( "已请求取消任务 #%1。" ).arg( taskId ) );
+        emit statusMessage( tr( "Cancellation requested for task #%1." ).arg( taskId ) );
     else
-        emit statusMessage( tr( "任务 #%1 无法取消（可能已结束）。" ).arg( taskId ) );
+        emit statusMessage( tr( "Task #%1 cannot be cancelled (it may have finished)." ).arg( taskId ) );
 }
 
 void CartographyDock::updatePreview( const QString &layoutName )
@@ -572,14 +572,14 @@ void CartographyDock::updatePreview( const QString &layoutName )
     QgsPrintLayout *layout = LayoutService::instance().findLayout( layoutName );
     if ( !layout )
     {
-        m_previewLabel->setText( tr( "布局 %1 不可用（可能已被移除）。" ).arg( layoutName ) );
+        m_previewLabel->setText( tr( "Layout %1 is unavailable (it may have been removed)." ).arg( layoutName ) );
         return;
     }
     QgsLayoutExporter exporter( layout );
     const QImage image = exporter.renderPageToImage( 0, QSize(), kPreviewDpi );
     if ( image.isNull() )
     {
-        m_previewLabel->setText( tr( "预览渲染失败（布局仍可导出）。" ) );
+        m_previewLabel->setText( tr( "Preview rendering failed (the layout can still be exported)." ) );
         return;
     }
     QPixmap pixmap = QPixmap::fromImage( image );

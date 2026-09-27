@@ -186,6 +186,22 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
         readFile( joinPath( sourceRoot,
                             "src/agent/harness/harness_error.h" ) ),
         errReport );
+    // The autonomy reason codes are a closed, stable vocabulary too — but
+    // their constants live in autonomy_decision.h, not harness_error.h.
+    // Without this scan every diagnostics.json page that curates an
+    // autonomy code dangles (its error_code node would never exist).
+    errScanner.scanHarnessCodes(
+        readFile( joinPath( sourceRoot,
+                            "src/agent/autonomy/autonomy_decision.h" ) ),
+        errReport );
+    // The runtime table (harness_error.cpp) is the wire-truth superset: SAR /
+    // InSAR codes ride the wire as literals at their raise sites and have no
+    // header constant. The diagnostics census consumes this same table, so
+    // the graph's error_code universe must include it.
+    errScanner.scanHarnessErrorTable(
+        readFile( joinPath( sourceRoot,
+                            "src/agent/harness/harness_error.cpp" ) ),
+        errReport );
     for ( const auto &[name, str] : errReport.caseMap )
     {
         if ( name == "Success" )

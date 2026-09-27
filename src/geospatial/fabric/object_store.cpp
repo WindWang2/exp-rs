@@ -431,11 +431,34 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
     if ( !credentials.endpoint.empty() )
     {
       // Path-style addressing against a custom endpoint (MinIO/loopback
-      // shapes); https endpoints keep the default AWS_HTTPS.
-      installConfigKey( mSetKeys, kS3Endpoint, credentials.endpoint );
+      // shapes). The endpoint is normalized to the bare host[:port] form
+      // with the scheme carried explicitly in AWS_HTTPS: GDAL versions
+      // disagree on whether AWS_S3_ENDPOINT may itself carry a scheme
+      // (builds that prepend their own composed "http://http://…" request
+      // URLs), while every build honors the bare form — the seam, not the
+      // GDAL build, owns the scheme/host decomposition. A scheme-less
+      // endpoint keeps the ambient AWS_HTTPS default (https).
+      std::string endpoint = credentials.endpoint;
+      const std::string lowered = [ & ] {
+        std::string text = endpoint;
+        std::transform( text.begin(), text.end(), text.begin(),
+                        [] ( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        return text;
+      }();
+      const bool explicitHttps = lowered.rfind( "https://", 0 ) == 0;
+      const bool explicitHttp = lowered.rfind( "http://", 0 ) == 0;
+      if ( explicitHttps )
+        endpoint = endpoint.substr( 8 );
+      else if ( explicitHttp )
+        endpoint = endpoint.substr( 7 );
+      while ( !endpoint.empty() && endpoint.back() == '/' )
+        endpoint.pop_back();
+      installConfigKey( mSetKeys, kS3Endpoint, endpoint );
       installConfigKey( mSetKeys, kS3VirtualHosting, "FALSE" );
-      if ( credentials.endpoint.rfind( "http://", 0 ) == 0 )
+      if ( explicitHttp )
         installConfigKey( mSetKeys, kS3Https, "NO" );
+      else if ( explicitHttps )
+        installConfigKey( mSetKeys, kS3Https, "YES" );
     }
   }
   else if ( mPrefix == "/vsiaz/" )

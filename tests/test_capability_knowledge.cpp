@@ -691,11 +691,6 @@ TEST_CASE( "live repair capability source routes the real knowledge documents",
     CHECK( shrunkenIds.count( "rs:align" ) == 1 );
 }
 
-// R4 processing-meta note: the TEST_CASE above was missing its closing brace
-// on master (the file did not compile; upstream repair in PR #1335). The one
-// brace is restored here so the D8 pages/drift gates can run on this track;
-// rebase onto #1335's version when it lands.
-
 TEST_CASE( "D8 revision seam: content changes advance the generation, "
            "same-content rescans do not",
            "[capability][d8][revision]" )
