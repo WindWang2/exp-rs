@@ -184,49 +184,39 @@ TEST_CASE( "dataset fingerprint is invariant under checkout byte perturbation",
         { "pretty vs compact spelling",
           []( const QJsonObject &o ) { return reindented( o, "  ", "\n" ); },
           []( const QJsonObject &o ) { return compactText( o ); } },
-        { "key insertion order reversed",
-          []( const QJsonObject &o ) {
-              QJsonObject reversed;
-              const QStringList keys = o.keys();
-              for ( auto it = keys.rbegin(); it != keys.rend(); ++it )
-                  reversed.insert( *it, o.value( *it ) );
-              return compactText( reversed );
+        { "key order reversed at the byte level (flat document)",
+          []( const QJsonObject & ) {
+              // Hand-serialized spellings: QJsonObject re-sorts after parse,
+              // so the variant must exist in the BYTES to be meaningful —
+              // the same pairs, reverse order, as an editor might write.
+              return QByteArray(
+                  "{\"zz_last\":1,\"middle\":2.5,\"aa_first\":true,\"s\":\"x\"}" );
           },
-          []( const QJsonObject &o ) { return compactText( o ); } },
+          []( const QJsonObject & ) {
+              return QByteArray(
+                  "{\"aa_first\":true,\"middle\":2.5,\"s\":\"x\",\"zz_last\":1}" );
+          },
+          false },
         { "integer spellings 1 / 1.0 / 1e0 agree",
           []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "count" ), 1 );
-              return compactText( variant );
+              return compactText( o ).replace( "\"count\":2.5", "\"count\":1e0" );
           },
           []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "count" ), 1.0 );
-              return compactText( variant );
+              return compactText( o ).replace( "\"count\":2.5", "\"count\":1.0" );
           },
           false },
         { "zero spellings 0 / -0.0 agree",
           []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "count" ), 0 );
-              return compactText( variant );
+              return compactText( o ).replace( "\"count\":2.5", "\"count\":0" );
           },
           []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "count" ), -0.0 );
-              return compactText( variant );
+              return compactText( o ).replace( "\"count\":2.5", "\"count\":-0.0" );
           },
           false },
         { "decimal spellings 0.1 / 1e-1 agree",
+          []( const QJsonObject &o ) { return compactText( o ); },
           []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "ratio" ), 0.1 );
-              return compactText( variant );
-          },
-          []( const QJsonObject &o ) {
-              QJsonObject variant = o;
-              variant.insert( QStringLiteral( "ratio" ), 1e-1 );
-              return compactText( variant );
+              return compactText( o ).replace( "\"ratio\":0.1", "\"ratio\":1e-1" );
           },
           false },
     };
