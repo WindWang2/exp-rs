@@ -25,4 +25,4 @@
 - 全部 12 条处置已于本轨完成：11 修 + ⑫ fixture 级收窄（真实平台部分书面保留）。
 - 5 项移交清单见 DECISIONS.md 末节（dataset 侧 lineage API、splits Result 化、CLI 展示路径、真实平台重放、incomingEdges 同型下推）。
 - 评审 P1-1（analyzeStudy 损坏行漏网）与 P2-1（limit≥10000 探测失效）已作为修复批次补入（5925e8aed9）。
-- 续作会话（2026-09-28）merge origin/master a726d17a6（+425 提交，白名单 src 零上游重叠）后逐条 rg 复验：12/12 修复实证在场，处置账面与代码一致（③⑦ 状态行曾滞留 PENDING/待定，本轮回填，见账本 3-6 轮）。
+- 续作会话（2026-09-28）merge origin/master a726d17a6（+425 提交，白名单 src 零上游重叠）后逐条 rg 复验：12/12 修复实证在场，处置账面与代码一致（③⑦ 状态行曾滞留 PENDING/待定，本轮回填，见账本 3-2 轮）。
