@@ -132,22 +132,17 @@ bool writeFileSync( const std::string &path, const std::string &bytes, std::stri
   }
   // Windows counterpart of fsync(2) above: the tmp file must reach stable
   // storage before rename() publishes it, or a crash can lose a save the
-  // caller was told succeeded (the documented old-or-new contract).
-  const std::wstring widePath = sicnu::portable::wideFromUtf8( path );
-  const HANDLE handle = ::CreateFileW( widePath.c_str(), GENERIC_WRITE,
-                                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
-  if ( handle == INVALID_HANDLE_VALUE )
-  {
-    error = "cannot reopen tmp file for flush: " +
-            std::to_string( ::GetLastError() );
-    return false;
-  }
-  const BOOL flushed = ::FlushFileBuffers( handle );
-  if ( !flushed )
-    error = "FlushFileBuffers failed: " + std::to_string( ::GetLastError() );
-  ::CloseHandle( handle );
-  return flushed != FALSE;
+  // caller was told succeeded (the documented old-or-new contract). The
+  // flush rides platform/portable.h's syncFileUtf8 — the single authority
+  // for the reopen+FlushFileBuffers branch.
+  sicnu::portable::SyncFailure failure = sicnu::portable::SyncFailure::OpenFailed;
+  std::uint64_t osError = 0;
+  if ( sicnu::portable::syncFileUtf8( path, &failure, &osError ) )
+    return true;
+  error = failure == sicnu::portable::SyncFailure::OpenFailed
+            ? "cannot reopen tmp file for flush: " + std::to_string( osError )
+            : "FlushFileBuffers failed: " + std::to_string( osError );
+  return false;
 #endif
 }
 
