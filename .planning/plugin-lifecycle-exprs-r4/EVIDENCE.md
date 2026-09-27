@@ -65,7 +65,7 @@ is running each of the 20 plugin/exprs BINARIES directly, twice.
 
 ## §3 New r4 suites — red/green provenance
 
-- `test_plugin_lifecycle_halffail_r4` — 9 cases / 67 assertions, ALL GREEN
+- `test_plugin_lifecycle_halffail_r4` — 9 cases / 68 assertions, ALL GREEN
   (pass 1 and 2). Notes: initially 8/9; the failing assertion looked for the
   dependency-spec refusal in the REGISTRY diagnostics — the scan-time
   validation verdict lives on the RECORD's diagnostics (plugin_discovery.cpp
