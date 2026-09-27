@@ -3345,6 +3345,11 @@ target_link_libraries(test_split_reproducibility PRIVATE Sicnu::dataset SQLite::
 sicnu_add_test(test_leakage_audit_coverage TIMEOUT 120)
 target_link_libraries(test_leakage_audit_coverage PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 version migration: golden v1 fixture tripwire, foreign-version
+# refusal matrix, diff ordering determinism.
+sicnu_add_test(test_dataset_version_migration TIMEOUT 120)
+target_link_libraries(test_dataset_version_migration PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
@@ -3639,6 +3644,10 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
+
+# Track 13 R4 governance mirror consistency: reference-family chain walk,
+# planted dangling-reference surfacing, fingerprint lookup convention.
+sicnu_add_test(test_data_governance_consistency TIMEOUT 300)
 
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
