@@ -71,6 +71,15 @@ endfunction()
 # Helper function to add a test executable. Extra args (TIMEOUT n,
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
 # properties — previously they were accepted and silently dropped.
+# GNU/ELF-only whole-archive fragment for the sicnu_agent_loop stopgap (see
+# the sicnu_add_test comment). Empty on non-GNU platforms: MSVC/PE executables
+# do not export symbols to DLLs and Mach-O dylibs link their undefined symbols
+# at library time, so there is nothing this fragment could fix there.
+if(UNIX AND NOT APPLE)
+  set(SICNU_TEST_AGENT_LOOP_LINK
+      "-Wl,--whole-archive" sicnu_agent_loop "-Wl,--no-whole-archive")
+endif()
+
 function(sicnu_add_test NAME)
   cmake_parse_arguments(SAT "" "TEST_PREFIX" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
@@ -86,6 +95,17 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    # GNU/ELF stopgap for sicnu_agent.so referencing agent_loop symbols
+    # (e.g. VerificationReport::aggregate via tools/agent_session_adapter.cpp)
+    # while src/agent/CMakeLists.txt lacks the sicnu_agent_loop link edge —
+    # the library-level fix is in-flight PR #1335 (P0-3); GNU ld never
+    # extracts archive members to satisfy a SHARED library's undefined
+    # symbols, so the archive is force-included here and the executable
+    # exports the definitions back to libsicnu_agent.so at runtime.
+    # Spelling note: classic -Wl flags, not $<LINK_LIBRARY:WHOLE_ARCHIVE>,
+    # because that genex needs CMake >= 3.24 while this project declares
+    # cmake_minimum_required 3.20. Both edges drop once #1335 merges.
+    ${SICNU_TEST_AGENT_LOOP_LINK}
     sicnu_operators
     # agent_workflow_executor (inside sicnu_task_center) routes through
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
@@ -818,6 +838,7 @@ target_link_libraries(test_mapspec PRIVATE
   qgis_gui
   sicnu_data
   sicnu_agent
+  ${SICNU_TEST_AGENT_LOOP_LINK}
   sicnu_operators
   sicnu_workflow
   sicnu_processing
@@ -12712,6 +12733,19 @@ endif()
 # standard sicnu_add_test registration is kept and the vendored gui is built
 # anyway. Anyone who wants to make the observatory gui-free has to break that
 # transitive edge in production CMake, not here.
+
+# Operator-path wing of the observatory (same harness, tests/perf/
+# perf_observatory.h): real operator workloads (spectral index, qa_mask,
+# recode, majority filter, temporal composite, change detection) as "obs op"
+# baseline records, plus the "memory guard" O(tile) RSS guards for the
+# documented streaming promises (ADR 0073 / USER_GUIDE temporal window /
+# ADR 0089). RUN_SERIAL keeps the RSS measurements uncontended; the guards pin
+# GDAL_CACHEMAX locally so the block cache is a constant, not a confounder.
+sicnu_add_test(test_perf_operator_observatory TIMEOUT 900 RUN_SERIAL TRUE)
+target_include_directories(test_perf_operator_observatory PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_link_jsoncpp(test_perf_operator_observatory)
 
 # ---------------------------------------------------------------------------
 # Data Scale 13.0 (Track C) — structural scale oracles for the DataManager

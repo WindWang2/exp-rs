@@ -222,6 +222,15 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
     const int totalBlocks = (height + blockRows - 1) / blockRows;
     int blockIndex = 0;
     bool ok = true;
+    // Scratch buffers sized once for the largest halo block: reallocating
+    // them per block put two allocations on every iteration of the streaming
+    // loop (the per-block sizes below only ever shrink).
+    const size_t maxReadCount =
+        static_cast<size_t>(width)
+        * std::min( static_cast<size_t>( height ),
+                    static_cast<size_t>( blockRows ) + 2 * static_cast<size_t>( half ) );
+    std::vector<int> labels(maxReadCount);
+    std::vector<float> blockScratch(maxReadCount);
     for (int y0 = 0; y0 < height && ok; y0 += blockRows, ++blockIndex) {
         context.throwIfCancelled();
         const int rows = std::min(blockRows, height - y0);
@@ -230,9 +239,8 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
         const int readRows = readEnd - readY0;
         const size_t readCount = static_cast<size_t>(width) * readRows;
 
-        std::vector<int> labels(readCount);
         {
-            std::vector<float> block(readCount);
+            std::vector<float> &block = blockScratch;
             if (!inDs.readBandWindow(1, 0, readY0, width, readRows, block.data())) {
                 throw RSOperatorError(ErrorCode::GdalError,
                                       "Failed to read label band: " + inputPath);

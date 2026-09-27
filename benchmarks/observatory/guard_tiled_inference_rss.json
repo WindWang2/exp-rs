@@ -1,0 +1,58 @@
+{
+  "counts" : 
+  {
+    "cache_hits" : 0,
+    "cache_misses" : 0,
+    "files_written" : 1,
+    "pages_requested" : 0,
+    "rows_materialized" : 0,
+    "tasks_dispatched" : 0
+  },
+  "environment" : 
+  {
+    "build_type" : "Release",
+    "compiler" : "gcc 16",
+    "cores" : 16,
+    "cpu_model" : "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "os" : "linux"
+  },
+  "extra" : 
+  {
+    "checksum" : 65664987.311338685,
+    "output_sum" : 16776725747.400202,
+    "tiles" : 256
+  },
+  "generated_at" : "2026-09-27T00:05:57Z",
+  "measurement" : 
+  {
+    "cpu_ms" : 1657.5419999999999,
+    "io" : 
+    {
+      "available" : true,
+      "unavailable_reason" : null
+    },
+    "peak_rss_baseline_mb" : 116,
+    "peak_rss_mb" : 66,
+    "peak_rss_unavailable_reason" : null,
+    "read_bytes" : 0,
+    "read_ops" : 963,
+    "wall_ms" : 1612.6555920000001,
+    "write_bytes" : 0,
+    "write_ops" : 1173
+  },
+  "scale" : 
+  {
+    "items" : 16777216,
+    "kind" : "small",
+    "probes" : 1
+  },
+  "schema" : "sicnu-perf-observatory/1",
+  "structural" : 
+  {
+    "bound_mb" : 96.0,
+    "gdal_cache_pinned_mb" : 64,
+    "promise" : "ADR 0073 Streaming O(tile); task_resource_budget.cpp Streaming=64MiB",
+    "tile_pixels" : 65536
+  },
+  "workload" : "guard_tiled_inference_rss"
+}
