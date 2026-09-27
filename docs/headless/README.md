@@ -14,7 +14,7 @@ row without a dispatch branch) fails the suite.
 
 | command | sub-commands |
 |---|---|
-| `algorithms` | `list`, `search [text] [--group g] [--tag a,b] [--purpose p] [--task f] [--modality m] [--input-type T] [--output-type T] [--large-raster-safe] [--limit n] [--cursor n]`, `schema <id>` |
+| `algorithms` | `list`, `search [text] [filters…]` — text or at least one filter is required (`--group g`, `--tag a,b`, `--purpose p`, `--task f`, `--modality m`, `--input-type T`, `--output-type T`, `--large-raster-safe`, `--limit n`, `--cursor n`), `schema <id>` |
 | `run` | `<operator-id> [--param k=v ...] [--params-file f]` |
 | `pipeline` | `run <file.json>`, `validate <file>`, `resume <run_id>` |
 | `workflow` | `run <file>`, `validate <file>`, `list-runs`, `resume <id>` |

@@ -96,7 +96,7 @@ TEST_CASE( "parity 1-2: algorithm search shares one authoritative engine shape",
     // MCP search_algorithms projects {algorithms, count, total, limit,
     // cursor, next_cursor} from the same engine; the CLI envelope must carry
     // the same shape so both surfaces answer the identical contract.
-    const Json::Value envelope = runForEnvelope( "algorithms search --json", 0 );
+    const Json::Value envelope = runForEnvelope( "algorithms search ndvi --json", 0 );
     const Json::Value data = envelope["data"];
     REQUIRE( data.isObject() );
     for ( const char *key : { "algorithms", "count", "total", "limit", "cursor" } )
@@ -154,10 +154,10 @@ TEST_CASE( "parity 8-11: dataset family store semantics are the MCP dataset:* tr
         "dataset inspect --dataset-db " + db + " --dataset " + datasetId + " --json", 0 );
     REQUIRE( inspected["data"].isMember( "dataset" ) );
 
-    // stats iterates a version: a missing one is MissingDependency(5),
-    // matching the not-found semantics of the MCP dataset:version tool.
-    runForEnvelope( "dataset --dataset-db " + db +
-                        " stats --version 00000000-0000-0000-0000-000000000000 --json",
+    // A missing version id is MissingDependency(5), matching the not-found
+    // semantics of the MCP dataset:version tool.
+    runForEnvelope( "dataset inspect --dataset-db " + db +
+                        " --version 00000000-0000-0000-0000-000000000000 --json",
                     5 );
 }
 

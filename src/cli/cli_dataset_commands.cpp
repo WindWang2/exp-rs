@@ -202,7 +202,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
     // Track 14 (WP-C): the verb is validated first — the unknown-subcommand
     // rejection doubles as the machine-readable subcommand vocabulary, and a
     // bogus verb must be rejected regardless of any other flags.
-    if ( sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+    // An EMPTY verb (bare `dataset`) is not an unknown verb — let the flag
+    // gates answer with the missing --dataset-db requirement instead.
+    if ( !sub.isEmpty() && sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
          sub != QLatin1String( "validate" ) && sub != QLatin1String( "diff" ) &&
          sub != QLatin1String( "stats" ) && sub != QLatin1String( "list" ) &&
          sub != QLatin1String( "version" ) && sub != QLatin1String( "label-schema" ) &&
@@ -588,7 +590,7 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
 {
     const CommonOptions options = parseOptions( args );
     // Track 14 (WP-C): verb validated first (see dataset side).
-    if ( sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+    if ( !sub.isEmpty() && sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
          sub != QLatin1String( "compare" ) && sub != QLatin1String( "list" ) &&
          sub != QLatin1String( "run" ) )
         return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString(),
@@ -734,7 +736,7 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
     // Track 14 (WP-C): verb validated first (see dataset side).
-    if ( sub != QLatin1String( "export" ) && sub != QLatin1String( "validate" ) &&
+    if ( !sub.isEmpty() && sub != QLatin1String( "export" ) && sub != QLatin1String( "validate" ) &&
          sub != QLatin1String( "inspect" ) )
         return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
                      kInvalidInput,

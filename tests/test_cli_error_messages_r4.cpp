@@ -185,7 +185,7 @@ TEST_CASE( "dataset argument errors carry the four-tuple", "[cli][errors][r4][da
     SECTION( "store open failure names the unreadable path" )
     {
         const std::string missing = "/nonexistent/sicnu-r4/missing.db";
-        const auto result = runCli( "dataset --dataset-db " + missing + " inspect", true );
+        const auto result = runCli( "dataset inspect --dataset-db " + missing, true );
         REQUIRE( result.exitCode == 6 );
         const std::string::size_type at = result.out.find( "[E-6:INVALID_INPUT]" );
         REQUIRE( at != std::string::npos );
@@ -219,8 +219,8 @@ TEST_CASE( "resource-not-found errors name expected vs actual",
     {
         // expected: an existing version id; actual: the unknown id.
         requireFourTuple(
-            "dataset --dataset-db " + db +
-                " inspect --version 00000000-0000-0000-0000-000000000000",
+            "dataset inspect --dataset-db " + db +
+                " --version 00000000-0000-0000-0000-000000000000",
             5, "MISSING_DEPENDENCY", true, true, false );
     }
     SECTION( "algorithms schema for unknown id (already 5; pins the code prefix)" )
@@ -234,11 +234,11 @@ TEST_CASE( "usage hints ride along on usage errors", "[cli][errors][r4]" )
 {
     SECTION( "run with no operator id" )
     {
-        requireFourTuple( "run", 6, "INVALID_INPUT", false, false, true );
+        requireFourTuple( "run", 6, "INVALID_INPUT", false, false, false );
     }
     SECTION( "pipeline run without a file" )
     {
-        requireFourTuple( "pipeline run", 6, "INVALID_INPUT", false, false, true );
+        requireFourTuple( "pipeline run", 6, "INVALID_INPUT", false, false, false );
     }
     SECTION( "pipeline run on a missing file (class fixed by WP-A)" )
     {

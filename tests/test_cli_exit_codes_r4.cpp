@@ -139,9 +139,11 @@ TEST_CASE( "usage errors exit InvalidInput (6)", "[cli][exit-codes][r4]" )
     {
         requireErrorEnvelope( "workflow bogus-sub", "workflow", kInvalidInput );
     }
-    SECTION( "plugin with no subcommand" )
+    SECTION( "plugin with unknown subcommand" )
     {
-        requireErrorEnvelope( "plugin", "plugin", kInvalidInput );
+        // Bare `plugin` defaults to `list` (same convention as algorithms);
+        // only an unknown verb is a usage error.
+        requireErrorEnvelope( "plugin bogus-sub-r4", "plugin", kInvalidInput );
     }
     SECTION( "algorithms schema with no id" )
     {
@@ -286,7 +288,9 @@ TEST_CASE( "dataset family failure classes follow the contract",
     SECTION( "store open failure on a missing database file" )
     {
         // RED at introduction (was GenericError 1).
-        requireErrorEnvelope( "dataset --dataset-db " + dir.file( "no-store.db" ) + " inspect",
+        // A non-existent path is CREATEd by open(); a directory can never be
+        // a store — that is the real open-failure trigger.
+        requireErrorEnvelope( "dataset inspect --dataset-db " + dir.path.string(),
                               "dataset", kInvalidInput );
     }
     SECTION( "missing required --name for create" )
@@ -298,8 +302,8 @@ TEST_CASE( "dataset family failure classes follow the contract",
         // A valid store queried for a nonexistent version: the contract's
         // "unknown resource" class.
         // RED at introduction (was GenericError 1).
-        requireErrorEnvelope( "dataset --dataset-db " + db +
-                                  " inspect --version 00000000-0000-0000-0000-000000000000",
+        requireErrorEnvelope( "dataset inspect --dataset-db " + db +
+                                  " --version 00000000-0000-0000-0000-000000000000",
                               "dataset", kMissingDependency );
     }
 }
