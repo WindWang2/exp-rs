@@ -34,6 +34,7 @@
 #include "agent/tool_catalog/agent_tool.h"
 #include "agent/tool_catalog/meta_protocol_tools.h"
 #include "agent/tool_catalog/surface_registry.h"
+#include "agent/tool_catalog/workspace_containment.h"
 #include "agent/tool_catalog/surface_progress.h"
 #include "agent/tool_catalog/surface_redaction.h"
 #include "agent/spatial_tools/spatial_tool.h"
@@ -409,8 +410,48 @@ McpServer::~McpServer()
     }
 }
 
+QString McpServer::installWorkspaceSandbox()
+{
+    namespace containment = sicnu::agent::tool_catalog::containment;
+    const QString configured = qEnvironmentVariable("SICNU_MCP_WORKSPACE").trimmed();
+    const QString root = containment::effectiveMcpWorkspaceRoot();
+    const QString canonical = containment::canonicalWorkspaceRoot(root);
+    if (canonical.isEmpty() || !QFileInfo(canonical).isDir())
+    {
+        // Fail closed: keep the (unresolvable) root so every path argument
+        // is rejected, and say so loudly instead of silently opening up.
+        qputenv("SICNU_MCP_WORKSPACE", root.toUtf8());
+        std::cerr << "MCP workspace sandbox: '" << root.toStdString()
+                  << "' does not exist; file-path tool arguments will be rejected" << std::endl;
+        return root;
+    }
+    // Publish the effective root so every downstream consumer that reads the
+    // variable directly (data-platform anchoring, exprs external-process
+    // effect policy, governance store) enforces the SAME sandbox.
+    qputenv("SICNU_MCP_WORKSPACE", canonical.toUtf8());
+    // Review P1-2: relative path arguments are VALIDATED against the
+    // workspace, so they must also be OPENED against it. Algorithms receive
+    // the raw strings and open them relative to the process CWD, so the MCP
+    // process runs with the workspace as its working directory — check and
+    // use resolve against the same base by construction.
+    if (QDir::current().canonicalPath() != canonical && !QDir::setCurrent(canonical))
+        std::cerr << "MCP workspace sandbox: cannot chdir into '" << canonical.toStdString()
+                  << "'; relative path arguments may not resolve inside it" << std::endl;
+    // main() installs the sandbox before start() re-asserts it: log once.
+    static QString announced;
+    if (announced != canonical)
+    {
+        announced = canonical;
+        std::cerr << "MCP workspace sandbox: " << canonical.toStdString()
+                  << (configured.isEmpty() ? " (default; set SICNU_MCP_WORKSPACE to change)" : "")
+                  << std::endl;
+    }
+    return canonical;
+}
+
 void McpServer::start(QCoreApplication *app)
 {
+    installWorkspaceSandbox();
     ProcessingJobAdapter::registerProcessingJobExecutor();
     mApp = app;
     mReader = new StdinReader(this);
@@ -519,8 +560,8 @@ void McpServer::handleRequest(const QVariantMap &request)
         // discover it from a rejection message.
         result[QStringLiteral("instructions")] = QStringLiteral(
             "File path arguments accept absolute paths or paths relative to the "
-            "directory named by the SICNU_MCP_WORKSPACE environment variable; when "
-            "that variable is set, paths resolving outside it are rejected. "
+            "server's workspace directory (SICNU_MCP_WORKSPACE, defaulting to the "
+            "server's working directory); paths resolving outside it are rejected. "
             "Committed outputs are registered in the data catalog and are listed "
             "by data:list_layers even when not displayed on a map.");
 
@@ -1173,17 +1214,14 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
     // the containment check on the resolved path: canonicalization inside
     // absolutePathOutsideWorkspace must see the joined path or a crafted
     // "../" segment would escape the sandbox.
-    const QString workspace = QProcessEnvironment::systemEnvironment().value(
-        QStringLiteral("SICNU_MCP_WORKSPACE"));
-    QString resolved = rawPath;
-    if (QFileInfo(rawPath).isRelative() && !workspace.isEmpty())
-        resolved = QDir(workspace).filePath(rawPath);
+    // Default-deny (review P1-1): with SICNU_MCP_WORKSPACE unset the sandbox
+    // is the effective default root, never "every path is allowed".
+    const QString workspace = sicnu::agent::tool_catalog::containment::effectiveMcpWorkspaceRoot();
+    const QString resolved =
+        sicnu::agent::tool_catalog::containment::resolveAgainstWorkspace(rawPath, workspace);
 
-    // With no sandbox configured (env unset) every path is allowed — the
-    // same policy as validateWorkspacePaths, which returns early instead of
-    // letting absolutePathOutsideWorkspace treat an empty root as the cwd.
     QString detail;
-    if (!workspace.isEmpty() && absolutePathOutsideWorkspace(resolved, workspace, &detail))
+    if (absolutePathOutsideWorkspace(resolved, workspace, &detail))
         throw McpToolError(
             QStringLiteral("artifact_read path rejected: %1").arg(detail));
 
@@ -1647,10 +1685,10 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
 
 bool McpServer::validateWorkspacePaths(const QVariantMap &parameters, QString *reason)
 {
-    const QString workspace = QProcessEnvironment::systemEnvironment().value(
-        QStringLiteral("SICNU_MCP_WORKSPACE"));
-    if (workspace.isEmpty())
-        return true;
+    // Default-deny (review P1-1): an unset SICNU_MCP_WORKSPACE no longer
+    // means "every path is allowed" — the sandbox falls back to the process
+    // CWD (or ~/.exp-rs/workspace when the CWD is / or $HOME).
+    const QString workspace = sicnu::agent::tool_catalog::containment::effectiveMcpWorkspaceRoot();
 
     QString detail;
     if (collectOutsideWorkspace(parameters, workspace, &detail)) {

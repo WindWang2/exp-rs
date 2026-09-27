@@ -6,6 +6,7 @@
 #include "agent_tool_catalog.h"
 #include "data_platform_tools.h"
 #include "interaction_tool_registry.h"
+#include "workspace_containment.h"
 #include "../env_flag.h"
 
 #include <QDir>
@@ -220,124 +221,11 @@ bool headlessHidesCatalogTool( const AgentTool &tool )
 bool surfacePathOutsideWorkspace( const QString &pathValue, const QString &workspaceRoot,
                                   QString *detail )
 {
-    // An unset/blank root means NO sandbox is configured: nothing is outside
-    // it. (Without this guard an empty root would canonicalize to the CWD and
-    // silently sandbox against the process working directory instead.)
-    if ( workspaceRoot.trimmed().isEmpty() )
-        return false;
-    if ( pathValue.isEmpty() )
-        return false;
-
-    // URL / VSI virtual-path awareness (#722-era remote policy): a network
-    // data reference is NOT a filesystem path — treating one as relative
-    // (QFileInfo::isAbsolute() == false for "https://host/x.tif") wrongly
-    // ALLOWED any URL, while on Linux "/vsicurl/https://..." canonicalized
-    // outside the workspace and was wrongly REJECTED. Policy: remote
-    // http(s) data references (optionally /vsicurl/-prefixed) are allowed
-    // read-only data inputs (bounded by GDAL HTTP timeouts); file:// maps to
-    // its local path and falls through to the workspace check; every other
-    // scheme is rejected. SICNU_MCP_ALLOW_REMOTE=0 restores strict local-only.
-    {
-        const QString trimmed = pathValue.trimmed();
-        const QString lowered = trimmed.toLower();
-        const bool vsiPrefixed = lowered.startsWith( QStringLiteral( "/vsicurl/" ) );
-        const bool vsiOther = lowered.startsWith( QStringLiteral( "/vsi" ) ) && !vsiPrefixed;
-        const bool httpUrl = lowered.startsWith( QStringLiteral( "http://" ) ) ||
-                             lowered.startsWith( QStringLiteral( "https://" ) );
-        const bool fileUrl = lowered.startsWith( QStringLiteral( "file://" ) );
-        if ( vsiOther && !vsiPrefixed )
-        {
-            if ( detail )
-                *detail = QStringLiteral( "Only /vsicurl/ remote sources are supported: %1" ).arg( pathValue );
-            return true;
-        }
-        if ( httpUrl || vsiPrefixed )
-        {
-            if ( !envFlagEnabled( "SICNU_MCP_ALLOW_REMOTE" ) )
-            {
-                if ( detail )
-                    *detail = QStringLiteral( "Remote data references are disabled "
-                                              "(set SICNU_MCP_ALLOW_REMOTE=1): %1" ).arg( pathValue );
-                return true;
-            }
-            return false; // scheme-validated remote reference, not a workspace path
-        }
-        if ( fileUrl )
-        {
-            const QUrl url( trimmed );
-            // file:///abs/path -> local path; falls through to the workspace check.
-            QString local = url.toLocalFile();
-            if ( local.isEmpty() )
-                local = trimmed.mid( 7 );
-            if ( !surfacePathOutsideWorkspace( local, workspaceRoot, detail ) )
-                return false;
-            if ( detail && detail->isEmpty() )
-                *detail = QStringLiteral( "Path outside SICNU_MCP_WORKSPACE: %1" ).arg( pathValue );
-            return true;
-        }
-    }
-
-    QString path = pathValue;
-    if ( path.startsWith( QLatin1Char( '~' ) ) )
-    {
-        path = QDir::homePath() + path.mid( 1 );
-    }
-
-    QString workspaceCanon = QDir( workspaceRoot ).canonicalPath();
-    if ( workspaceCanon.isEmpty() )
-        workspaceCanon = QFileInfo( workspaceRoot ).absoluteFilePath();
-    if ( workspaceCanon.isEmpty() )
-        return false;
-
-    const QFileInfo fi( path );
-    QString resolved;
-    if ( fi.isAbsolute() )
-    {
-        if ( fi.exists() )
-        {
-            resolved = fi.canonicalFilePath();
-        }
-        else
-        {
-            // Non-existent output path: resolve parent dir + filename
-            QDir parent = fi.dir();
-            QString parentCanon = parent.canonicalPath();
-            if ( parentCanon.isEmpty() )
-                parentCanon = parent.absolutePath();
-            resolved = QDir( parentCanon ).filePath( fi.fileName() );
-        }
-    }
-    else
-    {
-        const QString joined = QDir( workspaceCanon ).filePath( path );
-        const QFileInfo fiJoined( joined );
-        if ( fiJoined.exists() )
-        {
-            resolved = fiJoined.canonicalFilePath();
-        }
-        else
-        {
-            QDir parent = fiJoined.dir();
-            QString parentCanon = parent.canonicalPath();
-            if ( parentCanon.isEmpty() )
-                parentCanon = parent.absolutePath();
-            resolved = QDir( parentCanon ).filePath( fiJoined.fileName() );
-        }
-    }
-
-    const QString normResolved = QDir::cleanPath( resolved );
-    const QString normWorkspace = QDir::cleanPath( workspaceCanon );
-
-    if ( normResolved == normWorkspace )
-        return false;
-    if ( normResolved.startsWith( normWorkspace + QLatin1Char( '/' ) ) )
-        return false;
-
-    if ( detail )
-    {
-        *detail = QStringLiteral( "Path outside SICNU_MCP_WORKSPACE: %1" ).arg( pathValue );
-    }
-    return true;
+    // The policy itself lives in workspace_containment.h so the CLI pipeline
+    // runner (compiled without sicnu_agent) enforces byte-for-byte the same
+    // rule: weakly-canonical symlink resolution, URL-scheme restriction and
+    // fail-closed roots (review P1-3/P1-4).
+    return containment::pathOutsideWorkspace( pathValue, workspaceRoot, detail );
 }
 
 } // namespace sicnu::agent::tool_catalog
