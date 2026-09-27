@@ -3897,6 +3897,20 @@ if(TARGET _sicnu_operators AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bi
     sicnu_set_test_env(python_bindings_smoke)
 endif()
 
+# #1355: the GDAL_DRIVER_PATH harness policy (cmake/SicnuTestEnv.cmake) is
+# CMake code, so its regression test is a CMake script test — no C++ binary.
+# Unit-checks the pin policy (system /usr/lib* exclusion, prepend-or-set
+# semantics, path escaping) and the generated CTestCustom.cmake artifact of
+# this exact build tree.
+add_test(
+    NAME sicnu_env_gdal_driver_path
+    COMMAND ${CMAKE_COMMAND}
+        -DSRC_DIR=${CMAKE_SOURCE_DIR}
+        -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/test_sicnu_env_gdal_driver_path.cmake)
+set_tests_properties(sicnu_env_gdal_driver_path PROPERTIES TIMEOUT 60)
+sicnu_set_test_env(sicnu_env_gdal_driver_path)
+
 # #706: pi/ (ADR 0122) ships bridge lifecycle regression tests as node --test
 # modules (the #669 respawn/fork-loop family), but like the python-bindings
 # smoke test they ran in no lane. Register them in ctest when a capable node
