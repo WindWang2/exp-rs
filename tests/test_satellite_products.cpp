@@ -389,6 +389,85 @@ TEST_CASE("MODIS assign sinusoidal and reproject to EPSG:4326", "[satellite][mod
     REQUIRE(gt[0] < 140.0);
 }
 
+TEST_CASE("MODIS georeference keeps the declared nodata through copy and warp",
+          "[satellite][modis][nodata][r5]")
+{
+    // R5 NoData audit: the sinusoidal temp copy used to DROP the per-band
+    // declaration (and silently re-dtype to Float32), so the warp source had
+    // nothing to propagate and reprojected voids came back as undeclared
+    // zeros. Both steps must now keep the declaration machine-readable.
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    // Declared-sentinel MODIS-like tile (h24v08 keeps the fixture helper's
+    // filename contract; values 1..N with 32767 fill at two pixels).
+    const QString modis = tmp.filePath(
+        QStringLiteral("MOD09GQ.A2020161.h24v08.061.2020163012345.tif"));
+    {
+        ensureGdalInit();
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        std::vector<std::vector<float>> bands;
+        for (int b = 0; b < 2; ++b) {
+            std::vector<float> v(9);
+            for (size_t i = 0; i < v.size(); ++i)
+                v[i] = 100.0f + 10.0f * b;
+            v[4] = 32767.0f; // MODIS-style fill
+            bands.push_back(std::move(v));
+        }
+        QString werr;
+        REQUIRE(writeGdalOutput(modis, 3, 3, bands, gt, QString(), &werr));
+        GDALDatasetH ds = GDALOpen(modis.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= 2; ++b)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(ds, b), 32767.0);
+        GDALSetProjection(ds, "");
+        GDALClose(ds);
+    }
+
+    QString err;
+    const QString sinu = tmp.filePath(QStringLiteral("sinu.tif"));
+    REQUIRE(SatelliteProducts::assignModisSinusoidalGeoref(modis, sinu, -1, -1, &err));
+    {
+        GDALDatasetH ds = GDALOpen(sinu.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= 2; ++b) {
+            int has = 0;
+            const double nd = GDALGetRasterNoDataValue(GDALGetRasterBand(ds, b), &has);
+            REQUIRE(has);
+            REQUIRE(nd == 32767.0);
+        }
+        GDALClose(ds);
+    }
+
+    const QString wgs = tmp.filePath(QStringLiteral("wgs84.tif"));
+    REQUIRE(SatelliteProducts::georeferenceModis(
+        modis, wgs, QStringLiteral("EPSG:4326"), -1, -1, QStringLiteral("near"), &err));
+    {
+        GDALDatasetH ds = GDALOpen(wgs.toUtf8().constData(), GA_ReadOnly);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= 2; ++b) {
+            int has = 0;
+            const double nd = GDALGetRasterNoDataValue(GDALGetRasterBand(ds, b), &has);
+            REQUIRE(has);
+            REQUIRE(nd == 32767.0);
+        }
+        // Warp voids (the masked fill pixel and any footprint edges) must
+        // carry the DECLARED sentinel — never a silent zero.
+        GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+        int foundFill = 0;
+        std::vector<float> row(static_cast<size_t>(GDALGetRasterXSize(ds)));
+        for (int y = 0; y < GDALGetRasterYSize(ds); ++y) {
+            REQUIRE(GDALRasterIO(band, GF_Read, 0, y, GDALGetRasterXSize(ds), 1, row.data(),
+                                 GDALGetRasterXSize(ds), 1, GDT_Float32, 0, 0) == CE_None);
+            for (const float v : row)
+                if (v == 32767.0f)
+                    ++foundFill;
+        }
+        REQUIRE(foundFill >= 1);
+        GDALClose(ds);
+    }
+}
+
 TEST_CASE("rs:modis_import and rs:modis_georeference operators", "[operators][modis]")
 {
     ensureApp();
