@@ -289,6 +289,15 @@ target_link_libraries(sicnu_agent PUBLIC
   # sicnu.lab-pack/1: lab_data_pack is a Qt façade over the Qt-free shared
   # leaf — the ONE parser/validator shared with sicnu::teaching_admin.
   sicnu_lab_pack
+  # agent/tools/agent_session_adapter.cpp consumes the agent_loop verification
+  # seams (VerificationReport::aggregate) — without this link every executable
+  # linking sicnu_agent fails with an undefined-symbol/DSO error (master link
+  # break tracked by open PR #1335; minimal unlock for the R4 model-runtime
+  # track's own verification, semantics untouched).
+  sicnu_agent_loop
+  # mcp_server.h routes agent:ops through OpsDriver — same #1335 link-graph
+  # class as above (undefined OpsDriver::apply at every consumer's link).
+  sicnu_agent_ops
   ${JSONCPP_LIBRARIES}
 )
 
