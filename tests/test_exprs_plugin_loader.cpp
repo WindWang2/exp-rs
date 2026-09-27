@@ -316,9 +316,13 @@ TEST_CASE( "package signature and SBOM metadata validate typed", "[plugin][packa
 
 TEST_CASE( "manifest gate rejects ABI mismatch before dlopen", "[plugin][loader]" )
 {
-    writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, kHelloEntrypoint, 999 );
+    // Private copy: never write manifests (let alone an incompatible one)
+    // into the shared build-tree fixture dir (issue #1364 trampling class).
+    HelloFixtureCopy fixtureCopy;
+    const std::string &pluginDir = fixtureCopy.dir;
+    writeManifest( pluginDir, kHelloEntrypoint, 999 );
     PluginDiagnosticLog log;
-    PluginRecord record = PluginDiscovery::inspectDirectory( SICNU_TEST_HELLO_PLUGIN_DIR, log );
+    PluginRecord record = PluginDiscovery::inspectDirectory( pluginDir, log );
     REQUIRE( record.state == PluginState::Incompatible );
     bool sawAbi = false;
     for ( const auto &item : log.items() )
@@ -711,10 +715,14 @@ TEST_CASE( "hot reload aborts on a failed state migration with the old version l
 
 TEST_CASE( "loader drives the full native plugin lifecycle", "[plugin][loader]" )
 {
-    writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, kHelloEntrypoint, pluginAbiVersion() );
+    // Private copy: never write manifests into the shared build-tree fixture
+    // dir, and keep the mapped .so off the shared path (issue #1364).
+    HelloFixtureCopy fixtureCopy;
+    const std::string &pluginDir = fixtureCopy.dir;
+    writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
 
     PluginDiagnosticLog log;
-    PluginRecord record = PluginDiscovery::inspectDirectory( SICNU_TEST_HELLO_PLUGIN_DIR, log );
+    PluginRecord record = PluginDiscovery::inspectDirectory( pluginDir, log );
     REQUIRE( record.state == PluginState::Validated );
 
     // Entrypoint probe (plugin doctor surface) — no code executed.
@@ -750,7 +758,7 @@ TEST_CASE( "loader drives the full native plugin lifecycle", "[plugin][loader]" 
     REQUIRE( taken.instance == nullptr );
 
     // Missing entrypoint symbol.
-    writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, kHelloEntrypoint, pluginAbiVersion() );
+    writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
     SECTION( "bogus library reports a load diagnostic" )
     {
         PluginDiagnosticLog failureLog;
@@ -1040,7 +1048,8 @@ TEST_CASE( "registry unload drops the lock across the sink revoke (issue #1156)"
 
     registry.unloadAll();
     registry.setContributionSink( nullptr );
-    fs::remove_all( root );
+    // Tree removal belongs to the ScratchGuard — no redundant (throwing)
+    // remove_all after the last assertion.
 }
 
 // ---------------------------------------------------------------------------
@@ -2252,6 +2261,10 @@ TEST_CASE( "with neither snapshot usable, a failed reload reports honest absence
     REQUIRE_FALSE( registry.isLoaded( fixture.id ) );
 }
 
+// POSIX-only fault injection: on Windows, permissions(dir, owner_read|owner_exec)
+// merely sets FILE_ATTRIBUTE_READONLY, which does NOT block renaming children —
+// the injection would not fail the backup rename and the case could not hold.
+#ifndef _WIN32
 TEST_CASE( "installOrUpgrade rolls back when the activation swap fails post-drain",
            "[plugin][upgrade][p13][faultinjection]" )
 {
@@ -2274,11 +2287,11 @@ TEST_CASE( "installOrUpgrade rolls back when the activation swap fails post-drai
                                   std::filesystem::perms::owner_read
                                       | std::filesystem::perms::owner_exec,
                                   ec );
-    REQUIRE_FALSE( ec );
     // Restore write permission on ANY exit path: the fixture's remove_all
     // needs a writable root, so a failed REQUIRE must not leave the tree
     // read-only (the residue would outlive the process — pids are not
-    // reused within a boot).
+    // reused within a boot). Declared before the first REQUIRE so even a
+    // surprising chmod result cannot strand the tree read-only.
     struct PermissionsRestore
     {
         const std::string &path;
@@ -2289,6 +2302,7 @@ TEST_CASE( "installOrUpgrade rolls back when the activation swap fails post-drai
                 path, std::filesystem::perms::owner_all, restoreEc );
         }
     } restore{ fixture.userRoot };
+    REQUIRE_FALSE( ec );
 
     const PluginRegistry::PluginUpgradeResult rolled =
         registry.installOrUpgrade( fixture.root + "/src-v2" );
@@ -2313,6 +2327,7 @@ TEST_CASE( "installOrUpgrade rolls back when the activation swap fails post-drai
     REQUIRE( snapshotResidue.empty() ); // rollback consumed the snapshot
     REQUIRE( stagingResidue.empty() );  // no half-swapped staging tree
 }
+#endif // !_WIN32
 
 TEST_CASE( "repeated failed hot reloads roll back without leaking handles or residue",
            "[plugin][reload][p12][leak]" )

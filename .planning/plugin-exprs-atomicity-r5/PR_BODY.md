@@ -52,7 +52,22 @@ Out of scope (honored): generic atomic_fs (Track 08), model Python worker (Track
 
 ## Test evidence
 
-(filled after runs — E2..E6 of .planning/plugin-exprs-atomicity-r5/EVIDENCE.md)
+(see .planning/plugin-exprs-atomicity-r5/EVIDENCE.md E2..E7 for the full log)
+
+- Master marker fix: configure failed on clean master, passes after the one-line deletion.
+- #1362: pre-fix success-path leak reproduced (`exprs_test_registry.<pid>` / `exprs_test_policy.<pid>` left behind by green runs); post-fix acceptance with an intentionally injected `FAIL()` — case aborts (exit 42), `/tmp` carries zero residue.
+- #1364: paired-process protocol (2 concurrent processes × 8 rounds of the :1138 case): pre-fix **7/16 failed** (`Installed` → `2 == 0` Refused), post-fix **0/16 failed**, no scratch residue.
+- Post-fix gates, all green ×2: loader 429 assertions/36 cases, system 129/16, parity 10/3, halffail 68/9, unload_order 34/4, boundary 35/8, pollution 19/3. New oracles (activation-fault injection, 15-cycle reload leak check with `/proc/self/maps`) green; included in the loader counts.
+- No Windows lane: compile-level verification + inspection only.
+
+## Independent review
+
+One independent reviewer subagent (fresh eyes, diff + issues + evidence only), verdict **SHIP-WITH-FIXES**, zero Blocker/High:
+
+- [Medium] the activation-fault-injection case was not POSIX-guarded (on Windows `FILE_ATTRIBUTE_READONLY` does not block child renames — deterministic false red) → fixed: `#ifndef _WIN32` wrapper with rationale comment.
+- [Medium] overbroad claim: two loader cases (`*rejects ABI mismatch*`, `*full native plugin lifecycle*`) still wrote manifests into the shared build-tree fixture dir → fixed: both converted to the private `HelloFixtureCopy` copy; the loader file now has zero shared-fixture writers. Remaining (pre-existing, disclosed): test_plugin_lifecycle_halffail_r4's 9 cases still share the build-tree `plugin_fixtures/broken_plugin` dir — intra-binary race window under parallel ctest, not exercised by this track's claims, left for the halffail suite owner.
+- [Low] `PermissionsRestore` declared after the post-chmod REQUIRE → fixed: declared before it, so a surprising chmod result cannot strand the tree read-only.
+- [Nit] a throwing `fs::remove_all` tail in the issue-1156 case → removed (ScratchGuard owns the cleanup).
 
 ## Compatibility & risk
 
