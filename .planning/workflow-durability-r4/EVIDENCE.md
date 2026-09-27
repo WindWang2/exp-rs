@@ -76,12 +76,13 @@ oracle ctest output under the `test_workflow_crash_recovery_r4::` /
 - Net new failures vs baseline: **0**
 
 Direct-binary verification (Catch2, additionally to ctest):
-- `test_workflow_crash_recovery_r4`: 10/10, 106 assertions — twice
-- `test_workflow_run_lock_r4`: 7/7, 85 assertions
-- `test_workflow_cancel`: 4/4, 34 assertions (re-run after the coordinator fix)
+- `test_workflow_crash_recovery_r4`: 10/10, 108 assertions — twice (post-review state)
+- `test_workflow_run_lock_r4`: 7/7, 85 assertions (read-only-dir case skipped for root)
+- `test_workflow_cancel`: 4/4, 35 assertions (re-run after the coordinator fix + review fixes)
 - `test_workflow_incremental_cache`: 8/8, 38 assertions
-- `test_workflow_cache_e2e`: 14/14, 319 assertions (pre-existing CLI crash
-  E2E untouched and green)
+- `test_workflow_cache_e2e`: 14/14, 309 assertions (pre-existing CLI crash
+  E2E untouched and green; cancelled-step shadow now writes its output bytes
+  before blocking — the strongest seeding-gate shape)
 
 ## 4. Honest-coverage boundary
 
@@ -89,6 +90,11 @@ Direct-binary verification (Catch2, additionally to ctest):
   (microseconds wide, in-process) is constructed through the production writer
   and resumed through the production recovery path; its real-process siblings
   (IP-4a, IP-5a/b) bracket the same commit logic from both sides.
-* Every matrix assertion reconciles against disk truth (raw checkpoint JSON or
-  file existence), never against the recovery code's own state.
-* Kill timing is content-based (barrier files + settle polls), never sleeps.
+* The COMMITTED-SET / journal assertions reconcile purely against disk truth
+  (raw checkpoint JSON, byte-compares, tmp-residue counts, lock probes); the
+  final resume-VERDICT assertions (state == Completed) read the coordinator's
+  in-memory run, with the on-disk picture checked wherever the checkpoint
+  survives (IP-3 byte-compare, IP-4b, IP-5b, edge cases).
+* Kill timing is content-based (barrier files + settle polls), never sleeps;
+  the runId correlation polls the child's stdout with a bounded grace window
+  and falls back to the fresh scratch dir's single checkpoint on disk.
