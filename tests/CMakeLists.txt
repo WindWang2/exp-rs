@@ -7191,6 +7191,10 @@ if(TARGET sicnu_workflow)
     sicnu_task_center
     sicnu_jobs
     sicnu_agent
+    # Track 10 enablement: master's link graph leaves libsicnu_agent.so with
+    # an unresolved sicnu_agent_loop symbol at this commit (#1335's domain);
+    # this target must link to run its lane until that fix lands.
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
     Sicnu::data
     Qt6::Core
     Qt6::Gui
@@ -9352,6 +9356,8 @@ target_link_libraries(test_workflow_cache_e2e PRIVATE
   sicnu_workflow
   sicnu_operators
   GDAL::GDAL
+  # Track 10 enablement: same link-graph gap as test_workflow_cancel (#1335).
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 target_include_directories(test_workflow_cache_e2e PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -11642,7 +11648,6 @@ target_include_directories(test_workflow_durability_13 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_workflow_durability_13)
-
 
 # Track 10 durability R4: lock-semantics + checkpoint-durability light lane
 # (same compiled-sources pattern as durability_13, plus the runtime fault
