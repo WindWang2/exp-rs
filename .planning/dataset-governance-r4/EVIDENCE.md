@@ -5,13 +5,13 @@
 
 ## 1. Oracle 双轮全绿（最终树）
 
-命令：`ctest -R "dataset|fingerprint|split|leak|ontology" -j1`（49 个用例 = ctest 按用例级发现）
-- Round 3（终树）：**49/49 Passed，exit 0**
-- Round 4（终树）：**49/49 Passed，exit 0**
+命令：`ctest -R "dataset|fingerprint|split|leak|ontology" -j1`（50 个用例 = ctest 按用例级发现）
+- Round 3（终树）：**50/50 Passed，exit 0**
+- Round 4（终树）：**50/50 Passed，exit 0**
 关键摘录（完整输出本地留档 logs/ctest_final_r3.log / r4.log，按仓约定 raw logs 不入库）：
 ```
-100% tests passed, 0 tests failed out of 49   (round 3)
-100% tests passed, 0 tests failed out of 49   (round 4)
+100% tests passed, 0 tests failed out of 50   (round 3)
+100% tests passed, 0 tests failed out of 50   (round 4)
 ```
 首轮曾出现 `test_io_subdataset_inventory_NOT_BUILT (Not Run)`——正则误匹配的 io 域目标未构建所致，构建该目标后消失；该目标非本域代码，未改动。
 
@@ -46,7 +46,7 @@ Drift pin（在树实现一次性生成、人工钉死，防漂移非独立 orac
 
 ## 4. 确定性用例（ctest 逐一可数）
 
-正则内新增 27 例（49 例中）：fingerprint determinism ×6、split reproducibility ×8（含跨进程 tripwire）、leakage coverage ×4（13 检查矩阵/排列不变性+证据定位/单侧对/fold honest-gaps）、version migration ×4、D19 feature-join 定序 ×1、governance consistency ×2（挂 `data` 前缀，另行验证）。
+正则内新增 28 例（50 例中）：fingerprint determinism ×6、split reproducibility ×8（含跨进程 tripwire）、leakage coverage ×4（13 检查矩阵/排列不变性+证据定位/单侧对/fold honest-gaps）、version migration ×4、D19 feature-join 定序 ×1、governance consistency ×2（挂 `data` 前缀，另行验证）。
 正则外（另行双跑验证）：sample/annotation fail-fast ×3（test_sample_label_annotation，127 断言×2 绿）。
 回归面全绿：test_dataset_core 278、test_d19_dataset_foundry 1729、test_mlops9_split 285、test_split_leakage 683、test_stratified_split 125、test_spatial_block_leakage 218、test_contract_fuzz_ipc 3959、test_sample_fixtures 26132、test_governance_store 218、test_dataset_quality_scale 733、test_dataset_e2e_examples 57。
 
