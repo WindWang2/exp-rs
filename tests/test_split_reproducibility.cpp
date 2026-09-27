@@ -218,6 +218,18 @@ TEST_CASE( "a config JSON without seed_hex is refused, never silently seeded",
     malformed.insert( QStringLiteral( "seed_hex" ), QStringLiteral( "nothex" ) );
     CHECK( !SplitConfig::fromJson( malformed ).has_value() );
 
+    // Wrong TYPES must refuse as well: a number/null seed_hex would
+    // otherwise skip the parse and silently leave the default 0 in place.
+    QJsonObject numeric = randomConfig( 7 ).toJson();
+    numeric.insert( QStringLiteral( "seed_hex" ), 5 );
+    const auto numericParsed = SplitConfig::fromJson( numeric );
+    REQUIRE( !numericParsed.has_value() );
+    CHECK( numericParsed.diagnostics().first().message.contains(
+        QStringLiteral( "seed" ) ) );
+    QJsonObject nulled = randomConfig( 7 ).toJson();
+    nulled.insert( QStringLiteral( "seed_hex" ), QJsonValue() );
+    CHECK( !SplitConfig::fromJson( nulled ).has_value() );
+
     // Fold manifests deserialize through the same gate: a manifest JSON
     // whose config lacks the seed is refused.
     const QVector<SplitInput> inputs = makeInputs( 40 );
