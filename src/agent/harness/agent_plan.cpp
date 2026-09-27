@@ -363,6 +363,11 @@ std::string compilePlanToWorkflowJson( const AgentPlan &plan, HarnessError &erro
   metadata["cleanup"] = plan.cleanup.empty() ? "keep_all" : plan.cleanup;
   if ( plan.pins.isObject() && !plan.pins.empty() )
     metadata["pins"] = plan.pins;
+  // Compiler provenance rides metadata.compiler when the plan carries it
+  // (round-trip of a lowered plan through its wire document); the raw
+  // compiler projection is copied verbatim so the digest stays stable.
+  if ( plan.raw.isObject() && plan.raw.isMember( "compiler" ) )
+    metadata["compiler"] = plan.raw["compiler"];
   def["metadata"] = metadata;
 
   Json::StreamWriterBuilder builder;

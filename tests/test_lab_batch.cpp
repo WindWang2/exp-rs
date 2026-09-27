@@ -263,13 +263,16 @@ TEST_CASE( "batch usage: missing submissions directory is a usage failure",
 TEST_CASE( "batch exit-code contract", "[lab_batch][d7]" )
 {
     namespace exprs_ns = exprs;
+    // Designated initializers on purpose: LabBatchSummary grew fields
+    // mid-struct (unavailable landed 4th), which silently re-pointed the
+    // old positional {0,0,0,true} at `unavailable` instead of `usageError`.
     // All graded -> 0 even when every verdict is "fail" (grading worked).
-    CHECK( sicnu::cli::batchExitCodeFor( { 3, 3, 0, false } )
+    CHECK( sicnu::cli::batchExitCodeFor( { .total = 3, .graded = 3, .isolated = 0 } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok ) );
     // Any isolated row -> nonzero but the CSV is complete.
-    CHECK( sicnu::cli::batchExitCodeFor( { 3, 2, 1, false } )
+    CHECK( sicnu::cli::batchExitCodeFor( { .total = 3, .graded = 2, .isolated = 1 } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
     // Usage failure (missing dir).
-    CHECK( sicnu::cli::batchExitCodeFor( { 0, 0, 0, true } )
+    CHECK( sicnu::cli::batchExitCodeFor( { .usageError = true } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ) );
 }

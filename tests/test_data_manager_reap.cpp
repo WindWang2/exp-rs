@@ -550,7 +550,7 @@ static void affinityMessageHandler( QtMsgType, const QMessageLogContext &,
   g_affinityWarnings += QLatin1Char( '\n' );
 }
 
-TEST_CASE( "Off-affinity const reader is flagged by the affinity contract (#800)",
+TEST_CASE( "Affinity contract: snapshot readers are worker-safe, live-container readers warn once (#852)",
            "[data_manager][threads][ux6]" )
 {
   static QCoreApplication *app = []() {
@@ -575,14 +575,21 @@ TEST_CASE( "Off-affinity const reader is flagged by the affinity contract (#800)
   // On-thread reader: normal behavior, no warning.
   REQUIRE( manager.asset( id ).has_value() );
 
-  // #800: the documented THREAD AFFINITY CONTRACT warns on every
-  // off-affinity const read. Enforcement is warning-only (review L: known
-  // sanctioned temporal readers still cross threads), so this runs in every
-  // lane.
+  // 9.0 (#852) contract-ized the #800 affinity rule into TWO reader classes:
+  // snapshot-served readers (asset/assets/findByPath/...) read the immutable
+  // CatalogSnapshot and are worker-safe by design — no diagnostic. The old
+  // "every off-affinity const read warns" assertion predated that split.
   g_affinityWarnings.clear();
   QtMessageHandler previous = qInstallMessageHandler( affinityMessageHandler );
-  std::thread reader( [&manager]() { (void)manager.assets(); } );
-  reader.join();
+  std::thread snapshotReader( [&manager]() { (void)manager.assets(); } );
+  snapshotReader.join();
+  CHECK( g_affinityWarnings.isEmpty() );
+
+  // Live-container readers (leaseCount/leases/hasActiveEditLease/planUnload)
+  // walk mutable lease records: they are NOT snapshot-served, so an
+  // off-affinity poller gets the once-per-process diagnostic.
+  std::thread leaseReader( [&manager, &id]() { (void)manager.leaseCount( id ); } );
+  leaseReader.join();
   qInstallMessageHandler( previous );
 
   const QString &captured = g_affinityWarnings;

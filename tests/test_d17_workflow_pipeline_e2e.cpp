@@ -315,7 +315,7 @@ TEST_CASE( "Full 100-node scale run under the 1.5 GiB RSS budget", "[d17][workfl
     REQUIRE( rssBefore > 0 );
 }
 
-TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
+TEST_CASE( "All shipped lab templates execute green through the full stack",
            "[d17][workflow][e2e][labs]" )
 {
     ensureApp();
@@ -325,12 +325,20 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
     // lab8_temporal_analysis.lab.json (id temporal_phenology_timeline) that
     // intentionally does not conform to the strict LabSpec-1.0 corpus loader;
     // its grading runs headless in test_d16_temporal_phenology_e2e instead.
+    // (That file no longer ships as .lab.json — the removeAll below is kept
+    // as a guard for checkouts that still carry it.)
     labFiles.removeAll( QStringLiteral( "lab8_temporal_analysis.lab.json" ) );
-    REQUIRE( labFiles.size() == 11 ); // the strict LabSpec-1.0 teaching corpus
+    // 6cc6b7016 (#1190 curriculum wave) added lab12..lab16 to the strict
+    // LabSpec-1.0 corpus: lab01..lab11 (11) + lab12_sar_processing +
+    // lab13_hyperspectral_analysis + lab14_cartographic_mapping +
+    // lab15_data_inspection + lab16_accuracy_assessment = 16.
+    REQUIRE( labFiles.size() == 16 ); // the strict LabSpec-1.0 teaching corpus
 
-    // Corpus aggregate truth (hand-counted on master: 3+2+1+1+2+0+2+1+1+1+2):
-    // 16 operator-bound steps lift into runnable nodes across the 11 labs;
-    // lab06 is teaching-only (0 operators) and completes trivially.
+    // Corpus aggregate truth (recounted on master over data/labs:
+    // 3+2+1+1+2+0+2+1+1+1+2 = 16 across lab01..lab11, plus lab12/13/14
+    // teaching-only (0 operators), lab15 = 2, lab16 = 1):
+    // 19 operator-bound steps lift into runnable nodes across the 16 labs;
+    // lab06/lab12/lab13/lab14 are teaching-only (0 operators).
     int corpusOperatorSteps = 0;
 
     // NOTE: deliberately ONE loop (no DYNAMIC_SECTION): Catch2 re-runs the
@@ -366,7 +374,7 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
             QDir( dir ).removeRecursively();
         }
     }
-    REQUIRE( corpusOperatorSteps == 16 );
+    REQUIRE( corpusOperatorSteps == 19 );
 }
 
 namespace
