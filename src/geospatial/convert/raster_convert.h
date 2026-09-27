@@ -63,6 +63,13 @@ struct WarpOptions
     /// Warp memory budget in bytes (mirrors -wm); 0 = GDAL default.
     std::size_t warpMemoryLimitBytes = 0;
     int multithread = 0;                           ///< 1 = -multi
+    /// Explicit void contract (-srcnodata/-dstnodata), one entry per band.
+    /// Empty (default) = GDAL's implicit behavior: source declarations are
+    /// honored for masking and copied to the output, but undeclared sources
+    /// leave warp voids as undeclared zeros. Callers that want voids to be
+    /// machine-readable holes pin these explicitly.
+    std::vector<double> sourceNodata;              ///< empty = from file declarations
+    std::vector<double> targetNodata;              ///< empty = copy source values
 };
 
 struct TranslateResult
