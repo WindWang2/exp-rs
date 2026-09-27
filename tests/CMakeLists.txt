@@ -9279,7 +9279,9 @@ target_include_directories(test_workflow_crash_recovery_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/tests
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_workflow_crash_recovery_r4)
+# TEST_PREFIX makes the matrix cases selectable by the durability oracle lane
+# regex (workflow|durability|run_lock|lowering), which matches case names.
+sicnu_discover_tests(test_workflow_crash_recovery_r4 TEST_PREFIX "test_workflow_crash_recovery_r4::")
 
 add_executable(test_workflow_resume_provenance test_workflow_resume_provenance.cpp
   ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
@@ -11672,7 +11674,7 @@ target_include_directories(test_workflow_run_lock_r4 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_workflow_run_lock_r4)
+sicnu_discover_tests(test_workflow_run_lock_r4 TEST_PREFIX "test_workflow_run_lock_r4::")
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------
