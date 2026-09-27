@@ -22,6 +22,10 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <json/json.h>
+
+#include <sstream>
+
 #include <atomic>
 #include <algorithm>
 #include <vector>
@@ -132,10 +136,47 @@ std::shared_ptr<std::atomic<int>> registerCountingExecutor( const std::string &o
     return counter;
 }
 
+QStringList injector_read_plans( const QString &dir, const std::string &runId )
+{
+    QFile f( QDir( dir ).filePath(
+        QStringLiteral( "checkpoint_%1.json" ).arg( QString::fromStdString( runId ) ) ) );
+    QStringList ids;
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return ids;
+    const QByteArray data = f.readAll();
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::istringstream stream( data.toStdString() );
+    if ( !Json::parseFromStream( builder, stream, &root, &errs ) )
+        return ids;
+    for ( const Json::Value &plan : root["stepPlans"] )
+        ids << QString::fromStdString( plan["stepId"].asString() );
+    return ids;
+}
+
 QStringList normalize( QStringList list )
 {
     std::sort( list.begin(), list.end() );
     return list;
+}
+
+/// Raw checkpoint "state" reader for runs whose ids the test derived itself.
+QString injector_read_state( const QString &dir, const std::string &runId )
+{
+    QFile f( QDir( dir ).filePath(
+        QStringLiteral( "checkpoint_%1.json" ).arg( QString::fromStdString( runId ) ) ) );
+    if ( !f.open( QIODevice::ReadOnly ) )
+        return QString();
+    const QByteArray data = f.readAll();
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::istringstream stream( data.toStdString() );
+    if ( !Json::parseFromStream( builder, stream, &root, &errs ) )
+        return QString();
+    return root["state"].isString() ? QString::fromStdString( root["state"].asString() )
+                                    : QString();
 }
 
 } // namespace
@@ -614,4 +655,82 @@ TEST_CASE( "IP-5b: death after cancel fully propagated leaves a terminal, unowne
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( step1Runs->load() == 0 );
     REQUIRE( step2Runs->load() + step3Runs->load() >= 1 );
+}
+
+// --- Track 10 WP-D: boundary second pass ------------------------------------
+
+TEST_CASE( "edge: an empty DAG is refused with a Failed on-disk run and no lock left behind",
+           "[workflow][r4][edge][coordinator]" )
+{
+    CrashFixture fx;
+    auto &coordinator = WorkflowRunCoordinator::instance();
+
+    WorkflowDefinition def;
+    def.id = "wf4_edge_empty";
+    def.title = "empty";
+    const long pipelineId = coordinator.startTrackedPipeline( def, /*autoLoad=*/false );
+    // Found by this edge probe (pre-fix behavior: dispatched as an empty
+    // pipeline, then wedged Running forever with the flock held — the
+    // allTerminal roll-up requires non-empty plans). The coordinator now
+    // refuses the degenerate document up front.
+    REQUIRE( pipelineId == -1 );
+
+    // The refusal persisted a terminal, explainable run — never a silent
+    // half state — and the run lock was never taken.
+    QDir dir( fx.scratch.path() );
+    const QStringList checkpoints = dir.entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+    REQUIRE( checkpoints.size() == 1 );
+    const QString stem = checkpoints.front().chopped( strlen( ".json" ) );
+    const std::string runId = stem.mid( strlen( "checkpoint_" ) ).toStdString();
+    REQUIRE( injector_read_state( fx.scratch.path(), runId ) == "Failed" );
+    REQUIRE( injector_read_plans( fx.scratch.path(), runId ).isEmpty() );
+
+    const WorkflowRunLock::OwnerProbe probe = WorkflowRunLock::probeOwner(
+        WorkflowRunLock::lockPathForRun( fx.scratch.path(), runId ) );
+    REQUIRE( probe.state == WorkflowRunLock::OwnerProbe::State::NoHolder );
+
+    // The resumable-cycle contract stays consistent for the degenerate
+    // lineage: resume of the Failed run finalizes it Completed from an empty
+    // remaining set (#1078a), re-executing nothing.
+    QString err;
+    const long resumeOutcome = coordinator.resumeRun( runId, &err );
+    INFO( err.toStdString() );
+    REQUIRE( resumeOutcome == 0 );
+    // Completed runs archive to history/ — check both locations.
+    const QString stateAfter = injector_read_state( fx.scratch.path(), runId ).isEmpty()
+                                   ? injector_read_state(
+                                       QDir( fx.scratch.path() ).filePath( QStringLiteral( "history" ) ),
+                                       runId )
+                                   : injector_read_state( fx.scratch.path(), runId );
+    REQUIRE( stateAfter == "Completed" );
+}
+
+TEST_CASE( "edge: a single-node DAG completes, archives, and leaves the world terminal",
+           "[workflow][r4][edge][coordinator]" )
+{
+    CrashFixture fx;
+    WorkflowCrashInjector injector( fx.scratch.path() );
+    auto &coordinator = WorkflowRunCoordinator::instance();
+
+    const std::string prefix = "wf4_edge_single";
+    const auto stepRuns = registerCountingExecutor( prefix + ":only", fx.outDir(), prefix, 1,
+                                                    true );
+    WorkflowDefinition def;
+    def.id = prefix + "_def";
+    StepDef step;
+    step.id = "only";
+    step.operatorId = prefix + ":only";
+    step.params["output"] = ( fx.outDir() + QStringLiteral( "/%1_only.tif" ).arg( prefix.c_str() ) )
+                                .toStdString();
+    def.steps.push_back( step );
+
+    const long pipelineId = coordinator.startTrackedPipeline( def, /*autoLoad=*/false );
+    REQUIRE( pipelineId > 0 );
+    const auto snapshot = runToTerminal( coordinator, pipelineId );
+    REQUIRE( snapshot );
+    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    REQUIRE( stepRuns->load() == 1 );
+    // Completed runs archive to history/ — the durable terminal world.
+    REQUIRE( QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ) );
 }

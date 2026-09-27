@@ -493,6 +493,27 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     run->transitionTo( WorkflowRunState::Ready );
     run->transitionTo( WorkflowRunState::Running );
 
+    // Degenerate document guard (Track 10): a definition with zero steps
+    // would be dispatched as an empty pipeline whose roll-up can never fire
+    // (allTerminal requires non-empty plans), wedging the run in Running
+    // with its flock held for the process lifetime. Refuse it up front —
+    // persist the terminal Failed verdict and never take the run lock.
+    if ( def.steps.empty() )
+    {
+        run->setErrorMessage( "Workflow contains no steps" );
+        run->forceSetState( WorkflowRunState::Failed );
+        PersistRequest emptyPersist;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            emptyPersist = capturePersistLocked( run );
+            queueRunStateNotificationLocked( *run, QDateTime::currentMSecsSinceEpoch(),
+                                             QDateTime::currentMSecsSinceEpoch() );
+        }
+        persistRun( std::move( emptyPersist ) );
+        drainRunNotifications();
+        return -1;
+    }
+
     // Cross-process ownership (#727): hold the run's lock for the whole
     // execution so no other process reconciles or resumes this runId under
     // us. Acquired BEFORE TaskCenter dispatch (which starts real work).

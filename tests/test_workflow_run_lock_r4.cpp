@@ -312,3 +312,53 @@ TEST_CASE( "a corrupt checkpoint is a structured skip, never a crash or a silent
     REQUIRE( recovered.front()->runId() == "r4_corrupt_good" );
     REQUIRE( QFile::exists( goodPath ) ); // the corrupt file does not poison neighbors
 }
+
+// --- Track 10 WP-D: boundary second pass ------------------------------------
+
+TEST_CASE( "the guarded transition table refuses impossible durability moves",
+           "[workflow][r4][edge][state]" )
+{
+    auto run = WorkflowRun::createFromDefinition( oneStepDefinition( "wf-r4-edge" ), "r4_edge" );
+    REQUIRE( run );
+    // Created → Canceled is legal (cancel before planning); Created → Running is not.
+    REQUIRE( run->transitionTo( WorkflowRunState::Canceled ) );
+    auto done = WorkflowRun::createFromDefinition( oneStepDefinition( "wf-r4-edge2" ), "r4_edge2" );
+    REQUIRE( done );
+    REQUIRE_FALSE( done->transitionTo( WorkflowRunState::Running ) );
+    done->transitionTo( WorkflowRunState::Planning );
+    done->transitionTo( WorkflowRunState::Ready );
+    done->transitionTo( WorkflowRunState::Running );
+    done->transitionTo( WorkflowRunState::Completed );
+    // A terminal run refuses every lifecycle move — the anti-resurrection wall.
+    REQUIRE_FALSE( done->transitionTo( WorkflowRunState::Cancelling ) );
+    REQUIRE_FALSE( done->transitionTo( WorkflowRunState::Running ) );
+    REQUIRE_FALSE( done->transitionTo( WorkflowRunState::Interrupted ) );
+    REQUIRE( done->state() == WorkflowRunState::Completed );
+}
+
+TEST_CASE( "lock acquisition in a nonexistent directory creates it; a read-only directory is a "
+           "structured Error",
+           "[workflow][r4][run_lock][edge]" )
+{
+    QTemporaryDir parent;
+    REQUIRE( parent.isValid() );
+
+    // Missing directory: acquisition creates it (the first checkpoint may not
+    // exist yet when the lock is taken).
+    const QString missing = parent.path() + QStringLiteral( "/deep/nested/dir" );
+    {
+        WorkflowRunLock lock( WorkflowRunLock::lockPathForRun( missing, "r4_edge_mkpath" ) );
+        REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Acquired );
+        REQUIRE( QDir( missing ).exists() );
+    }
+
+    // Read-only directory: refusal is the typed Error branch, not a crash.
+    const QString readonly = parent.path() + QStringLiteral( "/ro" );
+    REQUIRE( QDir().mkpath( readonly ) );
+    REQUIRE( QFile::setPermissions(
+        readonly, QFileDevice::ReadOwner | QFileDevice::ExeOwner | QFileDevice::ReadGroup
+                      | QFileDevice::ExeGroup | QFileDevice::ReadOther | QFileDevice::ExeOther ) );
+    WorkflowRunLock lock( WorkflowRunLock::lockPathForRun( readonly, "r4_edge_ro" ) );
+    REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Error );
+    REQUIRE( lock.tryAcquire() == WorkflowRunLock::TryResult::Error ); // stable, not wedged
+}
