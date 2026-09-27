@@ -236,8 +236,9 @@ QString firstRecordedRunId( sicnu::experiment::ExperimentStore &store,
                             sicnu::experiment::MatrixLedger &ledger, const QString &pointId )
 {
     const auto runs = ledger.runsForCell( pointId );
-    REQUIRE( runs.size() == 1 );
-    return runs.first();
+    REQUIRE( runs.has_value() );
+    REQUIRE( runs.value().size() == 1 );
+    return runs.value().first();
 }
 
 QStringList samplePointIds( const ParameterStudySpec &spec )
@@ -287,8 +288,9 @@ TEST_CASE( "studio live: fake-backend study records real store truth that the "
     for ( const StudyPoint &point : points )
     {
         const auto runs = ledger.runsForCell( point.pointId );
-        REQUIRE( runs.size() == 1 );
-        const auto run = store.runById( runs.first() );
+        REQUIRE( runs.has_value() );
+        REQUIRE( runs.value().size() == 1 );
+        const auto run = store.runById( runs.value().first() );
         REQUIRE( run.has_value() );
         CHECK( run->status() == sicnu::dataset::RunStatus::Completed );
         CHECK( run->metrics().value( QStringLiteral( "maskedPercent" ) ) == 42.5 );
