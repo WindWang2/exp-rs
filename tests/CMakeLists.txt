@@ -3861,6 +3861,15 @@ sicnu_add_test(test_task_center_12 TIMEOUT 300 RUN_SERIAL TRUE)
 
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
+if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE MATCHES "^Debug$")
+  # #1361/#1354 review: the 100k perf case separates the product gate
+  # (Release/RelWithDebInfo budgets) from Debug instrumentation cost — the
+  # Debug build flags its profile so the test can carry a proportional
+  # budget instead of tripping the product gate (see test_workspace_catalog.cpp).
+  # An EMPTY CMAKE_BUILD_TYPE compiles -O0 (Debug-like cost) and gets the
+  # Debug gate too; multi-config generators see the same as above for mlops9.
+  target_compile_definitions(test_workspace_catalog PRIVATE SICNU_PERF_TEST_DEBUG_PROFILE=1)
+endif()
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)

@@ -95,3 +95,56 @@ Do not skip or disable the embedded-Python tests or the QSS stress test to go gr
 1. `ldd tests/test_python_engine | grep libxml2` — must be `/usr/lib/libxml2.so*`, not `$CONDA_PREFIX/lib`.
 2. `PYTHONHOME` in the ctest environment must equal the prefix of the `libpython` the binary actually loads (`ldd | grep libpython`).
 3. `QT_IM_MODULE` must not be `fcitx` for any `QApplication` test.
+
+## Budget governance (#1361, #1363)
+
+Performance and size budgets are split into two classes with different rules:
+
+| Class | Where measured | Examples | Raise rule |
+|---|---|---|---|
+| **Product SLO gate** | Release / RelWithDebInfo | `test_workspace_catalog` 100k page contract (500 ms); `test_mlops9_scale` 100k full-scale shape | Raise only with attribution data from the test's own report output |
+| **Non-product lane guard** | Debug / sanitizer / envelope | Debug 1000 ms + sanitizer 1500 ms page gates; `test_mlops9_scale` Debug 30k default; `test_catalog_size` per-operator ceiling + 288 KiB envelope | Same rule; keep the product gate reserved for the SLO lane — never widen it to fit local hardware |
+
+The product gates are calibrated on CI-class runners. Slower workstations
+have a HOST BASELINE offset that is roughly profile-independent (r5
+measurement: the workspace 100k page median is stable at ~0.58-0.61 s on a
+loaded workstation in BOTH Debug (578-594 ms) and Release (595-605 ms)) —
+expect a stable red on the product gate there, read the printed medians as
+attribution, and compare against the CI baseline instead of raising the
+gate. Sanitizer builds do roughly double the per-row SQLite cost; their
+gates account for that.
+
+### Rules
+
+1. **Never raise a budget to silence a red** — first decide with robust stats
+   (median-of-3 passes in-process) whether the red is jitter, instrumentation
+   cost, environment, or a real regression. Only the last one is a product
+   bug; the other three are budget/process work.
+2. **Per-operator ceiling over envelope ratchet** (`test_catalog_size.cpp`):
+   the whole-catalog envelope (288 KiB) is a secondary guard. The primary
+   guard is the per-operator schema ceiling — a budget change must name the
+   operators that outgrew their budget. Run with
+   `SICNU_CATALOG_SIZE_REPORT=1` to dump the ranked per-operator size table
+   and attach it to the budget-change PR (#1361 acceptance).
+3. **Scale profiles, not timeouts** (`test_mlops9_scale.cpp`): the 100k-run
+   store keeps its true scale on Release/RelWithDebInfo. Debug (+sanitizer)
+   defaults to 30k and asserts the same per-run cost contract, so complexity
+   regressions still fail at reduced cost. Full scale in a Debug tree is a
+   labeled opt-in, not a timeout raise — ALWAYS pair the override with the
+   longrun selector (`-R ..._longrun`); without it the override re-creates
+   the #1363 red against the REGULAR registration's 900 s timeout:
+   ```bash
+   SICNU_MLOPS9_SCALE_RUNS=100000 ctest -R mlops9_scale_longrun -L LONG_RUN
+   ```
+   Sanitizer note: a sanitizer LONG_RUN session at 100k costs ~2x the Debug
+   seed (~2500 s+ measured basis: 12.27 ms/run Debug × 2) and would exceed
+   the longrun registration's 2400 s TIMEOUT. No sanitizer LONG_RUN lane
+   exists; if one is added, raise that TIMEOUT with attribution data.
+4. **LONG_RUN label**: ctest tests registered with `LABELS LONG_RUN` are the
+   periodic full-scale lane. `ctest -LE LONG_RUN` is the fast local/PR loop;
+   `ctest -L LONG_RUN` is the full-scale session. Labels are visible and
+   auditable in `ctest -N -V`.
+5. **Shared-host timing evidence**: perf contracts measure multiple passes
+   and assert on the median (see `test_workspace_catalog.cpp`). When quoting
+   timings in a budget discussion, record build type, sanitizer state, and
+   host load — a single Debug number on a loaded host is not attribution.
