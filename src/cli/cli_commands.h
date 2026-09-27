@@ -29,8 +29,23 @@ namespace sicnu::cli {
 
 /// Stable symbol for a published exit code (docs/headless/README.md
 /// "Exit codes (stable contract)"). Returns "GENERIC_ERROR" for unknown
-/// values so the [E-n:SYMBOL] anchor never prints empty.
-std::string_view exitCodeSymbol( int code );
+/// values so the [E-n:SYMBOL] anchor never prints empty. Inline so test
+/// fakes of CliIO stay linkable without the CLI executable TU.
+inline std::string_view exitCodeSymbol( int code )
+{
+    switch ( code )
+    {
+        case 0: return "OK";
+        case 2: return "VALIDATION_FAILURE";
+        case 3: return "EXECUTION_FAILURE";
+        case 4: return "CANCELLED";
+        case 5: return "MISSING_DEPENDENCY";
+        case 6: return "INVALID_INPUT";
+        case 7: return "RUNTIME_UNAVAILABLE";
+        case 1:
+        default: return "GENERIC_ERROR";
+    }
+}
 
 /// The structured half of a command-level error message (Track 14 WP-B):
 /// expected/actual when the failure is a mismatch, plus the suggested
@@ -45,8 +60,22 @@ struct CliErrorDetails
     std::string hint;
 
     /// "E-6:INVALID_INPUT" — anchored to the published contract table.
-    std::string codeToken() const;
-    Json::Value toJson() const;
+    std::string codeToken() const
+    {
+        return "E-" + std::to_string( exitCode ) + ":" + std::string( exitCodeSymbol( exitCode ) );
+    }
+    Json::Value toJson() const
+    {
+        Json::Value json( Json::objectValue );
+        json["code"] = codeToken();
+        if ( !expected.empty() )
+            json["expected"] = expected;
+        if ( !actual.empty() )
+            json["actual"] = actual;
+        if ( !hint.empty() )
+            json["hint"] = hint;
+        return json;
+    }
 };
 
 /// Output mode flags shared by every command.

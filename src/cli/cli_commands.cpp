@@ -2712,49 +2712,6 @@ void CliIO::reportLog( const std::string &level, const std::string &message ) co
     std::cerr << "[" << level << "] " << message << "\n";
 }
 
-std::string_view exitCodeSymbol( int code )
-{
-    switch ( code )
-    {
-        case static_cast<int>( exprs_ns::ExitCode::Ok ):
-            return "OK";
-        case static_cast<int>( exprs_ns::ExitCode::GenericError ):
-            return "GENERIC_ERROR";
-        case static_cast<int>( exprs_ns::ExitCode::ValidationFailure ):
-            return "VALIDATION_FAILURE";
-        case static_cast<int>( exprs_ns::ExitCode::ExecutionFailure ):
-            return "EXECUTION_FAILURE";
-        case static_cast<int>( exprs_ns::ExitCode::Cancelled ):
-            return "CANCELLED";
-        case static_cast<int>( exprs_ns::ExitCode::MissingDependency ):
-            return "MISSING_DEPENDENCY";
-        case static_cast<int>( exprs_ns::ExitCode::InvalidInput ):
-            return "INVALID_INPUT";
-        case static_cast<int>( exprs_ns::ExitCode::RuntimeUnavailable ):
-            return "RUNTIME_UNAVAILABLE";
-        default:
-            return "GENERIC_ERROR";
-    }
-}
-
-std::string CliErrorDetails::codeToken() const
-{
-    return "E-" + std::to_string( exitCode ) + ":" + std::string( exitCodeSymbol( exitCode ) );
-}
-
-Json::Value CliErrorDetails::toJson() const
-{
-    Json::Value json( Json::objectValue );
-    json["code"] = codeToken();
-    if ( !expected.empty() )
-        json["expected"] = expected;
-    if ( !actual.empty() )
-        json["actual"] = actual;
-    if ( !hint.empty() )
-        json["hint"] = hint;
-    return json;
-}
-
 int CliIO::finish( bool ok, const std::string &command, Json::Value data, int exitCode,
                    const Json::Value &diagnostics, const std::string &errorMessage,
                    const CliErrorDetails *errorDetails ) const
