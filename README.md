@@ -29,7 +29,7 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
 - **Identify Tool:** Click-to-query pixel/feature values
-- **CRS Presets:** 36 common coordinate reference systems
+- **CRS Presets:** 39 common coordinate reference systems
 - **Logging:** Unified logging with file output option
 
 ## Remote-Sensing Workflows

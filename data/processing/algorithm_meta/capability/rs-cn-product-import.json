@@ -103,7 +103,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u79bb\u7ebf\u5bfc\u5165\uff1a\u9700\u8981\u4ea7\u54c1\u76ee\u5f55\u5185\u542b CRESDA sidecar XML \u4e0e TIFF\uff1b\u53ef\u8bc6\u522b\u5bb6\u65cf\u4ee5\u81ea\u52a8\u8bc6\u522b\u5217\u8868\u4e3a\u51c6\uff08GF-1/2/6/7\u3001ZY-3\u3001ZY-1 02C\u3001HJ-1/2 CCD\uff09\uff0c\u672a\u8bc6\u522b\u5bb6\u65cf\u6309\u5bfc\u5165\u8ba1\u5212\u5931\u8d25\u8def\u5f84\u5904\u7406\u3002"
+    ],
     "modality" : 
     [
       "optical"

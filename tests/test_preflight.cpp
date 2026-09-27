@@ -471,9 +471,12 @@ TEST_CASE( "preflight attaches a tile working-set plan for streaming operators",
     CHECK( plan["expectedTileCount"].asUInt64() == 16u );
     CHECK( plan["recommendedQueueCapacity"].asUInt() == 2u );
     // Halo widening is visible in the peak: peak(16px tile, halo 2, 1 band,
-    // 4 B) with (stages+1)=1, cap=2: 2*2*(20*20*4) + (20*20*4) bytes.
+    // 4 B) with (stages+1)=1, cap=2: 2*2*(20*20*4) + (20*20*4) bytes —
+    // 2 queued tiles x 2 in-hand tiles (producer/stage/consumer hold input
+    // AND output transiently, review R2-P1) plus the writer-drain tile
+    // (F-A-13). The memory_planner model is the canonical reference.
     const Json::UInt64 perTile = 20ull * 20 * 4;
-    CHECK( plan["requestedShapePeakBytes"].asUInt64() == 2ull * perTile + perTile );
+    CHECK( plan["requestedShapePeakBytes"].asUInt64() == 4ull * perTile + perTile );
 }
 
 TEST_CASE( "preflight survives a descriptor with zero tile dimensions (F-A-3)",

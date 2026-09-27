@@ -15,6 +15,7 @@
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size (grid compatibility is preflighted).；两期影像同网格、同波段集。
+- 局限：输出是连续变化强度（变化向量模长）而非二值掩膜：需与 rs:threshold_raster 链接才能得到变化掩膜。；方向角输出为弧度制，4 象限扇区分类依赖所选波段对的符号约定；模长对两时相辐射定标差异敏感，建议先完成辐射归一化。
 - 适用地物：城市、农田、森林
 - 适用场景：多波段变化强度制图、城市扩张多维度检测
 - 失败模式：
@@ -35,6 +36,7 @@ CVA 角度变体：在变化强度之外输出变化方向角，区分变化类�
 - 输出：height（integer）、method（string）、mode（string）、output（raster）、width（integer）
 - 参数：afterBand1（integer）、afterBand2（integer）、beforeBand1（integer）、beforeBand2（integer）、mode（enum）、output（string）
 - 前置条件：Before and after rasters must be co-registered with identical dimensions.
+- 局限：方向角在低变化强度处不稳定：变化向量模长接近 0 时方向无意义，角度/扇区平面应与 rs:change_cva 的模长输出联合解读。；原子变化度量输出：需与 rs:threshold_raster 链接才能得到变化掩膜。
 - 适用地物：农田、森林
 - 适用场景：变化方向判读、植被退化 vs 恢复区分
 - 失败模式：
@@ -76,6 +78,7 @@ CVA 角度变体：在变化强度之外输出变化方向角，区分变化类�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size (grid compatibility is preflighted).；两期影像须配准到同一网格；辐射量纲需一致。
+- 局限：对两期辐射定标差异与整体亮度偏移敏感：要求输入已经辐射归一化，适合同传感器、同处理级别的可比影像对。
 - 适用地物：植被、水体、城市
 - 适用场景：NDVI 差值植被变化、水体涨落检测
 - 失败模式：
@@ -96,6 +99,7 @@ IR-MAD 迭代加权 MAD：在 MAD 基础上迭代降权不变像元，收敛出�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：convThreshold（numeric）、maxIterations（integer）、output（string）
 - 前置条件：Before and after rasters must have equal band count and dimensions.
+- 局限：IR-MAD 假设两期影像的大部分区域未变化：大面积真实变化会污染不变像元降权估计，使变化概率失真；收敛失败时结果不可靠需人工复核。
 - 适用地物：城市、森林
 - 适用场景：高精度变化检测、变化概率制图
 - 失败模式：
@@ -115,6 +119,7 @@ IR-MAD 迭代加权 MAD：在 MAD 基础上迭代降权不变像元，收敛出�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、epsilon（numeric）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size.
+- 局限：输入必须非负（对数定义域）：零值按 eps 平滑处理，因此接近零的区域对数值噪声敏感；输出经 log 压缩动态范围，阈值选取与差值法不可混用。
 - 适用地物：植被、土壤
 - 适用场景：SAR 变化检测常用策略、对数域阈值实验
 - 失败模式：
@@ -135,6 +140,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size (grid compatibility is preflighted).
+- 局限：典型相关变换假设两期近似线性相关；输出为连续 MAD 统计量，需与 rs:threshold_raster 链接才能得到变化掩膜。
 - 适用地物：城市、农田
 - 适用场景：辐射差异较大时的稳健变化检测、多波段统计变化检测
 - 失败模式：
@@ -156,6 +162,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size (grid compatibility is preflighted).
+- 局限：(a-b)/(a+b) 形式压制公共乘性因子，但对加性偏移（大气/光照整体抬升）仍敏感；分母接近 0（a≈-b）的区域不稳定。
 - 适用地物：植被、水体
 - 适用场景：指数时序变化（如 dNDVI）、归一化变化制图
 - 失败模式：
@@ -176,6 +183,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、output（string）
 - 前置条件：Before and after rasters must be co-registered and same size (grid compatibility is preflighted).
+- 局限：对比值型（乘性）变化稳健，但后一期接近 0 的区域比值发散（以 eps 平滑），且对加性辐射偏移敏感。
 - 适用地物：植被、裸土
 - 适用场景：光照差异较大的两期比较、矿物蚀变粗查
 - 失败模式：
@@ -195,6 +203,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：output（string）
 - 前置条件：Before and after rasters must have equal band count and dimensions.
+- 局限：以光谱向量夹角度量形态变化，对亮度差异不敏感；要求两期波段数一致且已配准（类型化拒绝），低信噪比波段会拉偏光谱角。
 - 适用地物：矿物、植被
 - 适用场景：光谱形态变化识别、光照不一致场景的变化检测
 - 失败模式：

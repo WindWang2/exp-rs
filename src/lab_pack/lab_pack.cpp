@@ -43,25 +43,106 @@ std::string contextError( const std::string &context, const std::string &detail 
   return context + ": " + detail;
 }
 
-/// Streaming sha256 in bounded chunks. Returns an empty string when the file
-/// cannot be opened (caller reports the typed issue).
+/// Git's binary heuristic: a NUL byte anywhere in the first 8000 bytes means
+/// the blob is stored verbatim; everything else is text and is normalised to LF
+/// on commit. Twin of canonical_bytes() in scripts/gen_lab_packs.py.
+constexpr std::size_t kBinaryProbeBytes = 8000;
+
+bool looksBinary( const std::filesystem::path &path )
+{
+  std::ifstream file( path, std::ios::binary );
+  if ( !file.is_open() )
+    return false;
+  char probe[4096];
+  std::size_t seen = 0;
+  while ( seen < kBinaryProbeBytes && file.good() )
+  {
+    const std::size_t want = std::min( sizeof( probe ), kBinaryProbeBytes - seen );
+    file.read( probe, static_cast<std::streamsize>( want ) );
+    const std::streamsize got = file.gcount();
+    if ( got <= 0 )
+      break;
+    if ( std::find( probe, probe + got, '\0' ) != probe + got )
+      return true;
+    seen += static_cast<std::size_t>( got );
+  }
+  return false;
+}
+
+/// Streaming sha256 in bounded chunks over the bytes git would store for
+/// `path` - text canonicalised to LF, binary verbatim - plus that length in
+/// *bytesOut. This is what makes verification independent of the checkout EOL
+/// policy: a Windows tree with core.autocrlf=true materialises text fixtures as
+/// CRLF, while the pins in the pack were taken from the committed (LF) blob,
+/// so hashing the raw working-tree bytes could never match off Windows.
+/// Returns an empty string when the file cannot be opened (caller reports the
+/// typed issue).
 std::string fileSha256( const std::filesystem::path &path, std::int64_t *bytesOut )
 {
+  const bool text = !looksBinary( path );
   std::ifstream file( path, std::ios::binary );
   if ( !file.is_open() )
     return std::string();
   grader::Sha256 hash;
   std::int64_t total = 0;
   char buffer[65536];
+  bool pendingCR = false;
   while ( file.good() )
   {
     file.read( buffer, sizeof( buffer ) );
     const std::streamsize got = file.gcount();
-    if ( got > 0 )
+    if ( got <= 0 )
+      break;
+    if ( !text )
     {
       hash.update( buffer, static_cast<std::size_t>( got ) );
       total += got;
+      continue;
     }
+    // Compact CRLF -> LF in place (out <= i always, so this is safe). A '\r'
+    // that straddles the chunk edge is decided once the next byte is known; a
+    // lone '\r' is preserved, exactly as git keeps it.
+    std::size_t out = 0;
+    for ( std::size_t i = 0; i < static_cast<std::size_t>( got ); ++i )
+    {
+      const char c = buffer[i];
+      if ( pendingCR )
+      {
+        pendingCR = false;
+        if ( c == '\n' )
+        {
+          buffer[out++] = c; // CRLF collapses to this LF
+          continue;
+        }
+        buffer[out++] = '\r';
+      }
+      if ( c != '\r' )
+      {
+        buffer[out++] = c;
+        continue;
+      }
+      if ( i + 1 < static_cast<std::size_t>( got ) )
+      {
+        if ( buffer[i + 1] == '\n' )
+          continue; // drop the CR; the LF is emitted by the next iteration
+        buffer[out++] = '\r';
+      }
+      else
+      {
+        pendingCR = true;
+      }
+    }
+    if ( out > 0 )
+    {
+      hash.update( buffer, out );
+      total += static_cast<std::int64_t>( out );
+    }
+  }
+  if ( pendingCR )
+  {
+    const char cr = '\r';
+    hash.update( &cr, 1 );
+    ++total;
   }
   if ( file.bad() )
     return std::string();
