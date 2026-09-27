@@ -491,6 +491,10 @@ data/labs/_tmp/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
 
+# Track 13 dataset-governance-r4 planning artifacts (markdown only; logs stay local).
+!.planning/dataset-governance-r4/
+.planning/dataset-governance-r4/*
+!.planning/dataset-governance-r4/*.md
 # ui-backend-state-parity-r4 (Track 3 R4): track planning notes (markdown only; logs stay local).
 !.planning/ui-backend-state-parity-r4/
 .planning/ui-backend-state-parity-r4/*

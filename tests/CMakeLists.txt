@@ -111,6 +111,27 @@ function(sicnu_add_test NAME)
     # WorkflowRunCoordinator; its symbols resolve at final link time here.
     sicnu_workflow_runtime
   )
+  # sicnu_agent.so references the agent_loop VerificationReport seam
+  # (agent_session_adapter) without linking sicnu_agent_loop itself, so the
+  # symbol must resolve at FINAL link time. WHOLE_ARCHIVE because CMake
+  # places static archives before shared libs on the line — a plain archive
+  # ahead of sicnu_agent.so would never be pulled (Track 13 R4; tests-link
+  # layer only, the src/agent PUBLIC-link fix is recommended upstream).
+  # The LINK_LIBRARY generator expression requires CMake 3.24; fail loudly
+  # on older CMake instead of silently reverting to an ineffective plain
+  # archive (the closure was already broken there — undefined
+  # VerificationReport::aggregate — this just names the actual remedy).
+  if( CMAKE_VERSION VERSION_LESS 3.24 )
+    message( FATAL_ERROR
+      "sicnu_add_test needs CMake 3.24+ for the $<LINK_LIBRARY:WHOLE_ARCHIVE> "
+      "generator expression (found ${CMAKE_VERSION}). The test closure must "
+      "force-load sicnu_agent_loop to resolve sicnu_agent.so's "
+      "VerificationReport::aggregate; either upgrade CMake or apply the "
+      "upstream fix: add sicnu_agent_loop to sicnu_agent's PUBLIC "
+      "target_link_libraries in src/agent/CMakeLists.txt." )
+  endif()
+  set_property( TARGET ${NAME} APPEND PROPERTY LINK_LIBRARIES
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>" )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/stubs
@@ -3485,6 +3506,27 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# Track 13 R4 dataset fingerprint determinism: checkout byte perturbation
+# matrix (EOL/BOM/indent/number spelling), independent known-answer vector,
+# double-run + store funnel round-trip, binary loud-failure guard.
+sicnu_add_test(test_dataset_fingerprint_determinism TIMEOUT 120)
+target_link_libraries(test_dataset_fingerprint_determinism PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 split reproducibility: SplitMix64/Pcg32/seedFor known-answer
+# vectors, double-run manifest digest identity, seed=0 vs seed-absence gate.
+sicnu_add_test(test_split_reproducibility TIMEOUT 120)
+target_link_libraries(test_split_reproducibility PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 leakage audit coverage: constructed-leakage matrix over all
+# checks, input-permutation invariance, fold honest-gaps + replay.
+sicnu_add_test(test_leakage_audit_coverage TIMEOUT 120)
+target_link_libraries(test_leakage_audit_coverage PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# Track 13 R4 version migration: golden v1 fixture tripwire, foreign-version
+# refusal matrix, diff ordering determinism.
+sicnu_add_test(test_dataset_version_migration TIMEOUT 120)
+target_link_libraries(test_dataset_version_migration PRIVATE Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 sample model / label ontology / annotation chains (ADR 0135).
 sicnu_add_test(test_sample_label_annotation TIMEOUT 120)
 target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite::SQLite3)
@@ -3779,6 +3821,11 @@ sicnu_add_test(test_workspace_catalog TIMEOUT 300)
 
 # Workspace Governance 3.0 — persistent governance store.
 sicnu_add_test(test_governance_store TIMEOUT 300)
+
+# Track 13 R4 governance mirror consistency: reference-family chain walk,
+# planted dangling-reference surfacing, fingerprint lookup convention.
+sicnu_add_test(test_data_governance_consistency TIMEOUT 300)
+
 sicnu_add_test(test_workspace_services TIMEOUT 600)
 # Workspace Governance 3.0 — scale contract (SICNU_WS3_STRESS=1 -> 100k).
 sicnu_add_test(test_workspace_stress TIMEOUT 900 RUN_SERIAL TRUE)
