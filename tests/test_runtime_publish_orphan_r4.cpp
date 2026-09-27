@@ -26,6 +26,7 @@
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <future>
 #include <thread>
 
 using namespace sicnu::operators;
@@ -147,24 +148,27 @@ TEST_CASE( "Two threads publishing to the same path: the second guard is refused
     fixture.write( "product.tif", "FIRST-PUBLISHED" );
     fixture.write( "product.tif.prov.json", "FIRST-PROV" );
 
-    std::atomic<bool> firstGuardHeld{ false };
-    std::atomic<bool> secondAttempted{ false };
+    // Strict ordering: the first guard's fence is held BEFORE the second
+    // thread even starts constructing, and stays held until the second's
+    // attempt is DONE — no wall-clock timing anywhere.
+    std::promise<void> secondAttempting;
+    std::future<void> attemptStarted = secondAttempting.get_future();
+    std::promise<void> secondDone;
+    std::future<void> attemptFinished = secondDone.get_future();
     std::atomic<bool> secondRefused{ false };
     std::string secondWhat;
 
     std::thread first( [ & ] {
         // Parks the first product; holds the slot across the "slow" publish.
         ProductPublishGuard guard( fixture.path( "product.tif" ), kSuffix, nullptr );
-        firstGuardHeld.store( true );
-        while ( !secondAttempted.load() )
-            std::this_thread::yield();
+        attemptStarted.wait(); // the second guard is about to construct
+        attemptFinished.wait(); // ...and has finished (refused, with the fence)
         publishNew( guard, fixture, "SECOND-BYTES", R"({ "schema": "exp-rs-prov/1" })" );
         guard.disarm();
     } );
 
     std::thread second( [ & ] {
-        while ( !firstGuardHeld.load() )
-            std::this_thread::yield();
+        secondAttempting.set_value();
         try
         {
             ProductPublishGuard guard( fixture.path( "product.tif" ), kSuffix, nullptr );
@@ -177,7 +181,15 @@ TEST_CASE( "Two threads publishing to the same path: the second guard is refused
             secondRefused.store( true );
             secondWhat = error.what();
         }
-        secondAttempted.store( true );
+        catch ( const std::exception &other )
+        {
+            secondWhat = std::string( "NON-RSOperator: " ) + other.what();
+        }
+        catch ( ... )
+        {
+            secondWhat = "UNKNOWN-EXCEPTION";
+        }
+        secondDone.set_value();
     } );
 
     second.join();
