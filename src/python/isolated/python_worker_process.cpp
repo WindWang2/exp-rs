@@ -7,8 +7,19 @@
 #include <QStandardPaths>
 #include <QDebug>
 
+#if defined(Q_OS_UNIX)
+#include <csignal>
+#include <unistd.h>
+#endif
+
 namespace sicnu::python::isolated
 {
+namespace
+{
+// Bounded stderr tail: crash diagnostics stay readable without unbounded
+// memory; within the cap the capture is lossless.
+constexpr qint64 kStderrCapBytes = 1024 * 1024;
+} // namespace
 
 PythonWorkerProcess::PythonWorkerProcess( QObject *parent )
   : QObject( parent )
@@ -17,6 +28,16 @@ PythonWorkerProcess::PythonWorkerProcess( QObject *parent )
   connect( m_process, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ),
            this, &PythonWorkerProcess::onProcessFinished );
   connect( m_process, &QProcess::errorOccurred, this, &PythonWorkerProcess::onProcessError );
+  connect( m_process, &QProcess::readyReadStandardError, this, [this] {
+    m_stderrBuffer.append( m_process->readAllStandardError() );
+    if ( m_stderrBuffer.size() > kStderrCapBytes )
+      m_stderrBuffer.remove( 0, m_stderrBuffer.size() - kStderrCapBytes );
+  } );
+#if defined(Q_OS_UNIX)
+  // Own process group: lets stopWorker() sweep TERM-ignoring workers WITH
+  // their grandchildren (see killProcessTree).
+  m_process->setChildProcessModifier( [] { ::setpgid( 0, 0 ); } );
+#endif
 }
 
 PythonWorkerProcess::~PythonWorkerProcess()
@@ -109,10 +130,23 @@ void PythonWorkerProcess::stopWorker()
     m_process->terminate();
     if ( !m_process->waitForFinished( 500 ) )
     {
+      killProcessTree();
       m_process->kill();
       m_process->waitForFinished( 500 );
     }
+    // Sweep stragglers even on a clean child exit: a worker that spawned
+    // helpers must not leave them orphaned after an explicit stop.
+    killProcessTree();
   }
+}
+
+void PythonWorkerProcess::killProcessTree()
+{
+#if defined(Q_OS_UNIX)
+  const qint64 pid = m_process ? m_process->processId() : 0;
+  if ( pid > 0 )
+    ::kill( static_cast<pid_t>( -pid ), SIGKILL ); // negative pid = the group
+#endif
 }
 
 void PythonWorkerProcess::ensureSignalsConnected()
@@ -141,11 +175,18 @@ QProcess::ProcessState PythonWorkerProcess::state() const
 
 void PythonWorkerProcess::onProcessFinished( int exitCode, QProcess::ExitStatus exitStatus )
 {
+  m_lastExitCode = exitCode;
+  m_lastExitWasCrash = ( exitStatus == QProcess::CrashExit );
   if ( exitStatus == QProcess::CrashExit || ( exitCode != 0 && exitCode != 137 && exitCode != 15 && exitCode != 9 && exitCode != 1 ) )
   {
     emit workerCrashed();
   }
   emit workerFinished( exitCode, exitStatus );
+}
+
+QByteArray PythonWorkerProcess::capturedStderr() const
+{
+  return m_stderrBuffer;
 }
 
 void PythonWorkerProcess::onProcessError( QProcess::ProcessError error )

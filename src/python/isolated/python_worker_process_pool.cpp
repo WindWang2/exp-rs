@@ -234,8 +234,22 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
 
   node->isRestarting = true;
   int id = node->id;
+  // The console-side reason carries the REAL classification axis (exit code
+  // + crash status) and the captured stderr tail — never a constant string.
+  // Read from the crashed worker before it is disposed.
+  QString reason = QStringLiteral( "worker crashed" );
+  if ( node->worker )
+  {
+    reason = QStringLiteral( "worker crashed: exitCode=%1 crashExit=%2" )
+                 .arg( node->worker->lastExitCode() )
+                 .arg( node->worker->lastExitWasCrash() ? 1 : 0 );
+    const QByteArray stderrTail = node->worker->capturedStderr().trimmed();
+    if ( !stderrTail.isEmpty() )
+      reason += QStringLiteral( "; stderr: " )
+                + QString::fromUtf8( stderrTail.left( 512 ) );
+  }
   qWarning() << "Worker process crashed in pool, id:" << id;
-  emit workerCrashed( id, QStringLiteral( "Process exited unexpectedly / segfault" ) );
+  emit workerCrashed( id, reason );
 
   // State recovery: take ownership of any requests that were in flight when
   // the worker died so they can be re-dispatched to the restarted worker
