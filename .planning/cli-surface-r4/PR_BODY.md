@@ -9,8 +9,8 @@
 | 项 | 实测值 |
 |---|---|
 | 基线 `origin/master` | `15e5c66b54`（PR #1333 合并点，开分支时实测未前进） |
-| 本分支领先/落后 | `+N / -0`（回填 `git rev-list --left-right --count`） |
-| 原子提交 | N 个（回填） |
+| 本分支领先/落后 | `+37 / -0`（`git rev-list --left-right --count origin/master...HEAD`） |
+| 原子提交 | 37 个（每个独立可编译，静态验证 + 全量过滤面 ctest 门） |
 | 开放 issue | 0 |
 | 工作树 | `exp-rs-cli-surface-r4`（独立 worktree，master 只读） |
 | 构建资源 | 全程 `ninja -j2`（RSS 远低于 70%，无 -j1 降级）；`CTEST_PARALLEL_LEVEL=1`；gcc-15（16.2.1 ICE 规避 + launcher 显式置空） |
@@ -66,5 +66,7 @@
 
 ## 九、验证
 
-- `ctest -R "cli|exit_code|help" -j1` 连续两轮全绿（回填两轮日志摘要与退出码）。
-- 相对基线零新增失败；master 既有红（test_cli_command_surface docs 对账——README 缺 session 行）由本分支修复。
+- `ctest -R "cli|exit_code|help" -j1` 连续两轮：36 tests，97% passed（35/36），两轮结果逐位一致。
+- 唯一红 = `test_help_coverage`"Shell command ids all have help knowledge"——**master 既有红**，5 个缺失 id 与 open PR #1336 修复清单逐一吻合（GUI 词表轴归 #1336/#1339，本分支不越界重修）；相对基线零新增失败。
+- 本分支 5 个新套件 27 用例 / 601 断言全部在册通过；test_cli_command_surface 的 C-3 红（README 缺 session 行）已由本分支修复。
+- 附带修复的 master 潜伏缺陷：`-name/--name` argv 对被 QgsApplication 平台层消费（dataset/experiment `--name` 从不工作）；sicnu_agent 缺 agent_loop 链接（4 个测试目标无法链接）。
