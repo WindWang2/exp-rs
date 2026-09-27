@@ -12,6 +12,6 @@ D5（Phase 0）**token 记账**：口径见 PLAN.md 末节——subagent 用量�
 
 D6（WP-A）**SSE 可观测性最小实现**：截断/坏 JSON 工具调用从 qWarning-only 升级为类型化 Qt 信号 `malformedToolCall(QJsonObject)`（{reason, finish_reason, name?, error}），不改既有 toolCallParsed 语义（纯新增，向后兼容）；参数/缓冲上限沿 llm_streaming_client 既有常量风格新增。
 
-D7（WP-A）**自相矛盾探针最小实现**：计划级同输出路径冲突 → `validateAgentPlan` 增一条 INVALID_PLAN issue（复用 `kOutputPathCollision` 码，词表零扩充）。数值互斥的通用一致性检查不做（无合同来源，会变成猜测式启发）——本探针的合同来源是"一个产出路径至多一个生产者"的 workflow 语义。
+D7（WP-A）**自相矛盾探针最小实现**：计划级同输出名冲突（两 step 对同一产出声明互斥主张）→ `validateAgentPlan` 增一条 issue。码与既有全部 validateAgentPlan issue 一致用 `kInvalidPlan`（该函数现状所有 issue 均为此码，一致性优先），summary 携带 "Duplicate output name"。数值互斥的通用一致性检查不做（无合同来源，会变成猜测式启发）——本探针的合同来源是"一个产出路径至多一个生产者"的 workflow 语义。
 
 D8（WP-F）**计划级大小上限**：步数 ≤4096、计划文档 ≤4MiB，超限 INVALID_PLAN。合同先例：HarnessSessionStore kMaxDocumentBytes。上限值写入 tests 与头注释作漂移锚。
