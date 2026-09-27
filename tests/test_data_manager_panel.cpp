@@ -179,10 +179,10 @@ TEST_CASE( "Rows show status and persistence indicators", "[data_manager_panel]"
 
   sicnu::DataManagerPanel panel( &dataManager );
 
-  CHECK( panel.rowText( ready, 2 ) == QStringLiteral( "就绪" ) );
-  CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "工程持久" ) );
-  CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "源缺失" ) );
-  CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "会话临时" ) );
+  CHECK( panel.rowText( ready, 2 ) == QStringLiteral( "Ready" ) );
+  CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "Project Persistent" ) );
+  CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "Source Missing" ) );
+  CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "Session Temporary" ) );
 }
 
 TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",
@@ -318,9 +318,9 @@ TEST_CASE( "The persistence column distinguishes all three policies",
 
   sicnu::DataManagerPanel panel( &dataManager );
 
-  CHECK( panel.rowText( persistent, 3 ) == QStringLiteral( "工程持久" ) );
-  CHECK( panel.rowText( session, 3 ) == QStringLiteral( "会话临时" ) );
-  CHECK( panel.rowText( task, 3 ) == QStringLiteral( "任务临时" ) );
+  CHECK( panel.rowText( persistent, 3 ) == QStringLiteral( "Project Persistent" ) );
+  CHECK( panel.rowText( session, 3 ) == QStringLiteral( "Session Temporary" ) );
+  CHECK( panel.rowText( task, 3 ) == QStringLiteral( "Task Temporary" ) );
 }
 
 TEST_CASE( "A promote request is emitted for a temporary asset's id",
@@ -384,7 +384,7 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
     PersistencePolicy::SessionTemporary );
 
   sicnu::DataManagerPanel panel( &dataManager );
-  REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "会话临时" ) );
+  REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "Session Temporary" ) );
 
   // The shell consumes promoteRequested and calls DataManager::promote. The
   // panel refreshes automatically via the assetChanged ->
@@ -393,12 +393,12 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
   // manual refresh needed. Pump the event loop until the coalesced rebuild
   // lands (bounded; failure surfaces as the CHECK below).
   REQUIRE( dataManager.promote( id ) );
-  for ( int i = 0; i < 100 && panel.rowText( id, 3 ) != QStringLiteral( "工程持久" ); ++i )
+  for ( int i = 0; i < 100 && panel.rowText( id, 3 ) != QStringLiteral( "Project Persistent" ); ++i )
   {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
     QThread::msleep( 10 );
   }
-  CHECK( panel.rowText( id, 3 ) == QStringLiteral( "工程持久" ) );
+  CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Project Persistent" ) );
 }
 
 // --- Collections (#53) ---
@@ -509,11 +509,11 @@ TEST_CASE( "Selecting an asset fills the metadata detail panel",
 
   const QString html = panel.detailHtml();
   REQUIRE_FALSE( html.isEmpty() );
-  CHECK( html.contains( QStringLiteral( "资产 ID" ) ) );
+  CHECK( html.contains( QStringLiteral( "Asset ID" ) ) );
   CHECK( html.contains( id.toString() ) );
-  CHECK( html.contains( QStringLiteral( "数据源" ) ) );
-  CHECK( ( html.contains( QStringLiteral( "栅格结构" ) )
-           || html.contains( QStringLiteral( "结构" ) ) ) );
+  CHECK( html.contains( QStringLiteral( "Data Source" ) ) );
+  CHECK( ( html.contains( QStringLiteral( "Raster Structure" ) )
+           || html.contains( QStringLiteral( "Structure" ) ) ) );
 }
 
 TEST_CASE( "The detail view shows provenance and lineage", "[data_manager_panel][provenance]" )
@@ -561,14 +561,14 @@ TEST_CASE( "The detail view shows provenance and lineage", "[data_manager_panel]
   // Output asset: shows the derivation record and its inputs.
   tree->setCurrentItem( outputRow );
   QString html = view->toHtml();
-  CHECK( html.contains( QStringLiteral( "溯源与谱系" ) ) );
+  CHECK( html.contains( QStringLiteral( "Provenance and Lineage" ) ) );
   CHECK( html.contains( QStringLiteral( "rs:spectral_index" ) ) );
   CHECK( html.contains( QStringLiteral( "task-9" ) ) );
-  CHECK( html.contains( QStringLiteral( "源自" ) ) );
+  CHECK( html.contains( QStringLiteral( "Derived from" ) ) );
 
   // Input asset: shows that it has no derivation record but produced outputs.
   tree->setCurrentItem( inputRow );
   html = view->toHtml();
-  CHECK( html.contains( QStringLiteral( "无派生记录" ) ) );
-  CHECK( html.contains( QStringLiteral( "派生产物" ) ) );
+  CHECK( html.contains( QStringLiteral( "No derivation record" ) ) );
+  CHECK( html.contains( QStringLiteral( "Derived Artifacts" ) ) );
 }

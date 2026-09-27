@@ -142,7 +142,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("AtmosphericDialog")
     {
         AtmosphericDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("大气校正"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Atmospheric Correction"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -157,7 +157,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("RadiometricCalibrationDialog")
     {
         RadiometricCalibrationDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("辐射定标"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Radiometric Calibration"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -172,7 +172,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("ContrastStretchDialog")
     {
         ContrastStretchDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("对比度拉伸"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Contrast Stretch and Levels Adjustment"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -187,7 +187,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("SpatialFilterDialog")
     {
         SpatialFilterDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("空间滤波"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Spatial Filtering"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -202,7 +202,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("SpeckleFilterDialog")
     {
         SpeckleFilterDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("斑点滤波"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("SAR Speckle Filtering"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -217,7 +217,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("SpectralIndexDialog")
     {
         SpectralIndexDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("光谱指数"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Spectral Indices"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -232,7 +232,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("SpectralLibraryDialog")
     {
         SpectralLibraryDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("光谱库")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Spectral Library Matching")));
         REQUIRE(dlg.minimumWidth() >= 500);
 
         auto *pathEdit = dlg.findChild<QLineEdit *>(QStringLiteral("spectralLibPathEdit"));
@@ -248,7 +248,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("BandRatioDialog")
     {
         BandRatioDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("波段比值"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Band Ratio and IHS Transform"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -263,7 +263,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("BandMathDialog")
     {
         BandMathDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("波段运算"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Band Math"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -278,7 +278,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("ExtractBandDialog")
     {
         ExtractBandDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("提取波段"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Extract Band"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -293,7 +293,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     SECTION("QaMaskDialog")
     {
         QaMaskDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("QA 掩膜"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("QA Mask"));
         dlg.setRasterLayer(nullptr);
 
         // Verification of QA Mask Dialog invariant: should not auto accept so results stay visible
@@ -318,7 +318,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("OrthorectificationDialog")
     {
         OrthorectificationDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("正射纠正"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Orthorectification"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -332,7 +332,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("MosaicDialog")
     {
         MosaicDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("影像镶嵌"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Image Mosaic"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_mosaic_out.tif"));
@@ -345,7 +345,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("FusionDialog")
     {
         FusionDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("影像融合"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Image Fusion"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_fusion_out.tif"));
@@ -358,7 +358,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("ChangeDetectionDialog")
     {
         ChangeDetectionDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("变化检测"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Change Detection"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_cd_out.tif"));
@@ -371,7 +371,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("PcaDialog")
     {
         PcaDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("主成分分析"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Principal Component Analysis (PCA)"));
         dlg.setRasterLayer(nullptr);
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
@@ -385,7 +385,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("PostClassificationDialog")
     {
         PostClassificationDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("后分类比较"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Post-Classification Comparison"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_post_out.tif"));
@@ -398,7 +398,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("TerrainDialog")
     {
         TerrainDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("地形分析"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Terrain Analysis"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_terrain_out.tif"));
@@ -411,7 +411,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("ApplyMaskDialog")
     {
         ApplyMaskDialog dlg;
-        verifyProcessingDialogStructure(&dlg, QStringLiteral("应用掩膜"));
+        verifyProcessingDialogStructure(&dlg, QStringLiteral("Apply Mask"));
 
         auto *outputEdit = dlg.findChild<QLineEdit *>(QStringLiteral("rsDialogOutputEdit"));
         outputEdit->setText(QStringLiteral("/tmp/test_mask_out.tif"));
@@ -424,7 +424,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("BatchProcessingDialog")
     {
         BatchProcessingDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("批量处理")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Batch Processing")));
         REQUIRE(dlg.minimumWidth() >= 500);
 
         auto *algoCombo = dlg.findChild<QComboBox *>(QStringLiteral("batchAlgorithmCombo"));
@@ -438,7 +438,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("ProductImportDialog")
     {
         ProductImportDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("导入")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Import")));
         REQUIRE(dlg.minimumWidth() >= 500);
 
         auto *tree = dlg.findChild<QTreeWidget *>(QStringLiteral("productPreviewTree"));
@@ -448,7 +448,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("CrsPresetDialog")
     {
         CrsPresetDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("坐标系")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Select CRS Preset")));
         REQUIRE(dlg.minimumWidth() >= 500);
         REQUIRE(dlg.selectedEpsg() == -1);
     }
@@ -456,14 +456,14 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("ComparisonDialog")
     {
         ComparisonDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("对比")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Layer Comparison")));
         REQUIRE(dlg.minimumWidth() >= 600);
     }
 
     SECTION("HelpViewerDialog")
     {
         HelpViewerDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("帮助文档")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("RS Studio User Manual and Help")));
         REQUIRE(dlg.minimumWidth() >= 500);
         REQUIRE(dlg.tocTree() != nullptr);
         REQUIRE(dlg.textBrowser() != nullptr);
@@ -472,14 +472,14 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("PreferencesDialog")
     {
         PreferencesDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("首选项")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Preferences")));
         REQUIRE(dlg.minimumWidth() >= 500);
     }
 
     SECTION("RsMergeClassesDialog")
     {
         RsMergeClassesDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("合并分类类别")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Merge Classification Classes")));
         REQUIRE(dlg.minimumWidth() >= 300);
 
         // Test pure function buildRecodeMap
@@ -541,7 +541,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
         QString errMsg;
         bool ok = dlg.buildConfig(cfg, &errMsg);
         REQUIRE_FALSE(ok);
-        REQUIRE(errMsg.contains(QStringLiteral("旧类")));
+        REQUIRE(errMsg.contains(QStringLiteral("old class")));
 
         // Adding row to recode table
         auto *table = dlg.findChild<QTableWidget *>();
@@ -573,7 +573,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     SECTION("RsTemplateMatchDialog")
     {
         RsTemplateMatchDialog dlg;
-        REQUIRE(dlg.windowTitle().contains(QStringLiteral("模板匹配")));
+        REQUIRE(dlg.windowTitle().contains(QStringLiteral("Template Matching")));
         REQUIRE(dlg.minimumWidth() >= 400);
 
         auto p = dlg.params();
