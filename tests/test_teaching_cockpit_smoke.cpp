@@ -304,7 +304,9 @@ TEST_CASE( "smoke: capsule export uses the real builder/io contract",
     auto *ws = workspaceOf( fx.dock );
     emit ws->exportCapsuleRequested();
     const QString feedback = feedbackViewOf( fx.dock )->toPlainText();
-    REQUIRE( feedback.contains( QStringLiteral( "导出失败" ) ) );
+    // i18n rule (docs/i18n.md): tests load no .qm, so tr() returns the
+    // English source — pin sources, never translations.
+    REQUIRE( feedback.contains( QStringLiteral( "Export failed" ) ) );
     auto session = sicnu::teaching::LabSessionState::loadFromFile(
       fx.dock->sessionPath().toStdString() );
     REQUIRE( session.ok );
@@ -455,7 +457,7 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
 
   auto runButtonOf = [ws]() -> QPushButton * {
     for ( auto *btn : ws->findChildren<QPushButton *>() )
-      if ( btn->text().contains( QStringLiteral( "运行" ) ) ) return btn;
+      if ( btn->text().contains( QStringLiteral( "Run / jump to operator" ) ) ) return btn;
     return nullptr;
   };
   QPushButton *runBefore = runButtonOf();
@@ -482,10 +484,10 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
   // Run / prev / next / submit must all be OFF (fail-closed); no stale
   // enablement from the previously opened lab may survive.
   for ( const auto *btn : buttons ) {
-    const bool navOrRun = btn->text().contains( QStringLiteral( "上一步" ) )
-                          || btn->text().contains( QStringLiteral( "下一步" ) )
-                          || btn->text().contains( QStringLiteral( "运行" ) )
-                          || btn->text().contains( QStringLiteral( "提交" ) );
+    const bool navOrRun = btn->text().contains( QStringLiteral( "Previous" ) )
+                          || btn->text().contains( QStringLiteral( "Next" ) )
+                          || btn->text().contains( QStringLiteral( "Run / jump to operator" ) )
+                          || btn->text().contains( QStringLiteral( "Submit manual evidence" ) );
     if ( navOrRun )
       REQUIRE_FALSE( btn->isEnabled() );
   }
@@ -752,7 +754,7 @@ TEST_CASE( "smoke: recording-context change drops project-bound refs, keeps navi
 
   // The surface says what happened instead of silently keeping stale rows.
   const QString feedback = feedbackViewOf( fx.dock )->toPlainText();
-  REQUIRE( feedback.contains( QStringLiteral( "项目/记录上下文已切换" ) ) );
+  REQUIRE( feedback.contains( QStringLiteral( "Project/record context switched" ) ) );
 }
 
 TEST_CASE( "smoke: run button hands the operator real, absolutized prefill",
@@ -788,7 +790,7 @@ TEST_CASE( "smoke: run button hands the operator real, absolutized prefill",
   QPushButton *run = nullptr;
   const auto buttons = ws->findChildren<QPushButton *>();
   for ( auto *btn : buttons )
-    if ( btn->text().contains( QStringLiteral( "运行" ) ) ) run = btn;
+    if ( btn->text().contains( QStringLiteral( "Run / jump to operator" ) ) ) run = btn;
   REQUIRE( run != nullptr );
   REQUIRE( run->isEnabled() );
   run->click();
