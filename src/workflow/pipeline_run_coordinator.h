@@ -37,9 +37,17 @@
 // never blocks on a foreign thread, so no call can deadlock against it; a
 // foreign caller may block until the owner is idle, bounded by the owner's
 // current unit of work. requestCancel is two-phase so a canceller never waits
-// on a whole-file hash. Destroy the coordinator on its affinity thread (the
-// fast path) — a foreign-thread destruction is safe but marshals a drain,
-// which completes only while that thread services its event loop.
+// on a whole-file hash.
+//
+// Destruction (R5 runtime-lifecycle teardown): the destructor trips the
+// cancel flag, drains the worker pool on the affinity thread and drops every
+// completion still queued for the dying object — then releases its reference
+// to the shared RunState. Every affinity-thread body (including each
+// onNodeFinished frame, whose whole-file hash PUMPS the affinity event loop)
+// adopts its own reference first, so a delete serviced by the frame's own
+// pump — a queued functor, a timer, deleteLater — cannot free the state under
+// a live frame on ANY thread; RunState is destroyed exactly when the last
+// reference drops. No waits, no detached threads, no leaks.
 //
 // Cross-process ownership (#727 parity): a started or resumed run holds a
 // WorkflowRunLock next to its checkpoint for the whole execution — a second
@@ -56,6 +64,8 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
+#include <mutex>
 
 #include "workflow/workflow_ir_v2.h"
 #include "workflow/sicnu_workflow_export.h"
@@ -205,20 +215,31 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
   private:
     struct RunState;
 
+    /// Frame-local view of the run state. Every affinity-thread body adopts
+    /// its own reference so a destruction delivered by one of the frame's
+    /// own event pumps (the whole-file hash pumps the affinity thread; a
+    /// queued/timer delete landing in that pump runs the destructor
+    /// re-entrantly INSIDE the frame) cannot free the state under the live
+    /// frame — RunState is released exactly when the last reference drops.
+    /// Null once destruction began; public entry points refuse (or drop)
+    /// work instead of resurrecting state.
+    std::shared_ptr<RunState> adoptState() const;
+
     /// Affinity-thread bodies behind the public marshalling entry points
-    /// (startRun / resumeFromCheckpoint). Callers reach them only through the
-    /// public methods, which guarantee they run on the owner thread.
-    bool startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory, QString *outError );
-    bool resumeOnAffinity( const QString &checkpointFilePath, QString *outError );
-    void requestCancelOnAffinity();
+    /// (startRun / resumeFromCheckpoint). Callers reach them only through
+    /// the public methods, which guarantee they run on the owner thread.
+    bool startRunOnAffinity( RunState *state, const WorkflowDocument &def, const QString &runDirectory, QString *outError );
+    bool resumeOnAffinity( RunState *state, const QString &checkpointFilePath, QString *outError );
+    void requestCancelOnAffinity( RunState *state );
 
-    void dispatchReadyNodes();
+    void dispatchReadyNodes( RunState *state );
     void onNodeFinished( const QString &nodeId, NodeExecutionResult result, qint64 elapsedMs );
-    void finalizeIfDone();
-    void persistCheckpoint();
-    void markRemaining( ExecutionState state );
+    void finalizeIfDone( RunState *state );
+    void persistCheckpoint( RunState *state );
+    void markRemaining( RunState *state, ExecutionState stateToMark );
 
-    std::unique_ptr<RunState> m_state;
+    mutable std::mutex m_stateMutex;
+    std::shared_ptr<RunState> m_state;
 };
 
 } // namespace sicnu::workflow
