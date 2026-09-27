@@ -924,6 +924,12 @@ target_link_libraries(test_lab_chains PRIVATE
   Qt6::Gui
   qgis_core
   sicnu_agent
+  # r4-teaching-lab: the suite references
+  # sicnu::agent_loop::VerificationReport::aggregate, which libsicnu_agent.so
+  # does not carry on this base (its missing agent_loop dependency is the
+  # #1335 P0-3 root cause) — link agent_loop directly so the 34 cases can
+  # run at all. Redundant (harmless) once #1335 lands.
+  sicnu_agent_loop
   sicnu_operators
 )
 if(TARGET jsoncpp)
@@ -14332,6 +14338,70 @@ if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
 
+# hardening/r4-teaching-lab (Track 12): teaching-chain boundary matrix.
+# Light links (teaching_admin + lab_pack + Qt Core). See file header for the
+# B01..B22 boundary classes and the independent canonical-bytes oracle.
+sicnu_add_teaching_admin_test(test_lab_pack_boundaries_r4)
+
+# hardening/r4-teaching-lab (Track 12): batch failure semantics (empty run,
+# all-fail typing, throw isolation, duplicate discovery, corrupt/foreign
+# checkpoint degradation, cancel-then-resume, atomic publish + BOM).
+sicnu_add_teaching_admin_test(test_teaching_batch_r4)
+
+# hardening/r4-teaching-lab (Track 12): authoring-family failure paths +
+# fixture/pack asset consistency through the SAME inventory entry.
+sicnu_add_teaching_admin_test(test_teaching_authoring_failures_r4)
+
+# hardening/r4-teaching-lab (Track 12): transcript parity residuals +
+# session-family failure paths (restore byte-stability, order invariance,
+# partial-failure integrity, concurrency == sequential replay).
+sicnu_add_teaching_test(test_teaching_parity_r4)
+
+# hardening/r4-teaching-lab (Track 12) WP-E: cockpit authority under
+# registry drift — compiles the app-side launcher TU (the
+# test_teaching_cockpit_smoke pattern); heavy deps arrive via sicnu_agent.
+add_executable(test_teaching_cockpit_authority_r4
+  test_teaching_cockpit_authority_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_operator_launch.cpp
+)
+target_link_libraries(test_teaching_cockpit_authority_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  Sicnu::teaching_admin
+  sicnu_agent
+  # sicnu_agent.so does not carry its agent_loop dependency on this base
+  # (#1335 P0-3); the harness seams reference its types — link directly.
+  # Redundant (harmless) once #1335 lands.
+  sicnu_agent_loop
+)
+target_include_directories(test_teaching_cockpit_authority_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(test_teaching_cockpit_authority_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_cockpit_authority_r4)
+
+# hardening/r4-teaching-lab (Track 12) WP-D: teacher-credential fail-closed
+# CONSISTENCY across the three harness seams (lab_ask / autonomy_status /
+# lab_reference) — Catch2 + sicnu_agent + jsoncpp, the pattern of the
+# token-credential suites.
+add_executable(test_teaching_credential_paths_r4 test_teaching_credential_paths_r4.cpp)
+target_link_libraries(test_teaching_credential_paths_r4 PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent
+  # Same agent_loop gap as above (#1335 P0-3) — see the comment there.
+  sicnu_agent_loop
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_teaching_credential_paths_r4)
+target_include_directories(test_teaching_credential_paths_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(test_teaching_credential_paths_r4 PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_teaching_credential_paths_r4)
 # ---------------------------------------------------------------------------
 # Track 10 (workflow-durability R4): master@15e5c66b5 link-graph band-aid.
 # libsicnu_agent.so references

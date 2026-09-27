@@ -491,6 +491,10 @@ data/labs/_tmp/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
 
+# hardening/r4-teaching-lab (Track 12): track planning notes (markdown only; logs stay local).
+!.planning/teaching-lab-r4/
+.planning/teaching-lab-r4/*
+!.planning/teaching-lab-r4/*.md
 # workflow-durability-r4 (Track 10): track planning notes (markdown only; logs stay local).
 !.planning/workflow-durability-r4/
 .planning/workflow-durability-r4/*
