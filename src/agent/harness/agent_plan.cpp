@@ -44,6 +44,24 @@ bool operatorExists( const std::string &operatorId )
   return sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( operatorId ) != nullptr;
 }
 
+/// Reads a string member with a fallback (R4 type-confusion hardening: a
+/// hostile document must never reach asString() on a non-string — the reader
+/// contract is "false + typed error", never a Json::LogicError throw).
+std::string stringMemberOr( const Json::Value &doc, const char *key,
+                            const std::string &fallback )
+{
+  if ( doc.isObject() && doc.isMember( key ) && doc[key].isString() )
+    return doc[key].asString();
+  return fallback;
+}
+
+/// True when the member is present but is NOT a string — a structural lie
+/// for discriminator/vocabulary fields, rejected by the reader/validator.
+bool nonStringMember( const Json::Value &value, const char *key )
+{
+  return value.isObject() && value.isMember( key ) && !value[key].isString();
+}
+
 } // namespace
 
 bool isKnownIntent( const std::string &intent )
@@ -66,8 +84,24 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
     return false;
   }
 
-  const std::string version = doc.get( "schema_version", "1.0" ).asString();
-  const std::string kind = doc.get( "kind", "execution_plan" ).asString();
+  // R4 (type confusion): the discriminators decide WHICH document this is.
+  // A non-string there is a structural lie — typed rejection, never a
+  // Json::LogicError escaping the reader.
+  if ( nonStringMember( doc, "kind" ) )
+  {
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "Plan envelope 'kind' must be a string" );
+    return false;
+  }
+  if ( nonStringMember( doc, "schema_version" ) )
+  {
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "Plan 'schema_version' must be a string" );
+    return false;
+  }
+
+  const std::string version = stringMemberOr( doc, "schema_version", "1.0" );
+  const std::string kind = stringMemberOr( doc, "kind", "execution_plan" );
   if ( kind != "execution_plan" )
   {
     error = HarnessError::make( error_codes::kInvalidPlan,
@@ -88,9 +122,12 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
 
   plan = AgentPlan{};
   plan.raw = doc;
-  plan.planId = doc.get( "plan_id", "plan-agent" ).asString();
-  plan.goal = doc.get( "goal", "" ).asString();
-  plan.intent = doc.get( "intent", "" ).asString();
+  // Identity/content fields degrade to their documented defaults on type
+  // confusion (the reader runs before structural validation; the vocabulary
+  // check below speaks for intent).
+  plan.planId = stringMemberOr( doc, "plan_id", "plan-agent" );
+  plan.goal = stringMemberOr( doc, "goal", "" );
+  plan.intent = stringMemberOr( doc, "intent", "" );
   if ( !isKnownIntent( plan.intent ) )
   {
     Json::Value details( Json::objectValue );
@@ -144,6 +181,17 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
                                           "harness:plan", Json::Value() );
     return false;
   }
+  // R4 (bounded plans): a runaway model cannot make validation and compile
+  // walk an unbounded graph — the bound is a documented drift anchor.
+  if ( static_cast<int>( plan.steps.size() ) > kMaxPlanSteps )
+  {
+    Json::Value details( Json::objectValue );
+    details["steps"] = static_cast<Json::Int>( plan.steps.size() );
+    details["bound"] = kMaxPlanSteps;
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "Plan exceeds the step bound", details );
+    return false;
+  }
   return true;
 }
 
@@ -180,7 +228,17 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
                 "", true, "rename_input" );
   }
 
+  // Collect ALL step ids first: wiring checks must accept forward
+  // references (a step consuming a later step's output is legal), so the
+  // membership set has to be complete before any per-step check runs.
   std::set<std::string> ids;
+  for ( const Json::Value &step : plan.steps )
+  {
+    const std::string id = stepIdOf( step );
+    if ( !id.empty() )
+      ids.insert( id );
+  }
+  std::set<std::string> duplicateIds;
   for ( const Json::Value &step : plan.steps )
   {
     const std::string id = stepIdOf( step );
@@ -189,7 +247,7 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
       addIssue( error_codes::kInvalidPlan, "Every step needs a string 'id'", "", false, "" );
       continue;
     }
-    if ( !ids.insert( id ).second )
+    if ( !duplicateIds.insert( id ).second )
       addIssue( error_codes::kInvalidPlan, "Duplicate step id: " + id, id, true,
                 "rename_step" );
 
@@ -201,44 +259,106 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
       addIssue( error_codes::kInvalidPlan, "Unknown operator id: " + operatorId, id, true,
                 "search_capabilities" );
 
+    // R4 (type confusion): vocabulary-typed step fields reject a wrong TYPE
+    // as a structured issue instead of throwing on asString().
+    if ( nonStringMember( step, "verification" ) )
+    {
+      addIssue( error_codes::kInvalidPlan,
+                "verification must be a string (raster|vector|skip) in step " + id, id,
+                true, "set_verification" );
+    }
+    else
+    {
+      const std::string verificationValue =
+        step.isMember( "verification" ) && step["verification"].isString()
+          ? step["verification"].asString()
+          : std::string();
+      if ( !verificationValue.empty() && verificationValue != "raster" &&
+           verificationValue != "vector" && verificationValue != "skip" )
+        addIssue( error_codes::kInvalidPlan,
+                  "verification must be raster|vector|skip in step " + id, id, true,
+                  "set_verification" );
+    }
+    if ( nonStringMember( step, "role" ) )
+      addIssue( error_codes::kInvalidPlan,
+                "step role must be a string in step " + id, id, true, "set_role" );
+    if ( nonStringMember( step, "title" ) )
+      addIssue( error_codes::kInvalidPlan, "step title must be a string in step " + id, id,
+                true, "set_title" );
+
     for ( const Json::Value &input : step.get( "inputs", Json::Value( Json::arrayValue ) ) )
     {
+      if ( !input.isObject() )
+      {
+        addIssue( error_codes::kInvalidPlan, "Step input must be an object", id, true,
+                  "fix_wiring" );
+        continue;
+      }
+      if ( nonStringMember( input, "step" ) )
+      {
+        addIssue( error_codes::kInvalidPlan,
+                  "Step input must reference 'step' by id in step " + id, id, true,
+                  "fix_wiring" );
+        continue;
+      }
+      if ( nonStringMember( input, "port" ) || nonStringMember( input, "to_port" ) )
+      {
+        addIssue( error_codes::kInvalidPlan, "Step input ports must be strings in step " + id,
+                  id, true, "fix_wiring" );
+        continue;
+      }
       const std::string upstream = input.get( "step", "" ).asString();
-      if ( upstream.empty() || !std::any_of(
-             plan.steps.begin(), plan.steps.end(),
-             [ &upstream ]( const Json::Value &s ) { return stepIdOf( s ) == upstream; } ) )
+      if ( upstream.empty() || !ids.count( upstream ) )
         addIssue( error_codes::kInvalidPlan,
                   "Step input references unknown upstream step: " + upstream, id, true,
                   "fix_wiring" );
     }
-
-    const std::string verification =
-      step.get( "verification", "" ).asString();
-    if ( !verification.empty() && verification != "raster" && verification != "vector" &&
-         verification != "skip" )
-      addIssue( error_codes::kInvalidPlan,
-                "verification must be raster|vector|skip in step " + id, id, true,
-                "set_verification" );
   }
 
+  // R4 (self-contradiction probe): one output name claimed by two steps is
+  // two contradictory statements about the same product — evidence and
+  // verification are keyed by output identity, so the plan layer surfaces
+  // the contradiction instead of letting the engine resolve it silently.
+  std::set<std::string> outputNames;
   for ( const Json::Value &output : plan.outputs )
   {
+    if ( !output.isObject() )
+    {
+      addIssue( error_codes::kInvalidPlan, "Declared output must be an object", "", true,
+                "fix_outputs" );
+      continue;
+    }
+    if ( nonStringMember( output, "name" ) )
+    {
+      addIssue( error_codes::kInvalidPlan, "Declared output 'name' must be a string", "",
+                true, "fix_outputs" );
+      continue;
+    }
+    const std::string name = output["name"].asString();
+    if ( !name.empty() && !outputNames.insert( name ).second )
+      addIssue( error_codes::kInvalidPlan,
+                "Duplicate output name: " + name + " — two steps claim the same product",
+                "", true, "fix_outputs" );
+  }
+  for ( const Json::Value &output : plan.outputs )
+  {
+    if ( !output.isObject() || nonStringMember( output, "from_step" ) )
+      continue; // shape/type issues reported above
     const std::string from = output.get( "from_step", "" ).asString();
-    if ( !from.empty() && !std::any_of(
-           plan.steps.begin(), plan.steps.end(),
-           [ &from ]( const Json::Value &s ) { return stepIdOf( s ) == from; } ) )
+    if ( !from.empty() && !ids.count( from ) )
       addIssue( error_codes::kInvalidPlan,
                 "Declared output references unknown step: " + from, from, true,
                 "fix_outputs" );
   }
 
   // Harness 8.0 (Area E): closed step-role vocabulary (explainability only —
-  // roles never change execution semantics).
+  // roles never change execution semantics). R4: a wrong TYPE is the issue
+  // reported above; this loop reads only well-typed values.
   for ( const Json::Value &step : plan.steps )
   {
-    const std::string role = step.get( "role", "" ).asString();
-    if ( role.empty() )
+    if ( !step.isObject() || !step.isMember( "role" ) || !step["role"].isString() )
       continue;
+    const std::string &role = step["role"].asString();
     static const char *const kRoles[] = { "preparation", "analysis", "postprocess",
                                           "verification" };
     if ( !std::any_of( std::begin( kRoles ), std::end( kRoles ),
@@ -424,8 +544,11 @@ Json::Value estimatePlanResources( const AgentPlan &plan )
     if ( auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId ) )
     {
       // Input-dependent estimate first (Phase 8), static declaration second.
-      Json::Value estimate = op->estimateExecution(
-        step.isMember( "params" ) ? step["params"] : Json::Value( Json::objectValue ) );
+      // R4: a non-object params body is treated as absent, never forwarded.
+      const Json::Value params = step.isMember( "params" ) && step["params"].isObject()
+                                   ? step["params"]
+                                   : Json::Value( Json::objectValue );
+      Json::Value estimate = op->estimateExecution( params );
       if ( !estimate.isObject() || !estimate.isMember( "estimatedRamBytes" ) )
         estimate = op->executionEstimate();
       if ( estimate.isObject() && estimate.isMember( "estimatedRamBytes" ) &&

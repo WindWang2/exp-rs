@@ -1,0 +1,121 @@
+{
+  "_schema": "harness_adversarial_corpus/1.0",
+  "description": "Track 8 R4 adversarial corpus: structured failure samples for the LLM failure matrix. Single source shared by the plan-layer matrix (test_harness_adversarial_matrix) and the SSE-lane matrix (test_llm_streaming_client). Each sample: id, failure_class (PLAN.md taxonomy), target_seam, payload (the hostile input), expected (the documented contract outcome).",
+  "failure_classes": [
+    "hallucinated_reference",
+    "format_error",
+    "refusal_empty",
+    "truncation",
+    "partial_json",
+    "missing_parameters",
+    "tool_hallucination",
+    "self_contradiction",
+    "type_confusion"
+  ],
+  "samples": [
+    {
+      "id": "plan-top-level-array",
+      "failure_class": "format_error",
+      "target_seam": "agent_plan.read",
+      "payload": [],
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+    },
+    {
+      "id": "plan-top-level-string",
+      "failure_class": "format_error",
+      "target_seam": "agent_plan.read",
+      "payload": "execute everything",
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+    },
+    {
+      "id": "plan-kind-is-array",
+      "failure_class": "type_confusion",
+      "target_seam": "agent_plan.read",
+      "payload": {
+        "kind": [],
+        "schema_version": "2.0",
+        "steps": []
+      },
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+    },
+    {
+      "id": "plan-refusal-empty-steps",
+      "failure_class": "refusal_empty",
+      "target_seam": "agent_plan.read",
+      "payload": {
+        "kind": "execution_plan",
+        "schema_version": "2.0",
+        "steps": []
+      },
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN" }
+    },
+    {
+      "id": "plan-hallucinated-operator",
+      "failure_class": "hallucinated_reference",
+      "target_seam": "agent_plan.validate",
+      "payload": {
+        "kind": "execution_plan",
+        "schema_version": "2.0",
+        "steps": [
+          { "id": "s1", "operator_id": "rs:fabricate_revenue", "inputs": [] }
+        ]
+      },
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN", "summary_contains": "Unknown operator id" }
+    },
+    {
+      "id": "plan-duplicate-output-names",
+      "failure_class": "self_contradiction",
+      "target_seam": "agent_plan.validate",
+      "payload": {
+        "kind": "execution_plan",
+        "schema_version": "2.0",
+        "steps": [
+          { "id": "a", "operator_id": "rs:spectral_index", "inputs": [] },
+          { "id": "b", "operator_id": "rs:spectral_index", "inputs": [] }
+        ],
+        "outputs": [
+          { "name": "product", "from_step": "a", "port": "output", "kind": "raster" },
+          { "name": "product", "from_step": "b", "port": "output", "kind": "raster" }
+        ]
+      },
+      "expected": { "outcome": "reject", "code": "INVALID_PLAN", "summary_contains": "Duplicate output name" }
+    },
+    {
+      "id": "sse-truncated-by-length",
+      "failure_class": "truncation",
+      "target_seam": "llm_streaming.parse",
+      "payload": {
+        "lines": [
+          "data: {\"choices\": [{\"finish_reason\": \"length\"}]}",
+          "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c1\", \"function\": {\"name\": \"rs_change_difference\"}}]}}]}",
+          "data: [DONE]"
+        ]
+      },
+      "expected": { "outcome": "refuse", "reason": "truncated_arguments", "tool_call_emitted": false }
+    },
+    {
+      "id": "sse-partial-json-arguments",
+      "failure_class": "partial_json",
+      "target_seam": "llm_streaming.parse",
+      "payload": {
+        "lines": [
+          "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c2\", \"function\": {\"name\": \"harness_plan\", \"arguments\": \"{\\\"plan\\\": {\\\"steps\\\": [\"}}]}}]}]}",
+          "data: [DONE]"
+        ]
+      },
+      "expected": { "outcome": "refuse", "reason": "unparseable_arguments", "tool_call_emitted": false }
+    },
+    {
+      "id": "sse-argument-less-call-is-legitimate",
+      "failure_class": "refusal_empty",
+      "target_seam": "llm_streaming.parse",
+      "payload": {
+        "lines": [
+          "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c3\", \"function\": {\"name\": \"data_list_layers\"}}]}}]}",
+          "data: [DONE]"
+        ]
+      },
+      "expected": { "outcome": "emit", "tool_call_emitted": true }
+    }
+  ]
+}
