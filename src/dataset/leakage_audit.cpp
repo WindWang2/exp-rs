@@ -432,6 +432,15 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             if ( !( sample.input.sampleId < samples.at( *otherIt ).input.sampleId ) )
                 continue;
             const AuditSample &other = samples.at( *otherIt );
+            // Dedup only genuinely SYMMETRIC pairs (both endpoints link
+            // back): emit once, anchored on the lower id. A one-sided
+            // reference — the counterpart does not link back, e.g.
+            // asymmetric import data — still reports from its linking side;
+            // suppressing it would convert the old double-emission into a
+            // silent audit gap, the wrong failure direction.
+            if ( other.pairCounterpartId == sample.input.sampleId &&
+                 !( sample.input.sampleId < other.input.sampleId ) )
+                continue;
             if ( config.crossSplitOnly && !crossSplit( sample, other, foldBased ) )
                 continue;
             QJsonObject evidence;

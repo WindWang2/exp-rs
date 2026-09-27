@@ -210,7 +210,53 @@ TEST_CASE( "leakage audit coverage matrix: every planted contact surface is repo
         CHECK( finding.sampleA == sampleA );
         CHECK( finding.sampleB == sampleB );
         CHECK( finding.severity == DiagnosticSeverity::Error );
+        // The evidence follows the id-sorted pair: role_a belongs to the
+        // sample named in sampleA (enumeration order must not leak in).
+        const auto byId = [&]( const QString &id ) {
+            return std::find_if( row.samples.cbegin(), row.samples.cend(),
+                                 [ & ]( const AuditSample &s ) {
+                                     return s.input.sampleId == id;
+                                 } );
+        };
+        const auto sideA = byId( finding.sampleA );
+        const auto sideB = byId( finding.sampleB );
+        REQUIRE( sideA != row.samples.cend() );
+        REQUIRE( sideB != row.samples.cend() );
+        CHECK( finding.evidence.value( QStringLiteral( "role_a" ) ).toString() ==
+               splitRoleToString( sideA->role ) );
+        CHECK( finding.evidence.value( QStringLiteral( "role_b" ) ).toString() ==
+               splitRoleToString( sideB->role ) );
     }
+}
+
+TEST_CASE( "one-sided counterpart references report exactly once",
+           "[dataset][leakage][determinism][matrix]" )
+{
+    // The counterpart field is per-sample; nothing forces the reverse edge.
+    // Only the higher-id endpoint carries the link here — the pair must be
+    // reported once from the linking side (a dedup that suppressed this
+    // would trade a duplicate finding for a silent audit gap).
+    AuditSample linking = sampleWith( QStringLiteral( "pair-hi" ), SplitRole::Test,
+                                      QStringLiteral( "a" ) );
+    linking.pairCounterpartId = QStringLiteral( "pair-lo" );
+    AuditSample silent = sampleWith( QStringLiteral( "pair-lo" ), SplitRole::Train,
+                                     QStringLiteral( "a" ) );
+
+    LeakageAuditConfig config;
+    config.checks = QStringList{ QStringLiteral( "pre_post_pair_leakage" ) };
+    const auto report = LeakageAuditor::audit(
+        QStringLiteral( "version-x" ), QStringLiteral( "split-x" ),
+        plantedPair( linking, silent ), config );
+    REQUIRE( report.has_value() );
+    REQUIRE( report.value().findings().size() == 1 );
+    // sampleA/sampleB follow the id-sorted pair ("pair-hi" < "pair-lo").
+    CHECK( report.value().findings().first().sampleA == QStringLiteral( "pair-hi" ) );
+    CHECK( report.value().findings().first().sampleB == QStringLiteral( "pair-lo" ) );
+    // role_a follows sampleA — the LINKING side here (it is also the
+    // id-lower side), never the enumeration order.
+    CHECK( report.value().findings().first().evidence.value(
+               QStringLiteral( "role_a" ) ).toString() ==
+           splitRoleToString( SplitRole::Test ) );
 }
 
 TEST_CASE( "leakage findings order is invariant under input permutation",
