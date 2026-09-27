@@ -1147,5 +1147,97 @@
       "出图",
       "export"
     ]
+  },
+  {
+    "id": "command.mission.task.retry",
+    "purpose": "重试当前选中的失败或已取消的任务：沿用原任务参数在任务中心重新排队执行，不改写历史记录。",
+    "prerequisites": [
+      "选中的任务处于 failed 或 canceled 状态",
+      "任务引用的输入数据仍然可用"
+    ],
+    "suggestedNextAction": "在任务时间线中查看新的执行记录",
+    "related": [
+      "command.mission.task.resume",
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "重试",
+      "任务",
+      "失败",
+      "retry",
+      "mission task"
+    ]
+  },
+  {
+    "id": "command.mission.task.resume",
+    "purpose": "恢复选中的过期或已取消任务：重新绑定其引用后从断点继续，而不是重跑已完成的部分。",
+    "prerequisites": [
+      "选中的任务处于可恢复（stale/canceled）状态",
+      "任务引用仍可解析"
+    ],
+    "suggestedNextAction": "在任务时间线中确认恢复后的执行进度",
+    "related": [
+      "command.mission.task.retry",
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "恢复",
+      "续跑",
+      "断点",
+      "resume",
+      "mission task"
+    ]
+  },
+  {
+    "id": "command.mission.timeline.show",
+    "purpose": "打开任务时间线面板：按时间轴查看任务执行、事件与状态迁移。",
+    "prerequisites": [
+      "已打开包含任务运行记录的工程"
+    ],
+    "suggestedNextAction": "在时间线中选中一个任务节点查看其详情",
+    "related": [
+      "command.mission.task.retry",
+      "command.mission.task.resume"
+    ],
+    "keywords": [
+      "任务",
+      "时间线",
+      "timeline",
+      "mission"
+    ]
+  },
+  {
+    "id": "command.workbench.experimentExplorationStudio",
+    "purpose": "打开实验探索工作台：参数敏感性分析、空间对比、故障教学与首次分歧定位。",
+    "prerequisites": [
+      "已有可用的实验运行记录或工作流产物"
+    ],
+    "suggestedNextAction": "选择一次运行查看其参数敏感度或分歧报告",
+    "related": [
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "实验",
+      "参数敏感性",
+      "分歧",
+      "experiment studio"
+    ]
+  },
+  {
+    "id": "command.teaching.labCockpit.show",
+    "purpose": "打开遥感实验学习工作台：课程首页、就绪度检查与分步引导。",
+    "prerequisites": [
+      "当前账号处于教学场景（学生或教师）"
+    ],
+    "suggestedNextAction": "按课程首页的就绪度提示准备数据后开始引导步骤",
+    "related": [
+      "command.mission.timeline.show"
+    ],
+    "keywords": [
+      "教学",
+      "实验课",
+      "引导",
+      "lab cockpit"
+    ]
   }
 ]

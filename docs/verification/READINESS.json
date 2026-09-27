@@ -1,18 +1,18 @@
 {
  "schema": "exp.readiness.report.v1",
- "generated_utc": "2026-09-16T07:02:56.302663+00:00",
- "git_sha": "d2868c7445f496c1742f04c94d23bc6e14bda3ec",
- "build_dir": "C:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\build-dev",
+ "generated_utc": "2026-09-26T21:05:06.215035+00:00",
+ "git_sha": "774879cc28e02c2a3acce1763455311a03b9cb1a",
+ "build_dir": "/home/kevin/projects/rs-studio/exp-rs-perf-memory-r4/build-perf",
  "host": {
-  "platform": "win32"
+  "platform": "linux"
  },
  "counts": {
-  "compiled": 26,
-  "passed": 21,
+  "compiled": 46,
+  "passed": 40,
   "failed": 5,
-  "not_built": 19,
-  "skipped": 0,
-  "timeout": 1,
+  "not_built": 0,
+  "skipped": 1,
+  "timeout": 0,
   "no_evidence": 0
  },
  "overall": "attention",
@@ -21,7 +21,7 @@
   {
    "capability": "header-self-containment",
    "artifact": "sicnu_header_probes",
-   "compiled_here": false,
+   "compiled_here": true,
    "executed_status": "passed"
   },
   {
@@ -76,13 +76,13 @@
    "capability": "fuzz-worker-ipc-splits",
    "artifact": "test_contract_fuzz_ipc",
    "compiled_here": true,
-   "executed_status": "timeout"
+   "executed_status": "passed"
   },
   {
    "capability": "fuzz-operator-schemas",
    "artifact": "test_contract_fuzz_ops",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "known-answer-corpus-8",
@@ -99,104 +99,104 @@
   {
    "capability": "io-uri",
    "artifact": "test_io_uri",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-paths",
    "artifact": "test_io_paths",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-range-cache",
    "artifact": "test_io_range_cache",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-remote-range",
    "artifact": "test_io_remote_range",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-remote-validator",
    "artifact": "test_io_remote_validator",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-atomic-failures",
    "artifact": "test_io_atomic_failures",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "failed"
   },
   {
    "capability": "io-raster-contract",
    "artifact": "test_io_raster_contract",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-grid-descriptor",
    "artifact": "test_io_grid_descriptor",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "io-stac",
    "artifact": "test_io_stac",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "portable-fault-matrix",
    "artifact": "test_fault_matrix",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "sdk-ipc-contract",
    "artifact": "test_exprs_ipc",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "concurrency-stress",
    "artifact": "test_concurrency_stress",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "posix-fault-injection",
    "artifact": "test_fault_injection",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "worker-host-lifecycle",
    "artifact": "test_worker_host",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "visual-cartography",
    "artifact": "test_mapspec",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "skipped"
   },
   {
    "capability": "bench-quality7",
    "artifact": "benchmark_quality7",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "bench-scale8",
    "artifact": "benchmark_scale8",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "contract-graph",
@@ -208,7 +208,7 @@
    "capability": "contract-operator-projection",
    "artifact": "test_contract_projection_9",
    "compiled_here": true,
-   "executed_status": "failed"
+   "executed_status": "passed"
   },
   {
    "capability": "contract-command-reference",
@@ -231,8 +231,8 @@
   {
    "capability": "bench-contract9",
    "artifact": "benchmark_contract9",
-   "compiled_here": false,
-   "executed_status": "not_built"
+   "compiled_here": true,
+   "executed_status": "passed"
   },
   {
    "capability": "scientific-contract-10",
@@ -244,7 +244,7 @@
    "capability": "drift-projection-10",
    "artifact": "test_drift_projection_10",
    "compiled_here": true,
-   "executed_status": "failed"
+   "executed_status": "passed"
   },
   {
    "capability": "science-verification-10",
@@ -286,7 +286,7 @@
    "capability": "failure-contract-11",
    "artifact": "test_verification_failure_11",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "cross-surface-11",
@@ -301,5 +301,5 @@
   "macOS: GDAL 3.13 ladder exercised via PR #834 evidence; NOT executed on this host.",
   "Optional-feature omissions (OTB, Python worker, ONNX Runtime) follow the CMake option surface of this build tree; absent targets are reported as not-built, never as passing."
  ],
- "ladder_run_utc": "2026-09-16T07:00:59.196754+00:00"
+ "ladder_run_utc": "2026-09-26T20:57:47.738739+00:00"
 }

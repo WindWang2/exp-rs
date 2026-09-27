@@ -2443,5 +2443,711 @@
     ],
     "related": [],
     "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_agent_mode_required",
+    "family": "harness",
+    "code": "AUTONOMY_AGENT_MODE_REQUIRED",
+    "title": "需要 Agent 模式（科研域执行）",
+    "whatHappened": "科研（非实验课）域中请求了执行类能力，但当前会话的自治模式不是 agent 模式，自治决策按规则 3 直接拒绝。",
+    "whyItMatters": "科研域的 L5 执行必须显式选择 agent 模式；科学验证在放行后仍然强制执行，模式切换不会降低验证要求。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "把会话自治模式切换为 agent 模式后重新发起请求",
+      "或将请求降级为该模式已解锁的辅助能力（引擎不会静默替换更弱动作）",
+      "教学/实验课场景请改用 lab 域策略（适用 AUTONOMY_LAB_STUDENT_EXECUTION 规则）"
+    ],
+    "keywords": [
+      "autonomy",
+      "agent mode",
+      "execution",
+      "自治",
+      "模式"
+    ],
+    "related": [
+      "diagnostic.harness.autonomy_course_cap"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_course_cap",
+    "family": "harness",
+    "code": "AUTONOMY_COURSE_CAP",
+    "title": "达到课程自治上限",
+    "whatHappened": "请求的能力等级超过课程/策略声明的最高等级（max level），自治引擎按规则 7 以类型化原因码拒绝。",
+    "whyItMatters": "执行类能力从不降级：超过课程上限的请求只会被拒绝，不会被替换成更弱的动作冒充完成。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "由教师/管理员在课程策略中调整 max level（若确属教学安排需要）",
+      "改请求不超过上限的能力等级",
+      "检查策略加载是否把错误的课程上限应用到了当前会话"
+    ],
+    "keywords": [
+      "autonomy",
+      "course cap",
+      "max level",
+      "自治",
+      "课程上限"
+    ],
+    "related": [
+      "diagnostic.harness.autonomy_agent_mode_required"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_unknown_capability",
+    "family": "harness",
+    "code": "AUTONOMY_UNKNOWN_CAPABILITY",
+    "title": "未知的自治能力标识",
+    "whatHappened": "自治引擎收到的能力（capability）标识不在闭合能力表中，无法判定其风险等级，按规则 1 直接拒绝。",
+    "whyItMatters": "未知能力没有已审计的风险契约；放行它等于在未审计路径上执行动作。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "更正请求中的能力标识拼写（闭合词表见 autonomy_capability）",
+      "新能力需先在自治能力表中登记契约后才能被请求"
+    ],
+    "keywords": [
+      "autonomy",
+      "unknown capability"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_level_too_low",
+    "family": "harness",
+    "code": "AUTONOMY_LEVEL_TOO_LOW",
+    "title": "能力等级低于要求",
+    "whatHappened": "请求的能力所需的有效自治等级高于当前会话生效等级，且没有可用的降级路径。",
+    "whyItMatters": "等级矩阵是课程/策略自治意图的权威表达；绕过它会破坏最小特权。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "由教师/管理员提升策略等级，或改请求当前等级已解锁的能力",
+      "确认会话的角色与域映射是否符合预期"
+    ],
+    "keywords": [
+      "autonomy",
+      "level"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_downgraded",
+    "family": "harness",
+    "code": "AUTONOMY_DOWNGRADED",
+    "title": "自治动作已降级",
+    "whatHappened": "请求的辅助能力高于生效等级，自治引擎按规则 6 降级为该等级允许的最接近能力并已注明。",
+    "whyItMatters": "降级是显式且留痕的：结果由哪个（更弱的）能力产出会进入审计证据，不得当作原请求的产物。",
+    "severity": "warning",
+    "retry": "derived",
+    "remediation": [
+      "核对降级后产物的适用性",
+      "如需原能力，请提升策略等级或申请覆盖（override）"
+    ],
+    "keywords": [
+      "autonomy",
+      "downgrade"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_mode_ceiling",
+    "family": "harness",
+    "code": "AUTONOMY_MODE_CEILING",
+    "title": "会话模式封顶",
+    "whatHappened": "会话模式对自治等级设置了上限，请求的执行类能力高于该上限，按规则 7 拒绝。",
+    "whyItMatters": "模式上限（如考试/学生模式）独立于能力等级矩阵，是结构性约束，从不静默放宽。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "由授权方调整会话模式",
+      "改用模式内允许的能力完成当前步骤"
+    ],
+    "keywords": [
+      "autonomy",
+      "mode ceiling"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_override_denied",
+    "family": "harness",
+    "code": "AUTONOMY_OVERRIDE_DENIED",
+    "title": "自治覆盖被拒绝",
+    "whatHappened": "存在针对该能力的显式覆盖（override），其裁决为拒绝；覆盖优先于等级矩阵（规则 4）。",
+    "whyItMatters": "覆盖是策略作者的有意约束，必须在策略文件中修改，而不是在运行时绕过。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "联系策略作者修改对应能力的 override 条目",
+      "改用未被子覆盖拒绝的路径"
+    ],
+    "keywords": [
+      "autonomy",
+      "override"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.autonomy_lab_student_execution",
+    "family": "harness",
+    "code": "AUTONOMY_LAB_STUDENT_EXECUTION",
+    "title": "实验课学生不可执行",
+    "whatHappened": "实验课（lab）域中学生角色请求执行类能力，按规则 2（ADR 0155 结构性规则）拒绝，任何覆盖都无法解除。",
+    "whyItMatters": "学生在实验课永远不获得自治执行：这是防止代写/越权的结构性安全规则。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "由教师身份执行该步骤",
+      "学生改用辅助（assistive）能力完成同等观察"
+    ],
+    "keywords": [
+      "autonomy",
+      "lab",
+      "student",
+      "execution"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.numeric_domain_chain",
+    "family": "harness",
+    "code": "NUMERIC_DOMAIN_CHAIN",
+    "title": "数值域链冲突",
+    "whatHappened": "同一节点的两个兄弟输入来自不可互算的辐射度量域（如 DN 与地表反射率、dB 与线性功率），数值域链检查报出类型化冲突。",
+    "whyItMatters": "把不同标度/量纲的输入直接送入同一定量算子会产出物理上无意义的数值，且错误会向下游扩散。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "在冲突输入前插入校准/定标步骤（建议动作会给出演算链）",
+      "或统一两路输入的辐射度量域后再执行"
+    ],
+    "keywords": [
+      "numeric domain",
+      "radiometry",
+      "dn",
+      "reflectance",
+      "db"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.band_identity_mismatch",
+    "family": "harness",
+    "code": "BAND_IDENTITY_MISMATCH",
+    "title": "波段角色不匹配",
+    "whatHappened": "输入的波段角色与算子契约要求的角色不一致，修复规划将其映射为波段角色类需求。",
+    "whyItMatters": "波段角色驱动算法对光谱语义的解释（如 NIR/红边），错位会静默改变科学含义。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "检查输入波段的角色映射",
+      "更换含所需角色的输入，或在导入时修正角色标注"
+    ],
+    "keywords": [
+      "band role",
+      "bands"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.temporal_calendar_conflict",
+    "family": "harness",
+    "code": "TEMPORAL_CALENDAR_CONFLICT",
+    "title": "时间日历冲突",
+    "whatHappened": "声明的时相契约与可观测的采集日期冲突（例如要求 Monthly 而实际间隔不符，或日期范围外）。",
+    "whyItMatters": "时相分析的正确性依赖真实的重访周期；契约与事实不一致时结果不可信。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对采集日期事实（temporal facts 为观测值）",
+      "放宽或修正时相契约，使其与数据真实节奏一致"
+    ],
+    "keywords": [
+      "temporal",
+      "calendar",
+      "cadence"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.output_identity_mismatch",
+    "family": "harness",
+    "code": "OUTPUT_IDENTITY_MISMATCH",
+    "title": "输出身份不匹配",
+    "whatHappened": "声明的输出工件身份（路径/标识）与实际产出不一致，证据链无法把产物绑定到声明。",
+    "whyItMatters": "产物身份是 provenance 的主键；错位会让验证与解释面板引用错误的工件。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对节点声明的输出路径与实际写出位置",
+      "删除陈旧的同名产物后重跑"
+    ],
+    "keywords": [
+      "output",
+      "identity",
+      "provenance"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.scene_truth_invalid",
+    "family": "harness",
+    "code": "SCENE_TRUTH_INVALID",
+    "title": "场景真值无效",
+    "whatHappened": "InSAR 配对网络使用的场景真值（轨道/几何元数据）缺失或自相矛盾，无法建立可验证的配对。",
+    "whyItMatters": "真值是配对网络与形变解算的输入事实；无效真值会让后续所有 InSAR 产物失真。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "检查场景元数据（轨道、时间、几何）的完整性",
+      "移除或替换无法核实的场景"
+    ],
+    "keywords": [
+      "insar",
+      "scene",
+      "truth",
+      "orbit"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.baseline_no_zero_doppler_master",
+    "family": "harness",
+    "code": "BASELINE_NO_ZERO_DOPPLER_MASTER",
+    "title": "主影像缺少零多普勒元数据",
+    "whatHappened": "被选为主影像的场景没有可解析的零多普勒中心时间/轨道状态向量，垂直基线无法计算。",
+    "whyItMatters": "基线几何是干涉相位→高程/形变换算的标尺；缺零多普勒元数据的场景不能当主影像。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "换用带完整轨道元数据的场景作主影像",
+      "补载对应轨道文件后再建配对"
+    ],
+    "keywords": [
+      "insar",
+      "baseline",
+      "doppler",
+      "master"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.baseline_no_zero_doppler_slave",
+    "family": "harness",
+    "code": "BASELINE_NO_ZERO_DOPPLER_SLAVE",
+    "title": "从影像缺少零多普勒元数据",
+    "whatHappened": "被选为从影像的场景没有可解析的零多普勒中心时间/轨道状态向量，基线无法计算。",
+    "whyItMatters": "同主影像规则：从影像同样需要可解析的轨道几何。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "补载该场景的轨道元数据",
+      "改选其他场景配对"
+    ],
+    "keywords": [
+      "insar",
+      "baseline",
+      "doppler",
+      "slave"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.baseline_state_interpolation_failed",
+    "family": "harness",
+    "code": "BASELINE_STATE_INTERPOLATION_FAILED",
+    "title": "轨道状态向量插值失败",
+    "whatHappened": "基线计算需要在采集时刻插值轨道状态向量，但轨道数据的时间跨度或采样不足以支撑插值。",
+    "whyItMatters": "外插/劣质插值会给出看似合理实则错误的基线，直接污染相位→形变换算。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "确认轨道文件覆盖采集时刻（含前后冗余）",
+      "更换轨道源或重下载对应日期的精确轨道"
+    ],
+    "keywords": [
+      "insar",
+      "orbit",
+      "interpolation"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.orbit_epoch_mismatch",
+    "family": "harness",
+    "code": "ORBIT_EPOCH_MISMATCH",
+    "title": "轨道历元不匹配",
+    "whatHappened": "提供的轨道文件与场景的采集历元不一致（日期/时间对不上）。",
+    "whyItMatters": "错误历元的轨道描述的是另一时刻的传感器位置，基线与去斜结果全部无效。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对轨道文件与场景的日期与飞行框架",
+      "下载与采集时刻匹配的轨道"
+    ],
+    "keywords": [
+      "insar",
+      "orbit",
+      "epoch"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.orbit_segment_invalid",
+    "family": "harness",
+    "code": "ORBIT_SEGMENT_INVALID",
+    "title": "轨道弧段无效",
+    "whatHappened": "轨道弧段缺失、重复或顺序错乱，无法构成连续可插值的状态向量序列。",
+    "whyItMatters": "非连续弧段会在插值处产生跳变，基线误差不可控。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "重新下载完整弧段",
+      "检查是否混入了多个来源的轨道文件"
+    ],
+    "keywords": [
+      "insar",
+      "orbit",
+      "segment"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.coregistration_failed",
+    "family": "harness",
+    "code": "COREGISTRATION_FAILED",
+    "title": "配准失败",
+    "whatHappened": "主从影像的配准未能达到精度要求（配准函数返回失败或残差超限）。",
+    "whyItMatters": "干涉相位要求亚像素级配准；配准失败的像对产生的干涉图以噪声为主。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "检查配准控制（轨道/特征）是否充分",
+      "剔除质量过差的从影像",
+      "调整配准策略后重试"
+    ],
+    "keywords": [
+      "insar",
+      "coregistration"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.pair_graph_disconnected",
+    "family": "harness",
+    "code": "PAIR_GRAPH_DISCONNECTED",
+    "title": "配对图不连通",
+    "whatHappened": "按时空基线约束生成的干涉对图存在孤立子图，无法完成全网络的最小二乘反演。",
+    "whyItMatters": "不连通的网络把部分场景排除在解算之外，network inversion 会给出带偏的时序。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "增加时间/空间阈值内的配对",
+      "补采或补下载中间场景把子图连起来"
+    ],
+    "keywords": [
+      "insar",
+      "pair network",
+      "ps"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.network_inversion_pair_limit",
+    "family": "harness",
+    "code": "NETWORK_INVERSION_PAIR_LIMIT",
+    "title": "反演配对数超限",
+    "whatHappened": "时序反演的网络规模超过声明的配对数上限（保护内存与求解时间）。",
+    "whyItMatters": "上限是资源护栏；超限的网络应当被切分或精简，而不是无界求解。",
+    "severity": "warning",
+    "retry": "derived",
+    "remediation": [
+      "收紧时空基线阈值减少冗余配对",
+      "分块处理或提高上限（确认资源充足后）"
+    ],
+    "keywords": [
+      "insar",
+      "network",
+      "inversion"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.network_inversion_epoch_limit",
+    "family": "harness",
+    "code": "NETWORK_INVERSION_EPOCH_LIMIT",
+    "title": "反演历元数超限",
+    "whatHappened": "时序反演的历元（日期）数量超过声明的上限。",
+    "whyItMatters": "历元数决定方程规模；超限时求解时间与内存都会失控。",
+    "severity": "warning",
+    "retry": "derived",
+    "remediation": [
+      "减少参与反演的历元数",
+      "分时段反演后拼接"
+    ],
+    "keywords": [
+      "insar",
+      "network",
+      "epoch"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.network_inversion_rank_deficient",
+    "family": "harness",
+    "code": "NETWORK_INVERSION_RANK_DEFICIENT",
+    "title": "反演矩阵秩亏",
+    "whatHappened": "配对图构成的解算矩阵秩亏（存在未约束的形变参数组合），最小二乘解不唯一。",
+    "whyItMatters": "秩亏解会以任意基准漂移冒充形变信号，必须先补约束。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "补充闭环配对约束参考基准",
+      "固定一个稳定参考点/参考历元"
+    ],
+    "keywords": [
+      "insar",
+      "network",
+      "rank"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.topo_phase_metadata_missing",
+    "family": "harness",
+    "code": "TOPO_PHASE_METADATA_MISSING",
+    "title": "地形相位元数据缺失",
+    "whatHappened": "去除地形相位所需的元数据（高程基准/几何参数）缺失，无法构建地形相位模型。",
+    "whyItMatters": "没有地形相位的干涉图以地形条纹为主，形变信号被淹没。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "补齐 DEM 与几何元数据",
+      "确认输入是已配准的干涉图且附带对应 DEM"
+    ],
+    "keywords": [
+      "insar",
+      "topographic phase"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.topo_phase_orbit_coverage",
+    "family": "harness",
+    "code": "TOPO_PHASE_ORBIT_COVERAGE",
+    "title": "轨道覆盖不足以去地形相位",
+    "whatHappened": "轨道状态向量不覆盖干涉图完整范围，地形相位模拟在边缘区域无法计算。",
+    "whyItMatters": "部分覆盖会让去地形相位在空间上不一致，边缘条纹是插值伪影而非形变。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "使用覆盖完整幅宽的轨道",
+      "裁剪干涉图到轨道覆盖范围内"
+    ],
+    "keywords": [
+      "insar",
+      "topographic phase",
+      "orbit"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.dem_crs_mismatch",
+    "family": "harness",
+    "code": "DEM_CRS_MISMATCH",
+    "title": "DEM 坐标系与影像不一致",
+    "whatHappened": "DEM 的 CRS 与输入影像的 CRS 不一致且无法安全变换，地形算子拒绝执行。",
+    "whyItMatters": "错 CRS 的 DEM 采样位置整体偏移，高程修正会作用于错误的地面位置。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "先重投影 DEM 与影像一致",
+      "确认两者的 CRS 元数据真实且完整"
+    ],
+    "keywords": [
+      "dem",
+      "crs"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.dem_extent_insufficient",
+    "family": "harness",
+    "code": "DEM_EXTENT_INSUFFICIENT",
+    "title": "DEM 范围不足",
+    "whatHappened": "DEM 的空间范围没有完全覆盖输入影像，边缘区域没有可用高程。",
+    "whyItMatters": "范围外像素无法做地形修正，产出会出现无意义的边缘条带。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "使用覆盖完整影像的 DEM",
+      "或把处理范围裁剪到 DEM 覆盖内"
+    ],
+    "keywords": [
+      "dem",
+      "extent"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.dem_grid_unsupported",
+    "family": "harness",
+    "code": "DEM_GRID_UNSUPPORTED",
+    "title": "DEM 网格形式不受支持",
+    "whatHappened": "DEM 不是北上一致的规则网格（旋转/非常规网格），当前地形算子拒绝处理。",
+    "whyItMatters": "Horn 梯度与采样假设依赖规则网格；旋转网格需要专门的几何处理。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "先把 DEM 重采样为北上规则网格",
+      "确认 DEM 导出时的网格参数"
+    ],
+    "keywords": [
+      "dem",
+      "grid"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.grid_crs_missing",
+    "family": "harness",
+    "code": "GRID_CRS_MISSING",
+    "title": "输入缺少 CRS",
+    "whatHappened": "需要的输入（含 DEM）没有可解析的 CRS，网格一致性检查无法建立。",
+    "whyItMatters": "没有 CRS 就无法判断多源输入是否同一地面格网；默认假设会静默错位。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "为输入补写 CRS 元数据",
+      "用 understand 探针确认 CRS 事实"
+    ],
+    "keywords": [
+      "grid",
+      "crs"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.unwrap_provider_failed",
+    "family": "harness",
+    "code": "UNWRAP_PROVIDER_FAILED",
+    "title": "外部解缠 provider 执行失败",
+    "whatHappened": "外部相位解缠 provider 已找到并启动，但执行失败（参数模板不合法、工作目录不可用、进程报错等）。",
+    "whyItMatters": "解缠失败会留下未解缠的缠绕相位；错误被正确类型化以避免拿缠绕相位冒充解缠结果。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对 providerArgs 模板与输入/输出占位符",
+      "查看 provider 的标准输出定位其内部错误",
+      "改用内置解缠（provider=builtin）"
+    ],
+    "keywords": [
+      "insar",
+      "unwrap",
+      "provider"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.unwrap_provider_timeout",
+    "family": "harness",
+    "code": "UNWRAP_PROVIDER_TIMEOUT",
+    "title": "外部解缠 provider 超时",
+    "whatHappened": "外部解缠 provider 在声明的超时时间内未完成，进程被终止并计为失败。",
+    "whyItMatters": "超时是资源护栏：挂死的 provider 不能阻塞任务中心。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "提高 providerTimeoutSec（确属大场景）",
+      "缩小 AOI 或更换更快的 provider"
+    ],
+    "keywords": [
+      "insar",
+      "unwrap",
+      "timeout"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.unwrap_provider_invalid_output",
+    "family": "harness",
+    "code": "UNWRAP_PROVIDER_INVALID_OUTPUT",
+    "title": "外部解缠 provider 输出无效",
+    "whatHappened": "外部解缠 provider 的输出缺失、尺寸不符或不可读，无法作为解缠结果采纳。",
+    "whyItMatters": "采纳无效输出等于伪造科学结果；输出必须经尺寸与可读性核验。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "核对 provider 输出路径与 {output} 占位符一致",
+      "确认 provider 写出的栅格尺寸与输入缠绕相位一致"
+    ],
+    "keywords": [
+      "insar",
+      "unwrap",
+      "provider output"
+    ],
+    "related": [],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.network_inversion_pattern_blowup",
+    "family": "harness",
+    "code": "NETWORK_INVERSION_PATTERN_BLOWUP",
+    "title": "时序反演解算发散",
+    "whatHappened": "最小二乘时序反演的迭代解出现数值发散（形变/高程增量的范数在迭代中失控增长），解算器拒绝采纳该解。",
+    "whyItMatters": "发散的解不是物理形变场而是数值伪影；采纳它会以毫米级精度报告完全错误的地表运动。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "检查配对网络的冗余度与闭环一致性，剔除低质量干涉对",
+      "为解算增加正则化/参考点约束后重试",
+      "分块反演，定位引发发散的空间/时间区域"
+    ],
+    "keywords": [
+      "insar",
+      "network",
+      "inversion",
+      "blowup",
+      "时序",
+      "发散"
+    ],
+    "related": [
+      "diagnostic.harness.network_inversion_rank_deficient",
+      "diagnostic.harness.network_inversion_pair_limit"
+    ],
+    "category": "错误与诊断"
   }
 ]

@@ -52,8 +52,18 @@ void ProgressDialog::setValue(int progress)
     int clamped = qBound(m_progressBar->minimum(), progress, m_progressBar->maximum());
     m_progressBar->setValue(clamped);
 
-    if (m_autoClose && clamped >= m_progressBar->maximum()) {
-        QTimer::singleShot(500, this, &QDialog::accept);
+    // F-11/F-12 (ui-backend-state-parity-r4): auto-close only fires while the
+    // dialog is still in the state the max progress belonged to — not
+    // cancelled, and still at maximum when the timer lands (a reset() inside
+    // the 500 ms window re-arms the operation). Previously a late max update
+    // after cancel() closed the dialog with an Accepted (success) result, and
+    // a reset() inside the window auto-accepted the restarted run.
+    if (m_autoClose && !m_cancelled && clamped >= m_progressBar->maximum()) {
+        QTimer::singleShot(500, this, [this]() {
+            if (m_autoClose && !m_cancelled
+                && m_progressBar->value() >= m_progressBar->maximum())
+                accept();
+        });
     }
 }
 

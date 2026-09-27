@@ -78,12 +78,16 @@ MissionRuntimeState makeRuntime( const QString &missionId )
     tl.addTask( makeTask( QStringLiteral( "pre-1" ), MissionStage::Preprocess,
                           QStringLiteral( "Atmos correction" ), MissionTaskStatus::Failed,
                           { QStringLiteral( "layer-a" ) } ) );
-    tl.addTask( makeTask( QStringLiteral( "ana-1" ), MissionStage::Analyze,
-                          QStringLiteral( "NDVI" ), MissionTaskStatus::Running,
-                          { QStringLiteral( "layer-a" ) }, { QStringLiteral( "artifact-ndvi" ) } ) );
+    // The insertion gate (021ecf805) is fail-closed: a task may not ENTER the
+    // timeline claiming Running without a run authority. Bind the run first,
+    // insert as Pending, then drive the Running transition through the
+    // state machine — same end state as the pre-gate fixture.
     MissionRunRef run;
     run.kind = QStringLiteral( "task_center" );
     run.id = QStringLiteral( "4242" );
+    tl.addTask( makeTask( QStringLiteral( "ana-1" ), MissionStage::Analyze,
+                          QStringLiteral( "NDVI" ), MissionTaskStatus::Pending,
+                          { QStringLiteral( "layer-a" ) }, { QStringLiteral( "artifact-ndvi" ) } ) );
     tl.bindRunReference( QStringLiteral( "ana-1" ), run );
     tl.transition( QStringLiteral( "ana-1" ), MissionTaskStatus::Running,
                    QStringLiteral( "2026-09-21T00:00:00Z" ) );

@@ -114,7 +114,10 @@ RasterWriter RasterWriter::create( const std::string &targetPath, int width, int
     throw GeoError( ErrorCode::Unsupported, "RasterWriter::create: mixed per-band dtypes are not supported", details );
   }
 
-  const std::string stagedPath = atomic_fs::stagedPathFor( targetPath );
+  // Reserved (not created) staging name: GDALCreate refuses an existing
+  // target on several raster drivers — the O_EXCL-pre-created file of
+  // stagedPathFor would fail them before any pixel is written.
+  const std::string stagedPath = atomic_fs::reservedStagedPathFor( targetPath );
   QuietCplErrors quiet;
   GDALDatasetH handle = GDALCreate( driver, stagedPath.c_str(), width, height, static_cast<int>( bands.size() ),
                                     types[0], const_cast<char **>( creationOptions.data() ) );

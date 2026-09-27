@@ -488,14 +488,27 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                                   "Failed to read band " + std::to_string(src.band));
         }
         const size_t count = static_cast<size_t>(width) * rows;
+        // Single fused pass: sentinel normalization and (when #680 applies)
+        // scale normalization used to be two sweeps; both touch every sample
+        // exactly once, so one branchy pass does the same work with half the
+        // memory traffic. Values and NaN placement are identical.
         if (src.hasNodata) {
             const float nodataF = static_cast<float>(src.nodata);
-            for (size_t i = 0; i < count; ++i) {
-                if (buf[i] == nodataF || !std::isfinite(buf[i]))
-                    buf[i] = std::numeric_limits<float>::quiet_NaN();
+            if (src.invScale != 1.0f) {
+                for (size_t i = 0; i < count; ++i) {
+                    const float v = buf[i];
+                    if (v == nodataF || !std::isfinite(v))
+                        buf[i] = std::numeric_limits<float>::quiet_NaN();
+                    else
+                        buf[i] = v * src.invScale;
+                }
+            } else {
+                for (size_t i = 0; i < count; ++i) {
+                    if (buf[i] == nodataF || !std::isfinite(buf[i]))
+                        buf[i] = std::numeric_limits<float>::quiet_NaN();
+                }
             }
-        }
-        if (src.invScale != 1.0f) {
+        } else if (src.invScale != 1.0f) {
             // #680: normalize to unit reflectance; NaN'd nodata passes through.
             for (size_t i = 0; i < count; ++i) {
                 if (std::isfinite(buf[i]))

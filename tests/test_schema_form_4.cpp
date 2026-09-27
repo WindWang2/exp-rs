@@ -408,7 +408,7 @@ TEST_CASE( "Dynamic enum sources resolve through the provider and refresh",
     QComboBox *band = comboByLabel( form, QStringLiteral( "band" ) );
     REQUIRE( band != nullptr );
     REQUIRE( band->isEditable() );
-    REQUIRE( band->toolTip().contains( QStringLiteral( "动态选项源" ) ) );
+    REQUIRE( band->toolTip().contains( QStringLiteral( "Dynamic option source" ) ) );
     Json::Value free;
     free["band"] = "7";
     form.setValues( free );
@@ -466,7 +466,7 @@ TEST_CASE( "Async path_exists checks run bounded, cancel-safe, and honest",
                && !input->property( "check_path_exists" ).toBool();
     } );
     REQUIRE( warnSeen );
-    REQUIRE( input->toolTip().contains( QStringLiteral( "路径不存在" ) ) );
+    REQUIRE( input->toolTip().contains( QStringLiteral( "Path does not exist" ) ) );
 
     // Supersede: a newer run (generation bump) retires stale results —
     // fixing the path clears the warning tooltip again.
@@ -474,7 +474,7 @@ TEST_CASE( "Async path_exists checks run bounded, cancel-safe, and honest",
     form.runAsyncChecksNow();
     const bool okAgain = waitUntil( [&] {
         return input->property( "check_path_exists" ).toBool()
-               && !input->toolTip().contains( QStringLiteral( "路径不存在" ) );
+               && !input->toolTip().contains( QStringLiteral( "Path does not exist" ) );
     } );
     REQUIRE( okAgain );
 }

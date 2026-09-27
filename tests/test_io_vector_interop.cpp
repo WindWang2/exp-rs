@@ -47,7 +47,19 @@ std::string scratch( const std::string &name )
 bool parquetWriteCapable()
 {
   GDALDriverH driver = GDALGetDriverByName( "Parquet" );
-  return driver != nullptr && GDALGetMetadataItem( driver, GDAL_DCAP_CREATE, nullptr ) != nullptr;
+  if ( !driver || !GDALGetMetadataItem( driver, GDAL_DCAP_CREATE, nullptr ) )
+    return false;
+  // A registered driver whose runtime is broken (e.g. the machine lacks the
+  // Arrow libraries the driver dlopens) still answers the CREATE metadata —
+  // every GDALCreate through it fails. Ask for a real dataset instead: the
+  // capability answer must reflect a working write, not metadata.
+  GDALDatasetH probe = GDALCreate( driver, "/vsimem/sicnu_parquet_capability_probe.parquet",
+                                    0, 0, 0, GDT_Unknown, nullptr );
+  if ( !probe )
+    return false;
+  GDALClose( probe );
+  VSIUnlink( "/vsimem/sicnu_parquet_capability_probe.parquet" );
+  return true;
 }
 
 } // namespace

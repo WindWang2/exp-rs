@@ -88,7 +88,11 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u79bb\u7ebf\u5bfc\u5165\uff1a\u9700\u8981\u4ea7\u54c1\u76ee\u5f55\u5185\u542b CRESDA sidecar XML \u4e0e TIFF\uff1b\u8986\u76d6 GF-1/2/6 PMS/WFV \u4e0e GF-7 FWD/BWD \u7684 L1A \u4ea7\u54c1\u5305\u3002",
+      "\u5b9a\u6807\u4e3a\u53ef\u9009\u6b65\u9aa4\uff1aapply_calibration=true \u4e14 sidecar \u58f0\u660e\u7cfb\u6570\u65f6\u624d\u6267\u884c DN\u2192\u8f90\u4eae\u5ea6\uff1b\u5426\u5219\u4ec5\u6807\u8bb0 SICNU_* \u5b9a\u6807/\u592a\u9633\u51e0\u4f55\u5143\u6570\u636e\u3002"
+    ],
     "modality" : 
     [
       "optical"
