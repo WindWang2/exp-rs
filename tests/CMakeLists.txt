@@ -7408,6 +7408,10 @@ if(TARGET sicnu_workflow)
     sicnu_task_center
     sicnu_jobs
     sicnu_agent
+    # Track 10 enablement: master's link graph leaves libsicnu_agent.so with
+    # an unresolved sicnu_agent_loop symbol at this commit (#1335's domain);
+    # this target must link to run its lane until that fix lands.
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
     Sicnu::data
     Qt6::Core
     Qt6::Gui
@@ -9439,6 +9443,74 @@ target_include_directories(test_workflow_recovery PRIVATE
 )
 sicnu_discover_tests(test_workflow_recovery)
 
+# Track 10 durability R4: real-process crash-recovery matrix. The helper
+# binary runs the PRODUCTION coordinator/lock/checkpoint stack in a child
+# process; the parent test SIGKILLs it at the injection point and reconciles
+# every assertion against the on-disk artifacts. Helper output goes to the
+# build root and its path is compiled into the parent target (the
+# exprs_ep_helper pattern).
+add_executable(workflow_crash_helper workflow_crash_helper.cpp)
+set_target_properties(workflow_crash_helper PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+target_link_libraries(workflow_crash_helper PRIVATE
+  Qt6::Core
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  # master's link graph leaves libsicnu_agent.so with an unresolved
+  # sicnu_agent_loop symbol at this commit (#1335's fix domain); every
+  # executable pulling the agent .so must satisfy it itself until then.
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+if(TARGET jsoncpp)
+  target_link_libraries(workflow_crash_helper PRIVATE jsoncpp)
+endif()
+target_include_directories(workflow_crash_helper PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_workflow_crash_recovery_r4 test_workflow_crash_recovery_r4.cpp
+  workflow_crash_injector.cpp
+)
+target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  # See workflow_crash_helper: satisfies libsicnu_agent.so's unresolved
+  # sicnu_agent_loop symbol until #1335 lands.
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_workflow_crash_recovery_r4 PRIVATE jsoncpp)
+endif()
+if(WIN32)
+  target_compile_definitions(test_workflow_crash_recovery_r4 PRIVATE
+    SICNU_TEST_CRASH_HELPER="${CMAKE_BINARY_DIR}/workflow_crash_helper.exe"
+  )
+else()
+  target_compile_definitions(test_workflow_crash_recovery_r4 PRIVATE
+    SICNU_TEST_CRASH_HELPER="${CMAKE_BINARY_DIR}/workflow_crash_helper"
+  )
+endif()
+target_include_directories(test_workflow_crash_recovery_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+# TEST_PREFIX makes the matrix cases selectable by the durability oracle lane
+# regex (workflow|durability|run_lock|lowering), which matches case names.
+sicnu_discover_tests(test_workflow_crash_recovery_r4 TEST_PREFIX "test_workflow_crash_recovery_r4::")
+
 add_executable(test_workflow_resume_provenance test_workflow_resume_provenance.cpp
   ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
 )
@@ -9514,6 +9586,8 @@ target_link_libraries(test_workflow_cache_e2e PRIVATE
   sicnu_workflow
   sicnu_operators
   GDAL::GDAL
+  # Track 10 enablement: same link-graph gap as test_workflow_cancel (#1335).
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 target_include_directories(test_workflow_cache_e2e PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -11889,6 +11963,31 @@ target_include_directories(test_workflow_durability_13 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_workflow_durability_13)
+
+# Track 10 durability R4: lock-semantics + checkpoint-durability light lane
+# (same compiled-sources pattern as durability_13, plus the runtime fault
+# registry so the PRODUCTION workflow_checkpoint.write/.publish fault points
+# route through their real failure branches).
+add_executable(test_workflow_run_lock_r4 test_workflow_run_lock_r4.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_definition.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  ${CMAKE_SOURCE_DIR}/src/geospatial/util/atomic_fs.cpp
+  ${SICNU_FAULT_REGISTRY_SOURCE}
+)
+target_link_libraries(test_workflow_run_lock_r4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Network
+  jsoncpp
+)
+target_include_directories(test_workflow_run_lock_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_run_lock_r4 TEST_PREFIX "test_workflow_run_lock_r4::")
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------
@@ -14233,6 +14332,44 @@ if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
 
+# ---------------------------------------------------------------------------
+# Track 10 (workflow-durability R4): master@15e5c66b5 link-graph band-aid.
+# libsicnu_agent.so references
+# sicnu_agent_loop::VerificationReport::aggregate but does not link
+# sicnu_agent_loop, so every executable that pulls the agent .so fails to
+# link (301 targets repo-wide at this commit; #1335 is the proper fix, whose
+# domain includes src/agent). Band-aided here — tests/CMakeLists.txt ONLY —
+# for exactly the durability oracle lane targets, so the
+# crash/lock/cancel/cache lanes are measurable. REVERT this block when
+# #1335 lands.
+foreach(_t
+    test_agent_golden_workflow
+    test_agent_workflow_executor
+    test_classify_workflow_bridge
+    test_classify_workflow_controller
+    test_exprs_workflow_schema
+    test_guided_workflow_widget
+    test_workflow_analysis
+    test_workflow_analysis_11
+    test_workflow_artifact_gc
+    test_workflow_engine_v2
+    test_workflow_execution_plane
+    test_workflow_facts_11
+    test_workflow_ir
+    test_workflow_pipeline
+    test_workflow_pipeline_ui
+    test_workflow_planner
+    test_workflow_recovery
+    test_workflow_repair
+    test_workflow_resume_provenance
+    test_workflow_run_coordinator
+    test_workflow_runtime
+    test_workflow_session_controller
+)
+  if(TARGET ${_t})
+    target_link_libraries(${_t} PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
+  endif()
+endforeach()
 ###############################################################################
 # Track R4 (plugin lifecycle & exprs registry rollback)
 add_library(broken_plugin MODULE fixtures/broken_plugin/broken_plugin.cpp)
