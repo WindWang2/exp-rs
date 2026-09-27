@@ -476,6 +476,14 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
     if ( !validated )
         return Result::failure( validated.diagnostics() );
 
+    const auto status = versionStatusLocked( m_impl->db, annotation.datasetVersionId() );
+    if ( !status )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                           QStringLiteral( "version %1 does not exist" )
+                                               .arg( annotation.datasetVersionId() ) ) );
+    if ( *status != DatasetVersionStatus::Draft )
+        return Result::failure( notDraft( annotation.datasetVersionId() ) );
+
     // Schema-aware fail-fast: a non-empty class code must resolve inside the
     // referenced schema version. An unknown code is refused at ingest — a
     // stored annotation with a ghost code would silently poison every
@@ -513,14 +521,6 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
                                      annotation.labelSchemaId() )
                                .arg( annotation.labelSchemaVersion() ) );
     }
-
-    const auto status = versionStatusLocked( m_impl->db, annotation.datasetVersionId() );
-    if ( !status )
-        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
-                                           QStringLiteral( "version %1 does not exist" )
-                                               .arg( annotation.datasetVersionId() ) ) );
-    if ( *status != DatasetVersionStatus::Draft )
-        return Result::failure( notDraft( annotation.datasetVersionId() ) );
 
     if ( annotation.revision() == 1 )
     {
