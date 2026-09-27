@@ -65,7 +65,7 @@ ROUND_A_EXIT=0 — 100% tests passed out of 236
 | 两级 outcome 边界 | ≥6 | **本轨 3（WP-C）+ 既有互锁/聚合/不可判案族**；grader 侧另有 3 报告级 | §3 |
 | API 审计表 | 72 行 | **72 行处置全非空，零未声明缺口** | API_AUDIT.md |
 | 原子提交 | ≥18 | 见 `git rev-list --count origin/master..HEAD`（回填） | git |
-| 触碰文件 | ≥16 | 见 PR 正文 diff --stat（回填） | git |
+| 触碰文件 | ≥16 | **19**（diff --name-only 实测；含 tests/ 8 + planning 9 + .gitignore + 根账本） | git |
 | DECISIONS 链路规则 | ≥5 | **7 条**（D1-D7），抽查对照=代码 | DECISIONS.md |
 
 ## 6. 重链补跑记录（build/ 全栈目录，gcc-15 Debug）
