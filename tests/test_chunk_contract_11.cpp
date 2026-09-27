@@ -16,12 +16,15 @@
 #include "runtime/chunk/chunk_graph.h"
 #include "runtime/chunk/chunk_pipeline.h"
 #include "runtime/chunk/disk_tile_store.h"
+#include "runtime/chunk/fsync_compat.h"
 #include "runtime/chunk/scratch_registry.h"
 #include "runtime/chunk/tile_run_contract.h"
 #include "runtime/chunk/tile_spec.h"
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -366,3 +369,37 @@ TEST_CASE( "ScratchRegistry::acquire refuses path-injection components (#1056)",
     REQUIRE_THROWS_AS( registry.acquire( "run", "C:tile", 1024 ), std::invalid_argument );
     REQUIRE_THROWS_AS( registry.acquire( "", "tile", 1024 ), std::invalid_argument );
 }
+
+// R5 core/platform durability convergence: the chunk family's fsync shim
+// rides the same contract as atomic_fs::fsyncFile — a file that cannot be
+// opened FOR WRITING (read-only, missing) fails closed, because a durability
+// claim on bytes that cannot be flushed is a lie (#1228). Best-effort
+// wrappers stay silent by contract; a directory sync is always best-effort
+// (several filesystems refuse directory fsync with EINVAL).
+#if !defined( _WIN32 )
+TEST_CASE( "fsync compat: file sync fails closed on an unwritable file",
+           "[chunk][contract][durability]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string file = ( dir.filePath( "tile.dat" ) ).toStdString();
+    {
+        std::ofstream out( file, std::ios::binary );
+        REQUIRE( static_cast<bool>( out ) );
+        out << "tile-bytes";
+    }
+    REQUIRE_NOTHROW( fsyncPathCompat( file, /*directory=*/false ) );
+
+    std::filesystem::permissions( file, std::filesystem::perms::owner_read,
+                                  std::filesystem::perm_options::replace );
+    // The durability claim must fail loudly on a file it cannot open for
+    // writing — same contract as atomic_fs::fsyncFile's RO-FILE injection.
+    REQUIRE_THROWS_AS( fsyncPathCompat( file, /*directory=*/false ), std::runtime_error );
+    // The best-effort wrapper never throws, whatever the fault.
+    REQUIRE_NOTHROW( fsyncPathBestEffort( file, /*directory=*/false ) );
+    // Directory sync is best-effort silent on every input.
+    REQUIRE_NOTHROW( fsyncPathBestEffort( dir.path().toStdString(), /*directory=*/true ) );
+    REQUIRE_NOTHROW( fsyncPathBestEffort( ( dir.filePath( "absent" ) ).toStdString(),
+                                          /*directory=*/true ) );
+}
+#endif

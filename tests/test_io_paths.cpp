@@ -14,8 +14,10 @@
 
 using Catch::Approx;
 
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -243,4 +245,106 @@ TEST_CASE( "reserved staging names are unique but never pre-created", "[io][path
   CHECK( staged != second );
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( second ) );
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( staged ) );
+}
+
+// R5 core/platform: ".." after a symlinked directory component resolves
+// PHYSICALLY (the kernel walks through the link, then pops its parent),
+// while lexically_normal() drops the link textually. Allocating the staged
+// name from the lexical form can therefore place it in a different physical
+// directory than the one the publish rename's destination resolves into —
+// a silent cross-device fallback, or a rename that fails where it should
+// have been same-directory. The allocator must resolve symlinks (best
+// effort, with the lexical form as fallback) so staging lands beside the
+// target the way rename(2)/MoveFileExW will see it.
+TEST_CASE( "staging allocation resolves symlinked '..' to the physical directory",
+           "[io][paths][atomic][symlink]" )
+{
+#if !defined( _WIN32 )
+  const fs::path dir = fs::path( scratch( "staging_symlink" ) );
+  const fs::path elsewhere = dir / "elsewhere";
+  fs::create_directories( elsewhere );
+  const fs::path sub = dir / "sub";
+  fs::create_directories( sub );
+  const fs::path link = sub / "link";
+  fs::create_directory_symlink( elsewhere, link );
+
+  const std::string target = ( link / ".." / "out.tif" ).string();
+  // Kernel truth: link → elsewhere, then ".." pops to dir. Lexical truth:
+  // sub/link/.. collapses to sub. These MUST disagree for the case to bite.
+  const fs::path kernelParent = fs::canonical( link ) / "..";
+  REQUIRE( fs::weakly_canonical( kernelParent ) == dir );
+  REQUIRE( fs::path( target ).lexically_normal().parent_path() == sub );
+
+  for ( const std::string staged : { sicnu::geo::atomic_fs::stagedPathFor( target ),
+                                     sicnu::geo::atomic_fs::reservedStagedPathFor( target ) } )
+  {
+    INFO( "target: " << target << "\nstaged: " << staged );
+    // The staged name must live in the PHYSICAL directory the rename
+    // destination resolves into (same volume, one atomic rename, no
+    // cross-device fallback detour).
+    CHECK( fs::weakly_canonical( fs::path( staged ).parent_path() ) == dir );
+  }
+#endif
+}
+
+TEST_CASE( "staging allocation failure carries the typed OS cause",
+           "[io][paths][atomic]" )
+{
+  // A staging directory that cannot hold the claim (missing parent) fails
+  // with the typed GeoError AND the raw OS error code — a failure you can
+  // locate (ENOENT here) instead of a bare "cannot allocate" string.
+  const fs::path absent = fs::temp_directory_path() / "sicnu_io_test_paths" /
+                          "staging_missing" / "absent-subdir";
+  std::error_code ec;
+  fs::remove_all( absent.parent_path(), ec );
+  const std::string target = ( absent / "out.tif" ).string();
+  bool threw = false;
+  try
+  {
+    (void)sicnu::geo::atomic_fs::stagedPathFor( target );
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    threw = true;
+    CHECK( ex.code() == sicnu::geo::ErrorCode::IoError );
+    CHECK( std::string( ex.what() ).find( "out.tif" ) != std::string::npos );
+#if !defined( _WIN32 )
+    INFO( "details: " << ex.toJson()["details"] );
+    CHECK( ex.details().isMember( "errno" ) );
+    CHECK( ex.details()["errno"].asInt() == ENOENT );
+#endif
+  }
+  REQUIRE( threw );
+}
+
+// Cross-platform parity oracle: POSIX rename(2) replaces a read-only TARGET
+// (the gate is the directory's write permission, never the target's R/O
+// bit). Windows ReplaceFileW/MoveFileExW refuse a READONLY target, so the
+// publish path must clear that stale attribute to keep the same contract
+// there (static evidence: the portability source contract).
+TEST_CASE( "publish replaces a read-only target file (rename semantics)",
+           "[io][paths][atomic]" )
+{
+#if !defined( _WIN32 )
+  const fs::path dir = fs::path( scratch( "publish_ro_target" ) );
+  const std::string target = ( dir / "out.tif" ).string();
+  {
+    std::ofstream out( target, std::ios::binary );
+    out << "old-bytes";
+  }
+  fs::permissions( target, fs::perms::owner_read, fs::perm_options::replace );
+  REQUIRE( fs::status( target ).permissions() == fs::perms::owner_read );
+
+  const std::string staged = ( dir / "in.tif" ).string();
+  {
+    std::ofstream out( staged, std::ios::binary );
+    out << "new-bytes";
+  }
+  REQUIRE_NOTHROW( sicnu::geo::atomic_fs::publishStagedFile( staged, target ) );
+  std::ifstream in( target, std::ios::binary );
+  const std::string body( ( std::istreambuf_iterator<char>( in ) ),
+                          std::istreambuf_iterator<char>() );
+  CHECK( body == "new-bytes" );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( staged ) );
+#endif
 }
