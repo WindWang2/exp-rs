@@ -596,3 +596,155 @@ TEST_CASE( "Canonical text and digests are numeric-locale invariants",
             CHECK( specDigest( spec ) == digestC );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Track 16 WP-A: adapter coverage matrix closures. ADAPTER_MATRIX.md rows:
+// checkpoint Unreadable typed cell, bounded_io direct negative cells, and
+// the widest production-adapter assembly cell (four production adapters
+// plus the metric seam — which has no production adapter; the fake here is
+// the declared gap, see ADAPTER_MATRIX.md).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "an unreadable checkpoint file is a typed Unreadable, not a guess",
+           "[verify_adapters][track16][checkpoint]" )
+{
+    TempDir dir;
+    const std::string bad = dir.file( "checkpoint_bad.json" );
+    TempDir::write( bad, "{ this is not json at all" );
+    const adapters::CheckpointReadResult result = adapters::readCheckpoint( bad );
+    CHECK( result.status == adapters::CheckpointReadStatus::Unreadable );
+    CHECK_FALSE( result.detail.empty() );
+
+    // Contrast cell: the same path with a valid document reads Ok.
+    const std::string good = dir.file( "checkpoint_good.json" );
+    TempDir::write( good, serialize( checkpointDocument() ) );
+    CHECK( adapters::readCheckpoint( good ).status == adapters::CheckpointReadStatus::Ok );
+}
+
+TEST_CASE( "bounded_io refuses oversized, missing and malformed inputs typed",
+           "[verify_adapters][track16][bounded_io]" )
+{
+    TempDir dir;
+
+    // Over the cap: typed OverCap, never an unbounded buffer.
+    const std::string big = dir.file( "big.bin" );
+    TempDir::write( big, std::string( 4096, 'x' ) );
+    const adapters::IoResult over =
+        adapters::readFileBounded( big, 1024 );
+    CHECK( over.failure == adapters::IoFailure::OverCap );
+
+    // Missing path: typed Missing.
+    const adapters::IoResult missing =
+        adapters::readFileBounded( dir.file( "absent.bin" ), 1024 );
+    CHECK( missing.failure == adapters::IoFailure::Missing );
+
+    // Malformed JSON: typed nullopt with an error string, never a throw.
+    std::string error;
+    CHECK_FALSE( adapters::parseJsonBounded( "{ not json", error ).has_value() );
+    CHECK_FALSE( error.empty() );
+    const std::optional<Json::Value> ok = adapters::parseJsonBounded( "{\"a\":1}", error );
+    REQUIRE( ok.has_value() );
+    CHECK( ( *ok )["a"].asInt() == 1 );
+
+    // Existence goes through the same UTF-8 decoding contract.
+    CHECK( adapters::pathExists( big ) );
+    CHECK_FALSE( adapters::pathExists( dir.file( "absent.bin" ) ) );
+}
+
+TEST_CASE( "the widest production adapter assembly drives five check kinds "
+           "through one evaluation",
+           "[verify_adapters][track16][matrix]" )
+{
+    TempDir dir;
+    const std::string content = "track16-repro-bytes";
+    const std::string product = dir.file( "output.tif" );
+    TempDir::write( product, content );
+    TempDir::write( adapters::provenanceSidecarPathFor( product ), provSidecarJson() );
+    const std::string checkpointPath = dir.file( "checkpoint_r-1.json" );
+    TempDir::write( checkpointPath, serialize( checkpointDocument() ) );
+
+    adapters::FsArtifactProbe artifactProbe;
+    adapters::SidecarProvenanceView provenanceView( { dir.path() } );
+    const adapters::CheckpointReadResult read = adapters::readCheckpoint( checkpointPath );
+    REQUIRE( read.status == adapters::CheckpointReadStatus::Ok );
+    adapters::CheckpointStateView stateView( read.document );
+
+    // The metric seam has NO production adapter yet (declared gap in
+    // ADAPTER_MATRIX.md); this local fake keeps the assembly row honest
+    // about the metric dimension without inventing production code.
+    class FakeMetric final : public IMetricView
+    {
+      public:
+        std::optional<double> metric( const std::string &name ) override
+        {
+            if ( name == "ndvi_mean" )
+                return 0.42;
+            return std::nullopt;
+        }
+    } metricView;
+
+    VerificationSpec spec;
+    spec.specId = "spec.adapter.wide";
+    spec.scope = "node";
+
+    VerificationCheckSpec exists;
+    exists.checkId = "product-exists";
+    exists.kind = "artifact.exists";
+    exists.params["path"] = product;
+    spec.checks.push_back( exists );
+
+    VerificationCheckSpec provenance;
+    provenance.checkId = "product-provenance";
+    provenance.kind = "provenance.complete";
+    provenance.params["path"] = product;
+    Json::Value requiredFields( Json::arrayValue );
+    for ( const char *field : { "schema", "output", "model", "execution" } )
+        requiredFields.append( field );
+    provenance.params["requiredFields"] = requiredFields;
+    spec.checks.push_back( provenance );
+
+    VerificationCheckSpec state;
+    state.checkId = "node-a-succeeded";
+    state.kind = "state.invariant";
+    Json::Value expectations( Json::arrayValue );
+    Json::Value expectation( Json::objectValue );
+    expectation["key"] = "node/a/state";
+    expectation["op"] = "eq";
+    expectation["value"] = "succeeded";
+    expectations.append( expectation );
+    state.params["expectations"] = expectations;
+    spec.checks.push_back( state );
+
+    VerificationCheckSpec metric;
+    metric.checkId = "ndvi-in-band";
+    metric.kind = "metric.range";
+    metric.params["metric"] = "ndvi_mean";
+    metric.params["min"] = 0.3;
+    metric.params["max"] = 0.5;
+    spec.checks.push_back( metric );
+
+    VerificationCheckSpec reproducible;
+    reproducible.checkId = "bytes-match";
+    reproducible.kind = "reproducibility.digest";
+    reproducible.params["path"] = product;
+    reproducible.params["expectedDigest"] = sha256Hex( content );
+    spec.checks.push_back( reproducible );
+
+    REQUIRE( validateSpec( spec ).empty() );
+
+    VerificationContext context;
+    context.artifactProbe = &artifactProbe;
+    context.provenanceView = &provenanceView;
+    context.stateView = &stateView;
+    context.metricView = &metricView;
+    const VerificationReport report = evaluate( spec, context );
+
+    REQUIRE( report.checks.size() == 5 );
+    CHECK( report.checks[0].status == VerificationStatus::Pass ); // exists
+    CHECK( report.checks[1].status == VerificationStatus::Pass ); // provenance
+    CHECK( report.checks[2].status == VerificationStatus::Pass ); // state
+    CHECK( report.checks[3].status == VerificationStatus::Pass ); // metric
+    CHECK( report.checks[4].status == VerificationStatus::Pass ); // reproducibility
+    CHECK( report.overall == VerificationStatus::Pass );
+    CHECK_FALSE( report.digest().empty() );
+}

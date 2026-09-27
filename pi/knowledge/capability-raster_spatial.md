@@ -33,6 +33,8 @@
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、connectivity（enum）、output（string）
+- 前置条件：输入应为二值化栅格（非 0 为前景，0/NoData 为背景）：连续值场先经 rs:threshold_raster 二值化。
+- 局限：FullRaster 内存契约（非流式）：标签图与斑块属性驻留内存，超大栅格需预算内存。；两遍 union-find 标记，斑块编号按栅格行序紧凑输出且 0 号保留为背景/NoData；编号顺序依扫描次序，不作为跨输入的稳定斑块标识。
 - 适用地物：水体、建筑、烧迹地
 - 适用场景：斑块计数与编号、洪水斑块追踪
 - 失败模式：
@@ -50,6 +52,8 @@
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、connectivity（enum）、output（string）
+- 前置条件：输入为类别图或二值掩膜：只有与图边界不接触的闭合背景连通域被视为孔洞；开放凹陷不属于孔洞。
+- 局限：FullRaster 内存契约（非流式）：孔洞判定需整图连通域结构；与栅格边界接触的背景区域永不填充。；填充值取周边类别（按邻接类别判定），报告 filledPixels 供质检；不修复与边界连通的缺失区域。
 - 适用地物：任意地物
 - 适用场景：分类图后处理、水体掩膜修复
 - 失败模式：
@@ -67,6 +71,8 @@
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、output（string）、stat（enum）、window（integer）
+- 前置条件：输入为连续场或类别栅格并给定邻域窗口；NoData 邻居自动排除，不参与统计也不产生 NoData 结果（除非窗口内全为 NoData）。
+- 局限：边缘采用复制（replicate）邻域策略（primitives/window.h）；stddev 为总体（population）约定，与样本方差口径不可混比。
 - 适用地物：任意地物
 - 适用场景：邻域特征生产、景观格局分析
 - 失败模式：
@@ -84,6 +90,8 @@
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、output（string）、window（integer）
+- 前置条件：输入为连续场栅格并给定窗口；窗口内 NoData 邻居不参与极值比较，NoData 中心像元不产出极值标记。
+- 局限：流式 halo 瓦片上做窗口 max/min 测试，边缘采用复制策略；窗口越大越容易把平缓高地把成噪声极值，参数应与目标尺度匹配。
 - 适用地物：地形、温度场
 - 适用场景：山脊点识别、城市热岛峰值检测
 - 失败模式：
@@ -102,6 +110,7 @@
 - 输出：output（raster）
 - 参数：kernel（integer）、output（string）
 - 前置条件：Input raster must be a single-band integer classification raster.
+- 局限：窗口越大平滑越强，细小斑块可能被多数类吞并：分类后处理需在去噪与保全最小图斑之间权衡；仅对类别/整型栅格有意义。
 - 适用地物：任意地物
 - 适用场景：分类图平滑、类别噪声抑制
 - 失败模式：
@@ -119,6 +128,8 @@
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、connectivity（enum）、iterations（integer）、op（enum）、output（string）
+- 前置条件：输入为二值掩膜（0/1/255 约定）或灰度栅格，并给定结构元；NoData 像元受保护不参与运算。
+- 局限：共享 primitives/morphology 内核，边缘为文档化的复制策略；FullRaster 内存契约（非流式），超大栅格需预算内存。
 - 适用地物：任意地物
 - 适用场景：云掩膜修补、建筑斑块整形
 - 失败模式：
@@ -135,6 +146,7 @@
 - 模态：optical、sar、thermal、dem
 - 输出：height（integer）、inputCount（integer）、output（raster）、width（integer）
 - 参数：inputs（string）、output（string）
+- 前置条件：输入为影像路径列表：各影像需带地理参考且 CRS/网格一致；镶嵌仅按输入顺序合成重叠区，不做几何配准、匀色、羽化或接缝线处理。
 - 局限：仅处理各输入的第 1 波段；多波段数据需先按波段拆分或改用支持多波段的流程。；要求所有输入 CRS 一致。
 - 适用地物：任意地物
 - 适用场景：区域底图生产、分幅成果拼接
@@ -155,6 +167,7 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 输出：output（raster）
 - 参数：band（integer）、connectivity（enum）、output（string）
 - 前置条件：距离计算要求米制投影坐标系。
+- 局限：输出为欧氏距离栅格（源网格单位）：不含代价距离/障碍距离语义；目标要素之外的全场景均产距离值，分析时需按研究区裁剪。
 - 适用地物：河流、道路、居民点
 - 适用场景：河流缓冲分析、城市设施可达性
 - 失败模式：
@@ -171,11 +184,19 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 模态：optical
 - 输出：bandCount（integer）、height（integer）、inputCount（integer）、output（raster）、rejectedInputs（integer）、seamCount（integer）、width（integer）
 - 参数：balancing（string）、bandCount（integer）、blending（string）、inputs（string）、method（enum）、output（string）、overviews（string）、provenance（string）、qualityWeights（string）、reportOutput（string）、seamline（string）
+- 前置条件：输入影像需带地理参考且 CRS/网格可对齐：辐射均衡与接缝线生成在合成阶段完成，几何配准需在上游完成。
+- 局限：输出为分块原子化 GeoTIFF 并附金字塔与质量报告：分块布局与接缝线走向由实现决定，重跑在相同输入下保持一致，但接缝位置不应被下游硬编码依赖。
+- 适用地物：大区域底图生产、省级/国家级镶嵌制图
+- 适用场景：生产级影像镶嵌、带溯源要求的产品底图
+- 适用性备注：需要辐射均衡与接缝线场景；简单快速拼接用 rs:mosaic。
 - 失败模式：
   - `INVALID_PARAMETER` — 缺少必需参数 inputs/output，或 method、balancing.rejectPolicy、blending.mode 枚举非法、bandCount 超过最小输入波段数。处置：按 schema 校正参数与枚举值，bandCount 取不超过最小输入波段数的值
   - `GRID_MISMATCH` — 输入未共配准到同一 CRS/像素网格（CRS、像素尺寸、Y 方向或旋转/剪切不一致），或云掩模与场景地理配准不符。处置：先将各输入重投影/重采样到同一参考网格，并修正云掩模的地理配准
   - `DATASET_NOT_FOUND` — 输入栅格路径不存在或无法用 GDAL 打开。处置：检查输入路径与文件完整性
   - `EXECUTION_FAILED` — 辐射均衡被拒（增益异常且 rejectPolicy 为 fail），或拼接瓦片读写与输出发布失败。处置：放宽 balancing.minGain/maxGain 或改用 rejectPolicy=drop，并确认输出目录可写
+- 教学概念：影像镶嵌、接缝线、羽化过渡、直方图匹配/辐射均衡、数据溯源
+- 适用课程：遥感数字图像处理、摄影测量与遥感
+- 典型练习：对两景重叠影像分别执行 rs:mosaic 与 rs:quality_mosaic，比较接缝处的辐射差异与过渡带，并读取质量报告与逐像素来源层。
 
 ## rs:rasterize
 
@@ -207,6 +228,7 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 输出：output（raster）
 - 参数：map（json）、output（string）、recode（json）、recode_map（string）
 - 前置条件：Input raster must be a single-band integer classification raster.
+- 局限：仅替换类别编码、不改几何与投影：映射表未覆盖的旧值保留原值；合并/二值化/重排序均通过映射表表达。
 - 适用地物：任意地物
 - 适用场景：类别体系归并、二值掩膜生成
 - 失败模式：
@@ -224,6 +246,7 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 输入：input（raster）
 - 输出：height（integer）、output（raster）、resolutionX（numeric）、resolutionY（numeric）、width（integer）
 - 参数：categorical（boolean）、output（string）、resampling（enum）、resolution（numeric）、warpMemoryLimitBytes（numeric）
+- 前置条件：按数据类型选择插值方法：类别图/掩膜必须用最近邻以保持类别编码，连续场可选双线性或立方卷积。
 - 局限：Keeps the input CRS and derived extent; use rs:align to hit an exact reference grid.
 - 适用地物：任意地物
 - 适用场景：分辨率统一、金字塔生产
@@ -243,6 +266,8 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 - 输入：input（raster）
 - 输出：output（raster）
 - 参数：band（integer）、connectivity（enum）、min_area_pixels（integer）、output（string）
+- 前置条件：输入为二值掩膜/类别图并给定最小斑块像元数阈值：小于阈值的连通斑块被移除以压制椒盐噪声。
+- 局限：筛除不区分噪声与真实小目标：阈值过大时真实小斑块一并被移除；连通性约定（4/8 邻接）决定斑块判定结果。
 - 适用地物：任意地物
 - 适用场景：分类图去噪、细碎斑块清理
 - 失败模式：

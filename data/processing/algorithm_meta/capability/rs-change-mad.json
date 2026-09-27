@@ -123,7 +123,10 @@
         }
       ]
     },
-    "limitations" : [],
+    "limitations" : 
+    [
+      "\u5178\u578b\u76f8\u5173\u53d8\u6362\u5047\u8bbe\u4e24\u671f\u8fd1\u4f3c\u7ebf\u6027\u76f8\u5173\uff1b\u8f93\u51fa\u4e3a\u8fde\u7eed MAD \u7edf\u8ba1\u91cf\uff0c\u9700\u4e0e rs:threshold_raster \u94fe\u63a5\u624d\u80fd\u5f97\u5230\u53d8\u5316\u63a9\u819c\u3002"
+    ],
     "modality" : 
     [
       "optical"

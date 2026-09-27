@@ -62,7 +62,7 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         projection->setStatusTip( action->statusTip() );
         const QString reason = m_registry->unavailabilityReason( id );
         if ( !action->isEnabled() && !reason.isEmpty() )
-            projection->setToolTip( QStringLiteral( "%1\n⚠ %2" ).arg( action->toolTip(), reason ) );
+            projection->setToolTip( QObject::tr( "%1\n⚠ %2" ).arg( action->toolTip(), reason ) );
         // #1097: registry may deleteLater() the backing action while the menu
         // is still open (unregisterCommandsMatching) — hold a QPointer.
         const QPointer<QAction> actionGuard( action );
