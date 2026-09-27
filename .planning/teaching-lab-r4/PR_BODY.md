@@ -6,7 +6,7 @@ fix(teaching,lab-pack): teaching-chain R4 hardening — pack boundary matrix, cr
 
 ## 基线与在途 PR 重叠
 
-- 基线 `origin/master` = `15e5c66b5`（#1333 合并点；fetch 时未前进）。本分支领先 X 提交、落后 0。
+- 基线 `origin/master` = `15e5c66b5`（#1333 合并点；fetch 时未前进）。本分支领先 15 提交、落后 0。
 - **#1336（未合并）**：拥有 `src/lab_pack/lab_pack.cpp` 与 `scripts/gen_lab_packs.py` → 本分支全程未触碰这两个文件（写作提示声称 #1336 还改 `tests/test_lab_data_pack.cpp`，实测不改——已勘误记录）。WP-A 的边界矩阵因此先落 admin 层（`json_util.h` 单入口 + `data_pack_manager.cpp`），复用 `lab_pack.h` 公有原语，未造第二套校验。
 - **#1335（未合并）**：拥有 `lab_copilot.cpp` 与 `test_teacher_credential/test_lab_grading/test_harness_lab_evals` 接线 → 本分支不接这 3 个目标；`lab_copilot.cpp:432` 在 master 仍是反转缺陷（`return diff;`），本分支携带与 #1335 P0-1 相同的一行修复（rebase 时同内容自然收敛），账本逐处记账（共 1 处）。
 - 开放 issue：0。本地已验证、未等待线上 CI。
@@ -48,16 +48,18 @@ unsafe_ref（逃逸形引用）、重复 id/index、metric-kind 缺 metricKey、
 
 ## 本地验证
 
-- 轻闭包（16 二进制，删对象真重建协议）：全绿，新增 244 断言、既有 5459 断言零回归。
-- 完整 `ctest -R "lab|teaching|pack|copilot|autonomy" -j1`：连续两轮（结果回填）。
+- 轻闭包（删对象真重建协议，对抗 raise-compiler-stack.sh 假绿）：16 二进制全绿，新增 244 断言、既有 5459 断言零回归；48/48 仓库 pin 跨语言对账通过。
+- 完整 `ctest -R "lab|teaching|pack|copilot|autonomy" -j1 --timeout 900` 连续两轮：**148/148 实际运行的用例全绿，零新增失败**；19 个 Not-Run 为 master 既有链接破损（libsicnu_agent.so 未链 agent_loop，#1335 P0-3 同根因；本分支未触碰 src/agent/CMakeLists.txt），其中 test_lab_chains 已由本分支恢复（112 断言全绿）。
+- 编译资源：全程 -j2；未轮询线上 CI。
 - 编译资源：全程 -j2（RSS>70% 降 -j1 未触发）；未轮询线上 CI。
 
 ## 未解决项（诚实披露）
 
 1. `cmake/raise-compiler-stack.sh` 对确定性编译失败重试 12 次后 exit 0 且不产出 .o（实测复现）——本轨以"删对象真重建"协议自保；脚本在白名单外，移交修复。
-2. `test_lab_data_pack.cpp` master 既有编译破损（#include <QJsonValue>）——#1335 认领，本轨未碰。
+2. `test_lab_data_pack.cpp` master 既有编译破损（#include <QJsonValue>）——#1335 认领，本轨未碰；其余 18 个 NOT_BUILT 同属 #1335 P0-3 链接根因（libsicnu_agent.so 未链 agent_loop），建议 #1335 合并后全部自动恢复。
 3. WP-A 矩阵的 lab_pack.cpp 直测面（PackVerifier EOL 类）待 #1336 合并后 rebase 延伸（本次以 admin 层入口 + loadFromBytes 内存面覆盖）。
-4. （评审回填其他发现）
+4. 本分支携带的 `lab_copilot.cpp:432` 一行修复与 #1335 P0-1 同内容——#1335 先合并时按"同内容行"自然收敛；两 PR 同时到达 master 时可能需要一次 trivial 冲突确认。
+5. admin/agent 裁决在 Windows CRLF 检出下的分叉（P1-1）依赖 #1336 的落地时点：#1336 合并后 admin 的 canonicalFileSha256 应改为委托 lab_pack 权威，消除镜像实现。
 
 ## 零新方向声明
 
