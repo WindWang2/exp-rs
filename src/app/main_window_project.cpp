@@ -238,6 +238,9 @@ QVector<sicnu::experiment::LabReportThumbnail> collectThumbnails( const QString 
 
 void QgisDesktopWindow::resetSessionStoryState()
 {
+    // F-05 (ui-backend-state-parity-r4): the session story changed — every
+    // task auto-load submitted before this point belongs to a dead session.
+    ++m_sessionEpoch;
     // The cleared project has no lab: stop recording so later runs cannot
     // land in the previous project's experiment store, and clear the
     // recording context so no consumer (lab cockpit, cockpit capsule export)
@@ -484,6 +487,10 @@ bool QgisDesktopWindow::saveProjectAsTo(const QString &filePath)
         armMissionSidecarWatcher();
         updateWindowTitle();
         refreshWorkspaceBrowser();
+        // F-06 (ui-backend-state-parity-r4): Save As re-homes the session
+        // identity — task auto-loads submitted under the previous identity
+        // must not land into the re-homed context.
+        ++m_sessionEpoch;
         statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
         return true;
     }

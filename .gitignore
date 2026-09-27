@@ -486,6 +486,11 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+
+# ui-backend-state-parity-r4 (Track 3 R4): track planning notes (markdown only; logs stay local).
+!.planning/ui-backend-state-parity-r4/
+.planning/ui-backend-state-parity-r4/*
+!.planning/ui-backend-state-parity-r4/*.md
 !.planning/verify-chain-r4/
 .planning/verify-chain-r4/*
 !.planning/verify-chain-r4/*.md

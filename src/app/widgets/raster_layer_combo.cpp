@@ -8,6 +8,20 @@
 RasterLayerCombo::RasterLayerCombo( QWidget *parent )
   : QComboBox( parent )
 {
+  // F-01 (ui-backend-state-parity-r4): the combo used to be a one-shot
+  // snapshot — layers added/removed while the host dialog stayed open (a
+  // background task's auto-load, an import) left a stale picker behind. The
+  // project layer set is the source of truth; track it.
+  // Queued: the refresh must observe the project AFTER its mutation pass
+  // finishes — re-entering QgsProject from inside layersAdded/Removed
+  // delivery races the layer teardown (S3 stress caught the use-after-free).
+  connect( QgsProject::instance(),
+           qOverload<const QList<QgsMapLayer *> &>( &QgsProject::layersAdded ),
+           this, [this]( const QList<QgsMapLayer *> & ) { refreshFromProject(); },
+           Qt::QueuedConnection );
+  connect( QgsProject::instance(), &QgsProject::layersRemoved,
+           this, [this]( const QStringList & ) { refreshFromProject(); },
+           Qt::QueuedConnection );
 }
 
 void RasterLayerCombo::populate()
@@ -20,6 +34,18 @@ void RasterLayerCombo::populate()
     if ( rasterLayer && rasterLayer->isValid() )
       addItem( rasterLayer->name(), rasterLayer->id() );
   }
+}
+
+void RasterLayerCombo::refreshFromProject()
+{
+  const QString selectedId = currentLayerId();
+  // Suppress the transient -1 index churn while rebuilding: host dialogs
+  // react to currentIndexChanged and must not observe a phantom empty state
+  // between clear() and the re-selection.
+  const QSignalBlocker blocker( this );
+  populate();
+  if ( !selectedId.isEmpty() )
+    selectLayer( selectedId );
 }
 
 QString RasterLayerCombo::currentLayerId() const
