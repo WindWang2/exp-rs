@@ -38,11 +38,15 @@ TEST_CASE( "Tool catalog export stays within the context budget", "[agent][catal
     // Scientific Processing 8.0: four more operators (rs:sar_geocode,
     // rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats) pushed the full
     // envelope past 160 KiB (measured 167 KiB) — raised to 176 KiB.
-    // ci-redzone-r4 re-measure: the operator waves since 82308915d (#1247,
-    // agent-ops, io/processing hardening) grew the full envelope to a
-    // measured 268,388 bytes (~262 KiB) on this exact assertion — raised to
-    // 288 KiB (~+10% headroom), same convention as the 160→176 raise.
+    // ci-redzone-r4 re-measure: the operator waves since the 8.0 raise
+    // (review PR #1200 fix batch and the agent-ops/io/processing hardening
+    // waves) grew the full envelope to a measured 268,388 bytes (~262 KiB)
+    // on this exact assertion — raised to 288 KiB (~+10% headroom), same
+    // convention as the 160→176 raise. The lower bound keeps the budget
+    // honest in both directions: a silent catalog shrink must be noticed
+    // as loudly as a growth.
     const size_t budgetBytes = 288 * 1024;
+    REQUIRE( full.size() > 250 * 1024 );
     REQUIRE( full.size() < budgetBytes );
 
     // Compact discovery layer (id/name/group/purpose only) must be meaningfully
