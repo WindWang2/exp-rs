@@ -196,6 +196,38 @@ TEST_CASE( "A plan mutated after its compile supersedes the carried compiler blo
          compiled.plan.raw["compiler"]["plan_fingerprint"].asString() );
 }
 
+TEST_CASE( "A legacy unbound compiler block keeps the verbatim carry",
+           "[workflow_planner][provenance][r5]" )
+{
+  // Backward-compat clause of the #1359 fix: wire documents produced before
+  // the plan_fingerprint binding existed carry a digest-stamped block with
+  // no binding. They must keep riding as current metadata.compiler — the
+  // read gate already verified their integrity, and silently demoting every
+  // legacy document's provenance would corrupt history wholesale.
+  loadHarnessKnowledge();
+  HarnessError error;
+
+  Json::Value block( Json::objectValue );
+  block["schema_version"] = "1.0";
+  block["ir_fingerprint"] = "0123456789abcdef";
+  block["ir_id"] = "ir-legacy";
+  block["digest"] = projection::projectionDigest( block );
+
+  Json::Value doc = parse( R"({
+    "kind": "execution_plan", "schema_version": "2.0",
+    "plan_id": "plan-legacy-block", "intent": "ndvi",
+    "steps": [ { "id": "s1", "operator_id": "rs:ndvi",
+                 "params": { "red": "/x.tif", "nir": "/x.tif" } } ]
+  })" );
+  doc["compiler"] = block;
+  AgentPlan plan;
+  REQUIRE( readAgentPlan( doc, plan, error ) );
+  Json::Value engineJson;
+  REQUIRE( Json::Reader().parse( compilePlanToWorkflowJson( plan, error ), engineJson ) );
+  CHECK( engineJson["metadata"]["compiler"] == block );
+  CHECK_FALSE( engineJson["metadata"].isMember( "compiler_superseded" ) );
+}
+
 TEST_CASE( "readAgentPlan rejects a torn compiler provenance block",
            "[workflow_planner][provenance][r5]" )
 {

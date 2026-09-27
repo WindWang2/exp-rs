@@ -3606,6 +3606,30 @@ target_link_libraries(test_d19_dataset_foundry PRIVATE Sicnu::dataset SQLite::SQ
 sicnu_add_test(test_d19_benchmark TIMEOUT 180)
 target_link_libraries(test_d19_benchmark PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+# R5 persistence-consistency (#1360): the agent_ops ExperimentStore sink is a
+# fail-closed boundary — agentbench persist documents carry no evaluation
+# protocol, so the sink must refuse with a typed reason and land nothing.
+add_executable(test_agent_ops_benchmark_writer
+  test_agent_ops_benchmark_writer.cpp
+)
+target_link_libraries(test_agent_ops_benchmark_writer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::agent_ops_ui
+  Sicnu::experiment
+  SQLite::SQLite3
+)
+target_include_directories(test_agent_ops_benchmark_writer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_agent_ops_benchmark_writer PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+)
+sicnu_discover_tests(test_agent_ops_benchmark_writer)
+
 sicnu_add_test(test_d19_foundry_benchmark_chain TIMEOUT 180)
 target_link_libraries(test_d19_foundry_benchmark_chain PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 

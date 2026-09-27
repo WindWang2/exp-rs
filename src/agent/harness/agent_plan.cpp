@@ -150,10 +150,10 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
                                   "compiler provenance block must be an object" );
       return false;
     }
-    if ( !doc["compiler"].isMember( "digest" ) )
+    if ( !doc["compiler"].isMember( "digest" ) || !doc["compiler"]["digest"].isString() )
     {
       error = HarnessError::make( error_codes::kInvalidPlan,
-                                  "compiler provenance block needs a digest" );
+                                  "compiler provenance block needs a string digest" );
       return false;
     }
     Json::Value body = doc["compiler"];
@@ -411,8 +411,14 @@ std::string compilePlanToWorkflowJson( const AgentPlan &plan, HarnessError &erro
   if ( plan.raw.isObject() && plan.raw.isMember( "compiler" ) )
   {
     const Json::Value &compilerBlock = plan.raw["compiler"];
+    // Only a STRING binding counts (jsoncpp .asString() would throw on a
+    // hostile JSON type); a non-string fingerprint degrades to the unbound
+    // legacy carry — content integrity is still pinned by the read gate's
+    // digest verification.
     const std::string boundFingerprint =
-      compilerBlock.isObject() ? compilerBlock.get( "plan_fingerprint", "" ).asString() : "";
+      compilerBlock.isObject() && compilerBlock.get( "plan_fingerprint", "" ).isString()
+        ? compilerBlock["plan_fingerprint"].asString()
+        : "";
     if ( !boundFingerprint.empty() && boundFingerprint != planFingerprint( plan ) )
       metadata["compiler_superseded"] = compilerBlock;
     else
