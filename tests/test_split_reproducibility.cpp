@@ -244,6 +244,34 @@ TEST_CASE( "a config JSON without seed_hex is refused, never silently seeded",
     REQUIRE( !reparsed.has_value() );
 }
 
+TEST_CASE( "split manifest fingerprint is a pinned constant (cross-process tripwire)",
+           "[dataset][split][determinism][kav]" )
+{
+    // Generated once from the in-tree engine over the fixed (config, inputs)
+    // below; the fingerprint deliberately excludes wall-clock fields, so the
+    // value must hold in EVERY process and on every platform. Deliberately
+    // changing it is how a split-semantics or canonicalization change gets
+    // reviewed — it must never move as a side effect.
+    QVector<SplitInput> inputs;
+    for ( int i = 0; i < 12; ++i )
+    {
+        SplitInput input;
+        input.sampleId = QStringLiteral( "pin-%1" ).arg( i, 2, 10, QLatin1Char( '0' ) );
+        input.classCode = QStringLiteral( "class-%1" ).arg( i % 2 );
+        input.groupId = QStringLiteral( "group-%1" ).arg( i % 3 );
+        inputs.append( input );
+    }
+    SplitConfig config;
+    config.method = SplitMethod::Random;
+    config.seed = 0xA11CE;
+    const auto manifest =
+        SplitEngine::generate( config, QStringLiteral( "version-pin" ), inputs );
+    REQUIRE( manifest.has_value() );
+    const QString fingerprint = manifest.value().fingerprint();
+    INFO( "split pin fingerprint: " << fingerprint.toStdString() );
+    CHECK( fingerprint == QStringLiteral( "88c811e3258ae6ef2ac0e68df9d6efdc9cae8a5e51973524eacf96138739937f" ) );
+}
+
 TEST_CASE( "split manifest fingerprint covers content, not the fingerprint field",
            "[dataset][split][determinism]" )
 {
