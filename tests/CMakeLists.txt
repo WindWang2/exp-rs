@@ -5169,7 +5169,7 @@ if(TARGET qgis_app_classify)
     qgis_core
     qgis_analysis
     qgis_app_classify
-  )
+   sicnu_agent_loop)
   target_include_directories(test_global_help_tips PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/app
@@ -7612,7 +7612,7 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
-)
+ sicnu_agent_loop)
 
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
@@ -9633,10 +9633,13 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 if(NOT WIN32)
 # Surface-11: batch manifest runner (unit level, no CLI binary needed).
 sicnu_add_test(test_cli_batch_manifest)
-target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk)
+target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk sicnu_agent_loop)
 
 sicnu_add_test(test_cli_commands_json)
-target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
+# Track 14: sicnu_agent (reached PRIVATELY through sicnu_plugins_framework)
+# references agent_loop symbols; the executable link must name the archive
+# itself. Same link-graph class as open PR #1335 - rebase note in the PR body.
+target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework sicnu_agent_loop)
 # 8.0: data identity / data cache check tests drive the CLI against an
 # in-test loopback range server (shared fixture with the io suites).
 target_sources(test_cli_commands_json PRIVATE support/http_range_server.cpp)
