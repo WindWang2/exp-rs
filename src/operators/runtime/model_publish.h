@@ -89,6 +89,12 @@ class DetectionPublishGuard
 /// park's pre-clean drops — the new pair was complete, so nothing is
 /// adopted. Every fault point routes through the REAL failure branch
 /// (Verification Platform 8.0 pattern); nullptr disables.
+///
+/// Occupancy fence: one guard per final path per process. A second guard
+/// constructed on the same path while the first is alive throws
+/// RSOperatorError(AlreadyRunning) — without the fence the second guard's
+/// adoption branch would pull the first guard's parked product back out from
+/// under its live publish.
 class ProductPublishGuard
 {
   public:
@@ -116,6 +122,8 @@ class ProductPublishGuard
   private:
     /// Removes the backup family (main + prov sidecar backup).
     void removeBackupFamily();
+    /// Releases the process-wide publish occupancy slot for m_final.
+    void releasePublishFence();
 
     QString m_final;
     QString m_backup;
@@ -123,6 +131,7 @@ class ProductPublishGuard
     bool m_hadExisting = false;
     bool m_hadProv = false;
     bool m_disarmed = false;
+    bool m_fenceHeld = false; ///< process-wide publish slot for m_final
 };
 
 /// Builds the single-model detection provenance document (schema

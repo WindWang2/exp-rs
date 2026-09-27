@@ -135,8 +135,15 @@ void ChunkGraph::runSource( Node &node )
         TilePayload payload;
         while ( !isCancelling() && node.source( payload ) )
         {
-            if ( payload.spec.bufferElementCount() != payload.pixels->size() )
-                throw std::runtime_error( "chunk graph source buffer/spec mismatch" );
+            // Same typed contract gate as ChunkPipeline::validateBuffer: a
+            // source returning true without a pixel buffer is a producer
+            // contract breach — a typed error, never a null dereference.
+            const size_t expected = payload.spec.bufferElementCount();
+            const size_t actual = payload.pixels ? payload.pixels->size() : 0;
+            if ( actual != expected )
+                throw std::logic_error( "chunk graph source: tile buffer size " +
+                                        std::to_string( actual ) + " != spec size " +
+                                        std::to_string( expected ) );
             if ( !node.out->push( std::move( payload ) ) )
                 return; // graph unwinding downstream — drop the tile
             payload = TilePayload{};

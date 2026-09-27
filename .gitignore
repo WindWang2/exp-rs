@@ -490,6 +490,10 @@ data/labs/_tmp/
 !.planning/completion-teaching-admin-real-adapters/
 .planning/completion-teaching-admin-real-adapters/*
 !.planning/completion-teaching-admin-real-adapters/*.md
+# model-runtime-r4 hardening (Track 15): track planning notes (markdown only).
+!.planning/model-runtime-r4/
+.planning/model-runtime-r4/*
+!.planning/model-runtime-r4/*.md
 
 # hardening/r4-teaching-lab (Track 12): track planning notes (markdown only; logs stay local).
 !.planning/teaching-lab-r4/

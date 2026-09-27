@@ -8,6 +8,8 @@ namespace sicnu::runtime::gpu
 {
 namespace
 {
+constexpr size_t kMaxSessionsPerDevice = 4; // per-device warm+held session bound (see header)
+
 std::string makeSessionId()
 {
     static std::atomic<unsigned long long> counter{ 0 };
@@ -76,7 +78,12 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
             continue;
         live.released = false;
         live.session->useCount += 1;
-        result.outcome = AcquireOutcome::Acquired;
+        // Typed honesty: Acquired promises the PREFERRED footprint. A warm
+        // session granted a smaller footprint than the request's preferred
+        // size is a reduced grant and must read as such.
+        result.outcome = live.session->grantedVramMb >= request.vramMb
+                             ? AcquireOutcome::Acquired
+                             : AcquireOutcome::AcquiredReduced;
         result.session = live.session;
         return result;
     }
@@ -139,7 +146,10 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
                        [&]( const Impl::LiveSession &live ) {
                            return live.session->deviceId == deviceId;
                        } );
-    if ( deviceSessionCount >= 4 && !ladder.empty() )
+    // NOTE the documented bypass: a footprint-less request (vramMb == 0 and
+    // no ladder) cannot occupy VRAM, so the session-count bound does not
+    // apply to it — it falls through the empty ladder to CpuFallback below.
+    if ( deviceSessionCount >= kMaxSessionsPerDevice && !ladder.empty() )
     {
         result.outcome = AcquireOutcome::Busy;
         return result;
