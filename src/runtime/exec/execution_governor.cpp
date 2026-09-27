@@ -20,6 +20,11 @@ ExecutionGovernor::ExecutionGovernor( Config config )
     : m_config( std::move( config ) ), m_scratch( chunk::ScratchRegistry::Config{ m_config.scratchRoot, m_config.scratchBytes } ),
       m_writeGate( m_config.writeInFlightBytes )
 {
+    // A fresh governor starts a fresh leak-observation window: a previous
+    // governor's destructor report must never bleed into this one's
+    // diagnostics (or into a later test's assertion on lastLeakReportJson).
+    std::lock_guard<std::mutex> leakLock( g_lastLeakMutex );
+    g_lastLeakReportJson.clear();
 }
 
 ExecutionGovernor::~ExecutionGovernor()

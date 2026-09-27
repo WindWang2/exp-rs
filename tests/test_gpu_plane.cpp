@@ -119,6 +119,9 @@ TEST_CASE( "GPU plane evicts stale model identities", "[gpu_plane]" )
     auto stale = pool.acquireSession( makeRequest( "detector", 1024 ) );
     REQUIRE( stale.outcome == AcquireOutcome::Acquired );
     pool.releaseSession( stale.session->sessionId );
+    // Release protocol: drop the returned handle — the #1094 use_count gate
+    // only recycles sessions no operator (or test) is still holding.
+    stale.session.reset();
 
     // The model file changed: signature differs ⇒ old session recycled.
     pool.evictStale( "detector", "sig-2" );
