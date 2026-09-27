@@ -865,6 +865,12 @@ target_link_libraries(test_lab_chains PRIVATE
   Qt6::Gui
   qgis_core
   sicnu_agent
+  # r4-teaching-lab: the suite references
+  # sicnu::agent_loop::VerificationReport::aggregate, which libsicnu_agent.so
+  # does not carry on this base (its missing agent_loop dependency is the
+  # #1335 P0-3 root cause) — link agent_loop directly so the 34 cases can
+  # run at all. Redundant (harmless) once #1335 lands.
+  sicnu_agent_loop
   sicnu_operators
 )
 if(TARGET jsoncpp)
@@ -13880,6 +13886,10 @@ target_link_libraries(test_teaching_cockpit_authority_r4 PRIVATE
   Sicnu::teaching
   Sicnu::teaching_admin
   sicnu_agent
+  # sicnu_agent.so does not carry its agent_loop dependency on this base
+  # (#1335 P0-3); the harness seams reference its types — link directly.
+  # Redundant (harmless) once #1335 lands.
+  sicnu_agent_loop
 )
 target_include_directories(test_teaching_cockpit_authority_r4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 set_target_properties(test_teaching_cockpit_authority_r4 PROPERTIES
@@ -13897,6 +13907,8 @@ add_executable(test_teaching_credential_paths_r4 test_teaching_credential_paths_
 target_link_libraries(test_teaching_credential_paths_r4 PRIVATE
   Catch2::Catch2WithMain
   sicnu_agent
+  # Same agent_loop gap as above (#1335 P0-3) — see the comment there.
+  sicnu_agent_loop
   Qt6::Core
 )
 sicnu_link_jsoncpp(test_teaching_credential_paths_r4)

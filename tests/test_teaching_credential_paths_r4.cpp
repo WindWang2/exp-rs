@@ -54,8 +54,8 @@ class TokenEnvGuard
     }
     ~TokenEnvGuard()
     {
-        if ( saved_ )
-            ::setenv( kEnv, saved_->c_str(), 1 );
+        if ( !saved_.empty() )
+            ::setenv( kEnv, saved_.c_str(), 1 );
         else
             ::unsetenv( kEnv );
     }
