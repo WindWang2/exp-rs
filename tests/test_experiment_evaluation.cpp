@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include <limits>
 #include <QJsonValue>
 
 using namespace sicnu::dataset;
@@ -281,6 +282,20 @@ TEST_CASE( "evaluation protocol is validated and binds metric identity",
     EvaluationProtocol badAggregation = protocol;
     badAggregation.setAggregation( QStringLiteral( "average-ish" ) );
     CHECK( !badAggregation.validate().has_value() );
+
+    // Non-finite thresholds refused: every comparison against NaN is false,
+    // so the range checks alone let NaN slip through, toJson serializes it as
+    // null, and the reader silently substitutes the 0.5 default — the
+    // round-trip corrupts the protocol without anyone noticing.
+    EvaluationProtocol nanIou = protocol;
+    nanIou.setIouThreshold( std::numeric_limits<double>::quiet_NaN() );
+    CHECK( !nanIou.validate().has_value() );
+    EvaluationProtocol nanConfidence = protocol;
+    nanConfidence.setConfidenceThreshold( std::numeric_limits<double>::quiet_NaN() );
+    CHECK( !nanConfidence.validate().has_value() );
+    EvaluationProtocol infIou = protocol;
+    infIou.setIouThreshold( std::numeric_limits<double>::infinity() );
+    CHECK( !infIou.validate().has_value() );
 
     // The protocol is part of a MetricRecord and survives round-trip.
     MetricRecord record;

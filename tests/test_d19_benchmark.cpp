@@ -392,3 +392,111 @@ TEST_CASE( "a recorded benchmark refusal round-trips without poisoning its histo
     CHECK( results.first().protocol().datasetVersionId()
            == unreachable.datasetVersionId() );
 }
+
+TEST_CASE( "saveBenchmarkResult refuses an invalid protocol before it lands",
+           "[d19][benchmark][store][r5]" )
+{
+    // #1360: the write gate only checked id non-emptiness while the read gate
+    // (BenchmarkResult::fromJson) refuses any protocol that fails
+    // EvaluationProtocol::validate — the store could persist a row it can
+    // never parse back. The write gate must run the same validation.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp-store-gate.sqlite" ) ) ) );
+
+    // Seed one healthy record so the refusal below provably leaves existing
+    // rows untouched.
+    BenchmarkResult healthy;
+    healthy.setResultId( QStringLiteral( "br-good" ) );
+    healthy.setBenchmarkId( QStringLiteral( "bench-a" ) );
+    healthy.setBenchmarkVersion( 1 );
+    healthy.setProtocol( makeDefinition().protocol() );
+    REQUIRE( store.saveBenchmarkResult( healthy ).has_value() );
+
+    // A default-constructed protocol has no dataset version / split manifest
+    // — exactly the row benchmarkResultById could never read back.
+    BenchmarkResult result;
+    result.setResultId( QStringLiteral( "br-bad" ) );
+    result.setBenchmarkId( QStringLiteral( "bench-a" ) );
+    result.setBenchmarkVersion( 1 );
+    const auto saved = store.saveBenchmarkResult( result );
+    REQUIRE( !saved.has_value() );
+    REQUIRE( !saved.diagnostics().isEmpty() );
+    CHECK( saved.diagnostics().first().code
+           == QStringLiteral( "experiment.benchmark_result_invalid" ) );
+
+    // The refusal did not land: no row, and the healthy neighbor is intact.
+    CHECK( !store.benchmarkResultById( QStringLiteral( "br-bad" ) ).has_value() );
+    const auto listing = store.benchmarkResultsFor( QStringLiteral( "bench-a" ) );
+    REQUIRE( listing.has_value() );
+    REQUIRE( listing->size() == 1 );
+    CHECK( listing->first().resultId() == QStringLiteral( "br-good" ) );
+}
+
+TEST_CASE( "benchmark result save->load round-trips exactly",
+           "[d19][benchmark][store][r5]" )
+{
+    // Every optional field set, through both read paths (byId and listing):
+    // what the store hands back must be byte-equivalent to what went in.
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp-store-rt.sqlite" ) ) ) );
+
+    BenchmarkResult result;
+    result.setResultId( QStringLiteral( "br-full" ) );
+    result.setBenchmarkId( QStringLiteral( "bench-full" ) );
+    result.setBenchmarkVersion( 3 );
+    result.setDefinitionDigest( QStringLiteral( "def-digest" ) );
+    result.setStatus( BenchmarkRunStatus::Failed );
+    result.setFailureCode( QStringLiteral( "version_missing" ) );
+    result.setFailureMessage( QStringLiteral( "dataset version missing" ) );
+    result.setDatasetVersionId( QStringLiteral( "dv-1" ) );
+    result.setSplitManifestId( QStringLiteral( "sp-1" ) );
+    result.setModelId( QStringLiteral( "model-a" ) );
+    result.setModelDigest( QStringLiteral( "md-digest" ) );
+    result.setSeed( 42 );
+    result.setSoftwareRevision( QStringLiteral( "rev-9" ) );
+    result.setExperimentRunId( QStringLiteral( "run-1" ) );
+    result.setReproducibilityComplete( false );
+    result.reproducibilityGaps().append( QStringLiteral( "no verification sidecar" ) );
+    MetricResult metric;
+    metric.name = QStringLiteral( "overall_accuracy" );
+    metric.definitionVersion = QStringLiteral( "exp-rs.evaluation/1" );
+    metric.value = 0.75;
+    metric.scope = QStringLiteral( "overall" );
+    metric.support = 100;
+    metric.warnings.append( QStringLiteral( "degenerate confusion" ) );
+    result.metrics().append( metric );
+    QJsonObject raw;
+    raw.insert( QStringLiteral( "extra" ), 1.5 );
+    result.setRawMetrics( raw );
+    EvaluationProtocol protocol;
+    protocol.setDatasetVersionId( QStringLiteral( "dv-1" ) );
+    protocol.setSplitManifestId( QStringLiteral( "sp-1" ) );
+    protocol.setSubset( QStringLiteral( "validation" ) );
+    protocol.setIouThreshold( 0.7 );
+    protocol.setConfidenceThreshold( 0.3 );
+    protocol.setAggregation( QStringLiteral( "micro" ) );
+    protocol.ignoreLabels().append( QStringLiteral( "cloud" ) );
+    result.setProtocol( protocol );
+
+    REQUIRE( store.saveBenchmarkResult( result ).has_value() );
+    const auto loaded = store.benchmarkResultById( QStringLiteral( "br-full" ) );
+    REQUIRE( loaded.has_value() );
+    CHECK( loaded->toJson() == result.toJson() );
+    CHECK( loaded->resultId() == result.resultId() );
+    CHECK( loaded->benchmarkId() == result.benchmarkId() );
+    CHECK( loaded->benchmarkVersion() == result.benchmarkVersion() );
+    CHECK( loaded->status() == result.status() );
+    CHECK( loaded->seed() == result.seed() );
+    CHECK( loaded->protocol() == result.protocol() );
+    REQUIRE( loaded->metrics().size() == 1 );
+    CHECK( loaded->metrics().first().support == 100 );
+
+    const auto listing = store.benchmarkResultsFor( QStringLiteral( "bench-full" ) );
+    REQUIRE( listing.has_value() );
+    REQUIRE( listing->size() == 1 );
+    CHECK( listing->first().toJson() == result.toJson() );
+}
