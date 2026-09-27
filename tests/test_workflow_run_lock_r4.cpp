@@ -33,6 +33,7 @@
 #include <json/json.h>
 
 #include <memory>
+#include <unistd.h>
 #include <string>
 
 using namespace sicnu::workflow;
@@ -353,6 +354,9 @@ TEST_CASE( "lock acquisition in a nonexistent directory creates it; a read-only 
     }
 
     // Read-only directory: refusal is the typed Error branch, not a crash.
+    // (Skipped for root, which bypasses directory permissions.)
+    if ( ::geteuid() == 0 )
+        return;
     const QString readonly = parent.path() + QStringLiteral( "/ro" );
     REQUIRE( QDir().mkpath( readonly ) );
     REQUIRE( QFile::setPermissions(

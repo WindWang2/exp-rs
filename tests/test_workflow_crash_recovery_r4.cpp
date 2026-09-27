@@ -20,7 +20,10 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
+
+#include <cstring>
 
 #include <json/json.h>
 
@@ -248,7 +251,7 @@ TEST_CASE( "IP-2: SIGKILL mid-node commits exactly the journal set and resume ne
         { QStringLiteral( "run-block-at" ), fx.scratch.path(), fx.outDir(),
           QString::fromStdString( prefix ), QStringLiteral( "2" ), QStringLiteral( "2" ) },
         /*barrier=*/"step2_running" ) );
-    const std::string runId = injector.runIdLine().toStdString();
+    const std::string runId = injector.resolveRunId().toStdString();
     REQUIRE_FALSE( runId.empty() );
 
     // Settle window: the first node's completion fold managed its atomic
@@ -289,7 +292,7 @@ TEST_CASE( "IP-2: SIGKILL mid-node commits exactly the journal set and resume ne
     const auto snapshot = runToTerminal( coordinator, pipelineId );
     REQUIRE( snapshot );
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
-    REQUIRE( step1Runs->load() == 0 ); // 提交后不重放：committed step is not replayed
+    REQUIRE( step1Runs->load() == 0 ); // post-commit: a committed step is never replayed
     REQUIRE( step2Runs->load() >= 1 ); // uncommitted work re-executes exactly here
 }
 
@@ -304,7 +307,7 @@ TEST_CASE( "IP-2b: kill at a later commit boundary keeps the longer committed pr
         { QStringLiteral( "run-block-at" ), fx.scratch.path(), fx.outDir(),
           QString::fromStdString( prefix ), QStringLiteral( "3" ), QStringLiteral( "3" ) },
         /*barrier=*/"step3_running" ) );
-    const std::string runId = injector.runIdLine().toStdString();
+    const std::string runId = injector.resolveRunId().toStdString();
     REQUIRE_FALSE( runId.empty() );
     REQUIRE( eventually( [&] {
         return injector.committedStepsOnDisk( runId ).contains( QStringLiteral( "step1" ) );
@@ -422,7 +425,7 @@ TEST_CASE( "IP-4a: hard death before a step's commit re-executes it and never se
         { QStringLiteral( "run-exit-at" ), fx.scratch.path(), fx.outDir(),
           QString::fromStdString( prefix ), QStringLiteral( "2" ), QStringLiteral( "2" ) },
         /*barrier=*/"step2_running" ) );
-    const std::string runId = injector.runIdLine().toStdString();
+    const std::string runId = injector.resolveRunId().toStdString();
     REQUIRE_FALSE( runId.empty() );
     REQUIRE( eventually( [&] {
         return injector.committedStepsOnDisk( runId ).contains( QStringLiteral( "step1" ) );
@@ -433,7 +436,7 @@ TEST_CASE( "IP-4a: hard death before a step's commit re-executes it and never se
     REQUIRE( injector.childRunning() == false );
 
     // The stale step2 output exists, but the journal's committed set is
-    // step1 only: 提交前死区 — the uncommitted result is not trusted.
+    // step1 only: pre-commit death — the uncommitted result is not trusted.
     REQUIRE( QFile::exists( fx.outDir() + QStringLiteral( "/%1_step2.tif" ).arg( prefix.c_str() ) ) );
     REQUIRE( normalize( injector.committedStepsOnDisk( runId ) )
              == normalize( { QStringLiteral( "step1" ) } ) );
@@ -559,11 +562,19 @@ TEST_CASE( "IP-5a: death during cancel propagation keeps the completed prefix an
         { QStringLiteral( "cancel-mid" ), fx.scratch.path(), fx.outDir(),
           QString::fromStdString( prefix ), QStringLiteral( "2" ), QStringLiteral( "2" ) },
         /*barrier=*/"cancel_persisted" ) );
-    const std::string runId = injector.runIdLine().toStdString();
+    const std::string runId = injector.resolveRunId().toStdString();
     REQUIRE_FALSE( runId.empty() );
     REQUIRE( eventually( [&] {
         return injector.committedStepsOnDisk( runId ).contains( QStringLiteral( "step1" ) );
     } ) );
+
+    // Positive pin of the ordering contract: at the barrier, cancelRun has
+    // returned, so the Cancelling (or later) verdict is already on disk —
+    // checkpoint first, propagation second is the production order.
+    const QString stateAtBarrier = injector.checkpointStateOnDisk( runId );
+    INFO( "state at barrier: " << stateAtBarrier.toStdString() );
+    REQUIRE( ( stateAtBarrier == QStringLiteral( "Cancelling" )
+               || stateAtBarrier == QStringLiteral( "Canceled" ) ) );
 
     injector.killChild();
 
@@ -620,7 +631,7 @@ TEST_CASE( "IP-5b: death after cancel fully propagated leaves a terminal, unowne
         { QStringLiteral( "cancel-done" ), fx.scratch.path(), fx.outDir(),
           QString::fromStdString( prefix ), QStringLiteral( "2" ), QStringLiteral( "3" ) },
         /*barrier=*/"cancel_terminal" ) );
-    const std::string runId = injector.runIdLine().toStdString();
+    const std::string runId = injector.resolveRunId().toStdString();
     REQUIRE_FALSE( runId.empty() );
 
     // The child hard-exited after the terminal persist; reap it.
@@ -654,7 +665,8 @@ TEST_CASE( "IP-5b: death after cancel fully propagated leaves a terminal, unowne
     REQUIRE( snapshot );
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( step1Runs->load() == 0 );
-    REQUIRE( step2Runs->load() + step3Runs->load() >= 1 );
+    REQUIRE( step2Runs->load() >= 1 ); // was cancelled: must re-execute
+    REQUIRE( step3Runs->load() >= 1 ); // never ran: must re-execute — no silent skips
 }
 
 // --- Track 10 WP-D: boundary second pass ------------------------------------

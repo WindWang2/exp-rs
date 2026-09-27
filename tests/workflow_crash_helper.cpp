@@ -63,7 +63,14 @@ namespace {
 void barrier( const QString &dir, const std::string &name )
 {
     QFile f( QDir( dir ).filePath( QStringLiteral( "barrier_%1" ).arg( name.c_str() ) ) );
-    f.open( QIODevice::WriteOnly | QIODevice::Truncate );
+    if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    {
+        // A silently missing barrier would cost the parent a full timeout;
+        // fail loudly on stderr instead.
+        std::fprintf( stderr, "HELPER: barrier '%s' write failed: %s\n", name.c_str(),
+                      f.errorString().toUtf8().constData() );
+        std::fflush( stderr );
+    }
     f.close();
 }
 

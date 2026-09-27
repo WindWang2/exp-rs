@@ -501,7 +501,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     if ( def.steps.empty() )
     {
         run->setErrorMessage( "Workflow contains no steps" );
-        run->forceSetState( WorkflowRunState::Failed );
+        run->transitionTo( WorkflowRunState::Failed );
         PersistRequest emptyPersist;
         {
             std::lock_guard<std::mutex> lock( m_mutex );

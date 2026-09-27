@@ -242,6 +242,21 @@ struct CancelCoordinatorFixture
         return counter;
     }
 
+    /// Registers a completing (payload-only) second-step executor with a
+    /// run counter — for resume legs where the step must visibly re-execute.
+    static std::shared_ptr<std::atomic<int>> registerCountingCompletingSecond(
+        const std::string &prefix )
+    {
+        auto counter = std::make_shared<std::atomic<int>>( 0 );
+        sicnu::jobs::JobEngine::instance().registerExecutor(
+            prefix + ":second",
+            [counter]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+                counter->fetch_add( 1 );
+                return Json::Value( Json::objectValue );
+            } );
+        return counter;
+    }
+
     static std::shared_ptr<WorkflowRun> runToTerminal( WorkflowRunCoordinator &coordinator,
                                                        long pipelineId )
     {
@@ -369,11 +384,11 @@ TEST_CASE( "a run being canceled is refused to a concurrent resume until termina
     }();
     QString refusal;
     REQUIRE( coordinator.resumeRun( runId, &refusal ) == -1 );
-    // The refusal is the OWNERSHIP gate (the live coordinator holds the run's
-    // flock — same process, second descriptor), never a silent block.
+    // The refusal is specifically the OWNERSHIP gate (the live coordinator
+    // holds the run's flock — same process, second descriptor), never a
+    // silent block and never the weaker tracked-gate message.
     INFO( refusal.toStdString() );
-    REQUIRE( ( refusal.contains( QStringLiteral( "owned by a live process" ) )
-               || refusal.contains( QStringLiteral( "already tracked" ) ) ) );
+    REQUIRE( refusal.contains( QStringLiteral( "owned by a live process" ) ) );
 
     REQUIRE( coordinator.cancelRun( pipelineId ) );
     const auto snapshot = CancelCoordinatorFixture::runToTerminal( coordinator, pipelineId );
@@ -385,11 +400,8 @@ TEST_CASE( "a run being canceled is refused to a concurrent resume until termina
     // re-executes in THIS submission and the run completes.
     sicnu::jobs::JobEngine::instance().clearExecutors();
     const auto resumedFirst = CancelCoordinatorFixture::registerFastFirst( prefix );
-    sicnu::jobs::JobEngine::instance().registerExecutor(
-        prefix + ":second",
-        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
-            return Json::Value( Json::objectValue );
-        } );
+    const auto resumedSecond =
+        CancelCoordinatorFixture::registerCountingCompletingSecond( prefix );
 
     QString err;
     const long resumePipeline = coordinator.resumeRun( runId, &err );
@@ -400,4 +412,5 @@ TEST_CASE( "a run being canceled is refused to a concurrent resume until termina
     REQUIRE( resumed->state() == WorkflowRunState::Completed );
     REQUIRE( resumed->runId() == runId ); // one lineage thread across the resume
     REQUIRE( resumedFirst->load() == 0 ); // committed prefix served, not replayed
+    REQUIRE( resumedSecond->load() >= 1 ); // the canceled step visibly re-executed
 }

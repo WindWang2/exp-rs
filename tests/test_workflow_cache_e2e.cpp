@@ -1225,16 +1225,20 @@ TEST_CASE( "A cancelled step never seeds the execution cache; only a real comple
 
     const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*majorityKernel=*/3 );
 
-    // Step B is shadowed by a cancellable executor: it blocks on the
-    // cooperative cancel flag, so the cancel lands mid-step deterministically.
-    auto bStarted = std::make_shared<std::atomic_bool>( false );
+    // Step B is shadowed by a cancellable executor that writes its output
+    // bytes BEFORE blocking: the strongest shape of the gate — even a step
+    // whose artifact already exists on disk must not seed the cache without
+    // its completion accounting.
     sicnu::AlgorithmTaskInfo aInfo;
     long pipelineId = 0;
     {
         ShadowExecutorGuard shadowB(
-            "rs:majority_filter", [bStarted]( const sicnu::jobs::JobRequest &,
-                                              sicnu::operators::RSOperatorContext &ctx ) {
-                bStarted->store( true );
+            "rs:majority_filter", [bPath = fx.bPath]( const sicnu::jobs::JobRequest &,
+                                                     sicnu::operators::RSOperatorContext &ctx ) {
+                QFile out( bPath );
+                out.open( QIODevice::WriteOnly | QIODevice::Truncate );
+                out.write( "cancelled-step-bytes\n" );
+                out.close();
                 for ( ;; )
                 {
                     ctx.throwIfCancelled();
@@ -1318,13 +1322,19 @@ TEST_CASE( "A cancelled step never seeds the execution cache; only a real comple
     REQUIRE( containsPath( cache.cachedArtifacts(), fx.bPath ) );
 }
 
-TEST_CASE( "One run, two persisted views: the checkpoint committed set equals the "
+TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the "
            "completed-task view",
            "[workflow][r4][cache][coordinator]" )
 {
     CacheE2eFixture fx;
     auto &center = sicnu::TaskCenter::instance();
     auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+    // RAII: the singleton must never outlive this test pointing at a removed
+    // temp dir, even when an assertion fires mid-test.
+    struct DirReset
+    {
+        ~DirReset() { sicnu::workflow::WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() ); }
+    } dirReset;
     coordinator.setCheckpointDirectory( fx.dir.path() );
 
     const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*majorityKernel=*/3 );
@@ -1381,6 +1391,4 @@ TEST_CASE( "One run, two persisted views: the checkpoint committed set equals th
     // count mismatch, which is exactly what resume reconciles against.
     REQUIRE( completedTasks == 2 );
     REQUIRE( committedSteps == completedTasks );
-
-    coordinator.setCheckpointDirectory( QString() );
 }

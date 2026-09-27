@@ -46,7 +46,11 @@ verified by real SIGKILL in `test_workflow_crash_recovery_r4`):
   operator-identity gate, both fail-closed to re-execution.
 * **death after the last commit, before the finalize persist**: the
   all-committed picture reconciles to Interrupted and finalizes from its
-  committed set without re-executing anything (#1078a path).
+  committed set without re-executing anything (#1078a path). This one window
+  is microseconds wide inside the dying process and is therefore verified by
+  a CRAFTED on-disk picture (built with the production writer) resumed
+  through the production recovery path — not by a process death; its
+  real-death siblings bracket the same commit logic from both sides.
 
 ### 2. Lock semantics (unchanged, now pinned)
 
@@ -89,8 +93,9 @@ Pinned against ADR 0125 §3's contract:
 
 ## Consequences
 
-Crash/lock/cancel/cache behavior is now enforced by process-death tests, not
-only by in-process unit lanes. New durability work must extend
+Crash/lock/cancel behavior is now enforced by process-death tests, not only
+by in-process unit lanes; the cache contracts remain in-process API tests
+(the cache is not process-scoped state). New durability work must extend
 `workflow_crash_helper` (or reuse its modes) instead of simulating deaths
 in-process — an in-process "crash" cannot witness the kernel releasing the
 flock, which is the foundation of the whole ownership contract.

@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <sstream>
 #include <thread>
@@ -25,6 +26,21 @@
 
 namespace sicnu::workflow {
 namespace {
+
+/// Extracts "RUN <runId> <pipelineId>" from accumulated stdout into @p out.
+bool extractRunLine( const QString &buffer, QString *out )
+{
+    for ( const QString &line : buffer.split( QLatin1Char( '\n' ), Qt::SkipEmptyParts ) )
+    {
+        if ( line.startsWith( QStringLiteral( "RUN " ) ) )
+        {
+            *out = line.section( QLatin1Char( ' ' ), 1, 1 );
+            return true;
+        }
+    }
+    return false;
+}
+
 
 bool waitFor( const std::function<bool()> &predicate, int timeoutMs )
 {
@@ -49,6 +65,33 @@ WorkflowCrashInjector::WorkflowCrashInjector( const QString &scratchDir )
 WorkflowCrashInjector::~WorkflowCrashInjector()
 {
     killChild();
+}
+
+bool WorkflowCrashInjector::parseRunLine( const QString &buffer )
+{
+    QString id;
+    if ( extractRunLine( buffer, &id ) && !id.isEmpty() )
+    {
+        m_runIdLine = id;
+        return true;
+    }
+    return false;
+}
+
+QString WorkflowCrashInjector::resolveRunId() const
+{
+    if ( !m_runIdLine.isEmpty() )
+        return m_runIdLine;
+    // Disk fallback: the scratch dir is per-test fresh, so at most one run's
+    // checkpoint can exist.
+    const QStringList checkpoints = QDir( m_dir ).entryList(
+        QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+    if ( checkpoints.size() == 1 )
+    {
+        const QString stem = checkpoints.front().chopped( strlen( ".json" ) );
+        return stem.mid( strlen( "checkpoint_" ) );
+    }
+    return QString();
 }
 
 QString WorkflowCrashInjector::helperPath()
@@ -80,20 +123,43 @@ bool WorkflowCrashInjector::spawnUntilBarrier( const QStringList &args,
                       m_process->errorString().toUtf8().constData() );
         return false;
     }
-    const bool barrierSeen = waitFor( [this, barrierName] {
-        // Pump the child's pipes while polling: this thread runs no event
-        // loop, so without waitForReadyRead the stdout buffer is never
-        // drained into QProcess and the RUN line would be lost.
-        m_process->waitForReadyRead( 5 );
-        return barrierExists( barrierName );
-    }, timeoutMs );
-    // Correlate the runId from the helper's stdout ("RUN <runId> <pipelineId>").
-    const QString out = QString::fromUtf8( m_process->readAllStandardOutput() );
-    for ( const QString &line : out.split( QLatin1Char( '\n' ), Qt::SkipEmptyParts ) )
+    // Accumulate the child's stdout while polling: this thread runs no event
+    // loop, so each pump must drain the pipe into our own buffer or the RUN
+    // line would be lost. The barrier can beat the child's main thread to the
+    // print (executors run on JobEngine workers), so keep draining until the
+    // line shows up or a short bounded window closes.
+    const qint64 runLineDeadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
+    bool barrierSeen = false;
+    while ( QDateTime::currentMSecsSinceEpoch() < runLineDeadline )
     {
-        if ( line.startsWith( QStringLiteral( "RUN " ) ) )
-            m_runIdLine = line.section( QLatin1Char( ' ' ), 1, 1 );
+        m_process->waitForReadyRead( 5 );
+        m_stdoutBuffer += QString::fromUtf8( m_process->readAllStandardOutput() );
+        if ( m_stdoutBuffer.contains( QLatin1Char( '\n' ) ) )
+            barrierSeen = barrierExists( barrierName );
+        if ( barrierSeen && m_runIdLine.isEmpty() && parseRunLine( m_stdoutBuffer ) )
+            break;
+        if ( barrierSeen && !m_runIdLine.isEmpty() )
+            break;
+        if ( !barrierSeen && barrierExists( barrierName ) )
+        {
+            // Give the child's main thread a bounded grace period to flush the
+            // RUN line that precedes the barrier in program order.
+            barrierSeen = true;
+            const qint64 grace = QDateTime::currentMSecsSinceEpoch() + 5000;
+            while ( QDateTime::currentMSecsSinceEpoch() < grace )
+            {
+                m_process->waitForReadyRead( 5 );
+                m_stdoutBuffer += QString::fromUtf8( m_process->readAllStandardOutput() );
+                if ( parseRunLine( m_stdoutBuffer ) )
+                    break;
+                std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+            }
+            break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
+    if ( barrierSeen && m_runIdLine.isEmpty() )
+        parseRunLine( m_stdoutBuffer );
     if ( !barrierSeen )
     {
         const int exitCode = m_process->exitCode();

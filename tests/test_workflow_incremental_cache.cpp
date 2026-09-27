@@ -226,7 +226,7 @@ TEST_CASE( "ExecutionResultCache with V2 fingerprints", "[workflow][v2][cache]" 
 // re-run must strand the downstream entry, a targeted invalidate must not
 // over-invalidate sibling lineages, and a disabled cache must never serve.
 
-TEST_CASE( "An upstream re-run (new output revision) strands the downstream entry",
+TEST_CASE( "An upstream re-run (new output revision) moves the downstream cache key",
            "[workflow][r4][cache][invalidation]" )
 {
   auto &cache = ExecutionResultCache::instance();
@@ -268,7 +268,8 @@ TEST_CASE( "An upstream re-run (new output revision) strands the downstream entr
   REQUIRE_FALSE( cache.lookup( downstreamFpV2 ).has_value() );
 
   // The downstream re-execution under the new revision seeds a fresh entry;
-  // the stale one is stranded (never served again) until pruned.
+  // the stale entry is stranded at its own key — nothing serves it for the
+  // new lineage, and the targeted invalidate removes it without over-reach.
   cache.store( downstreamFpV2, downstreamOutV2 );
   REQUIRE( *cache.lookup( downstreamFpV2 ) == downstreamOutV2 );
   REQUIRE( *cache.lookup( downstreamFpV1 ) == downstreamOutV1 ); // still addressable by its own key

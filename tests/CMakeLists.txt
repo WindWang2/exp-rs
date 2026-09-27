@@ -9851,7 +9851,7 @@ sicnu_link_jsoncpp(test_contract_platform_9)
 add_executable(test_agent_loop_core test_agent_loop_core.cpp)
 target_link_libraries(test_agent_loop_core PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_core)
 
@@ -9860,7 +9860,7 @@ sicnu_discover_tests(test_agent_loop_core)
 add_executable(test_agent_loop_journal_durability test_agent_loop_journal_durability.cpp)
 target_link_libraries(test_agent_loop_journal_durability PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_journal_durability)
 
@@ -9868,7 +9868,7 @@ sicnu_discover_tests(test_agent_loop_journal_durability)
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
 target_link_libraries(test_agent_loop_seams PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_seams)
 
@@ -9876,7 +9876,7 @@ sicnu_discover_tests(test_agent_loop_seams)
 add_executable(test_agent_loop_modes test_agent_loop_modes.cpp)
 target_link_libraries(test_agent_loop_modes PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_modes)
 
@@ -9884,7 +9884,7 @@ sicnu_discover_tests(test_agent_loop_modes)
 add_executable(test_agent_loop_e2e test_agent_loop_e2e.cpp)
 target_link_libraries(test_agent_loop_e2e PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_e2e)
 
@@ -9892,7 +9892,7 @@ sicnu_discover_tests(test_agent_loop_e2e)
 add_executable(test_agent_loop_resume test_agent_loop_resume.cpp)
 target_link_libraries(test_agent_loop_resume PRIVATE
   Catch2::Catch2WithMain
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
 )
 sicnu_discover_tests(test_agent_loop_resume)
 
@@ -9931,7 +9931,7 @@ target_link_libraries(test_agent_session_adapter PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   qgis_core
-  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent_loop
   sicnu_agent
   sicnu_processing
   GDAL::GDAL

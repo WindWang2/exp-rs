@@ -39,9 +39,13 @@ class WorkflowCrashInjector
     void killChild();
     bool childRunning();
 
-    /// The runId line the helper prints ("RUN <runId> <pipelineId>"), or the
+    /// The runId the helper printed ("RUN <runId> <pipelineId>"), or the
     /// empty string when not (yet) seen.
     QString runIdLine() const;
+    /// runIdLine(), with a disk-derived fallback: when the child died before
+    /// its main thread flushed stdout (run-exit-at), the fresh scratch dir
+    /// holds exactly one checkpoint — its name carries the runId.
+    QString resolveRunId() const;
 
     // ---- on-disk truth readers (independent of any recovery code) --------
     /// Raw JSON read of the run's checkpoint; null member when absent.
@@ -60,11 +64,13 @@ class WorkflowCrashInjector
     QString archivedCheckpointPath( const std::string &runId ) const;
 
   private:
+    bool parseRunLine( const QString &buffer );
     QString barrierPath( const std::string &barrierName ) const;
 
     QString m_dir;
     std::unique_ptr<QProcess> m_process;
     QString m_runIdLine;
+    QString m_stdoutBuffer;
 };
 
 } // namespace sicnu::workflow
