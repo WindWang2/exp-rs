@@ -30,4 +30,9 @@ public:
 
     /// Select the layer with @p id if present; no-op otherwise.
     void selectLayer( const QString &id );
+
+  private:
+    /// Re-populate from the project's raster truth, keeping the current
+    /// selection when the layer survives (F-01, ui-backend-state-parity-r4).
+    void refreshFromProject();
 };

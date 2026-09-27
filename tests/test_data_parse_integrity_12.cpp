@@ -103,54 +103,13 @@ const KnownBadFile *knownBadFiles( std::size_t &count )
 {
     static const KnownBadFile kKnown[] = {
         // --- Family A: duplicated-key prefix block (evil merge 43dcf19cd) ---
-        // NOTE: help/commands.json (E-15) and agent/capabilities/preprocess.json
-        // were repaired earlier in this track by restoring the authored
-        // revision, so neither is listed here. The gate's own "stale
-        // allowlist" assertion is what forced their removal; see E-16g.
-
-        { "processing/algorithm_meta/capability/rs-ace.json", "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-endmember-extraction.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-gaofen-import.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-hj-import.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-library-select.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-matched-filter.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-mnf-inverse.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-mnf.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-sam-classify.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-spectral-band-select.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-spectral-unmixing.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-extract-regions.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-harmonic-breaks.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-monitor.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-phenology.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-region-features.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-regularize.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-temporal-smooth.json",
-          "A:dup-key-prefix" },
-        { "processing/algorithm_meta/capability/rs-terrain-flow.json",
-          "A:dup-key-prefix" },
-
+        // All 19 capability files were repaired by later R3 merges; the
+        // gate's stale-allowlist assertion forced the pruning below (the
+        // entries lingered while the files already parsed cleanly).
         // --- Family B: truncated to zero bytes (evil merge 4713528ef) ---
-        { "processing/algorithm_meta/rs-temporal-extract-regions.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-harmonic-breaks.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-region-features.json", "B:zero-byte" },
-        { "processing/algorithm_meta/rs-temporal-regularize.json", "B:zero-byte" },
+        // The four rs-temporal-*.json files were deleted outright by later
+        // merges; there is nothing left to tolerate, so their entries went
+        // with them.
     };
     count = sizeof( kKnown ) / sizeof( kKnown[0] );
     return kKnown;
@@ -159,8 +118,11 @@ const KnownBadFile *knownBadFiles( std::size_t &count )
 /// The ceiling. Repairing a file cannot break this assertion; ADDING one does.
 /// Set to the authored defect count so the gate is exactly as tight as the
 /// evidence supports at the moment it lands. Lowered 25 -> 23 when the two
-/// already-repaired Family-A files were pruned (E-16g).
-constexpr std::size_t kMaxTolerated = 23;
+/// already-repaired Family-A files were pruned (E-16g), and to 0 when the
+/// remaining Family-A files parsed (repaired by R3 merges) and the
+/// Family-B files were gone from the tree — the authored defect set is now
+/// fully repaired; a future defect must fix the data, not the list.
+constexpr std::size_t kMaxTolerated = 0;
 
 QString dataRoot()
 {

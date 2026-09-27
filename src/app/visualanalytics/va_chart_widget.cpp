@@ -83,7 +83,7 @@ VaChartWidget::VaChartWidget( QWidget *parent )
     setFocusPolicy( Qt::StrongFocus );
     setMouseTracking( true );
     setMinimumSize( minimumSizeHint() );
-    setAccessibleName( tr( "可视化图表" ) );
+    setAccessibleName( tr( "Visualization chart" ) );
 }
 
 void VaChartWidget::setData( const VaData &data )
@@ -99,7 +99,7 @@ void VaChartWidget::setData( const VaData &data )
 void VaChartWidget::setLoading( const QString &message )
 {
     m_mode = Mode::Loading;
-    m_message = message.isEmpty() ? tr( "加载中…" ) : message;
+    m_message = message.isEmpty() ? tr( "Loading…" ) : message;
     m_hasRange = false;
     update();
 }
@@ -241,13 +241,13 @@ void VaChartWidget::paintEvent( QPaintEvent *event )
     switch ( m_mode )
     {
         case Mode::Empty:
-            paintState( painter, tr( "暂无数据" ) );
+            paintState( painter, tr( "No data yet" ) );
             return;
         case Mode::Loading:
             paintState( painter, m_message );
             return;
         case Mode::Error:
-            paintState( painter, tr( "加载失败：%1" ).arg( m_message ) );
+            paintState( painter, tr( "Load failed: %1" ).arg( m_message ) );
             return;
         case Mode::Ready:
             break;

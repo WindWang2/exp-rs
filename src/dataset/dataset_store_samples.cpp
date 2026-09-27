@@ -484,6 +484,44 @@ sicnu::data::Result<void> DatasetStore::addAnnotation( const AnnotationRecord &a
     if ( *status != DatasetVersionStatus::Draft )
         return Result::failure( notDraft( annotation.datasetVersionId() ) );
 
+    // Schema-aware fail-fast: a non-empty class code must resolve inside the
+    // referenced schema version. An unknown code is refused at ingest — a
+    // stored annotation with a ghost code would silently poison every
+    // consumer that joins labels through the ontology.
+    if ( !annotation.classCode().isEmpty() )
+    {
+        auto refuse = []( const QString &detail ) {
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.annotation_invalid" ), detail ) );
+        };
+        if ( annotation.labelSchemaId().isEmpty() )
+            return refuse( QStringLiteral( "annotation %1: class_code '%2' requires a label schema" )
+                               .arg( annotation.annotationId(), annotation.classCode() ) );
+        StoreStmt schemaStmt( m_impl->db, QStringLiteral(
+            "SELECT json FROM label_schemas WHERE schema_id=? AND version=?" ) );
+        if ( !schemaStmt )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               schemaStmt.error( m_impl->db ) ) );
+        schemaStmt.bind( 1, annotation.labelSchemaId() );
+        schemaStmt.bind( 2, static_cast<qint64>( annotation.labelSchemaVersion() ) );
+        std::optional<LabelSchema> schema;
+        if ( schemaStmt.stepRow() )
+        {
+            const auto parsed = LabelSchema::fromJson( textToJson( schemaStmt.text( 0 ) ) );
+            if ( parsed )
+                schema = std::move( parsed.value() );
+        }
+        if ( !schema )
+            return refuse( QStringLiteral( "annotation %1: label schema %2@%3 not found" )
+                               .arg( annotation.annotationId(), annotation.labelSchemaId() )
+                               .arg( annotation.labelSchemaVersion() ) );
+        if ( schema.value().classByCode( annotation.classCode() ) == nullptr )
+            return refuse( QStringLiteral( "annotation %1: unknown class code '%2' under schema %3@%4" )
+                               .arg( annotation.annotationId(), annotation.classCode(),
+                                     annotation.labelSchemaId() )
+                               .arg( annotation.labelSchemaVersion() ) );
+    }
+
     if ( annotation.revision() == 1 )
     {
         // First revision must not collide with an existing chain head.

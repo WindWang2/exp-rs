@@ -1,0 +1,65 @@
+{
+  "rs:mosaic": {
+    "prerequisites": [
+      "输入为影像路径列表：各影像需带地理参考且 CRS/网格一致；镶嵌仅按输入顺序合成重叠区，不做几何配准、匀色、羽化或接缝线处理。"
+    ]
+  },
+  "rs:ndbi": {
+    "prerequisites": [
+      "输入需含 SWIR 与 NIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 5/4）。"
+    ]
+  },
+  "rs:ndvi": {
+    "prerequisites": [
+      "输入需含 NIR 与 Red 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 4/3）；建议在大气校正后计算。"
+    ]
+  },
+  "rs:ndwi": {
+    "prerequisites": [
+      "输入需含 Green 与 NIR 波段：可由 SICNU_BAND_ROLE 解析或显式 1-based 波段号指定（默认 2/4）。"
+    ]
+  },
+  "rs:obia_classify": {
+    "limitations": [
+      "训练来源为多边形标注或交互式对象标注（默认 svm）：分类质量取决于训练质量与对象特征表完备度，应先完成 rs:obia_features。",
+      "输出为对象级类别图（矢量/栅格），不是逐像元分类：对象内部的异质性由分割质量决定。"
+    ]
+  },
+  "rs:obia_features": {
+    "limitations": [
+      "标签栅格网格必须与源影像一致；标签波段按 UInt32 原样读取，不做重映射。",
+      "特征表为逐对象一行（光谱统计 + GLCM 纹理 + 形状指数）的 CSV：GLCM 计算开销随窗口与灰阶级数增长。"
+    ]
+  },
+  "rs:obia_hierarchy": {
+    "prerequisites": [
+      "build 模式依赖 OTB Segmentation CLI（SICNU_OTB_PATH）；rehydrate（labelsFine）模式复用此前构建输出的层级。"
+    ],
+    "limitations": [
+      "层级为两级（fine/coarse）父子结构：更细的多尺度层级栈不在本算子范围；可选对某一层级执行分类（method 默认 svm）。"
+    ]
+  },
+  "rs:obia_label": {
+    "prerequisites": [
+      "训练多边形需携带类别字段且 CRS 可解析；标签网格必须与源分割栅格一致（不可解析即 fail-closed 拒绝）。"
+    ],
+    "limitations": [
+      "按像元多数投票把多边形标签赋给对象：边界混合像元按多数归入，边界对象的标签纯度取决于分割质量。"
+    ]
+  },
+  "rs:obia_segment": {
+    "prerequisites": [
+      "simple 引擎开箱即用（教学级质量）；OTB MeanShift 质量引擎依赖 OTB CLI（SICNU_OTB_PATH）并受收敛阈值参数（threshold，默认 0.1）影响。"
+    ],
+    "limitations": [
+      "输出为对象标签栅格：对象层级构建、特征统计与对象分类分别接 rs:obia_hierarchy / rs:obia_features / rs:obia_classify。"
+    ]
+  },
+  "rs:osp_detection": {
+    "teaching_use": {
+      "concepts": ["正交子空间投影（OSP）", "干扰子空间", "正交补投影", "目标检测"],
+      "courses": ["高光谱遥感", "目标检测"],
+      "exercise": "给定目标光谱与干扰光谱运行 OSP，验证干扰光谱像元得分恒为 0，并与 CEM 的背景统计路线比较各自的适用条件。"
+    }
+  }
+}

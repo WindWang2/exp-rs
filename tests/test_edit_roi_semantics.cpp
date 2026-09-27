@@ -30,6 +30,12 @@
 #include <array>
 #include <cmath>
 #include <vector>
+#include "support/qt_lifecycle.h"
+
+// Track 2 R4 (PR #1335 exit-crash cluster, group 2): ordered teardown via the
+// shared listener — drains deferred deletes, runs exitQgis()/invalidateCaches
+// while guards are alive, deletes the app before glibc exit().
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {

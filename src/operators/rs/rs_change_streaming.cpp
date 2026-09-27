@@ -123,51 +123,37 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
         if ( !beforeDs.readBandWindow( bb, xOff, yOff, w, h, bandScratch.data() ) )
             return false;
         {
+            // Sentinel normalization fused with the BIP scatter (one pass per
+            // band instead of normalize-then-scatter; identical values).
             bool hasNd = false;
             double nd = beforeDs.bandNoDataValue( bb, &hasNd );
-            if ( hasNd && std::isfinite( nd ) ) {
-                // Float-space compare: matches large sentinels (-3.4e38) exactly
-                // where a double-space absolute tolerance never would (#444).
-                const float ndF = static_cast<float>( nd );
-                for ( size_t p = 0; p < tilePixels; ++p ) {
-                    float v = bandScratch[p];
-                    if ( !std::isfinite( v ) || v == ndF )
-                        bandScratch[p] = nan;
-                }
-            } else if ( hasNd && !std::isfinite( nd ) ) {
-                // Infinite declared NoData (±inf sentinel): sweep EVERY
-                // non-finite sample (inf sentinel and NaN alike) to NaN —
-                // an isnan-only test would let ±inf pass through as a
-                // "value" (#720).
-                for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
+            const float ndF = static_cast<float>( nd );
+            for ( size_t p = 0; p < tilePixels; ++p ) {
+                float v = bandScratch[p];
+                // Normalizes exactly when the original declared: a finite
+                // sentinel (#444 float-space compare) or ANY non-finite
+                // sample — the ±inf sentinel case sweeps every non-finite
+                // value (#720). With no declared NoData the pass copies.
+                if ( hasNd && ( !std::isfinite( v ) || v == ndF ) )
+                    v = nan;
+                beforeBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = v;
             }
         }
-        for ( size_t p = 0; p < tilePixels; ++p )
-            beforeBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = bandScratch[p];
         if ( !afterDs.readBandWindow( ab, xOff, yOff, w, h, bandScratch.data() ) )
             return false;
         {
+            // Fused normalize + scatter — see the before-copy comment above.
             bool hasNd = false;
             double nd = afterDs.bandNoDataValue( ab, &hasNd );
-            if ( hasNd && std::isfinite( nd ) ) {
-                // Float-space compare: matches large sentinels (-3.4e38) exactly
-                // where a double-space absolute tolerance never would (#444).
-                const float ndF = static_cast<float>( nd );
-                for ( size_t p = 0; p < tilePixels; ++p ) {
-                    float v = bandScratch[p];
-                    if ( !std::isfinite( v ) || v == ndF )
-                        bandScratch[p] = nan;
-                }
-            } else if ( hasNd && !std::isfinite( nd ) ) {
-                // Infinite declared NoData (±inf sentinel): see before-copy
-                // comment (#720).
-                for ( size_t p = 0; p < tilePixels; ++p )
-                    if ( !std::isfinite( bandScratch[p] ) ) bandScratch[p] = nan;
+            const float ndF = static_cast<float>( nd );
+            for ( size_t p = 0; p < tilePixels; ++p ) {
+                float v = bandScratch[p];
+                // Fused normalize + scatter — see the before-copy comment.
+                if ( hasNd && ( !std::isfinite( v ) || v == ndF ) )
+                    v = nan;
+                afterBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = v;
             }
         }
-        for ( size_t p = 0; p < tilePixels; ++p )
-            afterBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = bandScratch[p];
     }
     return true;
 }

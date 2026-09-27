@@ -10,6 +10,7 @@
  ***************************************************************************/
 
 #include "geospatial/remote/http_fetch.h"
+#include "geospatial/remote/remote_identity_resolver.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "support/http_range_server.h"
 #include "support/offline_probe.h"
@@ -18,6 +19,8 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <chrono>
+#include <future>
+#include <thread>
 
 static const char *NL = "\n";
 #include <cstdio>
@@ -364,4 +367,41 @@ TEST_CASE( "offline guard keeps loopback exempt from proxies",
 {
   sicnu::testsupport::offline::ensureLoopbackProxyHygiene();
   CHECK( sicnu::testsupport::offline::loopbackProxyExempted() );
+}
+
+TEST_CASE( "the session identity resolver returns on first sight, never deadlocks",
+           "[io][remote][identity][resolver]" )
+{
+  // Regression: the first-sight path called probeAndStore while STILL
+  // holding the session-cache mutex. The probe itself completed, then the
+  // publish lock re-acquired the same non-recursive mutex from the SAME
+  // thread — the submitting thread deadlocked forever, so every first
+  // TaskCenter submission of a remote input hung (observed as the
+  // execution-benchmarks remote-cog workload timing out).
+  //
+  // The probe runs on the calling thread; bounded via a detached worker and
+  // a wait_for — on the regression this fails in seconds instead of hanging
+  // the binary (the detached thread stays stuck; process exit is clean).
+  HttpRangeServer server( payloadOfSize( 2048 ) );
+  server.setEtag( "\"resolver-first-sight-1\"" );
+  auto resolver = sicnu::geo::makeRemoteInputIdentityResolver();
+
+  std::promise<std::string> promise;
+  std::future<std::string> future = promise.get_future();
+  std::thread worker( [&promise, &resolver, &server] {
+    try
+    {
+      promise.set_value( resolver( server.url() ) );
+    }
+    catch ( ... )
+    {
+      try { promise.set_exception( std::current_exception() ); } catch ( ... ) {}
+    }
+  } );
+  worker.detach();
+
+  const auto status = future.wait_for( std::chrono::seconds( 30 ) );
+  REQUIRE( status == std::future_status::ready );
+  // First sight probes the origin; a strong ETag comes back as the token.
+  CHECK( future.get() == "\"resolver-first-sight-1\"" );
 }

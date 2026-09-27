@@ -25,6 +25,7 @@
 
 #include <csignal>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <sstream>
 #include <thread>
@@ -43,6 +44,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_run_coordinator.h"
 
 using namespace sicnu::workflow;
 
@@ -1180,4 +1182,213 @@ TEST_CASE( "Out-of-band same-size rewrite of a registered input invalidates the 
                                   && third["a"].resultPayload.isMember( "cache" )
                                   ? third["a"].resultPayload["cache"].asString() : "<none>" ) );
     REQUIRE_FALSE( servedFromCache( third["a"] ) );
+}
+
+// --- Track 10 durability R4: cancel-to-cache and cross-view coherence -------
+//
+// ADR 0125 §3 gates cache seeding on a REAL completion
+// (storePipelineStepOutputLocked) and prunes terminal Failed/Canceled work.
+// These cases pin the gate from both sides and reconcile the two persisted
+// views of one run (the coordinator checkpoint's committed set vs the
+// TaskCenter/execution-cache view).
+
+namespace {
+
+/// RAII shadow executor: while alive, @p algorithmId executes via @p fn
+/// instead of the real operator (prefix executors beat the registry, job
+/// engine order: per-job → prefix → registry → fallback). clearExecutors on
+/// scope exit so no other test inherits the shadow.
+struct ShadowExecutorGuard
+{
+    ShadowExecutorGuard( const std::string &algorithmId,
+                         std::function<Json::Value( const sicnu::jobs::JobRequest &,
+                                                    sicnu::operators::RSOperatorContext & )> fn )
+    {
+        sicnu::jobs::JobEngine::instance().registerExecutor( algorithmId, std::move( fn ) );
+    }
+    ~ShadowExecutorGuard() { sicnu::jobs::JobEngine::instance().clearExecutors(); }
+};
+
+bool containsPath( const QStringList &paths, const QString &path )
+{
+    return paths.contains( path );
+}
+
+} // namespace
+
+TEST_CASE( "A cancelled step never seeds the execution cache; only a real completion does",
+           "[workflow][r4][cache][cancel]" )
+{
+    CacheE2eFixture fx;
+    auto &center = sicnu::TaskCenter::instance();
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+
+    const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*majorityKernel=*/3 );
+
+    // Step B is shadowed by a cancellable executor that writes its output
+    // bytes BEFORE blocking: the strongest shape of the gate — even a step
+    // whose artifact already exists on disk must not seed the cache without
+    // its completion accounting.
+    sicnu::AlgorithmTaskInfo aInfo;
+    long pipelineId = 0;
+    {
+        ShadowExecutorGuard shadowB(
+            "rs:majority_filter", [bPath = fx.bPath]( const sicnu::jobs::JobRequest &,
+                                                     sicnu::operators::RSOperatorContext &ctx ) {
+                QFile out( bPath );
+                out.open( QIODevice::WriteOnly | QIODevice::Truncate );
+                out.write( "cancelled-step-bytes\n" );
+                out.close();
+                for ( ;; )
+                {
+                    ctx.throwIfCancelled();
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+                }
+                return Json::Value( Json::objectValue );
+            } );
+
+        pipelineId = center.submitPipeline( def, /*autoLoad=*/false );
+        REQUIRE( pipelineId > 0 );
+
+        // Wait until B is actually executing, then cancel through TaskCenter.
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds( SICNU_TEST_TIME_LIMIT_S );
+        sicnu::AlgorithmTaskInfo bInfo;
+        for ( ;; )
+        {
+            const auto info = center.getPipelineInfo( pipelineId );
+            const auto it = info.stepToTaskId.find( "b" );
+            if ( it != info.stepToTaskId.end() )
+            {
+                bInfo = center.getTaskInfo( it.value() );
+                if ( bInfo.status == sicnu::TaskStatus::Running )
+                    break;
+            }
+            REQUIRE( std::chrono::steady_clock::now() < deadline );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        }
+        REQUIRE( center.cancelPipeline( pipelineId ) );
+
+        // Both tasks reach a terminal status (a Completed, b Canceled).
+        for ( ;; )
+        {
+            const auto info = center.getPipelineInfo( pipelineId );
+            bool allTerminal = !info.orderedStepIds.empty();
+            for ( const auto &stepId : info.orderedStepIds )
+            {
+                const auto it = info.stepToTaskId.find( stepId );
+                if ( it == info.stepToTaskId.end() )
+                    allTerminal = false;
+                else
+                {
+                    const auto st = center.getTaskInfo( it.value() ).status;
+                    allTerminal = allTerminal
+                                  && ( st == sicnu::TaskStatus::Completed
+                                       || st == sicnu::TaskStatus::Failed
+                                       || st == sicnu::TaskStatus::Canceled );
+                }
+            }
+            if ( allTerminal )
+                break;
+            REQUIRE( std::chrono::steady_clock::now() < deadline );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        }
+
+        aInfo = center.getTaskInfo(
+            center.getPipelineInfo( pipelineId ).stepToTaskId.value( "a", -1 ) );
+        bInfo = center.getTaskInfo(
+            center.getPipelineInfo( pipelineId ).stepToTaskId.value( "b", -1 ) );
+        REQUIRE( aInfo.status == sicnu::TaskStatus::Completed );
+        REQUIRE( bInfo.status == sicnu::TaskStatus::Canceled );
+
+        // The cache view: the REAL completion is seeded, the cancelled step
+        // is not — seeding is gated on completion, not on dispatch.
+        const QStringList seeded = cache.cachedArtifacts();
+        INFO( "seeded artifacts: " << seeded.join( QLatin1Char( ',' ) ).toStdString() );
+        REQUIRE( containsPath( seeded, fx.aPath ) );
+        REQUIRE_FALSE( containsPath( seeded, fx.bPath ) );
+    } // shadow lifted: the real majority-filter adapter handles B from here
+
+    // Production registration loop + resubmission: A is served from the
+    // cache; B was never seeded, so it re-executes (real adapter after the
+    // shadow guard lifts) and THEN its completion seeds it.
+    registerPipelineOutputs( fx, { { "a", aInfo } } );
+    auto second = runPipelineAndWait( def );
+    REQUIRE( second.size() == 2 );
+    REQUIRE( second["a"].status == sicnu::TaskStatus::Completed );
+    REQUIRE( servedFromCache( second["a"] ) );
+    REQUIRE( second["b"].status == sicnu::TaskStatus::Completed );
+    REQUIRE_FALSE( servedFromCache( second["b"] ) );
+    REQUIRE( containsPath( cache.cachedArtifacts(), fx.bPath ) );
+}
+
+TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the "
+           "completed-task view",
+           "[workflow][r4][cache][coordinator]" )
+{
+    CacheE2eFixture fx;
+    auto &center = sicnu::TaskCenter::instance();
+    auto &coordinator = sicnu::workflow::WorkflowRunCoordinator::instance();
+    // RAII: the singleton must never outlive this test pointing at a removed
+    // temp dir, even when an assertion fires mid-test.
+    struct DirReset
+    {
+        ~DirReset() { sicnu::workflow::WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() ); }
+    } dirReset;
+    coordinator.setCheckpointDirectory( fx.dir.path() );
+
+    const auto def = twoStepPipeline( fx.inputPath, fx.aPath, fx.bPath, /*majorityKernel=*/3 );
+    const long pipelineId = coordinator.startTrackedPipeline( def, /*autoLoad=*/false );
+    REQUIRE( pipelineId > 0 );
+
+    std::shared_ptr<WorkflowRun> snapshot;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds( SICNU_TEST_TIME_LIMIT_S );
+    for ( ;; )
+    {
+        snapshot = coordinator.runForPipeline( pipelineId );
+        if ( snapshot && sicnu::workflow::isTerminalRunState( snapshot->state() ) )
+            break;
+        REQUIRE( std::chrono::steady_clock::now() < deadline );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    REQUIRE( snapshot->state() == sicnu::workflow::WorkflowRunState::Completed );
+
+    // View 1 — the run's completed-task picture (TaskCenter).
+    const auto info = center.getPipelineInfo( pipelineId );
+    int completedTasks = 0;
+    for ( const auto &stepId : info.orderedStepIds )
+    {
+        const auto it = info.stepToTaskId.find( stepId );
+        REQUIRE( it != info.stepToTaskId.end() );
+        if ( center.getTaskInfo( it.value() ).status == sicnu::TaskStatus::Completed )
+            ++completedTasks;
+    }
+
+    // View 2 — the on-disk checkpoint (the crash-recovery journal), read
+    // back independently of any coordinator API.
+    const QString archived =
+        QDir( QDir( fx.dir.path() ).filePath( QStringLiteral( "history" ) ) )
+            .filePath( QStringLiteral( "checkpoint_%1.json" )
+                           .arg( QString::fromStdString( snapshot->runId() ) ) );
+    REQUIRE( QFile::exists( archived ) ); // Completed runs archive to history/
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    {
+        QFile doc( archived );
+        REQUIRE( doc.open( QIODevice::ReadOnly ) );
+        const QByteArray bytes = doc.readAll();
+        std::istringstream stream( bytes.toStdString() );
+        REQUIRE( Json::parseFromStream( builder, stream, &root, &errs ) );
+    }
+    int committedSteps = 0;
+    for ( const Json::Value &plan : root["stepPlans"] )
+        if ( plan["status"].asString() == "Completed" )
+            ++committedSteps;
+
+    // The two views agree: a crash between them would be visible as a
+    // count mismatch, which is exactly what resume reconciles against.
+    REQUIRE( completedTasks == 2 );
+    REQUIRE( committedSteps == completedTasks );
 }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QHideEvent>
 #include <QUrl>
 #include <QLineEdit>
 #include <QPushButton>
@@ -18,6 +19,9 @@ class StacBrowserDialog : public QDialog
 
 public:
     explicit StacBrowserDialog(QgsMapCanvas *canvas, QWidget *parent = nullptr);
+
+protected:
+    void hideEvent(QHideEvent *event) override;
 
 private slots:
     void searchCatalog();

@@ -499,7 +499,10 @@ signals:
     void taskAdded(const AlgorithmTaskInfo& info);
     void taskUpdated(const AlgorithmTaskInfo& info);
     void taskLogAdded(long taskId, const QString& message);
-    void layerAutoLoadRequested(const QString& filePath);
+    /// F-05 (ui-backend-state-parity-r4): carries the originating task id so
+    /// the shell can pair the request with the session that submitted it.
+    /// The default keeps 1-argument slots (and QSignalSpy users) compatible.
+    void layerAutoLoadRequested(const QString& filePath, long taskId = -1);
 
 private:
     TaskCenter();

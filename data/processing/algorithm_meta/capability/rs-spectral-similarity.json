@@ -1,7 +1,19 @@
 {
   "capability" : 
   {
-    "applicability" : {},
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269/\u690d\u88ab\u5149\u8c31\u5339\u914d\u533a"
+      ],
+      "notes" : "\u53c2\u8003\u5149\u8c31\u9700\u4e3a\u540c\u7f51\u683c\u3001\u53cd\u5c04\u7387\u57df\u7684\u975e\u8d1f\u5149\u8c31\u3002",
+      "scenes" : 
+      [
+        "\u53c2\u8003\u5149\u8c31\u9010\u50cf\u5143\u6807\u6ce8",
+        "\u5149\u8c31\u5e93\u6bd4\u5bf9\u5206\u7c7b"
+      ]
+    },
     "band_roles" : {},
     "crs" : 
     {
@@ -139,7 +151,20 @@
     ],
     "schema_version" : 2,
     "summary" : "SID-SAM \u6df7\u5408\u5149\u8c31\u76f8\u4f3c\u5ea6\uff1a\u628a\u5149\u8c31\u89d2\uff08\u5f62\u72b6\uff09\u4e0e\u4fe1\u606f\u6563\u5ea6\uff08\u5206\u5e03\uff09\u878d\u5408\u4e3a\u5355\u4e00\u6709\u754c\u76f8\u4f3c\u5ea6\uff0c\u5c06\u6bcf\u50cf\u5143\u6807\u6ce8\u5230\u6700\u76f8\u4f3c\u7684\u53c2\u8003\u5149\u8c31\u3002",
-    "teaching_use" : {}
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5149\u8c31\u4fe1\u606f\u6563\u5ea6\uff08SID\uff09",
+        "\u5149\u8c31\u89d2\uff08SAM\uff09",
+        "\u6df7\u5408\u76f8\u4f3c\u5ea6\u5ea6\u91cf"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u8c03\u6574 SID-SAM \u6df7\u5408\u5f62\u5f0f\u89c2\u5bdf\u6807\u6ce8\u53d8\u5316\uff0c\u5e76\u89e3\u91ca\u8d1f\u503c\u6ce2\u6bb5/\u96f6\u8303\u6570\u5149\u8c31\u8f93\u51fa NaN\uff08\u672a\u6807\u6ce8\uff09\u800c\u975e\u5f3a\u884c\u5f52\u7c7b\u7684\u8bbe\u8ba1\u3002"
+    }
   },
   "description" : "Hybrid spectral similarity combining SAM and SID (bounded product or classic tan form); classifies pixels to the most similar reference.",
   "display_name" : "SID-SAM Hybrid Similarity",
