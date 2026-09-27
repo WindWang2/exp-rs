@@ -49,6 +49,12 @@ class PublishFenceSlot
     PublishFenceSlot( const PublishFenceSlot & ) = delete;
     PublishFenceSlot &operator=( const PublishFenceSlot & ) = delete;
 
+    /// Ownership handover on successful guard construction: the fence must
+    /// outlive the constructor (it guards the WHOLE guard lifetime), so the
+    /// constructor-scoped holder must not erase the key at scope exit. After
+    /// release() the guard's own m_fenceHeld flag owns the erase.
+    void release() { m_acquired = false; }
+
   private:
     std::set<std::string> &m_fences;
     std::string m_key;
@@ -378,6 +384,7 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
     // interrupted run so it can never resurface or wedge a later park
     // (Windows rename does not overwrite).
     removeBackupFamily();
+    fenceSlot.release(); // the guard's m_fenceHeld owns the fence from here
     return;
   }
 
@@ -396,6 +403,12 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
       QFile::rename( backupProv, provPath );
     fail( "publish could not back up the previous product: " );
   }
+  // Success: hand the fence over to the guard (m_fenceHeld). Without this
+  // the constructor-scoped holder erased the key at ctor exit, so the fence
+  // only repelled a second guard whose constructor overlapped this one's —
+  // the guard's whole lifetime ran unfenced, exactly the window a second
+  // guard would corrupt by adopting the parked product back.
+  fenceSlot.release();
 }
 
 ProductPublishGuard::~ProductPublishGuard()
