@@ -129,6 +129,23 @@ std::string cliVocabularyText( const std::string &args )
     return result.output;
 }
 
+/// stdout-only runner (2>/dev/null): for assertions that PARSE the JSON
+/// envelope, stderr must not pollute the stream.
+RunResult runCliStdout( const std::string &args )
+{
+    FILE *pipe = ::popen( ( std::string( SICNU_TEST_CLI ) + " " + args + " --json 2>/dev/null" ).c_str(),
+                          "r" );
+    REQUIRE( pipe != nullptr );
+    char buffer[4096];
+    size_t read = 0;
+    RunResult result;
+    while ( ( read = fread( buffer, 1, sizeof( buffer ), pipe ) ) > 0 )
+        result.output.append( buffer, read );
+    const int status = ::pclose( pipe );
+    result.exitCode = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+    return result;
+}
+
 Json::Value parseJson( const std::string &text )
 {
     Json::Value root;
@@ -163,7 +180,7 @@ std::set<std::string> splitVocabulary( const std::string &expected )
 
 SICNU_OFFLINE_GUARD()
 
-TEST_CASE( "the README documents every CLI command", "[cli][vocabulary][r4]" )
+TEST_CASE( "cli the README documents every CLI command", "[cli][vocabulary][r4]" )
 {
     const auto rows = documentedRows();
     // The 19 accepted commands, duplicated deliberately: this list is the
@@ -181,7 +198,7 @@ TEST_CASE( "the README documents every CLI command", "[cli][vocabulary][r4]" )
     }
 }
 
-TEST_CASE( "documented subcommands are enumerated by the CLI itself",
+TEST_CASE( "cli documented subcommands are enumerated by the CLI itself",
            "[cli][vocabulary][r4]" )
 {
     // Direction 1 for every command with subcommand-shaped documentation.
@@ -242,7 +259,7 @@ TEST_CASE( "documented subcommands are enumerated by the CLI itself",
     }
 }
 
-TEST_CASE( "structured vocabularies match the documentation exactly",
+TEST_CASE( "cli structured vocabularies match the documentation exactly",
            "[cli][vocabulary][r4]" )
 {
     // Direction 2 for the dataset family: error_details.expected is a
@@ -256,7 +273,7 @@ TEST_CASE( "structured vocabularies match the documentation exactly",
     {
         SECTION( entry.first )
         {
-            const auto result = runCli( entry.second );
+            const auto result = runCliStdout( entry.second );
             REQUIRE( result.exitCode == 6 );
             const Json::Value envelope = parseJson( result.output );
             REQUIRE( envelope.get( "ok", true ).asBool() == false );
@@ -290,7 +307,7 @@ TEST_CASE( "structured vocabularies match the documentation exactly",
     }
 }
 
-TEST_CASE( "the session usage line enumerates every accepted action",
+TEST_CASE( "cli the session usage line enumerates every accepted action",
            "[cli][vocabulary][r4][session]" )
 {
     // session's vocabulary lives in its usage line (run|resume|reconcile|

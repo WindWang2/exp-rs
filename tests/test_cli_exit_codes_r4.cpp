@@ -123,7 +123,7 @@ void writeFile( const std::string &path, const std::string &content )
 // report `sicnu-skip: <reason>` + exit 77 instead.
 SICNU_OFFLINE_GUARD()
 
-TEST_CASE( "usage errors exit InvalidInput (6)", "[cli][exit-codes][r4]" )
+TEST_CASE( "cli usage errors exit InvalidInput (6)", "[cli][exit-codes][r4]" )
 {
     // Each case: the invocation omits a required argument or names an unknown
     // subcommand — the contract's "malformed arguments" class.
@@ -197,7 +197,7 @@ TEST_CASE( "usage errors exit InvalidInput (6)", "[cli][exit-codes][r4]" )
     }
 }
 
-TEST_CASE( "unknown resources exit MissingDependency (5)", "[cli][exit-codes][r4]" )
+TEST_CASE( "cli unknown resources exit MissingDependency (5)", "[cli][exit-codes][r4]" )
 {
     SECTION( "algorithms schema for an unknown algorithm" )
     {
@@ -223,7 +223,7 @@ TEST_CASE( "unknown resources exit MissingDependency (5)", "[cli][exit-codes][r4
     }
 }
 
-TEST_CASE( "unreadable input files exit InvalidInput (6)", "[cli][exit-codes][r4]" )
+TEST_CASE( "cli unreadable input files exit InvalidInput (6)", "[cli][exit-codes][r4]" )
 {
     SECTION( "workflow validate on a missing file" )
     {
@@ -251,7 +251,7 @@ TEST_CASE( "unreadable input files exit InvalidInput (6)", "[cli][exit-codes][r4
     }
 }
 
-TEST_CASE( "schema violations exit ValidationFailure (2)", "[cli][exit-codes][r4]" )
+TEST_CASE( "cli schema violations exit ValidationFailure (2)", "[cli][exit-codes][r4]" )
 {
     TempDir dir( "validation" );
 
@@ -273,7 +273,7 @@ TEST_CASE( "schema violations exit ValidationFailure (2)", "[cli][exit-codes][r4
     }
 }
 
-TEST_CASE( "dataset family failure classes follow the contract",
+TEST_CASE( "cli dataset family failure classes follow the contract",
            "[cli][exit-codes][r4][dataset]" )
 {
     TempDir dir( "dataset" );
@@ -308,7 +308,7 @@ TEST_CASE( "dataset family failure classes follow the contract",
     }
 }
 
-TEST_CASE( "error envelopes keep the published shape", "[cli][exit-codes][r4]" )
+TEST_CASE( "cli error envelopes keep the published shape", "[cli][exit-codes][r4]" )
 {
     // Machine-readable output contract (docs/headless/README.md): one JSON
     // envelope, ok:false, api_version stamped — regardless of exit class.

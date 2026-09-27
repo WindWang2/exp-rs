@@ -66,7 +66,7 @@ constexpr int kInvalidInput = 6;
 
 SICNU_OFFLINE_GUARD()
 
-TEST_CASE( "unknown subcommands are rejected at parse time", "[cli][fail-fast][r4]" )
+TEST_CASE( "cli unknown subcommands are rejected at parse time", "[cli][fail-fast][r4]" )
 {
     // RED at Track 14 introduction: `algorithms <bogus>` and `models <bogus>`
     // silently fell through to `list` and exited 0 — the command "succeeded"
@@ -98,7 +98,7 @@ TEST_CASE( "unknown subcommands are rejected at parse time", "[cli][fail-fast][r
     }
 }
 
-TEST_CASE( "unknown flags are rejected, not silently ignored",
+TEST_CASE( "cli unknown flags are rejected, not silently ignored",
            "[cli][fail-fast][r4]" )
 {
     // RED at introduction: `run` ignored flags it does not know and executed
@@ -115,7 +115,7 @@ TEST_CASE( "unknown flags are rejected, not silently ignored",
     }
 }
 
-TEST_CASE( "missing required flags are rejected before any store is created",
+TEST_CASE( "cli missing required flags are rejected before any store is created",
            "[cli][fail-fast][r4][side-effects]" )
 {
     // DatasetStore::open() uses SQLITE_OPEN_CREATE: opening a not-yet-existing
@@ -163,7 +163,7 @@ TEST_CASE( "missing required flags are rejected before any store is created",
     }
 }
 
-TEST_CASE( "malformed values are rejected at parse time", "[cli][fail-fast][r4]" )
+TEST_CASE( "cli malformed values are rejected at parse time", "[cli][fail-fast][r4]" )
 {
     SECTION( "run --param without key=value" )
     {

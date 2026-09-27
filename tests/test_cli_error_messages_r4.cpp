@@ -164,7 +164,7 @@ SICNU_OFFLINE_GUARD()
 // finish-layer helper (no per-command string assembly).
 // ---------------------------------------------------------------------------
 
-TEST_CASE( "dataset argument errors carry the four-tuple", "[cli][errors][r4][dataset]" )
+TEST_CASE( "cli dataset argument errors carry the four-tuple", "[cli][errors][r4][dataset]" )
 {
     SECTION( "missing --dataset-db" )
     {
@@ -193,7 +193,7 @@ TEST_CASE( "dataset argument errors carry the four-tuple", "[cli][errors][r4][da
     }
 }
 
-TEST_CASE( "experiment and reproduce argument errors carry the four-tuple",
+TEST_CASE( "cli experiment and reproduce argument errors carry the four-tuple",
            "[cli][errors][r4]" )
 {
     SECTION( "experiment without --experiment-db" )
@@ -206,7 +206,7 @@ TEST_CASE( "experiment and reproduce argument errors carry the four-tuple",
     }
 }
 
-TEST_CASE( "resource-not-found errors name expected vs actual",
+TEST_CASE( "cli resource-not-found errors name expected vs actual",
            "[cli][errors][r4]" )
 {
     TempDir dir( "notfound" );
@@ -230,7 +230,7 @@ TEST_CASE( "resource-not-found errors name expected vs actual",
     }
 }
 
-TEST_CASE( "usage hints ride along on usage errors", "[cli][errors][r4]" )
+TEST_CASE( "cli usage hints ride along on usage errors", "[cli][errors][r4]" )
 {
     SECTION( "run with no operator id" )
     {
@@ -247,7 +247,7 @@ TEST_CASE( "usage hints ride along on usage errors", "[cli][errors][r4]" )
     }
 }
 
-TEST_CASE( "plugin uninstall failure is classified, not bare", "[cli][errors][r4]" )
+TEST_CASE( "cli plugin uninstall failure is classified, not bare", "[cli][errors][r4]" )
 {
     // RED at introduction: hardcoded GenericError(1) with a bare
     // "uninstall failed" message. Contract class for "unknown plugin id" is

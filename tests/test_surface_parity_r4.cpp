@@ -90,7 +90,7 @@ void writeFile( const std::string &path, const std::string &content )
 
 SICNU_OFFLINE_GUARD()
 
-TEST_CASE( "parity 1-2: algorithm search shares one authoritative engine shape",
+TEST_CASE( "cli parity 1-2: algorithm search shares one authoritative engine shape",
            "[parity][r4]" )
 {
     // MCP search_algorithms projects {algorithms, count, total, limit,
@@ -115,7 +115,7 @@ TEST_CASE( "parity 1-2: algorithm search shares one authoritative engine shape",
     runForEnvelope( "algorithms search --limit abc --json", 6 );
 }
 
-TEST_CASE( "parity 3-4: unknown algorithm = missing dependency on both surfaces",
+TEST_CASE( "cli parity 3-4: unknown algorithm = missing dependency on both surfaces",
            "[parity][r4]" )
 {
     // MCP: "Algorithm not found: <id>" isError; CLI: MissingDependency(5)
@@ -127,7 +127,7 @@ TEST_CASE( "parity 3-4: unknown algorithm = missing dependency on both surfaces"
     REQUIRE( schema.get( "ok", true ).asBool() == false );
 }
 
-TEST_CASE( "parity 8-11: dataset family store semantics are the MCP dataset:* truth",
+TEST_CASE( "cli parity 8-11: dataset family store semantics are the MCP dataset:* truth",
            "[parity][r4][dataset]" )
 {
     TempDir dir( "parity_ds" );
@@ -161,7 +161,7 @@ TEST_CASE( "parity 8-11: dataset family store semantics are the MCP dataset:* tr
                     5 );
 }
 
-TEST_CASE( "parity 5-6: workflow documents validate as schema failures",
+TEST_CASE( "cli parity 5-6: workflow documents validate as schema failures",
            "[parity][r4]" )
 {
     TempDir dir( "parity_wf" );
@@ -172,7 +172,7 @@ TEST_CASE( "parity 5-6: workflow documents validate as schema failures",
     runForEnvelope( "workflow validate " + bad + " --json", 2 );
 }
 
-TEST_CASE( "parity 15: session verb vocabulary is the OpsDriver action set",
+TEST_CASE( "cli parity 15: session verb vocabulary is the OpsDriver action set",
            "[parity][r4][session]" )
 {
     // scientific:agent_session forwards `action` to the same OpsDriver; the
@@ -188,7 +188,7 @@ TEST_CASE( "parity 15: session verb vocabulary is the OpsDriver action set",
     }
 }
 
-TEST_CASE( "parity 16: passport names its input, invalid input is 6",
+TEST_CASE( "cli parity 16: passport names its input, invalid input is 6",
            "[parity][r4]" )
 {
     runForEnvelope( "passport /nonexistent/sicnu-r4/passport.json --json", 6 );
