@@ -13945,3 +13945,42 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# ---------------------------------------------------------------------------
+# Track 10 (workflow-durability R4): master@15e5c66b5 link-graph band-aid.
+# libsicnu_agent.so references
+# sicnu_agent_loop::VerificationReport::aggregate but does not link
+# sicnu_agent_loop, so every executable that pulls the agent .so fails to
+# link (301 targets repo-wide at this commit; #1335 is the proper fix, whose
+# domain includes src/agent). Band-aided here — tests/CMakeLists.txt ONLY —
+# for exactly the durability oracle lane targets, so the
+# crash/lock/cancel/cache lanes are measurable. REVERT this block when
+# #1335 lands.
+foreach(_t
+    test_agent_golden_workflow
+    test_agent_workflow_executor
+    test_classify_workflow_bridge
+    test_classify_workflow_controller
+    test_exprs_workflow_schema
+    test_guided_workflow_widget
+    test_workflow_analysis
+    test_workflow_analysis_11
+    test_workflow_artifact_gc
+    test_workflow_engine_v2
+    test_workflow_execution_plane
+    test_workflow_facts_11
+    test_workflow_ir
+    test_workflow_pipeline
+    test_workflow_pipeline_ui
+    test_workflow_planner
+    test_workflow_recovery
+    test_workflow_repair
+    test_workflow_resume_provenance
+    test_workflow_run_coordinator
+    test_workflow_runtime
+    test_workflow_session_controller
+)
+  if(TARGET ${_t})
+    target_link_libraries(${_t} PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>)
+  endif()
+endforeach()
