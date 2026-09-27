@@ -499,7 +499,9 @@ TEST_CASE( "AssetLease released from a worker thread does not strand the lease (
     {
       static int argc = 1;
       static char a0[] = "test_data_manager_reap";
-      char *argv[] = {a0, nullptr};
+      // QCoreApplication keeps the argv POINTER alive past this scope —
+      // the array itself must be static too (#1356 family).
+      static char *argv[] = {a0, nullptr};
       return new QCoreApplication( argc, argv );
     }
     return QCoreApplication::instance();
@@ -558,7 +560,9 @@ TEST_CASE( "Affinity contract: snapshot readers are worker-safe, live-container 
     {
       static int argc = 1;
       static char a0[] = "test_data_manager_reap";
-      char *argv[] = {a0, nullptr};
+      // QCoreApplication keeps the argv POINTER alive past this scope —
+      // the array itself must be static too (#1356 family).
+      static char *argv[] = {a0, nullptr};
       return new QCoreApplication( argc, argv );
     }
     return QCoreApplication::instance();
