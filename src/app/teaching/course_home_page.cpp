@@ -15,7 +15,7 @@ CourseHomePage::CourseHomePage( QWidget *parent )
 {
   setObjectName( QStringLiteral( "undergradLabCourseHome" ) );
   auto *root = new QVBoxLayout( this );
-  m_title = new QLabel( tr( "遥感实验学习工作台" ), this );
+  m_title = new QLabel( tr( "Undergraduate Lab Teaching Workbench" ), this );
   m_title->setObjectName( QStringLiteral( "courseTitle" ) );
   QFont f = m_title->font();
   f.setPointSize( f.pointSize() + 2 );
@@ -24,16 +24,16 @@ CourseHomePage::CourseHomePage( QWidget *parent )
   m_audience = new QLabel( this );
   m_progress = new QLabel( this );
   auto *modeRow = new QHBoxLayout;
-  modeRow->addWidget( new QLabel( tr( "体验模式:" ), this ) );
+  modeRow->addWidget( new QLabel( tr( "Mode:" ), this ) );
   m_modeCombo = new QComboBox( this );
-  m_modeCombo->addItem( tr( "实验模式（初学者）" ), QStringLiteral( "beginner" ) );
-  m_modeCombo->addItem( tr( "专家模式" ), QStringLiteral( "expert" ) );
+  m_modeCombo->addItem( tr( "Guided mode (beginner)" ), QStringLiteral( "beginner" ) );
+  m_modeCombo->addItem( tr( "Expert mode" ), QStringLiteral( "expert" ) );
   modeRow->addWidget( m_modeCombo );
   modeRow->addStretch( 1 );
   connect( m_modeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) {
     emit modeChanged( m_modeCombo->currentData().toString() );
   } );
-  m_continueBtn = new QPushButton( tr( "继续学习" ), this );
+  m_continueBtn = new QPushButton( tr( "Continue learning" ), this );
   connect( m_continueBtn, &QPushButton::clicked, this, [this]() {
     if ( !m_vm.continueLabId.empty() )
       emit continueRequested( QString::fromStdString( m_vm.continueModuleId ),
@@ -63,10 +63,10 @@ void CourseHomePage::setViewModel( const sicnu::teaching::CourseHomeViewModel &v
 void CourseHomePage::rebuild()
 {
   m_title->setText( m_vm.titleZh.empty()
-                      ? tr( "遥感实验学习工作台" )
+                      ? tr( "Undergraduate Lab Teaching Workbench" )
                       : QString::fromStdString( m_vm.titleZh ) );
   m_audience->setText( QString::fromStdString( m_vm.audienceZh ) );
-  m_progress->setText( tr( "总进度: %1%" ).arg( m_vm.overallPercent ) );
+  m_progress->setText( tr( "Overall progress: %1%" ).arg( m_vm.overallPercent ) );
   m_continueBtn->setEnabled( !m_vm.continueLabId.empty() );
   const int modeIdx = m_modeCombo->findData(
     QString::fromUtf8( sicnu::teaching::experienceModeWire( m_vm.mode ) ) );
