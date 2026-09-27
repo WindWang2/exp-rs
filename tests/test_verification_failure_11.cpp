@@ -232,8 +232,16 @@ TEST_CASE( "F5: read-only output location is a typed write refusal with no parti
     p["output"] = ( missingDir + QStringLiteral( "/f5_out.tif" ) ).toStdString();
     const std::string code = expectTypedFailure( op.get(), p );
     INFO( "typed refusal: " << code );
+    // R2 calibration (track-16): the io boundary guard refuses a missing
+    // target directory as a PARAMETER precondition before any GDAL work
+    // ("io: never creates directories implicitly", geospatial/io/
+    // param_guard.cpp reason "target_directory_missing") → G::InvalidArgument
+    // → InvalidParameter. Refusing the unusable parameter is the contract;
+    // the load-bearing halves stay hard: the refusal is typed and no partial
+    // output exists afterwards.
     CHECK( ( code == "FileNotWritable" || code == "GdalError"
-             || code == "DirectoryNotFound" || code == "InvalidInputData" ) );
+             || code == "DirectoryNotFound" || code == "InvalidInputData"
+             || code == "InvalidParameter" ) );
     const fs::path outPath = ( missingDir + QStringLiteral( "/f5_out.tif" ) ).toStdString();
     std::error_code ec;
     CHECK_FALSE( fs::exists( outPath, ec ) );
