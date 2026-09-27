@@ -63,3 +63,11 @@
 
 - 允许触碰：`src/experiment/`（含 capsule/、debugger/、bridge/ 子目录）、`src/experiment_studio/`、`src/study/`、`src/scientific_state/`、`src/dataset/dataset_store_splits.cpp`（仅第⑩条最小修复）、`tests/test_experiment*`、`tests/test_*capsule*`、`tests/test_*debugger*`、`tests/test_study*`、`tests/CMakeLists.txt`（仅追加注册）、`.planning/experiment-consistency-r4/`。
 - 白名单外一律不改；发现必须改的跨边界缺陷 → 记账移交，不顺手修。
+
+## 7. 续作附录（2026-09-28 会话：merge origin/master a726d17a6）
+
+- `origin/master` 实测前进至 **`a726d17a6224632d929e782e996351732632f272`**（较本轨基线 15e5c66b5 领先 **425** 提交；期间 #1334/#1335 已并入，多条并行轨道 R4 PR 落地）。
+- **白名单重叠实测**：`git diff --name-only 15e5c66b5..a726d17a6` 与本轨 26 个 diff 文件取交集 = 仅 `tests/CMakeLists.txt` 与 `.goal-loop-ledger.md`（共享账本）；`--no-merges` 提交里触碰 `src/experiment*|src/study*|src/scientific_state*|splits.cpp` 的计数 = **0** —— 12 条处置不可能被上游顺手修掉（merge 后已逐条 rg 复验在场）。
+- **上游自带缺陷（已修复并记账）**：origin/master 的 `tests/CMakeLists.txt:14728` 残留孤立 `=======` 冲突标记（union 合并解法保留双侧但漏删分隔线；与上游自修过的 8781892972/6dff24166f 同一事故类），导致 **master 当前任何 configure 都在 tests/CMakeLists.txt 解析失败**。本轨 merge 提交后以 53658dba92 删除该行（两侧块均完整、两侧 .cpp 均在树）。
+- **门禁架构修订**：终门禁改在**全新 `build-r4-gate` 目录**执行（复刻 light 选项 gcc-15/Debug/Ninja/ENABLE_TESTS=ON，无包装脚本）。测试注册为 `catch_discover_tests(DISCOVERY_MODE PRE_TEST)`——未构建可执行在 ctest 侧显示 `*_NOT_BUILT` 占位，构建完成即真实发现；门禁载体集 = 28 个可执行目标（experiment 族 9 + scientific_state 族 10 + study 族 8 + test_studio_live_e2e 作为受影响面附加证据）。`-j2` 全程。
+- 基线红绿分布（§5.1）改在 build-r4-gate 全量门禁首跑时一并产出：PASS/FAIL 与失败清单区分"master 既有红"与本轨引入（对照手段：失败用例先在未含本轨改动的构建上复跑定性）。

@@ -21,7 +21,13 @@
 | 33f65ef97c | WP-E 事务边界三 oracle + 变异效力 | WP-E |
 | e77443ddbc | ⑫ capsule fixture 级重放闭环 | WP-F |
 | cd85a3fea0 | WP-F study spine 边界两 oracle | WP-F |
-| (待) | ③ 围栏自适应 + 分区两态 oracle | WP-B/WP-D |
+| 27b963d40e | ③ fence oracle + ⑦ attempt-scan oracle + 分区两态 oracle | WP-B/WP-D |
+| 1f7a1d88e3 | planning 六件套落盘（强制 add，目录 gitignored 为仓库默认） | 归档 |
+| 5925e8aed9 | 评审修复批次：P0-1 bridge 套件落树、P0-2 compactJson 前置声明、P1-1 analyzeStudy typed 读取器、P2-1..4、P3-1/P3-6 | Phase 5 |
+| 438a249654 | runsForCell 三既有测试载体迁移收尾（续作补完中断轮，含 test_study_runner.cpp:309） | ④ 传播 |
+| da0b08a454 | REVIEW_LOG 逐条处置回填（P3-5 声明的账面修正实际补落） | Phase 5 |
+| edea399120 | merge origin/master a726d17a6（+425 提交；账本冲突双保留；白名单 src 零上游重叠） | 集成 |
+| 53658dba92 | 删除 origin/master 自带的 tests/CMakeLists.txt 孤立 `=======`（master 当前无法 configure 的根因） | 集成必需 |
 
 ## 2. RED 证据（stash/checkout 回退实现后运行，均为本地实证）
 

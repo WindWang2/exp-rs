@@ -2,9 +2,11 @@
 
 ## 实测基线与分支
 
-- 基线：`origin/master = 15e5c66b543ef3874cb929f17529ef456bd6c059`（PR #1333 合并点，2026-09-27 实测，与任务书一致；无漂移）。
+- 开工基线：`origin/master = 15e5c66b543ef3874cb929f17529ef456bd6c059`（PR #1333 合并点，2026-09-27 实测，与任务书一致）。
+- 续作集成：开发完成后面上 `origin/master` 前进至 `a726d17a6`（+425 提交），已 merge 进本分支（edea399120）。merge 前实测：**白名单 src 目录与全部 425 个上游提交零重叠**（`--no-merges` 计数 = 0），12 条处置不可能被上游顺手修掉，merge 后逐条 rg 复验在场。
+- **附带修复（集成必需）**：origin/master 自身 `tests/CMakeLists.txt:14728` 残留孤立 `=======` 冲突标记（union 合并保留双侧但漏删分隔线，同 8781892972/6dff24166f 事故类），**当前 master 任何 configure 都失败**；本分支 53658dba92 删除该行（两侧块完整、两侧 .cpp 在树）。
 - 分支：`hardening/r4-experiment-consistency`，worktree `exp-rs-experiment-consistency-r4`。
-- open PR 盘点（开工时 7 个：#1334–#1340）：**零源码重叠**。唯一共享文件 `tests/CMakeLists.txt`（#1334/#1335/#1339/#1340 也在改）——本轨沿用仓库 append-only 惯例只追加注册块，冲突面为一处文本相邻，rebase 取并集即可。
+- 开工时 open PR 盘点（7 个：#1334–#1340）：**零源码重叠**。唯一共享文件 `tests/CMakeLists.txt`——本轨沿用仓库 append-only 惯例只追加注册块；merge 时该文件由 git 自动合并（无手工冲突），仅上游残留标记需要清除。
 
 ## 任务与实际内容的关系
 
@@ -23,8 +25,8 @@
 | ⑪ runById/promotionById fail-open | typed 读取器 `runRecordById`/`promotionRecordById`（`experiment.run_not_found` vs `experiment.run_corrupt`，promotion 同构）；判定路径全迁移：promotion 门拒 corrupt、ref 分类器区分 unreadable/vanished、debugger `kCodeRunCorrupt`、matrix 聚合拒绝；旧 optional 签名保留为展示接缝（corrupt→absent 已文档化） | 874eb6c0a2 + 7f62b2b0c9 | consistency_r4: "a corrupt run row is refused by the promotion gate, not read as absent"（含 absent 控制组） |
 | ⑩ splitManifestsForVersion 静默跳过 | 文件内最小修复：跳过计数 + 稳定令牌 qWarning `dataset.split_manifest_corrupt_skipped`（D7） | 08c552f6a2 | consistency_r4: "skipped corrupt split manifest rows are named, not silent"（直插损坏行 + 消息捕获） |
 | ⑧ seed ≥2^63 负 JSON 数 | legacy 十进制 seed 仅 [0,2^53) 整数可导入；否则 typed 拒绝（D5）；seed_hex（#1326）不受影响 | 4504c14dea | consistency_r4: "legacy decimal seeds outside the lossless domain are refused"（1e19 拒/-5 拒/42 精确，checksum 重铸） |
-| ⑦ candidatePaths toInt 未查 ok | `toInt(&ok)` 失败排除，不再冒充 attempt-0 | (见 ③ 验证提交) | test_experiment_debugger: "attempt directory with an unparsable number is not an attempt (r4)" |
-| ③ markdown ≥4 反引号残余向量 | `jsonCodeFence` 单点助手（围栏 = max(4, 载荷最长反引号串+1)，CommonMark），5 处调用点统一；载荷字节不变 | (见 ③ 验证提交) | test_experiment_bridge_r4: 2 例（毒载荷 7 反引号围栏 / 干净载荷 4 反引号零漂移） |
+| ⑦ candidatePaths toInt 未查 ok | `toInt(&ok)` 失败/溢出排除，不再冒充 attempt-0 | 7f62b2b0c9 + oracle 27b963d40e | test_experiment_debugger: "attempt directory with an unparsable number is not an attempt (r4)" |
+| ③ markdown ≥4 反引号残余向量 | `jsonCodeFence` 单点助手（围栏 = max(4, 载荷最长反引号串+1)，CommonMark），5 处调用点统一；载荷字节不变 | 5925e8aed9 + oracle 27b963d40e | test_experiment_bridge_r4: 2 例（毒载荷 7 反引号围栏 / 干净载荷 4 反引号零漂移） |
 | ⑫ capsule 生产 run 端到端重放 | fixture 级闭环落地；真实平台部分书面保留（r2 起延续） | e77443ddbc | test_experiment_capsule: "capsule replay closure through disk keeps identity and verdict (r4)" |
 
 ## 一致性 oracle（20 个，全部可重复运行）
