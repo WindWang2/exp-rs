@@ -27,6 +27,7 @@
 #include "exprs/plugin_record.h"
 #include "exprs/plugin_permissions.h"
 #include "exprs/plugin_registry.h"
+#include "support/exprs_test_env.h"
 #include "exprs/plugin_snapshot.h"
 
 #include <algorithm>
@@ -56,6 +57,14 @@ static void halffailUnsetEnv( const char *key ) { unsetenv( key ); }
 #endif
 
 using namespace exprs;
+namespace {
+/// Binary-wide pid-unique user plugin root: without this redirect every
+/// setEnabled() below persists the REAL $HOME/sicnu_geo_rs/plugins.index.json
+/// — parallel case processes race that shared file and tests write into the
+/// developer's profile (issue #1364 cross-process trampling class).
+const exprs_test::UserRootRedirect kUserRootRedirected;
+} // namespace
+
 
 #ifndef SICNU_TEST_BROKEN_PLUGIN_DIR
 #error "SICNU_TEST_BROKEN_PLUGIN_DIR must point at the built broken fixture plugin dir"
@@ -132,7 +141,8 @@ struct HalfFailFixture
     const std::string pluginDir;
 
     HalfFailFixture()
-        : root( ( std::filesystem::temp_directory_path() / "exprs_test_halffail_r4" )
+        : root( ( std::filesystem::temp_directory_path()
+                      / ( "exprs_test_halffail_r4." + std::to_string( snapshotOwnerPid() ) ) )
                     .generic_string() )
         , userRoot( root + "/user-plugins" )
         , pluginDir( std::string( SICNU_TEST_BROKEN_PLUGIN_DIR ) )

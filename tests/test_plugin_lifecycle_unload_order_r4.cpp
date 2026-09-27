@@ -18,6 +18,7 @@
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_registry.h"
 #include "exprs/version.h"
+#include "support/exprs_test_env.h"
 
 #include <fstream>
 
@@ -29,6 +30,14 @@
 #include <vector>
 
 using namespace exprs;
+namespace {
+/// Binary-wide pid-unique user plugin root: without this redirect every
+/// setEnabled() below persists the REAL $HOME/sicnu_geo_rs/plugins.index.json
+/// — parallel case processes race that shared file and tests write into the
+/// developer's profile (issue #1364 cross-process trampling class).
+const exprs_test::UserRootRedirect kUserRootRedirected;
+} // namespace
+
 
 #ifndef SICNU_TEST_HELLO_PLUGIN_DIR
 #error "SICNU_TEST_HELLO_PLUGIN_DIR must point at the built hello fixture plugin dir"
@@ -103,14 +112,23 @@ struct UnloadOrderFixture
     PluginRegistry &registry = PluginRegistry::instance();
     OrderSink sink;
     const std::string root;
-    const std::string pluginDir{ std::string( SICNU_TEST_HELLO_PLUGIN_DIR ) };
+    // A per-process COPY of the built hello fixture: writing the manifest
+    // into the shared build-tree dir would race every other test binary
+    // linked against the same define (issue #1364 cross-process class).
+    const std::string pluginDir{ root + "/hello_plugin" };
 
     UnloadOrderFixture()
-        : root( ( std::filesystem::temp_directory_path() / "exprs_test_unload_order_r4" )
+        : root( ( std::filesystem::temp_directory_path()
+                      / ( "exprs_test_unload_order_r4." + std::to_string( snapshotOwnerPid() ) ) )
                     .generic_string() )
     {
         std::error_code ec;
         std::filesystem::remove_all( root, ec );
+        std::filesystem::create_directories( pluginDir, ec );
+        std::filesystem::copy( SICNU_TEST_HELLO_PLUGIN_DIR, pluginDir,
+                               std::filesystem::copy_options::recursive, ec );
+        if ( ec )
+            FAIL( "cannot copy the hello fixture into a private scratch: " + ec.message() );
         // The fixture dir ships no manifest — the tests own it (same deal
         // as ReloadFixture in test_exprs_plugin_loader.cpp).
         {
@@ -129,7 +147,7 @@ struct UnloadOrderFixture
         })";
         }
         PluginRegistryOptions options;
-        options.roots = { pluginDir + "/.." };
+        options.roots = { root };
         options.tempDirectory = root;
         options.policy.allowThirdPartyNative = true;
         options.policy.devMode = true; // last-good captures (async) like dev usage

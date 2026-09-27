@@ -10,6 +10,7 @@
 #include "exprs/plugin_snapshot.h"
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
+#include "support/exprs_test_env.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QProcess>
@@ -63,6 +64,50 @@ void writeManifest( const std::string &dir, const std::string &entrypoint, int a
         "operators": [{ "id": "test:hello", "display_name": "Test Hello", "group": "test" }]
     })";
 }
+
+/// Process-unique scratch root (issue #1364): ctest's PRE_TEST discovery
+/// runs each case as its own process, and under ctest -j2 — plus the four
+/// sibling r4 plugin suites — a shared fixed /tmp name lets one process's
+/// `remove_all`/manifest write trample another's mid-test. That cross-process
+/// trampling is the root cause of the historical :493/:1138/:1226 flake
+/// family; every fixture below therefore lives under a pid-unique root.
+using exprs_test::scratchRoot;
+using exprs_test::ScratchGuard;
+
+/// Binary-wide pid-unique user plugin root: without this redirect every
+/// registry enable/disable below persists the REAL
+/// $HOME/sicnu_geo_rs/plugins.index.json — parallel case processes race that
+/// shared file (issue #1364's trampling class) and tests pollute the
+/// developer's profile. UpgradeFixture temporarily overrides this env with
+/// its own root and re-arms the redirect via set() on teardown.
+const exprs_test::UserRootRedirect kUserRootRedirected;
+
+/// Unloads everything in the registry singleton at scope exit. Declared
+/// AFTER the fixture copy in a case so destruction order is: unload guard
+/// (sink still alive) → sink → fixture scratch — a mapped fixture .so is
+/// never unlinked by the scratch removal, on any assertion outcome.
+struct RegistryUnloadGuard
+{
+    ~RegistryUnloadGuard() { PluginRegistry::instance().unloadAll(); }
+};
+
+/// A per-process COPY of the built hello fixture: tests must never write
+/// manifests into the shared build-tree fixture dir — every test binary
+/// linked against it would race the writes (issue #1364).
+struct HelloFixtureCopy
+{
+    ScratchGuard scratch{ "exprs_test_hello_copy" };
+    const std::string dir{ scratch.path + "/hello_plugin" };
+    HelloFixtureCopy()
+    {
+        std::error_code ec;
+        std::filesystem::create_directories( dir, ec );
+        std::filesystem::copy( SICNU_TEST_HELLO_PLUGIN_DIR, dir,
+                               std::filesystem::copy_options::recursive, ec );
+        if ( ec )
+            FAIL( "cannot copy the hello fixture into a private scratch: " + ec.message() );
+    }
+};
 
 /// Recording sink capturing registered factories.
 class RecordingSink : public PluginContributionSink
@@ -120,15 +165,18 @@ TEST_CASE( "registry load of a native plugin registers a working factory",
     // Guards against the dead-code regression where the native load path was
     // unreachable: registry reported Loaded but the sink never received the
     // operator factory ("operator factory returned nullptr" at execute).
-    writeManifest( SICNU_TEST_HELLO_PLUGIN_DIR, kHelloEntrypoint, pluginAbiVersion() );
+    HelloFixtureCopy fixtureCopy;
+    const std::string &pluginDir = fixtureCopy.dir;
+    writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
 
     exprs::PluginRegistryOptions options;
     // Discovery scans subdirectories of each root — the root is the fixture
     // PARENT (scan() skips the root directory itself).
-    options.roots = { std::string( SICNU_TEST_HELLO_PLUGIN_DIR ) + "/.." };
+    options.roots = { pluginDir + "/.." };
     options.policy.allowThirdPartyNative = true;
     exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
     RecordingSink sink;
+    RegistryUnloadGuard unloadOnExit;
     registry.setContributionSink( &sink );
     registry.configure( options );
     registry.setEnabled( "org.exprs.test.hello-plugin", true );
@@ -157,9 +205,9 @@ TEST_CASE( "registry load of a native plugin registers a working factory",
 // (the POSIX-only test_exprs_plugin_system lane covers install rollback).
 TEST_CASE( "package signature and SBOM metadata validate typed", "[plugin][package][p12]" )
 {
-    const std::string root = "/tmp/exprs_test_pkgmeta_win";
+    ScratchGuard scratch( "exprs_test_pkgmeta" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    std::filesystem::remove_all( root, ec );
     std::filesystem::create_directories( root + "/org.test.pkgmeta", ec );
     const std::string dir = root + "/org.test.pkgmeta";
 
@@ -284,9 +332,9 @@ TEST_CASE( "manifest gate rejects ABI mismatch before dlopen", "[plugin][loader]
 TEST_CASE( "granted permissions carry audit events in both policy modes",
            "[plugin][permissions][p12]" )
 {
-    const std::string root = "/tmp/exprs_test_audit_win";
+    ScratchGuard scratch( "exprs_test_audit" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    std::filesystem::remove_all( root, ec );
     std::filesystem::create_directories( root + "/org.test.audit", ec );
     {
         std::ofstream manifest( root + "/org.test.audit/plugin.json", std::ios::trunc );
@@ -380,19 +428,35 @@ TEST_CASE( "granted permissions carry audit events in both policy modes",
 // ---------------------------------------------------------------------------
 namespace {
 /// Loads the hello fixture into the registry the same way the production
-/// shell does, and restores a clean manifest for later tests on return.
+/// shell does. The fixture lives in a PRIVATE pid-unique copy (never in the
+/// shared build-tree dir: concurrent case processes and the sibling r4
+/// suites would trample each other's manifests — issue #1364) and the
+/// registry's tempDirectory points into the same private scratch, so the
+/// dev last-good snapshot root (<scratch>/sicnu-plugin-snapshots) is fully
+/// process-local: a sibling process can neither read a half-written capture
+/// nor delete this process's rollback source mid-test.
 struct ReloadFixture
 {
     PluginRegistry &registry = PluginRegistry::instance();
     RecordingSink sink;
+    ScratchGuard scratch{ "exprs_test_reload" };
     const std::string id = "org.exprs.test.hello-plugin";
-    std::string pluginDir{ std::string( SICNU_TEST_HELLO_PLUGIN_DIR ) };
+    const std::string pluginDir{ scratch.path + "/hello_plugin" };
+    const std::string snapshotRoot{ scratch.path + "/sicnu-plugin-snapshots" };
+    RegistryUnloadGuard unloadOnExit;
 
     ReloadFixture()
     {
+        std::error_code ec;
+        std::filesystem::create_directories( pluginDir, ec );
+        std::filesystem::copy( SICNU_TEST_HELLO_PLUGIN_DIR, pluginDir,
+                               std::filesystem::copy_options::recursive, ec );
+        if ( ec )
+            FAIL( "cannot copy the hello fixture into a private scratch: " + ec.message() );
         writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
         PluginRegistryOptions options;
-        options.roots = { pluginDir + "/.." };
+        options.roots = { scratch.path };
+        options.tempDirectory = scratch.path;
         options.policy.allowThirdPartyNative = true;
         options.policy.devMode = true;
         registry.setContributionSink( &sink );
@@ -405,18 +469,8 @@ struct ReloadFixture
     {
         registry.unloadAll();
         registry.setContributionSink( nullptr );
-        writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );
-        std::error_code ec;
-        std::filesystem::remove_all( pluginDir + "/libnotreally.so", ec );
-        // The real rollback source lives in the registry snapshot root
-        // (<temp>/sicnu-plugin-snapshots/last-good-<id>, track 13.0 layout);
-        // remove the whole root so the next test starts clean and the
-        // dev-mode temp tree does not accumulate. The pre-13.0 flat name
-        // is dropped too in case an older run left one.
-        const std::string temp =
-            std::filesystem::temp_directory_path().generic_string();
-        std::filesystem::remove_all( temp + "/sicnu-plugin-snapshots", ec );
-        std::filesystem::remove_all( temp + "/plugin-last-good-" + id, ec );
+        // The private scratch (fixture copy + snapshot root) is removed by
+        // the ScratchGuard destructor after the unload guard above.
     }
 
     PluginRegistry::ReloadOptions devOptions()
@@ -581,8 +635,8 @@ TEST_CASE( "hot reload rolls back to the snapshot when the new code cannot load"
     // own, so snapshotOwnerPid() names the directory.)
     {
         const std::string marker =
-            std::filesystem::temp_directory_path().generic_string()
-            + "/sicnu-plugin-snapshots/last-good-" + fixture.id
+            fixture.snapshotRoot
+            + "/last-good-" + fixture.id
             + "-" + std::to_string( snapshotOwnerPid() )
             + "/snapshot.marker.json";
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
@@ -716,8 +770,8 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
     // must refuse a record whose entrypoint escapes (or stopped being inside)
     // the plugin root, independently of the validator verdict.
     namespace fs = std::filesystem;
-    const std::string root = "/tmp/exprs_test_loader_escape";
-    fs::remove_all( root );
+    ScratchGuard scratch( "exprs_test_loader_escape" );
+    const std::string &root = scratch.path;
     fs::create_directories( root + "/org.test.escape" );
     const std::string pluginDir = root + "/org.test.escape";
     // A real file OUTSIDE the plugin dir (the escape target exists — the
@@ -726,9 +780,9 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
     // And a legal file inside, later swapped for an escaping symlink.
     { std::ofstream output( pluginDir + "/liblegal.so", std::ios::binary ); output << "legal"; }
 
-    auto makeRecord = []( const std::string &entrypoint ) {
+    auto makeRecord = [&]( const std::string &entrypoint ) {
         PluginRecord record;
-        record.directory = "/tmp/exprs_test_loader_escape/org.test.escape";
+        record.directory = pluginDir;
         record.manifestPath = record.directory + "/plugin.json";
         record.manifest.manifestVersion = 1;
         record.manifest.id = "org.test.escape";
@@ -760,8 +814,7 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
     }
     SECTION( "absolute entrypoint refused before dlopen" )
     {
-        PluginRecord record =
-            makeRecord( "/tmp/exprs_test_loader_escape/liboutside.so" );
+        PluginRecord record = makeRecord( root + "/liboutside.so" );
         PluginLoader loader;
         RecordingSink sink;
         PluginDiagnosticLog log;
@@ -774,13 +827,10 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
         // liblegal.so was a regular file inside the root; by load time it is
         // a symlink to a library outside.
         std::error_code linkError;
-        fs::create_symlink( "/tmp/exprs_test_loader_escape/liboutside.so",
+        fs::create_symlink( fs::path( root + "/liboutside.so" ),
                             fs::path( pluginDir + "/liblegal.so" ), linkError );
         if ( linkError )
-        {
-            fs::remove_all( root );
             return;
-        }
         PluginRecord record = makeRecord( "liblegal.so" );
         PluginLoader loader;
         RecordingSink sink;
@@ -791,15 +841,14 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
             sawEscape = sawEscape || item.code == PluginDiagnosticCode::EntrypointOutsideRoot;
         REQUIRE( sawEscape );
     }
-    fs::remove_all( root );
 }
 
 TEST_CASE( "registry load drops the lock across host-process spawn (issue #928)",
            "[plugin][registry][lockdrop]" )
 {
     namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "exprs_test_lockdrop";
-    fs::remove_all( root );
+    ScratchGuard scratch( "exprs_test_lockdrop" );
+    const fs::path root{ scratch.path };
     const fs::path slowDir = root / "org.test.slow-load";
     const fs::path peerDir = root / "org.test.peer-load";
     fs::create_directories( slowDir );
@@ -878,32 +927,38 @@ TEST_CASE( "registry load drops the lock across host-process spawn (issue #928)"
     while ( !runtime.entered.load()
             && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds( 2 ) )
         std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-    REQUIRE( runtime.entered.load() );
+    const bool entered = runtime.entered.load();
 
+    // Capture every outcome BEFORE loader.join(): a REQUIRE while the
+    // thread is joinable unwinds into ~thread() == std::terminate, killing
+    // the process and skipping every cleanup guard (issue #1362's contract).
     // record()/refresh() of a *different* plugin must not wait out the
     // 400 ms spawn. refresh() rebuilds mRecords (the in-flight load may
     // then abandon); the bound is the lock-drop proof.
     const auto t0 = std::chrono::steady_clock::now();
-    REQUIRE( registry.record( "org.test.peer-load" ) != nullptr );
+    const bool peerFound = registry.record( "org.test.peer-load" ) != nullptr;
     registry.refresh();
-    REQUIRE( registry.copyRecord( "org.test.peer-load", copied ) );
+    const bool copyOk = registry.copyRecord( "org.test.peer-load", copied );
     const auto elapsed = std::chrono::steady_clock::now() - t0;
-    REQUIRE( elapsed < std::chrono::milliseconds( 150 ) );
-    REQUIRE( copied.id() == "org.test.peer-load" );
 
     loader.join();
     registry.unloadAll();
     registry.setHostProcessRuntime( nullptr );
     registry.setContributionSink( nullptr );
-    fs::remove_all( root );
+
+    REQUIRE( entered );
+    REQUIRE( peerFound );
+    REQUIRE( copyOk );
+    REQUIRE( elapsed < std::chrono::milliseconds( 150 ) );
+    REQUIRE( copied.id() == "org.test.peer-load" );
 }
 
 TEST_CASE( "registry unload drops the lock across the sink revoke (issue #1156)",
            "[plugin][registry][lockdrop][issue1156]" )
 {
     namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "exprs_test_lockdrop_revoke";
-    fs::remove_all( root );
+    ScratchGuard scratch( "exprs_test_lockdrop_revoke" );
+    const fs::path root{ scratch.path };
     const fs::path pluginDir = root / "org.test.gated";
     fs::create_directories( pluginDir );
     {
@@ -995,7 +1050,12 @@ namespace {
 /// Registry + filesystem stage for upgrade tests: a private user plugin
 /// root (SICNU_PLUGIN_USER_ROOT) and a private temp dir, so the snapshot
 /// root (<temp>/sicnu-plugin-snapshots) is fully contained and GC claims
-/// are checkable by listing one directory.
+/// are checkable by listing one directory. The whole tree is PID-UNIQUE:
+/// the shared fixed name used to make every parallel case process of this
+/// binary construct the fixture at the SAME path — one process's
+/// remove_all(root) in the constructor erased another's install mid-test,
+/// and the two processes also fought over the global
+/// SICNU_PLUGIN_USER_ROOT env value (issue #1364's :1138/:1226 flake).
 struct UpgradeFixture
 {
     PluginRegistry &registry = PluginRegistry::instance();
@@ -1007,7 +1067,8 @@ struct UpgradeFixture
 
     UpgradeFixture()
         : root( ( std::filesystem::temp_directory_path()
-                  / "exprs_test_upgrade" )
+                  / ( "exprs_test_upgrade."
+                      + std::to_string( snapshotOwnerPid() ) ) )
                     .generic_string() )
         , userRoot( root + "/user-plugins" )
         , snapshotRoot( root + "/sicnu-plugin-snapshots" )
@@ -1027,7 +1088,10 @@ struct UpgradeFixture
     {
         registry.unloadAll();
         registry.setContributionSink( nullptr );
-        qunsetenv( "SICNU_PLUGIN_USER_ROOT" );
+        // Re-arm the binary-wide pid-unique redirect instead of unsetting
+        // the env: qunsetenv would expose the real $HOME plugin root (and
+        // its enable/disable index) to whatever runs later in this process.
+        kUserRootRedirected.set();
         std::error_code ec;
         std::filesystem::remove_all( root, ec );
     }
@@ -1322,10 +1386,9 @@ TEST_CASE( "snapshot capture is bounded, verified and fail-closed",
            "[plugin][snapshot][p13]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_snapshot" ).generic_string();
+    ScratchGuard scratch( "exprs_test_snapshot" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     fs::create_directories( root + "/src/sub", ec );
     { std::ofstream f( root + "/src/a.txt" ); f << "alpha"; }
     { std::ofstream f( root + "/src/sub/b.txt" ); f << "beta-gamma"; }
@@ -1443,10 +1506,9 @@ TEST_CASE( "snapshot sweep reclaims residue but keeps live and own-pid artifacts
            "[plugin][snapshot][p13]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string snapRoot = pluginSnapshotRoot( root );
     fs::create_directories( snapRoot, ec );
     const long pid = snapshotOwnerPid();
@@ -1497,10 +1559,9 @@ TEST_CASE( "snapshot sweep keeps a live sibling's pid-attributed last-good (comp
            "[plugin][snapshot][completion13]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep_cross" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep_cross" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string snapRoot = pluginSnapshotRoot( root );
     fs::create_directories( snapRoot, ec );
 
@@ -1560,10 +1621,9 @@ TEST_CASE( "snapshot sweep keeps the legacy last-good liveness rule unchanged (c
            "[plugin][snapshot][completion13]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep_legacy" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep_legacy" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string snapRoot = pluginSnapshotRoot( root );
     fs::create_directories( snapRoot, ec );
     const long ownPid = snapshotOwnerPid();
@@ -1593,10 +1653,9 @@ TEST_CASE( "the legacy temp-root sweep never touches the pid-attributed layout (
            "[plugin][snapshot][completion13][r3]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep_legacy_layout" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep_legacy_layout" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string snapRoot = pluginSnapshotRoot( root );
     fs::create_directories( snapRoot, ec );
     const long ownPid = snapshotOwnerPid();
@@ -1632,10 +1691,9 @@ TEST_CASE( "snapshot sweep keeps a dead-owner last-good while the plugin id is l
            "[plugin][snapshot][completion13]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep_deadowner" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep_deadowner" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string snapRoot = pluginSnapshotRoot( root );
     fs::create_directories( snapRoot, ec );
     // A pid guaranteed dead (see the sweep harness above).
@@ -1666,10 +1724,9 @@ TEST_CASE( "snapshot sweep restores a dead-owner upgrade snapshot into a partial
            "[plugin][snapshot][p13][issue1157]" )
 {
     namespace fs = std::filesystem;
-    const std::string root =
-        ( fs::temp_directory_path() / "exprs_test_sweep_restore" ).generic_string();
+    ScratchGuard scratch( "exprs_test_sweep_restore" );
+    const std::string &root = scratch.path;
     std::error_code ec;
-    fs::remove_all( root, ec );
     const std::string pluginRoot = root + "/plugins";
     const std::string pluginDir = pluginRoot + "/org.test.crashed";
     fs::create_directories( pluginDir, ec );
@@ -2104,10 +2161,11 @@ TEST_CASE( "hot reload falls back to a legacy pre-attribution last-good snapshot
     ReloadFixture fixture;
     PluginRegistry &registry = fixture.registry;
 
-    const std::string temp = std::filesystem::temp_directory_path().generic_string();
-    const std::string attributed = temp + "/sicnu-plugin-snapshots/last-good-"
+    // The registry's snapshot root is the fixture's PRIVATE one (tempDirectory
+    // points inside the pid-unique scratch).
+    const std::string attributed = fixture.snapshotRoot + "/last-good-"
                                      + fixture.id + "-" + std::to_string( snapshotOwnerPid() );
-    const std::string legacy = temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id;
+    const std::string legacy = fixture.snapshotRoot + "/last-good-" + fixture.id;
     waitForSnapshotMarker( attributed );
 
     // Simulate a pre-attribution build: the ONLY snapshot is the legacy
@@ -2140,10 +2198,9 @@ TEST_CASE( "a legacy last-good snapshot never shadows the attributed one",
     ReloadFixture fixture;
     PluginRegistry &registry = fixture.registry;
 
-    const std::string temp = std::filesystem::temp_directory_path().generic_string();
-    const std::string attributed = temp + "/sicnu-plugin-snapshots/last-good-"
+    const std::string attributed = fixture.snapshotRoot + "/last-good-"
                                      + fixture.id + "-" + std::to_string( snapshotOwnerPid() );
-    const std::string legacy = temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id;
+    const std::string legacy = fixture.snapshotRoot + "/last-good-" + fixture.id;
     waitForSnapshotMarker( attributed );
 
     // A fully VALID legacy snapshot (marker rebuilt) that carries one extra
@@ -2181,11 +2238,10 @@ TEST_CASE( "with neither snapshot usable, a failed reload reports honest absence
     ReloadFixture fixture;
     PluginRegistry &registry = fixture.registry;
 
-    const std::string temp = std::filesystem::temp_directory_path().generic_string();
-    waitForSnapshotMarker( temp + "/sicnu-plugin-snapshots/last-good-" + fixture.id
+    waitForSnapshotMarker( fixture.snapshotRoot + "/last-good-" + fixture.id
                            + "-" + std::to_string( snapshotOwnerPid() ) );
     std::error_code ec;
-    std::filesystem::remove_all( temp + "/sicnu-plugin-snapshots", ec );
+    std::filesystem::remove_all( fixture.snapshotRoot, ec );
     REQUIRE_FALSE( ec );
 
     installBrokenNextVersion( fixture.pluginDir );
@@ -2194,4 +2250,117 @@ TEST_CASE( "with neither snapshot usable, a failed reload reports honest absence
     // the honest outcome, reported as a typed missing resource.
     REQUIRE( fixture.sawCode( PluginDiagnosticCode::ResourceMissing ) );
     REQUIRE_FALSE( registry.isLoaded( fixture.id ) );
+}
+
+TEST_CASE( "installOrUpgrade rolls back when the activation swap fails post-drain",
+           "[plugin][upgrade][p13][faultinjection]" )
+{
+    // Fault injection at the ACTIVATION leg (POSIX): the previous install
+    // cannot be moved aside — the read-only user root makes
+    // rename(target → backup) fail with EACCES — so PluginPackage::install
+    // fails AFTER the old generation was drained. Every failure stage of the
+    // upgrade transaction must provably restore the previous state: v1 bytes
+    // on disk, v1 running again, snapshot consumed, no staging residue.
+    UpgradeFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    fixture.writePackage( "src-v1", "1.0.0", true );
+    REQUIRE( registry.installOrUpgrade( fixture.root + "/src-v1" ).status
+             == PluginRegistry::PluginUpgradeStatus::Installed );
+    REQUIRE( registry.load( fixture.id ) );
+    fixture.writePackage( "src-v2", "2.0.0", true );
+
+    std::error_code ec;
+    std::filesystem::permissions( fixture.userRoot,
+                                  std::filesystem::perms::owner_read
+                                      | std::filesystem::perms::owner_exec,
+                                  ec );
+    REQUIRE_FALSE( ec );
+    // Restore write permission on ANY exit path: the fixture's remove_all
+    // needs a writable root, so a failed REQUIRE must not leave the tree
+    // read-only (the residue would outlive the process — pids are not
+    // reused within a boot).
+    struct PermissionsRestore
+    {
+        const std::string &path;
+        ~PermissionsRestore()
+        {
+            std::error_code restoreEc;
+            std::filesystem::permissions(
+                path, std::filesystem::perms::owner_all, restoreEc );
+        }
+    } restore{ fixture.userRoot };
+
+    const PluginRegistry::PluginUpgradeResult rolled =
+        registry.installOrUpgrade( fixture.root + "/src-v2" );
+    const bool rollbackTyped =
+        fixture.sawCode( PluginDiagnosticCode::PluginUpgradeRolledBack );
+    const std::string version = fixture.installedVersion();
+    const bool stillLoaded = registry.isLoaded( fixture.id );
+    std::vector<std::string> snapshotResidue = fixture.snapshotRootEntries();
+    std::vector<std::string> stagingResidue;
+    for ( const auto &entry :
+          std::filesystem::directory_iterator( fixture.userRoot + "/.staging", ec ) )
+        stagingResidue.push_back( entry.path().filename().generic_string() );
+
+    // Fix the permissions first, THEN assert (the restore guard above only
+    // runs at scope exit — after these assertions).
+    std::filesystem::permissions( fixture.userRoot, std::filesystem::perms::owner_all, ec );
+
+    REQUIRE( rolled.status == PluginRegistry::PluginUpgradeStatus::RolledBack );
+    REQUIRE( rollbackTyped );
+    REQUIRE( version == "1.0.0" );
+    REQUIRE( stillLoaded );
+    REQUIRE( snapshotResidue.empty() ); // rollback consumed the snapshot
+    REQUIRE( stagingResidue.empty() );  // no half-swapped staging tree
+}
+
+TEST_CASE( "repeated failed hot reloads roll back without leaking handles or residue",
+           "[plugin][reload][p12][leak]" )
+{
+    // A bounded reload→rollback→reload loop: every cycle must restore the
+    // working bytes exactly and leave NO broken-payload residue, and after
+    // the final unload the fixture library must be fully UNMAPPED — a
+    // dlopen/dlclose pair that leaks its handle would keep it in
+    // /proc/self/maps (the "重复 reload handle/resource leak" oracle).
+    ReloadFixture fixture;
+    PluginRegistry &registry = fixture.registry;
+    const std::string attributedSnapshot = fixture.snapshotRoot + "/last-good-"
+                                           + fixture.id + "-"
+                                           + std::to_string( snapshotOwnerPid() );
+
+    for ( int cycle = 0; cycle < 15; ++cycle )
+    {
+        INFO( "reload cycle " << cycle );
+        waitForSnapshotMarker( attributedSnapshot );
+        installBrokenNextVersion( fixture.pluginDir );
+        REQUIRE_FALSE( registry.reload( fixture.id, fixture.devOptions() ) );
+        REQUIRE( fixture.sawCode( PluginDiagnosticCode::PluginReloadRolledBack ) );
+
+        PluginDiagnosticLog log;
+        PluginRecord record =
+            PluginDiscovery::inspectDirectory( fixture.pluginDir, log );
+        REQUIRE( record.state == PluginState::Validated );
+        REQUIRE( record.manifest.version == "1.0.0" );
+        REQUIRE( record.manifest.entrypoint == kHelloEntrypoint );
+        REQUIRE( registry.isLoaded( fixture.id ) );
+        std::error_code ec;
+        REQUIRE_FALSE(
+            std::filesystem::exists( fixture.pluginDir + "/libnotreally.so", ec ) );
+        REQUIRE_FALSE( std::filesystem::exists( fixture.pluginDir + "/.reload-snapshot", ec ) );
+    }
+
+    registry.unloadAll();
+
+#if defined( __linux__ )
+    std::ifstream maps( "/proc/self/maps" );
+    REQUIRE( maps.is_open() );
+    int mappedFixtures = 0;
+    std::string line;
+    while ( std::getline( maps, line ) )
+    {
+        if ( line.find( "hello_plugin" ) != std::string::npos )
+            ++mappedFixtures;
+    }
+    REQUIRE( mappedFixtures == 0 );
+#endif
 }
