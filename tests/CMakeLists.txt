@@ -13972,6 +13972,44 @@ if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
 
+# ---------------------------------------------------------------------------
+# track-16 verify-chain closure (hardening/r4-verify-chain) — new test targets
+# Append-only; each block is independent so sibling-track rebase conflicts
+# stay line-local.
+# ---------------------------------------------------------------------------
+
+# WP-B: dual-locale byte-stability matrix over every chain digest production
+# point (verify / grader / preflight / science_context / suitability).
+add_executable(test_verify_chain_locale_matrix test_verify_chain_locale_matrix.cpp)
+target_link_libraries(test_verify_chain_locale_matrix PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+  sicnu_grader
+  sicnu_preflight
+  Sicnu::ScienceContext
+  sicnu_recipes
+  Sicnu::ScientificState
+  sicnu_suitability
+  Qt6::Core
+)
+sicnu_link_jsoncpp(test_verify_chain_locale_matrix)
+target_include_directories(test_verify_chain_locale_matrix PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_verify_chain_locale_matrix TEST_PREFIX "test_verify_chain_locale_matrix::")
+
+# WP-D: preflight <-> science_context invalidation linkage matrix (shared
+# authority, fail-closed transitions, no stale facts).
+add_executable(test_preflight_authority_invalidation test_preflight_authority_invalidation.cpp)
+target_link_libraries(test_preflight_authority_invalidation PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_preflight
+  sicnu_preflight_state_adapter
+  sicnu_scientific_state
+  Sicnu::ScienceContext
+  sicnu_recipes
+)
+sicnu_link_jsoncpp(test_preflight_authority_invalidation)
+target_include_directories(test_preflight_authority_invalidation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_preflight_authority_invalidation TEST_PREFIX "test_preflight_authority_invalidation::")
 # ── Track 2 (R4 Deep, cluster A): teardown lifecycle fixtures (WP-C) ──────
 # Every binary here registers the shared ordered-teardown listener
 # (tests/support/qt_lifecycle.h) and must survive glibc exit() with no
