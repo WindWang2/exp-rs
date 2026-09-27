@@ -13921,6 +13921,41 @@ if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
 
+# ---------------------------------------------------------------------------
+# Track 7 R4 (rs-operator-oracles): NoData/mask semantics, tolerance chains,
+# determinism digests, preflight refusals, known-answer gap-filling.
+# ---------------------------------------------------------------------------
+# R4 operator-oracle suites run on the LIGHT lane (Catch2 + Qt6::Core +
+# sicnu_operators -> sicnu_processing): they exercise the registry/run seam
+# directly and need no qgis_gui chain.
+foreach(_r4_test
+    test_operator_nodata_semantics
+    test_operator_chain_tolerance
+    test_operator_determinism_digest
+    test_operator_preflight_refusals
+    test_known_answer_corpus_r4)
+  add_executable(${_r4_test} ${_r4_test}.cpp)
+  target_link_libraries(${_r4_test} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+    sicnu_processing
+  )
+  target_include_directories(${_r4_test} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${_r4_test} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+endforeach()
+# TEST_PREFIX r4:: lets track gates select the R4 operator-oracle cases
+# with `ctest -R "^r4::"` (D15 selection convention).
+sicnu_discover_tests(test_operator_nodata_semantics TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_chain_tolerance TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_operator_determinism_digest TEST_PREFIX r4:: TIMEOUT 600)
+sicnu_discover_tests(test_operator_preflight_refusals TEST_PREFIX r4:: TIMEOUT 300)
+sicnu_discover_tests(test_known_answer_corpus_r4 TEST_PREFIX r4:: TIMEOUT 300)
 # Track 17 R4 (WP-D): commands.json schema / entry-floor / EOL gate. Light —
 # Catch2 + Qt6::Core only (QJsonDocument); the registry bidirectional diff
 # stays in test_help_coverage, the corpus shape gate in test_help_integrity_12.

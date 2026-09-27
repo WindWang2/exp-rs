@@ -135,6 +135,9 @@ Json::Value RsSarPhaseFilterOperator::run( const Json::Value &params, RSOperator
     if ( !out.isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable,
                                "Failed to create output raster: " + outputPath );
+    // Non-finite phases are written as NaN phasors; declare the holes
+    // (R4 NoData audit) so downstream consumers can mask them.
+    out.setBandNoDataValue( 1, kNaN );
     out.setMetadataItem( sicnu::sar::kModalityKey, "sar" );
     out.setMetadataItem( "SICNU_SAR_INSAR_PRODUCT", "filtered_phasor" );
     out.setMetadataItem( "SICNU_SAR_INSAR_GOLDSTEIN_ALPHA",
