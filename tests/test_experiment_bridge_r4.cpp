@@ -47,7 +47,11 @@ QJsonObject minimalValidDocument( const QJsonObject &stepParams )
                                  { QStringLiteral( "startedAtUtc" ),
                                    QStringLiteral( "2026-09-27T00:00:01Z" ) },
                                  { QStringLiteral( "durationMs" ), 1.0 },
-                                 { QStringLiteral( "params" ), stepParams } } } );
+                                 { QStringLiteral( "params" ), stepParams },
+                                 { QStringLiteral( "attribution" ),
+                                   QJsonObject{ { QStringLiteral( "policy" ),
+                                                  QLatin1String(
+                                                      sicnu::experiment::kLabStepAttributionPolicy ) } } } } } );
     document.insert( QStringLiteral( "statistics" ), QJsonArray{} );
     document.insert( QStringLiteral( "thumbnails" ), QJsonArray{} );
     document.insert( QStringLiteral( "grade" ),
@@ -55,7 +59,8 @@ QJsonObject minimalValidDocument( const QJsonObject &stepParams )
                                     QStringLiteral( "unavailable" ) } } );
     document.insert( QStringLiteral( "lineage" ), QJsonObject{} );
     document.insert( QStringLiteral( "environment" ), QJsonObject{} );
-    document.insert( QStringLiteral( "replay" ), QJsonObject{} );
+    document.insert( QStringLiteral( "replay" ),
+                     QJsonObject{ { QStringLiteral( "level" ), QStringLiteral( "exact" ) } } );
     return document;
 }
 
@@ -89,7 +94,11 @@ TEST_CASE( "markdown fences outgrow backtick runs inside step payloads (r4)",
     const QString poison = QStringLiteral( "``````" );
     const auto document = minimalValidDocument(
         QJsonObject{ { QStringLiteral( "code" ), poison } } );
-    REQUIRE( LabReportBuilder::validate( document ).has_value() );
+    const auto validatedDocument = LabReportBuilder::validate( document );
+    if ( !validatedDocument )
+        for ( const auto &diagnostic : validatedDocument.diagnostics() )
+            WARN( diagnostic.code.toStdString() << " " << diagnostic.message.toStdString() );
+    REQUIRE( validatedDocument.has_value() );
 
     const QString md = labReportMarkdown( document ).value();
     REQUIRE( !md.isEmpty() );
@@ -134,7 +143,7 @@ TEST_CASE( "bridge workflow steps partition: missing refused, empty legal (r4)",
         REQUIRE( !missing.has_value() );
         bool malformed = false;
         for ( const auto &diagnostic : missing.diagnostics() )
-            if ( diagnostic.code == QLatin1String( kCodeMalformedEvidence ) )
+            if ( diagnostic.code == QLatin1String( sicnu::experiment::debugger::kCodeMalformedEvidence ) )
                 malformed = true;
         CHECK( malformed );
     }

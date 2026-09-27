@@ -28,6 +28,7 @@
 #include "experiment/debugger/agent_diagnostic.h"
 
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <json/json.h>
@@ -2432,4 +2433,39 @@ TEST_CASE( "stale evidence: held snapshots stay put and re-records are tracked",
     CHECK( report->verdict == QStringLiteral( "divergent" ) );
     CHECK( report->firstDivergence.kind == DivergenceKind::ParameterDivergence );
     CHECK( report->firstDivergence.referenceStepId == QStringLiteral( "threshold" ) );
+}
+
+// --- Track 11 R4 (#1333 ⑦): an attempt directory whose number does not fit
+// an int is not an attempt slot. Pre-fix, "attempt-99999999999999" parsed as
+// 0 via unchecked toInt() and silently became the OLDEST candidate while
+// sorting put it last — a masquerade that changed which file evidence is
+// served from. Post-fix it is excluded from the scan entirely.
+TEST_CASE( "attempt directory with an unparsable number is not an attempt (r4)",
+           "[debugger][evidence][r4]" )
+{
+    LabHarness lab;
+
+    // A real checkpoint recorded ONLY under the overflow-named attempt
+    // directory: no root checkpoint, no provenance, no store run.
+    REQUIRE( QDir( lab.dir.path() ).mkpath( QStringLiteral( "attempt-99999999999999" ) ) );
+    const QString overflowDir = lab.dir.filePath( QStringLiteral( "attempt-99999999999999" ) );
+    QHash<QString, QPair<const char *, const char *>> identity;
+    identity.insert( QStringLiteral( "ndvi" ), { kHex1, kHex1 } );
+    identity.insert( QStringLiteral( "threshold" ), { kHex2, kHex2 } );
+    identity.insert( QStringLiteral( "area" ), { kHex3, kHex3 } );
+    recordCheckpoint( overflowDir, QStringLiteral( "r-overflow" ), labDefinition( false ),
+                      identity, 0.5 );
+
+    DirectoryEvidenceSource source( &lab.store, lab.dir.path() );
+    auto steps = source.steps( QStringLiteral( "r-overflow" ) );
+
+    // The checkpoint file exists, but never under a usable attempt slot, so
+    // the ladder ends at the typed absence instead of serving evidence from
+    // a directory the contract does not recognize.
+    REQUIRE( !steps.has_value() );
+    bool absentTyped = false;
+    for ( const auto &diagnostic : steps.diagnostics() )
+        if ( diagnostic.code == QLatin1String( kCodeEvidenceAbsent ) )
+            absentTyped = true;
+    CHECK( absentTyped );
 }
