@@ -15,11 +15,21 @@
 
 ## 3. 基线红绿分布
 
-（构建完成后回填：`ctest -R "cli|exit_code|help" -j1` 首轮输出；区分 master 既有红与本轨道引入红。已知 master 既有红：`test_cli_command_surface` 的 docs 对账用例（README 缺 `session` 行）。）
+Phase 0 计划的"先跑基线 ctest"被全库构建时长阻断（并行轨道负载，load≈20 下 ~960 步/小时）；改为在最终树上跑 + 用 git 考古界定红的归属。实测基线红（master 既有，与本轨道无关）：
+
+1. `test_help_coverage` — "Shell command ids all have help knowledge"：5 个 GUI shell 命令 id 缺 help 条目（mission.task.resume / mission.task.retry / mission.timeline.show / teaching.labCockpit.show / workbench.experimentExplorationStudio）——**与 open PR #1336 修复清单逐一吻合**（其轴：GUI CommandRegistry 81 词表；#1339 同源），本轨道不重修（D7）。
+2. `test_cli_command_surface` — README 命令表缺 `session` 行（C-3 红）——**已由本轨道修复**（docs 行 + 词表测试）。
+3. `test_cli_agent_ops` / `test_cli_commands_json` 等 4 目标 **链接失败**（sicnu_agent 缺 agent_loop 归档）——master 既有断链（#1335 轴），已由 87f883a89f 一行根因解除。
+4. **`dataset create --name x` 在 master 上从不工作**（QgsApplication 平台层吞 `-name/--name <值>` argv 对，b6c284a060 修复）——Track 14 套件是第一个端到端踩到它的测试。
 
 ## 4. 双跑日志
 
-（回填：两轮 `ctest -R "cli|exit_code|help" -j1` 全量输出摘要 + 第二轮排除假阳性声明。）
+`ctest -R "cli|exit_code|help" -j1`（CTEST_PARALLEL_LEVEL=1，build-gcc15，gcc-15）：
+
+- **Run 1**（/tmp/track14-ctest-run1.log）：36 tests，**97% passed，1 failed** —— 唯一红 = 上述 master 既有 `test_help_coverage`（5 id 与 #1336 清单逐一吻合）。
+- **Run 2**（间隔 20s，/tmp/track14-ctest-run2.log）：36 tests，**97% passed，1 failed** —— 同一既有红，两轮结果一致，排除假阳性。
+- 本轨道 5 套件（27 用例 / 601 断言）全部在册通过：test_cli_exit_codes_r4（169）、test_cli_error_messages_r4（81）、test_cli_fail_fast_r4（34）、test_cli_help_vocabulary_r4（277）、test_surface_parity_r4（40）。
+- **相对基线零新增失败** ✓（唯一红为基线既有且归属明确的在途 PR 轴）。
 
 ## 5. 崩溃路径注入（WP-F）
 
