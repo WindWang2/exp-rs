@@ -29,6 +29,7 @@
 #include <json/json.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,19 @@ struct FusedStage
     /// Extra payload entries merged into the tail result (e.g.
     /// "thresholdUsed"). Recorded on the head task's result payload.
     Json::Value resultExtras;
+    /// Shared post-run payload carrier: filled by @p tailPlaneObserver (or
+    /// the executor) during the run and merged into the tail payload after
+    /// success — lets the tail adapter report run-derived values (masked /
+    /// total pixel counts) with unfused-payload parity.
+    std::shared_ptr<Json::Value> postRunExtras;
+    /// Output metadata items written onto the tail raster (e.g. the change
+    /// family's SICNU_CHANGE_METHOD / SICNU_CHANGE_THRESHOLD), so a fused
+    /// output carries the same machine-readable contract as the unfused one.
+    std::vector<std::pair<std::string, std::string>> outputMetadata;
+    /// Invoked once per written tail plane (float values as written, before
+    /// the dtype cast) so the adapter can accumulate run statistics. Called
+    /// from the consumer thread only.
+    std::function<void( const float *plane, int width, int height )> tailPlaneObserver;
 };
 
 /// Adapter lookup: operator id + canonical params → stage, or nullopt when
