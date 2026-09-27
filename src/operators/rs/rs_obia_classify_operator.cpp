@@ -46,6 +46,7 @@
 #include <opencv2/core.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <memory>
@@ -328,13 +329,27 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         // ADR 0060: the segutil quantize stack is retired; the grid superpixel
         // path stays as the classify-specific fallback (cell labels 1..N).
         if (segmentMethod == "quantize") {
-            bool hasNodata = false;
-            const double nodataValue = ds.bandNoDataValue(1, &hasNodata);
-            const float nodata = hasNodata ? static_cast<float>(nodataValue)
-                                           : std::numeric_limits<float>::quiet_NaN();
+            // Per-band NoData wash: declared finite sentinels become NaN so the
+            // segmenter's NaN void convention honors heterogeneous per-band
+            // declarations (band 1's sentinel no longer masquerades as data in
+            // bands 2..n, R5 NoData audit / #803 family). Washed here — inside
+            // the quantize branch only — because bandData is shared with the
+            // mean feature model, which resolves per-band sentinels itself.
             std::vector<const float*> bandPtrs(static_cast<size_t>(nFeat));
-            for (int i = 0; i < nFeat; ++i)
-                bandPtrs[static_cast<size_t>(i)] = bandData[static_cast<size_t>(i)].data();
+            for (int i = 0; i < nFeat; ++i) {
+                bool bandHasNd = false;
+                const double bandNd = ds.bandNoDataValue(bands[static_cast<size_t>(i)], &bandHasNd);
+                float *band = bandData[static_cast<size_t>(i)].data();
+                if (bandHasNd && std::isfinite(bandNd)) {
+                    const float ndF = static_cast<float>(bandNd);
+                    for (size_t px = 0; px < nPix; ++px) {
+                        if (band[px] == ndF || !std::isfinite(band[px]))
+                            band[px] = std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
+                bandPtrs[static_cast<size_t>(i)] = band;
+            }
+            const float nodata = std::numeric_limits<float>::quiet_NaN();
             RsSimpleSegmenter::Params segParams;
             segParams.smoothKernel = smoothKernel;
             segParams.quantizeBins = quantizeBins;

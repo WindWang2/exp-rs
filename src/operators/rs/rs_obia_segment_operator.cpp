@@ -19,6 +19,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
@@ -127,12 +128,24 @@ RsSegmentMap runSimpleEngine(const std::string& inputPath,
         context.throwIfCancelled();
     }
 
-    // Nodata: band 1's declared value when present, else NaN (only actual NaN
-    // pixels become nodata). Label 0 = nodata follows the analysis convention.
-    bool hasNodata = false;
-    const double nodataValue = ds.bandNoDataValue(1, &hasNodata);
-    const float nodata = hasNodata ? static_cast<float>(nodataValue)
-                                   : std::numeric_limits<float>::quiet_NaN();
+    // Per-band NoData: wash each band's declared finite sentinel to NaN so the
+    // segmenter's NaN void convention (composite=0 when ANY band is NaN) honors
+    // heterogeneous per-band declarations. The old single band-1 sentinel let a
+    // band-2 void (different sentinel) masquerade as data (R5 NoData audit,
+    // #803 family). NaN nodata keeps actual NaN pixels void too.
+    for (int bi = 0; bi < nBands; ++bi) {
+        bool hasNd = false;
+        const double nd = ds.bandNoDataValue(bands[static_cast<size_t>(bi)], &hasNd);
+        if (!hasNd || !std::isfinite(nd))
+            continue;
+        const float ndF = static_cast<float>(nd);
+        float *band = bandData[static_cast<size_t>(bi)].data();
+        for (size_t i = 0; i < nPix; ++i) {
+            if (band[i] == ndF || !std::isfinite(band[i]))
+                band[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+    const float nodata = std::numeric_limits<float>::quiet_NaN();
 
     std::vector<const float*> bandPtrs(static_cast<size_t>(nBands));
     for (int bi = 0; bi < nBands; ++bi)
