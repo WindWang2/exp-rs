@@ -211,16 +211,33 @@ int equalizeBinOf( float v, float minVal, float binWidth, int bins )
 
 bool streamBandWindowed( const GdalDatasetWrapper &src, int bandNum,
                          GdalStreamingOutput &dst, int tileDim, int halo,
-                         const WindowedTileFn &fn )
+                         const WindowedTileFn &fn, float noData )
 {
     // #1044: the halo is a kernel radius — bound it so a foreign caller cannot
     // size the tile buffer unboundedly (`tile + 2*halo`).
     constexpr int kMaxWindowHalo = 128;
     if ( tileDim < 1 || halo < 0 || halo > kMaxWindowHalo )
         return false;
+    // Declared finite sentinel: wash it (and any non-finite sample) to NaN on
+    // a tile-sized copy before the kernel runs — the window kernels are all
+    // NaN-aware, so the sentinel can neither leak into window statistics nor
+    // be rewritten as data on the output (which declares NaN voids).
+    const bool washSentinel = std::isfinite( noData );
     GdalBlockStream stream( src, bandNum, tileDim, tileDim, halo );
     std::vector<float> core( static_cast<size_t>( tileDim ) * tileDim );
+    std::vector<float> washed;
     const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *haloBuf ) {
+        const size_t bufSamples = static_cast<size_t>( tile.bufferWidth ) * tile.bufferHeight;
+        if ( washSentinel )
+        {
+            washed.assign( haloBuf, haloBuf + bufSamples );
+            for ( float &v : washed )
+            {
+                if ( v == noData || !std::isfinite( v ) )
+                    v = std::numeric_limits<float>::quiet_NaN();
+            }
+            haloBuf = washed.data();
+        }
         fn( tile, haloBuf, core.data() );
         return dst.writeTile( bandNum, tile, core.data() );
     } );
