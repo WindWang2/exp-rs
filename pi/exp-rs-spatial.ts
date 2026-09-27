@@ -16,7 +16,9 @@
  *   EXP_RS_MCP_ARGS       extra CLI args appended to --mcp
  *   EXP_RS_TOOL_CATEGORIES comma-separated tool prefixes to bridge
  *                         (default: "meta,spatial,data,temporal,cartography,symbology,workflow,workspace,layout,harness,mission"; e.g. add "rs,gdal,otb")
- *   SICNU_MCP_WORKSPACE   passed through to restrict server file access
+ *   SICNU_MCP_WORKSPACE   passed through; sandbox root for server file access.
+ *                         Unset = the directory Pi runs in (the server
+ *                         inherits Pi's CWD and sandboxes to it).
  *   SICNU_MODELS_DIR      passed through to locate model manifests
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,8 +32,16 @@ import { existsSync, statSync } from "node:fs";
 // the class, the constants, or the teardown hook reappear in this file.
 import {
   McpBridge,
-  MAX_RESULT_CHARS,
+  piToolName,
+  toolCategory,
+  truncateTail,
 } from "./mcp_bridge.ts";
+
+// piToolName (":" -> "_" sanitization), toolCategory (family extraction)
+// and truncateTail (tail-keeping cut at MAX_RESULT_CHARS) live in
+// mcp_bridge.ts since Track 9: one implementation, importable — and
+// therefore contract-testable — from node --test against
+// tests/surface_diff_snapshot.json.
 
 /** Runs a bridge request, cancellable via AbortSignal: on abort the local
  * promise rejects AND the server is told to cancel the work behind the rpc
@@ -44,17 +54,6 @@ async function requestOrAbort(
   signal?: AbortSignal,
 ): Promise<any> {
   return bridge.request(method, params, signal);
-}
-
-function truncateTail(text: string, max = MAX_RESULT_CHARS): string {
-  if (text.length <= max) return text;
-  const cut = text.length - max;
-  return `[… ${cut} characters truncated, tail kept …]\n${text.slice(cut)}`;
-}
-
-/** MCP ids contain ":" which some providers reject; sanitize for Pi/OpenAI. */
-function piToolName(mcpName: string): string {
-  return "exprs_" + mcpName.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function detectBinary(): string | null {
@@ -91,11 +90,6 @@ function wantedCategories(): Set<string> {
     if (trimmed) set.add(trimmed);
   }
   return set;
-}
-
-function toolCategory(mcpName: string): string {
-  if (!mcpName.includes(":")) return "meta";
-  return mcpName.split(":", 1)[0];
 }
 
 export default async function (pi: ExtensionAPI) {

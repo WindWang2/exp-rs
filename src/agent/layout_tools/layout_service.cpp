@@ -523,7 +523,7 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
     auto *legend = qobject_cast<QgsLayoutItemLegend *>( item );
     if ( QgsLayoutItemMap *map = referenceMapFor( layout ) )
       legend->setLinkedMap( map );
-    legend->setTitle( QStringLiteral( "图例" ) );
+    legend->setTitle( QObject::tr( "Legend" ) );
   }
   else if ( t == QStringLiteral( "scalebar" ) )
   {
@@ -535,8 +535,8 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
   else if ( t == QStringLiteral( "label" ) || t == QStringLiteral( "title" ) )
   {
     auto *label = qobject_cast<QgsLayoutItemLabel *>( item );
-    label->setText( t == QStringLiteral( "title" ) ? QStringLiteral( "地图标题" )
-                                                   : QStringLiteral( "文本" ) );
+    label->setText( t == QStringLiteral( "title" ) ? QObject::tr( "Map title" )
+                                                   : QObject::tr( "Text" ) );
     if ( t == QStringLiteral( "title" ) )
     {
       QFont font = label->font();
@@ -1459,7 +1459,7 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     if ( id == QLatin1String( "auto:title" ) )
     {
       auto *label = new QgsLayoutItemLabel( layout );
-      label->setText( QStringLiteral( "地图标题" ) );
+      label->setText( QObject::tr( "Map title" ) );
       QFont font = label->font();
       font.setPointSizeF( 18.0 );
       font.setBold( true );
@@ -1470,7 +1470,7 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     if ( id == QLatin1String( "auto:legend" ) )
     {
       auto *legend = new QgsLayoutItemLegend( layout );
-      legend->setTitle( QStringLiteral( "图例" ) );
+      legend->setTitle( QObject::tr( "Legend" ) );
       legend->setLinkedMap( map );
       return legend;
     }
@@ -1492,7 +1492,7 @@ Json::Value LayoutService::autoArrange( QgsLayout *layout, bool apply, QString *
     if ( id == QLatin1String( "auto:source" ) )
     {
       auto *label = new QgsLayoutItemLabel( layout );
-      label->setText( QStringLiteral( "数据来源：" ) );
+      label->setText( QObject::tr( "Data source:" ) );
       QFont font = label->font();
       font.setPointSizeF( 7.0 );
       label->setFont( font );

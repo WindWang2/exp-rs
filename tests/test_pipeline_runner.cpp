@@ -519,3 +519,108 @@ struct WorkspaceEnvGuard
     }
 };
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Review P1-4: the CLI used to carry its own drifted sandbox copy with no
+// URL-scheme policy, so "https://..." inputs were joined into the workspace,
+// classified "inside" and handed to GDAL — bypassing the remote default-deny.
+// The runner now uses the shared containment policy.
+// ---------------------------------------------------------------------------
+namespace {
+struct PipelineSecurityEnvGuard
+{
+    QByteArray remote = qgetenv("SICNU_MCP_ALLOW_REMOTE");
+    bool hadRemote = qEnvironmentVariableIsSet("SICNU_MCP_ALLOW_REMOTE");
+    QString cwd = QDir::currentPath();
+    ~PipelineSecurityEnvGuard()
+    {
+        QDir::setCurrent(cwd);
+        qunsetenv("SICNU_PIPELINE_WORKSPACE");
+        if (hadRemote) qputenv("SICNU_MCP_ALLOW_REMOTE", remote); else qunsetenv("SICNU_MCP_ALLOW_REMOTE");
+    }
+};
+
+Json::Value singleStepPipeline(const std::string &input, const std::string &output)
+{
+    Json::Value pipeline(Json::objectValue);
+    Json::Value steps(Json::arrayValue);
+    Json::Value step(Json::objectValue);
+    step["operator"] = "rs:spectral_index";
+    Json::Value params(Json::objectValue);
+    params["input"] = input;
+    params["output"] = output;
+    step["params"] = params;
+    steps.append(step);
+    pipeline["steps"] = steps;
+    return pipeline;
+}
+} // namespace
+
+TEST_CASE("CLI pipeline rejects remote references by default (P1-4)", "[cli][pipeline][workspace][security]")
+{
+    const PipelineSecurityEnvGuard guard;
+    qunsetenv("SICNU_MCP_ALLOW_REMOTE");
+    QTemporaryDir ws;
+    REQUIRE(ws.isValid());
+    const std::string out = ws.path().toStdString() + "/out.tif";
+
+    for (const bool withWorkspace : { false, true })
+    {
+        if (withWorkspace)
+            qputenv("SICNU_PIPELINE_WORKSPACE", ws.path().toUtf8());
+        else
+            qunsetenv("SICNU_PIPELINE_WORKSPACE");
+        INFO("workspace configured: " << withWorkspace);
+        for (const std::string input : { std::string("https://169.254.169.254/latest/x.tif"),
+                                         std::string("http://example.invalid/x.tif"),
+                                         std::string("/vsicurl/https://example.invalid/x.tif") })
+        {
+            INFO("input: " << input);
+            sicnu::cli::RsPipelineRunner runner;
+            const auto result = runner.runFromJson(singleStepPipeline(input, out));
+            CHECK_FALSE(result.success);
+            CHECK(QString::fromStdString(result.errorMessage).contains(QStringLiteral("SICNU_MCP_ALLOW_REMOTE")));
+        }
+        for (const std::string input : { std::string("/vsizip/evil.zip/x.tif"), std::string("s3://bucket/x.tif") })
+        {
+            INFO("input: " << input);
+            sicnu::cli::RsPipelineRunner runner;
+            const auto result = runner.runFromJson(singleStepPipeline(input, out));
+            CHECK_FALSE(result.success);
+            CHECK((QString::fromStdString(result.errorMessage).contains(QStringLiteral("vsicurl"))
+                   || QString::fromStdString(result.errorMessage).contains(QStringLiteral("scheme"))));
+        }
+    }
+
+    // Explicit opt-in lifts only the remote gate (the run may still fail for
+    // other reasons — it must not fail the containment check).
+    qputenv("SICNU_MCP_ALLOW_REMOTE", "1");
+    qunsetenv("SICNU_PIPELINE_WORKSPACE");
+    sicnu::cli::RsPipelineRunner runner;
+    const auto result = runner.runFromJson(singleStepPipeline("https://example.invalid/x.tif", out));
+    CHECK_FALSE(QString::fromStdString(result.errorMessage).contains(QStringLiteral("Remote data references are disabled")));
+}
+
+TEST_CASE("CLI pipeline workspace resolves symlinks through missing directories (P1-3)", "[cli][pipeline][workspace][security]")
+{
+    const PipelineSecurityEnvGuard guard;
+    QTemporaryDir ws;
+    QTemporaryDir outside;
+    REQUIRE(ws.isValid());
+    REQUIRE(outside.isValid());
+    if (!QFile::link(outside.path(), ws.filePath(QStringLiteral("link"))))
+        SKIP("symlinks unavailable on this filesystem");
+    qputenv("SICNU_PIPELINE_WORKSPACE", ws.path().toUtf8());
+
+    for (const std::string output : { ws.path().toStdString() + "/link/newdir/out.tif",
+                                      std::string("link/a/b/out.tif") })
+    {
+        INFO("output: " << output);
+        sicnu::cli::RsPipelineRunner runner;
+        const auto result = runner.runFromJson(singleStepPipeline(ws.path().toStdString() + "/in.tif", output));
+        CHECK_FALSE(result.success);
+        CHECK(QString::fromStdString(result.errorMessage).contains(QStringLiteral("SICNU_PIPELINE_WORKSPACE")));
+    }
+    // The run restores the caller's working directory (P1-2 scoped anchor).
+    CHECK(QDir::currentPath() == guard.cwd);
+}

@@ -13,6 +13,7 @@ SAR 后向散射状态转换：在已定标强度数据上于 sigma0/gamma0/beta
 - 输入：incidenceRaster（raster）、input（raster）
 - 输出：bands（integer）、calibration（string）、domain（string）、output（raster）
 - 参数：band（integer）、fromCalibration（enum）、incidenceDeg（numeric）、inputDomain（enum）、output（string）、outputDomain（enum）、polarizations（string）、sensor（string）、toCalibration（enum）
+- 前置条件：输入必须是已定标强度数据（声明 sigma0/gamma0/beta0 辐射状态与线性功率/dB 量纲）：DN 与 SLC 复数据不在本算子范围（类型化拒绝）。
 - 局限：beta0 needs the incidence angle from geometry: set incidenceDeg > 0 or provide incidenceRaster.；DN input is unsupported; calibrate first with rs:sar_calibrate.；inputDomain=db cannot be combined with a calibration-state conversion; convert the numeric domain in a separate step.
 - 适用地物：任意地物（SAR）
 - 适用场景：SAR 定量分析入口、土壤水分与作物监测的输入
@@ -96,11 +97,17 @@ SAR 局部配准：在同网格复 SLC 对上估计 patch NCC 偏移场（抛物
 - 参数：masterBand（numeric）、medianRadius（numeric）、minPeakRatio（numeric）、offsetFieldOutput（string）、output（string）、patchSize（numeric）、patchStride（numeric）、searchRadius（numeric）、slaveBand（numeric）
 - 前置条件：Same-grid complex SLC pair (rs:sar_coregister preflight semantics apply).
 - 局限：Translation-field model: no affine/polynomial warp and no DEM-based refinement; strong range ramps need a lattice finer than the ramp scale.；Both planes are materialized behind a 2 GiB gate (MEMORY_BUDGET_EXCEEDED beyond — use a smaller AOI).
+- 适用地物：InSAR 试验区
+- 适用场景：主从 SLC 局部配准、形变链前置几何对齐
+- 适用性备注：要求同网格复 SLC 对。
 - 失败模式：
   - `COMPLEX_BANDS_REQUIRED` — master 或 slave 的指定波段不是复数（CFloat32）SLC 波段。处置：输入复 SLC 数据或校正 masterBand/slaveBand 波段号
   - `GRID_MISMATCH` — master 与 slave 不共享 CRS、分辨率、原点与范围，或两景栅格尺寸不同。处置：先对齐为同网格 SLC 对（或换用可以外部对齐的产品）
   - `INSUFFICIENT_MEMORY` — 两景复平面物化超过 2 GiB 预算（约 48 字节/像素）。处置：缩小 AOI 后重试
   - `COREGISTRATION_FAILED` — 置信 patch 少于 3 个——两景去相关严重，或 searchRadius 小于真实配准偏差。处置：增大 searchRadius/patchSize，或检查两景相关性
+- 教学概念：NCC 偏移场、抛物线亚像元精化、中值滤波、主从重采样
+- 适用课程：微波遥感、InSAR
+- 典型练习：对同网格 SLC 对执行局部配准，检查偏移场与滤波后的全局平移输出，并解释亚像元精化对配准精度的贡献。
 
 ## rs:sar_displacement
 
@@ -191,11 +198,17 @@ InSAR 网络反演：小基线线性反演，从连通成对网络的逐对解�
 - 参数：displacementInputs（string）、displacementOutput（string）、epochTemporalYears（string）、maskStrategy（enum）、maxPatterns（integer）、pairWeights（string）、pairs（string）、rmsOutput（string）、velocityOutput（string）
 - 前置条件：Connected pair network (rs:sar_pair_network) and per-pair unwrapped displacement rasters on one grid.
 - 局限：LINEAR small-baseline model: atmospheric phase stays in the epoch displacements — NOT PSI (no PS selection, no APS separation).；Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond).
+- 适用地物：城市/矿区/滑坡等形变监测区
+- 适用场景：小基线时序反演、线性速度场生产
+- 适用性备注：输入为连通成对网络的逐对解缠视线向位移栅格。
 - 失败模式：
   - `NETWORK_INVERSION_RANK_DEFICIENT` — pair/epoch 契约无效（每对 master 索引未大于 slave、计数不一致或权重 ≤ 0），或某缺失模式的历元方程组秩亏。处置：校正 pairs 的 [masterEpoch, slaveEpoch]（注意其索引方向与 rs:sar_pair_network 输出相反）并保证权重 > 0
   - `NETWORK_INVERSION_PATTERN_BLOWUP` — 互异缺失数据模式数超过 maxPatterns 缓存上限。处置：改用 maskStrategy=intersect，或在确认代价后调大 maxPatterns
   - `NETWORK_INVERSION_PAIR_LIMIT` — 输入位移栅格（成对数）超过 64 对的模式掩码上限。处置：拆分网络分批反演
   - `NETWORK_INVERSION_EPOCH_LIMIT` — epoch 数超过 200 上限。处置：减少历元数（合并或裁剪场景）后重试
+- 教学概念：小基线集（SBAS）、网络反演、历元位移、线性速度场、拟合 RMS
+- 适用课程：InSAR、形变测量
+- 典型练习：对解缠位移网络执行小基线反演，读取各历元位移与线性速度场，并结合拟合 RMS 与缺失数据质量账评估结果可靠性。
 
 ## rs:sar_pair_network
 
@@ -207,11 +220,17 @@ InSAR 成对网络：在重处理前按时间/垂直基线约束从场景真值�
 - 参数：allowDisconnected（boolean）、maxPerpendicularM（numeric）、maxTemporalDays（numeric）、minPerpendicularM（numeric）、outputFile（string）、referenceIdx（numeric）、scenes（string）、strategy（enum）
 - 前置条件：Scene truth stack: orbit states + acquisition UTC + one common wavelength.
 - 局限：Screening B⊥ is evaluated at each master's orbit mid-time nadir — a graph metric, not a per-pixel baseline product.；Bounded scale: 512 scenes, 65536 pairs (typed refusals beyond).
+- 适用地物：任意 SAR 台栈规划场景
+- 适用场景：干涉对筛选、重处理前的网络构建
+- 适用性备注：基于场景真值栈（轨道、波长、采集时刻）按时间/垂直基线约束筛选。
 - 失败模式：
   - `SCENE_TRUTH_INVALID` — 任一场景真值缺失或非法（缺 acquisitionUtc/wavelengthUm），或场景数超过 512、可用对超过 65536、referenceIdx 越界。处置：补齐各场景的采集时刻、波长与轨道状态，并裁剪网络规模
   - `ORBIT_SEGMENT_INVALID` — 轨道状态段无效（少于 2 个状态、时间非严格升序有限或速度退化）。处置：按 SICNU_SAR_ORBIT_STATES 语法修复该场景的轨道串
   - `WAVELENGTH_INCOMPATIBLE` — 某场景波长与参考场景波长相对偏差超过 1e-9。处置：统一全栈为同一雷达波长（µm）
   - `PAIR_GRAPH_DISCONNECTED` — 约束过滤后图为空，或滤波后的图有多个连通分量且未设 allowDisconnected。处置：放宽 maxTemporalDays 或垂直基线约束，或设 allowDisconnected=true 取分量图做 QA
+- 教学概念：时间基线、垂直基线、连通性网络、fail-closed 类型化拒绝
+- 适用课程：InSAR
+- 典型练习：给定基线约束从场景栈生成干涉对网络，并故意引入缺失轨道元数据验证类型化拒绝路径。
 
 ## rs:sar_phase_filter
 
@@ -262,6 +281,7 @@ SAR 双通道或多时相比值运算：突出散射机制差异，常用于水�
 - 输入：inputA（raster）、inputB（raster）
 - 输出：bands（integer）、output（raster）、outputType（string）、radiometricState（string）
 - 参数：bandA（integer）、bandB（integer）、inputDomain（enum）、output（string）、outputType（enum）、polarizations（string）、sensor（string）
+- 前置条件：输入必须为同网格、同辐射状态（如均为 sigma0）的已定标强度数据；支持双通道或多时相栈。
 - 局限：Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.；Both inputs must declare the same recognized radiometric state (or nothing); a sigma0/gamma0 mix or a derived input is a typed refusal.；The output is a derived pair metric (SICNU_RADIOMETRIC_STATE=sar_pair_metric), not a backscatter calibration; rs:sar_calibrate and rs:sar_backscatter refuse it.；If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first).；Nonpositive power becomes NoData (NaN) for the log-domain outputs; B == 0 is NoData for ratio.
 - 适用地物：水体、植被（SAR）
 - 适用场景：快速 SAR 判别图生产、教学演示散射机制差异
@@ -282,11 +302,17 @@ InSAR 地形相位剔除：用两景轨道的逐像素严格距离差几何，�
 - 参数：band（numeric）、demBand（numeric）、masterOrbitStates（string）、output（string）、slaveOrbitStates（string）、topoPhaseOutput（string）、wavelengthUm（numeric）
 - 前置条件：Complex interferogram; DEM above the WGS84 ellipsoid in the interferogram CRS; both scene orbit state vectors; radar wavelength.
 - 局限：North-up axis-aligned grids only; DEM must share the interferogram CRS and cover it (warp/clip otherwise).；Height sensitivity degenerates near zero B⊥ — the removal is exact for the given DEM, but pairs without perpendicular baseline carry no height signal to remove.
+- 适用地物：起伏地形的形变监测区
+- 适用场景：地形相位剔除、形变/大气相位分离前置步骤
+- 适用性备注：需要 DEM 与两景轨道的逐像素严格距离差几何。
 - 失败模式：
   - `TOPO_PHASE_METADATA_MISSING` — master/slave 轨道状态串无法解析，或雷达波长既无 wavelengthUm 参数也无 SICNU_SAR_WAVELENGTH_UM 元数据。处置：按 SICNU_SAR_ORBIT_STATES 语法补两景轨道状态，并传 wavelengthUm 或在干涉图上声明波长元数据
   - `COMPLEX_BANDS_REQUIRED` — 干涉图的指定 band 不是复（CFloat32）波段。处置：输入复干涉图或校正 band 波段号
   - `DEM_CRS_MISMATCH` — DEM 与干涉图 CRS 不一致（算子不执行隐式重投影）。处置：先把 DEM 重投影到干涉图 CRS/网格再执行
   - `DEM_EXTENT_INSUFFICIENT` — DEM 范围未完整覆盖干涉图像元中心所在范围。处置：扩大 DEM 覆盖范围，或裁剪干涉图 AOI 到 DEM 范围内
+- 教学概念：地形相位、距离差几何、DEM、残余相位
+- 适用课程：InSAR
+- 典型练习：对复干涉图执行地形相位剔除，比较剔除前后的相位结构并解释残余相位的可能来源。
 
 ## rs:sar_speckle
 

@@ -9,24 +9,9 @@
 #include "qgsmapcanvas.h"
 #include "rs_georef_mode_toggle.h"
 
-#include <cstdlib>
+#include "support/qt_lifecycle.h"
 
-// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup when
-// the test process exercised qgis_core/qgis_gui. Bypass the C++ destructor
-// sequence with std::_Exit once Catch has reported the final result.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace
 {
@@ -38,8 +23,7 @@ namespace
   {
     if ( !QCoreApplication::instance() )
     {
-      static QApplication app( fake_argc, fake_argv );
-      return &app;
+      return sicnu::test::qtlifecycle::heapQApplication( fake_argc, fake_argv );
     }
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }

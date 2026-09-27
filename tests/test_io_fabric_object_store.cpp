@@ -204,6 +204,50 @@ TEST_CASE( "credential windows install and exactly restore GDAL config state",
   CHECK( activeScopedCredentialWindows() == 0 );   // failures never leak windows
 }
 
+TEST_CASE( "the credential window hands GDAL a scheme-free endpoint",
+           "[io][fabric][object_store][endpoint]" )
+{
+  // GDAL versions disagree on whether AWS_S3_ENDPOINT may carry a scheme:
+  // builds that prepend their own compose "http://http://…" request URLs.
+  // The window, not the GDAL build, owns the decomposition — bare
+  // host[:port] plus an explicit AWS_HTTPS — so the transport behaves the
+  // same on every supported GDAL.
+  ObjectStoreCredentials credentials;
+  credentials.accessKeyId = "k";
+  credentials.secretAccessKey = "s";
+
+  credentials.endpoint = "http://127.0.0.1:9000";
+  {
+    ScopedObjectStoreCredentials window( "/vsis3/", credentials );
+    CHECK( std::string( CPLGetConfigOption( "AWS_S3_ENDPOINT", "" ) ) == "127.0.0.1:9000" );
+    CHECK( std::string( CPLGetConfigOption( "AWS_HTTPS", "" ) ) == "NO" );
+    CHECK( std::string( CPLGetConfigOption( "AWS_VIRTUAL_HOSTING", "" ) ) == "FALSE" );
+  }
+
+  credentials.endpoint = "HTTPS://Files.Example.com/";
+  {
+    ScopedObjectStoreCredentials window( "/vsis3/", credentials );
+    CHECK( std::string( CPLGetConfigOption( "AWS_S3_ENDPOINT", "" ) ) == "Files.Example.com" );
+    CHECK( std::string( CPLGetConfigOption( "AWS_HTTPS", "" ) ) == "YES" );
+  }
+
+  // A scheme-less endpoint reaches GDAL verbatim (host[:port] only, no
+  // trailing slash) and leaves AWS_HTTPS exactly as the ambient environment
+  // had it — captured so a developer machine that exports AWS_HTTPS does
+  // not produce a false red.
+  credentials.endpoint = "127.0.0.1:9000";
+  const bool hadAmbientHttps = CPLGetConfigOption( "AWS_HTTPS", nullptr ) != nullptr;
+  const std::string ambientHttps = CPLGetConfigOption( "AWS_HTTPS", "" );
+  {
+    ScopedObjectStoreCredentials window( "/vsis3/", credentials );
+    CHECK( std::string( CPLGetConfigOption( "AWS_S3_ENDPOINT", "" ) ) == "127.0.0.1:9000" );
+    CHECK( ( CPLGetConfigOption( "AWS_HTTPS", nullptr ) != nullptr ) == hadAmbientHttps );
+    if ( hadAmbientHttps )
+      CHECK( std::string( CPLGetConfigOption( "AWS_HTTPS", "" ) ) == ambientHttps );
+  }
+  CHECK( activeScopedCredentialWindows() == 0 );
+}
+
 TEST_CASE( "an s3:// asset opens through the real GDAL S3 stack against a loopback endpoint",
            "[io][fabric][object_store][integration]")
 {

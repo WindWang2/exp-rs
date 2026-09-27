@@ -3146,7 +3146,7 @@ void TaskCenter::markTaskCompleted( long taskId,
     fireTaskCompletionCallbacks( taskId );
 
     if ( shouldAutoLoad && !autoLoadPath.isEmpty() )
-        emit layerAutoLoadRequested( autoLoadPath );
+        emit layerAutoLoadRequested( autoLoadPath, taskId );
 }
 
 void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long userRootId,
