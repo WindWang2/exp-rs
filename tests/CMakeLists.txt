@@ -13848,3 +13848,53 @@ endif()
 if(TARGET test_workflow_resume_provenance)
   set_target_properties(test_workflow_resume_provenance PROPERTIES AUTOMOC ON)
 endif()
+
+# ---- Track 15: model runtime & python integration hardening R4 -------------
+# Boundary suites for the four src/runtime subdomains (worker/gpu/chunk/exec),
+# the bounded session pool stress lane, the P1-8 manifest validation contract,
+# and the python worker channel. Append-only block (shared-file convention).
+sicnu_add_test(test_runtime_worker_boundaries_r4 TIMEOUT 120 TEST_PREFIX "test_runtime_worker_boundaries_r4::")
+target_link_libraries(test_runtime_worker_boundaries_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_runtime_gpu_boundaries_r4 TIMEOUT 120 TEST_PREFIX "test_runtime_gpu_boundaries_r4::")
+target_link_libraries(test_runtime_gpu_boundaries_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_runtime_exec_boundaries_r4 TIMEOUT 120 TEST_PREFIX "test_runtime_exec_boundaries_r4::")
+target_link_libraries(test_runtime_exec_boundaries_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_runtime_chunk_boundaries_r4 TIMEOUT 300 TEST_PREFIX "test_runtime_chunk_boundaries_r4::")
+target_link_libraries(test_runtime_chunk_boundaries_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_runtime_pool_stress_r4 TIMEOUT 300 RUN_SERIAL TRUE TEST_PREFIX "test_runtime_pool_stress_r4::")
+target_link_libraries(test_runtime_pool_stress_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_model_manifest_r4 TIMEOUT 120 TEST_PREFIX "test_model_manifest_r4::")
+target_link_libraries(test_model_manifest_r4 PRIVATE sicnu_operators)
+sicnu_add_test(test_runtime_publish_orphan_r4 TIMEOUT 180 RUN_SERIAL TRUE TEST_PREFIX "test_runtime_publish_orphan_r4::")
+target_link_libraries(test_runtime_publish_orphan_r4 PRIVATE sicnu_operators)
+if(TARGET jsoncpp)
+  target_link_libraries(test_runtime_publish_orphan_r4 PRIVATE jsoncpp)
+endif()
+qt_add_executable(test_runtime_python_channel_r4
+  test_runtime_python_channel_r4.cpp
+)
+target_link_libraries(test_runtime_python_channel_r4 PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Network
+  Qt6::Widgets
+  sicnu_python_isolated
+  sicnu_jobs
+  # sicnu_python_isolated references app-side symbols (ProjectContext,
+  # JobEngine) that resolve through these targets — same link set every
+  # other consumer of the isolated lib uses.
+  sicnu_qgis_display
+  sicnu_processing
+  sicnu_operators
+  qgis_core
+)
+target_include_directories(test_runtime_python_channel_r4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_runtime_python_channel_r4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_runtime_python_channel_r4 TEST_PREFIX "test_runtime_python_channel_r4::" TIMEOUT 180 RUN_SERIAL TRUE)
+sicnu_add_test(test_runtime_oom_ladder_r4 TIMEOUT 120 TEST_PREFIX "test_runtime_oom_ladder_r4::")
+target_link_libraries(test_runtime_oom_ladder_r4 PRIVATE sicnu_runtime)
+sicnu_add_test(test_provider_guard_r4 TIMEOUT 120 TEST_PREFIX "test_provider_guard_r4::")
+target_link_libraries(test_provider_guard_r4 PRIVATE sicnu_operators)
