@@ -146,6 +146,9 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
                        [&]( const Impl::LiveSession &live ) {
                            return live.session->deviceId == deviceId;
                        } );
+    // NOTE the documented bypass: a footprint-less request (vramMb == 0 and
+    // no ladder) cannot occupy VRAM, so the session-count bound does not
+    // apply to it — it falls through the empty ladder to CpuFallback below.
     if ( deviceSessionCount >= kMaxSessionsPerDevice && !ladder.empty() )
     {
         result.outcome = AcquireOutcome::Busy;

@@ -134,9 +134,10 @@ void PythonWorkerProcess::stopWorker()
       m_process->kill();
       m_process->waitForFinished( 500 );
     }
-    // Sweep stragglers even on a clean child exit: a worker that spawned
-    // helpers must not leave them orphaned after an explicit stop.
-    killProcessTree();
+    // NOTE: after a clean waitForFinished the child is gone and QProcess
+    // reports pid 0, so a group sweep is impossible by that route — helpers
+    // a cleanly-exiting worker leaves behind are the worker daemon's own
+    // lifecycle concern. The effective sweep is the timeout branch above.
   }
 }
 

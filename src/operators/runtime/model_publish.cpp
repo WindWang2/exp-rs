@@ -27,6 +27,33 @@ namespace {
 /// corrupt by adopting the parked product back.
 std::mutex g_publishFenceMutex;
 std::set<std::string> g_publishFences;
+
+/// RAII fence slot. A throwing constructor never runs the destructor, so the
+/// raw bool flag would leak the slot on every throw path after acquisition —
+/// this holder owns the release (scope exit, including throw).
+class PublishFenceSlot
+{
+  public:
+    PublishFenceSlot( std::set<std::string> &fences, const std::string &key, bool acquired )
+        : m_fences( fences ), m_key( key ), m_acquired( acquired )
+    {
+    }
+    ~PublishFenceSlot()
+    {
+        if ( m_acquired )
+        {
+            std::lock_guard<std::mutex> lock( g_publishFenceMutex );
+            m_fences.erase( m_key );
+        }
+    }
+    PublishFenceSlot( const PublishFenceSlot & ) = delete;
+    PublishFenceSlot &operator=( const PublishFenceSlot & ) = delete;
+
+  private:
+    std::set<std::string> &m_fences;
+    std::string m_key;
+    bool m_acquired;
+};
 } // namespace
 
 std::string crsDisplayName( const QString &wkt )
@@ -289,6 +316,9 @@ ProductPublishGuard::ProductPublishGuard( const QString &finalPath, const QStrin
                              "another publish is already in progress for "
                                + finalPath.toStdString() );
   }
+  // RAII: released on EVERY exit below (including the throwing constructor
+  // paths a destructor cannot cover); the dtor's own release stays idempotent.
+  PublishFenceSlot fenceSlot( g_publishFences, fenceKey, /*acquired=*/true );
   m_fenceHeld = true;
 
   const QString provPath = m_final + QStringLiteral( ".prov.json" );

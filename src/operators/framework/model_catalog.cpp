@@ -547,7 +547,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       // Report the DECLARED token honestly: a non-integral value (5.5) must
       // never surface as a silently-defaulted 0.
       const double declared = declaredVersion.toDouble();
-      const int v = declaredVersion.toInt( -1 );
+      const int v = declaredVersion.toInt();
       if ( v < 1 || v > 6 )
         markInvalid( "manifest_version "
                        + QString::number( declared, 'g', 15 ).toStdString()
@@ -2010,6 +2010,10 @@ bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
 {
   auto fail = [&info]( ModelReadiness state, std::string reason ) {
     info.readiness = state;
+    // P1-8: the artifact/digest family reports through the SAME path-prefixed
+    // shape as parseManifest's markInvalid — one error contract surface.
+    if ( !info.sourceManifest.empty() )
+      reason = info.sourceManifest + ": " + reason;
     info.readinessReason = std::move( reason );
     return false;
   };
