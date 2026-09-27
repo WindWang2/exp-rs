@@ -54,7 +54,8 @@ struct TileRunPartition
     int bandOffset = 0; ///< provenance: first source band carried by payloads
     int timeIndex = 0;  ///< provenance: temporal chunk index (0 = single step)
 
-    // Overflow contract (#1056 discipline, mirrored from buildTileGrid): the
+    // Overflow contract (#1056 discipline; same int index domain as
+    // buildTileGrid, which refuses construction with std::length_error): the
     // partition arithmetic previously ran in plain int — a zero/negative tile
     // or raster dimension was a division-by-zero UB and dims near INT_MAX
     // wrapped. All math is int64 and typed-thrown when the result cannot be
@@ -153,8 +154,9 @@ struct TileRunSpec
 /// O(1) tile lookup equivalent to buildTileGrid()[index] without
 /// materializing the grid (million-tile plans stay arithmetic-only).
 /// Throws std::invalid_argument when @p index is outside the partition and
-/// std::overflow_error when the grid leaves the int domain (same typed
-/// bounds as buildTileGrid / TileRunPartition).
+/// std::overflow_error when the grid leaves the int domain (same bound as
+/// TileRunPartition; construction-side buildTileGrid refuses the same domain
+/// with std::length_error).
 /// Equality with buildTileGrid is contract-tested in
 /// tests/test_execution_scale_fault_11.cpp.
 inline TileSpec tileSpecAt( const TileRunPartition &p, std::uint64_t index )
