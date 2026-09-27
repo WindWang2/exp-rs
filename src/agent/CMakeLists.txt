@@ -275,6 +275,13 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
   # decision engine the lab copilot and the plan executor gate on.
   Sicnu::autonomy
+  # Track 14 unblock: lsisnu_agent.so references
+  # agent_loop::VerificationReport::aggregate (agent-ops session driver)
+  # but was never linked against the archive — every downstream executable
+  # link failed with an undefined reference. One-line inherited master
+  # link-graph repair (same class as open PR #1335); drop on rebase if
+  # #1335 lands first.
+  sicnu_agent_loop
   # RS14-15 Explainable Workflow: explain core + live adapters (registry
   # knowledge, workflow projection) behind the explain:step tool surface.
   Sicnu::explain_adapters

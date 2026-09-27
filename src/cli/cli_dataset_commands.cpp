@@ -2,6 +2,7 @@
 #include "cli_dataset_commands.h"
 
 #include "cli_commands.h"
+#include "exprs/exit_codes.h"
 
 #include "dataset/dataset_manifest.h"
 #include "dataset/dataset_store.h"
@@ -154,10 +155,40 @@ Json::Value diagnosticsToJson( const QVector<sicnu::data::Diagnostic> &diagnosti
     return array;
 }
 
+// Track 14 (WP-A/WP-B): the dataset/experiment/reproduce family classifies
+// every failure through this one helper — the exit-code classes and the
+// structured four-tuple (code + reason + expected/actual + hint) are built at
+// this single exit, never per call site.
+namespace {
+
+namespace exprs_ns = exprs;
+
+const int kInvalidInput = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput );
+const int kValidationFailure =
+    exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+const int kExecutionFailure =
+    exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure );
+const int kMissingDependency =
+    exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency );
+
+constexpr const char *kDatasetSubcommands =
+    "create|inspect|validate|diff|stats|list|version|label-schema|split|leakage";
+constexpr const char *kExperimentSubcommands = "create|inspect|compare|list|run";
+constexpr const char *kReproduceSubcommands = "export|validate|inspect";
+
+constexpr const char *kDatasetStoreHint =
+    "create a store first: dataset create --dataset-db <path> --name <name>";
+
+} // namespace
+
 int fail( const CliIO &io, const std::string &command, const std::string &message,
+          int exitCode, const sicnu::cli::CliErrorDetails &details = {},
           const QVector<sicnu::data::Diagnostic> &diagnostics = {} )
 {
-    return io.finish( false, command, {}, 1, diagnosticsToJson( diagnostics ), message );
+    sicnu::cli::CliErrorDetails classified = details;
+    classified.exitCode = exitCode;
+    return io.finish( false, command, {}, exitCode, diagnosticsToJson( diagnostics ), message,
+                      &classified );
 }
 
 std::string versionIdStdString( const QString &text )
@@ -168,22 +199,71 @@ std::string versionIdStdString( const QString &text )
 int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): the verb is validated first — the unknown-subcommand
+    // rejection doubles as the machine-readable subcommand vocabulary, and a
+    // bogus verb must be rejected regardless of any other flags.
+    // An EMPTY verb (bare `dataset`) is not an unknown verb — let the flag
+    // gates answer with the missing --dataset-db requirement instead.
+    if ( !sub.isEmpty() && sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+         sub != QLatin1String( "validate" ) && sub != QLatin1String( "diff" ) &&
+         sub != QLatin1String( "stats" ) && sub != QLatin1String( "list" ) &&
+         sub != QLatin1String( "version" ) && sub != QLatin1String( "label-schema" ) &&
+         sub != QLatin1String( "split" ) && sub != QLatin1String( "leakage" ) )
+        return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kDatasetSubcommands, .actual = sub.toStdString() } );
     if ( options.datasetDb.isEmpty() )
-        return fail( io, "dataset", "--dataset-db <path> is required" );
+        return fail( io, "dataset", "--dataset-db <path> is required", kInvalidInput,
+                     { .expected = "--dataset-db <path>",
+                       .hint = "usage: dataset <subcommand> --dataset-db <path> [options]" } );
+
+    // Track 14 (WP-E): every subcommand's required flags are validated BEFORE
+    // the store opens — DatasetStore::open() creates the SQLite file, so a
+    // rejected invocation must leave no artifact behind. These checks used to
+    // run inside the subcommand branches, after the store existed.
+    if ( sub == QLatin1String( "create" ) && options.name.isEmpty() )
+        return fail( io, "dataset", "--name is required", kInvalidInput,
+                     { .expected = "--name <name>",
+                       .hint = "usage: dataset create --dataset-db <path> --name <name>" } );
+    // validate and stats both iterate a version (master behaviour); the
+    // version subcommand takes --dataset instead (gated below).
+    if ( ( sub == QLatin1String( "validate" ) || sub == QLatin1String( "stats" ) ) &&
+         options.versionId.isEmpty() )
+        return fail( io, "dataset", "--version is required", kInvalidInput,
+                     { .expected = "--version <id>" } );
+    if ( sub == QLatin1String( "diff" ) &&
+         ( options.versionFrom.isEmpty() || options.versionTo.isEmpty() ) )
+        return fail( io, "dataset", "--from and --to are required", kInvalidInput,
+                     { .expected = "--from <id> --to <id>" } );
+    if ( sub == QLatin1String( "label-schema" ) && options.schemaId.isEmpty() )
+        return fail( io, "dataset", "--schema is required", kInvalidInput,
+                     { .expected = "--schema <id>" } );
+    if ( sub == QLatin1String( "split" ) && options.splitManifestId.isEmpty() &&
+         options.versionId.isEmpty() )
+        return fail( io, "dataset", "--split or --version is required", kInvalidInput,
+                     { .expected = "--split <id> or --version <id>" } );
+    if ( sub == QLatin1String( "leakage" ) && options.splitManifestId.isEmpty() )
+        return fail( io, "dataset", "--split is required", kInvalidInput,
+                     { .expected = "--split <id>" } );
+    if ( sub == QLatin1String( "version" ) && options.datasetId.isEmpty() )
+        return fail( io, "dataset", "--dataset is required", kInvalidInput,
+                     { .expected = "--dataset <id>" } );
 
     sicnu::dataset::DatasetStore store;
     QString error;
     if ( !store.open( options.datasetDb, &error ) )
-        return fail( io, "dataset", error.toStdString() );
+        return fail( io, "dataset", error.toStdString(), kInvalidInput,
+                     { .expected = "an openable dataset store",
+                       .actual = options.datasetDb.toStdString(),
+                       .hint = kDatasetStoreHint } );
 
     if ( sub == QLatin1String( "create" ) )
     {
-        if ( options.name.isEmpty() )
-            return fail( io, "dataset", "--name is required" );
         const auto created = store.createDataset( sicnu::dataset::DatasetId::generate(),
                                                   options.name, options.description );
         if ( !created )
-            return fail( io, "dataset", "create failed", created.diagnostics() );
+            return fail( io, "dataset", "create failed", kExecutionFailure, {},
+                         created.diagnostics() );
         Json::Value data( Json::objectValue );
         data["dataset_id"] = created.value().toStdString();
         return io.finish( true, "dataset", data, 0 );
@@ -198,7 +278,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
                 sicnu::dataset::DatasetVersionId::fromString( options.versionId )
                     .value_or( sicnu::dataset::DatasetVersionId{} ) );
             if ( !version )
-                return fail( io, "dataset", "version not found" );
+                return fail( io, "dataset", "version not found", kMissingDependency,
+                             { .expected = "an existing dataset version id",
+                               .actual = options.versionId.toStdString() } );
             data["version"] = toJsonValue(
                 QJsonDocument::fromJson( version->manifestJson().toUtf8() ).object() );
             data["status"] =
@@ -214,7 +296,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
                 sicnu::dataset::DatasetId::fromString( options.datasetId )
                     .value_or( sicnu::dataset::DatasetId{} ) );
             if ( !record )
-                return fail( io, "dataset", "dataset not found" );
+                return fail( io, "dataset", "dataset not found", kMissingDependency,
+                             { .expected = "an existing dataset id",
+                               .actual = options.datasetId.toStdString() } );
             data["dataset"] = toJsonValue( QJsonObject::fromVariantMap( record.value() ) );
             Json::Value versions( Json::arrayValue );
             for ( const auto &entry : store.versionsOfDataset(
@@ -234,7 +318,7 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         {
             const auto page = store.listDatasets( 0, sicnu::dataset::DatasetStore::kMaxPageSize );
             if ( !page )
-                return fail( io, "dataset", "listing failed" );
+                return fail( io, "dataset", "listing failed", kExecutionFailure );
             data["total"] = static_cast<Json::Int64>( page.value().first );
             Json::Value rows( Json::arrayValue );
             for ( const QVariantMap &row : page.value().second )
@@ -251,13 +335,12 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "validate" ) )
     {
-        if ( options.versionId.isEmpty() )
-            return fail( io, "dataset", "--version is required" );
         const auto staged = store.stageVersion(
             sicnu::dataset::DatasetVersionId::fromString( options.versionId )
                 .value_or( sicnu::dataset::DatasetVersionId{} ) );
         if ( !staged )
-            return fail( io, "dataset", "validation failed", staged.diagnostics() );
+            return fail( io, "dataset", "validation failed", kValidationFailure, {},
+                         staged.diagnostics() );
         Json::Value data( Json::objectValue );
         data["version_id"] = versionIdStdString( options.versionId );
         data["staged"] = true;
@@ -266,8 +349,6 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "diff" ) )
     {
-        if ( options.versionFrom.isEmpty() || options.versionTo.isEmpty() )
-            return fail( io, "dataset", "--from and --to are required" );
         auto load = [&]( const QString &id ) -> std::optional<sicnu::dataset::DatasetManifest> {
             const auto version = store.versionById(
                 sicnu::dataset::DatasetVersionId::fromString( id )
@@ -282,10 +363,12 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         const auto from = load( options.versionFrom );
         const auto to = load( options.versionTo );
         if ( !from || !to )
-            return fail( io, "dataset", "version(s) not found" );
+            return fail( io, "dataset", "version(s) not found", kMissingDependency,
+                         { .expected = "existing version ids for --from/--to" } );
         const auto diff = sicnu::dataset::diffManifests( from.value(), to.value() );
         if ( !diff )
-            return fail( io, "dataset", "diff failed", diff.diagnostics() );
+            return fail( io, "dataset", "diff failed", kExecutionFailure, {},
+                         diff.diagnostics() );
         Json::Value data( Json::objectValue );
         data["diff"] = toJsonValue( diff.value().toJson() );
         return io.finish( true, "dataset", data, 0 );
@@ -293,8 +376,6 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "stats" ) )
     {
-        if ( options.versionId.isEmpty() )
-            return fail( io, "dataset", "--version is required" );
         const auto versionId = sicnu::dataset::DatasetVersionId::fromString( options.versionId )
                                    .value_or( sicnu::dataset::DatasetVersionId{} );
         qint64 offset = 0;
@@ -304,7 +385,7 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         {
             const auto page = store.samplesPage( versionId, offset, 500 );
             if ( !page )
-                return fail( io, "dataset", "sample page failed" );
+                return fail( io, "dataset", "sample page failed", kExecutionFailure );
             if ( page.value().second.isEmpty() )
                 break;
             for ( const auto &sample : page.value().second )
@@ -329,7 +410,7 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         const qint64 cursor = options.cursor > 0 ? options.cursor : 0;
         const auto page = store.listDatasets( cursor, limit );
         if ( !page )
-            return fail( io, "dataset", "listing failed" );
+            return fail( io, "dataset", "listing failed", kExecutionFailure );
         Json::Value data( Json::objectValue );
         data["total"] = static_cast<Json::Int64>( page.value().first );
         Json::Value rows( Json::arrayValue );
@@ -350,11 +431,12 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "version" ) )
     {
-        if ( options.datasetId.isEmpty() )
-            return fail( io, "dataset", "--dataset is required" );
         const auto datasetId = sicnu::dataset::DatasetId::fromString( options.datasetId );
         if ( !datasetId )
-            return fail( io, "dataset", "invalid dataset id: " + options.datasetId.toStdString() );
+            return fail( io, "dataset", "invalid dataset id: " + options.datasetId.toStdString(),
+                         kInvalidInput,
+                         { .expected = "a well-formed dataset id",
+                           .actual = options.datasetId.toStdString() } );
         Json::Value data( Json::objectValue );
         data["dataset_id"] = options.datasetId.toStdString();
         Json::Value rows( Json::arrayValue );
@@ -377,18 +459,20 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "label-schema" ) )
     {
-        if ( options.schemaId.isEmpty() )
-            return fail( io, "dataset", "--schema is required" );
         Json::Value data( Json::objectValue );
         if ( !options.schemaVersion.isEmpty() )
         {
             bool versionOk = false;
             const quint64 version = options.schemaVersion.toULongLong( &versionOk );
             if ( !versionOk )
-                return fail( io, "dataset", "invalid --schema-version" );
+                return fail( io, "dataset", "invalid --schema-version", kInvalidInput,
+                             { .expected = "a known schema version",
+                               .actual = options.schemaVersion.toStdString() } );
             const auto schema = store.labelSchema( options.schemaId, version );
             if ( !schema )
-                return fail( io, "dataset", "label schema not found" );
+                return fail( io, "dataset", "label schema not found", kMissingDependency,
+                             { .expected = "an existing label schema id",
+                               .actual = options.schemaId.toStdString() } );
             data["schema"] = toJsonValue( schema->toJson() );
         }
         else
@@ -412,11 +496,14 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         if ( options.splitManifestId.isEmpty() )
         {
             if ( options.versionId.isEmpty() )
-                return fail( io, "dataset", "--split or --version is required" );
+                return fail( io, "dataset", "--split or --version is required", kInvalidInput,
+                             { .expected = "--split <id> or --version <id>" } );
             const auto versionId =
                 sicnu::dataset::DatasetVersionId::fromString( options.versionId );
             if ( !versionId )
-                return fail( io, "dataset", "invalid version id" );
+                return fail( io, "dataset", "invalid version id", kInvalidInput,
+                             { .expected = "a well-formed version id",
+                               .actual = options.versionId.toStdString() } );
             Json::Value data( Json::objectValue );
             Json::Value rows( Json::arrayValue );
             for ( const auto &manifest : store.splitManifestsForVersion( versionId.value() ) )
@@ -434,7 +521,9 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
         }
         const auto manifest = store.splitManifestById( options.splitManifestId );
         if ( !manifest )
-            return fail( io, "dataset", "split manifest not found" );
+            return fail( io, "dataset", "split manifest not found", kMissingDependency,
+                         { .expected = "an existing split manifest id",
+                           .actual = options.splitManifestId.toStdString() } );
         Json::Value data = toJsonValue( manifest->toJson() );
         // A 100k-assignment manifest is summarized by default; the assignment
         // page (bounded by --limit) is opt-in.
@@ -479,36 +568,66 @@ int datasetSubcommand( const QString &sub, QStringList args, const CliIO &io )
 
     if ( sub == QLatin1String( "leakage" ) )
     {
-        if ( options.splitManifestId.isEmpty() )
-            return fail( io, "dataset", "--split is required" );
         const auto report = store.latestLeakageReport( options.splitManifestId );
         if ( !report )
             return fail( io, "dataset",
                          "no stored leakage report for split " +
-                             options.splitManifestId.toStdString() );
+                             options.splitManifestId.toStdString(),
+                         kMissingDependency,
+                         { .expected = "a split manifest with a stored leakage report",
+                           .actual = options.splitManifestId.toStdString() } );
         Json::Value data = toJsonValue( report->toJson() );
         data["clean"] = report->isClean();
         return io.finish( true, "dataset", data, 0 );
     }
 
-    return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString() );
+    return fail( io, "dataset", "unknown dataset subcommand: " + sub.toStdString(),
+                 kInvalidInput,
+                 { .expected = kDatasetSubcommands, .actual = sub.toStdString() } );
 }
 
 int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): verb validated first (see dataset side).
+    if ( !sub.isEmpty() && sub != QLatin1String( "create" ) && sub != QLatin1String( "inspect" ) &&
+         sub != QLatin1String( "compare" ) && sub != QLatin1String( "list" ) &&
+         sub != QLatin1String( "run" ) )
+        return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kExperimentSubcommands, .actual = sub.toStdString() } );
     if ( options.experimentDb.isEmpty() )
-        return fail( io, "experiment", "--experiment-db <path> is required" );
+        return fail( io, "experiment", "--experiment-db <path> is required", kInvalidInput,
+                     { .expected = "--experiment-db <path>",
+                       .hint = "usage: experiment <subcommand> --experiment-db <path> [options]" } );
+
+    // Track 14 (WP-E): validate required flags before the store opens
+    // (SQLITE_OPEN_CREATE side effect).
+    if ( sub == QLatin1String( "create" ) && options.name.isEmpty() )
+        return fail( io, "experiment", "--name is required", kInvalidInput,
+                     { .expected = "--name <name>",
+                       .hint = "usage: experiment create --experiment-db <path> --name <name>" } );
+    if ( sub == QLatin1String( "inspect" ) && options.experimentId.isEmpty() )
+        return fail( io, "experiment", "--experiment is required", kInvalidInput,
+                     { .expected = "--experiment <id>" } );
+    if ( sub == QLatin1String( "compare" ) &&
+         ( options.runA.isEmpty() || options.runB.isEmpty() ) )
+        return fail( io, "experiment", "--a and --b are required", kInvalidInput,
+                     { .expected = "--a <run-id> --b <run-id>" } );
+    if ( sub == QLatin1String( "run" ) && options.runId.isEmpty() )
+        return fail( io, "experiment", "--run is required", kInvalidInput,
+                     { .expected = "--run <id>" } );
 
     sicnu::experiment::ExperimentStore store;
     QString error;
     if ( !store.open( options.experimentDb, &error ) )
-        return fail( io, "experiment", error.toStdString() );
+        return fail( io, "experiment", error.toStdString(), kInvalidInput,
+                     { .expected = "an openable experiment store",
+                       .actual = options.experimentDb.toStdString(),
+                       .hint = "create one first: experiment create --experiment-db <path> --name <name>" } );
 
     if ( sub == QLatin1String( "create" ) )
     {
-        if ( options.name.isEmpty() )
-            return fail( io, "experiment", "--name is required" );
         sicnu::experiment::Experiment experiment;
         experiment.setExperimentId( sicnu::experiment::ExperimentId::generate().toString() );
         experiment.setName( options.name );
@@ -516,7 +635,8 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
         const auto created = store.upsertExperiment( experiment );
         if ( !created )
-            return fail( io, "experiment", "create failed", created.diagnostics() );
+            return fail( io, "experiment", "create failed", kExecutionFailure, {},
+                         created.diagnostics() );
         Json::Value data( Json::objectValue );
         data["experiment_id"] = experiment.experimentId().toStdString();
         return io.finish( true, "experiment", data, 0 );
@@ -524,11 +644,11 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
 
     if ( sub == QLatin1String( "inspect" ) )
     {
-        if ( options.experimentId.isEmpty() )
-            return fail( io, "experiment", "--experiment is required" );
         const auto experiment = store.experimentById( options.experimentId );
         if ( !experiment )
-            return fail( io, "experiment", "experiment not found" );
+            return fail( io, "experiment", "experiment not found", kMissingDependency,
+                         { .expected = "an existing experiment id",
+                           .actual = options.experimentId.toStdString() } );
         Json::Value data = toJsonValue( experiment->toJson() );
         Json::Value runs( Json::arrayValue );
         const auto runPage = store.listRuns( options.experimentId );
@@ -550,12 +670,13 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
 
     if ( sub == QLatin1String( "compare" ) )
     {
-        if ( options.runA.isEmpty() || options.runB.isEmpty() )
-            return fail( io, "experiment", "--a and --b are required" );
         const auto a = store.runById( options.runA );
         const auto b = store.runById( options.runB );
         if ( !a || !b )
-            return fail( io, "experiment", "run(s) not found" );
+            return fail( io, "experiment", "run(s) not found", kMissingDependency,
+                         { .expected = "two existing run ids",
+                           .actual = "--a " + options.runA.toStdString() + " --b " +
+                                     options.runB.toStdString() } );
         const auto comparison = sicnu::experiment::RunComparison::compare( a.value(), b.value() );
         Json::Value data = toJsonValue( comparison.toJson() );
         data["metric_diff"] = toJsonValue( comparison.metricDiff( a.value(), b.value() ) );
@@ -568,7 +689,7 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         const qint64 cursor = options.cursor > 0 ? options.cursor : 0;
         const auto page = store.listExperiments( cursor, limit );
         if ( !page )
-            return fail( io, "experiment", "listing failed" );
+            return fail( io, "experiment", "listing failed", kExecutionFailure );
         Json::Value data( Json::objectValue );
         data["total"] = static_cast<Json::Int64>( page.value().first );
         Json::Value rows( Json::arrayValue );
@@ -588,11 +709,11 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
 
     if ( sub == QLatin1String( "run" ) )
     {
-        if ( options.runId.isEmpty() )
-            return fail( io, "experiment", "--run is required" );
         const auto run = store.runById( options.runId );
         if ( !run )
-            return fail( io, "experiment", "run not found" );
+            return fail( io, "experiment", "run not found", kMissingDependency,
+                         { .expected = "an existing run id",
+                           .actual = options.runId.toStdString() } );
         Json::Value data = toJsonValue( sicnu::experiment::RunEnvironment::redactSecretKeys(
             run->toJson() ) );
         data["config_hash"] = run->configHash().toStdString();
@@ -606,56 +727,83 @@ int experimentSubcommand( const QString &sub, QStringList args, const CliIO &io 
         return io.finish( true, "experiment", data, 0 );
     }
 
-    return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString() );
+    return fail( io, "experiment", "unknown experiment subcommand: " + sub.toStdString(),
+                 kInvalidInput,
+                 { .expected = kExperimentSubcommands, .actual = sub.toStdString() } );
 }
 
 int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
 {
     const CommonOptions options = parseOptions( args );
+    // Track 14 (WP-C): verb validated first (see dataset side).
+    if ( !sub.isEmpty() && sub != QLatin1String( "export" ) && sub != QLatin1String( "validate" ) &&
+         sub != QLatin1String( "inspect" ) )
+        return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
+                     kInvalidInput,
+                     { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );
     if ( options.experimentDb.isEmpty() || options.datasetDb.isEmpty() )
-        return fail( io, "reproduce", "--experiment-db and --dataset-db are required" );
+        return fail( io, "reproduce", "--experiment-db and --dataset-db are required",
+                     kInvalidInput,
+                     { .expected = "--experiment-db <path> --dataset-db <path>",
+                       .hint = "usage: reproduce <subcommand> --experiment-db <path> --dataset-db <path> [options]" } );
+
+    // Track 14 (WP-E): validate subcommand flags before either store opens.
+    if ( sub == QLatin1String( "export" ) &&
+         ( options.runId.isEmpty() || options.outputDir.isEmpty() ) )
+        return fail( io, "reproduce", "--run and --out are required", kInvalidInput,
+                     { .expected = "--run <id> --out <dir>" } );
+    if ( sub == QLatin1String( "validate" ) && options.bundleDir.isEmpty() )
+        return fail( io, "reproduce", "--bundle is required", kInvalidInput,
+                     { .expected = "--bundle <path>" } );
+    if ( sub == QLatin1String( "inspect" ) && options.runId.isEmpty() )
+        return fail( io, "reproduce", "--run is required", kInvalidInput,
+                     { .expected = "--run <id>" } );
 
     sicnu::dataset::DatasetStore datasetStore;
     sicnu::experiment::ExperimentStore experimentStore;
     QString error;
     if ( !datasetStore.open( options.datasetDb, &error ) ||
          !experimentStore.open( options.experimentDb, &error ) )
-        return fail( io, "reproduce", error.toStdString() );
+        return fail( io, "reproduce", error.toStdString(), kInvalidInput,
+                     { .expected = "openable experiment and dataset stores",
+                       .actual = options.experimentDb.toStdString() + " / " +
+                                 options.datasetDb.toStdString() } );
 
     sicnu::experiment::ReproductionBundleExporter exporter( experimentStore, datasetStore );
 
     if ( sub == QLatin1String( "export" ) )
     {
-        if ( options.runId.isEmpty() || options.outputDir.isEmpty() )
-            return fail( io, "reproduce", "--run and --out are required" );
         sicnu::experiment::ReproductionBundleOptions bundleOptions;
         bundleOptions.outputDir = options.outputDir;
         const auto report = exporter.exportRun( options.runId, bundleOptions );
         if ( !report.ok && report.fileCount == 0 )
-            return fail( io, "reproduce", "export failed" );
+            return fail( io, "reproduce", "export failed", kExecutionFailure );
         Json::Value data = toJsonValue( report.toJson() );
-        return io.finish( report.ok, "reproduce", data, report.ok ? 0 : 1 );
+        return io.finish( report.ok, "reproduce", data,
+                          report.ok ? 0 : kExecutionFailure );
     }
 
     if ( sub == QLatin1String( "validate" ) )
     {
-        if ( options.bundleDir.isEmpty() )
-            return fail( io, "reproduce", "--bundle is required" );
         sicnu::experiment::ReproductionHooks hooks;
         const auto validation = exporter.validateBundle( options.bundleDir, hooks );
         Json::Value data = toJsonValue( validation.toJson() );
         const bool replayable =
             validation.level != sicnu::dataset::ReproductionLevel::Impossible;
-        return io.finish( replayable, "reproduce", data, replayable ? 0 : 1 );
+        return io.finish( replayable, "reproduce", data,
+                          replayable ? 0 : kValidationFailure );
     }
 
     if ( sub == QLatin1String( "inspect" ) )
     {
         if ( options.runId.isEmpty() )
-            return fail( io, "reproduce", "--run is required" );
+            return fail( io, "reproduce", "--run is required", kInvalidInput,
+                         { .expected = "--run <id>" } );
         const auto run = experimentStore.runById( options.runId );
         if ( !run )
-            return fail( io, "reproduce", "run not found" );
+            return fail( io, "reproduce", "run not found", kMissingDependency,
+                         { .expected = "an existing run id",
+                           .actual = options.runId.toStdString() } );
         // Same library assessment as the MCP surface: dataset/split pins
         // against the store, artifact existence probe, model/algorithm via
         // hooks (unwired here -> unknown, never a fabricated ok).
@@ -679,10 +827,15 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
         data["equivalent_runs"] = equivalentJson;
         const bool impossible =
             report.level == sicnu::dataset::ReproductionLevel::Impossible;
-        return io.finish( !impossible, "reproduce", data, impossible ? 1 : 0 );
+        return io.finish( !impossible, "reproduce", data,
+                          impossible ? kValidationFailure : 0 );
     }
 
-    return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString() );
+    // Unreachable (the head guard restricts the verb set above) — kept so
+    // every path through the dispatcher returns.
+    return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
+                 kInvalidInput,
+                 { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );
 }
 
 } // namespace

@@ -321,9 +321,12 @@ int commandTools( QStringList args, const CliIO &io )
         return commandToolsListOrSearch( std::move( args ), true, io );
     if ( sub == "schema" )
         return commandToolsSchema( std::move( args ), io );
+    const CliErrorDetails details {
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+        .expected = "list|search|schema",
+        .actual = sub.toStdString() };
     return io.finish( false, "tools", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "unknown tools subcommand: " + sub.toStdString()
-                          + " (expected list|search|schema)" );
+                      {}, "unknown tools subcommand: " + sub.toStdString(), &details );
 }
 
 int commandBatch( QStringList args, const CliIO &io )
@@ -333,9 +336,12 @@ int commandBatch( QStringList args, const CliIO &io )
         return commandBatchRun( std::move( args ), io );
     if ( sub == "validate" )
         return commandBatchValidate( std::move( args ), io );
+    const CliErrorDetails details {
+        .exitCode = exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+        .expected = "run|validate",
+        .actual = sub.toStdString() };
     return io.finish( false, "batch", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                      {}, "unknown batch subcommand: " + sub.toStdString()
-                          + " (expected run|validate)" );
+                      {}, "unknown batch subcommand: " + sub.toStdString(), &details );
 }
 
 } // namespace sicnu::cli

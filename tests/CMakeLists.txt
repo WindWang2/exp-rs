@@ -5339,7 +5339,7 @@ if(TARGET qgis_app_classify)
     qgis_core
     qgis_analysis
     qgis_app_classify
-  )
+   sicnu_agent_loop)
   target_include_directories(test_global_help_tips PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/app
@@ -7782,7 +7782,7 @@ sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
-)
+ sicnu_agent_loop)
 
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
@@ -9821,10 +9821,13 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 if(NOT WIN32)
 # Surface-11: batch manifest runner (unit level, no CLI binary needed).
 sicnu_add_test(test_cli_batch_manifest)
-target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk)
+target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk sicnu_agent_loop)
 
 sicnu_add_test(test_cli_commands_json)
-target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
+# Track 14: sicnu_agent (reached PRIVATELY through sicnu_plugins_framework)
+# references agent_loop symbols; the executable link must name the archive
+# itself. Same link-graph class as open PR #1335 - rebase note in the PR body.
+target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework sicnu_agent_loop)
 # 8.0: data identity / data cache check tests drive the CLI against an
 # in-test loopback range server (shared fixture with the io suites).
 target_sources(test_cli_commands_json PRIVATE support/http_range_server.cpp)
@@ -9835,6 +9838,47 @@ endif()
 target_compile_definitions(test_cli_commands_json PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )
+
+# Track 14 (WP-A): per-command exit-code contract conformance. Same POSIX
+# popen()/WEXITSTATUS CLI-spawn fixture as test_cli_commands_json.
+if(NOT WIN32)
+sicnu_add_test(test_cli_exit_codes_r4)
+target_link_libraries(test_cli_exit_codes_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_exit_codes_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-B): structured error-message four-tuple on failure paths.
+sicnu_add_test(test_cli_error_messages_r4)
+target_link_libraries(test_cli_error_messages_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_error_messages_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-E): parse-time rejection with zero side effects.
+sicnu_add_test(test_cli_fail_fast_r4)
+target_link_libraries(test_cli_fail_fast_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_cli_fail_fast_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+
+# Track 14 (WP-C): README command vocabulary <-> CLI, bidirectional. Reads
+# the source tree (like test_cli_command_surface) and spawns the real binary
+# (like test_cli_commands_json) — POSIX popen only.
+if(NOT WIN32)
+sicnu_add_sdk_test(test_cli_help_vocabulary_r4)
+target_compile_definitions(test_cli_help_vocabulary_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+endif()
+
+# Track 14 (WP-D): CLI-side parity assertions for the three-surface table.
+sicnu_add_test(test_surface_parity_r4)
+target_link_libraries(test_surface_parity_r4 PRIVATE sicnu_sdk sicnu_plugins_framework)
+target_compile_definitions(test_surface_parity_r4 PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+endif()
 endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
